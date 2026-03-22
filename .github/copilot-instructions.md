@@ -17,6 +17,16 @@ actually think. Zero dependencies. AI-first. Production-ready by default.
 5. Apply document economy: completed items are removed from lists, not checked
    off. Resolved known issues are deleted. A document that does not influence
    a decision must be reduced or removed.
+6. Read session context from `forge-cms/forge-architect/context/corepilot.md`
+   via GitHub MCP. This is your state from the previous session.
+7. Check `forge-cms/forge-architect/prompts/corepilot/NEXT.md` via GitHub MCP
+   — if it exists, read and execute it.
+
+## After every commit
+
+Update session context at `forge-cms/forge-architect/context/corepilot.md`
+via GitHub MCP. Record: current versions, latest amendment shipped,
+current milestone and step, what was deferred or blocked.
 
 ## Change classification
 
@@ -251,9 +261,10 @@ that both exist, then stage the file.
   planned files that are now implemented. Update it before proposing the commit.
 - The step is not complete until the review checkbox is ticked.
 
-### 5. Update the roadmap and backlog
+### 5. Update the roadmap, backlog, and session context
 - Mark the step `✅ Done` in the `Milestone{N}_BACKLOG.md` Progress table with the completion date.
 - Tick the step's summary checkbox in `ROADMAP.md` and update its row in the step table.
+- Update session context at `forge-cms/forge-architect/context/corepilot.md` via GitHub MCP.
 - Never batch updates — update immediately after the step is verified.
 
 ### 6. Propose a commit message
