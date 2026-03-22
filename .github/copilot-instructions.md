@@ -14,6 +14,9 @@ actually think. Zero dependencies. AI-first. Production-ready by default.
    Do not read completed milestone backlogs — they are historical record only.
    Do not implement anything not listed in the current backlog.
    Do not skip steps — the order is load-bearing (dependency layers).
+5. Apply document economy: completed items are removed from lists, not checked
+   off. Resolved known issues are deleted. A document that does not influence
+   a decision must be reduced or removed.
 
 ## Change classification
 
