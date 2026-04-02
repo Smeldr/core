@@ -5,22 +5,22 @@ actually think. Zero dependencies. AI-first. Production-ready by default.
 
 ## Before writing any code
 
-1. Read `DECISIONS.md` — all 22 architectural decisions are locked here.
+1. Read session context from `forge-cms/forge-architect/context/corepilot.md`
+   via GitHub MCP. This is your state from the previous session.
+2. Check `forge-cms/forge-architect/prompts/corepilot/NEXT.md` via GitHub MCP.
+   If it exists, read and execute it — stop here, do not proceed with steps 3–7.
+3. Read `DECISIONS.md` — all architectural decisions are locked here.
    Do not work around them. If a decision seems wrong, raise it explicitly.
-2. Read `ARCHITECTURE.md` — package structure, request lifecycle, stable interfaces.
-3. Read `ROADMAP.md` — current milestone and implementation order.
-4. Read the milestone backlog file for the **current milestone only**
+4. Read `ARCHITECTURE.md` — package structure, request lifecycle, stable interfaces.
+5. Read `ROADMAP.md` — current milestone and implementation order.
+6. Read the milestone backlog file for the **current milestone only**
    (e.g. `Milestone11_BACKLOG.md`). This is the authoritative task list.
    Do not read completed milestone backlogs — they are historical record only.
    Do not implement anything not listed in the current backlog.
    Do not skip steps — the order is load-bearing (dependency layers).
-5. Apply document economy: completed items are removed from lists, not checked
+7. Apply document economy: completed items are removed from lists, not checked
    off. Resolved known issues are deleted. A document that does not influence
    a decision must be reduced or removed.
-6. Read session context from `forge-cms/forge-architect/context/corepilot.md`
-   via GitHub MCP. This is your state from the previous session.
-7. Check `forge-cms/forge-architect/prompts/corepilot/NEXT.md` via GitHub MCP
-   — if it exists, read and execute it.
 
 ## After every commit
 
