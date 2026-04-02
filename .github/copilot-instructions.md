@@ -5,8 +5,11 @@ actually think. Zero dependencies. AI-first. Production-ready by default.
 
 ## Before writing any code
 
-1. Read `NEXT.md` in the workspace root. If it exists, read and execute it —
-   stop here, do not proceed with steps 2–7.
+1. Read `NEXT.md` in the workspace root. If it exists:
+   - Read the task description.
+   - **Plan your approach and present it to the user for approval before writing any code.**
+   - Wait for explicit approval. Do not implement anything until the user confirms the plan.
+   - Stop here — do not proceed with steps 2–7.
 2. Read session context from `forge-cms/forge-architect/context/corepilot.md`
    via GitHub MCP. This is your state from the previous session.
 3. Read `DECISIONS.md` — all architectural decisions are locked here.
