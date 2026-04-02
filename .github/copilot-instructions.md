@@ -27,7 +27,9 @@ actually think. Zero dependencies. AI-first. Production-ready by default.
 
 ## After every commit
 
-- Delete `NEXT.md` from the workspace root if it exists — it is a one-shot prompt.
+- If `NEXT.md` exists, stage it for deletion with `git rm NEXT.md` and include
+  the deletion in the implementation commit — not as a separate commit.
+  This avoids push conflicts since `NEXT.md` already exists on the remote.
 - Update session context at `forge-cms/forge-architect/context/corepilot.md`
   via GitHub MCP. Record: current versions, latest amendment shipped,
   current milestone and step, what was deferred or blocked.
