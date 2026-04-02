@@ -5,10 +5,10 @@ actually think. Zero dependencies. AI-first. Production-ready by default.
 
 ## Before writing any code
 
-1. Read session context from `forge-cms/forge-architect/context/corepilot.md`
+1. Read `NEXT.md` in the workspace root. If it exists, read and execute it —
+   stop here, do not proceed with steps 2–7.
+2. Read session context from `forge-cms/forge-architect/context/corepilot.md`
    via GitHub MCP. This is your state from the previous session.
-2. Check `forge-cms/forge-architect/prompts/corepilot/NEXT.md` via GitHub MCP.
-   If it exists, read and execute it — stop here, do not proceed with steps 3–7.
 3. Read `DECISIONS.md` — all architectural decisions are locked here.
    Do not work around them. If a decision seems wrong, raise it explicitly.
 4. Read `ARCHITECTURE.md` — package structure, request lifecycle, stable interfaces.
@@ -24,9 +24,10 @@ actually think. Zero dependencies. AI-first. Production-ready by default.
 
 ## After every commit
 
-Update session context at `forge-cms/forge-architect/context/corepilot.md`
-via GitHub MCP. Record: current versions, latest amendment shipped,
-current milestone and step, what was deferred or blocked.
+- Delete `NEXT.md` from the workspace root if it exists — it is a one-shot prompt.
+- Update session context at `forge-cms/forge-architect/context/corepilot.md`
+  via GitHub MCP. Record: current versions, latest amendment shipped,
+  current milestone and step, what was deferred or blocked.
 
 ## Change classification
 
