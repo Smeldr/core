@@ -112,7 +112,7 @@ func TestTemplates_noIndexMeta(t *testing.T) {
 	tpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(forgeHeadTmpl))
 	var buf bytes.Buffer
 	h := Head{Title: "Test Page", NoIndex: true}
-	if err := tpl.ExecuteTemplate(&buf, "forge:head", h); err != nil {
+	if err := tpl.ExecuteTemplate(&buf, "forge:head", TemplateData[any]{Head: h}); err != nil {
 		t.Fatalf("ExecuteTemplate: %v", err)
 	}
 	got := buf.String()
@@ -198,7 +198,7 @@ func TestTemplates_twitterCard(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			if err := tpl.ExecuteTemplate(&buf, "forge:head", tc.head); err != nil {
+			if err := tpl.ExecuteTemplate(&buf, "forge:head", TemplateData[any]{Head: tc.head}); err != nil {
 				t.Fatalf("ExecuteTemplate: %v", err)
 			}
 			want := `content="` + string(tc.want) + `"`

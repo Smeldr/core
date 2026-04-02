@@ -4,7 +4,7 @@
 Built for developers. Optimized for AI. Zero compromises on readability.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/forge-cms/forge.svg)](https://pkg.go.dev/github.com/forge-cms/forge)
-**v1.1.7 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
+**v1.1.9 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
 
 ```go
 app := forge.New(forge.Config{
@@ -888,7 +888,7 @@ app.Content(&BlogPost{},
 
 ```html
 {{/* show.html */}}
-{{template "forge:head" .Head}}
+{{template "forge:head" .}}
 
 <article>
     <h1>{{.Content.Title}}</h1>
@@ -897,7 +897,7 @@ app.Content(&BlogPost{},
 </article>
 
 {{/* list.html */}}
-{{template "forge:head" .Head}}
+{{template "forge:head" .}}
 
 {{range .Content}}
 <a href="/posts/{{.Slug}}">
@@ -908,17 +908,20 @@ app.Content(&BlogPost{},
 ```
 
 The `forge:head` partial renders everything in `<head>` automatically:
-`<title>`, `<meta>`, canonical, Open Graph, Twitter Cards, JSON-LD, breadcrumbs,
+`<title>`, `<meta>`, canonical, Open Graph, Twitter Cards, `twitter:site`,
+app-level JSON-LD, JSON-LD, breadcrumbs,
 and `<meta name="robots">` based on content Status.
 
 ### Template data shape
 
 ```go
 type TemplateData[T Node] struct {
-    Content  T             // T for show, []T for list
-    Head     forge.Head    // from Headable.Head() on T, or HeadFunc if provided (HeadFunc takes priority)
-    User     forge.User    // current user (zero value if Guest)
-    Request  *http.Request
+    Content    T                // T for show, []T for list
+    Head       forge.Head       // from Headable.Head() on T, or HeadFunc if provided (HeadFunc takes priority)
+    User       forge.User       // current user (zero value if Guest)
+    Request    *http.Request
+    OGDefaults *forge.OGDefaults // app-level OG/Twitter fallbacks (nil if not configured)
+    AppSchema  template.HTML    // pre-rendered app-level JSON-LD block (empty if not configured)
 }
 ```
 

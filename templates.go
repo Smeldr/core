@@ -57,65 +57,75 @@ func TemplatesOptional(dir string) Option { return templatesOption{dir: dir, req
 // forgeHeadTmpl is the named template injected into every parsed template set
 // as "forge:head". Developers invoke it inside their own <head> element:
 //
-//	{{template "forge:head" .Head}}
+//	{{template "forge:head" .}}
 //
-// The template receives a [Head] value and renders: title, description meta,
-// canonical link, Open Graph tags, and a robots noindex tag when [Head.NoIndex]
-// is true. JSON-LD is not emitted here — place {{forge_meta .Head .Content}}
-// in the template body to control JSON-LD placement and schema type.
-const forgeHeadTmpl = `{{define "forge:head"}}<title>{{.Title}}</title>
-{{- if .Description}}
-<meta name="description" content="{{.Description}}">
+// The template receives the full [TemplateData] value and renders: title,
+// description meta, canonical link, Open Graph tags, Twitter Card tags
+// (including the app-level twitter:site from [OGDefaults]), app-level
+// JSON-LD from [AppSchema], and a robots noindex tag when [Head.NoIndex]
+// is true. JSON-LD for individual content items is not emitted here —
+// place {{forge_meta .Head .Content}} in the template body to control
+// JSON-LD placement and schema type.
+const forgeHeadTmpl = `{{define "forge:head"}}<title>{{.Head.Title}}</title>
+{{- if .Head.Description}}
+<meta name="description" content="{{.Head.Description}}">
 {{- end}}
-{{- if .Canonical}}
-<link rel="canonical" href="{{.Canonical}}">
+{{- if .Head.Canonical}}
+<link rel="canonical" href="{{.Head.Canonical}}">
 {{- end}}
-{{- if .Title}}
-<meta property="og:title" content="{{.Title}}">
-{{- if .Description}}
-<meta property="og:description" content="{{.Description}}">
+{{- if .Head.Title}}
+<meta property="og:title" content="{{.Head.Title}}">
+{{- if .Head.Description}}
+<meta property="og:description" content="{{.Head.Description}}">
 {{- end}}
-{{- if .Canonical}}
-<meta property="og:url" content="{{.Canonical}}">
+{{- if .Head.Canonical}}
+<meta property="og:url" content="{{.Head.Canonical}}">
 {{- end}}
-{{- if .Image.URL}}
-<meta property="og:image" content="{{.Image.URL}}">
-{{- if gt .Image.Width 0}}
-<meta property="og:image:width" content="{{.Image.Width}}">
-<meta property="og:image:height" content="{{.Image.Height}}">
+{{- if .Head.Image.URL}}
+<meta property="og:image" content="{{.Head.Image.URL}}">
+{{- if gt .Head.Image.Width 0}}
+<meta property="og:image:width" content="{{.Head.Image.Width}}">
+<meta property="og:image:height" content="{{.Head.Image.Height}}">
 {{- end}}
 {{- end}}
-<meta property="og:type" content="{{if .Type}}{{.Type}}{{else}}website{{end}}">
-{{- if eq .Type "Article"}}
-{{- if gt .Published.Year 1}}
-<meta property="article:published_time" content="{{forge_rfc3339 .Published}}">
+<meta property="og:type" content="{{if .Head.Type}}{{.Head.Type}}{{else}}website{{end}}">
+{{- if eq .Head.Type "Article"}}
+{{- if gt .Head.Published.Year 1}}
+<meta property="article:published_time" content="{{forge_rfc3339 .Head.Published}}">
 {{- end}}
-{{- if .Author}}
-<meta property="article:author" content="{{.Author}}">
+{{- if .Head.Author}}
+<meta property="article:author" content="{{.Head.Author}}">
 {{- end}}
-{{- range .Tags}}
+{{- range .Head.Tags}}
 <meta property="article:tag" content="{{.}}">
 {{- end}}
 {{- end}}
-{{- if .Social.Twitter.Card}}
-<meta name="twitter:card" content="{{.Social.Twitter.Card}}">
-{{- else if or (eq .Type "Article") (eq .Type "Product") .Image.URL}}
+{{- if .Head.Social.Twitter.Card}}
+<meta name="twitter:card" content="{{.Head.Social.Twitter.Card}}">
+{{- else if or (eq .Head.Type "Article") (eq .Head.Type "Product") .Head.Image.URL}}
 <meta name="twitter:card" content="summary_large_image">
 {{- else}}
 <meta name="twitter:card" content="summary">
 {{- end}}
-<meta name="twitter:title" content="{{.Title}}">
-{{- if .Description}}
-<meta name="twitter:description" content="{{.Description}}">
+<meta name="twitter:title" content="{{.Head.Title}}">
+{{- if .Head.Description}}
+<meta name="twitter:description" content="{{.Head.Description}}">
 {{- end}}
-{{- if .Image.URL}}
-<meta name="twitter:image" content="{{.Image.URL}}">
+{{- if .Head.Image.URL}}
+<meta name="twitter:image" content="{{.Head.Image.URL}}">
 {{- end}}
-{{- if .Social.Twitter.Creator}}
-<meta name="twitter:creator" content="{{.Social.Twitter.Creator}}">
+{{- if .Head.Social.Twitter.Creator}}
+<meta name="twitter:creator" content="{{.Head.Social.Twitter.Creator}}">
+{{- end}}
+{{- if .OGDefaults}}
+{{- if .OGDefaults.TwitterSite}}
+<meta name="twitter:site" content="{{.OGDefaults.TwitterSite}}">
 {{- end}}
 {{- end}}
-{{- if .NoIndex}}
+{{- end}}
+{{- if .AppSchema}}{{.AppSchema}}
+{{- end}}
+{{- if .Head.NoIndex}}
 <meta name="robots" content="noindex, nofollow">
 {{- end}}
 {{end}}`
@@ -127,6 +137,14 @@ const forgeHeadTmpl = `{{define "forge:head"}}<title>{{.Title}}</title>
 // Called by [App.Content] as part of module wiring.
 func (m *Module[T]) setSiteName(name string) {
 	m.siteName = name
+}
+
+// setSEODefaults stores the app-level OG defaults and AppSchema so they can
+// be merged and rendered into [TemplateData] at HTML render time.
+// Called by [App.Handler] after all [App.SEO] options have been applied.
+func (m *Module[T]) setSEODefaults(d *OGDefaults, a *AppSchema) {
+	m.ogDefaults = d
+	m.appSchema = a
 }
 
 // parseTemplates loads list.html and show.html from the module's template
@@ -207,6 +225,8 @@ func (m *Module[T]) renderListHTML(w http.ResponseWriter, r *http.Request, ctx C
 	}
 
 	data := NewTemplateData(ctx, items, Head{}, m.siteName)
+	data.OGDefaults = m.ogDefaults
+	data.AppSchema = renderAppSchema(m.appSchema)
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
 		WriteError(w, r, fmt.Errorf("forge: list template execution: %w", err))
@@ -231,7 +251,10 @@ func (m *Module[T]) renderShowHTML(w http.ResponseWriter, r *http.Request, ctx C
 	}
 
 	head := m.resolveHead(ctx, item)
+	head = mergeOGDefaults(head, m.ogDefaults)
 	data := NewTemplateData(ctx, item, head, m.siteName)
+	data.OGDefaults = m.ogDefaults
+	data.AppSchema = renderAppSchema(m.appSchema)
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
 		WriteError(w, r, fmt.Errorf("forge: show template execution: %w", err))

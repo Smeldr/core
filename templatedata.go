@@ -1,6 +1,9 @@
 package forge
 
-import "net/http"
+import (
+	"html/template"
+	"net/http"
+)
 
 // TemplateData is the value passed to every HTML template rendered by Forge.
 // T is the content type for show handlers (e.g. *BlogPost) or a slice type
@@ -53,6 +56,19 @@ type TemplateData[T any] struct {
 	// registration time (e.g. "example.com"). Uses the hostname rather than
 	// [Context.SiteName] because SiteName() always returns "" in v1.
 	SiteName string
+
+	// OGDefaults holds the app-level Open Graph and Twitter Card fallback
+	// values set via [App.SEO]. forge:head uses OGDefaults.TwitterSite to emit
+	// twitter:site on every page; image and creator fallbacks are already merged
+	// into [Head] before TemplateData is constructed.
+	OGDefaults *OGDefaults
+
+	// AppSchema is a pre-rendered <script type="application/ld+json"> block for
+	// the app-level structured data set via [App.SEO] with [AppSchema]. It is
+	// emitted automatically by the forge:head partial on every page.
+	// The value is safe HTML produced by [renderAppSchema]; it is empty when
+	// no [AppSchema] was registered.
+	AppSchema template.HTML
 }
 
 // NewTemplateData constructs a [TemplateData][T] for the given context,

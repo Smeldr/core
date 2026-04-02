@@ -818,7 +818,7 @@ func TestFull_templateData_requestURL(t *testing.T) {
 // Social(OpenGraph, TwitterCard) and SitemapConfig{} (M3) renders og:title and
 // twitter:card meta tags inside forge:head when HeadFunc returns a non-empty Title.
 func TestFull_social_ogTagsInHTML(t *testing.T) {
-	const show = `<!DOCTYPE html><html><head>{{template "forge:head" .Head}}</head></html>`
+	const show = `<!DOCTYPE html><html><head>{{template "forge:head" .}}</head></html>`
 	dir := intTmpDir(t, `<p>list</p>`, show)
 	_, handler, repo := intSetup(t,
 		Social(OpenGraph, TwitterCard),
@@ -1133,7 +1133,7 @@ func TestFull_feed_afterPublishSignalFires(t *testing.T) {
 // (Social, AIIndex, Feed, SitemapConfig) plus M3/M4 (HeadFunc, Templates)
 // still renders og:title and twitter:card correctly in forge:head.
 func TestFull_fullM5_htmlHasOGTags(t *testing.T) {
-	const show = `<!DOCTYPE html><html><head>{{template "forge:head" .Head}}</head></html>`
+	const show = `<!DOCTYPE html><html><head>{{template "forge:head" .}}</head></html>`
 	dir := intTmpDir(t, `<p>list</p>`, show)
 
 	aiStore := NewLLMsStore("example.com")

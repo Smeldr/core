@@ -173,3 +173,35 @@ func ExampleRobotsConfig() {
 	})
 	_ = app.Handler()
 }
+
+// ExampleOGDefaults demonstrates setting app-level Open Graph and Twitter Card
+// fallback values. These are merged into every page's Head by forge:head when
+// the content item does not supply its own image or Twitter creator handle.
+func ExampleOGDefaults() {
+	app := New(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("example-secret-key-32-bytes!!!!!"),
+	})
+	app.SEO(&OGDefaults{
+		Image:          Image{URL: "https://example.com/og-default.png", Width: 1200, Height: 630},
+		TwitterSite:    "@mycompany",
+		TwitterCreator: "@editor",
+	})
+	_ = app.Handler()
+}
+
+// ExampleAppSchema demonstrates registering app-level JSON-LD structured data.
+// The block is emitted automatically by forge:head on every page.
+func ExampleAppSchema() {
+	app := New(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("example-secret-key-32-bytes!!!!!"),
+	})
+	app.SEO(&AppSchema{
+		Type: "Organization",
+		Name: "Acme Corp",
+		URL:  "https://example.com",
+		Logo: "https://example.com/logo.png",
+	})
+	_ = app.Handler()
+}

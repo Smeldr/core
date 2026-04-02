@@ -302,6 +302,8 @@ type Module[T any] struct {
 	tplShow          *template.Template // nil until parseTemplates succeeds
 	tplMu            sync.RWMutex       // guards tplList, tplShow reads and swaps
 	siteName         string             // set by App.Content via setSiteName
+	ogDefaults       *OGDefaults        // nil until App.Handler via setSEODefaults
+	appSchema        *AppSchema         // nil until App.Handler via setSEODefaults
 
 	sitemapCfg   *SitemapConfig  // nil when no SitemapConfig option given
 	sitemapStore *SitemapStore   // set by App.Content via setSitemap

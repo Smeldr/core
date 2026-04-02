@@ -16,8 +16,9 @@ func execForgeHead(t *testing.T, h Head) string {
 	if err != nil {
 		t.Fatalf("parse forgeHeadTmpl: %v", err)
 	}
+	data := TemplateData[any]{Head: h}
 	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "forge:head", h); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "forge:head", data); err != nil {
 		t.Fatalf("execute forge:head: %v", err)
 	}
 	return buf.String()

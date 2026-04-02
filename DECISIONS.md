@@ -79,6 +79,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A58 | `forge.go`: `forgeVersions()` — read `runtime/debug.ReadBuildInfo()` for `/_health` and startup log; remove `"version"` key from `Health()` response | Agreed | 2026-03-20 |
 | A59 | `forge.go`: `httpsRedirect()` — exempt `/_health` from HTTPS redirect so reverse-proxy health checks receive 200 on plain HTTP | Agreed | 2026-03-20 |
 | A60 | `forge.go`: `New()` calls `MustConfig()` automatically — configuration errors are always caught at startup, never at first request | Agreed | 2026-04-02 |
+| A61 | `social.go`/`schema.go`/`templates.go`: `OGDefaults`, `AppSchema` SEOOptions; `forge:head` receiver changed from `Head` to `TemplateData` | Agreed | 2026-04-02 |
 
 ---
 
@@ -3584,3 +3585,55 @@ invalid.
    `MustConfig` is pure and returns the validated `Config` unchanged.
 5. No exported symbols added or changed. No interfaces modified.
 6. Shipped as patch v1.1.7.
+
+---
+
+## Amendment A61 — `OGDefaults`, `AppSchema`, and `forge:head` receiver change
+
+**Status:** Agreed
+**Date:** 2026-04-02
+**Scope:** `social.go`, `schema.go`, `forge.go` (`seoState`, `Handler()`),
+`module.go`, `templates.go`, `templatedata.go`
+
+**Problem:**
+Forge sites had no way to declare app-level Open Graph fallbacks (`og:image`,
+`twitter:creator`) or a `twitter:site` handle once at the app level. Each
+content type had to repeat these values, or they were absent entirely. There
+was also no mechanism for site-wide JSON-LD structured data (e.g. an
+Organization block) without duplicating it in every content type.
+
+**Decision:**
+
+1. **`OGDefaults`** (`social.go`) — new `SEOOption` applied via `app.SEO()`.
+   Fields: `Image Image`, `TwitterSite string`, `TwitterCreator string`.
+   `mergeOGDefaults(head, d)` applies fallbacks at render time: `Head.Image`
+   is replaced when empty; `Head.Social.Twitter.Creator` is replaced when empty.
+   `TwitterSite` is app-level only (no per-item override).
+2. **`AppSchema`** (`schema.go`) — new `SEOOption` applied via `app.SEO()`.
+   Fields: `Type`, `Name`, `URL`, `Logo`. `renderAppSchema` produces a
+   pre-rendered `template.HTML` JSON-LD block at `Handler()` time.
+3. **`forge:head` receiver change** — the partial now receives the full
+   `TemplateData` value (`{{template "forge:head" .}}`) instead of just `Head`
+   (`{{template "forge:head" .Head}}`). All field references inside the partial
+   are prefixed with `.Head.`. New tags added: `twitter:site` (from
+   `.OGDefaults.TwitterSite`) and `{{.AppSchema}}` (auto-emitted).
+4. **`TemplateData[T]`** gains two fields: `OGDefaults *OGDefaults` and
+   `AppSchema template.HTML`.
+5. **`seoState`** gains `ogDefaults *OGDefaults` and `appSchema *AppSchema`.
+   `App.Handler()` pushes both to all template modules via `setSEODefaults`
+   using the same inline interface pattern as `setSiteName`.
+
+**Consequences:**
+
+1. **Breaking call-site change:** `{{template "forge:head" .Head}}` must be
+   updated to `{{template "forge:head" .}}` in all developer templates. The
+   three built-in example apps and all `README.md` examples are updated in this
+   commit. The `example_test.go` compile tests remain green.
+2. `twitter:site` is now emitted when `OGDefaults.TwitterSite` is set —
+   previously this tag was never emitted by Forge at all.
+3. `AppSchema` JSON-LD is auto-emitted every page when configured; no per-
+   template change required.
+4. `OGDefaults` and `AppSchema` are zero-safe: nil values produce no output.
+5. Go generics / `html/template` compatibility confirmed: `TemplateData[T]` is
+   monomorphized at compile time; reflection sees concrete field names at
+   runtime regardless of `T`.

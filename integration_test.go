@@ -160,7 +160,7 @@ func TestIntegration_htmlFallback_noTemplates(t *testing.T) {
 // — 4.2 forge:head correctness ————————————————————————————————————————————
 
 // headTpl is a minimal show template that includes the forge:head partial.
-const headTpl = `<!DOCTYPE html><html><head>{{template "forge:head" .Head}}</head><body>{{.Content.Title}}</body></html>`
+const headTpl = `<!DOCTYPE html><html><head>{{template "forge:head" .}}</head><body>{{.Content.Title}}</body></html>`
 
 func TestIntegration_forgeHead_noIndex(t *testing.T) {
 	dir := intTmpDir(t, `<p>list</p>`, headTpl)
@@ -213,7 +213,7 @@ func TestIntegration_forgeHead_canonical(t *testing.T) {
 }
 
 func TestIntegration_forgeHead_jsonLD(t *testing.T) {
-	const jsonLDTpl = `<!DOCTYPE html><html><head>{{template "forge:head" .Head}}{{forge_meta .Head .Content}}</head><body></body></html>`
+	const jsonLDTpl = `<!DOCTYPE html><html><head>{{template "forge:head" .}}{{forge_meta .Head .Content}}</head><body></body></html>`
 	dir := intTmpDir(t, `<p>list</p>`, jsonLDTpl)
 	_, handler, repo := intSetup(t,
 		Templates(dir),

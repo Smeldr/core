@@ -2,6 +2,7 @@ package forge
 
 import (
 	"encoding/json"
+	"html/template"
 	"strings"
 	"time"
 )
@@ -414,4 +415,63 @@ func SchemaFor(head Head, content any) string {
 	sb.WriteByte('\n')
 	sb.WriteString(crumbScript)
 	return sb.String()
+}
+
+// — AppSchema —————————————————————————————————————————————————————————————
+
+// AppSchema registers app-level JSON-LD structured data emitted in every
+// page's <head> by forge:head. Use it to declare site-wide Organisation or
+// WebSite metadata once rather than per content type.
+//
+// Apply via [App.SEO]:
+//
+//	app.SEO(&forge.AppSchema{
+//	    Type: "Organization",
+//	    Name: "Acme Corp",
+//	    URL:  "https://acme.com",
+//	    Logo: "https://acme.com/logo.png",
+//	})
+type AppSchema struct {
+	// Type is the JSON-LD @type, e.g. "Organization" or "WebSite".
+	Type string
+
+	// Name is the human-readable name of the organisation or site.
+	Name string
+
+	// URL is the canonical URL of the organisation or site's home page.
+	URL string
+
+	// Logo is the absolute URL of the organisation's logo image.
+	Logo string
+}
+
+// applySEO stores a in the app-level SEO state. Satisfies [SEOOption].
+func (a *AppSchema) applySEO(s *seoState) { s.appSchema = a }
+
+// renderAppSchema returns a pre-rendered, HTML-safe
+// <script type="application/ld+json"> block for a. Returns an empty
+// template.HTML when a is nil or a.Type is empty.
+func renderAppSchema(a *AppSchema) template.HTML {
+	if a == nil || a.Type == "" {
+		return ""
+	}
+	type ldAppOrg struct {
+		Context string   `json:"@context"`
+		Type    string   `json:"@type"`
+		Name    string   `json:"name,omitempty"`
+		URL     string   `json:"url,omitempty"`
+		Logo    *ldImage `json:"logo,omitempty"`
+	}
+	var logo *ldImage
+	if a.Logo != "" {
+		logo = &ldImage{Type: "ImageObject", URL: a.Logo}
+	}
+	block := scriptBlock(ldAppOrg{
+		Context: "https://schema.org",
+		Type:    a.Type,
+		Name:    a.Name,
+		URL:     a.URL,
+		Logo:    logo,
+	})
+	return template.HTML(block) //nolint:gosec
 }

@@ -132,7 +132,9 @@ type SEOOption interface {
 
 // seoState holds the app-level SEO configuration applied via [App.SEO].
 type seoState struct {
-	robots *RobotsConfig
+	robots     *RobotsConfig
+	ogDefaults *OGDefaults
+	appSchema  *AppSchema
 }
 
 // App is the central registry for a Forge application. It couples the HTTP
@@ -390,6 +392,13 @@ func (a *App) Handler() http.Handler {
 	}
 	if len(a.templateModules) > 0 {
 		bindErrorTemplates(a.templateModules)
+		for _, tp := range a.templateModules {
+			if s, ok := tp.(interface {
+				setSEODefaults(*OGDefaults, *AppSchema)
+			}); ok {
+				s.setSEODefaults(a.seo.ogDefaults, a.seo.appSchema)
+			}
+		}
 	}
 	// A34: trigger a one-shot startup rebuild of all derived content (sitemap,
 	// feed, AI index) so that items already in the repository at server start

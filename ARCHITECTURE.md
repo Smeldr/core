@@ -96,7 +96,7 @@ github.com/forge-cms/forge/
                       debounce callback uses NewBackgroundContext (Amendment A41)
 │                     (Markdownable migrated to ai.go — Amendment A11)
 ├── forge.go          Config, MustConfig, New, App (Use/Content/Handle/Run/Handler/SEO),
-│                     Registrator, SEOOption, seoState, httpsRedirect,
+│                     Registrator, SEOOption, seoState (robots/ogDefaults/appSchema), httpsRedirect,
 │                     graceful shutdown via SIGINT/SIGTERM;
 │                     SitemapStore wiring in Content+Handler (Amendment A4);
 │                     SEO option loop, robotsTxtRegistered guard in Handler (Amendment A5);
@@ -112,7 +112,8 @@ github.com/forge-cms/forge/
                       stoppableModules []stoppable field, Stop() wired after srv.Shutdown
                       (Amendment A39);
                       App.MCPModules() (Amendment A49);
-                      App.Secret() (Amendment A50)
+                      App.Secret() (Amendment A50);
+                      setSEODefaults push loop in Handler() (Amendment A61)
 └── head.go           Head (Title, Description, Author, Published, Modified, Image, Type,
                       Canonical, Tags, Breadcrumbs, Alternates, Social, NoIndex),
                       Image, Breadcrumb, Alternate, Headable, HeadFunc[T],
@@ -122,24 +123,30 @@ github.com/forge-cms/forge/
 └── schema.go         SchemaFor, FAQProvider, HowToProvider, EventProvider,
                       RecipeProvider, ReviewProvider, OrganizationProvider,
                       FAQEntry, HowToStep, EventDetails, RecipeDetails,
-                      ReviewDetails, OrganizationDetails
+                      ReviewDetails, OrganizationDetails;
+                      AppSchema (SEOOption), renderAppSchema (Amendment A61)
 └── sitemap.go        SitemapConfig, ChangeFreq, SitemapEntry, SitemapNode,
                       SitemapPrioritiser, SitemapStore, SitemapEntries[T],
                       WriteSitemapFragment, WriteSitemapIndex
 └── robots.go         CrawlerPolicy (Allow/Disallow/AskFirst), RobotsConfig,
                       RobotsTxt, RobotsTxtHandler
-└── templatedata.go   TemplateData[T], NewTemplateData
+└── templatedata.go   TemplateData[T] (Content, Head, User, Request, SiteName,
+                      OGDefaults, AppSchema), NewTemplateData (Amendment A61)
 └── templates.go      templateParser, Templates, TemplatesOptional, forgeHeadTmpl, parseTemplates,
-                      renderListHTML, renderShowHTML, errorTemplate, bindErrorTemplates;
+                      renderListHTML, renderShowHTML, setSiteName, setSEODefaults,
+                      errorTemplate, bindErrorTemplates;
                       Amendment A6 (Module[T] template fields + HTML render path),
                       Amendment A7 (errorTemplateLookup in errors.go),
-                      Amendment A8 (templateModules + startup wiring in forge.go)
+                      Amendment A8 (templateModules + startup wiring in forge.go);
+                      forge:head receiver changed to TemplateData, twitter:site and
+                      AppSchema auto-emitted (Amendment A61)
 └── templatehelpers.go forgeMeta, forgeDate, forgeRFC3339, forgeMarkdown, forgeExcerpt, forgeCSRFToken,
                       forgeLLMSEntries(data any), TemplateFuncMap();
                       Amendment A9 (parseOneTemplate uses .Funcs(TemplateFuncMap()));
                       forge_rfc3339 added (M5 Step 1) for article:published_time in forge:head;
                       forgeLLMSEntries wired to real implementation (Amendment A12)
-└── social.go         SocialFeature, OpenGraph, TwitterCard, Social() option
+└── social.go         SocialFeature, OpenGraph, TwitterCard, Social() option;
+                      OGDefaults (SEOOption), mergeOGDefaults (Amendment A61)
 └── ai.go             Markdownable (migrated from module.go, A11), AIDocSummary,
                       AIFeature, LLMsTxt, LLMsTxtFull, AIDoc constants,
                       AIIndex() option, WithoutID() option,

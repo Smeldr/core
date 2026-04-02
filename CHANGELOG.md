@@ -23,6 +23,30 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.1.9] — 2026-04-02
+
+App-level Open Graph defaults and structured data (Amendment A61).
+
+### Added
+
+- `forge.OGDefaults` — new `SEOOption` applied via `app.SEO()`. Sets a
+  fallback `og:image`, a `twitter:site` handle, and a fallback
+  `twitter:creator`. Fallbacks are merged into each page's `Head` at render
+  time; `twitter:site` is always emitted when set (Amendment A61).
+- `forge.AppSchema` — new `SEOOption` applied via `app.SEO()`. Declares
+  app-level JSON-LD structured data (e.g. `Organization`, `WebSite`) emitted
+  automatically by `forge:head` on every page (Amendment A61).
+
+### Changed
+
+- `forge:head` partial now receives the full `TemplateData` value instead of
+  just `Head`: update `{{template "forge:head" .Head}}` to
+  `{{template "forge:head" .}}` in all templates. The partial's rendered output
+  is identical for existing sites with no `OGDefaults` or `AppSchema`
+  configured (Amendment A61).
+
+---
+
 ## [1.1.8] — 2026-04-02
 
 `forge.New()` now calls `MustConfig()` automatically, so configuration errors
