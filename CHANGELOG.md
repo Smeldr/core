@@ -23,6 +23,21 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.1.8] — 2026-04-02
+
+`forge.New()` now calls `MustConfig()` automatically, so configuration errors
+(empty `BaseURL`, `Secret` too short) are always caught at process start, never
+at first request (Amendment A60).
+
+### Changed
+
+- `forge.go`: `New()` calls `MustConfig(cfg)` as its first line; apps with
+  invalid configuration that previously started silently will now panic at
+  startup with a descriptive message. Godoc on `New()` updated to document the
+  panic behaviour (Amendment A60).
+
+---
+
 ## [1.1.7] — 2026-03-20
 
 `/_health` is now exempt from the HTTPS redirect middleware so that reverse-proxy

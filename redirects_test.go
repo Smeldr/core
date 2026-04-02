@@ -159,7 +159,7 @@ func TestRedirectStore_handler_404(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func newTestApp() *App {
-	return New(Config{BaseURL: "http://localhost"})
+	return New(Config{BaseURL: "http://localhost", Secret: []byte("test-secret-key!!")})
 }
 
 func TestApp_Redirect_permanent(t *testing.T) {

@@ -178,14 +178,15 @@ type App struct {
 
 // New creates a new [App] from cfg.
 //
+// New calls [MustConfig] on cfg automatically, so it panics at startup if
+// BaseURL is empty or not a valid absolute URL, or if Secret is shorter than
+// 16 bytes. Configuration errors are always caught at process start, never at
+// first request.
+//
 // Default timeouts are applied if the corresponding Config fields are zero:
 // ReadTimeout 5 s, WriteTimeout 10 s, IdleTimeout 120 s.
-//
-// New does not validate the Config. Use [MustConfig] to catch configuration
-// errors at startup:
-//
-//	app := forge.New(forge.MustConfig(cfg))
 func New(cfg Config) *App {
+	cfg = MustConfig(cfg)
 	if cfg.ReadTimeout == 0 {
 		cfg.ReadTimeout = defaultReadTimeout
 	}

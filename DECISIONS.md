@@ -78,6 +78,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A57 | `storage.go`: `quoteIdent()` helper — double-quote all generated SQL identifiers to handle reserved keywords | Agreed | 2026-03-20 |
 | A58 | `forge.go`: `forgeVersions()` — read `runtime/debug.ReadBuildInfo()` for `/_health` and startup log; remove `"version"` key from `Health()` response | Agreed | 2026-03-20 |
 | A59 | `forge.go`: `httpsRedirect()` — exempt `/_health` from HTTPS redirect so reverse-proxy health checks receive 200 on plain HTTP | Agreed | 2026-03-20 |
+| A60 | `forge.go`: `New()` calls `MustConfig()` automatically — configuration errors are always caught at startup, never at first request | Agreed | 2026-04-02 |
 
 ---
 
@@ -3548,5 +3549,38 @@ skips the TLS check entirely.
    `/_health` gains no meaningful advantage over targeting any other public endpoint.
 4. New test `TestApp_health_httpsExempt` confirms `/_health` returns 200 on a
    plain-HTTP request when `Config.HTTPS` is true.
+
+---
+
+## Amendment A60 — `forge.go`: `New()` enforces `MustConfig()` automatically
+
+**Status:** Agreed
+**Date:** 2026-04-02
+**Scope:** `forge.go` (`New()`)
+
+**Problem:**
+`forge.New()` accepted a `Config` without validation. An app with an empty
+`BaseURL` or a `Secret` shorter than 16 bytes would start successfully and only
+fail at the first request that needed those values (e.g. a CSRF check or a
+cookie signature). This delayed error discovery until runtime, often in
+production.
+
+**Decision:**
+Add `cfg = MustConfig(cfg)` as the first line of `New()`. The existing
+`MustConfig` function already performs all required checks and panics with a
+descriptive message on failure. Callers that previously passed a raw `Config`
+directly to `New` now get an immediate panic at process start if the config is
+invalid.
+
+**Consequences:**
+
+1. Breaking change: apps that passed an invalid `Config` to `New()` directly
+   (without calling `MustConfig`) and somehow started will now panic at startup.
+   This is intentional — a misconfigured app must not silently start.
+2. The godoc on `New()` is updated to document the panic behaviour and remove
+   the recommendation to call `MustConfig` manually.
+3. Calling `forge.New(forge.MustConfig(cfg))` remains correct and is still the
+   idiomatic form documented in examples; the double call is a no-op because
+   `MustConfig` is pure and returns the validated `Config` unchanged.
 5. No exported symbols added or changed. No interfaces modified.
 6. Shipped as patch v1.1.7.
