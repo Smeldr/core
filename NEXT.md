@@ -5,23 +5,18 @@
 configuration (empty BaseURL, Secret too short) is only discovered at runtime,
 not at startup. `MustConfig()` already exists and performs the correct validation.
 
-## Task
-Call `MustConfig(cfg)` as the first line of `forge.New()` in `forge.go`.
-
 ## Why
 Configuration errors must be caught at startup, not at first request.
 This aligns with the existing godoc on `New()` which already recommends
 `MustConfig` — now it is enforced automatically.
 
-## Consequences
+## Constraints
+- Only `forge.go` and `CHANGELOG.md` are in scope.
 - Breaking change: apps with invalid config that previously started will now
   panic at startup. This is intentional and correct behaviour.
-- Update godoc on `New()` to reflect the new behaviour.
-- Add entry in CHANGELOG.md.
+- Godoc on `New()` must be updated to reflect the new behaviour.
+- Register as A60 in `DECISIONS.md` at commit time (index row + body section).
 
-## Files affected
-- `forge.go` — `New()` function only
-- `CHANGELOG.md`
-
-## Amendment
-Register as A60 at commit time.
+## Your task
+1. Plan the change and present it for review before writing any code.
+2. Wait for approval before implementing.
