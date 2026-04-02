@@ -231,3 +231,159 @@ func TestTemplates_errorPage_fallback(t *testing.T) {
 		t.Errorf("expected 'Not found' in fallback HTML body, got: %s", body)
 	}
 }
+
+// — A62: Shared partials ——————————————————————————————————————————————————
+
+// writePartialFile writes a {{define}} partial into a partials sub-directory.
+func writePartialFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPartials_availableInListTemplate(t *testing.T) {
+	dir := t.TempDir()
+	partialsDir := filepath.Join(dir, "partials")
+	writePartialFile(t, partialsDir, "nav.html", `{{define "nav"}}<nav>site-nav</nav>{{end}}`)
+	writeTplFile(t, dir, "list.html", `{{template "nav" .}}<p>list</p>`)
+	writeTplFile(t, dir, "show.html", `<p>show</p>`)
+
+	partials, err := loadPartials(partialsDir)
+	if err != nil {
+		t.Fatalf("loadPartials: %v", err)
+	}
+	m := newTplModule(t, Templates(dir))
+	m.setPartials(partials)
+	if err := m.parseTemplates(); err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+
+	data := NewTemplateData[[](*tdPost)](NewTestContext(GuestUser), nil, Head{}, "test")
+	var buf bytes.Buffer
+	if err := m.tplList.Execute(&buf, data); err != nil {
+		t.Fatalf("Execute list: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "site-nav") {
+		t.Errorf("expected nav partial in list output, got:\n%s", got)
+	}
+}
+
+func TestPartials_availableInShowTemplate(t *testing.T) {
+	dir := t.TempDir()
+	partialsDir := filepath.Join(dir, "partials")
+	writePartialFile(t, partialsDir, "footer.html", `{{define "footer"}}<footer>site-footer</footer>{{end}}`)
+	writeTplFile(t, dir, "list.html", `<p>list</p>`)
+	writeTplFile(t, dir, "show.html", `{{template "footer" .}}<p>show</p>`)
+
+	partials, err := loadPartials(partialsDir)
+	if err != nil {
+		t.Fatalf("loadPartials: %v", err)
+	}
+	m := newTplModule(t, Templates(dir))
+	m.setPartials(partials)
+	if err := m.parseTemplates(); err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+
+	p := &tdPost{Node: Node{ID: NewID(), Slug: "s", Status: Published}, Title: "T"}
+	data := NewTemplateData(NewTestContext(GuestUser), p, Head{}, "test")
+	var buf bytes.Buffer
+	if err := m.tplShow.Execute(&buf, data); err != nil {
+		t.Fatalf("Execute show: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "site-footer") {
+		t.Errorf("expected footer partial in show output, got:\n%s", got)
+	}
+}
+
+func TestPartials_missingDirErrors(t *testing.T) {
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("16bytessecretkey"),
+	}))
+	app.Partials("/nonexistent-dir-that-does-not-exist")
+
+	dir := t.TempDir()
+	writeTplFile(t, dir, "list.html", `<p>list</p>`)
+	writeTplFile(t, dir, "show.html", `<p>show</p>`)
+
+	repo := NewMemoryRepo[*tdPost]()
+	m := NewModule((*tdPost)(nil), Repo(repo), At("/test"), Templates(dir))
+	app.Content(m)
+
+	err := app.Run(":0")
+	if err == nil {
+		t.Fatal("expected error for missing partials dir, got nil")
+	}
+	if !strings.Contains(err.Error(), "partials directory") {
+		t.Errorf("expected 'partials directory' in error, got: %v", err)
+	}
+}
+
+func TestPartials_noPartialsIsNoop(t *testing.T) {
+	dir := t.TempDir()
+	writeTplFile(t, dir, "list.html", `<p>list</p>`)
+	writeTplFile(t, dir, "show.html", `<p>show</p>`)
+
+	m := newTplModule(t, Templates(dir))
+	// No setPartials call — m.partials is nil.
+	if err := m.parseTemplates(); err != nil {
+		t.Fatalf("parseTemplates without partials: %v", err)
+	}
+	if m.tplList == nil || m.tplShow == nil {
+		t.Fatal("expected both tplList and tplShow to be non-nil without partials")
+	}
+}
+
+func TestPartials_mustParseTemplate_includesPartials(t *testing.T) {
+	dir := t.TempDir()
+	partialsDir := filepath.Join(dir, "partials")
+	writePartialFile(t, partialsDir, "nav.html", `{{define "nav"}}<nav>home-nav</nav>{{end}}`)
+
+	homePath := filepath.Join(dir, "home.html")
+	if err := os.WriteFile(homePath, []byte(`{{template "nav" .}}<main>home</main>`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("16bytessecretkey"),
+	}))
+	app.Partials(partialsDir)
+
+	tpl := app.MustParseTemplate(homePath)
+	var buf bytes.Buffer
+	if err := tpl.Execute(&buf, nil); err != nil {
+		t.Fatalf("Execute home: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "home-nav") {
+		t.Errorf("expected nav partial in home output, got:\n%s", got)
+	}
+}
+
+func TestPartials_loadPartials_sortedAlphabetically(t *testing.T) {
+	dir := t.TempDir()
+	// Write in reverse order to confirm sorting.
+	writePartialFile(t, dir, "z.html", `{{define "z"}}Z{{end}}`)
+	writePartialFile(t, dir, "a.html", `{{define "a"}}A{{end}}`)
+	writePartialFile(t, dir, "m.html", `{{define "m"}}M{{end}}`)
+
+	srcs, err := loadPartials(dir)
+	if err != nil {
+		t.Fatalf("loadPartials: %v", err)
+	}
+	if len(srcs) != 3 {
+		t.Fatalf("expected 3 partials, got %d", len(srcs))
+	}
+	// First src must be a.html (alphabetical).
+	if !strings.Contains(srcs[0], `define "a"`) {
+		t.Errorf("expected first partial to be a.html, got: %s", srcs[0])
+	}
+}

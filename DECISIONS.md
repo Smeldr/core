@@ -80,6 +80,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A59 | `forge.go`: `httpsRedirect()` — exempt `/_health` from HTTPS redirect so reverse-proxy health checks receive 200 on plain HTTP | Agreed | 2026-03-20 |
 | A60 | `forge.go`: `New()` calls `MustConfig()` automatically — configuration errors are always caught at startup, never at first request | Agreed | 2026-04-02 |
 | A61 | `social.go`/`schema.go`/`templates.go`: `OGDefaults`, `AppSchema` SEOOptions; `forge:head` receiver changed from `Head` to `TemplateData` | Agreed | 2026-04-02 |
+| A62 | `forge.go`/`templates.go`/`module.go`: `App.Partials(dir)`, `App.MustParseTemplate(path)`, `loadPartials`, `setPartials`, `parseOneTemplate` accepts partials — shared partial templates injected into all module and custom handler templates | Agreed | 2026-04-02 |
 
 ---
 
@@ -3637,3 +3638,52 @@ Organization block) without duplicating it in every content type.
 5. Go generics / `html/template` compatibility confirmed: `TemplateData[T]` is
    monomorphized at compile time; reflection sees concrete field names at
    runtime regardless of `T`.
+
+---
+
+## Amendment A62 — Shared template partials
+
+**Status:** Agreed  
+**Date:** 2026-04-02  
+**Scope:** `templates.go`, `forge.go`, `module.go`
+
+**Problem:**
+Every Forge site duplicated nav and footer HTML across all module templates
+(`list.html`, `show.html`) and any custom handler templates (e.g. `home.html`).
+There was no mechanism to define a shared partial once and include it across
+all templates.
+
+**Decision:**
+
+1. **`App.Partials(dir string) *App`** (`forge.go`) — stores a partials
+   directory path; returns `*App` for chaining. Any `*.html` file in `dir` is
+   treated as a shared partial and registered into every module template set.
+   Files must use `{{define "name"}}...{{end}}` syntax (same convention as
+   `forge:head`). Files are loaded and registered in alphabetical order for
+   determinism. Opt-in: sites with no `Partials()` call are unaffected.
+2. **`loadPartials(dir string) ([]string, error)`** (`templates.go`) — reads
+   all `*.html` files from `dir` alphabetically. Returns `(nil, nil)` when
+   `dir` is empty. Returns an error if the directory does not exist.
+3. **`Module[T].setPartials([]string)`** (`templates.go`) — stores partial
+   sources on the module. Called by `App.Run()` before `parseTemplates()` via
+   the same inline interface pattern as `setSiteName` and `setSEODefaults`.
+4. **`parseOneTemplate`** now accepts a `partials []string` argument and
+   registers each source into the template set after `forge:head`.
+5. **`App.MustParseTemplate(path string) *template.Template`** (`forge.go`) —
+   loads a single template file, registers `TemplateFuncMap`, `forge:head`, and
+   all partials from `a.partialsDir`. Panics on error (consistent with
+   `MustConfig`). For custom `app.Handle()` route handlers that need shared
+   partials (e.g. a home page template).
+
+**Consequences:**
+
+1. Module templates: partials auto-injected at `parseTemplates()` time with no
+   call-site change to `list.html` / `show.html`.
+2. Custom handler templates: developer calls `app.MustParseTemplate(path)` once
+   in `main()` before `app.Run()`.
+3. `parseOneTemplate` signature change is internal — no exported API touched.
+4. `loadPartials` / `setPartials` / `partialsDir` are all internal; the only
+   exported symbols added are `App.Partials` and `App.MustParseTemplate`.
+5. Missing partials directory returns an error from `App.Run()` (not a panic)
+   so the failure message is clear; `MustParseTemplate` panics for consistency
+   with the `Must` naming convention.

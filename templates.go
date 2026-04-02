@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // — Option types ——————————————————————————————————————————————————————————
@@ -139,6 +140,42 @@ func (m *Module[T]) setSiteName(name string) {
 	m.siteName = name
 }
 
+// setPartials stores the pre-loaded partial template sources so they are
+// registered into each module template set during [Module.parseTemplates].
+// Called by [App.Run] after [App.Partials] has loaded the partials directory.
+func (m *Module[T]) setPartials(p []string) {
+	m.partials = p
+}
+
+// loadPartials reads all *.html files from dir alphabetically and returns
+// their raw contents as a slice. Returns an error if dir does not exist or
+// any file cannot be read. Returns (nil, nil) when dir is the empty string.
+func loadPartials(dir string) ([]string, error) {
+	if dir == "" {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("forge: partials directory %q: %w", dir, err)
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".html" {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	srcs := make([]string, 0, len(names))
+	for _, name := range names {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, fmt.Errorf("forge: partial %q: %w", name, err)
+		}
+		srcs = append(srcs, string(data))
+	}
+	return srcs, nil
+}
+
 // setSEODefaults stores the app-level OG defaults and AppSchema so they can
 // be merged and rendered into [TemplateData] at HTML render time.
 // Called by [App.Handler] after all [App.SEO] options have been applied.
@@ -148,8 +185,9 @@ func (m *Module[T]) setSEODefaults(d *OGDefaults, a *AppSchema) {
 }
 
 // parseTemplates loads list.html and show.html from the module's template
-// directory, registers the forge:head named partial in both template sets, and
-// stores them thread-safely under tplMu.
+// directory, registers the forge:head named partial and any shared partials
+// (set via [setPartials]) in both template sets, and stores them
+// thread-safely under tplMu.
 //
 // Called by [App.Run] before the server starts. Returns a descriptive error
 // when a required file is absent or a template fails to parse. Returns nil
@@ -162,12 +200,12 @@ func (m *Module[T]) parseTemplates() error {
 	listPath := filepath.Join(m.templateDir, "list.html")
 	showPath := filepath.Join(m.templateDir, "show.html")
 
-	tplList, err := parseOneTemplate(listPath, m.templateRequired)
+	tplList, err := parseOneTemplate(listPath, m.templateRequired, m.partials)
 	if err != nil {
 		return fmt.Errorf("forge: templates for %s: %w", m.prefix, err)
 	}
 
-	tplShow, err := parseOneTemplate(showPath, m.templateRequired)
+	tplShow, err := parseOneTemplate(showPath, m.templateRequired, m.partials)
 	if err != nil {
 		return fmt.Errorf("forge: templates for %s: %w", m.prefix, err)
 	}
@@ -183,12 +221,13 @@ func (m *Module[T]) parseTemplates() error {
 	return nil
 }
 
-// parseOneTemplate parses a single HTML template file and registers the
-// forge:head sub-template in the returned set.
+// parseOneTemplate parses a single HTML template file, registers the
+// forge:head sub-template, and then registers each shared partial in the
+// returned template set. When partials is nil, no shared partials are added.
 //
 // When required is false and the file does not exist, (nil, nil) is returned.
 // When required is true and the file does not exist, an error is returned.
-func parseOneTemplate(path string, required bool) (*template.Template, error) {
+func parseOneTemplate(path string, required bool, partials []string) (*template.Template, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if required {
 			return nil, fmt.Errorf("file not found: %s", path)
@@ -202,9 +241,17 @@ func parseOneTemplate(path string, required bool) (*template.Template, error) {
 	}
 
 	// Register the forge:head partial into this template set so every
-	// developer template can call {{template "forge:head" .Head}}.
+	// developer template can call {{template "forge:head" .}}.
 	if _, err := tpl.Parse(forgeHeadTmpl); err != nil {
 		return nil, fmt.Errorf("register forge:head in %s: %w", filepath.Base(path), err)
+	}
+
+	// Register each shared partial (loaded from the app-level partials
+	// directory) so they are available inside list.html and show.html.
+	for i, src := range partials {
+		if _, err := tpl.Parse(src); err != nil {
+			return nil, fmt.Errorf("register partial[%d] in %s: %w", i, filepath.Base(path), err)
+		}
 	}
 
 	return tpl, nil

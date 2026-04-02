@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/url"
 	"os"
@@ -176,6 +177,7 @@ type App struct {
 	stoppableModules       []stoppable         // modules with background goroutines to stop at shutdown
 	mcpModules             []MCPModule         // modules registered with forge.MCP(...)
 	rebuildDone            bool                // true once startup rebuildAll goroutine is launched
+	partialsDir            string              // set by App.Partials(); shared partial templates loaded at Run() time
 }
 
 // New creates a new [App] from cfg.
@@ -231,6 +233,50 @@ func (a *App) Use(mws ...func(http.Handler) http.Handler) {
 //	}))
 func (a *App) Handle(pattern string, handler http.Handler) {
 	a.mux.Handle(pattern, handler)
+}
+
+// Partials sets the directory from which shared HTML partial templates are
+// loaded. Every *.html file in dir is registered into each module's template
+// set (list.html and show.html) at [App.Run] time, making them available via:
+//
+//	{{template "nav" .}}
+//
+// Each partial file must use {{define "name"}}...{{end}} syntax. Any name
+// except "forge:head" may be used. Files are registered in alphabetical order.
+//
+// Partials returns the App so multiple calls can be chained:
+//
+//	app.Partials("templates/partials")
+//
+// Use [App.MustParseTemplate] to parse custom handler templates (e.g. a home
+// page) with the same partials and forge:head registered.
+func (a *App) Partials(dir string) *App {
+	a.partialsDir = dir
+	return a
+}
+
+// MustParseTemplate parses the HTML template at path and registers
+// [TemplateFuncMap], the forge:head partial, and any partials configured via
+// [App.Partials]. Panics on any error.
+//
+// Use this for custom route handlers that need access to the same shared
+// partials as module templates:
+//
+//	app.Partials("templates/partials")
+//	homeTpl := app.MustParseTemplate("templates/home.html")
+//	app.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+//	    homeTpl.Execute(w, data)
+//	}))
+func (a *App) MustParseTemplate(path string) *template.Template {
+	partials, err := loadPartials(a.partialsDir)
+	if err != nil {
+		panic(fmt.Sprintf("forge: MustParseTemplate: %v", err))
+	}
+	tpl, err := parseOneTemplate(path, true, partials)
+	if err != nil {
+		panic(fmt.Sprintf("forge: MustParseTemplate %q: %v", path, err))
+	}
+	return tpl
 }
 
 // Content registers a content module with the App.
@@ -591,6 +637,19 @@ func (a *App) Health() {
 //	    log.Fatal(err)
 //	}
 func (a *App) Run(addr string) error {
+	// Load shared partials once, then push to each module before parsing.
+	partials, err := loadPartials(a.partialsDir)
+	if err != nil {
+		return err
+	}
+	if len(partials) > 0 {
+		for _, tp := range a.templateModules {
+			if sp, ok := tp.(interface{ setPartials([]string) }); ok {
+				sp.setPartials(partials)
+			}
+		}
+	}
+
 	// Parse HTML templates before starting the server. Fail fast so startup
 	// errors are obvious rather than surfacing as 406 responses at request time.
 	for _, tp := range a.templateModules {

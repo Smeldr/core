@@ -58,6 +58,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-03-20 | Amendment A57 (`storage.go`): `quoteIdent()` helper added; applied to every generated column reference in `SQLRepo.Save`, `FindAll`, `FindByID`, `FindBySlug`, and `Delete`; prevents SQL syntax errors when `db` struct tags use reserved keywords (e.g. `db:"order"`). Shipped in v1.1.5. |
 | 2026-03-20 | Amendment A58 (`forge.go`): `forgeVersions()` reads `runtime/debug.ReadBuildInfo()` at `Health()` mount time and `Run()` startup; `Health()` now includes `"forge"` and companion-module version keys in the JSON response instead of the removed `"version"` key; startup log line emitted to stderr before `ListenAndServe`. `Config.Version` retained for application use only. Shipped in v1.1.6. |
 | 2026-03-20 | Amendment A59 (`forge.go`): `httpsRedirect()` exempts `/_health` from the HTTPS redirect — plain-HTTP requests to `/_health` pass through to `next` immediately, before the TLS / `X-Forwarded-Proto` check; reverse-proxy health checks no longer receive a `301`. Shipped in v1.1.7. |
+| 2026-04-02 | Amendment A62 (`forge.go`, `templates.go`, `module.go`): `App.Partials(dir) *App` stores a partials directory; `loadPartials(dir)` reads `*.html` files alphabetically; `Module[T].setPartials([]string)` stores partial sources; `parseOneTemplate` now accepts `partials []string` and registers each into the template set after `forge:head`; `App.MustParseTemplate(path) *template.Template` loads a single template with FuncMap + forge:head + partials, panics on error. Shipped in v1.2.0. |
 
 ---
 
@@ -113,7 +114,9 @@ github.com/forge-cms/forge/
                       (Amendment A39);
                       App.MCPModules() (Amendment A49);
                       App.Secret() (Amendment A50);
-                      setSEODefaults push loop in Handler() (Amendment A61)
+                      setSEODefaults push loop in Handler() (Amendment A61);
+                      App.Partials() / App.MustParseTemplate(), partialsDir field,
+                      setPartials push loop in Run() (Amendment A62)
 └── head.go           Head (Title, Description, Author, Published, Modified, Image, Type,
                       Canonical, Tags, Breadcrumbs, Alternates, Social, NoIndex),
                       Image, Breadcrumb, Alternate, Headable, HeadFunc[T],
@@ -139,7 +142,9 @@ github.com/forge-cms/forge/
                       Amendment A7 (errorTemplateLookup in errors.go),
                       Amendment A8 (templateModules + startup wiring in forge.go);
                       forge:head receiver changed to TemplateData, twitter:site and
-                      AppSchema auto-emitted (Amendment A61)
+                      AppSchema auto-emitted (Amendment A61);
+                      loadPartials, setPartials, parseOneTemplate accepts partials slice
+                      (Amendment A62)
 └── templatehelpers.go forgeMeta, forgeDate, forgeRFC3339, forgeMarkdown, forgeExcerpt, forgeCSRFToken,
                       forgeLLMSEntries(data any), TemplateFuncMap();
                       Amendment A9 (parseOneTemplate uses .Funcs(TemplateFuncMap()));

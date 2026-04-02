@@ -298,6 +298,7 @@ type Module[T any] struct {
 
 	templateDir      string             // set by Templates or TemplatesOptional option
 	templateRequired bool               // true when Templates (not TemplatesOptional) was used
+	partials         []string           // raw template source for each shared partial; set via setPartials
 	tplList          *template.Template // nil until parseTemplates succeeds
 	tplShow          *template.Template // nil until parseTemplates succeeds
 	tplMu            sync.RWMutex       // guards tplList, tplShow reads and swaps

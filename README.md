@@ -4,7 +4,7 @@
 Built for developers. Optimized for AI. Zero compromises on readability.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/forge-cms/forge.svg)](https://pkg.go.dev/github.com/forge-cms/forge)
-**v1.1.9 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
+**v1.2.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
 
 ```go
 app := forge.New(forge.Config{
@@ -924,6 +924,49 @@ type TemplateData[T Node] struct {
     AppSchema  template.HTML    // pre-rendered app-level JSON-LD block (empty if not configured)
 }
 ```
+
+### Shared partials
+
+✅ **Available**
+
+Define nav, footer, or any shared HTML once and inject it into every module
+template set — and into custom handler templates — automatically.
+
+```go
+app.Partials("templates/partials") // any *.html file in the directory is a partial
+```
+
+Each partial file must use `{{define "name"}}...{{end}}` syntax (same convention
+as `forge:head`). Files are loaded in alphabetical order for determinism.
+
+```html
+{{/* templates/partials/nav.html */}}
+{{define "nav"}}
+<nav><a href="/">Home</a> | <a href="/posts">Blog</a></nav>
+{{end}}
+```
+
+```html
+{{/* templates/posts/list.html */}}
+{{template "nav" .}}
+{{range .Content}}<a href="/posts/{{.Slug}}"><h2>{{.Title}}</h2></a>{{end}}
+```
+
+For custom `app.Handle()` routes that also need shared partials, use
+`App.MustParseTemplate`:
+
+```go
+// parsed once at startup — includes TemplateFuncMap, forge:head, and all partials
+homeTpl := app.MustParseTemplate("templates/home.html")
+
+app.Handle("GET /", func(w http.ResponseWriter, r *http.Request) {
+    data := forge.NewTemplateData[any](ctx, nil, forge.Head{Title: "Home"}, "My Site")
+    homeTpl.Execute(w, data)
+})
+```
+
+`MustParseTemplate` panics on error (consistent with `MustConfig`), so
+misconfigured templates fail at startup rather than at first request.
 
 ---
 

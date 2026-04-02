@@ -205,3 +205,19 @@ func ExampleAppSchema() {
 	})
 	_ = app.Handler()
 }
+
+// ExampleApp_Partials demonstrates registering a shared partials directory so
+// that nav, footer, and other common HTML fragments are available in every
+// module template and in custom handler templates parsed via MustParseTemplate.
+func ExampleApp_Partials() {
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("example-secret-key-32-bytes!!!!!"),
+	}))
+
+	// Any *.html file in templates/partials is injected into every module
+	// template set and into templates parsed via MustParseTemplate.
+	app.Partials("templates/partials")
+
+	_ = app.Handler()
+}

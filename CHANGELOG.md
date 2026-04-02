@@ -23,6 +23,22 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.2.0] — 2026-04-02
+
+Shared template partials (Amendment A62).
+
+### Added
+
+- `App.Partials(dir string) *App` — registers a directory of partial templates
+  (any `*.html` file) to be injected into every module template set. Files must
+  use `{{define "name"}}...{{end}}` syntax. Loaded in alphabetical order.
+- `App.MustParseTemplate(path string) *template.Template` — parses a single
+  template file with `TemplateFuncMap`, `forge:head`, and all partials from the
+  configured partials directory. Intended for custom `app.Handle()` route
+  handlers (e.g. a home page). Panics on error, consistent with `MustConfig`.
+
+---
+
 ## [1.1.9] — 2026-04-02
 
 App-level Open Graph defaults and structured data (Amendment A61).
