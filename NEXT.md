@@ -72,6 +72,30 @@ The render path in `templates.go` must set `data.Head`, `data.OGDefaults`,
 `data.AppSchema`, and `data.HeadAssets` via the promoted fields — no call-site
 change is needed if promotion works correctly, but corepilot must verify.
 
+## Implementation note — embedding vs named field
+
+`TemplateData[T]` must embed `PageHead` as an **unnamed (anonymous) field**:
+
+```go
+type TemplateData[T any] struct {
+    PageHead   // correct — fields are promoted to the top level
+    ...
+}
+```
+
+Not as a named field:
+
+```go
+type TemplateData[T any] struct {
+    PageHead PageHead   // wrong — fields are NOT promoted; templates break
+    ...
+}
+```
+
+Go's `html/template` engine accesses promoted fields at the top level of the
+struct. A named field creates a nested namespace (`.PageHead.Head`) which breaks
+all existing templates. Verify this in the plan before writing any code.
+
 ## Constraints
 
 - Zero breaking changes. Existing templates call `.Head`, `.OGDefaults` etc.
