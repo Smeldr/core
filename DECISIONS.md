@@ -82,6 +82,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A61 | `social.go`/`schema.go`/`templates.go`: `OGDefaults`, `AppSchema` SEOOptions; `forge:head` receiver changed from `Head` to `TemplateData` | Agreed | 2026-04-02 |
 | A62 | `forge.go`/`templates.go`/`module.go`: `App.Partials(dir)`, `App.MustParseTemplate(path)`, `loadPartials`, `setPartials`, `parseOneTemplate` accepts partials — shared partial templates injected into all module and custom handler templates | Agreed | 2026-04-02 |
 | A63 | `head.go`/`templates.go`/`templatedata.go`/`forge.go`/`module.go`: `HeadAssets`, `FaviconLink`, `ScriptTag` SEOOption — injects static assets (preconnect, stylesheets, favicons, scripts) into forge:head on every page via `app.SEO(&HeadAssets{...})` | Agreed | 2026-04-03 |
+| A64 | `head.go`/`templatedata.go`: `PageHead` exported struct — embeddable head fields for custom handler data structs; `TemplateData[T]` refactored to embed `PageHead` anonymously | Agreed | 2026-04-03 |
 
 ---
 
@@ -3748,3 +3749,55 @@ framework manage the `<head>` consistently.
 5. Inline script bodies must be wrapped with `template.JS(...)` at the call
    site. This is explicit and secure: it reminds developers never to pass
    user-supplied content as raw JavaScript.
+
+---
+
+## Amendment A64 — PageHead: embeddable head struct for custom handlers
+
+**Status:** Agreed  
+**Date:** 2026-04-03  
+**Scope:** `head.go`, `templatedata.go`
+
+**Problem:**
+`forge:head` works in module templates (list.html, show.html) because they
+receive `TemplateData[T]`, which carries `.Head`, `.OGDefaults`, `.AppSchema`,
+and `.HeadAssets`. Custom handlers — like a home page — define their own data
+structs and could not use `{{template "forge:head" .}}` because those fields
+were absent from any struct they defined.
+
+**Decision:**
+
+1. **`PageHead`** (`head.go`) — new exported struct holding exactly the four
+   fields that `forge:head` reads: `Head Head`, `OGDefaults *OGDefaults`,
+   `AppSchema template.HTML`, `HeadAssets *HeadAssets`.
+2. **`TemplateData[T]`** (`templatedata.go`) — refactored to embed `PageHead`
+   as an **anonymous (unnamed) field**. Go's `html/template` engine promotes
+   all fields of the embedded struct to the top level, so existing template
+   access paths (`.Head`, `.OGDefaults`, `.AppSchema`, `.HeadAssets`) are
+   preserved without modification.
+3. **`NewTemplateData`** constructor — signature unchanged. The body now writes
+   `PageHead: PageHead{Head: head}` instead of `Head: head`.
+4. **Zero breaking changes** — field access paths in templates, the
+   `NewTemplateData` signature, and the `templates.go` render paths (which use
+   field assignment, not struct-literal syntax) are all unaffected.
+
+**Consequences:**
+
+1. `PageHead` is a new exported type in `head.go`. Any developer building a
+   custom handler struct can embed it to gain `forge:head` support:
+   ```go
+   type homeData struct {
+       forge.PageHead
+       Posts []*Post
+   }
+   ```
+2. Struct literal initialization of `TemplateData[T]` with `Head:`,
+   `OGDefaults:`, `AppSchema:`, or `HeadAssets:` keys directly is no longer
+   valid — callers must use `PageHead: forge.PageHead{Head: ...}`. This affects
+   only internal test files (updated in the same commit); public API callers use
+   `NewTemplateData` which is unchanged.
+3. `templatedata.go` drops its `"html/template"` import (now unused); the import
+   lives in `head.go` where `PageHead.AppSchema template.HTML` is declared.
+4. `forgeHeadTmpl` is unchanged — it already accesses `.Head`, `.OGDefaults`,
+   `.AppSchema`, `.HeadAssets` at the top level, which anonymous embedding
+   satisfies.

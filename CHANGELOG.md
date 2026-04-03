@@ -23,6 +23,28 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.4.0] — 2026-04-03
+
+Embeddable head struct for custom handlers (Amendment A64).
+
+### Added
+
+- `forge.PageHead` — exported struct holding the four framework-owned head
+  fields (`Head`, `OGDefaults`, `AppSchema`, `HeadAssets`). Embed `PageHead`
+  in any custom handler data struct to enable `{{template "forge:head" .}}`
+  without using `TemplateData[T]` (Amendment A64).
+
+### Changed
+
+- `forge.TemplateData[T]` — the four previously individual fields (`Head`,
+  `OGDefaults`, `AppSchema`, `HeadAssets`) are now promoted from the embedded
+  anonymous `PageHead` field. Existing templates access them identically
+  (`.Head`, `.OGDefaults`, etc.) — zero breaking changes. Internally, struct
+  literals must be updated to use `PageHead: forge.PageHead{...}` syntax
+  (Amendment A64).
+
+---
+
 ## [1.3.0] — 2026-04-03
 
 Static linked assets in forge:head (Amendment A63).

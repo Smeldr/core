@@ -4,7 +4,7 @@
 Built for developers. Optimized for AI. Zero compromises on readability.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/forge-cms/forge.svg)](https://pkg.go.dev/github.com/forge-cms/forge)
-**v1.3.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
+**v1.4.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
 
 ```go
 app := forge.New(forge.Config{
@@ -968,6 +968,45 @@ app.Handle("GET /", func(w http.ResponseWriter, r *http.Request) {
 
 `MustParseTemplate` panics on error (consistent with `MustConfig`), so
 misconfigured templates fail at startup rather than at first request.
+
+### Custom handler with forge:head
+
+✅ **Available**
+
+Custom handler data structs can embed `forge.PageHead` to gain
+`{{template "forge:head" .}}` support without using `TemplateData[T]`:
+
+```go
+type homeData struct {
+    forge.PageHead        // promotes Head, OGDefaults, AppSchema, HeadAssets
+    Posts      []*Post
+    Featured   *Post
+}
+
+homeTpl := app.MustParseTemplate("templates/home.html")
+
+app.Handle("GET /", func(w http.ResponseWriter, r *http.Request) {
+    data := homeData{
+        PageHead: forge.PageHead{Head: forge.Head{Title: "Home"}},
+        Posts:    loadPosts(),
+    }
+    homeTpl.Execute(w, data)
+})
+```
+
+In `templates/home.html`:
+
+```html
+<head>{{template "forge:head" .}}</head>
+<body>
+    {{range .Posts}}<h2>{{.Title}}</h2>{{end}}
+</body>
+```
+
+`PageHead` is the same struct that `TemplateData[T]` embeds internally.
+Any field on `PageHead` set by `app.SEO(...)` (such as `HeadAssets`) must be
+populated manually in custom handlers — module templates receive these
+automatically, but `app.Handle()` routes are outside the module render path.
 
 ### Site-wide static assets
 

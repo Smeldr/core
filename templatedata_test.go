@@ -1,6 +1,8 @@
 package forge
 
 import (
+	"html/template"
+	"strings"
 	"testing"
 	"time"
 )
@@ -119,6 +121,43 @@ func TestTemplateData_headFields(t *testing.T) {
 	}
 	if !td.Head.Published.Equal(pub) {
 		t.Errorf("Head.Published = %v, want %v", td.Head.Published, pub)
+	}
+}
+
+// TestTemplateData_PageHead_embedding confirms that a custom data struct
+// embedding PageHead can be passed to forge:head and that Go's html/template
+// engine promotes the embedded fields to the top level, making .Head,
+// .OGDefaults, .AppSchema, and .HeadAssets accessible without qualification.
+func TestTemplateData_PageHead_embedding(t *testing.T) {
+	type homeData struct {
+		PageHead
+		Extra string
+	}
+
+	data := homeData{
+		PageHead: PageHead{
+			Head: Head{Title: "Home"},
+			HeadAssets: &HeadAssets{
+				Stylesheets: []string{"/static/app.css"},
+			},
+		},
+		Extra: "ignored",
+	}
+
+	tmpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(forgeHeadTmpl))
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "forge:head", data); err != nil {
+		t.Fatalf("ExecuteTemplate: %v", err)
+	}
+
+	out := buf.String()
+
+	if !strings.Contains(out, "<title>Home</title>") {
+		t.Errorf("missing <title>: %s", out)
+	}
+	if !strings.Contains(out, `<link rel="stylesheet" href="/static/app.css">`) {
+		t.Errorf("missing stylesheet link: %s", out)
 	}
 }
 

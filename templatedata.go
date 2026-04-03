@@ -1,7 +1,6 @@
 package forge
 
 import (
-	"html/template"
 	"net/http"
 )
 
@@ -9,21 +8,24 @@ import (
 // T is the content type for show handlers (e.g. *BlogPost) or a slice type
 // for list handlers (e.g. []*BlogPost).
 //
+// The framework-owned head fields (Head, OGDefaults, AppSchema, HeadAssets)
+// are promoted from the embedded [PageHead] field and remain accessible at the
+// top level of the struct — existing template calls like {{.Head.Title}} are
+// unchanged.
+//
+// To use {{template "forge:head" .}} in a custom handler without TemplateData,
+// embed [PageHead] directly in your own data struct:
+//
+//	type homeData struct {
+//	    forge.PageHead
+//	    Posts []*Post
+//	}
+//
 // Show handler:
 //
 //	TemplateData[*BlogPost]{
+//	    PageHead: forge.PageHead{Head: post.Head()},
 //	    Content:  post,
-//	    Head:     post.Head(),         // merged with module HeadFunc when set
-//	    User:     ctx.User(),
-//	    Request:  r,
-//	    SiteName: "example.com",
-//	}
-//
-// List handler:
-//
-//	TemplateData[[]*BlogPost]{
-//	    Content:  posts,
-//	    Head:     forge.Head{Title: "All Posts"},
 //	    User:     ctx.User(),
 //	    Request:  r,
 //	    SiteName: "example.com",
@@ -31,17 +33,18 @@ import (
 //
 // In templates:
 //
-//	{{template "forge:head" .Head}}
+//	{{template "forge:head" .}}
 //	<h1>{{.Content.Title}}</h1>
 //	<p>Welcome, {{.User.Name}}</p>
 type TemplateData[T any] struct {
+	// PageHead promotes Head, OGDefaults, AppSchema, and HeadAssets to the
+	// top level of TemplateData. Templates access them as .Head, .OGDefaults,
+	// .AppSchema, and .HeadAssets — identical to before embedding was used.
+	PageHead
+
 	// Content is the page payload — a single item for show templates,
 	// a slice for list templates.
 	Content T
-
-	// Head carries all SEO and social metadata for this page, merged from
-	// the content type's Head() method and any module-level HeadFunc.
-	Head Head
 
 	// User is the authenticated user for this request. Zero value ([GuestUser])
 	// when the request is unauthenticated.
@@ -56,25 +59,6 @@ type TemplateData[T any] struct {
 	// registration time (e.g. "example.com"). Uses the hostname rather than
 	// [Context.SiteName] because SiteName() always returns "" in v1.
 	SiteName string
-
-	// OGDefaults holds the app-level Open Graph and Twitter Card fallback
-	// values set via [App.SEO]. forge:head uses OGDefaults.TwitterSite to emit
-	// twitter:site on every page; image and creator fallbacks are already merged
-	// into [Head] before TemplateData is constructed.
-	OGDefaults *OGDefaults
-
-	// AppSchema is a pre-rendered <script type="application/ld+json"> block for
-	// the app-level structured data set via [App.SEO] with [AppSchema]. It is
-	// emitted automatically by the forge:head partial on every page.
-	// The value is safe HTML produced by [renderAppSchema]; it is empty when
-	// no [AppSchema] was registered.
-	AppSchema template.HTML
-
-	// HeadAssets holds the app-level static assets (preconnect hints,
-	// stylesheets, favicons, and scripts) set via [App.SEO] with [HeadAssets].
-	// forge:head emits them on every page in order: preconnect → stylesheets →
-	// favicons → scripts. Nil when no [HeadAssets] was registered.
-	HeadAssets *HeadAssets
 }
 
 // NewTemplateData constructs a [TemplateData][T] for the given context,
@@ -84,8 +68,8 @@ type TemplateData[T any] struct {
 // (e.g. "example.com"), set once at module registration.
 func NewTemplateData[T any](ctx Context, content T, head Head, siteName string) TemplateData[T] {
 	return TemplateData[T]{
+		PageHead: PageHead{Head: head},
 		Content:  content,
-		Head:     head,
 		User:     ctx.User(),
 		Request:  ctx.Request(),
 		SiteName: siteName,

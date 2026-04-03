@@ -238,7 +238,7 @@ func TestHeadFunc_storedOnModule(t *testing.T) {
 func renderHeadAssets(t *testing.T, ha *HeadAssets) string {
 	t.Helper()
 	tpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(forgeHeadTmpl))
-	data := TemplateData[string]{HeadAssets: ha}
+	data := TemplateData[string]{PageHead: PageHead{HeadAssets: ha}}
 	var buf strings.Builder
 	if err := tpl.ExecuteTemplate(&buf, "forge:head", data); err != nil {
 		t.Fatalf("template execution: %v", err)

@@ -243,3 +243,24 @@ func ExampleHeadAssets() {
 	})
 	_ = app.Handler()
 }
+
+// ExamplePageHead demonstrates embedding PageHead in a custom handler data
+// struct to enable {{template "forge:head" .}} without using TemplateData.
+func ExamplePageHead() {
+	type homeData struct {
+		PageHead
+		Featured string
+	}
+
+	data := homeData{
+		PageHead: PageHead{
+			Head: Head{Title: "Home — My Site"},
+		},
+		Featured: "Welcome post",
+	}
+
+	// data.Head, data.OGDefaults, data.AppSchema, and data.HeadAssets are all
+	// accessible at the top level of homeData because PageHead is embedded
+	// anonymously. forge:head reads them identically to TemplateData[T].
+	_ = data.Head.Title // "Home — My Site"
+}

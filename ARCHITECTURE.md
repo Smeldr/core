@@ -60,6 +60,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-03-20 | Amendment A59 (`forge.go`): `httpsRedirect()` exempts `/_health` from the HTTPS redirect — plain-HTTP requests to `/_health` pass through to `next` immediately, before the TLS / `X-Forwarded-Proto` check; reverse-proxy health checks no longer receive a `301`. Shipped in v1.1.7. |
 | 2026-04-02 | Amendment A62 (`forge.go`, `templates.go`, `module.go`): `App.Partials(dir) *App` stores a partials directory; `loadPartials(dir)` reads `*.html` files alphabetically; `Module[T].setPartials([]string)` stores partial sources; `parseOneTemplate` now accepts `partials []string` and registers each into the template set after `forge:head`; `App.MustParseTemplate(path) *template.Template` loads a single template with FuncMap + forge:head + partials, panics on error. Shipped in v1.2.0. |
 | 2026-04-03 | Amendment A63 (`head.go`, `templates.go`, `templatedata.go`, `forge.go`, `module.go`): `HeadAssets`, `FaviconLink`, `ScriptTag` new exported types in `head.go`; `HeadAssets` implements `SEOOption` via `applySEO(*seoState)`; `seoState.headAssets` field added to `forge.go`; `App.Handler()` interface assertion updated to 3-arg `setSEODefaults(*OGDefaults, *AppSchema, *HeadAssets)`; `Module[T].headAssets` field added to `module.go`; `TemplateData[T].HeadAssets *HeadAssets` field added to `templatedata.go`; `forgeHeadTmpl` extended with HeadAssets block (preconnect → stylesheets → favicons → scripts); both render paths propagate `headAssets`. Shipped in v1.3.0. |
+| 2026-04-03 | Amendment A64 (`head.go`, `templatedata.go`): `PageHead` new exported struct holding `Head`, `OGDefaults`, `AppSchema`, `HeadAssets`; `TemplateData[T]` refactored to embed `PageHead` anonymously — fields promoted to top level, all template access paths unchanged; `NewTemplateData` body updated to `PageHead: PageHead{Head: head}`; custom handler structs can now embed `forge.PageHead` to gain `{{template "forge:head" .}}` support without using `TemplateData[T]`. Shipped in v1.4.0. |
 
 ---
 
@@ -124,7 +125,8 @@ github.com/forge-cms/forge/
                       Excerpt, URL, AbsURL, Crumbs, Crumb, rich-result constants,
                       TwitterCardType (Summary/SummaryLargeImage/AppCard/PlayerCard),
                       TwitterMeta, SocialOverrides;
-                      HeadAssets (SEOOption), FaviconLink, ScriptTag (Amendment A63)
+                      HeadAssets (SEOOption), FaviconLink, ScriptTag (Amendment A63);
+                      PageHead (Amendment A64)
 └── schema.go         SchemaFor, FAQProvider, HowToProvider, EventProvider,
                       RecipeProvider, ReviewProvider, OrganizationProvider,
                       FAQEntry, HowToStep, EventDetails, RecipeDetails,
@@ -135,9 +137,9 @@ github.com/forge-cms/forge/
                       WriteSitemapFragment, WriteSitemapIndex
 └── robots.go         CrawlerPolicy (Allow/Disallow/AskFirst), RobotsConfig,
                       RobotsTxt, RobotsTxtHandler
-└── templatedata.go   TemplateData[T] (Content, Head, User, Request, SiteName,
-                      OGDefaults, AppSchema, HeadAssets), NewTemplateData
-                      (Amendment A61; HeadAssets field — Amendment A63)
+└── templatedata.go   TemplateData[T] (embeds PageHead; Content, User, Request, SiteName),
+                      PageHead (Head, OGDefaults, AppSchema, HeadAssets), NewTemplateData
+                      (Amendment A61; HeadAssets field — Amendment A63; PageHead embedding — Amendment A64)
 └── templates.go      templateParser, Templates, TemplatesOptional, forgeHeadTmpl, parseTemplates,
                       renderListHTML, renderShowHTML, setSiteName, setSEODefaults,
                       errorTemplate, bindErrorTemplates;

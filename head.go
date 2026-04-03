@@ -173,6 +173,45 @@ type HeadAssets struct {
 
 func (h *HeadAssets) applySEO(s *seoState) { s.headAssets = h }
 
+// — PageHead ——————————————————————————————————————————————————————————————
+
+// PageHead holds the framework-owned fields that [forge:head] reads.
+// Embed PageHead in any custom handler data struct to enable
+// {{template "forge:head" .}} without using [TemplateData].
+//
+// Example:
+//
+//	type homeData struct {
+//	    forge.PageHead
+//	    Posts []*Post
+//	}
+//
+//	func homeHandler(app *forge.App) http.HandlerFunc {
+//	    tmpl := app.MustParseTemplate("templates/home.html")
+//	    return func(w http.ResponseWriter, r *http.Request) {
+//	        data := homeData{
+//	            PageHead: forge.PageHead{Head: forge.Head{Title: "Home"}},
+//	            Posts:    loadPosts(),
+//	        }
+//	        tmpl.ExecuteTemplate(w, "home.html", data)
+//	    }
+//	}
+type PageHead struct {
+	// Head carries SEO and social metadata for this page.
+	Head Head
+
+	// OGDefaults holds the app-level Open Graph and Twitter Card fallback values.
+	OGDefaults *OGDefaults
+
+	// AppSchema is a pre-rendered <script type="application/ld+json"> block
+	// for app-level structured data.
+	AppSchema template.HTML
+
+	// HeadAssets holds the app-level static assets (preconnect, stylesheets,
+	// favicons, scripts) set via [App.SEO] with [HeadAssets].
+	HeadAssets *HeadAssets
+}
+
 // — HeadFunc option ———————————————————————————————————————————————————————
 
 // headFuncOption stores a module-level head override function.
