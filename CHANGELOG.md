@@ -23,6 +23,26 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.3.0] — 2026-04-03
+
+Static linked assets in forge:head (Amendment A63).
+
+### Added
+
+- `forge.HeadAssets` — new `SEOOption` applied via `app.SEO()`. Injects
+  preconnect hints, stylesheets, favicon `<link>` elements, and `<script>`
+  tags into `forge:head` on every page. Assets are emitted in order:
+  preconnect → stylesheets → favicons → scripts (Amendment A63).
+- `forge.FaviconLink` — struct declaring a single `<link>` for a favicon or
+  touch icon. `Rel` is required; `Type` and `Sizes` are omitted when empty
+  (Amendment A63).
+- `forge.ScriptTag` — struct declaring a single `<script>` element. `Src`
+  loads an external script; `Body template.JS` inlines JavaScript when `Src`
+  is empty. `Async` and `Defer` are only emitted for external scripts
+  (Amendment A63).
+
+---
+
 ## [1.2.0] — 2026-04-02
 
 Shared template partials (Amendment A62).

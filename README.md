@@ -4,7 +4,7 @@
 Built for developers. Optimized for AI. Zero compromises on readability.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/forge-cms/forge.svg)](https://pkg.go.dev/github.com/forge-cms/forge)
-**v1.2.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
+**v1.3.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
 
 ```go
 app := forge.New(forge.Config{
@@ -916,12 +916,13 @@ and `<meta name="robots">` based on content Status.
 
 ```go
 type TemplateData[T Node] struct {
-    Content    T                // T for show, []T for list
-    Head       forge.Head       // from Headable.Head() on T, or HeadFunc if provided (HeadFunc takes priority)
-    User       forge.User       // current user (zero value if Guest)
-    Request    *http.Request
-    OGDefaults *forge.OGDefaults // app-level OG/Twitter fallbacks (nil if not configured)
-    AppSchema  template.HTML    // pre-rendered app-level JSON-LD block (empty if not configured)
+    Content     T                  // T for show, []T for list
+    Head        forge.Head         // from Headable.Head() on T, or HeadFunc if provided (HeadFunc takes priority)
+    User        forge.User         // current user (zero value if Guest)
+    Request     *http.Request
+    OGDefaults  *forge.OGDefaults  // app-level OG/Twitter fallbacks (nil if not configured)
+    AppSchema   template.HTML      // pre-rendered app-level JSON-LD block (empty if not configured)
+    HeadAssets  *forge.HeadAssets  // preconnect/stylesheets/favicons/scripts (nil if not configured)
 }
 ```
 
@@ -967,6 +968,37 @@ app.Handle("GET /", func(w http.ResponseWriter, r *http.Request) {
 
 `MustParseTemplate` panics on error (consistent with `MustConfig`), so
 misconfigured templates fail at startup rather than at first request.
+
+### Site-wide static assets
+
+✅ **Available**
+
+Inject preconnect hints, stylesheets, favicon links, and scripts into `forge:head`
+on every page via `app.SEO`:
+
+```go
+app.SEO(&forge.HeadAssets{
+    Preconnect:  []string{"https://fonts.googleapis.com"},
+    Stylesheets: []string{
+        "https://fonts.googleapis.com/css2?family=Inter&display=swap",
+        "/static/app.css",
+    },
+    Favicons: []forge.FaviconLink{
+        {Rel: "icon", Type: "image/png", Sizes: "32x32", Href: "/favicon-32.png"},
+        {Rel: "apple-touch-icon", Href: "/apple-touch-icon.png"},
+    },
+    Scripts: []forge.ScriptTag{
+        {Src: "/static/app.js", Defer: true},
+    },
+})
+```
+
+Assets are emitted in order: preconnect → stylesheets → favicons → scripts.
+Inline script bodies use `template.JS` to opt in to verbatim emission:
+
+```go
+forge.ScriptTag{Body: template.JS("console.log('Forge')")} // never pass user input here
+```
 
 ---
 

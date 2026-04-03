@@ -136,6 +136,7 @@ type seoState struct {
 	robots     *RobotsConfig
 	ogDefaults *OGDefaults
 	appSchema  *AppSchema
+	headAssets *HeadAssets
 }
 
 // App is the central registry for a Forge application. It couples the HTTP
@@ -440,9 +441,9 @@ func (a *App) Handler() http.Handler {
 		bindErrorTemplates(a.templateModules)
 		for _, tp := range a.templateModules {
 			if s, ok := tp.(interface {
-				setSEODefaults(*OGDefaults, *AppSchema)
+				setSEODefaults(*OGDefaults, *AppSchema, *HeadAssets)
 			}); ok {
-				s.setSEODefaults(a.seo.ogDefaults, a.seo.appSchema)
+				s.setSEODefaults(a.seo.ogDefaults, a.seo.appSchema, a.seo.headAssets)
 			}
 		}
 	}

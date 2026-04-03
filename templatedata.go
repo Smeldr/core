@@ -69,6 +69,12 @@ type TemplateData[T any] struct {
 	// The value is safe HTML produced by [renderAppSchema]; it is empty when
 	// no [AppSchema] was registered.
 	AppSchema template.HTML
+
+	// HeadAssets holds the app-level static assets (preconnect hints,
+	// stylesheets, favicons, and scripts) set via [App.SEO] with [HeadAssets].
+	// forge:head emits them on every page in order: preconnect → stylesheets →
+	// favicons → scripts. Nil when no [HeadAssets] was registered.
+	HeadAssets *HeadAssets
 }
 
 // NewTemplateData constructs a [TemplateData][T] for the given context,

@@ -81,6 +81,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A60 | `forge.go`: `New()` calls `MustConfig()` automatically — configuration errors are always caught at startup, never at first request | Agreed | 2026-04-02 |
 | A61 | `social.go`/`schema.go`/`templates.go`: `OGDefaults`, `AppSchema` SEOOptions; `forge:head` receiver changed from `Head` to `TemplateData` | Agreed | 2026-04-02 |
 | A62 | `forge.go`/`templates.go`/`module.go`: `App.Partials(dir)`, `App.MustParseTemplate(path)`, `loadPartials`, `setPartials`, `parseOneTemplate` accepts partials — shared partial templates injected into all module and custom handler templates | Agreed | 2026-04-02 |
+| A63 | `head.go`/`templates.go`/`templatedata.go`/`forge.go`/`module.go`: `HeadAssets`, `FaviconLink`, `ScriptTag` SEOOption — injects static assets (preconnect, stylesheets, favicons, scripts) into forge:head on every page via `app.SEO(&HeadAssets{...})` | Agreed | 2026-04-03 |
 
 ---
 
@@ -3687,3 +3688,63 @@ all templates.
 5. Missing partials directory returns an error from `App.Run()` (not a panic)
    so the failure message is clear; `MustParseTemplate` panics for consistency
    with the `Must` naming convention.
+
+---
+
+## Amendment A63 — HeadAssets: static linked assets via forge:head
+
+**Status:** Agreed  
+**Date:** 2026-04-03  
+**Scope:** `head.go`, `templates.go`, `templatedata.go`, `forge.go`, `module.go`
+
+**Problem:**
+Forge provided no built-in way to inject site-wide static assets — preconnect
+hints, stylesheets, favicon `<link>` elements, and `<script>` tags — into
+`forge:head`. Developers had to hard-code these in every list/show template or
+create a shared partial that duplicated the logic. Neither approach let the
+framework manage the `<head>` consistently.
+
+**Decision:**
+
+1. **`HeadAssets`** (`head.go`) — new `SEOOption` struct. Applied via
+   `app.SEO(&forge.HeadAssets{...})`. Fields:
+   - `Preconnect []string` — emitted as `<link rel="preconnect" href="…">`
+   - `Stylesheets []string` — emitted as `<link rel="stylesheet" href="…">`
+   - `Favicons []FaviconLink` — emitted as typed `<link>` elements
+   - `Scripts []ScriptTag` — emitted as `<script>` elements (external or inline)
+2. **`FaviconLink`** (`head.go`) — struct with `Rel`, `Type`, `Sizes`, `Href`.
+   `Type` and `Sizes` are omitted from the emitted `<link>` when empty.
+3. **`ScriptTag`** (`head.go`) — struct with `Src`, `Body template.JS`, `Async`,
+   `Defer`. `Async`/`Defer` are only emitted for external scripts (`Src`
+   non-empty). `Body` is typed `template.JS` (an alias for `string` from
+   `html/template`) so Go's context-aware escaping does not quote inline bodies.
+4. **Emission order** in `forgeHeadTmpl` (`templates.go`): preconnect →
+   stylesheets → favicons → scripts. Scripts are always last to give
+   stylesheets time to load.
+5. **Propagation chain** — mirrors `OGDefaults` and `AppSchema`:
+   - `seoState.headAssets *HeadAssets` added to `forge.go`
+   - `App.Handler()` interface assertion updated to 3-arg `setSEODefaults`:
+     `interface{ setSEODefaults(*OGDefaults, *AppSchema, *HeadAssets) }`
+   - `Module[T].headAssets *HeadAssets` field added to `module.go`
+   - `Module[T].setSEODefaults(d, a, ha)` body updated in `templates.go`
+   - `TemplateData[T].HeadAssets *HeadAssets` field added to `templatedata.go`
+   - Both render paths (`renderListHTML`, `renderShowHTML`) set `data.HeadAssets`
+6. **Critical sync constraint**: the `forge.go` interface assertion and the
+   `module.go` `setSEODefaults` method signature must always match. A mismatch
+   produces no compile error but silently breaks `HeadAssets` propagation at
+   runtime.
+
+**Consequences:**
+
+1. `HeadAssets`, `FaviconLink`, `ScriptTag` are new exported types in `head.go`.
+   The `html/template` import is added to `head.go`.
+2. `setSEODefaults` signature change (2-arg → 3-arg) is internal — the method
+   is unexported and called only via the inline interface assertion in
+   `App.Handler()`.
+3. `TemplateData[T]` gains one new field (`HeadAssets`). Existing templates that
+   do not use `HeadAssets` are unaffected.
+4. Nil `HeadAssets` (no `app.SEO(&HeadAssets{...})` call) produces no output —
+   the template block is guarded by `{{- if .HeadAssets}}`.
+5. Inline script bodies must be wrapped with `template.JS(...)` at the call
+   site. This is explicit and secure: it reminds developers never to pass
+   user-supplied content as raw JavaScript.

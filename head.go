@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"html/template"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -119,6 +120,58 @@ type Head struct {
 // RSS feeds, and AI endpoints — no HeadFunc option required.
 // HeadFunc takes priority over Headable when both are present.
 type Headable interface{ Head() Head }
+
+// — HeadAssets ————————————————————————————————————————————————————————————
+
+// FaviconLink declares a single <link> element for a favicon or touch icon.
+// Rel is required ("icon", "apple-touch-icon"). Type and Sizes are optional;
+// omit them by leaving the fields empty.
+type FaviconLink struct {
+	Rel   string // "icon", "apple-touch-icon", etc.
+	Type  string // MIME type, e.g. "image/png"; omitted when empty
+	Sizes string // e.g. "32x32"; omitted when empty
+	Href  string // URL to the icon file
+}
+
+// ScriptTag declares a single <script> element.
+// Src loads an external script; Body inlines a JavaScript body when Src is empty.
+// Body is typed as [html/template.JS] — convert a string literal with
+// template.JS("…") to mark it as safe for emission inside a <script> block;
+// never use this with user-supplied content.
+// Async and Defer are only emitted for external scripts (Src non-empty).
+type ScriptTag struct {
+	Src   string      // external script URL; empty means inline
+	Body  template.JS // inline JavaScript body; used when Src is empty
+	Async bool        // adds async attribute (external scripts only)
+	Defer bool        // adds defer attribute (external scripts only)
+}
+
+// HeadAssets is an [SEOOption] that injects static linked assets —
+// preconnect hints, stylesheets, favicons, and scripts — into the
+// forge:head partial on every page.
+//
+// Apply it via [App.SEO]:
+//
+//	app.SEO(&forge.HeadAssets{
+//	    Preconnect:  []string{"https://fonts.googleapis.com"},
+//	    Stylesheets: []string{"https://fonts.googleapis.com/css2?family=Inter&display=swap"},
+//	    Favicons: []forge.FaviconLink{
+//	        {Rel: "icon", Type: "image/png", Sizes: "32x32", Href: "/favicon-32.png"},
+//	    },
+//	    Scripts: []forge.ScriptTag{
+//	        {Src: "/static/app.js", Defer: true},
+//	    },
+//	})
+//
+// Assets are emitted in order: preconnect → stylesheets → favicons → scripts.
+type HeadAssets struct {
+	Preconnect  []string      // <link rel="preconnect" href="…">
+	Stylesheets []string      // <link rel="stylesheet" href="…">
+	Favicons    []FaviconLink // <link rel="icon" …> / <link rel="apple-touch-icon" …>
+	Scripts     []ScriptTag   // <script …>
+}
+
+func (h *HeadAssets) applySEO(s *seoState) { s.headAssets = h }
 
 // — HeadFunc option ———————————————————————————————————————————————————————
 

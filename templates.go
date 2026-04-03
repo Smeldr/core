@@ -126,6 +126,18 @@ const forgeHeadTmpl = `{{define "forge:head"}}<title>{{.Head.Title}}</title>
 {{- end}}
 {{- if .AppSchema}}{{.AppSchema}}
 {{- end}}
+{{- if .HeadAssets}}
+{{- range .HeadAssets.Preconnect}}<link rel="preconnect" href="{{.}}">
+{{- end}}
+{{- range .HeadAssets.Stylesheets}}<link rel="stylesheet" href="{{.}}">
+{{- end}}
+{{- range .HeadAssets.Favicons}}<link rel="{{.Rel}}"{{if .Type}} type="{{.Type}}"{{end}}{{if .Sizes}} sizes="{{.Sizes}}"{{end}} href="{{.Href}}">
+{{- end}}
+{{- range .HeadAssets.Scripts}}
+{{- if .Src}}<script src="{{.Src}}"{{if .Async}} async{{end}}{{if .Defer}} defer{{end}}></script>
+{{- else}}<script>{{.Body}}</script>{{end}}
+{{- end}}
+{{- end}}
 {{- if .Head.NoIndex}}
 <meta name="robots" content="noindex, nofollow">
 {{- end}}
@@ -176,12 +188,13 @@ func loadPartials(dir string) ([]string, error) {
 	return srcs, nil
 }
 
-// setSEODefaults stores the app-level OG defaults and AppSchema so they can
-// be merged and rendered into [TemplateData] at HTML render time.
+// setSEODefaults stores the app-level OG defaults, AppSchema, and HeadAssets
+// so they can be merged and rendered into [TemplateData] at HTML render time.
 // Called by [App.Handler] after all [App.SEO] options have been applied.
-func (m *Module[T]) setSEODefaults(d *OGDefaults, a *AppSchema) {
+func (m *Module[T]) setSEODefaults(d *OGDefaults, a *AppSchema, ha *HeadAssets) {
 	m.ogDefaults = d
 	m.appSchema = a
+	m.headAssets = ha
 }
 
 // parseTemplates loads list.html and show.html from the module's template
@@ -274,6 +287,7 @@ func (m *Module[T]) renderListHTML(w http.ResponseWriter, r *http.Request, ctx C
 	data := NewTemplateData(ctx, items, Head{}, m.siteName)
 	data.OGDefaults = m.ogDefaults
 	data.AppSchema = renderAppSchema(m.appSchema)
+	data.HeadAssets = m.headAssets
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
 		WriteError(w, r, fmt.Errorf("forge: list template execution: %w", err))
@@ -302,6 +316,7 @@ func (m *Module[T]) renderShowHTML(w http.ResponseWriter, r *http.Request, ctx C
 	data := NewTemplateData(ctx, item, head, m.siteName)
 	data.OGDefaults = m.ogDefaults
 	data.AppSchema = renderAppSchema(m.appSchema)
+	data.HeadAssets = m.headAssets
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
 		WriteError(w, r, fmt.Errorf("forge: show template execution: %w", err))

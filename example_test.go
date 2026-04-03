@@ -221,3 +221,25 @@ func ExampleApp_Partials() {
 
 	_ = app.Handler()
 }
+
+// ExampleHeadAssets demonstrates injecting site-wide static assets —
+// preconnect hints, stylesheets, favicons, and scripts — into forge:head
+// on every page via app.SEO.
+func ExampleHeadAssets() {
+	app := New(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("example-secret-key-32-bytes!!!!!"),
+	})
+	app.SEO(&HeadAssets{
+		Preconnect:  []string{"https://fonts.googleapis.com"},
+		Stylesheets: []string{"https://fonts.googleapis.com/css2?family=Inter&display=swap", "/static/app.css"},
+		Favicons: []FaviconLink{
+			{Rel: "icon", Type: "image/png", Sizes: "32x32", Href: "/favicon-32.png"},
+			{Rel: "apple-touch-icon", Href: "/apple-touch-icon.png"},
+		},
+		Scripts: []ScriptTag{
+			{Src: "/static/app.js", Defer: true},
+		},
+	})
+	_ = app.Handler()
+}

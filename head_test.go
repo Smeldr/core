@@ -1,6 +1,8 @@
 package forge
 
 import (
+	"html/template"
+	"strings"
 	"testing"
 	"time"
 )
@@ -226,5 +228,112 @@ func TestHeadFunc_storedOnModule(t *testing.T) {
 	h := fn(NewTestContext(GuestUser), &Post{})
 	if h.Title != "overridden" {
 		t.Errorf("headFunc returned Head.Title = %q; want %q", h.Title, "overridden")
+	}
+}
+
+// ——— HeadAssets ———————————————————————————————————————————————————————————
+
+// renderHeadAssets is a test helper that executes forgeHeadTmpl with a
+// TemplateData carrying the given HeadAssets and returns the output string.
+func renderHeadAssets(t *testing.T, ha *HeadAssets) string {
+	t.Helper()
+	tpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(forgeHeadTmpl))
+	data := TemplateData[string]{HeadAssets: ha}
+	var buf strings.Builder
+	if err := tpl.ExecuteTemplate(&buf, "forge:head", data); err != nil {
+		t.Fatalf("template execution: %v", err)
+	}
+	return buf.String()
+}
+
+func TestHeadAssets_stylesheets(t *testing.T) {
+	ha := &HeadAssets{
+		Stylesheets: []string{
+			"https://fonts.googleapis.com/css2?family=Inter&display=swap",
+			"/static/app.css",
+		},
+	}
+	got := renderHeadAssets(t, ha)
+	if !strings.Contains(got, `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter&amp;display=swap">`) {
+		t.Errorf("missing Google Fonts stylesheet link in output:\n%s", got)
+	}
+	if !strings.Contains(got, `<link rel="stylesheet" href="/static/app.css">`) {
+		t.Errorf("missing /static/app.css stylesheet link in output:\n%s", got)
+	}
+}
+
+func TestHeadAssets_favicons_full(t *testing.T) {
+	ha := &HeadAssets{
+		Favicons: []FaviconLink{
+			{Rel: "icon", Type: "image/png", Sizes: "32x32", Href: "/favicon-32.png"},
+		},
+	}
+	got := renderHeadAssets(t, ha)
+	want := `<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">`
+	if !strings.Contains(got, want) {
+		t.Errorf("missing full favicon link in output:\n%s", got)
+	}
+}
+
+func TestHeadAssets_favicons_minimal(t *testing.T) {
+	ha := &HeadAssets{
+		Favicons: []FaviconLink{
+			{Rel: "apple-touch-icon", Href: "/apple-touch-icon.png"},
+		},
+	}
+	got := renderHeadAssets(t, ha)
+	if !strings.Contains(got, `<link rel="apple-touch-icon" href="/apple-touch-icon.png">`) {
+		t.Errorf("missing minimal favicon link in output:\n%s", got)
+	}
+	if strings.Contains(got, "type=") || strings.Contains(got, "sizes=") {
+		t.Errorf("type and sizes attributes should be omitted when empty:\n%s", got)
+	}
+}
+
+func TestHeadAssets_scripts_external(t *testing.T) {
+	ha := &HeadAssets{
+		Scripts: []ScriptTag{
+			{Src: "/static/app.js", Defer: true},
+			{Src: "/static/analytics.js", Async: true},
+		},
+	}
+	got := renderHeadAssets(t, ha)
+	if !strings.Contains(got, `<script src="/static/app.js" defer></script>`) {
+		t.Errorf("missing deferred script in output:\n%s", got)
+	}
+	if !strings.Contains(got, `<script src="/static/analytics.js" async></script>`) {
+		t.Errorf("missing async script in output:\n%s", got)
+	}
+}
+
+func TestHeadAssets_scripts_inline(t *testing.T) {
+	ha := &HeadAssets{
+		Stylesheets: []string{"/static/app.css"},
+		Scripts:     []ScriptTag{{Body: template.JS("console.log('hi')")}},
+	}
+	got := renderHeadAssets(t, ha)
+
+	ssIdx := strings.Index(got, `<link rel="stylesheet"`)
+	scriptIdx := strings.Index(got, `<script>console.log`)
+	if ssIdx < 0 {
+		t.Fatalf("stylesheet link not found in output:\n%s", got)
+	}
+	if scriptIdx < 0 {
+		t.Fatalf("inline script not found in output:\n%s", got)
+	}
+	if scriptIdx < ssIdx {
+		t.Errorf("inline script appears before stylesheet (index %d < %d); want scripts after stylesheets:\n%s",
+			scriptIdx, ssIdx, got)
+	}
+}
+
+func TestHeadAssets_nil_isNoop(t *testing.T) {
+	baseline := renderHeadAssets(t, nil)
+	withNil := renderHeadAssets(t, nil)
+	if baseline != withNil {
+		t.Error("nil HeadAssets should produce identical output on every call")
+	}
+	if strings.Contains(baseline, "<link") || strings.Contains(baseline, "<script") {
+		t.Errorf("nil HeadAssets emitted unexpected link/script tags:\n%s", baseline)
 	}
 }
