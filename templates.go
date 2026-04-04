@@ -270,7 +270,19 @@ func parseOneTemplate(path string, required bool, partials []string) (*template.
 	return tpl, nil
 }
 
-// renderListHTML renders tplList with a TemplateData[[]T] payload.
+// resolveExtra calls m.contextFunc if set and returns its result.
+// On error it logs and returns nil so the render is never aborted.
+func (m *Module[T]) resolveExtra(ctx Context, item any) any {
+	if m.contextFunc == nil {
+		return nil
+	}
+	extra, err := m.contextFunc(ctx, item)
+	if err != nil {
+		return nil
+	}
+	return extra
+}
+
 // If tplList is nil the request receives a 406 Not Acceptable response.
 // Template execution errors produce a 500; the response buffer is flushed
 // only on success so Content-Type is not written on error.
@@ -288,6 +300,7 @@ func (m *Module[T]) renderListHTML(w http.ResponseWriter, r *http.Request, ctx C
 	data.OGDefaults = m.ogDefaults
 	data.AppSchema = renderAppSchema(m.appSchema)
 	data.HeadAssets = m.headAssets
+	data.Extra = m.resolveExtra(ctx, items)
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
 		WriteError(w, r, fmt.Errorf("forge: list template execution: %w", err))
@@ -317,6 +330,7 @@ func (m *Module[T]) renderShowHTML(w http.ResponseWriter, r *http.Request, ctx C
 	data.OGDefaults = m.ogDefaults
 	data.AppSchema = renderAppSchema(m.appSchema)
 	data.HeadAssets = m.headAssets
+	data.Extra = m.resolveExtra(ctx, item)
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
 		WriteError(w, r, fmt.Errorf("forge: show template execution: %w", err))

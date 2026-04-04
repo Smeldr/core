@@ -4,7 +4,7 @@
 Built for developers. Optimized for AI. Zero compromises on readability.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/forge-cms/forge.svg)](https://pkg.go.dev/github.com/forge-cms/forge)
-**v1.4.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
+**v1.5.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
 
 ```go
 app := forge.New(forge.Config{
@@ -1007,6 +1007,39 @@ In `templates/home.html`:
 Any field on `PageHead` set by `app.SEO(...)` (such as `HeadAssets`) must be
 populated manually in custom handlers — module templates receive these
 automatically, but `app.Handle()` routes are outside the module render path.
+
+### Per-request extra data (ContextFunc)
+
+✅ **Available**
+
+Pass additional data — sidebar items, navigation trees, related posts — into
+a module's list or show template without writing a custom handler:
+
+```go
+app.Content(forge.NewModule((*DocPage)(nil),
+    forge.At("/docs"),
+    forge.Repo(docRepo),
+    forge.Templates("templates/docs"),
+    forge.ContextFunc(func(ctx forge.Context, _ any) (any, error) {
+        return docRepo.FindAll(ctx, forge.ListOptions{
+            Status: []forge.Status{forge.Published},
+        })
+    }),
+))
+```
+
+The return value is available as `.Extra` in the template:
+
+```html
+{{- $nav := .Extra}}
+<nav>
+  {{range $nav}}<a href="/docs/{{.Slug}}">{{.Title}}</a>{{end}}
+</nav>
+```
+
+The `item` argument is the content being rendered — `T` for show, `[]T` for
+list. Cast it inside the function if the concrete type is needed. Errors from
+`ContextFunc` log and set `.Extra` to nil; the render is never aborted.
 
 ### Site-wide static assets
 

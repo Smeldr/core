@@ -59,6 +59,15 @@ type TemplateData[T any] struct {
 	// registration time (e.g. "example.com"). Uses the hostname rather than
 	// [Context.SiteName] because SiteName() always returns "" in v1.
 	SiteName string
+
+	// Extra holds the value returned by the [ContextFunc] option for this
+	// request. It is nil when no ContextFunc is configured. Templates access
+	// it as {{.Extra}} and may assign it to a typed variable using a template
+	// helper or direct assignment:
+	//
+	//	{{- $nav := .Extra}}
+	//	{{template "sidebar" $nav}}
+	Extra any
 }
 
 // NewTemplateData constructs a [TemplateData][T] for the given context,

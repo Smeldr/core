@@ -23,6 +23,27 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.5.0] — 2026-04-04
+
+Per-request extra data for module templates (Amendment A65).
+
+### Added
+
+- `forge.ContextFunc(fn func(ctx Context, item any) (any, error)) Option` —
+  new module option. The function is called once per list and show render.
+  Its return value is stored in `TemplateData.Extra` and is available in
+  templates as `.Extra`. Errors from the function log and set `Extra` to nil
+  — the render is never aborted (Amendment A65).
+- `TemplateData[T].Extra any` — new field. Zero value is `nil` when no
+  `ContextFunc` is configured. Templates access it as `{{.Extra}}`:
+  ```
+  {{- $nav := .Extra}}
+  {{template "sidebar" $nav}}
+  ```
+  (Amendment A65).
+
+---
+
 ## [1.4.0] — 2026-04-03
 
 Embeddable head struct for custom handlers (Amendment A64).

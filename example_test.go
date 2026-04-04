@@ -264,3 +264,34 @@ func ExamplePageHead() {
 	// anonymously. forge:head reads them identically to TemplateData[T].
 	_ = data.Head.Title // "Home — My Site"
 }
+
+// ExampleContextFunc demonstrates passing per-request sidebar data to a
+// module show template via ContextFunc. The function is called once per
+// render; its return value is available as .Extra in the template.
+func ExampleContextFunc() {
+	type DocPage struct {
+		Node
+		Title string `forge:"required"`
+		Body  string
+	}
+
+	docRepo := NewMemoryRepo[*DocPage]()
+
+	m := NewModule((*DocPage)(nil),
+		At("/docs"),
+		Repo(docRepo),
+		ContextFunc(func(ctx Context, _ any) (any, error) {
+			// Return all published docs for use as a navigation sidebar.
+			return docRepo.FindAll(ctx, ListOptions{
+				Status: []Status{Published},
+			})
+		}),
+	)
+
+	app := New(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("example-secret-key-32-bytes!!!!!"),
+	})
+	app.Content(m)
+	_ = app.Handler()
+}

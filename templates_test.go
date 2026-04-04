@@ -387,3 +387,126 @@ func TestPartials_loadPartials_sortedAlphabetically(t *testing.T) {
 		t.Errorf("expected first partial to be a.html, got: %s", srcs[0])
 	}
 }
+
+// — ContextFunc tests ———————————————————————————————————————————————————————
+
+func TestContextFunc_list(t *testing.T) {
+	dir := t.TempDir()
+	writeTplFile(t, dir, "list.html", `{{.Extra}}`)
+	writeTplFile(t, dir, "show.html", ``)
+
+	called := false
+	m := newTplModule(t,
+		Templates(dir),
+		ContextFunc(func(_ Context, item any) (any, error) {
+			called = true
+			return "nav-data", nil
+		}),
+	)
+	if err := m.parseTemplates(); err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	m.setSiteName("example.com")
+	ctx := NewTestContext(GuestUser)
+
+	w := httptest.NewRecorder()
+	m.renderListHTML(w, ctx.Request(), ctx, nil)
+
+	if !called {
+		t.Error("ContextFunc was not called for list render")
+	}
+	if body := w.Body.String(); body != "nav-data" {
+		t.Errorf("expected Extra = \"nav-data\", got %q", body)
+	}
+}
+
+func TestContextFunc_show(t *testing.T) {
+	dir := t.TempDir()
+	writeTplFile(t, dir, "list.html", ``)
+	writeTplFile(t, dir, "show.html", `{{.Extra}}`)
+
+	post := &tdPost{}
+	post.Slug = "test-post"
+	post.Status = Published
+
+	called := false
+	m := newTplModule(t,
+		Templates(dir),
+		ContextFunc(func(_ Context, item any) (any, error) {
+			called = true
+			return "sidebar-data", nil
+		}),
+	)
+	if err := m.parseTemplates(); err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	m.setSiteName("example.com")
+	ctx := NewTestContext(GuestUser)
+
+	w := httptest.NewRecorder()
+	m.renderShowHTML(w, ctx.Request(), ctx, post)
+
+	if !called {
+		t.Error("ContextFunc was not called for show render")
+	}
+	if body := w.Body.String(); body != "sidebar-data" {
+		t.Errorf("expected Extra = \"sidebar-data\", got %q", body)
+	}
+}
+
+func TestContextFunc_nil(t *testing.T) {
+	dir := t.TempDir()
+	writeTplFile(t, dir, "list.html", `{{if .Extra}}EXTRA{{else}}NONE{{end}}`)
+	writeTplFile(t, dir, "show.html", ``)
+
+	// No ContextFunc option — Extra must be nil.
+	m := newTplModule(t, Templates(dir))
+	if err := m.parseTemplates(); err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	m.setSiteName("example.com")
+	ctx := NewTestContext(GuestUser)
+
+	w := httptest.NewRecorder()
+	m.renderListHTML(w, ctx.Request(), ctx, nil)
+
+	if body := w.Body.String(); body != "NONE" {
+		t.Errorf("expected Extra to be nil (NONE), got %q", body)
+	}
+}
+
+func TestContextFunc_error(t *testing.T) {
+	dir := t.TempDir()
+	writeTplFile(t, dir, "list.html", `{{if .Extra}}EXTRA{{else}}NONE{{end}}`)
+	writeTplFile(t, dir, "show.html", ``)
+
+	m := newTplModule(t,
+		Templates(dir),
+		ContextFunc(func(_ Context, _ any) (any, error) {
+			return nil, &testContextFuncErr{}
+		}),
+	)
+	if err := m.parseTemplates(); err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	m.setSiteName("example.com")
+	ctx := NewTestContext(GuestUser)
+
+	w := httptest.NewRecorder()
+	m.renderListHTML(w, ctx.Request(), ctx, nil)
+
+	// Render must complete (no 500); Extra must be nil.
+	if w.Code != 200 {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if body := w.Body.String(); body != "NONE" {
+		t.Errorf("expected Extra to be nil (NONE) on ContextFunc error, got %q", body)
+	}
+}
+
+// testContextFuncErr satisfies the forge.Error interface for tests.
+type testContextFuncErr struct{}
+
+func (e *testContextFuncErr) Error() string   { return "context func error" }
+func (e *testContextFuncErr) Code() string    { return "context_func_error" }
+func (e *testContextFuncErr) HTTPStatus() int { return 500 }

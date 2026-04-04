@@ -146,6 +146,35 @@ func (repoOption[T]) isOption() {}
 //	forge.Repo(forge.NewMemoryRepo[*Post]())
 func Repo[T any](r Repository[T]) Option { return repoOption[T]{repo: r} }
 
+// contextFuncOption carries the per-request extra-data function. Use [ContextFunc] to create one.
+type contextFuncOption struct {
+	fn func(Context, any) (any, error)
+}
+
+func (contextFuncOption) isOption() {}
+
+// ContextFunc returns an [Option] that registers a function called at render
+// time for every list and show request. The return value is stored in
+// [TemplateData].Extra and is available in templates as .Extra.
+//
+// Use ContextFunc to supply sidebar data, navigation trees, related items, or
+// any per-request data that the content item itself does not carry:
+//
+//	forge.ContextFunc(func(ctx forge.Context, _ any) (any, error) {
+//	    return docRepo.FindAll(ctx, forge.ListOptions{
+//	        Status: []forge.Status{forge.Published},
+//	    })
+//	})
+//
+// The item argument is the content item being rendered (T for show, []T for
+// list). Cast it inside the function if the concrete type is needed.
+//
+// Errors from ContextFunc are logged and Extra is set to nil — they do not
+// abort the render.
+func ContextFunc(fn func(ctx Context, item any) (any, error)) Option {
+	return contextFuncOption{fn: fn}
+}
+
 // — Node field reflection cache ———————————————————————————————————————————
 
 // nodeFields holds the struct field index paths for the three required Node fields.
@@ -321,6 +350,8 @@ type Module[T any] struct {
 
 	mcpOps []MCPOperation // non-nil when MCP(...) option was given
 
+	contextFunc func(Context, any) (any, error) // nil when no ContextFunc option given
+
 	stopCh chan struct{} // closed by Stop() to terminate the cache sweep goroutine
 }
 
@@ -410,6 +441,8 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 			m.feedCfg = nil
 		case mcpOption:
 			m.mcpOps = v.ops
+		case contextFuncOption:
+			m.contextFunc = v.fn
 		}
 		// repoOption[T] requires a concrete type assertion — handled separately.
 		if ro, ok := o.(repoOption[T]); ok {

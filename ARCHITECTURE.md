@@ -61,6 +61,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-04-02 | Amendment A62 (`forge.go`, `templates.go`, `module.go`): `App.Partials(dir) *App` stores a partials directory; `loadPartials(dir)` reads `*.html` files alphabetically; `Module[T].setPartials([]string)` stores partial sources; `parseOneTemplate` now accepts `partials []string` and registers each into the template set after `forge:head`; `App.MustParseTemplate(path) *template.Template` loads a single template with FuncMap + forge:head + partials, panics on error. Shipped in v1.2.0. |
 | 2026-04-03 | Amendment A63 (`head.go`, `templates.go`, `templatedata.go`, `forge.go`, `module.go`): `HeadAssets`, `FaviconLink`, `ScriptTag` new exported types in `head.go`; `HeadAssets` implements `SEOOption` via `applySEO(*seoState)`; `seoState.headAssets` field added to `forge.go`; `App.Handler()` interface assertion updated to 3-arg `setSEODefaults(*OGDefaults, *AppSchema, *HeadAssets)`; `Module[T].headAssets` field added to `module.go`; `TemplateData[T].HeadAssets *HeadAssets` field added to `templatedata.go`; `forgeHeadTmpl` extended with HeadAssets block (preconnect → stylesheets → favicons → scripts); both render paths propagate `headAssets`. Shipped in v1.3.0. |
 | 2026-04-03 | Amendment A64 (`head.go`, `templatedata.go`): `PageHead` new exported struct holding `Head`, `OGDefaults`, `AppSchema`, `HeadAssets`; `TemplateData[T]` refactored to embed `PageHead` anonymously — fields promoted to top level, all template access paths unchanged; `NewTemplateData` body updated to `PageHead: PageHead{Head: head}`; custom handler structs can now embed `forge.PageHead` to gain `{{template "forge:head" .}}` support without using `TemplateData[T]`. Shipped in v1.4.0. |
+| 2026-04-04 | Amendment A65 (`module.go`, `templatedata.go`, `templates.go`): `ContextFunc(fn)` new module option; `contextFuncOption` unexported type in `module.go`; `contextFunc func(Context, any) (any, error)` field on `Module[T]`; `resolveExtra` unexported method on `Module[T]` in `templates.go`; `TemplateData[T].Extra any` new field; called in `renderListHTML` and `renderShowHTML` after all other data fields are set; errors from `contextFunc` return nil and never abort the render. Shipped in v1.5.0. |
 
 ---
 
@@ -91,12 +92,14 @@ github.com/forge-cms/forge/
 │                     RateLimit, TrustedProxy, InMemoryCache, CacheStore, Authenticate, CSRF, Chain
 ├── module.go         Module[T], NewModule, Register, Stop, At, Cache, Auth,
                       Middleware, Repo, On, SitemapConfig, AIIndex, WithoutID,
-                      Feed, DisableFeed options;
+                      Feed, DisableFeed, ContextFunc options;
                       setSitemap, regenerateSitemap, setAIRegistry, regenerateAI, aiDocHandler;
                       setFeedStore, regenerateFeed; triggerRebuild();
-                      aiFeatures, llmsStore, withoutID, feedCfg, feedStore fields;
+                      aiFeatures, llmsStore, withoutID, feedCfg, feedStore,
+                      contextFunc fields;
                       stoppable interface, stopCh field (Amendment A39);
-                      debounce callback uses NewBackgroundContext (Amendment A41)
+                      debounce callback uses NewBackgroundContext (Amendment A41);
+                      contextFuncOption, ContextFunc (Amendment A65)
 │                     (Markdownable migrated to ai.go — Amendment A11)
 ├── forge.go          Config, MustConfig, New, App (Use/Content/Handle/Run/Handler/SEO),
 │                     Registrator, SEOOption, seoState (robots/ogDefaults/appSchema), httpsRedirect,
@@ -137,9 +140,10 @@ github.com/forge-cms/forge/
                       WriteSitemapFragment, WriteSitemapIndex
 └── robots.go         CrawlerPolicy (Allow/Disallow/AskFirst), RobotsConfig,
                       RobotsTxt, RobotsTxtHandler
-└── templatedata.go   TemplateData[T] (embeds PageHead; Content, User, Request, SiteName),
+└── templatedata.go   TemplateData[T] (embeds PageHead; Content, User, Request, SiteName, Extra),
                       PageHead (Head, OGDefaults, AppSchema, HeadAssets), NewTemplateData
-                      (Amendment A61; HeadAssets field — Amendment A63; PageHead embedding — Amendment A64)
+                      (Amendment A61; HeadAssets field — Amendment A63; PageHead embedding — Amendment A64;
+                      Extra field — Amendment A65)
 └── templates.go      templateParser, Templates, TemplatesOptional, forgeHeadTmpl, parseTemplates,
                       renderListHTML, renderShowHTML, setSiteName, setSEODefaults,
                       errorTemplate, bindErrorTemplates;
@@ -151,7 +155,8 @@ github.com/forge-cms/forge/
                       loadPartials, setPartials, parseOneTemplate accepts partials slice
                       (Amendment A62);
                       HeadAssets block in forgeHeadTmpl, setSEODefaults 3-arg,
-                      HeadAssets propagated in render paths (Amendment A63)
+                      HeadAssets propagated in render paths (Amendment A63);
+                      resolveExtra, ContextFunc extra propagated in render paths (Amendment A65)
 └── templatehelpers.go forgeMeta, forgeDate, forgeRFC3339, forgeMarkdown, forgeExcerpt, forgeCSRFToken,
                       forgeLLMSEntries(data any), TemplateFuncMap();
                       Amendment A9 (parseOneTemplate uses .Funcs(TemplateFuncMap()));

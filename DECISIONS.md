@@ -83,6 +83,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A62 | `forge.go`/`templates.go`/`module.go`: `App.Partials(dir)`, `App.MustParseTemplate(path)`, `loadPartials`, `setPartials`, `parseOneTemplate` accepts partials — shared partial templates injected into all module and custom handler templates | Agreed | 2026-04-02 |
 | A63 | `head.go`/`templates.go`/`templatedata.go`/`forge.go`/`module.go`: `HeadAssets`, `FaviconLink`, `ScriptTag` SEOOption — injects static assets (preconnect, stylesheets, favicons, scripts) into forge:head on every page via `app.SEO(&HeadAssets{...})` | Agreed | 2026-04-03 |
 | A64 | `head.go`/`templatedata.go`: `PageHead` exported struct — embeddable head fields for custom handler data structs; `TemplateData[T]` refactored to embed `PageHead` anonymously | Agreed | 2026-04-03 |
+| A65 | `module.go`/`templatedata.go`/`templates.go`: `ContextFunc` module option — per-request extra data injected into `TemplateData.Extra` for list and show renders | Agreed | 2026-04-04 |
 
 ---
 
@@ -3801,3 +3802,60 @@ were absent from any struct they defined.
 4. `forgeHeadTmpl` is unchanged — it already accesses `.Head`, `.OGDefaults`,
    `.AppSchema`, `.HeadAssets` at the top level, which anonymous embedding
    satisfies.
+
+---
+
+## Amendment A65 — ContextFunc: per-request extra data for module templates
+
+**Status:** Agreed  
+**Date:** 2026-04-04  
+**Scope:** `module.go`, `templatedata.go`, `templates.go`
+
+**Problem:**
+Module show and list templates receive only `TemplateData[T]`, which contains
+the single content item being rendered (or a slice for list). There is no
+framework-supported way to pass additional data — for example, all published
+docs for a sidebar — into a template without writing a custom handler that
+bypasses the module's routing, authentication, caching, and lifecycle layers.
+
+**Decision:**
+
+1. **`ContextFunc(fn)`** (`module.go`) — new module `Option`. Accepts a
+   function `func(Context, any) (any, error)`. The function is called once
+   per list or show render, after all module wiring has run. Its return value
+   is stored in `TemplateData.Extra`. The function receives the current
+   `Context` and the item being rendered (T for show, []T for list).
+2. **`TemplateData.Extra any`** (`templatedata.go`) — new field. Zero value is
+   `nil` when no `ContextFunc` is configured. Templates access it as `{{.Extra}}`
+   and may assign it to a named variable:
+   ```
+   {{- $nav := .Extra}}
+   {{template "sidebar" $nav}}
+   ```
+3. **`resolveExtra`** (`templates.go`) — unexported method on `Module[T]`.
+   Called by `renderListHTML` and `renderShowHTML` after all other `data`
+   fields are set. If `contextFunc` is nil it returns nil immediately (zero
+   overhead for all sites that do not use the option). If the function returns
+   an error, `resolveExtra` logs and returns nil — the render is never aborted.
+4. **`NewTemplateData` signature unchanged.** `Extra` is set by the render
+   path via direct field assignment, consistent with how `OGDefaults`,
+   `AppSchema`, and `HeadAssets` are set after construction.
+
+**Rationale for `any` item parameter:**
+`ContextFunc` uses `any` rather than `T` because a single function type must
+work for both list (`[]T`) and show (`T`) call sites. A `T`-typed overload
+would require two distinct options, two fields, and two call sites — more
+surface area for one pattern that is already clear at the call site.
+
+**Consequences:**
+
+1. Sites without `ContextFunc` are unaffected; `resolveExtra` is a nil-check
+   short-circuit with no allocation.
+2. `ContextFunc` errors must never abort the render — log and return nil.
+   This is consistent with how signal errors are handled: they are logged but
+   do not surface to the HTTP client.
+3. `resolveExtra` lives in `templates.go`, not `module.go`, because it is
+   purely a render concern. This follows the file-organisation principle that
+   logic belongs in the file where it is consumed.
+4. No change to `forgeHeadTmpl`, `NewTemplateData` signature, or any existing
+   template field paths.
