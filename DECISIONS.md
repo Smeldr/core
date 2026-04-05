@@ -86,7 +86,8 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A64 | `head.go`/`templatedata.go`: `PageHead` exported struct — embeddable head fields for custom handler data structs; `TemplateData[T]` refactored to embed `PageHead` anonymously | Agreed | 2026-04-03 |
 | A65 | `module.go`/`templatedata.go`/`templates.go`: `ContextFunc` module option — per-request extra data injected into `TemplateData.Extra` for list and show renders | Agreed | 2026-04-04 |
 | A66 | `auth.go`/`forge.go`/`forge-mcp`: `TokenStore` — named revocable bearer tokens, DB-backed `VerifyBearerToken`, three Admin MCP tools (`create_token`, `list_tokens`, `revoke_token`) | Agreed | 2026-04-05 |
+| A67 | `templatehelpers.go`: `forgeHTML` / `forge_html` — trusted raw HTML passthrough added to `TemplateFuncMap` | Agreed | 2026-04-05 |
 
 ---
 
-> **Body text** for all decisions lives in [decisions/core.md](decisions/core.md) (Decisions 1–22 + Amendments A19–A65) and [decisions/phase2.md](decisions/phase2.md) (Decision 25 + Amendment A66).
+> **Body text** for all decisions lives in [decisions/core.md](decisions/core.md) (Decisions 1–22 + Amendments A19–A65) and [decisions/phase2.md](decisions/phase2.md) (Decision 25 + Amendments A66–A67).

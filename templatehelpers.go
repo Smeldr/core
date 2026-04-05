@@ -70,6 +70,17 @@ func forgeMarkdown(s string) template.HTML {
 	return renderMarkdown(s)
 }
 
+// forgeHTML wraps s as [template.HTML], bypassing Go's automatic HTML escaping.
+// Use only for trusted content — user-supplied strings must never be passed to
+// forge_html without prior sanitisation.
+//
+// Template usage:
+//
+//	{{.Content.Embed | forge_html}}
+func forgeHTML(s string) template.HTML {
+	return template.HTML(s)
+}
+
 // forgeExcerpt returns a plain-text excerpt of s truncated at the last word
 // boundary within maxLen runes, with a Unicode ellipsis appended when truncated.
 // Wraps [Excerpt].
@@ -146,6 +157,7 @@ func forgeLLMsEntries(data any) template.HTML {
 //	forge_meta         — JSON-LD <script> block: {{forge_meta .Head .Content}}
 //	forge_date         — formatted date string: {{.PublishedAt | forge_date}}
 //	forge_markdown     — Markdown → HTML: {{.Body | forge_markdown}}
+//	forge_html         — trusted raw HTML passthrough: {{.Content.Embed | forge_html}}
 //	forge_excerpt      — truncated excerpt: {{.Body | forge_excerpt 160}}
 //	forge_csrf_token   — hidden CSRF input: {{forge_csrf_token .Request}}
 //	forge_rfc3339      — RFC 3339 timestamp: {{forge_rfc3339 .Head.Published}}
@@ -157,6 +169,7 @@ func TemplateFuncMap() template.FuncMap {
 		"forge_date":         forgeDate,
 		"forge_rfc3339":      forgeRFC3339,
 		"forge_markdown":     forgeMarkdown,
+		"forge_html":         forgeHTML,
 		"forge_excerpt":      forgeExcerpt,
 		"forge_csrf_token":   forgeCSRFToken,
 		"forge_llms_entries": forgeLLMsEntries,

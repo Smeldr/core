@@ -63,6 +63,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-04-03 | Amendment A64 (`head.go`, `templatedata.go`): `PageHead` new exported struct holding `Head`, `OGDefaults`, `AppSchema`, `HeadAssets`; `TemplateData[T]` refactored to embed `PageHead` anonymously — fields promoted to top level, all template access paths unchanged; `NewTemplateData` body updated to `PageHead: PageHead{Head: head}`; custom handler structs can now embed `forge.PageHead` to gain `{{template "forge:head" .}}` support without using `TemplateData[T]`. Shipped in v1.4.0. |
 | 2026-04-04 | Amendment A65 (`module.go`, `templatedata.go`, `templates.go`): `ContextFunc(fn)` new module option; `contextFuncOption` unexported type in `module.go`; `contextFunc func(Context, any) (any, error)` field on `Module[T]`; `resolveExtra` unexported method on `Module[T]` in `templates.go`; `TemplateData[T].Extra any` new field; called in `renderListHTML` and `renderShowHTML` after all other data fields are set; errors from `contextFunc` return nil and never abort the render. Shipped in v1.5.0. |
 | 2026-04-05 | Amendment A66 (`auth.go`, `forge.go`, `forge-mcp/`): `TokenRecord`, `TokenStore`, `NewTokenStore(db, secret)` added to `auth.go`; `TokenStore.Create`, `List`, `Revoke`, `probeTable` methods; `VerifyBearerToken` signature extended to 3-arg `(r, secret, store *TokenStore)` — nil store preserves stateless HMAC behaviour; `Config.TokenStore *TokenStore` and `App.TokenStore()` accessor in `forge.go`; `Handler()` startup probe warns if `forge_tokens` table absent; `forge-mcp/mcp.go` wires `Server.tokenStore`; `forge-mcp/transport.go` updated sole call site; `forge-mcp/tool.go` adds `authoriseAdmin`, `tokenToolDefs`, `handleTokenTool`, pre-dispatch for token tools in `handleToolsCall`; `tools/list` exposes `create_token`/`list_tokens`/`revoke_token` when store configured (Admin role required). Shipped in v1.6.0 / forge-mcp v1.1.0. |
+| 2026-04-05 | Amendment A67 (`templatehelpers.go`): `forgeHTML(s string) template.HTML` added — trusted raw HTML passthrough registered as `forge_html` in `TemplateFuncMap`; `TemplateFuncMap` godoc updated; `TestTemplateFuncMap_keys` expected count updated from 8 to 9; `TestForgeHTML` added (3 sub-tests). Shipped in v1.7.0. |
 
 ---
 
@@ -161,11 +162,12 @@ github.com/forge-cms/forge/
                       HeadAssets block in forgeHeadTmpl, setSEODefaults 3-arg,
                       HeadAssets propagated in render paths (Amendment A63);
                       resolveExtra, ContextFunc extra propagated in render paths (Amendment A65)
-└── templatehelpers.go forgeMeta, forgeDate, forgeRFC3339, forgeMarkdown, forgeExcerpt, forgeCSRFToken,
+└── templatehelpers.go forgeMeta, forgeDate, forgeRFC3339, forgeMarkdown, forgeHTML, forgeExcerpt, forgeCSRFToken,
                       forgeLLMSEntries(data any), TemplateFuncMap();
                       Amendment A9 (parseOneTemplate uses .Funcs(TemplateFuncMap()));
                       forge_rfc3339 added (M5 Step 1) for article:published_time in forge:head;
-                      forgeLLMSEntries wired to real implementation (Amendment A12)
+                      forgeLLMSEntries wired to real implementation (Amendment A12);
+                      forgeHTML / forge_html passthrough (Amendment A67)
 └── social.go         SocialFeature, OpenGraph, TwitterCard, Social() option;
                       OGDefaults (SEOOption), mergeOGDefaults (Amendment A61)
 └── ai.go             Markdownable (migrated from module.go, A11), AIDocSummary,

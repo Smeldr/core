@@ -116,6 +116,31 @@ func TestForgeMarkdown_fencedCodeHTMLEscape(t *testing.T) {
 	}
 }
 
+func TestForgeHTML(t *testing.T) {
+	t.Run("passthrough", func(t *testing.T) {
+		input := "<strong>bold</strong>"
+		got := forgeHTML(input)
+		if string(got) != input {
+			t.Errorf("got %q, want %q", got, input)
+		}
+	})
+	t.Run("empty", func(t *testing.T) {
+		got := forgeHTML("")
+		if got != "" {
+			t.Errorf("got %q, want empty string", got)
+		}
+	})
+	t.Run("not_escaped", func(t *testing.T) {
+		// forge_html is a trusted passthrough — the caller is responsible
+		// for ensuring the string is safe. Verify no escaping occurs.
+		input := "<script>alert(1)</script>"
+		got := forgeHTML(input)
+		if string(got) != input {
+			t.Errorf("got %q, want %q (should not be escaped)", got, input)
+		}
+	})
+}
+
 func TestForgeExcerpt_pipeline(t *testing.T) {
 	body := "The quick brown fox jumps over the lazy dog and then some more words follow here"
 	got := string(forgeExcerpt(20, body))
@@ -158,6 +183,7 @@ func TestTemplateFuncMap_keys(t *testing.T) {
 		"forge_date",
 		"forge_rfc3339",
 		"forge_markdown",
+		"forge_html",
 		"forge_excerpt",
 		"forge_csrf_token",
 		"forge_llms_entries",

@@ -23,6 +23,25 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.7.0] — 2026-04-05
+
+Trusted raw HTML passthrough for module templates (Amendment A67).
+
+### Added
+
+- `forge_html` template function — wraps a `string` as `template.HTML`, bypassing
+  Go's automatic HTML escaping. Registered in `TemplateFuncMap` as `"forge_html"`.
+  Use only for trusted content (e.g. pre-rendered video embeds, third-party
+  iframes). User-supplied strings must never be passed without prior sanitisation
+  (Amendment A67).
+
+  Template usage:
+  ```
+  {{.Content.Embed | forge_html}}
+  ```
+
+---
+
 ## [1.6.0] — 2026-04-05
 
 Named revocable bearer tokens backed by a `forge_tokens` table (Amendment A66).

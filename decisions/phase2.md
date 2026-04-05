@@ -114,3 +114,32 @@ backward compatibility for deployments that do not need revocation.
 - Token tool names (`create_token`, `list_tokens`, `revoke_token`) are
   pre-dispatched before module-level auth to avoid name collisions.
 - `forge-mcp` version bumps to `v1.1.0`; root package bumps to `v1.6.0`.
+
+---
+
+## Amendment A67 — `forge_html`: trusted raw HTML passthrough
+
+**Status:** Agreed
+**Date:** 2026-04-05
+
+**Context:**
+Go's `html/template` escapes all string output by default. There is no way for a
+module template to render pre-rendered HTML (e.g. a video embed iframe, a
+third-party widget) without a trusted passthrough function. The gap was identified
+during planning of the forge-cms.dev demo page, which needs to embed an iframe
+alongside Markdown content (`forge_markdown` handles the Markdown; `forge_html`
+handles the iframe).
+
+**What changed:**
+- `templatehelpers.go`: `forgeHTML(s string) template.HTML` — one-line function
+  returning `template.HTML(s)`; registered as `"forge_html"` in `TemplateFuncMap`;
+  godoc warns that the caller is responsible for trust.
+- `templatehelpers_test.go`: `TestForgeHTML` (3 sub-tests: passthrough, empty,
+  not_escaped); `TestTemplateFuncMap_keys` expected count updated from 8 to 9.
+
+**Consequences:**
+- `TemplateFuncMap` grows from 8 to 9 entries.
+- No exported Go symbol is added — `forgeHTML` is package-internal; only the map
+  key `"forge_html"` is visible to templates.
+- No interface, file, or behaviour change beyond the new function.
+- Root package bumps to `v1.7.0`.
