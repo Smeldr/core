@@ -12,8 +12,10 @@ actually think. Zero dependencies. AI-first. Production-ready by default.
    - Stop here — do not proceed with steps 2–7.
 2. Read session context from `forge-cms/forge-architect/context/corepilot.md`
    via GitHub MCP. This is your state from the previous session.
-3. Read `DECISIONS.md` — all architectural decisions are locked here.
-   Do not work around them. If a decision seems wrong, raise it explicitly.
+3. Read `DECISIONS.md` — index table only. Body text lives in `decisions/core.md`
+   (Decisions 1–22 + amendments) and `decisions/phase2.md` (Decision 25 onwards).
+   Read the relevant body file when a specific decision is needed.
+   Do not work around locked decisions. If a decision seems wrong, raise it explicitly.
 4. Read `ARCHITECTURE.md` — package structure, request lifecycle, stable interfaces.
 5. Read `ROADMAP.md` — current milestone and implementation order.
 6. Read the milestone backlog file for the **current milestone only**
@@ -33,6 +35,26 @@ actually think. Zero dependencies. AI-first. Production-ready by default.
 - Update session context at `forge-cms/forge-architect/context/corepilot.md`
   via GitHub MCP. Record: current versions, latest amendment shipped,
   current milestone and step, what was deferred or blocked.
+
+## DECISIONS.md file structure (CRITICAL)
+
+DECISIONS.md is now split into three files:
+
+- `DECISIONS.md` — index table only. Always small.
+- `decisions/core.md` — Decisions 1–22 + all amendments (A19–A65). ~173KB.
+- `decisions/phase2.md` — Decision 25 onwards.
+
+**Corepilot owns all writes to `decisions/` and `DECISIONS.md`.**
+These files must be edited locally via git — never via GitHub MCP API calls.
+The files are too large for `create_or_update_file` and `push_files` silently
+truncates them.
+
+**When adding a new Decision or Amendment:**
+1. Edit the relevant file locally (`decisions/core.md` for amendments,
+   `decisions/phase2.md` for new decisions)
+2. Add the index row to `DECISIONS.md`
+3. Commit both in the same commit
+4. Never use GitHub MCP `create_or_update_file` or `push_files` for these files
 
 ## Change classification
 
@@ -243,17 +265,17 @@ An Amendment must never leave `example_test.go` in a failing state.
 
 **Amendment DECISIONS.md completeness rule:**
 Every commit that implements an Amendment must contain **both** of the following
-edits to `DECISIONS.md` — neither is optional:
+edits — neither is optional:
 
-1. **Index table row** — a new row added to the Amendment index table at the top
-   of `DECISIONS.md` (columns: ID, description, status, date).
-2. **Body section** — the full Amendment text appended after the previous
-   Amendment's body.
+1. **Index table row** — a new row added to the Amendment index table in
+   `DECISIONS.md` (columns: ID, description, status, date).
+2. **Body section** — the full Amendment text appended to `decisions/core.md`
+   (for amendments) or `decisions/phase2.md` (for new decisions).
 
-A commit that adds a body without an index row (or an index row without a body)
-is incomplete and must not be proposed. Treat these as a single atomic unit:
-write both in the same edit pass, verify with `Select-String` or `grep_search`
-that both exist, then stage the file.
+Both edits must be made locally via git — never via GitHub MCP.
+A commit that adds a body without an index row (or vice versa) is incomplete.
+Treat these as a single atomic unit: write both, verify with `Select-String`
+that both exist, then stage.
 
 ### 4. Architecture and decision review
 - After verification passes, review `ARCHITECTURE.md` and `DECISIONS.md`.
@@ -290,7 +312,7 @@ Decisions: {Decision numbers and Amendment IDs referenced}
 Milestone: {N} / Step {N} ✅
 ```
 
-Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`  
+Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
 Scope: the file name without extension (e.g. `errors`, `roles`, `node`)
 
 ---
