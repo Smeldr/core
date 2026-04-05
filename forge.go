@@ -58,6 +58,13 @@ type Config struct {
 	//	)
 	Auth AuthFunc
 
+	// TokenStore enables database-backed named bearer token management. When
+	// set, [VerifyBearerToken] checks the forge_tokens table to validate that
+	// a token has not been revoked. The forge_tokens table must exist before
+	// the application starts; see [TokenStore] for the required DDL.
+	// Optional — leave nil to use HMAC-only token validation.
+	TokenStore *TokenStore
+
 	// Version is the application version string. It is an optional field for
 	// application authors who want to track their own release version; forge
 	// itself does not use this field in any built-in endpoint.
@@ -179,6 +186,7 @@ type App struct {
 	mcpModules             []MCPModule         // modules registered with forge.MCP(...)
 	rebuildDone            bool                // true once startup rebuildAll goroutine is launched
 	partialsDir            string              // set by App.Partials(); shared partial templates loaded at Run() time
+	tokenStore             *TokenStore         // non-nil when Config.TokenStore is set; enables DB-backed token management
 }
 
 // New creates a new [App] from cfg.
@@ -210,6 +218,7 @@ func New(cfg Config) *App {
 		mux:           http.NewServeMux(),
 		middleware:    []func(http.Handler) http.Handler{Authenticate(auth)},
 		redirectStore: NewRedirectStore(),
+		tokenStore:    cfg.TokenStore,
 	}
 }
 
@@ -362,6 +371,11 @@ func (a *App) MCPModules() []MCPModule { return a.mcpModules }
 // verify tokens minted with [SignToken] but cannot access [Config] directly.
 func (a *App) Secret() []byte { return a.cfg.Secret }
 
+// TokenStore returns the configured [TokenStore] for database-backed named
+// token management, or nil when token management is not configured. forge-mcp
+// calls this in its New constructor to wire token tools and revocation checks.
+func (a *App) TokenStore() *TokenStore { return a.tokenStore }
+
 // httpsRedirect returns a middleware that redirects plain-HTTP requests to
 // their HTTPS equivalents with a 301 Moved Permanently response.
 //
@@ -445,6 +459,12 @@ func (a *App) Handler() http.Handler {
 			}); ok {
 				s.setSEODefaults(a.seo.ogDefaults, a.seo.appSchema, a.seo.headAssets)
 			}
+		}
+	}
+	// A66: probe forge_tokens table at startup when a TokenStore is configured.
+	if a.tokenStore != nil {
+		if err := a.tokenStore.probeTable(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "WARN  forge: TokenStore is configured but the forge_tokens table is missing or inaccessible — create it using the DDL in the TokenStore documentation\n")
 		}
 	}
 	// A34: trigger a one-shot startup rebuild of all derived content (sitemap,

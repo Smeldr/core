@@ -79,3 +79,38 @@ backward compatibility for deployments that do not need revocation.
   Forge logs a warning at startup if TokenStore is configured but the table
   is absent
 - Stateless HMAC (current behaviour) remains the default — no breaking change
+
+---
+
+## Amendment A66 — TokenStore: implementation
+
+**Status:** Agreed
+**Date:** 2026-04-05
+
+**Implements:** Decision 25
+
+**What changed:**
+
+- `auth.go`: Added `TokenRecord` struct, `TokenStore` struct and
+  `NewTokenStore(db, secret)` constructor, `probeTable`, `Create`,
+  `List`, `Revoke` methods. `VerifyBearerToken` signature extended from
+  2-arg to 3-arg `(r, secret, store *TokenStore)` — when store is nil,
+  behaviour is unchanged (stateless HMAC only).
+- `forge.go`: `Config.TokenStore *TokenStore` field; `App.tokenStore`
+  private field; `App.TokenStore() *TokenStore` accessor; startup probe
+  in `Handler()` that logs a warning if the table is absent.
+- `forge-mcp/mcp.go`: `Server.tokenStore *forge.TokenStore` field; wired
+  from `app.TokenStore()` in `New()`.
+- `forge-mcp/transport.go`: sole `VerifyBearerToken` call updated to pass
+  `s.tokenStore`.
+- `forge-mcp/tool.go`: `authoriseAdmin()` helper; `tokenToolDefs()` (3
+  tool definitions with JSON Schema); `handleTokenTool()` dispatcher;
+  `handleToolsList()` and `handleToolsCall()` updated to expose and
+  dispatch token tools when `s.tokenStore != nil`.
+
+**Consequences:**
+- MCP `tools/list` returns three additional tool entries when a TokenStore
+  is configured; token tools require Admin role.
+- Token tool names (`create_token`, `list_tokens`, `revoke_token`) are
+  pre-dispatched before module-level auth to avoid name collisions.
+- `forge-mcp` version bumps to `v1.1.0`; root package bumps to `v1.6.0`.

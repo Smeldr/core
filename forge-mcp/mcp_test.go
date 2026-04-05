@@ -3,7 +3,10 @@ package forgemcp
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -971,8 +974,8 @@ func TestMCPServeStdio_contextCancel(t *testing.T) {
 }
 
 func TestMCPHandler_initialize(t *testing.T) {
-	// Use a no-secret app so the server applies no auth on POST /mcp/message.
-	cfg := forge.Config{BaseURL: "http://localhost"}
+	// Use WithSecret([]byte{}) so the server applies no auth (GuestUser path).
+	cfg := forge.Config{BaseURL: "http://localhost", Secret: []byte("test-secret-32-bytes-xxxxxxxxxxxx")}
 	app := forge.New(cfg)
 	repo := forge.NewMemoryRepo[*testMCPPost]()
 	posts := forge.NewModule(
@@ -982,7 +985,7 @@ func TestMCPHandler_initialize(t *testing.T) {
 		forge.MCP(forge.MCPRead),
 	)
 	app.Content(posts)
-	srv := New(app) // empty secret → GuestUser path
+	srv := New(app, WithSecret([]byte{})) // empty secret → GuestUser path
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
 	req := httptest.NewRequest(http.MethodPost, "/mcp/message", strings.NewReader(body))
@@ -1085,8 +1088,8 @@ func TestMCPHandler_authenticated_resourcesList(t *testing.T) {
 }
 
 func TestMCPHandler_bodyTooLarge(t *testing.T) {
-	// Use a no-secret app so we test body-size enforcement in isolation.
-	cfg := forge.Config{BaseURL: "http://localhost"}
+	// Use WithSecret([]byte{}) so the server applies no auth (GuestUser path).
+	cfg := forge.Config{BaseURL: "http://localhost", Secret: []byte("test-secret-32-bytes-xxxxxxxxxxxx")}
 	appNoSecret := forge.New(cfg)
 	repo := forge.NewMemoryRepo[*testMCPPost]()
 	posts := forge.NewModule(
@@ -1096,7 +1099,7 @@ func TestMCPHandler_bodyTooLarge(t *testing.T) {
 		forge.MCP(forge.MCPRead),
 	)
 	appNoSecret.Content(posts)
-	srv := New(appNoSecret) // empty secret → GuestUser path
+	srv := New(appNoSecret, WithSecret([]byte{})) // empty secret → GuestUser path
 
 	// Build a body larger than 1 MiB. The body must be structured as valid JSON
 	// so the decoder reads past the 1 MiB limit before hitting a parse error;
@@ -1140,9 +1143,13 @@ func TestMCPHandler_SSEOpen(t *testing.T) {
 
 // ExampleNew verifies that the README quick-start compiles correctly.
 func ExampleNew() {
+	secret := os.Getenv("SECRET")
+	if secret == "" {
+		secret = "example-placeholder-secret-32byt" // 32-byte fallback for example
+	}
 	app := forge.New(forge.Config{
 		BaseURL: "https://example.com",
-		Secret:  []byte(os.Getenv("SECRET")),
+		Secret:  []byte(secret),
 	})
 	// app.Content(..., forge.MCP(forge.MCPWrite))
 	srv := New(app)
@@ -1359,5 +1366,224 @@ func TestMCPToolsCall_list_empty(t *testing.T) {
 	items, _ := emptyFields["items"].([]any)
 	if len(items) != 0 {
 		t.Errorf("got %d items, want 0", len(items))
+	}
+}
+
+// — Token management tools ————————————————————————————————————————————————
+
+// newAdminCtx returns a forge.Context with Admin role for token management tests.
+func newAdminCtx() forge.Context {
+	return forge.NewTestContext(forge.User{ID: "admin1", Roles: []forge.Role{forge.Admin}})
+}
+
+// tokenTestDB is a forge.DB stub for token management tool tests.
+// ExecContext handles INSERT (Create) and UPDATE (Revoke).
+// QueryContext returns empty *sql.Rows via sql.OpenDB.
+type tokenTestDB struct {
+	inserted []tokenTestRow
+}
+
+type tokenTestRow struct {
+	id, name, role string
+}
+
+func (d *tokenTestDB) ExecContext(_ context.Context, query string, args ...any) (sql.Result, error) {
+	if strings.Contains(query, "INSERT") {
+		d.inserted = append(d.inserted, tokenTestRow{
+			id:   args[0].(string),
+			name: args[1].(string),
+			role: args[2].(string),
+		})
+		return nil, nil
+	}
+	if strings.Contains(query, "UPDATE") {
+		return nil, nil // Revoke: no-op in stub
+	}
+	return nil, errors.New("tokenTestDB: unhandled ExecContext")
+}
+
+func (d *tokenTestDB) QueryContext(ctx context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	// Return an empty *sql.Rows by opening a db with a connector that
+	// immediately returns io.EOF from Next (zero rows).
+	db := sql.OpenDB(&emptyRowConnector{})
+	return db.QueryContext(ctx, "SELECT 1")
+}
+
+func (d *tokenTestDB) QueryRowContext(_ context.Context, _ string, _ ...any) *sql.Row {
+	return nil
+}
+
+// emptyRowConnector is a driver.Connector that produces zero rows.
+type emptyRowConnector struct{}
+
+func (c *emptyRowConnector) Connect(_ context.Context) (driver.Conn, error) {
+	return &emptyRowConn{}, nil
+}
+func (c *emptyRowConnector) Driver() driver.Driver { return &emptyRowConn{} }
+
+type emptyRowConn struct{}
+
+func (*emptyRowConn) Open(_ string) (driver.Conn, error)           { return &emptyRowConn{}, nil }
+func (*emptyRowConn) Prepare(_ string) (driver.Stmt, error)        { return &emptyRowConn{}, nil }
+func (*emptyRowConn) Close() error                                 { return nil }
+func (*emptyRowConn) Begin() (driver.Tx, error)                    { return nil, nil }
+func (*emptyRowConn) NumInput() int                                { return -1 }
+func (*emptyRowConn) Exec(_ []driver.Value) (driver.Result, error) { return nil, nil }
+func (*emptyRowConn) Query(_ []driver.Value) (driver.Rows, error)  { return &emptyRowConn{}, nil }
+func (*emptyRowConn) Columns() []string {
+	return []string{"id", "name", "role", "expires_at", "revoked_at", "created_at"}
+}
+func (*emptyRowConn) Next(_ []driver.Value) error { return io.EOF }
+
+// newTokenApp returns an App + Server wired with a TokenStore using tokenTestDB.
+func newTokenApp(t *testing.T) (*forge.App, *tokenTestDB) {
+	t.Helper()
+	db := &tokenTestDB{}
+	ts := forge.NewTokenStore(db, "test-secret-32-bytes-xxxxxxxxxxxx")
+	cfg := forge.Config{
+		BaseURL:    "http://localhost",
+		Secret:     []byte("test-secret-32-bytes-xxxxxxxxxxxx"),
+		TokenStore: ts,
+	}
+	app := forge.New(cfg)
+	return app, db
+}
+
+// TestTokenToolsAbsentWithoutStore verifies that token tools do not appear in
+// tools/list when the server has no TokenStore configured.
+func TestTokenToolsAbsentWithoutStore(t *testing.T) {
+	app, _ := newWriteApp(t)
+	srv := New(app)
+
+	result := srv.handleToolsList()
+	m := result.(map[string]any)
+	tools := m["tools"].([]mcpTool)
+	for _, tool := range tools {
+		if tool.Name == "create_token" || tool.Name == "list_tokens" || tool.Name == "revoke_token" {
+			t.Errorf("unexpected token tool %q in tools/list without TokenStore", tool.Name)
+		}
+	}
+}
+
+// TestTokenToolsPresentWithStore verifies that all three token tools appear in
+// tools/list when the server has a TokenStore configured.
+func TestTokenToolsPresentWithStore(t *testing.T) {
+	app, _ := newTokenApp(t)
+	srv := New(app)
+
+	result := srv.handleToolsList()
+	m := result.(map[string]any)
+	tools := m["tools"].([]mcpTool)
+
+	toolNames := make(map[string]bool)
+	for _, tool := range tools {
+		toolNames[tool.Name] = true
+	}
+	for _, want := range []string{"create_token", "list_tokens", "revoke_token"} {
+		if !toolNames[want] {
+			t.Errorf("expected token tool %q in tools/list, not found", want)
+		}
+	}
+}
+
+// TestTokenToolsForbiddenForNonAdmin verifies that token tools return -32001
+// for callers without Admin role.
+func TestTokenToolsForbiddenForNonAdmin(t *testing.T) {
+	app, _ := newTokenApp(t)
+	srv := New(app)
+	ctx := newAuthorCtx()
+
+	for _, toolName := range []string{"create_token", "list_tokens", "revoke_token"} {
+		params, _ := json.Marshal(map[string]any{
+			"name":      toolName,
+			"arguments": map[string]any{},
+		})
+		_, rpcErr := srv.handleToolsCall(ctx, params)
+		if rpcErr == nil {
+			t.Errorf("%s: expected forbidden error for Author, got nil", toolName)
+			continue
+		}
+		if rpcErr.Code != -32001 {
+			t.Errorf("%s: error code = %d, want -32001", toolName, rpcErr.Code)
+		}
+	}
+}
+
+// TestTokenToolCreateToken verifies that create_token stores an ExecContext
+// INSERT and returns a non-empty token string for Admin callers.
+func TestTokenToolCreateToken(t *testing.T) {
+	app, db := newTokenApp(t)
+	srv := New(app)
+	ctx := newAdminCtx()
+
+	params, _ := json.Marshal(map[string]any{
+		"name": "create_token",
+		"arguments": map[string]any{
+			"name":            "CI Bot",
+			"role":            "author",
+			"expires_in_days": float64(90),
+		},
+	})
+	result, rpcErr := srv.handleToolsCall(ctx, params)
+	if rpcErr != nil {
+		t.Fatalf("unexpected error: %+v", rpcErr)
+	}
+	fields := unwrapToolResult(t, result)
+	tok, ok := fields["token"].(string)
+	if !ok || tok == "" {
+		t.Fatalf("expected non-empty token string, got %v", fields["token"])
+	}
+	if len(db.inserted) != 1 {
+		t.Fatalf("expected 1 inserted row, got %d", len(db.inserted))
+	}
+	if db.inserted[0].name != "CI Bot" {
+		t.Errorf("inserted name = %q, want CI Bot", db.inserted[0].name)
+	}
+	if db.inserted[0].role != "author" {
+		t.Errorf("inserted role = %q, want author", db.inserted[0].role)
+	}
+}
+
+// TestTokenToolListTokens verifies that list_tokens returns a tokens array for
+// Admin callers (empty when no tokens exist).
+func TestTokenToolListTokens(t *testing.T) {
+	app, _ := newTokenApp(t)
+	srv := New(app)
+	ctx := newAdminCtx()
+
+	params, _ := json.Marshal(map[string]any{
+		"name":      "list_tokens",
+		"arguments": map[string]any{},
+	})
+	result, rpcErr := srv.handleToolsCall(ctx, params)
+	if rpcErr != nil {
+		t.Fatalf("unexpected error: %+v", rpcErr)
+	}
+	fields := unwrapToolResult(t, result)
+	if _, ok := fields["tokens"]; !ok {
+		t.Fatal("expected tokens key in result")
+	}
+}
+
+// TestTokenToolRevokeToken verifies that revoke_token returns success for Admin.
+func TestTokenToolRevokeToken(t *testing.T) {
+	app, _ := newTokenApp(t)
+	srv := New(app)
+	ctx := newAdminCtx()
+
+	params, _ := json.Marshal(map[string]any{
+		"name": "revoke_token",
+		"arguments": map[string]any{
+			"id": "abc123def456",
+		},
+	})
+	result, rpcErr := srv.handleToolsCall(ctx, params)
+	if rpcErr != nil {
+		t.Fatalf("unexpected error: %+v", rpcErr)
+	}
+	fields := unwrapToolResult(t, result)
+	revoked, _ := fields["revoked"].(bool)
+	if !revoked {
+		t.Errorf("expected revoked=true, got %v", fields["revoked"])
 	}
 }

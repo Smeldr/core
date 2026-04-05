@@ -27,8 +27,9 @@ func WithSecret(secret []byte) ServerOption {
 // Server wraps a set of [forge.MCPModule] values and serves the MCP protocol
 // over stdio (see [Server.ServeStdio]) or HTTP SSE (see [Server.Handler]).
 type Server struct {
-	modules []forge.MCPModule
-	secret  []byte // HMAC secret for SSE bearer-token verification
+	modules    []forge.MCPModule
+	secret     []byte            // HMAC secret for SSE bearer-token verification
+	tokenStore *forge.TokenStore // non-nil when the app has a TokenStore configured
 }
 
 // New creates a Server for the given forge App, collecting all content modules
@@ -37,8 +38,9 @@ type Server struct {
 // Pass [WithSecret] to override (e.g. during secret rotation).
 func New(app *forge.App, opts ...ServerOption) *Server {
 	s := &Server{
-		modules: app.MCPModules(),
-		secret:  app.Secret(),
+		modules:    app.MCPModules(),
+		secret:     app.Secret(),
+		tokenStore: app.TokenStore(),
 	}
 	for _, o := range opts {
 		o(s)

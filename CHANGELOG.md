@@ -23,6 +23,39 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.6.0] — 2026-04-05
+
+Named revocable bearer tokens backed by a `forge_tokens` table (Amendment A66).
+
+### Added
+
+- `forge.TokenRecord` struct — exported record type returned by `TokenStore.List`.
+  Fields: `ID`, `Name`, `Role string`; `ExpiresAt`, `RevokedAt`, `CreatedAt time.Time`.
+- `forge.TokenStore` struct + `forge.NewTokenStore(db DB, secret string) *TokenStore` —
+  server-side token registry. Issues tokens via `Create`, enumerates them via
+  `List`, and revokes them via `Revoke`. Backed by a `forge_tokens` table.
+- `TokenStore.Create(ctx, name, role string, ttl time.Duration) (string, error)` —
+  calls `SignToken`, stores a SHA-256 fingerprint in `forge_tokens`, and returns the
+  plaintext token once. The plaintext is never persisted (Amendment A66).
+- `TokenStore.List(ctx context.Context) ([]TokenRecord, error)` — returns all token
+  records ordered newest first (Amendment A66).
+- `TokenStore.Revoke(ctx context.Context, id string) error` — sets `revoked_at`;
+  effective immediately on next request (Amendment A66).
+- `forge.Config.TokenStore *TokenStore` optional field — wire a `TokenStore` into the
+  App at startup. Nil by default (stateless HMAC mode unchanged) (Amendment A66).
+- `App.TokenStore() *TokenStore` accessor — used by `forge-mcp` to inherit the store
+  (Amendment A66).
+
+### Changed
+
+- `forge.VerifyBearerToken` signature extended from 2-arg to 3-arg:
+  `VerifyBearerToken(r *http.Request, secret []byte, store *TokenStore) (User, bool)`.
+  When `store` is `nil`, behaviour is identical to the previous version.
+  When `store` is non-nil, the token fingerprint is looked up in `forge_tokens`;
+  absent or revoked tokens are rejected (Amendment A66).
+
+---
+
 ## [1.5.0] — 2026-04-04
 
 Per-request extra data for module templates (Amendment A65).

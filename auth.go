@@ -1,10 +1,12 @@
 package forge
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -190,10 +192,15 @@ func (b *bearerAuthFn) authenticate(r *http.Request) (User, bool) {
 // Authorization header. It returns the authenticated [User] and true on success,
 // or [GuestUser] and false if the header is absent, malformed, or the signature
 // is invalid. secret must be the same value used to sign the token with [SignToken].
+//
+// When store is non-nil, VerifyBearerToken additionally checks the forge_tokens
+// table: the token's SHA-256 fingerprint must be present and not revoked.
+// Pass nil to skip database verification and use HMAC-only validation.
+//
 // This is the public counterpart to the unexported authenticate method on
 // [BearerHMAC] and is intended for use outside the forge package (e.g. forge-mcp
 // SSE transport) where [AuthFunc] is not directly callable.
-func VerifyBearerToken(r *http.Request, secret []byte) (User, bool) {
+func VerifyBearerToken(r *http.Request, secret []byte, store *TokenStore) (User, bool) {
 	hdr := r.Header.Get("Authorization")
 	if !strings.HasPrefix(hdr, "Bearer ") {
 		return GuestUser, false
@@ -203,7 +210,157 @@ func VerifyBearerToken(r *http.Request, secret []byte) (User, bool) {
 	if err != nil {
 		return GuestUser, false
 	}
+	if store != nil {
+		h := sha256.Sum256([]byte(token))
+		id := hex.EncodeToString(h[:])
+		row := store.db.QueryRowContext(r.Context(),
+			`SELECT revoked_at FROM forge_tokens WHERE id = $1`, id,
+		)
+		var revokedAt *string
+		if err := row.Scan(&revokedAt); err != nil {
+			// Token fingerprint not in DB — not a managed token.
+			return GuestUser, false
+		}
+		if revokedAt != nil {
+			return GuestUser, false
+		}
+	}
 	return user, true
+}
+
+// — TokenStore —————————————————————————————————————————————————————————————
+
+// TokenRecord is a named bearer token entry stored in the forge_tokens table.
+// Retrieve records with [TokenStore.List]; revoke with [TokenStore.Revoke].
+type TokenRecord struct {
+	// ID is the SHA-256 hex fingerprint of the raw token. Tokens are never
+	// stored in plaintext; only this fingerprint is persisted.
+	ID string
+
+	// Name is the human-readable label provided when the token was created.
+	Name string
+
+	// Role is the role string assigned to this token (e.g. "author", "editor").
+	Role string
+
+	// ExpiresAt is the UTC time after which the token is no longer valid.
+	ExpiresAt time.Time
+
+	// RevokedAt is the UTC time at which this token was revoked. A zero value
+	// means the token has not been revoked.
+	RevokedAt time.Time
+
+	// CreatedAt is the UTC time at which the token was created.
+	CreatedAt time.Time
+}
+
+// TokenStore manages named, revocable bearer tokens stored in a forge_tokens
+// database table. Use [NewTokenStore] to create one; wire it into
+// [Config.TokenStore] to activate database-backed token verification.
+//
+// The forge_tokens table must exist before the application starts. Forge does
+// not create or migrate it automatically. Required DDL:
+//
+//	CREATE TABLE forge_tokens (
+//	    id         TEXT PRIMARY KEY,  -- SHA-256 hex fingerprint of the raw token
+//	    name       TEXT NOT NULL,
+//	    role       TEXT NOT NULL,
+//	    expires_at TEXT NOT NULL,     -- RFC3339 UTC
+//	    revoked_at TEXT,              -- NULL when not revoked; RFC3339 UTC when revoked
+//	    created_at TEXT NOT NULL      -- RFC3339 UTC
+//	);
+type TokenStore struct {
+	db     DB
+	secret string
+}
+
+// NewTokenStore creates a [TokenStore] backed by db using secret as the HMAC
+// signing key. The secret must match [Config.Secret] so that tokens created
+// here are verifiable by [VerifyBearerToken].
+func NewTokenStore(db DB, secret string) *TokenStore {
+	return &TokenStore{db: db, secret: secret}
+}
+
+// probeTable verifies the forge_tokens table is accessible. Called at startup
+// by [App.Handler] when a TokenStore is configured.
+func (ts *TokenStore) probeTable(ctx context.Context) error {
+	row := ts.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM forge_tokens`)
+	var n int
+	return row.Scan(&n)
+}
+
+// Create generates a signed named bearer token with the given role and ttl,
+// stores its SHA-256 fingerprint in forge_tokens, and returns the raw token
+// string. The raw token is never persisted; it cannot be retrieved after this
+// call — pass it to the client through a secure channel.
+//
+// role must be a valid [Role] string ("author", "editor", "admin").
+// ttl must be positive.
+func (ts *TokenStore) Create(ctx context.Context, name, role string, ttl time.Duration) (string, error) {
+	user := User{ID: NewID(), Name: name, Roles: []Role{Role(role)}}
+	raw, err := SignToken(user, ts.secret, ttl)
+	if err != nil {
+		return "", ErrInternal
+	}
+	h := sha256.Sum256([]byte(raw))
+	id := hex.EncodeToString(h[:])
+	now := time.Now().UTC()
+	expiresAt := now.Add(ttl)
+	_, err = ts.db.ExecContext(ctx,
+		`INSERT INTO forge_tokens (id, name, role, expires_at, created_at) VALUES ($1, $2, $3, $4, $5)`,
+		id, name, role, expiresAt.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		return "", ErrInternal
+	}
+	return raw, nil
+}
+
+// List returns all token records from forge_tokens ordered by created_at
+// descending (newest first). Revoked and expired tokens are included; inspect
+// [TokenRecord.RevokedAt] to filter client-side.
+func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
+	rows, err := ts.db.QueryContext(ctx,
+		`SELECT id, name, role, expires_at, revoked_at, created_at FROM forge_tokens ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, ErrInternal
+	}
+	defer rows.Close()
+	var out []TokenRecord
+	for rows.Next() {
+		var rec TokenRecord
+		var expiresAtStr, createdAtStr string
+		var revokedAtStr *string
+		if err := rows.Scan(&rec.ID, &rec.Name, &rec.Role, &expiresAtStr, &revokedAtStr, &createdAtStr); err != nil {
+			return nil, ErrInternal
+		}
+		rec.ExpiresAt, _ = time.Parse(time.RFC3339, expiresAtStr)
+		rec.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
+		if revokedAtStr != nil {
+			rec.RevokedAt, _ = time.Parse(time.RFC3339, *revokedAtStr)
+		}
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, ErrInternal
+	}
+	return out, nil
+}
+
+// Revoke marks the token with the given fingerprint ID as revoked in
+// forge_tokens. Subsequent [VerifyBearerToken] calls with a non-nil
+// [TokenStore] reject revoked tokens immediately. Use [TokenStore.List]
+// to obtain token IDs.
+func (ts *TokenStore) Revoke(ctx context.Context, id string) error {
+	_, err := ts.db.ExecContext(ctx,
+		`UPDATE forge_tokens SET revoked_at = $1 WHERE id = $2`,
+		time.Now().UTC().Format(time.RFC3339), id,
+	)
+	if err != nil {
+		return ErrInternal
+	}
+	return nil
 }
 
 // — CookieSession ——————————————————————————————————————————————————————————

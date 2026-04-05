@@ -68,6 +68,16 @@ func (s *Server) authoriseEditor(ctx forge.Context) *jsonRPCError {
 	return &jsonRPCError{Code: -32001, Message: "forbidden"}
 }
 
+// authoriseAdmin returns a -32001 error when the caller lacks Admin role.
+// Admin is required for token management operations (create_token, list_tokens,
+// revoke_token).
+func (s *Server) authoriseAdmin(ctx forge.Context) *jsonRPCError {
+	if forge.HasRole(ctx.User().Roles, forge.Admin) {
+		return nil
+	}
+	return &jsonRPCError{Code: -32001, Message: "forbidden"}
+}
+
 // errorFor maps a forge error to a JSON-RPC error:
 //   - [forge.ValidationError] → -32602 (invalid params) with the validation message
 //   - [forge.ErrNotFound]      → -32001 (resource not found)
@@ -89,7 +99,9 @@ func errorFor(err error) *jsonRPCError {
 
 // handleToolsList returns the tools/list result: a "tools" array containing
 // one entry per MCPWrite operation per registered MCPWrite module, plus two
-// admin read tools (list_{type}s, get_{type}) per MCPWrite module.
+// admin read tools (list_{type}s, get_{type}) per MCPWrite module. When
+// the server has a TokenStore, three additional Admin-only token management
+// tools are appended (create_token, list_tokens, revoke_token).
 func (s *Server) handleToolsList() any {
 	var tools []mcpTool
 	for _, m := range s.modules {
@@ -98,6 +110,9 @@ func (s *Server) handleToolsList() any {
 		}
 		tools = append(tools, mcpToolDefs(m)...)
 		tools = append(tools, mcpAdminReadToolDefs(m)...)
+	}
+	if s.tokenStore != nil {
+		tools = append(tools, tokenToolDefs()...)
 	}
 	return map[string]any{"tools": tools}
 }
@@ -123,6 +138,22 @@ func (s *Server) handleToolsCall(ctx forge.Context, params json.RawMessage) (any
 	}
 	if p.Name == "" {
 		return nil, &jsonRPCError{Code: -32602, Message: "invalid params: name required"}
+	}
+
+	// Token management tools require Admin role and are dispatched before
+	// module-scoped tool authorisation.
+	if s.tokenStore != nil {
+		switch p.Name {
+		case "create_token", "list_tokens", "revoke_token":
+			if rpcErr := s.authoriseAdmin(ctx); rpcErr != nil {
+				return nil, rpcErr
+			}
+			args := p.Arguments
+			if args == nil {
+				args = map[string]any{}
+			}
+			return s.handleTokenTool(ctx, p.Name, args)
+		}
 	}
 
 	if rpcErr := s.authorise(ctx); rpcErr != nil {
@@ -314,4 +345,109 @@ func stringArg(args map[string]any, key string) (string, bool) {
 	}
 	s, ok := v.(string)
 	return s, ok && s != ""
+}
+
+// tokenToolDefs returns the three Admin-only token management tool definitions
+// appended by [handleToolsList] when the server has a TokenStore configured.
+func tokenToolDefs() []mcpTool {
+	return []mcpTool{
+		{
+			Name:        "create_token",
+			Description: "Create a named, revocable bearer token. Requires Admin role. Returns the raw token — store it securely; it cannot be retrieved again.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": `Human-readable label for this token (e.g. "GitHub Actions CI").`,
+					},
+					"role": map[string]any{
+						"type":        "string",
+						"enum":        []string{"author", "editor", "admin"},
+						"description": "Role assigned to this token.",
+					},
+					"expires_in_days": map[string]any{
+						"type":        "number",
+						"description": "Token lifetime in days (e.g. 90).",
+					},
+				},
+				"required": []string{"name", "role", "expires_in_days"},
+			},
+		},
+		{
+			Name:        "list_tokens",
+			Description: "List all named bearer tokens. Requires Admin role. Includes revoked and expired tokens.",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			Name:        "revoke_token",
+			Description: "Revoke a named bearer token by its fingerprint ID. Requires Admin role. Revoked tokens are rejected immediately on the next request.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "SHA-256 hex fingerprint of the token (from list_tokens).",
+					},
+				},
+				"required": []string{"id"},
+			},
+		},
+	}
+}
+
+// handleTokenTool dispatches create_token, list_tokens, and revoke_token
+// requests. Called only when s.tokenStore is non-nil and the caller holds
+// Admin role (checked by the caller).
+func (s *Server) handleTokenTool(ctx forge.Context, name string, args map[string]any) (any, *jsonRPCError) {
+	switch name {
+	case "create_token":
+		tokenName, ok := stringArg(args, "name")
+		if !ok {
+			return nil, &jsonRPCError{Code: -32602, Message: "invalid params: name required"}
+		}
+		role, ok := stringArg(args, "role")
+		if !ok {
+			return nil, &jsonRPCError{Code: -32602, Message: "invalid params: role required"}
+		}
+		days, ok := args["expires_in_days"].(float64)
+		if !ok || days <= 0 {
+			return nil, &jsonRPCError{Code: -32602, Message: "invalid params: expires_in_days must be a positive number"}
+		}
+		ttl := time.Duration(float64(24*time.Hour) * days)
+		raw, err := s.tokenStore.Create(ctx, tokenName, role, ttl)
+		if err != nil {
+			return nil, errorFor(err)
+		}
+		return toolResult(map[string]any{
+			"token":   raw,
+			"message": "Store this token securely — it cannot be retrieved again.",
+		}), nil
+
+	case "list_tokens":
+		records, err := s.tokenStore.List(ctx)
+		if err != nil {
+			return nil, errorFor(err)
+		}
+		if records == nil {
+			records = []forge.TokenRecord{}
+		}
+		return toolResult(map[string]any{"tokens": records}), nil
+
+	case "revoke_token":
+		id, ok := stringArg(args, "id")
+		if !ok {
+			return nil, &jsonRPCError{Code: -32602, Message: "invalid params: id required"}
+		}
+		if err := s.tokenStore.Revoke(ctx, id); err != nil {
+			return nil, errorFor(err)
+		}
+		return toolResult(map[string]any{"revoked": true, "id": id}), nil
+
+	default:
+		return nil, &jsonRPCError{Code: -32602, Message: "unknown token tool: " + name}
+	}
 }

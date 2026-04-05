@@ -2,8 +2,13 @@ package forge
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -436,7 +441,7 @@ func TestVerifyBearerToken(t *testing.T) {
 		}
 		r, _ := http.NewRequest(http.MethodGet, "/", nil)
 		r.Header.Set("Authorization", "Bearer "+tok)
-		got, ok := VerifyBearerToken(r, secret)
+		got, ok := VerifyBearerToken(r, secret, nil)
 		if !ok {
 			t.Fatal("expected ok=true for valid token")
 		}
@@ -450,7 +455,7 @@ func TestVerifyBearerToken(t *testing.T) {
 
 	t.Run("missing Authorization header returns GuestUser", func(t *testing.T) {
 		r, _ := http.NewRequest(http.MethodGet, "/", nil)
-		got, ok := VerifyBearerToken(r, secret)
+		got, ok := VerifyBearerToken(r, secret, nil)
 		if ok {
 			t.Fatal("expected ok=false for missing header")
 		}
@@ -466,12 +471,218 @@ func TestVerifyBearerToken(t *testing.T) {
 		}
 		r, _ := http.NewRequest(http.MethodGet, "/", nil)
 		r.Header.Set("Authorization", "Bearer "+tok)
-		got, ok := VerifyBearerToken(r, []byte("wrong-secret-32-bytes-xxxxxxxxxxxx"))
+		got, ok := VerifyBearerToken(r, []byte("wrong-secret-32-bytes-xxxxxxxxxxxx"), nil)
 		if ok {
 			t.Fatal("expected ok=false for wrong secret")
 		}
 		if got.ID != GuestUser.ID {
 			t.Errorf("expected GuestUser, got %+v", got)
+		}
+	})
+}
+
+// — TokenStore ——————————————————————————————————————————————————————————————
+
+// stubDB implements forge.DB using an in-memory slice for forge_tokens rows.
+// Only ExecContext (INSERT + UPDATE) is needed by TokenStore.Create/Revoke.
+type stubDB struct {
+	rows []stubTokenRow
+}
+
+type stubTokenRow struct {
+	id, name, role, expiresAt string
+	revokedAt                 *string
+	createdAt                 string
+}
+
+func (s *stubDB) ExecContext(_ context.Context, query string, args ...any) (sql.Result, error) {
+	if strings.Contains(query, "INSERT INTO forge_tokens") {
+		s.rows = append(s.rows, stubTokenRow{
+			id:        args[0].(string),
+			name:      args[1].(string),
+			role:      args[2].(string),
+			expiresAt: args[3].(string),
+			createdAt: args[4].(string),
+		})
+		return nil, nil
+	}
+	if strings.Contains(query, "UPDATE forge_tokens SET revoked_at") {
+		ts := args[0].(string)
+		id := args[1].(string)
+		for i := range s.rows {
+			if s.rows[i].id == id {
+				s.rows[i].revokedAt = &ts
+				return nil, nil
+			}
+		}
+		return nil, nil
+	}
+	return nil, errors.New("stubDB: unhandled ExecContext query")
+}
+
+func (s *stubDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, errors.New("stubDB: QueryContext not used in these tests")
+}
+
+func (s *stubDB) QueryRowContext(_ context.Context, _ string, _ ...any) *sql.Row {
+	return nil // not called by Create/Revoke
+}
+
+func TestTokenStoreCreate(t *testing.T) {
+	secret := "test-secret-32-bytes-xxxxxxxxxxxx"
+	db := &stubDB{}
+	store := NewTokenStore(db, secret)
+
+	raw, err := store.Create(context.Background(), "CI Bot", "author", 24*time.Hour)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if raw == "" {
+		t.Fatal("Create returned empty token")
+	}
+	if len(db.rows) != 1 {
+		t.Fatalf("expected 1 row in stubDB, got %d", len(db.rows))
+	}
+	row := db.rows[0]
+	if row.name != "CI Bot" {
+		t.Errorf("name: got %q want %q", row.name, "CI Bot")
+	}
+	if row.role != "author" {
+		t.Errorf("role: got %q want %q", row.role, "author")
+	}
+	if row.id == "" {
+		t.Error("fingerprint ID must be non-empty")
+	}
+	// Stored token must decode to the correct user.
+	user, err := decodeToken(raw, secret)
+	if err != nil {
+		t.Fatalf("decodeToken: %v", err)
+	}
+	if user.Name != "CI Bot" {
+		t.Errorf("user.Name: got %q want %q", user.Name, "CI Bot")
+	}
+	if len(user.Roles) != 1 || user.Roles[0] != Author {
+		t.Errorf("user.Roles: got %v want [author]", user.Roles)
+	}
+}
+
+func TestTokenStoreRevoke(t *testing.T) {
+	secret := "test-secret-32-bytes-xxxxxxxxxxxx"
+	db := &stubDB{}
+	store := NewTokenStore(db, secret)
+
+	_, err := store.Create(context.Background(), "Bot", "author", 24*time.Hour)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	id := db.rows[0].id
+
+	if err := store.Revoke(context.Background(), id); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if db.rows[0].revokedAt == nil {
+		t.Fatal("expected revokedAt to be set after Revoke")
+	}
+}
+
+// — VerifyBearerToken with store ——————————————————————————————————————————
+
+// rowDB implements forge.DB with a QueryRowContext that returns a pre-built
+// *sql.Row via sql.OpenDB + a custom driver.Connector. Avoids sql.Register.
+type rowDB struct {
+	revokedAt *string // nil → active; non-nil pointer → revoked; use errNoRow sentinel
+	noRow     bool    // true → simulate "not found" (empty result set)
+}
+
+func (r *rowDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (r *rowDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, nil
+}
+func (r *rowDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
+	conn := &rowDriverConn{revokedAt: r.revokedAt, noRow: r.noRow}
+	db := sql.OpenDB(conn)
+	return db.QueryRowContext(ctx, "SELECT revoked_at")
+}
+
+// rowDriverConn implements driver.Connector, driver.Conn, driver.Stmt, and
+// driver.Rows as a single struct to keep the stub self-contained.
+type rowDriverConn struct {
+	revokedAt *string
+	noRow     bool
+	done      bool
+}
+
+func (c *rowDriverConn) Connect(_ context.Context) (driver.Conn, error) {
+	return &rowDriverConn{revokedAt: c.revokedAt, noRow: c.noRow}, nil
+}
+func (c *rowDriverConn) Driver() driver.Driver                        { return dummyDriver{} }
+func (c *rowDriverConn) Prepare(_ string) (driver.Stmt, error)        { return c, nil }
+func (c *rowDriverConn) Close() error                                 { return nil }
+func (c *rowDriverConn) Begin() (driver.Tx, error)                    { return nil, nil }
+func (c *rowDriverConn) NumInput() int                                { return -1 }
+func (c *rowDriverConn) Exec(_ []driver.Value) (driver.Result, error) { return nil, nil }
+func (c *rowDriverConn) Query(_ []driver.Value) (driver.Rows, error)  { return c, nil }
+func (c *rowDriverConn) Columns() []string                            { return []string{"revoked_at"} }
+func (c *rowDriverConn) Next(dest []driver.Value) error {
+	if c.done || c.noRow {
+		return io.EOF // sql.Row.Scan returns sql.ErrNoRows
+	}
+	c.done = true
+	if c.revokedAt == nil {
+		dest[0] = nil
+	} else {
+		dest[0] = *c.revokedAt
+	}
+	return nil
+}
+
+// dummyDriver satisfies driver.Driver; not used since we use sql.OpenDB.
+type dummyDriver struct{}
+
+func (dummyDriver) Open(_ string) (driver.Conn, error) { return nil, nil }
+
+func TestVerifyBearerTokenWithStore(t *testing.T) {
+	secret := []byte("test-secret-32-bytes-xxxxxxxxxxxx")
+
+	t.Run("managed token absent from DB is rejected", func(t *testing.T) {
+		store := NewTokenStore(&rowDB{noRow: true}, string(secret))
+		u := User{ID: "u1", Name: "Alice", Roles: []Role{Editor}}
+		tok, _ := SignToken(u, string(secret), 0)
+		r, _ := http.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Authorization", "Bearer "+tok)
+		_, ok := VerifyBearerToken(r, secret, store)
+		if ok {
+			t.Fatal("expected rejection when token fingerprint not in DB")
+		}
+	})
+
+	t.Run("revoked token is rejected", func(t *testing.T) {
+		revoked := "2026-01-01T00:00:00Z"
+		store := NewTokenStore(&rowDB{revokedAt: &revoked}, string(secret))
+		u := User{ID: "u2", Name: "Bob", Roles: []Role{Author}}
+		tok, _ := SignToken(u, string(secret), 0)
+		r, _ := http.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Authorization", "Bearer "+tok)
+		_, ok := VerifyBearerToken(r, secret, store)
+		if ok {
+			t.Fatal("expected rejection for revoked token")
+		}
+	})
+
+	t.Run("valid managed token is accepted", func(t *testing.T) {
+		store := NewTokenStore(&rowDB{revokedAt: nil}, string(secret))
+		u := User{ID: "u3", Name: "Carol", Roles: []Role{Editor}}
+		tok, _ := SignToken(u, string(secret), 0)
+		r, _ := http.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Authorization", "Bearer "+tok)
+		got, ok := VerifyBearerToken(r, secret, store)
+		if !ok {
+			t.Fatal("expected accepted for valid non-revoked managed token")
+		}
+		if got.ID != "u3" {
+			t.Errorf("user ID: got %q want %q", got.ID, "u3")
 		}
 	})
 }

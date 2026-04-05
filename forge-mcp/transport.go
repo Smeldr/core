@@ -114,7 +114,7 @@ func (s *Server) messageHandler(w http.ResponseWriter, r *http.Request) {
 	// Authentication boundary: HTTP-level 401 before any JSON-RPC decoding.
 	var forgeCtx forge.Context
 	if len(s.secret) > 0 {
-		user, ok := forge.VerifyBearerToken(r, s.secret)
+		user, ok := forge.VerifyBearerToken(r, s.secret, s.tokenStore)
 		if !ok {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return

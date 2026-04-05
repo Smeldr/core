@@ -7,6 +7,33 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.0] — 2026-04-05
+
+Named revocable bearer token tools — Admin role required (Amendment A66).
+
+### Added
+
+- `mcp.go`: `Server.tokenStore *forge.TokenStore` field; wired from
+  `app.TokenStore()` in `New()`.
+- `transport.go`: `VerifyBearerToken` call updated to pass `s.tokenStore`
+  (3-arg signature).
+- `tool.go`: `authoriseAdmin()` helper enforcing Admin role (JSON-RPC -32001
+  on failure); `tokenToolDefs()` returning three MCP tool definitions
+  (`create_token`, `list_tokens`, `revoke_token`) with JSON Schema; 
+  `handleTokenTool()` dispatcher; `handleToolsList()` appends token tools
+  when `s.tokenStore != nil`; `handleToolsCall()` pre-dispatches token
+  tool names before module-level auth.
+
+### Token tools (Admin role required)
+
+| Tool | Description |
+|------|-------------|
+| `create_token` | Issues a named bearer token with a given role and TTL in days |
+| `list_tokens` | Lists all tokens with name, role, expiry, and revocation status |
+| `revoke_token` | Revokes a token by ID — effective on the next request |
+
+---
+
 ## [1.0.5] — 2026-03-18
 
 `delete_{type}` moved to Editor-level admin tools (Amendment A55).
