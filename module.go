@@ -1437,9 +1437,11 @@ func mcpParseForgeTag(tag string) (required bool, minLen, maxLen int, enum []str
 // mcpStructField builds an MCPField descriptor from a reflect.StructField.
 func mcpStructField(sf reflect.StructField) MCPField {
 	f := MCPField{
-		Name:     sf.Name,
-		JSONName: mcpJSONName(sf),
-		Type:     mcpGoTypeStr(sf.Type),
+		Name:        sf.Name,
+		JSONName:    mcpJSONName(sf),
+		Type:        mcpGoTypeStr(sf.Type),
+		Format:      sf.Tag.Get("forge_format"),
+		Description: sf.Tag.Get("forge_description"),
 	}
 	if tag := sf.Tag.Get("forge"); tag != "" {
 		f.Required, f.MinLength, f.MaxLength, f.Enum = mcpParseForgeTag(tag)

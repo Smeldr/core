@@ -65,6 +65,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-04-05 | Amendment A66 (`auth.go`, `forge.go`, `forge-mcp/`): `TokenRecord`, `TokenStore`, `NewTokenStore(db, secret)` added to `auth.go`; `TokenStore.Create`, `List`, `Revoke`, `probeTable` methods; `VerifyBearerToken` signature extended to 3-arg `(r, secret, store *TokenStore)` — nil store preserves stateless HMAC behaviour; `Config.TokenStore *TokenStore` and `App.TokenStore()` accessor in `forge.go`; `Handler()` startup probe warns if `forge_tokens` table absent; `forge-mcp/mcp.go` wires `Server.tokenStore`; `forge-mcp/transport.go` updated sole call site; `forge-mcp/tool.go` adds `authoriseAdmin`, `tokenToolDefs`, `handleTokenTool`, pre-dispatch for token tools in `handleToolsCall`; `tools/list` exposes `create_token`/`list_tokens`/`revoke_token` when store configured (Admin role required). Shipped in v1.6.0 / forge-mcp v1.1.0. |
 | 2026-04-05 | Amendment A67 (`templatehelpers.go`): `forgeHTML(s string) template.HTML` added — trusted raw HTML passthrough registered as `forge_html` in `TemplateFuncMap`; `TemplateFuncMap` godoc updated; `TestTemplateFuncMap_keys` expected count updated from 8 to 9; `TestForgeHTML` added (3 sub-tests). Shipped in v1.7.0. |
 | 2026-04-06 | Decision 26 (`auth.go`, `errors.go`, `forge-mcp/tool.go`): `ErrLastAdmin` sentinel (409 `last_admin`) added to `errors.go`; `TokenStore.Revoke` gains pre-check — counts other active admin tokens before revoking; returns `ErrLastAdmin` if count is 0 and target is admin; `forge-mcp/tool.go` `revoke_token` surfaces actionable message for `ErrLastAdmin`. Shipped in forge v1.8.0, forge-mcp v1.2.0. |
+| 2026-04-07 | Decision 27 (`mcp.go`, `module.go`, `forge-mcp/mcp.go`): `MCPField.Format string` and `MCPField.Description string` added to `mcp.go`; `mcpStructField` in `module.go` reads `forge_format` and `forge_description` struct tags; `fieldDescription` helper added to `forge-mcp/mcp.go`; `inputSchema` and `inputSchemaUpdate` emit `"description"` key in JSON Schema properties with three-case priority logic (both → description + " (" + format + ")"; format-only → "(format)"; neither → omitted). Shipped in forge v1.9.0, forge-mcp v1.3.0. |
 
 ---
 
@@ -80,7 +81,7 @@ github.com/forge-cms/forge/
 ├── errors.go         Error interface, sentinel errors, WriteError(), ValidationError
 ├── roles.go          Role type, hierarchy, HasRole(), IsRole(), built-in constants, Option interface
 ├── mcp.go            MCPOperation type, MCPRead/MCPWrite constants, MCP() option,
-│                     MCPMeta struct, MCPField struct, MCPModule interface
+│                     MCPMeta struct, MCPField struct (incl. Format/Description — D27), MCPModule interface
 │                     (Amendment A49)
 ├── node.go           Node, Status, lifecycle constants, NewID(), GenerateSlug(), UniqueSlug(), ValidateStruct()
 │                     GetSlug(), GetPublishedAt(), GetStatus() getter methods (Amendment A2)

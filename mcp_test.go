@@ -183,6 +183,50 @@ func TestMCPSchemaWithConstraints(t *testing.T) {
 	}
 }
 
+// TestMCPSchema_formatTags verifies that forge_format and forge_description
+// struct tags are reflected in MCPField.Format and MCPField.Description
+// (Decision 27).
+func TestMCPSchema_formatTags(t *testing.T) {
+	type richPost struct {
+		Node
+		Body  string `forge:"required" forge_format:"markdown" forge_description:"Write content in Markdown."`
+		Embed string `forge_format:"html"`
+		Plain string
+	}
+	repo := NewMemoryRepo[*richPost]()
+	m := NewModule((*richPost)(nil), Repo(repo), At("/richposts"))
+	fields := m.MCPSchema()
+
+	byName := make(map[string]MCPField)
+	for _, f := range fields {
+		byName[f.Name] = f
+	}
+
+	body := byName["Body"]
+	if body.Format != "markdown" {
+		t.Errorf("Body.Format = %q, want markdown", body.Format)
+	}
+	if body.Description != "Write content in Markdown." {
+		t.Errorf("Body.Description = %q, want \"Write content in Markdown.\"", body.Description)
+	}
+
+	embed := byName["Embed"]
+	if embed.Format != "html" {
+		t.Errorf("Embed.Format = %q, want html", embed.Format)
+	}
+	if embed.Description != "" {
+		t.Errorf("Embed.Description = %q, want empty", embed.Description)
+	}
+
+	plain := byName["Plain"]
+	if plain.Format != "" {
+		t.Errorf("Plain.Format = %q, want empty", plain.Format)
+	}
+	if plain.Description != "" {
+		t.Errorf("Plain.Description = %q, want empty", plain.Description)
+	}
+}
+
 // TestAppMCPModules verifies that App.MCPModules returns only modules that have
 // MCP operations registered.
 func TestAppMCPModules(t *testing.T) {

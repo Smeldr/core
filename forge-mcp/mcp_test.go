@@ -1192,6 +1192,65 @@ func TestInputSchema_arrayField(t *testing.T) {
 	}
 }
 
+// TestInputSchema_description verifies the three priority rules for the
+// "description" key in JSON Schema properties (Decision 27).
+func TestInputSchema_description(t *testing.T) {
+	fields := []forge.MCPField{
+		{Name: "Body", JSONName: "body", Type: "string", Format: "markdown", Description: "Write content in Markdown."},
+		{Name: "Embed", JSONName: "embed", Type: "string", Format: "html"},
+		{Name: "Title", JSONName: "title", Type: "string"},
+	}
+	schema := inputSchema(fields)
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("properties is not map[string]any")
+	}
+
+	t.Run("both_format_and_description", func(t *testing.T) {
+		prop := props["body"].(map[string]any)
+		want := "Write content in Markdown. (markdown)"
+		if prop["description"] != want {
+			t.Errorf("body description = %q, want %q", prop["description"], want)
+		}
+	})
+
+	t.Run("format_only", func(t *testing.T) {
+		prop := props["embed"].(map[string]any)
+		want := "(html)"
+		if prop["description"] != want {
+			t.Errorf("embed description = %q, want %q", prop["description"], want)
+		}
+	})
+
+	t.Run("neither", func(t *testing.T) {
+		prop := props["title"].(map[string]any)
+		if _, ok := prop["description"]; ok {
+			t.Errorf("title must not have a description key, got %q", prop["description"])
+		}
+	})
+}
+
+// TestInputSchemaUpdate_description verifies description hints are applied in
+// the update schema as well (Decision 27).
+func TestInputSchemaUpdate_description(t *testing.T) {
+	fields := []forge.MCPField{
+		{Name: "Body", JSONName: "body", Type: "string", Format: "markdown", Description: "Write in Markdown."},
+	}
+	schema := inputSchemaUpdate(fields)
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("properties is not map[string]any")
+	}
+	prop, ok := props["body"].(map[string]any)
+	if !ok {
+		t.Fatal("body property missing")
+	}
+	want := "Write in Markdown. (markdown)"
+	if prop["description"] != want {
+		t.Errorf("body description = %q, want %q", prop["description"], want)
+	}
+}
+
 // — Admin read tools —————————————————————————————————————————————————————
 
 // newEditorCtx returns a forge.Context with Editor role for admin read operations.

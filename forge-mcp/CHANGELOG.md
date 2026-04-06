@@ -7,6 +7,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.3.0] — 2026-04-07
+
+Field format semantics: emit `"description"` in tool input schemas (Decision 27).
+
+### Added
+
+- `mcp.go`: `fieldDescription` helper implementing the three-case priority rule
+  from Decision 27 — both tags, format-only, neither (Decision 27).
+- `mcp.go`: `inputSchema` and `inputSchemaUpdate` now set `"description"` in each
+  JSON Schema property when `forge.MCPField.Format` or `.Description` is non-empty
+  (Decision 27).
+
+---
+
 ## [1.2.0] — 2026-04-06
 
 Surface last-admin guard error as actionable MCP message (Decision 26).

@@ -202,6 +202,12 @@ func mcpAdminReadToolDefs(m forge.MCPModule) []mcpTool {
 
 // inputSchema converts []forge.MCPField to a JSON Schema object suitable for
 // MCP tools/list, marking Required fields in the required array.
+// When a field carries a forge_format or forge_description tag, a
+// "description" key is added to the property using the priority rules from
+// Decision 27:
+//   - Both present: forge_description + " (" + forge_format + ")"
+//   - Only forge_format: "(" + forge_format + ")"
+//   - Neither: no description key emitted
 func inputSchema(fields []forge.MCPField) map[string]any {
 	props := make(map[string]any, len(fields))
 	var required []string
@@ -224,6 +230,9 @@ func inputSchema(fields []forge.MCPField) map[string]any {
 				prop["enum"] = f.Enum
 			}
 		}
+		if desc := fieldDescription(f); desc != "" {
+			prop["description"] = desc
+		}
 		props[f.JSONName] = prop
 		if f.Required {
 			required = append(required, f.JSONName)
@@ -241,6 +250,8 @@ func inputSchema(fields []forge.MCPField) map[string]any {
 
 // inputSchemaUpdate builds an update tool schema: adds a required "slug" field
 // and makes all content fields optional (partial-update semantics).
+// Description hints from forge_format and forge_description tags are applied
+// using the same priority rules as [inputSchema] (Decision 27).
 func inputSchemaUpdate(fields []forge.MCPField) map[string]any {
 	props := map[string]any{
 		"slug": map[string]any{"type": "string"},
@@ -264,12 +275,31 @@ func inputSchemaUpdate(fields []forge.MCPField) map[string]any {
 				prop["enum"] = f.Enum
 			}
 		}
+		if desc := fieldDescription(f); desc != "" {
+			prop["description"] = desc
+		}
 		props[f.JSONName] = prop
 	}
 	return map[string]any{
 		"type":       "object",
 		"properties": props,
 		"required":   []string{"slug"},
+	}
+}
+
+// fieldDescription builds the JSON Schema "description" string for a field
+// from its Format and Description hints (Decision 27):
+//   - Both non-empty: Description + " (" + Format + ")"
+//   - Only Format: "(" + Format + ")"
+//   - Neither: ""
+func fieldDescription(f forge.MCPField) string {
+	switch {
+	case f.Description != "" && f.Format != "":
+		return f.Description + " (" + f.Format + ")"
+	case f.Format != "":
+		return "(" + f.Format + ")"
+	default:
+		return ""
 	}
 }
 

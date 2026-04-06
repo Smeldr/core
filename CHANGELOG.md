@@ -23,6 +23,23 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.9.0] — 2026-04-07
+
+Field format semantics: `forge_format` and `forge_description` struct tags (Decision 27).
+
+### Added
+
+- `MCPField.Format string` — populated from the `forge_format` struct tag; machine-readable
+  format hint (`"markdown"`, `"html"`). Empty string when the tag is absent (Decision 27).
+- `MCPField.Description string` — populated from the `forge_description` struct tag; free-text
+  authoring guidance for AI agents. Empty string when the tag is absent (Decision 27).
+- `forge-mcp`: tool input schemas now emit a `"description"` key in JSON Schema properties
+  using the priority logic defined in Decision 27:
+  both tags → `forge_description + " (" + forge_format + ")"`;
+  format only → `"(" + forge_format + ")"`; neither → key omitted.
+
+---
+
 ## [1.8.0] — 2026-04-06
 
 Last-admin guard on token revocation (Decision 26).
