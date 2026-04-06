@@ -1409,8 +1409,10 @@ func (d *tokenTestDB) QueryContext(ctx context.Context, _ string, _ ...any) (*sq
 	return db.QueryContext(ctx, "SELECT 1")
 }
 
-func (d *tokenTestDB) QueryRowContext(_ context.Context, _ string, _ ...any) *sql.Row {
-	return nil
+func (d *tokenTestDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
+	// Return a no-row result so the role lookup in Revoke gets sql.ErrNoRows,
+	// skipping the last-admin guard for tokens not present in d.inserted.
+	return sql.OpenDB(&emptyRowConnector{}).QueryRowContext(ctx, "SELECT 1")
 }
 
 // emptyRowConnector is a driver.Connector that produces zero rows.

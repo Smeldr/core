@@ -23,6 +23,25 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.8.0] — 2026-04-06
+
+Last-admin guard on token revocation (Decision 26).
+
+### Added
+
+- `forge.ErrLastAdmin` — sentinel error (HTTP 409 Conflict, code `"last_admin"`).
+  Returned by `TokenStore.Revoke` when the token being revoked is the last active
+  (non-revoked, non-expired) admin token (Decision 26).
+
+### Changed
+
+- `TokenStore.Revoke` now checks whether the target token is an admin token and,
+  if so, whether at least one other active admin token exists. If the target would
+  be the last active admin, `Revoke` returns `ErrLastAdmin` without modifying any
+  row. All other revocations are unaffected (Decision 26).
+
+---
+
 ## [1.7.0] — 2026-04-05
 
 Trusted raw HTML passthrough for module templates (Amendment A67).

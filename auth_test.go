@@ -524,8 +524,34 @@ func (s *stubDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows,
 	return nil, errors.New("stubDB: QueryContext not used in these tests")
 }
 
-func (s *stubDB) QueryRowContext(_ context.Context, _ string, _ ...any) *sql.Row {
-	return nil // not called by Create/Revoke
+func (s *stubDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	if strings.Contains(query, "SELECT role FROM forge_tokens") {
+		id := args[0].(string)
+		for _, r := range s.rows {
+			if r.id == id {
+				conn := &guardRowConn{val: r.role}
+				return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+			}
+		}
+		conn := &guardRowConn{noRow: true}
+		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+	}
+	if strings.Contains(query, "COUNT(*)") {
+		now := args[0].(string)
+		excludeID := args[1].(string)
+		count := int64(0)
+		for _, r := range s.rows {
+			if r.id == excludeID || r.role != "admin" || r.revokedAt != nil {
+				continue
+			}
+			if r.expiresAt > now {
+				count++
+			}
+		}
+		conn := &guardRowConn{val: count}
+		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+	}
+	return nil
 }
 
 func TestTokenStoreCreate(t *testing.T) {
@@ -642,6 +668,91 @@ func (c *rowDriverConn) Next(dest []driver.Value) error {
 type dummyDriver struct{}
 
 func (dummyDriver) Open(_ string) (driver.Conn, error) { return nil, nil }
+
+// guardRowConn implements sql driver.Connector for a single-value row.
+// Used by stubDB.QueryRowContext to satisfy the last-admin guard queries.
+type guardRowConn struct {
+	val   driver.Value
+	noRow bool
+	done  bool
+}
+
+func (c *guardRowConn) Connect(_ context.Context) (driver.Conn, error) {
+	return &guardRowConn{val: c.val, noRow: c.noRow}, nil
+}
+func (c *guardRowConn) Driver() driver.Driver                        { return dummyDriver{} }
+func (c *guardRowConn) Prepare(_ string) (driver.Stmt, error)        { return c, nil }
+func (c *guardRowConn) Close() error                                 { return nil }
+func (c *guardRowConn) Begin() (driver.Tx, error)                    { return nil, nil }
+func (c *guardRowConn) NumInput() int                                { return -1 }
+func (c *guardRowConn) Exec(_ []driver.Value) (driver.Result, error) { return nil, nil }
+func (c *guardRowConn) Query(_ []driver.Value) (driver.Rows, error)  { return c, nil }
+func (c *guardRowConn) Columns() []string                            { return []string{"v"} }
+func (c *guardRowConn) Next(dest []driver.Value) error {
+	if c.done || c.noRow {
+		return io.EOF
+	}
+	c.done = true
+	dest[0] = c.val
+	return nil
+}
+
+func TestTokenStore_Revoke_lastAdmin(t *testing.T) {
+	secret := "test-secret-32-bytes-xxxxxxxxxxxx"
+
+	t.Run("only_admin_blocked", func(t *testing.T) {
+		db := &stubDB{}
+		store := NewTokenStore(db, secret)
+		_, err := store.Create(context.Background(), "Admin", "admin", 24*time.Hour)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		id := db.rows[0].id
+		err = store.Revoke(context.Background(), id)
+		if !errors.Is(err, ErrLastAdmin) {
+			t.Fatalf("expected ErrLastAdmin, got %v", err)
+		}
+		if db.rows[0].revokedAt != nil {
+			t.Fatal("row must not be modified when guard fires")
+		}
+	})
+
+	t.Run("two_admins_allowed", func(t *testing.T) {
+		db := &stubDB{}
+		store := NewTokenStore(db, secret)
+		_, err := store.Create(context.Background(), "Admin1", "admin", 24*time.Hour)
+		if err != nil {
+			t.Fatalf("Create admin1: %v", err)
+		}
+		_, err = store.Create(context.Background(), "Admin2", "admin", 24*time.Hour)
+		if err != nil {
+			t.Fatalf("Create admin2: %v", err)
+		}
+		id := db.rows[0].id
+		if err := store.Revoke(context.Background(), id); err != nil {
+			t.Fatalf("Revoke: %v", err)
+		}
+		if db.rows[0].revokedAt == nil {
+			t.Fatal("expected revokedAt to be set after Revoke")
+		}
+	})
+
+	t.Run("non_admin_not_guarded", func(t *testing.T) {
+		db := &stubDB{}
+		store := NewTokenStore(db, secret)
+		_, err := store.Create(context.Background(), "Editor", "editor", 24*time.Hour)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		id := db.rows[0].id
+		if err := store.Revoke(context.Background(), id); err != nil {
+			t.Fatalf("Revoke: %v", err)
+		}
+		if db.rows[0].revokedAt == nil {
+			t.Fatal("expected revokedAt to be set after Revoke")
+		}
+	})
+}
 
 func TestVerifyBearerTokenWithStore(t *testing.T) {
 	secret := []byte("test-secret-32-bytes-xxxxxxxxxxxx")

@@ -443,6 +443,9 @@ func (s *Server) handleTokenTool(ctx forge.Context, name string, args map[string
 			return nil, &jsonRPCError{Code: -32602, Message: "invalid params: id required"}
 		}
 		if err := s.tokenStore.Revoke(ctx, id); err != nil {
+			if errors.Is(err, forge.ErrLastAdmin) {
+				return nil, &jsonRPCError{Code: -32602, Message: "Cannot revoke token: it is the last active admin token. Create a replacement admin token before revoking this one."}
+			}
 			return nil, errorFor(err)
 		}
 		return toolResult(map[string]any{"revoked": true, "id": id}), nil

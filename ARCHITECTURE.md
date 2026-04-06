@@ -64,6 +64,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-04-04 | Amendment A65 (`module.go`, `templatedata.go`, `templates.go`): `ContextFunc(fn)` new module option; `contextFuncOption` unexported type in `module.go`; `contextFunc func(Context, any) (any, error)` field on `Module[T]`; `resolveExtra` unexported method on `Module[T]` in `templates.go`; `TemplateData[T].Extra any` new field; called in `renderListHTML` and `renderShowHTML` after all other data fields are set; errors from `contextFunc` return nil and never abort the render. Shipped in v1.5.0. |
 | 2026-04-05 | Amendment A66 (`auth.go`, `forge.go`, `forge-mcp/`): `TokenRecord`, `TokenStore`, `NewTokenStore(db, secret)` added to `auth.go`; `TokenStore.Create`, `List`, `Revoke`, `probeTable` methods; `VerifyBearerToken` signature extended to 3-arg `(r, secret, store *TokenStore)` — nil store preserves stateless HMAC behaviour; `Config.TokenStore *TokenStore` and `App.TokenStore()` accessor in `forge.go`; `Handler()` startup probe warns if `forge_tokens` table absent; `forge-mcp/mcp.go` wires `Server.tokenStore`; `forge-mcp/transport.go` updated sole call site; `forge-mcp/tool.go` adds `authoriseAdmin`, `tokenToolDefs`, `handleTokenTool`, pre-dispatch for token tools in `handleToolsCall`; `tools/list` exposes `create_token`/`list_tokens`/`revoke_token` when store configured (Admin role required). Shipped in v1.6.0 / forge-mcp v1.1.0. |
 | 2026-04-05 | Amendment A67 (`templatehelpers.go`): `forgeHTML(s string) template.HTML` added — trusted raw HTML passthrough registered as `forge_html` in `TemplateFuncMap`; `TemplateFuncMap` godoc updated; `TestTemplateFuncMap_keys` expected count updated from 8 to 9; `TestForgeHTML` added (3 sub-tests). Shipped in v1.7.0. |
+| 2026-04-06 | Decision 26 (`auth.go`, `errors.go`, `forge-mcp/tool.go`): `ErrLastAdmin` sentinel (409 `last_admin`) added to `errors.go`; `TokenStore.Revoke` gains pre-check — counts other active admin tokens before revoking; returns `ErrLastAdmin` if count is 0 and target is admin; `forge-mcp/tool.go` `revoke_token` surfaces actionable message for `ErrLastAdmin`. Shipped in forge v1.8.0, forge-mcp v1.2.0. |
 
 ---
 
@@ -90,7 +91,8 @@ github.com/forge-cms/forge/
 ├── storage.go        DB interface, Query[T], QueryOne[T], Repository[T], MemoryRepo[T], ListOptions
 ├── auth.go           AuthFunc interface, BearerHMAC, CookieSession, BasicAuth, AnyAuth, SignToken,
 │                     VerifyBearerToken(r, secret, store *TokenStore);
-│                     TokenRecord, TokenStore, NewTokenStore (Amendment A66)
+│                     TokenRecord, TokenStore, NewTokenStore (Amendment A66);
+│                     Revoke last-admin guard — returns ErrLastAdmin (Decision 26)
 ├── middleware.go     RequestLogger, Recoverer, SecurityHeaders, CORS, MaxBodySize,
 │                     RateLimit, TrustedProxy, InMemoryCache, CacheStore, Authenticate, CSRF, Chain
 ├── module.go         Module[T], NewModule, Register, Stop, At, Cache, Auth,

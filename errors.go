@@ -59,6 +59,10 @@ var (
 	// ErrConflict indicates a state conflict (e.g. duplicate slug). → 409
 	ErrConflict = newSentinel(http.StatusConflict, "conflict", "Conflict")
 
+	// ErrLastAdmin is returned by [TokenStore.Revoke] when the token being
+	// revoked is the last active (non-revoked, non-expired) admin token. → 409
+	ErrLastAdmin = newSentinel(http.StatusConflict, "last_admin", "Cannot revoke the last active admin token")
+
 	// ErrBadRequest indicates the request is malformed or unparseable. → 400
 	ErrBadRequest = newSentinel(http.StatusBadRequest, "bad_request", "Bad request")
 

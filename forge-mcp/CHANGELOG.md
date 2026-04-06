@@ -7,6 +7,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.0] — 2026-04-06
+
+Surface last-admin guard error as actionable MCP message (Decision 26).
+
+### Changed
+
+- `tool.go`: `handleTokenTool` — `revoke_token` now detects `forge.ErrLastAdmin`
+  and returns a specific, actionable JSON-RPC error message directing the operator
+  to create a replacement admin token before revoking (Decision 26).
+
+---
+
 ## [1.1.0] — 2026-04-05
 
 Named revocable bearer token tools — Admin role required (Amendment A66).

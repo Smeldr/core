@@ -143,3 +143,82 @@ handles the iframe).
   key `"forge_html"` is visible to templates.
 - No interface, file, or behaviour change beyond the new function.
 - Root package bumps to `v1.7.0`.
+
+---
+
+## Decision 26 — Last-admin guard on token revocation
+
+**Status:** Locked
+**Date:** 2026-04-06
+
+**Decision:** `TokenStore.Revoke` refuses to revoke a token if it is the last
+active (non-revoked, non-expired) token with the `admin` role. The check is a
+two-step SQL lookup executed inside `Revoke` before the UPDATE. First the role
+of the target token is fetched; if it is not `admin` the guard is skipped. If it
+is `admin`, a COUNT of other active admin tokens is performed. If that count is 0,
+`Revoke` returns the new sentinel error `ErrLastAdmin` without modifying any row.
+
+### Guard logic
+
+```go
+// 1. Fetch role of target token — skip guard for non-admin:
+SELECT role FROM forge_tokens WHERE id = $1
+
+// 2. Only if role = "admin": count other active admins:
+SELECT COUNT(*) FROM forge_tokens
+WHERE role = 'admin'
+  AND revoked_at IS NULL
+  AND expires_at > $1
+  AND id != $2
+```
+
+If COUNT = 0, `Revoke` returns `ErrLastAdmin`.
+
+### New exported symbol
+
+`ErrLastAdmin` — sentinel `forge.Error`, HTTP status 409 Conflict,
+code `"last_admin"`, public message `"Cannot revoke the last active admin token"`.
+Consistent with `ErrConflict` and other package sentinels.
+
+### Scope
+
+- `auth.go`: `Revoke` gains the two-step pre-check
+- `errors.go`: `ErrLastAdmin` exported sentinel
+- `forge-mcp/tool.go`: `handleTokenTool` returns a specific, actionable message
+  for `ErrLastAdmin` on `revoke_token`
+- forge core bumps to `v1.8.0` (new exported symbol `ErrLastAdmin`)
+- forge-mcp bumps to `v1.2.0` (behavioural change in error surface)
+
+### What this does not cover
+
+- Natural token expiry — not an operator action; not guarded
+- `Create` and `List` — unchanged
+- MCP tool signatures — unchanged
+- `forge_tokens` schema — unchanged
+
+**Rationale:**
+A single `revoke_token` call can permanently lock out all MCP-based administrative
+access. Recovery requires direct database access — bypassing all Forge abstractions.
+The guard makes this impossible without first creating a replacement admin token.
+The check is in core, not in the MCP layer, so it protects against any caller
+regardless of interface.
+
+The guard is intentionally narrow: only the `admin` role is protected, only active
+(non-revoked, non-expired) tokens are counted, and natural expiry is excluded
+because it is not a discrete operator action. The two-query implementation is
+preferred over a single-query approach so that non-admin tokens are never blocked
+when no admin tokens exist — a correctness guarantee that the spec's single-query
+wording did not provide.
+
+**Rejected alternatives:**
+- Guard in forge-mcp only: Does not protect against future non-MCP callers. The
+  invariant belongs in the store, not the transport.
+- Warn instead of refuse: A warning can be ignored by any caller. A hard refusal cannot.
+- Guard all roles: Only admin tokens gate administrative access. Over-broad.
+- Single-query guard (COUNT of other admins regardless of target role): Would
+  incorrectly block revoking non-admin tokens when no admin tokens exist.
+
+**Consequences:**
+- `Revoke` is no longer unconditional — callers must handle `ErrLastAdmin`
+- forge-mcp surfaces a clear, actionable error message for this case
+- No schema changes, no breaking changes to existing call sites that do not hit the guard

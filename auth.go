@@ -5,9 +5,11 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -349,13 +351,40 @@ func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 }
 
 // Revoke marks the token with the given fingerprint ID as revoked in
-// forge_tokens. Subsequent [VerifyBearerToken] calls with a non-nil
-// [TokenStore] reject revoked tokens immediately. Use [TokenStore.List]
+// forge_tokens. Returns [ErrLastAdmin] if the token being revoked is the last
+// active (non-revoked, non-expired) admin token — create a replacement admin
+// token before revoking this one. Subsequent [VerifyBearerToken] calls with a
+// non-nil [TokenStore] reject revoked tokens immediately. Use [TokenStore.List]
 // to obtain token IDs.
 func (ts *TokenStore) Revoke(ctx context.Context, id string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Look up the role of the token being revoked to determine whether the
+	// last-admin guard applies.
+	var role string
+	if err := ts.db.QueryRowContext(ctx,
+		`SELECT role FROM forge_tokens WHERE id = $1`, id,
+	).Scan(&role); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return ErrInternal
+	}
+
+	// Guard: refuse to revoke the last active admin token.
+	if role == "admin" {
+		var otherAdmins int
+		if err := ts.db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM forge_tokens WHERE role = 'admin' AND revoked_at IS NULL AND expires_at > $1 AND id != $2`,
+			now, id,
+		).Scan(&otherAdmins); err != nil {
+			return ErrInternal
+		}
+		if otherAdmins == 0 {
+			return ErrLastAdmin
+		}
+	}
+
 	_, err := ts.db.ExecContext(ctx,
 		`UPDATE forge_tokens SET revoked_at = $1 WHERE id = $2`,
-		time.Now().UTC().Format(time.RFC3339), id,
+		now, id,
 	)
 	if err != nil {
 		return ErrInternal
