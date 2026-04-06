@@ -3,6 +3,11 @@
 This document is for AI assistants working with Forge — either building
 applications or consuming a running site via MCP.
 
+Two roles, two sections:
+
+- [AI coding agents](#for-ai-coding-agents) — you are helping a developer build a Forge application
+- [AI consuming agents](#for-ai-consuming-agents) — you are connected to a running Forge site via MCP
+
 ---
 
 ## For AI coding agents
@@ -32,6 +37,30 @@ Rules:
 - Use `db:"column_name"` for `SQLRepo` column mapping
 - Avoid SQLite reserved keywords as column names (`order`, `group`, etc.)
   — use `db:"sort_order"` instead
+
+### Field format hints
+
+Use `forge_format` and `forge_description` to tell AI consuming agents
+what a field expects. These hints appear in MCP tool descriptions at the
+point of authoring.
+
+```go
+type DocPage struct {
+    forge.Node
+    Title string `forge:"required,min=3"`
+    Body  string `forge:"required" forge_format:"markdown" forge_description:"Write content in Markdown. Supports headings, lists, and code blocks."`
+    Embed string `forge_format:"html" forge_description:"Raw HTML only. Use for iframes and third-party embeds. Must be trusted content."`
+}
+```
+
+Supported `forge_format` values:
+
+| Value | Meaning |
+|-------|---------|
+| `markdown` | CommonMark/GFM markdown — also covers plain text |
+| `html` | Trusted raw HTML — caller is responsible for sanitisation |
+
+These tags are hints only. Forge performs no validation based on them.
 
 ### Wiring a module
 
@@ -69,7 +98,24 @@ forge.NewModule((*Post)(nil),
 )
 ```
 
-See `forge-mcp/README.md` for connection setup (Claude Desktop, Cursor, SSE).
+Wire the MCP server and token store in `main.go`:
+
+```go
+import forgemcp "github.com/forge-cms/forge-mcp"
+
+app := forge.New(forge.MustConfig(forge.Config{
+    BaseURL:    "https://mysite.com",
+    Secret:     []byte(os.Getenv("SECRET")),
+    DB:         db,
+    TokenStore: forge.NewTokenStore(db, os.Getenv("SECRET")),
+}))
+
+mcpSrv := forgemcp.New(app)
+app.Handle("GET /mcp", mcpSrv.Handler())
+app.Handle("POST /mcp/message", mcpSrv.Handler())
+```
+
+See `forge-mcp/README.md` for connection setup and token management.
 
 ### Key rules for code generation
 
@@ -78,12 +124,16 @@ See `forge-mcp/README.md` for connection setup (Claude Desktop, Cursor, SSE).
 - `forge.DB` is an interface, not `*sql.DB`
 - All errors must implement `forge.Error` — never raw `errors.New`
 - Read `ERROR_HANDLING.md` before writing any error-handling code
+- Never use `forge.SignToken` in `main()` when `TokenStore` is wired —
+  stateless HMAC tokens are rejected by `VerifyBearerToken` when a store is configured
 
 ---
 
 ## For AI consuming agents
 
-You are connected to a running Forge site via MCP.
+You are connected to a running Forge site via MCP. This guide applies
+regardless of which MCP-compatible agent you are — Claude, Cursor, or any
+other tool that supports the Model Context Protocol.
 
 ### What you can do
 
@@ -92,6 +142,8 @@ the modules:
 
 - **MCPRead** — list and read published content
 - **MCPWrite** — create, update, publish, schedule, archive, delete content
+
+Admin-role agents also have access to token management tools (see below).
 
 ### Lifecycle rules
 
@@ -116,10 +168,37 @@ For each registered content type, these tools are available:
 - `archive_{type}` — transitions to Archived
 - `delete_{type}` — permanent deletion
 
+### Field format hints
+
+When a content type field carries a `forge_format` or `forge_description`
+tag, the tool description tells you exactly what the field expects.
+Follow it precisely — Markdown fields expect Markdown, HTML fields expect
+raw HTML. Do not mix formats.
+
 ### Reading content
 
 - `resources/list` — all Published items across all MCPRead modules
 - `resources/read` — single item by URI (`forge://{prefix}/{slug}`)
+
+### Token management tools (Admin role required)
+
+These tools are available when the site has `TokenStore` configured:
+
+| Tool | Description |
+|------|-------------|
+| `create_token` | Issues a new named token with a given role and TTL |
+| `list_tokens` | Lists all tokens with name, role, expiry, revoked status |
+| `revoke_token` | Revokes a token by ID — effective immediately |
+
+**Critical rules for token operations:**
+
+- Always use `list_tokens` before `revoke_token` to confirm the ID
+- `revoke_token` will refuse if the token is the last active admin token —
+  create a replacement first
+- A revoked token cannot be restored — revocation is permanent
+- Never revoke a token without explicit instruction from the site owner
+- `create_token` returns the plaintext token once — copy it immediately
+  and deliver it through a secure channel. It cannot be retrieved again.
 
 ### Connection setup
 
