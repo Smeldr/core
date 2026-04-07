@@ -11,3 +11,5 @@ use ./example/blog
 use ./example/docs
 
 use ./example/api
+
+use ./forge-cli

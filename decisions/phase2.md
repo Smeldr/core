@@ -316,3 +316,67 @@ authoring guidance.
   `inputSchemaUpdate` emit `"description"` key with priority Logic
 - forge core bumps to `v1.9.0` (new fields on exported struct `MCPField`)
 - forge-mcp bumps to `v1.3.0` (tool description output changes)
+
+
+---
+
+## Decision 28 - forge-cli: operator CLI submodule
+
+**Date:** 2026-04-07
+**Status:** Agreed
+**Files:** `forge-cli/` (new submodule)
+
+**Context:**
+Operators need a scriptable way to manage content and tokens on a running Forge
+instance from a terminal or CI/CD pipeline. The REST API and MCP endpoints are
+already stable. A thin CLI wrapping those endpoints is the minimal solution.
+
+**Decision:**
+Add a new Go submodule `github.com/forge-cms/forge/forge-cli` (package main).
+
+### Design constraints
+
+- Zero third-party dependencies (stdlib only: net/http, encoding/json, flag, bufio, os)
+- No import of forge core -- the CLI is a pure HTTP client
+- Config via FORGE_URL, FORGE_TOKEN, FORGE_MCP_URL env vars or .forge-cli.env fallback
+- FORGE_MCP_URL defaults to {FORGE_URL}/mcp/message
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| client.go | Config, loadConfig, loadEnvFile, request, getItem, mergeFields, printJSON, fatal |
+| frontmatter.go | parseFrontmatter, parseFrontmatterFile -- YAML-subset parser |
+| content.go | Content subcommands: create, update, publish, unpublish, archive, delete, list, get |
+| token.go | Token subcommands via MCP JSON-RPC 2.0: create, list, revoke |
+| status.go | status subcommand -- GET /_health |
+| main.go | Entry point + top-level subcommand router |
+| cli_test.go | Unit tests: frontmatter (9), mergeFields (2), loadEnvFile (3) |
+| go.mod | Module github.com/forge-cms/forge/forge-cli, Go 1.22, no require block |
+| CHANGELOG.md | Submodule changelog |
+| README.md | Installation, configuration, all commands |
+
+### Lifecycle operations (GET-then-PUT)
+
+All lifecycle and update commands follow this pattern:
+
+1. GET /{prefix}/{slug} -- retrieve current item as map[string]any
+2. Modify the map (set Status, overlay frontmatter fields, etc.)
+3. PUT /{prefix}/{slug} -- write back the entire map
+
+PublishedAt is set server-side on the draft-to-published transition --
+the client-supplied value is irrelevant. []string arrays survive the
+[]interface{}-JSON-[]string round-trip correctly (confirmed by G23).
+
+### Token commands
+
+Token management posts MCP JSON-RPC 2.0 (tools/call) to FORGE_MCP_URL.
+Tools: create_token, list_tokens, revoke_token. Admin role required.
+
+**Consequences:**
+
+- New forge-cli/ submodule added to go.work
+- No changes to forge core or forge-mcp
+- Tagged forge-cli/v0.1.0
+- Integration test group G23 (TestFull_G23_CLIRoundTrip) validates the
+  GET-then-PUT round-trip contract in integration_full_test.go

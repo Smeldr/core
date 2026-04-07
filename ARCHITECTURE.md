@@ -66,6 +66,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-04-05 | Amendment A67 (`templatehelpers.go`): `forgeHTML(s string) template.HTML` added — trusted raw HTML passthrough registered as `forge_html` in `TemplateFuncMap`; `TemplateFuncMap` godoc updated; `TestTemplateFuncMap_keys` expected count updated from 8 to 9; `TestForgeHTML` added (3 sub-tests). Shipped in v1.7.0. |
 | 2026-04-06 | Decision 26 (`auth.go`, `errors.go`, `forge-mcp/tool.go`): `ErrLastAdmin` sentinel (409 `last_admin`) added to `errors.go`; `TokenStore.Revoke` gains pre-check — counts other active admin tokens before revoking; returns `ErrLastAdmin` if count is 0 and target is admin; `forge-mcp/tool.go` `revoke_token` surfaces actionable message for `ErrLastAdmin`. Shipped in forge v1.8.0, forge-mcp v1.2.0. |
 | 2026-04-07 | Decision 27 (`mcp.go`, `module.go`, `forge-mcp/mcp.go`): `MCPField.Format string` and `MCPField.Description string` added to `mcp.go`; `mcpStructField` in `module.go` reads `forge_format` and `forge_description` struct tags; `fieldDescription` helper added to `forge-mcp/mcp.go`; `inputSchema` and `inputSchemaUpdate` emit `"description"` key in JSON Schema properties with three-case priority logic (both → description + " (" + format + ")"; format-only → "(format)"; neither → omitted). Shipped in forge v1.9.0, forge-mcp v1.3.0. |
+| 2026-04-07 | Decision 28 (`forge-cli/`): new stdlib-only submodule `github.com/forge-cms/forge/forge-cli` (`package main`); content CRUD + lifecycle via GET-then-PUT to Forge REST API; token management via MCP JSON-RPC 2.0; YAML-subset frontmatter parser; `Config` from `FORGE_URL`/`FORGE_TOKEN`/`FORGE_MCP_URL` env vars; G23 integration test validates GET→PUT round-trip contract. Tagged `forge-cli/v0.1.0`. |
 
 ---
 
@@ -211,6 +212,17 @@ github.com/forge-cms/forge/forge-mcp/  (sub-module: ./forge-mcp/)
 │                     sseHandler, messageHandler
 └── README.md         AI-first integration guide: quick start, Claude/Cursor  ✅ Milestone 10 Step 5
                       config, SSE Bearer auth, MCPRead vs MCPWrite table
+
+github.com/forge-cms/forge/forge-cli/  (sub-module: ./forge-cli/)
+├── client.go         Config{ForgeURL,Token,MCPURL}, loadConfig, loadEnvFile,
+│                     request, getItem, mergeFields, printJSON, fatal
+├── frontmatter.go    parseFrontmatter, parseFrontmatterFile — YAML-subset parser
+├── content.go        runContentCommand, runCreate, runUpdate, runLifecycle,
+│                     runDelete, runList, runGet, findKey, findKeyIn
+├── token.go          runTokenCommand, mcpCall — create/list/revoke via MCP JSON-RPC
+├── status.go         runStatus — GET /_health
+├── main.go           Entry point + top-level subcommand router
+└── cli_test.go       Unit tests: frontmatter (9), mergeFields (2), loadEnvFile (3)
 ```
 
 ### Shipped (Milestones 7–8)

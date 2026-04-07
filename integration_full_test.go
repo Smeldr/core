@@ -29,6 +29,7 @@ package forge
 //   G20 — Scheduler wired through App.Content(): schedulerModules populated, tick publishes (M8 + M2 + M3)
 //   G21 — Full v1.0.0 stack: scheduler + sitemap + feed + AI index + redirects (M1+M2+M3+M5+M7+M8)
 //   G22 — forge-mcp MCPModule interface + lifecycle (M10)
+//   G23 — CLI round-trip: GET→PUT lifecycle and field preservation (Decision 28)
 
 import (
 	"bytes"
@@ -2141,6 +2142,18 @@ type testMCPPost struct {
 	Tags   string `json:"tags"`
 }
 
+// cliRoundTripPost is the content type used by the G23 CLI round-trip group.
+// It carries a []string Tags field to verify that array values survive a
+// GET→PUT round-trip without conversion errors.
+type cliRoundTripPost struct {
+	Node
+	Title string `forge:"required"`
+	Body  string
+	Tags  []string
+}
+
+func (p *cliRoundTripPost) Head() Head { return Head{Title: p.Title} }
+
 // findField looks up an MCPField by Go field name in a schema slice.
 // Tests use this helper rather than positional indexing because field
 // order is unspecified.
@@ -2295,5 +2308,155 @@ func TestFull_G22_MCPCreatePublishLifecycle(t *testing.T) {
 	}
 	if len(drafts) != 0 {
 		t.Errorf("MCPList(Draft) = %d items; want 0", len(drafts))
+	}
+}
+
+// — G23: CLI round-trip — GET→PUT lifecycle and field preservation (Decision 28) —
+
+// TestFull_G23_CLIRoundTrip verifies that the HTTP API correctly handles
+// the GET→PUT round-trip pattern used by forge-cli for lifecycle operations.
+// Specifically it checks:
+//   - PublishedAt is set server-side on publish (not taken from the body)
+//   - PublishedAt is preserved on a subsequent update (no re-publish)
+//   - []string Tags survive the JSON round-trip without loss or type error
+//   - Status transitions (publish, archive) work correctly via PUT
+func TestFull_G23_CLIRoundTrip(t *testing.T) {
+	repo := NewMemoryRepo[*cliRoundTripPost]()
+	m := NewModule((*cliRoundTripPost)(nil),
+		Repo(repo),
+		At("/posts"),
+		Auth(Read(Author), Write(Author), Delete(Editor)),
+	)
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("16bytessecretkey"),
+	}))
+	app.Content(m)
+	h := app.Handler()
+
+	author := User{ID: "a1", Roles: []Role{Author}}
+	editor := User{ID: "e1", Roles: []Role{Editor}}
+
+	do := func(method, path string, body []byte, user User) *httptest.ResponseRecorder {
+		t.Helper()
+		var r *http.Request
+		if body != nil {
+			r = httptest.NewRequest(method, path, bytes.NewReader(body))
+			r.Header.Set("Content-Type", "application/json")
+		} else {
+			r = httptest.NewRequest(method, path, nil)
+		}
+		r.Header.Set("Accept", "application/json")
+		r = withUser(r, user)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+
+	decode := func(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
+		t.Helper()
+		var m map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&m); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return m
+	}
+
+	// Step 1: Create a draft with Tags — POST /posts.
+	createBody := `{"Title":"Round-trip Post","Body":"Hello world","Status":"draft","Tags":["go","forge"]}`
+	w1 := do("POST", "/posts", []byte(createBody), author)
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d; want 201; body: %s", w1.Code, w1.Body.String())
+	}
+	created := decode(t, w1)
+	slug, _ := created["Slug"].(string)
+	if slug == "" {
+		t.Fatal("create: Slug not returned")
+	}
+	if got, _ := created["Status"].(string); got != "draft" {
+		t.Errorf("create: Status = %q; want %q", got, "draft")
+	}
+
+	// Step 2: GET the item — verify Tags in initial draft.
+	w2 := do("GET", "/posts/"+slug, nil, author)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("GET draft: status = %d; want 200", w2.Code)
+	}
+	getItem := decode(t, w2)
+	tags, _ := getItem["Tags"].([]any)
+	if len(tags) != 2 {
+		t.Errorf("GET draft: Tags len = %d; want 2", len(tags))
+	}
+
+	// Step 3: Simulate CLI `publish` — set Status=published and PUT back.
+	// PublishedAt in the body is zero (from the GET response); the server
+	// must set it to now regardless.
+	getItem["Status"] = "published"
+	pubBody, _ := json.Marshal(getItem)
+	w3 := do("PUT", "/posts/"+slug, pubBody, author)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("publish PUT: status = %d; want 200; body: %s", w3.Code, w3.Body.String())
+	}
+	published := decode(t, w3)
+	if got, _ := published["Status"].(string); got != "published" {
+		t.Errorf("after publish: Status = %q; want %q", got, "published")
+	}
+	pa, _ := published["PublishedAt"].(string)
+	if pa == "" || pa == "0001-01-01T00:00:00Z" {
+		t.Errorf("after publish: PublishedAt = %q; want non-zero server-set timestamp", pa)
+	}
+
+	// Step 4: Simulate CLI `update` — GET the published item, change Title only,
+	// PUT back. Verify PublishedAt and Tags are preserved unchanged.
+	w4 := do("GET", "/posts/"+slug, nil, author)
+	if w4.Code != http.StatusOK {
+		t.Fatalf("GET published: status = %d; want 200", w4.Code)
+	}
+	publishedItem := decode(t, w4)
+	savedPublishedAt, _ := publishedItem["PublishedAt"].(string)
+	publishedItem["Title"] = "Updated Title"
+	updateBody, _ := json.Marshal(publishedItem)
+	w5 := do("PUT", "/posts/"+slug, updateBody, author)
+	if w5.Code != http.StatusOK {
+		t.Fatalf("update PUT: status = %d; want 200; body: %s", w5.Code, w5.Body.String())
+	}
+	updated := decode(t, w5)
+	if got, _ := updated["Title"].(string); got != "Updated Title" {
+		t.Errorf("after update: Title = %q; want %q", got, "Updated Title")
+	}
+	if got, _ := updated["Status"].(string); got != "published" {
+		t.Errorf("after update: Status = %q; want published (must not regress)", got)
+	}
+	if got, _ := updated["PublishedAt"].(string); got != savedPublishedAt {
+		t.Errorf("after update: PublishedAt = %q; want %q (must not re-publish)", got, savedPublishedAt)
+	}
+	updatedTags, _ := updated["Tags"].([]any)
+	if len(updatedTags) != 2 {
+		t.Errorf("after update: Tags len = %d; want 2 (array must survive round-trip)", len(updatedTags))
+	}
+
+	// Step 5: Simulate CLI `archive` — GET then PUT with Status=archived.
+	w6 := do("GET", "/posts/"+slug, nil, author)
+	archiveItem := decode(t, w6)
+	archiveItem["Status"] = "archived"
+	archBody, _ := json.Marshal(archiveItem)
+	w7 := do("PUT", "/posts/"+slug, archBody, author)
+	if w7.Code != http.StatusOK {
+		t.Fatalf("archive PUT: status = %d; want 200", w7.Code)
+	}
+	archived := decode(t, w7)
+	if got, _ := archived["Status"].(string); got != "archived" {
+		t.Errorf("after archive: Status = %q; want %q", got, "archived")
+	}
+
+	// Step 6: CLI `delete` — DELETE /posts/{slug} requires Editor role.
+	w8 := do("DELETE", "/posts/"+slug, nil, editor)
+	if w8.Code != http.StatusNoContent {
+		t.Fatalf("delete: status = %d; want 204", w8.Code)
+	}
+	// Confirm it's gone.
+	w9 := do("GET", "/posts/"+slug, nil, author)
+	if w9.Code != http.StatusNotFound {
+		t.Errorf("after delete: GET status = %d; want 404", w9.Code)
 	}
 }
