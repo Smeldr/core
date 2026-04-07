@@ -2,6 +2,23 @@
 
 ## Decision 28 — forge-cli: operator CLI
 
+### Plan approval and go-ahead
+
+The plan is approved. Proceed with implementation.
+
+**Token management:** Use option (a) — token commands call the MCP JSON-RPC
+endpoint (`FORGE_MCP_URL`, defaulting to `{FORGE_URL}/mcp/message`). No
+Amendment to forge core required.
+
+**Read-modify-write note:** For `publish`, `unpublish`, `archive`, and `update`,
+the CLI does a GET-then-PUT round-trip. Test this pattern early and stop to raise
+an Amendment if any fields are lost or mishandled through the round-trip —
+particularly `PublishedAt`, `ScheduledAt`, and array fields like `Tags`.
+
+**All other plan details are approved as stated.**
+
+---
+
 ### What and why
 
 Forge needs a distributable operator CLI (`forge-cli`) that lets operators manage
@@ -25,17 +42,7 @@ Decision 28 summary for the index:
 ### Module to create
 
 Create `forge-cli/` as a new submodule in forge-repo with its own `go.mod`.
-Follow the same pattern as `forge-mcp/`.
-
-### Implementation
-
-Before writing any code, present a plan covering:
-1. Which existing Forge HTTP endpoints cover each CLI command — and which gaps
-   exist (if any gaps exist, stop and raise an Amendment before proceeding)
-2. Module structure and file layout
-3. How `--from <file>` frontmatter parsing will work
-
-Wait for Peter's approval of the plan before writing any code.
+Follow the same pattern as `forge-mcp/`. Starts at `v0.1.0`.
 
 ### Command structure
 
@@ -65,12 +72,16 @@ tags: [go, forge]
 Markdown body here...
 ```
 
-**Token commands:**
+Frontmatter parser: stdlib only, no YAML library. Key: value per line.
+`[a, b, c]` → `[]string`. No multi-line values, no nested structures.
+Body after `---` separator becomes the `body` field.
+
+**Token commands** — call MCP JSON-RPC endpoint:
 
 ```
 forge-cli token create <name> <role> <ttl>   # Admin
-forge-cli token list                         # Admin
-forge-cli token revoke <id>                  # Admin
+forge-cli token list                          # Admin
+forge-cli token revoke <id>                   # Admin
 ```
 
 **Diagnostics:**
@@ -82,8 +93,9 @@ forge-cli status   # calls /_health, prints version and connectivity
 ### Configuration
 
 ```
-FORGE_URL    — base URL of the running Forge instance
-FORGE_TOKEN  — bearer token with appropriate role
+FORGE_URL      — base URL of the running Forge instance
+FORGE_TOKEN    — bearer token with appropriate role
+FORGE_MCP_URL  — MCP endpoint (default: {FORGE_URL}/mcp/message)
 ```
 
 Loaded from environment or `.forge-cli.env` file in the working directory.
@@ -94,18 +106,13 @@ Loaded from environment or `.forge-cli.env` file in the working directory.
 - No direct database access — always HTTP
 - AGPL licensed
 - All commands must have `--help` output with usage, flags, and examples
+- Gets its own `forge-cli/CHANGELOG.md`
+- `go.work` gains `use ./forge-cli`
 
-### What this is not
+### After implementation
 
-- No interactive prompts for long-form content — file-based input only
-- No direct database access
-- No replacement for forge-admin
-
-### Note on superseded task
-
-This file previously contained a README/MCP section update task. That task
-is superseded by this one. Corepilot may include the README update as part
-of this work if convenient, or defer it.
+- Delete this file
+- Update `context/corepilot.md` in forge-cms/forge-architect
 
 ### v2 — deferred, do not implement now
 
