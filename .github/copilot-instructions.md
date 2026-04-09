@@ -3,6 +3,34 @@
 This is the Forge CMS project — a Go web framework designed for how you
 actually think. Zero dependencies. AI-first. Production-ready by default.
 
+## New chat session — start here
+
+Every new chat has no memory of previous sessions. Follow these steps
+at the start of every new chat, before doing anything else.
+
+**Step 1 — Read session context:**
+Read `context/corepilot.md` from `forge-cms/forge-architect` via GitHub MCP.
+This is your state from the previous session: current versions, latest
+amendment, active milestone and step, anything deferred.
+
+**Step 2 — Check for a pending task:**
+Check whether `NEXT.md` exists in the forge repo root via GitHub MCP.
+If it exists: read it, present a plan to the user, wait for approval,
+then implement. Delete `NEXT.md` in the same commit as the implementation.
+After the commit: update `context/corepilot.md` with the amendment number
+assigned at commit time.
+
+**Step 3 — If no NEXT.md:**
+Report what you found in `context/corepilot.md` and ask the user what
+to work on. Do not proceed autonomously.
+
+**Why this matters:**
+An implementer that starts a new chat without reading context will use
+wrong versions, repeat completed work, or miss deferred items. The context
+file is the bridge between sessions. Always read it first.
+
+---
+
 ## Before writing any code
 
 1. Read `NEXT.md` in the workspace root. If it exists:
@@ -367,7 +395,7 @@ After pushing, create a GitHub Release for each tag from
 | `vX.Y.Z` | `Forge vX.Y.Z — {release name}` |
 | `forge-mcp/vX.Y.Z` | `forge-mcp vX.Y.Z — {release name}` |
 
-The release name is a short (2–4 word) phrase that captures the primary change —
+The release name is a short (2-4 word) phrase that captures the primary change —
 identical to the one-line summary in the tag message. Always propose the GitHub
 Release title(s) alongside the commit message. Paste the relevant
 `CHANGELOG.md` section as release notes.
