@@ -364,7 +364,9 @@ type Module[T any] struct {
 //   - [Repo]: provides the Repository[T]
 //
 // Optional options:
-//   - [At]: override URL prefix (default: "/"+lowercase(TypeName)+"s")
+//   - [At]: override URL prefix (default: "/"+lowercase(TypeName)+"s").
+//     Use when the default pluralisation is wrong: Story → "/storys".
+//     Example: forge.At("/solved") or forge.At("/stories").
 //   - [Auth]: set per-operation role requirements
 //   - [Cache]: enable per-module LRU response cache
 //   - [Middleware]: wrap all routes with the given middleware

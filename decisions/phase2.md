@@ -380,3 +380,52 @@ Tools: create_token, list_tokens, revoke_token. Admin role required.
 - Tagged forge-cli/v0.1.0
 - Integration test group G23 (TestFull_G23_CLIRoundTrip) validates the
   GET-then-PUT round-trip contract in integration_full_test.go
+
+---
+
+## Amendment A68 — storage.go/module.go: irregular pluralisation doc comments
+
+**Date:** 2026-04-09
+**Status:** Agreed
+**Level:** 1 (micro-amendment — doc-only, no exported symbol change)
+
+### Problem
+
+Story → "storys" by default. An implementer agent hit an internal server
+error because neither Table nor At mentioned this class of problem. The
+correction (orge.Table("stories")) was trivially available, but neither
+doc comment surfaced it. This is a documentation gap, not a code bug.
+
+### Changes
+
+**storage.go — Table function doc comment:**
+
+Extended to name the problem class explicitly and add a *Story example:
+
+`go
+// Table returns a [SQLRepoOption] that overrides the automatically derived
+// table name for a [SQLRepo]. Use it when the default snake_case plural
+// derivation does not produce the correct name — for example, types whose
+// plural is not formed by appending "s" (Story → "storys", not "stories").
+//
+//repo := forge.NewSQLRepo[*Story](db, forge.Table("stories"))
+//repo := forge.NewSQLRepo[*BlogPost](db, forge.Table("posts"))
+`
+
+**module.go — NewModule doc comment, At option line:**
+
+Extended to name the pitfall inline:
+
+`go
+//   - [At]: override URL prefix (default: "/"+lowercase(TypeName)+"s").
+//     Use when the default pluralisation is wrong: Story → "/storys".
+//     Example: forge.At("/solved") or forge.At("/stories").
+`
+
+### Consequences
+
+- No logic changes
+- No new tests required
+- No exported symbols added, removed, or renamed
+- ARCHITECTURE.md unchanged (existing entries are historical record)
+- NEXT.md deleted in the same commit

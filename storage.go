@@ -431,9 +431,11 @@ func (tableOption) isSQLRepoOption() {}
 
 // Table returns a [SQLRepoOption] that overrides the automatically derived
 // table name for a [SQLRepo]. Use it when the default snake_case plural
-// derivation does not produce the correct name.
+// derivation does not produce the correct name — for example, types whose
+// plural is not formed by appending "s" (Story → "storys", not "stories").
 //
-//	repo := forge.NewSQLRepo[BlogPost](db, forge.Table("posts"))
+//	repo := forge.NewSQLRepo[*Story](db, forge.Table("stories"))
+//	repo := forge.NewSQLRepo[*BlogPost](db, forge.Table("posts"))
 func Table(name string) SQLRepoOption { return tableOption{name: name} }
 
 // camelToSnake converts a CamelCase identifier to snake_case.
