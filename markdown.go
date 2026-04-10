@@ -251,12 +251,67 @@ func parseTableRow(line string) []string {
 // HTML-entity-escaped. The escape step ensures that raw < > & in the source
 // are neutralised before any markup tags are inserted.
 //
-// Supported patterns: **bold** → <strong>, `code` → <code>.
+// Supported patterns: [text](url) → <a href="url">, **bold** → <strong>,
+// `code` → <code>. Link URL allow-list: http://, https://, and / only.
 func mdInline(s string) string {
 	s = template.HTMLEscapeString(s)
+	s = mdApplyLinks(s)
 	s = mdApplyBold(s)
 	s = mdApplyCode(s)
 	return s
+}
+
+// mdApplyLinks replaces [text](url) with <a href="url">text</a>.
+// Called after HTML escaping, so the text portion is already safe.
+// URL allow-list: only http://, https://, and / (relative paths) are
+// accepted. Any other scheme is silently rejected and the original
+// [text](url) literal is emitted unchanged.
+func mdApplyLinks(s string) string {
+	var b strings.Builder
+	for {
+		// Find opening '['
+		open := strings.Index(s, "[")
+		if open == -1 {
+			b.WriteString(s)
+			break
+		}
+		// Find '](' immediately after the text
+		mid := strings.Index(s[open:], "](")
+		if mid == -1 {
+			b.WriteString(s)
+			break
+		}
+		mid += open // absolute index of ']('
+		// Find closing ')' after the URL
+		close := strings.Index(s[mid+2:], ")")
+		if close == -1 {
+			b.WriteString(s)
+			break
+		}
+		close += mid + 2 // absolute index of ')'
+
+		text := s[open+1 : mid]
+		rawURL := s[mid+2 : close]
+
+		// Allow-list: only safe URL schemes.
+		if !strings.HasPrefix(rawURL, "http://") &&
+			!strings.HasPrefix(rawURL, "https://") &&
+			!strings.HasPrefix(rawURL, "/") {
+			// Reject: emit everything up to and including the closing ')' as-is.
+			b.WriteString(s[:close+1])
+			s = s[close+1:]
+			continue
+		}
+
+		b.WriteString(s[:open])
+		b.WriteString("<a href=\"")
+		b.WriteString(rawURL)
+		b.WriteString("\">")
+		b.WriteString(text)
+		b.WriteString("</a>")
+		s = s[close+1:]
+	}
+	return b.String()
 }
 
 // mdApplyBold replaces **text** with <strong>text</strong>.

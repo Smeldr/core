@@ -188,6 +188,49 @@ func TestRenderMarkdown(t *testing.T) {
 			t.Errorf("got %q; want %q", got, want)
 		}
 	})
+
+	t.Run("inline link https", func(t *testing.T) {
+		got := string(renderMarkdown("[Read more](https://example.com)"))
+		want := `<p><a href="https://example.com">Read more</a></p>`
+		if got != want {
+			t.Errorf("got %q; want %q", got, want)
+		}
+	})
+
+	t.Run("inline link relative", func(t *testing.T) {
+		got := string(renderMarkdown("[Docs](/docs)"))
+		want := `<p><a href="/docs">Docs</a></p>`
+		if got != want {
+			t.Errorf("got %q; want %q", got, want)
+		}
+	})
+
+	t.Run("inline link rejected scheme javascript", func(t *testing.T) {
+		got := string(renderMarkdown("[bad](javascript:alert(1))"))
+		if containsStr(got, `href="javascript:`) {
+			t.Errorf("javascript: scheme must not appear in href: %q", got)
+		}
+		if !containsStr(got, "[bad]") {
+			t.Errorf("rejected link text should be emitted as literal: %q", got)
+		}
+	})
+
+	t.Run("inline link rejected scheme data", func(t *testing.T) {
+		got := string(renderMarkdown("[x](data:text/html,<h1>xss</h1>)"))
+		if containsStr(got, `href="data:`) {
+			t.Errorf("data: scheme must not appear in href: %q", got)
+		}
+	})
+
+	t.Run("inline link next to bold", func(t *testing.T) {
+		got := string(renderMarkdown("**bold** and [link](https://example.com)"))
+		if !containsStr(got, "<strong>bold</strong>") {
+			t.Errorf("expected <strong> in output: %q", got)
+		}
+		if !containsStr(got, `<a href="https://example.com">link</a>`) {
+			t.Errorf("expected <a> in output: %q", got)
+		}
+	})
 }
 
 func TestIsTableSep(t *testing.T) {

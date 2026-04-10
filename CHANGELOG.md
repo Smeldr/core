@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.9.1] — 2026-04-10
+
+Inline link support in `mdInline` — `[text](url)` now renders as `<a href="url">text</a>`.
+
+### Added
+
+- `markdown.go`: `mdApplyLinks` — iterative `[text](url)` → `<a href="url">text</a>`
+  replacement with a URL allow-list (`http://`, `https://`, `/` only). Any other
+  scheme (e.g. `javascript:`, `data:`) is silently rejected and the original
+  literal text is emitted unchanged. Called from `mdInline` after HTML escaping
+  and before bold/code pattern application.
+
+---
+
 ## [1.9.0] — 2026-04-07
 
 Field format semantics: `forge_format` and `forge_description` struct tags (Decision 27).

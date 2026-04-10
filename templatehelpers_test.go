@@ -57,10 +57,9 @@ func TestForgeMarkdown_bold(t *testing.T) {
 }
 
 func TestForgeMarkdown_link(t *testing.T) {
-	// renderMarkdown does not support [text](url) inline links;
-	// the raw syntax is emitted as paragraph text.
+	// renderMarkdown now supports [text](url) inline links.
 	got := string(forgeMarkdown("[click here](https://example.com)"))
-	want := "<p>[click here](https://example.com)</p>"
+	want := `<p><a href="https://example.com">click here</a></p>`
 	if got != want {
 		t.Errorf("link: got %q, want %q", got, want)
 	}
