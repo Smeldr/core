@@ -156,6 +156,44 @@ func TestInputSchema(t *testing.T) {
 	}
 }
 
+// TestInputSchema_datetimeField verifies that a field with Type == "datetime"
+// (the internal Forge type identifier for time.Time) emits
+// {"type":"string","format":"date-time"} in both inputSchema and
+// inputSchemaUpdate, satisfying the JSON Schema specification.
+func TestInputSchema_datetimeField(t *testing.T) {
+	fields := []forge.MCPField{
+		{Name: "PublishedAt", JSONName: "published_at", Type: "datetime"},
+		{Name: "ScheduledAt", JSONName: "scheduled_at", Type: "datetime"},
+	}
+
+	for _, fn := range []struct {
+		name   string
+		schema map[string]any
+	}{
+		{"inputSchema", inputSchema(fields)},
+		{"inputSchemaUpdate", inputSchemaUpdate(fields)},
+	} {
+		t.Run(fn.name, func(t *testing.T) {
+			props, ok := fn.schema["properties"].(map[string]any)
+			if !ok {
+				t.Fatal("properties is not map[string]any")
+			}
+			for _, key := range []string{"published_at", "scheduled_at"} {
+				prop, ok := props[key].(map[string]any)
+				if !ok {
+					t.Fatalf("%s: %q property missing or wrong type", fn.name, key)
+				}
+				if got := prop["type"]; got != "string" {
+					t.Errorf("%s: %q type = %q; want %q", fn.name, key, got, "string")
+				}
+				if got := prop["format"]; got != "date-time" {
+					t.Errorf("%s: %q format = %q; want %q", fn.name, key, got, "date-time")
+				}
+			}
+		})
+	}
+}
+
 // TestMCPResourcesList verifies that resources/list returns only Published items
 // and formats URIs as forge://{prefix}/{slug}.
 func TestMCPResourcesList(t *testing.T) {

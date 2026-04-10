@@ -218,6 +218,10 @@ func inputSchema(fields []forge.MCPField) map[string]any {
 				"type":  "array",
 				"items": map[string]any{"type": "string"},
 			}
+		} else if f.Type == "datetime" {
+			// "datetime" is an internal Forge type identifier. JSON Schema
+			// requires the RFC 3339 date-time format expressed as a string.
+			prop = map[string]any{"type": "string", "format": "date-time"}
 		} else {
 			prop = map[string]any{"type": f.Type}
 			if f.MinLength > 0 {
@@ -263,6 +267,10 @@ func inputSchemaUpdate(fields []forge.MCPField) map[string]any {
 				"type":  "array",
 				"items": map[string]any{"type": "string"},
 			}
+		} else if f.Type == "datetime" {
+			// "datetime" is an internal Forge type identifier. JSON Schema
+			// requires the RFC 3339 date-time format expressed as a string.
+			prop = map[string]any{"type": "string", "format": "date-time"}
 		} else {
 			prop = map[string]any{"type": f.Type}
 			if f.MinLength > 0 {

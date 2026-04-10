@@ -109,12 +109,12 @@ Token commands require `FORGE_MCP_URL` and an Admin-role token in `FORGE_TOKEN`.
 ### Create a token
 
 ```bash
-forge-cli token create --name ci-deploy --role author --ttl 720h
+forge-cli token create ci-deploy author 30
 ```
 
-Roles: `guest`, `author`, `editor`, `admin`. TTL is a Go duration string
-(e.g. `24h`, `30d` is not supported — use `720h` for 30 days). Prints the
-plaintext token once — copy it immediately.
+Arguments: `<name> <role> <ttl-days>`. Roles: `guest`, `author`, `editor`,
+`admin`. TTL is an integer number of days (e.g. `30` for 30 days). Prints
+the plaintext token once — copy it immediately.
 
 ### List tokens
 

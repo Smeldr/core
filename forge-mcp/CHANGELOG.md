@@ -7,6 +7,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.3.1] — 2026-04-10
+
+Fix invalid `"type":"datetime"` in generated JSON Schema for time fields.
+
+### Fixed
+
+- `mcp.go`: `inputSchema` and `inputSchemaUpdate` now emit
+  `{"type":"string","format":"date-time"}` for fields with internal type
+  `"datetime"` (`time.Time` fields such as `published_at` and `scheduled_at`).
+  Previously emitted the invalid `"type":"datetime"`, which caused VS Code
+  Copilot agent mode and other strict MCP clients to reject tool registration.
+
+---
+
 ## [1.3.0] — 2026-04-07
 
 Field format semantics: emit `"description"` in tool input schemas (Decision 27).
