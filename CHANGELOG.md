@@ -23,6 +23,52 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.10.0] — 2026-04-11
+
+NavTree — first-class navigation abstraction (Decision 29).
+
+### Added
+
+- `nav.go`: `NavMode` type with `NavModeDB` (database-backed) and `NavModeCode`
+  (code-supplied) constants. Zero value disables navigation.
+- `nav.go`: `NavItem` struct — nine fields: `ID`, `Label`, `Path`, `ParentID`,
+  `Module`, `Hidden`, `Ghost`, `SortOrder`, `Children`. Hidden/Ghost flag matrix
+  governs visibility in navigation, breadcrumbs, and clickability.
+- `nav.go`: `NavTree` struct — thread-safe in-memory tree with flat `map[string]*NavItem`
+  and roots slice. Methods: `Tree()` (deep copy of roots with Children), `List()`
+  (flat list), `Get(id)`, `HasDB()`, `Create`, `Update`, `Delete` (recursive
+  descendant removal), `setCode`, `migrate`, `load`.
+- `forge.go`: `Config.NavMode NavMode` field — selects DB or code navigation mode.
+- `forge.go`: `App.navTree *NavTree`, `App.navCodeItems []NavItem`,
+  `App.navTreeModules` — nav wiring fields.
+- `forge.go`: `App.Nav(items ...NavItem)` — registers code-mode nav items.
+- `forge.go`: `App.NavTree() *NavTree` — accessor for forge-mcp and custom handlers.
+- `forge.go`: `Content()` — detects `setNavTree(*NavTree)` interface, appends
+  module to `navTreeModules` for deferred wiring.
+- `forge.go`: `Handler()` — initialises NavTree after TokenStore probe: migrates
+  and loads (NavModeDB) or builds from code items (NavModeCode); then calls
+  `setNavTree` on all registered modules.
+- `templatedata.go`: `TemplateData[T].Nav []NavItem` field — populated in HTML
+  renders when a nav tree is configured. Templates access it as `{{.Nav}}`.
+- `templates.go`: `Module[T].setNavTree(*NavTree)` — setter called by
+  `App.Handler()`.
+- `templates.go`: `renderListHTML` and `renderShowHTML` — inject `data.Nav` from
+  `m.navTree.Tree()` when `m.navTree != nil`.
+- `module.go`: `Module[T].navTree *NavTree` field.
+
+### forge-mcp — v1.4.0
+
+- `mcp.go`: `Server.navTree *forge.NavTree` field, wired from `app.NavTree()` in
+  `New()`.
+- `tool.go`: `navToolDefs(hasDB bool)` — returns `list_nav_items` always; adds
+  `create_nav_item`, `update_nav_item`, `delete_nav_item` when tree is DB-backed.
+  All require Editor or Admin role.
+- `tool.go`: `handleNavTool()` — dispatches the four nav tools; `update_nav_item`
+  uses partial-overlay semantics (absent fields preserved from stored item).
+- `tool.go`: `stringArgOr`, `boolArgOr`, `intArgOr` helper functions.
+
+---
+
 ## [1.9.1] — 2026-04-10
 
 Inline link support in `mdInline` — `[text](url)` now renders as `<a href="url">text</a>`.

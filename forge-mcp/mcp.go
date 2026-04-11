@@ -30,6 +30,7 @@ type Server struct {
 	modules    []forge.MCPModule
 	secret     []byte            // HMAC secret for SSE bearer-token verification
 	tokenStore *forge.TokenStore // non-nil when the app has a TokenStore configured
+	navTree    *forge.NavTree    // non-nil when the app has a NavTree configured
 }
 
 // New creates a Server for the given forge App, collecting all content modules
@@ -41,6 +42,7 @@ func New(app *forge.App, opts ...ServerOption) *Server {
 		modules:    app.MCPModules(),
 		secret:     app.Secret(),
 		tokenStore: app.TokenStore(),
+		navTree:    app.NavTree(),
 	}
 	for _, o := range opts {
 		o(s)

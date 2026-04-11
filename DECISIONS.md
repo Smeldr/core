@@ -91,6 +91,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | D27 | `mcp.go`/`module.go`/`forge-mcp/mcp.go`: field format semantics — `forge_format` and `forge_description` struct tags populate `MCPField.Format` and `MCPField.Description`; forge-mcp emits `"description"` key in JSON Schema properties with priority logic | Agreed | 2026-04-07 |
 | D28 | `forge-cli/`: operator CLI — stdlib-only submodule; content CRUD + lifecycle via HTTP REST; token management via MCP JSON-RPC; YAML-subset frontmatter parser; `forge-cli/v0.1.0` | Agreed | 2026-04-07 |
 | A68 | `storage.go`/`module.go`: doc comments on `Table` and `At` extended to surface irregular pluralisation pitfalls (Story → "storys") | Agreed | 2026-04-09 |
+| D29 | `nav.go`/`forge.go`/`templatedata.go`/`templates.go`/`module.go`/`forge-mcp`: NavTree — first-class navigation abstraction; `NavItem`, `NavTree`, `NavModeDB`/`NavModeCode`, `App.Nav()`, `App.NavTree()`, `TemplateData.Nav`, four MCP nav tools (Editor role) | Agreed | 2026-04-11 |
 
 ---
 

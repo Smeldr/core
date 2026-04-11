@@ -7,6 +7,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.4.0] — 2026-04-11
+
+NavTree MCP tools — four new nav tools (Decision 29).
+
+### Added
+
+- `mcp.go`: `Server.navTree *forge.NavTree` field; wired from `app.NavTree()` in `New()`.
+- `tool.go`: `navToolDefs(hasDB bool)` — returns `list_nav_items` (always available);
+  adds `create_nav_item`, `update_nav_item`, `delete_nav_item` when tree is DB-backed.
+  All require Editor or Admin role.
+- `tool.go`: `handleNavTool()` — dispatches four nav tools. `update_nav_item` uses
+  partial-overlay semantics: absent fields are preserved from the stored item.
+- `tool.go`: `stringArgOr`, `boolArgOr`, `intArgOr` helper functions for optional arg extraction.
+- `tool.go`: `handleToolsList()` — appends nav tools when `s.navTree != nil`.
+- `tool.go`: `handleToolsCall()` — pre-dispatches nav tools (Editor gate) before generic module routing.
+
+---
+
 ## [1.3.1] — 2026-04-10
 
 Fix invalid `"type":"datetime"` in generated JSON Schema for time fields.

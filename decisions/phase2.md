@@ -429,3 +429,142 @@ Extended to name the pitfall inline:
 - No exported symbols added, removed, or renamed
 - ARCHITECTURE.md unchanged (existing entries are historical record)
 - NEXT.md deleted in the same commit
+
+---
+
+## Decision 29 — NavTree: first-class navigation abstraction
+
+**Date:** 2026-04-11
+**Status:** Agreed
+**Level:** 2 (standard — new exported types, interface, DB migration, template injection, MCP tools)
+
+### Problem
+
+Forge applications need structured navigation that can be rendered in
+templates and authored by AI consuming agents via MCP. The existing
+approach (hard-coding nav in templates or ad hoc Extra data) is
+inconsistent across modules and invisible to agents. A first-class
+abstraction eliminates this duplication and surfaces nav to both
+template authors and MCP clients.
+
+### Decision
+
+Add a `NavTree` type with two backing modes — DB-persisted (`NavModeDB`)
+and code-supplied (`NavModeCode`). Nav is inactive by default (zero
+`NavMode` value) so existing apps are unaffected.
+
+### NavMode values
+
+| Value | Constant | Meaning |
+|-------|----------|---------|
+| 0 | (zero) | Nav inactive — no tree, no migration |
+| 1 | `NavModeDB` | Tree persisted in `forge_nav` table; CRUD via MCP |
+| 2 | `NavModeCode` | Tree supplied once via `App.Nav()` at startup; read-only |
+
+`NavModeDB` panics at `Handler()` startup if `Config.DB` is nil.
+
+### NavItem fields
+
+| Field | Type | Persisted | Notes |
+|-------|------|-----------|-------|
+| `ID` | string | ✅ | Caller-supplied; primary key |
+| `Label` | string | ✅ | Display text |
+| `Path` | string | ✅ | Href (absolute or relative) |
+| `ParentID` | string | ✅ | Empty string = root item |
+| `Module` | string | ✅ | Informational; not enforced |
+| `Hidden` | bool | ✅ | Exclude from nav; show in breadcrumb |
+| `Ghost` | bool | ✅ | Show in nav; breadcrumb only — not clickable |
+| `SortOrder` | int | ✅ | Ascending; ties broken by Label |
+| `Children` | []*NavItem | ❌ | In-memory only; populated by buildTree |
+
+### Hidden / Ghost flag matrix
+
+| Hidden | Ghost | In nav | In breadcrumb | Clickable |
+|--------|-------|--------|---------------|-----------|
+| false | false | ✅ | ✅ | ✅ |
+| true | false | ❌ | ✅ | ✅ |
+| false | true | ✅ | ✅ | ❌ |
+| true | true | ❌ | ✅ | ❌ |
+
+### forge_nav table schema
+
+```sql
+CREATE TABLE IF NOT EXISTS forge_nav (
+    id        TEXT PRIMARY KEY,
+    label     TEXT,
+    path      TEXT,
+    parent_id TEXT,
+    module    TEXT,
+    hidden    INTEGER,
+    ghost     INTEGER,
+    sort_order INTEGER
+)
+```
+
+### Deferred wiring pattern
+
+`Content()` runs before `Handler()`. At `Content()` time, `NavTree` is
+not yet initialised. The fix: `Content()` detects modules implementing
+`interface{ setNavTree(*NavTree) }` and appends them to
+`App.navTreeModules`. In `Handler()`, after `NavTree` is initialised,
+`setNavTree` is called on every collected module.
+
+### Template injection
+
+`TemplateData[T]` gains a `Nav []NavItem` field. Both `renderListHTML`
+and `renderShowHTML` in `templates.go` call `m.navTree.Tree()` and
+assign the result to `data.Nav` when `m.navTree != nil`.
+
+Templates access navigation via `{{range .Nav}}` and recurse into
+`{{range .Children}}`.
+
+### delete_nav_item: recursive cascade
+
+Deleting a nav item deletes all its descendants. `collectDescendantIDs`
+walks the in-memory tree under a read lock to gather all descendant IDs,
+then a single SQL `DELETE … WHERE id IN (…)` removes all of them. The
+in-memory cache is rebuilt via `load()` after the deletion.
+
+### MCP nav tools
+
+All nav tools require the **Editor** role or higher.
+
+| Tool | Condition | Description |
+|------|-----------|-------------|
+| `list_nav_items` | always (when NavTree ≠ nil) | Returns flat list of all NavItems |
+| `create_nav_item` | NavModeDB only | Creates a new item |
+| `update_nav_item` | NavModeDB only | Partial-overlay update |
+| `delete_nav_item` | NavModeDB only | Recursive delete |
+
+`update_nav_item` implements partial-overlay semantics: it fetches the
+existing item via `Get()`, applies only the fields present in the MCP
+args (non-empty string / explicit bool), then calls `Update()`. Absent
+fields are preserved.
+
+### New exported symbols
+
+In package `forge`:
+- `type NavMode int`
+- `const NavModeDB NavMode`, `const NavModeCode NavMode`
+- `type NavItem struct { … }`
+- `type NavTree struct { … }` (opaque — fields unexported)
+- `(*NavTree).HasDB() bool`
+- `(*NavTree).Tree() []NavItem`
+- `(*NavTree).List() []NavItem`
+- `(*NavTree).Get(id string) (NavItem, bool)`
+- `(*NavTree).Create(ctx context.Context, item NavItem) (NavItem, error)`
+- `(*NavTree).Update(ctx context.Context, item NavItem) (NavItem, error)`
+- `(*NavTree).Delete(ctx context.Context, id string) error`
+- `Config.NavMode NavMode` field
+- `App.Nav(items ...NavItem)` method
+- `App.NavTree() *NavTree` method
+- `TemplateData[T].Nav []NavItem` field
+
+### Consequences
+
+- forge core: v1.9.1 → v1.10.0
+- forge-mcp: v1.3.1 → v1.4.0
+- Zero behaviour change for apps that do not set `Config.NavMode`
+- No new third-party dependencies
+- `example_test.go` unchanged (no new examples required for this decision)
+- NEXT.md deleted in the same commit

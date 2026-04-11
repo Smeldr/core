@@ -91,6 +91,13 @@ type Config struct {
 	// IdleTimeout is the maximum keep-alive idle time between requests.
 	// Defaults to 120 s. Optional.
 	IdleTimeout time.Duration
+
+	// NavMode selects how the application's navigation tree is populated.
+	// Use [NavModeDB] to persist navigation items in the forge_nav database
+	// table (requires [Config.DB]; panics at startup if DB is nil).
+	// Use [NavModeCode] to supply items directly via [App.Nav].
+	// The zero value disables navigation entirely. Optional.
+	NavMode NavMode
 }
 
 // MustConfig validates cfg and returns it unchanged.
@@ -163,30 +170,33 @@ type App struct {
 	cfg                    Config
 	mux                    *http.ServeMux
 	middleware             []func(http.Handler) http.Handler
-	sitemapStore           *SitemapStore       // non-nil when at least one module has SitemapConfig
-	sitemapIndexRegistered bool                // true once GET /sitemap.xml is registered
-	seo                    seoState            // app-level SEO configuration set via SEO()
-	robotsTxtRegistered    bool                // true once GET /robots.txt is registered
-	templateModules        []templateParser    // modules with HTML templates; parsed at Run() time
-	llmsStore              *LLMsStore          // non-nil when at least one module uses AIIndex
-	llmsTxtRegistered      bool                // true once GET /llms.txt is registered
-	llmsFullTxtRegistered  bool                // true once GET /llms-full.txt is registered
-	feedStore              *FeedStore          // non-nil when at least one module uses Feed(...)
-	feedIndexRegistered    bool                // true once GET /feed.xml is registered
-	cookieDecls            []Cookie            // registered via Cookies(); drives /.well-known/cookies.json
-	cookieManifestOpts     []Option            // options for the manifest handler (e.g. ManifestAuth)
-	cookieManifestReg      bool                // true once GET /.well-known/cookies.json is registered
-	redirectStore          *RedirectStore      // runtime redirect table; always non-nil after New()
-	redirectFallbackReg    bool                // true once "/" fallback handler is registered
-	redirectManifestReg    bool                // true once GET /.well-known/redirects.json is registered
-	redirectManifestOpts   []Option            // options for the redirect manifest handler (e.g. ManifestAuth)
-	schedulerModules       []schedulableModule // modules that implement scheduled publishing
-	rebuilderModules       []rebuilder         // modules with derived content (sitemap, feed, AI)
-	stoppableModules       []stoppable         // modules with background goroutines to stop at shutdown
-	mcpModules             []MCPModule         // modules registered with forge.MCP(...)
-	rebuildDone            bool                // true once startup rebuildAll goroutine is launched
-	partialsDir            string              // set by App.Partials(); shared partial templates loaded at Run() time
-	tokenStore             *TokenStore         // non-nil when Config.TokenStore is set; enables DB-backed token management
+	sitemapStore           *SitemapStore                       // non-nil when at least one module has SitemapConfig
+	sitemapIndexRegistered bool                                // true once GET /sitemap.xml is registered
+	seo                    seoState                            // app-level SEO configuration set via SEO()
+	robotsTxtRegistered    bool                                // true once GET /robots.txt is registered
+	templateModules        []templateParser                    // modules with HTML templates; parsed at Run() time
+	llmsStore              *LLMsStore                          // non-nil when at least one module uses AIIndex
+	llmsTxtRegistered      bool                                // true once GET /llms.txt is registered
+	llmsFullTxtRegistered  bool                                // true once GET /llms-full.txt is registered
+	feedStore              *FeedStore                          // non-nil when at least one module uses Feed(...)
+	feedIndexRegistered    bool                                // true once GET /feed.xml is registered
+	cookieDecls            []Cookie                            // registered via Cookies(); drives /.well-known/cookies.json
+	cookieManifestOpts     []Option                            // options for the manifest handler (e.g. ManifestAuth)
+	cookieManifestReg      bool                                // true once GET /.well-known/cookies.json is registered
+	redirectStore          *RedirectStore                      // runtime redirect table; always non-nil after New()
+	redirectFallbackReg    bool                                // true once "/" fallback handler is registered
+	redirectManifestReg    bool                                // true once GET /.well-known/redirects.json is registered
+	redirectManifestOpts   []Option                            // options for the redirect manifest handler (e.g. ManifestAuth)
+	schedulerModules       []schedulableModule                 // modules that implement scheduled publishing
+	rebuilderModules       []rebuilder                         // modules with derived content (sitemap, feed, AI)
+	stoppableModules       []stoppable                         // modules with background goroutines to stop at shutdown
+	mcpModules             []MCPModule                         // modules registered with forge.MCP(...)
+	rebuildDone            bool                                // true once startup rebuildAll goroutine is launched
+	partialsDir            string                              // set by App.Partials(); shared partial templates loaded at Run() time
+	tokenStore             *TokenStore                         // non-nil when Config.TokenStore is set; enables DB-backed token management
+	navTree                *NavTree                            // non-nil when NavMode is set or App.Nav() is called
+	navCodeItems           []NavItem                           // items supplied via App.Nav() for NavModeCode
+	navTreeModules         []interface{ setNavTree(*NavTree) } // modules that receive the navTree after startup
 }
 
 // New creates a new [App] from cfg.
@@ -354,6 +364,9 @@ func (a *App) Content(v any, opts ...Option) {
 		if mm, ok := r.(MCPModule); ok && len(mm.MCPMeta().Operations) > 0 {
 			a.mcpModules = append(a.mcpModules, mm)
 		}
+		if nt, ok := r.(interface{ setNavTree(*NavTree) }); ok {
+			a.navTreeModules = append(a.navTreeModules, nt)
+		}
 		return
 	}
 	m := NewModule(v, opts...)
@@ -375,6 +388,23 @@ func (a *App) Secret() []byte { return a.cfg.Secret }
 // token management, or nil when token management is not configured. forge-mcp
 // calls this in its New constructor to wire token tools and revocation checks.
 func (a *App) TokenStore() *TokenStore { return a.tokenStore }
+
+// Nav registers navigation items for [NavModeCode]. Calling Nav implicitly
+// activates code-mode navigation — no database table is created or read.
+// Items are deep-copied at [App.Handler] time; the caller's slice is not
+// retained after that point.
+//
+// Nav must be called before [App.Handler] or [App.Run].
+func (a *App) Nav(items ...NavItem) {
+	a.navCodeItems = append(a.navCodeItems, items...)
+}
+
+// NavTree returns the application's [NavTree], or nil when navigation has not
+// been configured. NavTree is non-nil only after [App.Handler] or [App.Run]
+// has been called.
+//
+// forge-mcp calls this in its New constructor to wire nav tools.
+func (a *App) NavTree() *NavTree { return a.navTree }
 
 // httpsRedirect returns a middleware that redirects plain-HTTP requests to
 // their HTTPS equivalents with a 301 Moved Permanently response.
@@ -465,6 +495,32 @@ func (a *App) Handler() http.Handler {
 	if a.tokenStore != nil {
 		if err := a.tokenStore.probeTable(context.Background()); err != nil {
 			fmt.Fprintf(os.Stderr, "WARN  forge: TokenStore is configured but the forge_tokens table is missing or inaccessible — create it using the DDL in the TokenStore documentation\n")
+		}
+	}
+	// D29: initialise the navigation tree when NavMode is set or App.Nav() items
+	// were supplied. NavModeDB migrates and loads from forge_nav; NavModeCode
+	// builds the tree from the items supplied via App.Nav().
+	if a.cfg.NavMode == NavModeDB {
+		if a.cfg.DB == nil {
+			panic("forge: Config.NavMode is NavModeDB but Config.DB is nil — set Config.DB or use NavModeCode")
+		}
+		u, _ := url.Parse(a.cfg.BaseURL)
+		navCtx := NewBackgroundContext(u.Hostname())
+		a.navTree = &NavTree{}
+		if err := a.navTree.migrate(navCtx, a.cfg.DB); err != nil {
+			fmt.Fprintf(os.Stderr, "WARN  forge: NavTree migration failed: %v\n", err)
+			a.navTree = nil
+		} else if err := a.navTree.load(navCtx, a.cfg.DB); err != nil {
+			fmt.Fprintf(os.Stderr, "WARN  forge: NavTree load failed: %v\n", err)
+			a.navTree = nil
+		}
+	} else if len(a.navCodeItems) > 0 {
+		a.navTree = &NavTree{}
+		a.navTree.setCode(a.navCodeItems)
+	}
+	if a.navTree != nil {
+		for _, m := range a.navTreeModules {
+			m.setNavTree(a.navTree)
 		}
 	}
 	// A34: trigger a one-shot startup rebuild of all derived content (sitemap,

@@ -68,6 +68,15 @@ type TemplateData[T any] struct {
 	//	{{- $nav := .Extra}}
 	//	{{template "sidebar" $nav}}
 	Extra any
+
+	// Nav holds the top-level navigation items with their Children populated.
+	// It is nil when no navigation tree is configured. Templates access it
+	// as {{.Nav}} to render site-wide navigation:
+	//
+	//	{{range .Nav}}
+	//	  <a href="{{.Path}}">{{.Label}}</a>
+	//	{{end}}
+	Nav []NavItem
 }
 
 // NewTemplateData constructs a [TemplateData][T] for the given context,

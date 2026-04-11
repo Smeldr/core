@@ -152,6 +152,13 @@ func (m *Module[T]) setSiteName(name string) {
 	m.siteName = name
 }
 
+// setNavTree stores the application's [NavTree] so it can be injected into
+// [TemplateData.Nav] during HTML rendering. Called by [App.Handler] after the
+// nav tree has been initialised from the database or code items.
+func (m *Module[T]) setNavTree(nt *NavTree) {
+	m.navTree = nt
+}
+
 // setPartials stores the pre-loaded partial template sources so they are
 // registered into each module template set during [Module.parseTemplates].
 // Called by [App.Run] after [App.Partials] has loaded the partials directory.
@@ -301,6 +308,9 @@ func (m *Module[T]) renderListHTML(w http.ResponseWriter, r *http.Request, ctx C
 	data.AppSchema = renderAppSchema(m.appSchema)
 	data.HeadAssets = m.headAssets
 	data.Extra = m.resolveExtra(ctx, items)
+	if m.navTree != nil {
+		data.Nav = m.navTree.Tree()
+	}
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
 		WriteError(w, r, fmt.Errorf("forge: list template execution: %w", err))
@@ -331,6 +341,9 @@ func (m *Module[T]) renderShowHTML(w http.ResponseWriter, r *http.Request, ctx C
 	data.AppSchema = renderAppSchema(m.appSchema)
 	data.HeadAssets = m.headAssets
 	data.Extra = m.resolveExtra(ctx, item)
+	if m.navTree != nil {
+		data.Nav = m.navTree.Tree()
+	}
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
 		WriteError(w, r, fmt.Errorf("forge: show template execution: %w", err))

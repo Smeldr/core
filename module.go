@@ -352,6 +352,8 @@ type Module[T any] struct {
 
 	contextFunc func(Context, any) (any, error) // nil when no ContextFunc option given
 
+	navTree *NavTree // non-nil when App.NavTree is active; set by App.Handler via setNavTree
+
 	stopCh chan struct{} // closed by Stop() to terminate the cache sweep goroutine
 }
 

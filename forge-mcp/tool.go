@@ -101,7 +101,9 @@ func errorFor(err error) *jsonRPCError {
 // one entry per MCPWrite operation per registered MCPWrite module, plus two
 // admin read tools (list_{type}s, get_{type}) per MCPWrite module. When
 // the server has a TokenStore, three additional Admin-only token management
-// tools are appended (create_token, list_tokens, revoke_token).
+// tools are appended (create_token, list_tokens, revoke_token). When the
+// server has a NavTree, nav management tools are appended (always
+// list_nav_items; create/update/delete_nav_item only when the tree is DB-backed).
 func (s *Server) handleToolsList() any {
 	var tools []mcpTool
 	for _, m := range s.modules {
@@ -113,6 +115,9 @@ func (s *Server) handleToolsList() any {
 	}
 	if s.tokenStore != nil {
 		tools = append(tools, tokenToolDefs()...)
+	}
+	if s.navTree != nil {
+		tools = append(tools, navToolDefs(s.navTree.HasDB())...)
 	}
 	return map[string]any{"tools": tools}
 }
@@ -153,6 +158,22 @@ func (s *Server) handleToolsCall(ctx forge.Context, params json.RawMessage) (any
 				args = map[string]any{}
 			}
 			return s.handleTokenTool(ctx, p.Name, args)
+		}
+	}
+
+	// Nav tools require Editor role and are dispatched before module-scoped
+	// tool authorisation.
+	if s.navTree != nil {
+		switch p.Name {
+		case "list_nav_items", "create_nav_item", "update_nav_item", "delete_nav_item":
+			if rpcErr := s.authoriseEditor(ctx); rpcErr != nil {
+				return nil, rpcErr
+			}
+			navArgs := p.Arguments
+			if navArgs == nil {
+				navArgs = map[string]any{}
+			}
+			return s.handleNavTool(ctx, p.Name, navArgs)
 		}
 	}
 
@@ -453,4 +474,200 @@ func (s *Server) handleTokenTool(ctx forge.Context, name string, args map[string
 	default:
 		return nil, &jsonRPCError{Code: -32602, Message: "unknown token tool: " + name}
 	}
+}
+
+// navToolDefs returns the nav tool definitions. list_nav_items is always
+// included. create_nav_item, update_nav_item, and delete_nav_item are included
+// only when hasDB is true (i.e. the NavTree is in NavModeDB).
+//
+// All nav tools require Editor or Admin role.
+func navToolDefs(hasDB bool) []mcpTool {
+	tools := []mcpTool{
+		{
+			Name:        "list_nav_items",
+			Description: "List all navigation items in the site navigation tree. Requires Editor or Admin role.",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+	}
+	if !hasDB {
+		return tools
+	}
+	tools = append(tools,
+		mcpTool{
+			Name:        "create_nav_item",
+			Description: "Create a new navigation item. Requires Editor or Admin role.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"label":      map[string]any{"type": "string", "description": "Display text for this navigation item."},
+					"path":       map[string]any{"type": "string", "description": "URL path prefix, e.g. /learn. Leave empty for a ghost (non-clickable) item."},
+					"parent_id":  map[string]any{"type": "string", "description": "ID of the parent item. Omit or leave empty for a top-level item."},
+					"module":     map[string]any{"type": "string", "description": "Forge module table name this item maps to. Omit for custom or ghost items."},
+					"hidden":     map[string]any{"type": "boolean", "description": "Exclude from navigation while keeping in breadcrumbs."},
+					"ghost":      map[string]any{"type": "boolean", "description": "Non-clickable structural grouping node. Still appears in navigation unless also hidden."},
+					"sort_order": map[string]any{"type": "number", "description": "Display order within the same parent level (lower = earlier)."},
+				},
+				"required": []string{"label"},
+			},
+		},
+		mcpTool{
+			Name:        "update_nav_item",
+			Description: "Update an existing navigation item by ID. Requires Editor or Admin role. Absent fields are preserved from the stored item.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id":         map[string]any{"type": "string", "description": "ID of the navigation item to update."},
+					"label":      map[string]any{"type": "string"},
+					"path":       map[string]any{"type": "string"},
+					"parent_id":  map[string]any{"type": "string"},
+					"module":     map[string]any{"type": "string"},
+					"hidden":     map[string]any{"type": "boolean"},
+					"ghost":      map[string]any{"type": "boolean"},
+					"sort_order": map[string]any{"type": "number"},
+				},
+				"required": []string{"id"},
+			},
+		},
+		mcpTool{
+			Name:        "delete_nav_item",
+			Description: "Permanently delete a navigation item and all its descendants. Requires Editor or Admin role.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{"type": "string", "description": "ID of the navigation item to delete."},
+				},
+				"required": []string{"id"},
+			},
+		},
+	)
+	return tools
+}
+
+// handleNavTool dispatches list_nav_items, create_nav_item, update_nav_item,
+// and delete_nav_item requests. Called only when s.navTree is non-nil and the
+// caller holds Editor role (checked by the caller).
+func (s *Server) handleNavTool(ctx forge.Context, name string, args map[string]any) (any, *jsonRPCError) {
+	switch name {
+	case "list_nav_items":
+		items := s.navTree.List()
+		if items == nil {
+			items = []forge.NavItem{}
+		}
+		return toolResult(map[string]any{"items": items}), nil
+
+	case "create_nav_item":
+		label, ok := stringArg(args, "label")
+		if !ok {
+			return nil, &jsonRPCError{Code: -32602, Message: "invalid params: label required"}
+		}
+		item := forge.NavItem{
+			Label:     label,
+			Path:      stringArgOr(args, "path", ""),
+			ParentID:  stringArgOr(args, "parent_id", ""),
+			Module:    stringArgOr(args, "module", ""),
+			Hidden:    boolArgOr(args, "hidden", false),
+			Ghost:     boolArgOr(args, "ghost", false),
+			SortOrder: intArgOr(args, "sort_order", 0),
+		}
+		created, err := s.navTree.Create(ctx, item)
+		if err != nil {
+			return nil, errorFor(err)
+		}
+		return toolResult(created), nil
+
+	case "update_nav_item":
+		id, ok := stringArg(args, "id")
+		if !ok {
+			return nil, &jsonRPCError{Code: -32602, Message: "invalid params: id required"}
+		}
+		// Fetch the existing item and apply the caller's fields as an overlay.
+		existing, exists := s.navTree.Get(id)
+		if !exists {
+			return nil, &jsonRPCError{Code: -32001, Message: "not found"}
+		}
+		if sv, ok := args["label"].(string); ok {
+			existing.Label = sv
+		}
+		if sv, ok := args["path"].(string); ok {
+			existing.Path = sv
+		}
+		if sv, ok := args["parent_id"].(string); ok {
+			existing.ParentID = sv
+		}
+		if sv, ok := args["module"].(string); ok {
+			existing.Module = sv
+		}
+		if bv, ok := args["hidden"].(bool); ok {
+			existing.Hidden = bv
+		}
+		if bv, ok := args["ghost"].(bool); ok {
+			existing.Ghost = bv
+		}
+		if nv, ok := args["sort_order"].(float64); ok {
+			existing.SortOrder = int(nv)
+		}
+		updated, err := s.navTree.Update(ctx, existing)
+		if err != nil {
+			return nil, errorFor(err)
+		}
+		return toolResult(updated), nil
+
+	case "delete_nav_item":
+		id, ok := stringArg(args, "id")
+		if !ok {
+			return nil, &jsonRPCError{Code: -32602, Message: "invalid params: id required"}
+		}
+		if err := s.navTree.Delete(ctx, id); err != nil {
+			return nil, errorFor(err)
+		}
+		return toolResult(map[string]any{"deleted": true, "id": id}), nil
+	}
+	return nil, &jsonRPCError{Code: -32602, Message: "unknown nav tool: " + name}
+}
+
+// stringArgOr extracts a string from args under key, returning fallback when
+// the key is absent or the value is not a string.
+func stringArgOr(args map[string]any, key, fallback string) string {
+	v, ok := args[key]
+	if !ok {
+		return fallback
+	}
+	s, ok := v.(string)
+	if !ok {
+		return fallback
+	}
+	return s
+}
+
+// boolArgOr extracts a bool from args under key, returning fallback when
+// the key is absent or the value is not a bool.
+func boolArgOr(args map[string]any, key string, fallback bool) bool {
+	v, ok := args[key]
+	if !ok {
+		return fallback
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return fallback
+	}
+	return b
+}
+
+// intArgOr extracts an int from args under key (JSON numbers arrive as float64),
+// returning fallback when the key is absent or the value cannot be converted.
+func intArgOr(args map[string]any, key string, fallback int) int {
+	v, ok := args[key]
+	if !ok {
+		return fallback
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	}
+	return fallback
 }
