@@ -23,6 +23,33 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.11.0] — 2026-04-11
+
+forge.config — file-based configuration (Decision 30).
+
+### Added
+
+- `config.go`: `loadConfigFile(path string) (Config, error)` — parses a
+  plain `key = value` file. Comments (`#`), blank lines, and unknown keys are
+  silently ignored. Values may contain `=`; only the first is the separator.
+- `config.go`: `mergeFileConfig(goCfg, fileCfg Config) Config` — merges file
+  values into a Go Config; Go-code fields always take precedence.
+- `forge.go`: `Config.AppSchema *AppSchema` — app-level JSON-LD structured
+  data set via file (`org_name`, `org_type`) or directly in Go code. Explicit
+  `app.SEO()` call takes precedence.
+- `forge.go`: `Config.OGDefaults *OGDefaults` — app-level Open Graph and
+  Twitter Card fallbacks set via file (`og_image`, `twitter_site`) or Go code.
+  Root-relative `og_image` values are resolved against `BaseURL` at startup.
+- `forge.go`: `MustConfig` now loads `forge.config` in the working directory
+  (or the path in `FORGE_CONFIG` env var) before validating the config. Go-code
+  fields win. `secret` as a file key panics immediately.
+- Supported keys: `base_url`, `https`, `nav_mode`, `org_name`, `org_type`,
+  `twitter_site`, `og_image`. Unknown keys are silently ignored.
+- Error messages include line number, invalid value, and expected values —
+  readable by both humans and AI agents.
+
+---
+
 ## [1.10.0] — 2026-04-11
 
 NavTree — first-class navigation abstraction (Decision 29).

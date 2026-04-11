@@ -98,6 +98,20 @@ type Config struct {
 	// Use [NavModeCode] to supply items directly via [App.Nav].
 	// The zero value disables navigation entirely. Optional.
 	NavMode NavMode
+
+	// AppSchema sets the app-level JSON-LD structured data block emitted on
+	// every page as a <script type="application/ld+json"> element. When set
+	// here, it is applied automatically at startup; an explicit [App.SEO] call
+	// with an [AppSchema] takes precedence. This field is also populated when
+	// a forge.config file contains the org_name or org_type keys. Optional.
+	AppSchema *AppSchema
+
+	// OGDefaults sets the app-level Open Graph and Twitter Card fallback values
+	// applied to every page. When set here, it is applied automatically at
+	// startup; an explicit [App.SEO] call with an [OGDefaults] takes
+	// precedence. Also populated from forge.config og_image and twitter_site
+	// keys. Optional.
+	OGDefaults *OGDefaults
 }
 
 // MustConfig validates cfg and returns it unchanged.
@@ -113,6 +127,18 @@ type Config struct {
 //	    Secret:  []byte(os.Getenv("SECRET")),
 //	}))
 func MustConfig(cfg Config) Config {
+	// D30: load forge.config (or the path in FORGE_CONFIG) and merge file
+	// values into cfg. Go-code fields always take precedence.
+	if path := os.Getenv("FORGE_CONFIG"); path != "" {
+		fc, err := loadConfigFile(path)
+		if err != nil {
+			panic("forge: " + err.Error())
+		}
+		cfg = mergeFileConfig(cfg, fc)
+	} else {
+		fc, _ := loadConfigFile("forge.config") // missing file is not an error
+		cfg = mergeFileConfig(cfg, fc)
+	}
 	if cfg.BaseURL == "" {
 		panic(`forge: Config.BaseURL is required (e.g. "https://example.com")`)
 	}
@@ -480,6 +506,30 @@ func (a *App) Handler() http.Handler {
 	if !a.redirectFallbackReg {
 		a.redirectFallbackReg = true
 		a.mux.Handle("/", a.redirectStore.handler())
+	}
+	// D30: auto-apply Config.AppSchema and Config.OGDefaults loaded from
+	// forge.config. App.SEO() calls take precedence (applied only when nil).
+	if a.cfg.AppSchema != nil && a.seo.appSchema == nil {
+		a.seo.appSchema = a.cfg.AppSchema
+	}
+	if a.cfg.OGDefaults != nil && a.seo.ogDefaults == nil {
+		og := a.cfg.OGDefaults
+		// Resolve root-relative og_image path against BaseURL so scrapers
+		// receive an absolute URL (e.g. "/static/og.png" → "https://example.com/static/og.png").
+		if strings.HasPrefix(og.Image.URL, "/") && a.cfg.BaseURL != "" {
+			resolved := &OGDefaults{
+				TwitterSite:    og.TwitterSite,
+				TwitterCreator: og.TwitterCreator,
+				Image: Image{
+					URL:    strings.TrimRight(a.cfg.BaseURL, "/") + og.Image.URL,
+					Width:  og.Image.Width,
+					Height: og.Image.Height,
+				},
+			}
+			a.seo.ogDefaults = resolved
+		} else {
+			a.seo.ogDefaults = og
+		}
 	}
 	if len(a.templateModules) > 0 {
 		bindErrorTemplates(a.templateModules)

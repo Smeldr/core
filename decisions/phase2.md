@@ -568,3 +568,129 @@ In package `forge`:
 - No new third-party dependencies
 - `example_test.go` unchanged (no new examples required for this decision)
 - NEXT.md deleted in the same commit
+
+---
+
+## Decision 30 — forge.config: file-based configuration
+
+**Date:** 2026-04-11
+**Status:** Agreed
+**Level:** 2 (new exported Config fields, changed MustConfig behaviour)
+
+### Problem
+
+Forge Cloud agents need to provision a Forge instance by writing a file — without
+compiling Go code. No existing mechanism supports this. The format must be simple
+enough for an AI agent to generate without consulting docs.
+
+### Decision
+
+Add a minimal `key = value` file parser in `config.go`. `MustConfig` loads
+`forge.config` from the working directory (or the path in `FORGE_CONFIG`) and
+merges file values into the Go `Config`. Go-code fields always take precedence —
+no breaking change for existing applications.
+
+### File format
+
+```
+# forge.config — plain key = value pairs
+base_url = https://example.com
+https = true
+nav_mode = db
+org_name = Acme Corp
+org_type = Organization
+twitter_site = @acme
+og_image = /static/og.png
+```
+
+Rules:
+- Lines beginning with `#` are comments — skipped
+- Blank/whitespace lines — skipped
+- Split on the first `=` only — values may contain `=`
+- Trim whitespace from key and value
+- Unknown keys — silently ignored (forward compatibility)
+- `secret` as a key — panics immediately with a descriptive message
+
+### Key-to-field mapping (explicit table, no reflection)
+
+| Key | Maps to | Valid values |
+|-----|---------|--------------|
+| `base_url` | `Config.BaseURL` | Full URL including scheme |
+| `https` | `Config.HTTPS` | `true` or `false` |
+| `nav_mode` | `Config.NavMode` | `db` or `code` |
+| `org_name` | `Config.AppSchema.Name` | Free text |
+| `org_type` | `Config.AppSchema.Type` | schema.org type e.g. `Organization` |
+| `twitter_site` | `Config.OGDefaults.TwitterSite` | `@handle` |
+| `og_image` | `Config.OGDefaults.Image.URL` | Relative or absolute path |
+
+`url` in AppSchema is always derived from `BaseURL` — never a separate key.
+`secret` in the file panics immediately.
+
+### og_image path resolution
+
+`og_image` is stored as-is by the parser. In `Handler()`, at auto-apply time,
+if the value starts with `/` and `BaseURL` is non-empty, it is resolved to an
+absolute URL by prefixing `BaseURL` (trailing slash stripped). This ensures
+`og:image` is always an absolute URL as required by scrapers.
+
+Example: `og_image = /static/og.png` + `base_url = https://example.com` →
+`OGDefaults.Image.URL = "https://example.com/static/og.png"`.
+
+### Load order in MustConfig
+
+1. Check `FORGE_CONFIG` env var — if set, use its value as the file path
+2. Otherwise, try `forge.config` in the working directory
+3. Merge file values into Go `Config` (Go-code non-zero values win)
+4. Validate (`BaseURL` is required; `Secret` must be ≥ 16 bytes — cannot come from file)
+
+### Config.AppSchema and Config.OGDefaults — new fields
+
+`AppSchema` and `OGDefaults` today only reach the `App` via `app.SEO()`. To
+support file-based provisioning, both are added as fields on `Config`. In
+`Handler()`, before the `setSEODefaults` loop, these fields are auto-applied
+to `seoState` when `app.SEO()` has not already set those values (Go-code wins).
+
+```go
+// Option A: directly in Go config
+app := forge.New(forge.MustConfig(forge.Config{
+    BaseURL:    "https://example.com",
+    Secret:     []byte(os.Getenv("SECRET")),
+    AppSchema:  &forge.AppSchema{Name: "Acme", Type: "Organization"},
+    OGDefaults: &forge.OGDefaults{TwitterSite: "@acme"},
+}))
+
+// Option B: via forge.config file (no Go code change needed for provisioning)
+// forge.config:
+//   org_name = Acme
+//   org_type = Organization
+//   twitter_site = @acme
+```
+
+### New exported symbols
+
+- `Config.AppSchema *AppSchema` field
+- `Config.OGDefaults *OGDefaults` field
+
+New unexported functions (internal):
+- `loadConfigFile(path string) (Config, error)`
+- `mergeFileConfig(goCfg, fileCfg Config) Config`
+
+### Error messages
+
+Parse errors include line number, the invalid value, and what is expected:
+
+```
+forge.config line 4: invalid value "yes" for key "https" — expected "true" or "false"
+forge.config line 7: invalid value "auto" for key "nav_mode" — expected "db" or "code"
+```
+
+### Consequences
+
+- forge core: v1.10.0 → **v1.11.0**
+- forge-mcp: no changes (no version bump)
+- forge-cli: no changes
+- Zero behaviour change for apps that do not have a `forge.config` file
+- No new third-party dependencies
+- `example_test.go` unchanged
+- NEXT.md deleted in the same commit
+- `plans/core-next-plan.md` deleted in the same commit
