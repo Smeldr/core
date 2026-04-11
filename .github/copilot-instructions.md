@@ -15,10 +15,18 @@ amendment, active milestone and step, anything deferred.
 
 **Step 2 — Check for a pending task:**
 Check whether `NEXT.md` exists in the forge repo root via GitHub MCP.
-If it exists: read it, present a plan to the user, wait for approval,
-then implement. Delete `NEXT.md` in the same commit as the implementation.
-After the commit: update `context/corepilot.md` with the amendment number
-assigned at commit time.
+If it exists:
+1. Read it and form a full implementation plan (including any questions).
+2. Write the plan to `forge-cms/forge-architect` at path
+   `plans/core-next-plan.md` via GitHub MCP (`create_or_update_file`).
+   Include the complete plan and any open questions in that file.
+3. Notify the user in chat that the plan is ready for review at
+   `forge-architect/plans/core-next-plan.md`. Do not write any code yet.
+4. Wait for explicit approval before implementing anything.
+5. At commit time: delete both `NEXT.md` and `plans/core-next-plan.md`
+   in the same commit as the implementation.
+6. After the commit: update `context/corepilot.md` with the amendment
+   number assigned at commit time.
 
 **Step 3 — If no NEXT.md:**
 Report what you found in `context/corepilot.md` and ask the user what
@@ -60,6 +68,9 @@ file is the bridge between sessions. Always read it first.
 - If `NEXT.md` exists, stage it for deletion with `git rm NEXT.md` and include
   the deletion in the implementation commit — not as a separate commit.
   This avoids push conflicts since `NEXT.md` already exists on the remote.
+- If `plans/core-next-plan.md` exists in `forge-cms/forge-architect`, delete it
+  via GitHub MCP in the same commit as `NEXT.md` (use `delete_file` on the
+  forge-architect repo, or include it in the same `push_files` call).
 - Update session context at `forge-cms/forge-architect/context/corepilot.md`
   via GitHub MCP. Record: current versions, latest amendment shipped,
   current milestone and step, what was deferred or blocked.
