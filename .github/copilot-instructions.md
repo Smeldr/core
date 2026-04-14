@@ -9,7 +9,7 @@ Every new chat has no memory of previous sessions. Follow these steps
 at the start of every new chat, before doing anything else.
 
 **Step 1 — Read session context:**
-Read `context/corepilot.md` from `forge-cms/forge-architect` via GitHub MCP.
+Read `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md` (local file).
 This is your state from the previous session: current versions, latest
 amendment, active milestone and step, anything deferred.
 
@@ -25,8 +25,9 @@ If it exists:
 4. Wait for explicit approval before implementing anything.
 5. At commit time: delete both `NEXT.md` and `plans/core-next-plan.md`
    in the same commit as the implementation.
-6. After the commit: update `context/corepilot.md` with the amendment
-   number assigned at commit time.
+6. After the commit: write `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md`
+   locally with the amendment number, then commit and push from that repo
+   (see "After every commit" for the exact command sequence).
 
 **Step 3 — If no NEXT.md:**
 Report what you found in `context/corepilot.md` and ask the user what
@@ -46,8 +47,8 @@ file is the bridge between sessions. Always read it first.
    - **Plan your approach and present it to the user for approval before writing any code.**
    - Wait for explicit approval. Do not implement anything until the user confirms the plan.
    - Stop here — do not proceed with steps 2–7.
-2. Read session context from `forge-cms/forge-architect/context/corepilot.md`
-   via GitHub MCP. This is your state from the previous session.
+2. Read session context from `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md`
+   (local file). This is your state from the previous session.
 3. Read `DECISIONS.md` — index table only. Body text lives in `decisions/core.md`
    (Decisions 1–22 + amendments) and `decisions/phase2.md` (Decision 25 onwards).
    Read the relevant body file when a specific decision is needed.
@@ -70,9 +71,12 @@ file is the bridge between sessions. Always read it first.
   This avoids push conflicts since `NEXT.md` already exists on the remote.
 - If `plans/core-next-plan.md` exists locally, delete it:
   `Remove-Item "C:\Users\peter\Documents\Code\forge-architect\plans\core-next-plan.md"`
-- Update session context at `forge-cms/forge-architect/context/corepilot.md`
-  via GitHub MCP. Record: current versions, latest amendment shipped,
+- Update session context: write `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md`
+  locally. Record: current versions, latest amendment shipped,
   current milestone and step, what was deferred or blocked.
+  Then commit and push from the forge-architect repo:
+  `cd C:\Users\peter\Documents\Code\forge-architect ; git add context/corepilot.md ; git commit -m "chore(context): update corepilot after [sprint name]" ; git push`
+  Do NOT use GitHub MCP to update this file.
 
 ## DECISIONS.md file structure (CRITICAL)
 
@@ -330,7 +334,8 @@ that both exist, then stage.
 ### 5. Update the roadmap, backlog, and session context
 - Mark the step `✅ Done` in the `Milestone{N}_BACKLOG.md` Progress table with the completion date.
 - Tick the step's summary checkbox in `ROADMAP.md` and update its row in the step table.
-- Update session context at `forge-cms/forge-architect/context/corepilot.md` via GitHub MCP.
+- Write `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md` locally,
+  then commit and push from that repo (see "After every commit" for the command sequence).
 - Never batch updates — update immediately after the step is verified.
 
 ### 6. Propose a commit message
