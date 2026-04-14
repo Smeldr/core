@@ -1,11 +1,39 @@
 # Forge
 
-**The Go web framework designed for how you actually think.**  
-Built for developers. Optimized for AI. Zero compromises on readability.
+**Go get Forge. From idea to production in one step.**  
+Zero dependencies. Built-in content lifecycle. AI-native by default.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/forge-cms/forge.svg)](https://pkg.go.dev/github.com/forge-cms/forge)
 **v1.11.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
 
+## What Forge gives you
+
+**Content**
+- **Full CRUD** — create, update, publish, archive, and delete through a single `Module[T]`
+- **Draft-safe lifecycle** — drafts return 404 to guests; only Published content is visible
+- **Scheduled publishing** — set a future `ScheduledAt`; Forge transitions to Published automatically
+- **Content negotiation** — one endpoint serves JSON, HTML, or Markdown based on `Accept`
+
+**Auth & security**
+- **Role-based auth** — Guest → Author → Editor → Admin enforced per-module, per-operation
+- **Cookie compliance** — `/.well-known/cookies.json` declares cookie categories for GDPR tooling
+- **Security headers** — CSP, HSTS, X-Frame-Options wired in one middleware call
+
+**Discovery**
+- **Structured data (JSON-LD)** — Article, Product, FAQ, and more emitted in every page `<head>`
+- **Event-driven sitemap** — regenerated on publish, update, and delete; no cron job required
+- **Open Graph** — og:title, og:description, og:image meta tags for social link previews
+- **Twitter Cards** — twitter: meta tags with summary and summary_large_image support
+- **RSS feed** — per-module feed at `/{prefix}/feed.xml` plus a global aggregate at `/feed.xml`
+
+**AI-native**
+- **AI indexing** — `/llms.txt` compact index, `/llms-full.txt` Markdown corpus, and per-item `/aidoc` endpoints
+- **MCP integration** — connect AI agents to read and write content via the Model Context Protocol
+
+**Infrastructure**
+- **Graceful shutdown** — drains in-flight requests before exiting on SIGINT/SIGTERM
+
+---
 
 | | Forge | Echo | Gin | Chi |
 |---|---|---|---|---|
@@ -17,7 +45,6 @@ Built for developers. Optimized for AI. Zero compromises on readability.
 | Cookie compliance built-in | ✓ | ✗ | ✗ | ✗ |
 | Social sharing built-in | ✓ | ✗ | ✗ | ✗ |
 | Role hierarchy built-in | ✓ | ✗ | ✗ | ✗ |
-| AI-native endpoints (llms.txt, AIDoc) | ✓ | ✗ | ✗ | ✗ |
 
 ---
 
@@ -61,7 +88,7 @@ func (p *Post) Markdown() string { return p.Body }
 
 func main() {
 	repo := forge.NewMemoryRepo[*Post]()
-	m := forge.NewModule((*Post)(nil),
+	m := forge.NewModule((*Post)(nil), // nil pointer — type parameter inferred, no allocation
 		forge.At("/posts"),
 		forge.Repo(repo),
 		forge.Auth(forge.Read(forge.Guest), forge.Write(forge.Author)),
@@ -97,18 +124,18 @@ m := forge.NewModule((*Post)(nil),
 	forge.Feed(forge.FeedConfig{Title: "My Blog"}),               // /posts/feed.xml + /feed.xml
 	forge.Templates("templates/posts"),                           // HTML at Accept: text/html
 	forge.On(forge.AfterPublish, func(_ forge.Context, p *Post) error {
-		return nil // fires on publish and scheduled→Published
+		log.Printf("published: %s", p.Slug) // fires on publish and scheduled→Published
+		return nil
 	}),
 )
 ```
 
-**What you get:**
+Three runnable examples are in [example/](example/):
+- **example/blog** — devlog with seeded posts, RSS, AI indexing, and scheduled publishing
+- **example/api**  — headless JSON API with role-based auth and a redirect manifest
+- **example/docs** — documentation site with AI indexing, `/llms.txt`, and AIDoc endpoints
 
-Full CRUD · Role-based auth · Draft-safe lifecycle  
-Structured data (JSON-LD) · Event-driven sitemap · Content negotiation  
-Open Graph · Twitter Cards · AI indexing · RSS feed  
-Security headers · Graceful shutdown · Cookie compliance manifest  
-Scheduled publishing · MCP integration
+Each runs with: `cd example/blog && go run .`
 
 ---
 

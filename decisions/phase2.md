@@ -749,3 +749,66 @@ delete lines to reduce scope without reading docs.
 - `example/blog/main.go` package comment: was already at v1.11.0.
 - `REFERENCE.md` is verbatim — no content was altered, only relocated.
 - No version bump. Stays at v1.11.0 (documentation-only change).
+
+---
+
+## Amendment A70 — README: tagline, named value section, showcase fixes (2026-04-14)
+
+**Status:** Agreed  
+**Scope:** Documentation only. No exported symbols changed. No version bump.
+
+### Problem
+
+The restructured README (A69) still had several issues undermining its effectiveness for community engagement (HN, r/golang, pkg.go.dev):
+
+1. **Tagline** was generic — could describe any web framework.
+2. **Value proposition** was buried at the bottom as a flat anonymous bullet list, visible only after two full code examples.
+3. **Duplicate table row** — "AI indexing (llms.txt + AIDoc)" and "AI-native endpoints (llms.txt, AIDoc)" said the same thing.
+4. **`(*Post)(nil)` unexplained** — valid Go but unfamiliar to many developers.
+5. **AfterPublish noop** — the signal callback returned `nil` with only a comment; the reader could not tell what it actually does.
+6. **No pointer to runnable examples** in `example/`.
+7. **"What you get" flat bullets** — anonymous, unordered, no descriptions.
+
+### Changes
+
+- **Tagline replaced:**
+  ```
+  **Go get Forge. From idea to production in one step.**
+  Zero dependencies. Built-in content lifecycle. AI-native by default.
+  ```
+  First line is the hook; second delivers the three concrete differentiators.
+
+- **New "What Forge gives you" section** inserted after the badge/version line, before the comparison table. All 15 features named and described, grouped into five categories: Content, Auth & security, Discovery, AI-native, Infrastructure.
+
+- **Duplicate table row removed:** "AI-native endpoints (llms.txt, AIDoc)" deleted; "AI indexing (llms.txt + AIDoc)" kept.
+
+- **`(*Post)(nil)` comment added:**
+  ```go
+  m := forge.NewModule((*Post)(nil), // nil pointer — type parameter inferred, no allocation
+  ```
+
+- **AfterPublish real body:**
+  ```go
+  forge.On(forge.AfterPublish, func(_ forge.Context, p *Post) error {
+      log.Printf("published: %s", p.Slug) // fires on publish and scheduled→Published
+      return nil
+  }),
+  ```
+
+- **Examples pointer** added after the showcase code block, before the Reference section:
+  ```markdown
+  Three runnable examples are in [example/](example/):
+  - example/blog — devlog with seeded posts, RSS, AI indexing, and scheduled publishing
+  - example/api  — headless JSON API with role-based auth and a redirect manifest
+  - example/docs — documentation site with AI indexing, /llms.txt, and AIDoc endpoints
+  ```
+
+- **Flat "What you get" bullet list removed** — all 15 features moved to the new named value section.
+
+### Consequences
+
+- README more effective for first-time visitors and community links.
+- No call-site syntax changed. No AI generation accuracy affected.
+- `example_test.go` unaffected — uses its own `examplePost` type, not the README showcase.
+- No version bump. Stays at v1.11.0 (documentation-only change).
+- NEXT.md deleted in the same commit.
