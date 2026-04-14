@@ -1,5 +1,5 @@
 // Package main is a self-contained Forge devlog — an example blog application
-// that demonstrates the full v1.0.0 feature set:
+// that demonstrates the full v1.11.0 feature set:
 //
 //   - Content lifecycle (Published, Draft, Scheduled)
 //   - HTML template rendering with forge:head

@@ -694,3 +694,58 @@ forge.config line 7: invalid value "auto" for key "nav_mode" — expected "db" o
 - `example_test.go` unchanged
 - NEXT.md deleted in the same commit
 - `plans/core-next-plan.md` deleted in the same commit
+
+---
+
+## Amendment A69 — README restructure: short README + REFERENCE.md
+
+**Status:** Accepted  
+**Date:** 2026-04-14  
+**Files affected:** `README.md` (rewritten), `REFERENCE.md` (new file)
+
+### Problem
+
+`README.md` had grown to 1 074 lines — a full API reference that was
+useful as a reference but counterproductive as an introduction. Developers
+opening the repo saw a wall of text before encountering a runnable example.
+AI assistants loading the README for context exhausted token budgets before
+reaching the code examples.
+
+### Decision
+
+Split the single `README.md` into two files:
+
+- **`README.md`** — ≤150 lines. Title, badge, comparison table, one
+  complete minimal example (runnable `package main`), one feature-showcase
+  snippet, a bullet summary of what you get, and a `## Reference` link
+  section. Nothing else.
+- **`REFERENCE.md`** — verbatim extraction of all detailed sections removed
+  from `README.md`: Getting started, Core concepts, Content types, Lifecycle,
+  Roles & auth, SEO & structured data, AI indexing, Social sharing, Cookies &
+  compliance, Storage, Middleware, Templates & rendering, Error handling,
+  Redirects & content mobility, MCP integration, The AI-first design
+  philosophy, Minimal complete example, Known issues.
+
+### New README examples
+
+Two new code examples replace the old "Getting started" walkthrough:
+
+**Minimal example** — a complete `package main` that compiles and runs.
+The `Post` type includes `Head()` and `Markdown()` so the showcase snippet
+can safely use `SitemapConfig` and `AIIndex(LLMsTxtFull)` without a startup
+panic (Decision A36 capability checks).
+
+**Feature showcase** — a `NewModule(...)` call with one option per line.
+Each line is commented with the endpoint or tag it enables. Developers can
+delete lines to reduce scope without reading docs.
+
+### Consequences
+
+- No Go code changed. No exported symbols added, removed, or renamed.
+- `go build ./...`, `go vet ./...`, `go test ./...` are green by
+  construction.
+- `example_test.go` unchanged — no Example functions compile-test README
+  prose, only API signatures.
+- `example/blog/main.go` package comment: was already at v1.11.0.
+- `REFERENCE.md` is verbatim — no content was altered, only relocated.
+- No version bump. Stays at v1.11.0 (documentation-only change).
