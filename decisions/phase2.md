@@ -812,3 +812,53 @@ The restructured README (A69) still had several issues undermining its effective
 - `example_test.go` unaffected — uses its own `examplePost` type, not the README showcase.
 - No version bump. Stays at v1.11.0 (documentation-only change).
 - NEXT.md deleted in the same commit.
+
+---
+
+## Amendment A71 — README: framework subtitle + 30-second start (2026-04-15)
+
+**Status:** Agreed  
+**Scope:** Documentation only. No exported symbols changed. No version bump.
+
+### Problem
+
+Two remaining first-impression gaps identified after A70:
+
+1. **No plain-language description** — the tagline ("Go get Forge. From idea to
+   production in one step.") is a pun, not a description. A first-time visitor
+   landing from GitHub search or a link cannot tell what Forge is before scrolling.
+
+2. **No immediate runnable path** — the quickest way to see Forge in action
+   (`cd example/blog && go run .`) was buried after the feature list and comparison
+   table. A developer who can run the project in 30 seconds is more likely to read on.
+
+### Changes
+
+- **Tagline replaced:**
+  ```
+  **Go get Forge. From idea to production in one step.**
+  Zero dependencies. Built-in content lifecycle. AI-native by default.
+  ```
+  Replaced with a single plain sentence:
+  ```
+  A Go framework for content-driven applications. Zero dependencies. AI-native by default.
+  ```
+
+- **New `## 30-second start` section** inserted immediately after the badges/version
+  line, before `## What Forge gives you`:
+  ```bash
+  git clone https://github.com/forge-cms/forge
+  cd example/blog
+  go run .
+  # open http://localhost:8080
+  ```
+  No prose — four commands only. The `open` line is a comment for cross-platform safety.
+
+### Consequences
+
+- README opens with a factual description instead of marketing copy.
+- Clone-and-run path is the first content after the version badge.
+- No call-site syntax changed. No AI generation accuracy affected.
+- `example_test.go` unaffected.
+- No version bump. Stays at v1.11.0 (documentation-only change).
+- NEXT.md deleted in the same commit.

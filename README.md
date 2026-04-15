@@ -1,10 +1,18 @@
 # Forge
 
-**Go get Forge. From idea to production in one step.**  
-Zero dependencies. Built-in content lifecycle. AI-native by default.
+A Go framework for content-driven applications. Zero dependencies. AI-native by default.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/forge-cms/forge.svg)](https://pkg.go.dev/github.com/forge-cms/forge)
 **v1.11.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
+
+## 30-second start
+
+```bash
+git clone https://github.com/forge-cms/forge
+cd example/blog
+go run .
+# open http://localhost:8080
+```
 
 ## What Forge gives you
 
