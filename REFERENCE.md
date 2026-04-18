@@ -1283,6 +1283,73 @@ Scheduled publishing
 
 ---
 
+## forge-media
+
+✅ **Available**
+
+Optional submodule for file upload, storage, serving, and AI-agent access via MCP.
+
+### Install
+
+```
+go get github.com/forge-cms/forge-media
+```
+
+### Wiring
+
+```go
+import forgemedia "github.com/forge-cms/forge-media"
+
+store := forgemedia.NewLocalMediaStore(app)
+mediaSrv := forgemedia.Register(app, store)
+
+// Wire into the MCP server so AI agents can upload files.
+mcpSrv := forgemcp.New(app, forgemcp.WithModule(mediaSrv))
+```
+
+`Register` mounts all four HTTP routes and returns a `*Server` that implements
+`forge.MCPModule`. Pass it to `forgemcp.WithModule` to expose the MCP tools.
+
+A database is required. Call `forgemedia.CreateMediaTable(db)` once to create
+the `forge_media` table, or run the migration manually.
+
+### HTTP endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/media` | Author+ | Upload a file. Multipart body with `file` and `description` fields. Returns `{"id","url","media_type","mime_type"}` (201). Image uploads require a non-empty `description` (WCAG 1.1.1). |
+| `GET` | `/media/{filename}` | Public | Serve a stored file. No authentication required. |
+| `GET` | `/media` | Editor+ | List all records. Optional `?type=image\|document\|video\|other` filter. |
+| `DELETE` | `/media/{id}` | Editor+ | Delete a record and its stored file. Returns 204 No Content. |
+
+### MCP tools
+
+Exposed when `forgemcp.WithModule(mediaSrv)` is wired. TypeName is `"File"`.
+
+| Tool | Role | Description |
+|------|------|-------------|
+| `create_file` | Author+ | Upload a file. Required fields: `filename`, `data` (base64-encoded). Optional: `description` (required for images). |
+| `list_files` | Editor+ | List all uploaded files. Returns an array of `MediaRecord` objects. |
+| `get_file` | Editor+ | Fetch a single file record by ID. |
+| `delete_file` | Editor+ | Delete a file record and its stored file by ID. |
+
+`update_file`, `publish_file`, `schedule_file`, and `archive_file` are not
+supported — media files have no lifecycle. These tools return `ErrBadRequest`.
+
+### Config keys
+
+The two `forge.config` keys below are read automatically by `LocalMediaStore`.
+Set them in your `forge.config` file or override in Go code via `forge.Config`.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `media_path` | `./media` | Directory where uploaded files are stored on disk. |
+| `media_max_size` | `5242880` (5 MB) | Maximum upload size in bytes. |
+
+Full reference: [forge-media README](https://github.com/forge-cms/forge/tree/main/forge-media)
+
+---
+
 ## forge.config file
 
 Forge reads a `forge.config` file from the working directory (or from the path
