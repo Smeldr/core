@@ -5,6 +5,7 @@ package forgemedia
 // touching the filesystem.
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -29,6 +30,9 @@ var removeFile = func(path string) error {
 	}
 	return err
 }
+
+// randRead fills b with cryptographically random bytes.
+var randRead = rand.Read
 
 // isNoRows reports whether err is sql.ErrNoRows.
 func isNoRows(err error) bool {
