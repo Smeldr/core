@@ -38,46 +38,7 @@ Media Library — optional `forge-media` submodule (Decision 31).
   `MediaPath`, and `MediaMaxSize` without the host application repeating those
   values at the call site (Amendment A73).
 
-### forge-media — v1.0.0
-
-New optional submodule `github.com/forge-cms/forge/forge-media`:
-
-- `MediaType` string type with constants: `MediaTypeImage`, `MediaTypeDocument`,
-  `MediaTypeVideo`, `MediaTypeOther`.
-- `MediaRecord` struct: `ID`, `Filename`, `OriginalFilename`, `MediaType`,
-  `MIMEType`, `Description`, `SizeBytes`, `UploadedAt`.
-- `MediaStore` interface: `Store(filename string, data []byte) (url string, err error)`,
-  `Delete(filename string) error`, `URL(filename string) string`.
-- `LocalMediaStore`: writes files under `Config.MediaPath`; returns public URLs
-  rooted at `Config.BaseURL + "/media/"`. Create with `NewLocalMediaStore(app)`.
-- `CreateMediaTable(db forge.DB) error`: creates `forge_media` table (if absent).
-  Called by `New` at startup; panics on failure.
-- MIME magic-byte detection for JPEG, PNG, GIF, WebP, PDF, SVG; agent-actionable
-  mismatch errors (`"expected JPEG (from .jpg extension), got PNG content"`);
-  extension-to-`MediaType` classification.
-- `Server` struct: HTTP server for media operations.
-  - `New(app, store) *Server`: panics if `Config.DB` is nil.
-  - `Register(app, store) *Server`: convenience constructor that creates the
-    server and registers all four HTTP routes.
-  - Routes: `POST /media` (upload, Author+, WCAG 1.1.1 description required for
-    images), `GET /media/{filename}` (serve, public), `GET /media` (list,
-    Editor+, `?type=` filter), `DELETE /media/{id}` (delete, Editor+).
-- `Server` implements `forge.MCPModule`:
-  - TypeName `"File"`, Prefix `"/media"`.
-  - `MCPCreate`: decodes base64 `data` field, detects MIME type, stores, and
-    inserts a `MediaRecord`. Returns the record as JSON.
-  - `MCPList`: returns all media records (status filter ignored).
-  - `MCPGet`: returns a single record by ID.
-  - `MCPDelete`: removes the record and the stored file.
-  - `MCPUpdate`, `MCPPublish`, `MCPSchedule`, `MCPArchive`: return
-    `ErrBadRequest` — media files do not have a content lifecycle.
-
-### forge-mcp — v1.5.0
-
-- `WithModule(m forge.MCPModule) ServerOption` — registers any value implementing
-  `forge.MCPModule` with the MCP server. Use this to wire `forge-media.Server`
-  (or any future `MCPModule` implementation) into the MCP tool and resource
-  registry without requiring `forge.App.Content`.
+Submodules: forge-media v1.0.0 released, forge-mcp v1.5.0 released.
 
 ---
 
