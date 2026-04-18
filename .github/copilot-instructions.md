@@ -66,10 +66,9 @@ file is the bridge between sessions. Always read it first.
 
 ## After every commit
 
-- If `NEXT.md` exists, stage it for deletion with `git rm NEXT.md 2>$null` and
-  include the deletion in the implementation commit — not as a separate commit.
-  Use `2>$null` because NEXT.md may already be gone locally (deleted on read);
-  the suppressed error is expected and harmless.
+- If `NEXT.md` exists, delete it with `Remove-Item NEXT.md -ErrorAction SilentlyContinue`.
+  NEXT.md is written locally by the architect and is never committed to git — it is
+  always untracked. Do not use `git rm`; it will fail on an untracked file.
 - If `plans/core-next-plan.md` exists locally, delete it:
   `Remove-Item "C:\Users\peter\Documents\Code\forge-architect\plans\core-next-plan.md"`
 - Update session context: write `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md`
