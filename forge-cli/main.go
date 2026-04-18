@@ -36,6 +36,8 @@ func main() {
 		runStatus(os.Args[2:])
 	case "token":
 		runTokenCommand(os.Args[2:])
+	case "media":
+		runMediaCommand(os.Args[2:])
 	default:
 		runContentCommand(os.Args[1], os.Args[2:])
 	}
@@ -63,6 +65,11 @@ Token verbs (Admin role required):
   create <name> <role> <ttl-days>          issue a new named token
   list                                     list all tokens
   revoke <id>                              revoke a token by fingerprint ID
+
+Media subcommands:
+  upload <file> [--description <text>]     upload a file to the media library
+  list [--type image|document|video|other] list media records
+  delete <id>                              permanently delete a media record
 
 Environment variables:
   FORGE_URL      base URL of the running Forge instance (required)
