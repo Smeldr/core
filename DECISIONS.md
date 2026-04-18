@@ -94,6 +94,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A69 | `README.md`: shortened to <150 lines; `REFERENCE.md`: new full API reference file; `example/blog/main.go` package comment updated to v1.11.0 | Agreed | 2026-04-14 |
 | A70 | `README.md`: tagline, named value section (15 features), remove duplicate table row, `(*Post)(nil)` comment, real AfterPublish body, examples pointer, remove flat bullet list | Agreed | 2026-04-14 |
 | A71 | `README.md`: replace tagline with plain-language framework description; add 30-second start section (clone + run) before "What Forge gives you" | Agreed | 2026-04-15 |
+| A72 | `VISION.md`: insert "What Forge is" (typed state layer for AI agents); insert "The two-layer model" (Core AGPL / Cloud commercial); replace Roadmap (Phases 1–2 ✅ DONE, Phase 3 Cloud private beta, Phase 4 Cloud GA) | Agreed | 2026-04-18 |
 | D29 | `nav.go`/`forge.go`/`templatedata.go`/`templates.go`/`module.go`/`forge-mcp`: NavTree — first-class navigation abstraction; `NavItem`, `NavTree`, `NavModeDB`/`NavModeCode`, `App.Nav()`, `App.NavTree()`, `TemplateData.Nav`, four MCP nav tools (Editor role) | Agreed | 2026-04-11 |
 | D30 | `config.go`/`forge.go`: forge.config file-based configuration — `loadConfigFile`, `mergeFileConfig`; `Config.AppSchema`, `Config.OGDefaults`; `MustConfig` loads `forge.config` (or `FORGE_CONFIG` env var path); Go-code fields always win; `secret` key panics | Agreed | 2026-04-11 |
 

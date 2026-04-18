@@ -862,3 +862,47 @@ Two remaining first-impression gaps identified after A70:
 - `example_test.go` unaffected.
 - No version bump. Stays at v1.11.0 (documentation-only change).
 - NEXT.md deleted in the same commit.
+
+---
+
+## Amendment A72 — VISION.md: strategic repositioning (2026-04-18)
+
+**Status:** Agreed  
+**Scope:** Documentation only. No exported symbols changed. No version bump.
+
+### Problem
+
+VISION.md last updated 2026-03-18 and no longer reflected the strategic
+positioning decided on 2026-04-17:
+
+1. No articulation of Forge as a typed state layer for AI agents (beyond content).
+2. No documentation of the two-layer commercial model (Core AGPL / Cloud commercial).
+3. Roadmap still described future plans for Phases 1–2, which shipped in v1.11.0
+   and forge-mcp v1.4.0.
+
+### Changes
+
+**Inserted `## What Forge is`** after "The core thesis", before "The vision in one sentence":
+- Forge as the typed, persistent state layer AI agents operate on
+- Contrast with Temporal/LangChain (orchestration vs state substrate)
+- MCP as the protocol for agent-driven state transitions
+- Content as canonical use case; any typed stateful data is valid
+
+**Inserted `## The two-layer model`** after the MCP section, before Roadmap:
+- Forge Core: open source (AGPL), zero dependencies, self-hostable
+- Forge Cloud: commercial, process-per-tenant, SQLite per customer, forge-admin closed source
+- forge-media: LocalMediaStore with swappable interface for S3 in Phase 4
+
+**Replaced `## Roadmap`** in full:
+- Phase 1 ✅ DONE: forge-mcp v1.4.0
+- Phase 2 ✅ DONE: forge v1.11.0 (full production foundation)
+- Phase 3: Forge Cloud private beta (current focus)
+- Phase 4: Forge Cloud GA (multi-site, bureau workflow, commercial licenses)
+
+### Consequences
+
+- VISION.md now accurately reflects shipped state and strategic direction.
+- No call-site syntax changed. No AI generation accuracy affected.
+- `example_test.go` unaffected.
+- No version bump. Stays at v1.11.0 (documentation-only change).
+- NEXT.md deleted in the same commit.

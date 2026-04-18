@@ -23,6 +23,31 @@ content management.
 
 ---
 
+## What Forge is
+
+Forge is the typed, persistent state layer that AI agents operate on.
+
+Content is the canonical use case — any typed, stateful data is valid.
+A Post, a Task, a Product, a workflow checkpoint: all are structured,
+validated, lifecycle-managed entities that AI agents can create, update,
+and transition via MCP.
+
+Forge is the state. The AI agent is the workflow engine.
+
+This is a precise distinction. Temporal and LangChain orchestrate AI
+within traditional software infrastructure. Forge inverts this: the AI
+agent orchestrates, and Forge provides the typed, stateful substrate it
+operates on. MCP is not a bolt-on — it is the protocol by which agents
+drive state transitions on Forge entities. Forge and workflow engines
+are complements, not competitors.
+
+Every property that makes Forge useful for content — lifecycle
+enforcement, typed schemas, role-based access, validation that cannot
+be bypassed — makes it equally useful for any AI workflow that needs
+reliable, structured, persistent state.
+
+---
+
 ## The vision in one sentence
 
 A user tells their AI assistant: *"Make me a blog with these specs. The first
@@ -156,47 +181,54 @@ authenticated user of the system.
 
 ---
 
+## The two-layer model
+
+**Forge Core — open source (AGPL)**
+Content lifecycle engine. MCP-native API. AI-first content negotiation.
+Zero dependencies. The trust anchor: inspectable, self-hostable, fully
+ownable. For regulated industries, compliance-constrained organisations,
+and developers who want full control of their stack.
+
+**Forge Cloud — commercial**
+"Give me a site in 10 minutes." No Go, no deployment, no server.
+forge-admin handles provisioning, dashboard, and multi-site management.
+forge-admin is closed source. The customer never writes Go.
+
+Cloud architecture: process-per-tenant. One Forge instance and one SQLite
+database per customer. Complete isolation. Simple provisioning. SQLite
+handles the content scale of any realistic content site.
+
+---
+
 ## Roadmap
 
-### Phase 1 — MCP core (M10, v2.0.0)
+### Phase 1 — MCP core ✅ DONE
 
-Implement the MCP server in Forge. This is the technical prerequisite for
-everything that follows.
+forge-mcp v1.4.0. MCP server transport (stdio + SSE), auto-derived resource
+schema, typed MCP tools, role system and validation applied to all MCP calls.
 
-- MCP server transport: stdio (local tools) and SSE (remote, authenticated)
-- Auto-derive resource schema from `forge.Node` struct tags
-- Expose module CRUD operations as typed MCP tools
-- Apply existing role system and validation to all MCP calls
-- Separate `forge-mcp` package to preserve zero-dependency core
+### Phase 2 — Production foundation ✅ DONE
 
-### Phase 2 — Production foundation
+forge v1.11.0. forge-pgx, shared partials, forge:head, MustConfig,
+AppSchema, OGDefaults, TokenStore, NavTree (NavModeDB/Code), forge.config,
+forge-cli, forge_format and forge_description tags, REFERENCE.md.
 
-Close the remaining gaps between the open source framework and a hosted
-offering.
+### Phase 3 — Forge Cloud private beta (current focus)
 
-- `forge-pgx` integration tests against a real database
-- Shared template partials
-- `forge:head` public helper
-- `forge.New` MustConfig enforcement
-- `forge.AppSchema{}` and `forge.OGDefaults{}`
-- Webhooks
-- `forge.Analytics` middleware
-- `forge-admin`: web-based admin UI
+Invitation-only. forge-admin provisions one Forge instance per customer
+(process-per-tenant, SQLite). forge-admin has a proper database from day
+one. Per-site tokens are an internal forge-admin detail — never exposed to
+end users.
 
-### Phase 3 — Forge Cloud private beta
+forge-media ships as LocalMediaStore with a swappable storage interface
+designed for S3 in Phase 4. Media files are addressable by URL, not local path.
 
-Invitation-only. Manually provisioned instances to start.
+### Phase 4 — Forge Cloud GA
 
-- Site provisioning
-- Content model definition via admin UI (no-code)
-- Forge Cloud MCP layer
-- Custom domain and SSL
-
-### Phase 4 — Forge Cloud general availability
-
-- Automated multi-tenant provisioning
-- Team management and billing
-- Commercial license (AGPL exemption) introduced
+Multi-site management and aggregation. Bureau workflow: one dashboard,
+many client sites. Shared media across sites via pluggable MediaStore
+backends. Commercial licenses for self-hosters. Automated provisioning
+and billing.
 
 ---
 
