@@ -7,6 +7,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.5.0] — 2026-04-18
+
+forge-media integration — `WithModule` server option (Decision 31).
+
+### Added
+
+- `mcp.go`: `WithModule(m forge.MCPModule) ServerOption` — registers an additional
+  `forge.MCPModule` with the MCP server. Enables external sub-packages such as
+  `forge-media` to expose their content through the same MCP server without
+  registering through `forge.App.MCPModules()`.
+
+---
+
 ## [1.4.0] — 2026-04-11
 
 NavTree MCP tools — four new nav tools (Decision 29).

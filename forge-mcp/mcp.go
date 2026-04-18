@@ -24,6 +24,18 @@ func WithSecret(secret []byte) ServerOption {
 	return func(s *Server) { s.secret = secret }
 }
 
+// WithModule registers an additional [forge.MCPModule] with the MCP server.
+// Use this to expose modules from external sub-packages (e.g. forge-media)
+// that cannot be wired through [forge.App.MCPModules] directly.
+//
+// Example:
+//
+//	mediaSrv := forgemedia.Register(app, store)
+//	mcpSrv := forgemcp.New(app, forgemcp.WithModule(mediaSrv))
+func WithModule(m forge.MCPModule) ServerOption {
+	return func(s *Server) { s.modules = append(s.modules, m) }
+}
+
 // Server wraps a set of [forge.MCPModule] values and serves the MCP protocol
 // over stdio (see [Server.ServeStdio]) or HTTP SSE (see [Server.Handler]).
 type Server struct {
@@ -215,16 +227,17 @@ func inputSchema(fields []forge.MCPField) map[string]any {
 	var required []string
 	for _, f := range fields {
 		var prop map[string]any
-		if f.Type == "array" {
+		switch f.Type {
+		case "array":
 			prop = map[string]any{
 				"type":  "array",
 				"items": map[string]any{"type": "string"},
 			}
-		} else if f.Type == "datetime" {
+		case "datetime":
 			// "datetime" is an internal Forge type identifier. JSON Schema
 			// requires the RFC 3339 date-time format expressed as a string.
 			prop = map[string]any{"type": "string", "format": "date-time"}
-		} else {
+		default:
 			prop = map[string]any{"type": f.Type}
 			if f.MinLength > 0 {
 				prop["minLength"] = f.MinLength
@@ -264,16 +277,17 @@ func inputSchemaUpdate(fields []forge.MCPField) map[string]any {
 	}
 	for _, f := range fields {
 		var prop map[string]any
-		if f.Type == "array" {
+		switch f.Type {
+		case "array":
 			prop = map[string]any{
 				"type":  "array",
 				"items": map[string]any{"type": "string"},
 			}
-		} else if f.Type == "datetime" {
+		case "datetime":
 			// "datetime" is an internal Forge type identifier. JSON Schema
 			// requires the RFC 3339 date-time format expressed as a string.
 			prop = map[string]any{"type": "string", "format": "date-time"}
-		} else {
+		default:
 			prop = map[string]any{"type": f.Type}
 			if f.MinLength > 0 {
 				prop["minLength"] = f.MinLength

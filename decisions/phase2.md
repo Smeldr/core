@@ -978,3 +978,130 @@ func (a *App) Config() Config { return a.cfg }
 - `example_test.go` unaffected.
 - `REFERENCE.md` updated with `forge.config` key table including `media_path` and `media_max_size`.
 
+---
+
+## Decision 31 — forge-media submodule
+
+**Status:** Agreed
+**Date:** 2026-04-18
+
+**Decision:** Introduce `forge-media` as an optional, separately versioned Go submodule
+(`github.com/forge-cms/forge/forge-media`) that provides file upload, serving, listing,
+and deletion for Forge applications, together with a full `forge.MCPModule` implementation
+so that AI agents can manage media files through MCP. Add `WithModule` to `forge-mcp` as
+the wiring point for externally-defined `MCPModule` implementations.
+
+### Module layout
+
+```
+forge-media/
+  go.mod          — module github.com/forge-cms/forge/forge-media, requires forge v0.0.0
+  media.go        — MediaStore interface, LocalMediaStore, MediaRecord, DB helpers
+  os_helpers.go   — testable wrappers for OS and crypto operations
+  server.go       — Server struct, New(), Register(), four HTTP handlers
+  mcp.go          — forge.MCPModule implementation on *Server
+```
+
+### MediaStore interface (`media.go`)
+
+```go
+type MediaStore interface {
+    Store(filename string, data []byte) (url string, err error)
+    Delete(filename string) error
+    URL(filename string) string
+}
+```
+
+`LocalMediaStore` implements `MediaStore` by writing files to `cfg.MediaPath`
+(default `"./media"`) and computing URLs from `cfg.BaseURL`.
+
+### MediaRecord struct
+
+| Field | DB column | Notes |
+|-------|-----------|-------|
+| `ID` | `id` | 22-char base64 raw URL (16 random bytes) |
+| `Filename` | `filename` | generated; safe for filesystem and URLs |
+| `OriginalFilename` | `original_filename` | caller-supplied |
+| `MediaType` | `media_type` | `image` / `video` / `audio` / `document` / `other` |
+| `MIMEType` | `mime_type` | detected from magic bytes |
+| `Description` | `description` | WCAG alt text; required for images |
+| `SizeBytes` | `size_bytes` | |
+| `UploadedAt` | `uploaded_at` | UTC |
+| `URL` | *(computed)* | not persisted; set at query time |
+
+Table: `forge_media`. Created by `CreateMediaTable(db forge.DB)`.
+
+### HTTP endpoints (`server.go`)
+
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| `POST` | `/media` | Author+ | Upload a file (multipart) |
+| `GET` | `/media/{filename}` | public | Serve a stored file |
+| `GET` | `/media` | Editor+ | List records; `?type=` filter |
+| `DELETE` | `/media/{id}` | Editor+ | Delete record + file |
+
+`Register(app *forge.App, store MediaStore) *Server` wires all four routes
+onto the forge `App` and returns the `Server` (which also implements `MCPModule`).
+
+`New(app, store)` panics if `cfg.DB == nil` — DB is required for record persistence.
+
+### MCPModule implementation (`mcp.go`)
+
+`*Server` implements `forge.MCPModule`:
+
+| Method | Behaviour |
+|--------|-----------|
+| `MCPMeta()` | TypeName `"File"`, Prefix `"/media"`, Read+Write ops |
+| `MCPSchema()` | `filename` (required), `data` (required, base64), `description` (markdown hint) |
+| `MCPList(ctx, statuses...)` | Returns all records; status filter ignored (no lifecycle) |
+| `MCPGet(ctx, slug)` | Lookup by ID; `ErrNotFound` when missing |
+| `MCPCreate(ctx, fields)` | Decode base64 `data`; detect MIME; require description for images; store + insert |
+| `MCPUpdate` | Returns `ErrBadRequest` — delete and re-upload instead |
+| `MCPPublish` | Returns `ErrBadRequest` |
+| `MCPSchedule` | Returns `ErrBadRequest` |
+| `MCPArchive` | Returns `ErrBadRequest` |
+| `MCPDelete(ctx, slug)` | Delete DB record + best-effort file removal |
+
+`MediaRecord.GetSlug() string` returns `r.ID`, satisfying the internal `slugger`
+interface in `forge-mcp` for resource URI construction.
+
+### WithModule option (`forge-mcp/mcp.go`)
+
+```go
+func WithModule(m forge.MCPModule) ServerOption {
+    return func(s *Server) { s.modules = append(s.modules, m) }
+}
+```
+
+Enables modules from external sub-packages (where `forge.App.MCPModules()` cannot
+reach) to participate in the same MCP server. Wiring:
+
+```go
+mediaSrv := forgemedia.Register(app, store)
+mcpSrv := forgemcp.New(app, forgemcp.WithModule(mediaSrv))
+```
+
+### MIME detection
+
+`detectMIME(data []byte, ext string)` uses magic bytes and cross-checks extension.
+Mismatch produces an agent-actionable `forge.Err("file", "expected JPEG (from .jpg extension), got PNG content")`.
+`sniffMIME` covers: JPEG, PNG, GIF, WebP, PDF, MP4, WebM, MP3, WAV, OGG, SVG.
+
+### Rejected alternatives
+
+- **Single package**: Ruled out because forge core has zero third-party dependencies.
+  SQLite and OS I/O belong in an optional layer.
+- **Separate repository**: Ruled out to keep versioning simple — a single repo with a
+  `replace` directive for local development, same as `forge-cli` and `forge-mcp`.
+- **Struct tag on Node**: Media files are not content nodes — they have no slug,
+  lifecycle, or template. A separate struct type is more honest.
+
+### Consequences
+
+- `forge-media` is independently versioned (`forge-media/v1.0.0`).
+- `forge-mcp` bumps to `v1.5.0` for the `WithModule` addition.
+- Forge core bumps to `v1.12.0` for `MediaPath`, `MediaMaxSize`, and `App.Config()`.
+- No existing exported symbol in `forge` core changed.
+- WCAG 1.1.1 is enforced at the handler level for image uploads — description required.
+- `LocalMediaStore` never stores absolute URLs in the DB; computes from `baseURL` at read time.
+
