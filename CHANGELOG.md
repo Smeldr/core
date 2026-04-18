@@ -102,16 +102,7 @@ NavTree — first-class navigation abstraction (Decision 29).
   `m.navTree.Tree()` when `m.navTree != nil`.
 - `module.go`: `Module[T].navTree *NavTree` field.
 
-### forge-mcp — v1.4.0
-
-- `mcp.go`: `Server.navTree *forge.NavTree` field, wired from `app.NavTree()` in
-  `New()`.
-- `tool.go`: `navToolDefs(hasDB bool)` — returns `list_nav_items` always; adds
-  `create_nav_item`, `update_nav_item`, `delete_nav_item` when tree is DB-backed.
-  All require Editor or Admin role.
-- `tool.go`: `handleNavTool()` — dispatches the four nav tools; `update_nav_item`
-  uses partial-overlay semantics (absent fields preserved from stored item).
-- `tool.go`: `stringArgOr`, `boolArgOr`, `intArgOr` helper functions.
+Submodules: forge-mcp v1.4.0 released.
 
 ---
 
