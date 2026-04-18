@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -78,6 +79,14 @@ func loadConfigFile(path string) (Config, error) {
 		case "og_image":
 			og.Image.URL = value
 			hasOG = true
+		case "media_path":
+			cfg.MediaPath = value
+		case "media_max_size":
+			n, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return Config{}, fmt.Errorf("forge.config line %d: invalid value %q for key \"media_max_size\" — expected an integer number of bytes", lineNum, value)
+			}
+			cfg.MediaMaxSize = n
 			// unknown keys are silently ignored (forward compatibility)
 		}
 	}
@@ -112,6 +121,12 @@ func mergeFileConfig(goCfg, fileCfg Config) Config {
 	}
 	if goCfg.OGDefaults == nil && fileCfg.OGDefaults != nil {
 		goCfg.OGDefaults = fileCfg.OGDefaults
+	}
+	if goCfg.MediaPath == "" && fileCfg.MediaPath != "" {
+		goCfg.MediaPath = fileCfg.MediaPath
+	}
+	if goCfg.MediaMaxSize == 0 && fileCfg.MediaMaxSize != 0 {
+		goCfg.MediaMaxSize = fileCfg.MediaMaxSize
 	}
 	return goCfg
 }

@@ -313,3 +313,54 @@ func TestMergeFileConfig_navModeZeroValue(t *testing.T) {
 		t.Errorf("NavMode: file NavModeCode should apply to zero Go code; got %v", result.NavMode)
 	}
 }
+
+func TestLoadConfigFile_mediaPath(t *testing.T) {
+	path := writeConfig(t, "media_path = ./uploads\n")
+	cfg, err := loadConfigFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MediaPath != "./uploads" {
+		t.Errorf("MediaPath: want %q, got %q", "./uploads", cfg.MediaPath)
+	}
+}
+
+func TestLoadConfigFile_mediaMaxSize(t *testing.T) {
+	path := writeConfig(t, "media_max_size = 10485760\n")
+	cfg, err := loadConfigFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MediaMaxSize != 10485760 {
+		t.Errorf("MediaMaxSize: want 10485760, got %d", cfg.MediaMaxSize)
+	}
+}
+
+func TestLoadConfigFile_mediaMaxSize_invalid(t *testing.T) {
+	path := writeConfig(t, "media_max_size = notanumber\n")
+	_, err := loadConfigFile(path)
+	if err == nil {
+		t.Fatal("expected error for invalid media_max_size, got nil")
+	}
+	if !strings.Contains(err.Error(), "media_max_size") {
+		t.Errorf("error should mention key name, got: %v", err)
+	}
+}
+
+func TestMergeFileConfig_mediaPath_goCodeWins(t *testing.T) {
+	goCfg := Config{MediaPath: "./custom"}
+	fileCfg := Config{MediaPath: "./from-file"}
+	result := mergeFileConfig(goCfg, fileCfg)
+	if result.MediaPath != "./custom" {
+		t.Errorf("MediaPath: Go code should win; got %q", result.MediaPath)
+	}
+}
+
+func TestMergeFileConfig_mediaMaxSize_fileApplied(t *testing.T) {
+	goCfg := Config{} // MediaMaxSize is zero
+	fileCfg := Config{MediaMaxSize: 2097152}
+	result := mergeFileConfig(goCfg, fileCfg)
+	if result.MediaMaxSize != 2097152 {
+		t.Errorf("MediaMaxSize: file should apply to zero Go code; got %d", result.MediaMaxSize)
+	}
+}

@@ -906,3 +906,75 @@ positioning decided on 2026-04-17:
 - `example_test.go` unaffected.
 - No version bump. Stays at v1.11.0 (documentation-only change).
 - NEXT.md deleted in the same commit.
+
+---
+
+## Amendment A73 — forge.go/config.go: MediaPath, MediaMaxSize fields; App.Config() accessor (2026-04-25)
+
+### Problem
+
+`forge-media` (new optional submodule) needs to read the canonical upload
+directory and maximum upload size from the app configuration, so that the
+developer does not repeat these values at the call site.
+
+### Change
+
+**`forge.go` — `Config` struct:**
+
+Added two optional fields after `OGDefaults`:
+
+```go
+// MediaPath is the upload directory for forge-media.
+// Default ./media is applied at handler time when this is empty.
+MediaPath string
+
+// MediaMaxSize is the maximum upload size in bytes for forge-media.
+// Default 5 MB (5242880) is applied at handler time when this is zero.
+MediaMaxSize int64
+```
+
+**`config.go` — `loadConfigFile`:**
+
+Added `media_path` and `media_max_size` cases to the key switch:
+
+```go
+case "media_path":
+    cfg.MediaPath = value
+case "media_max_size":
+    n, err := strconv.ParseInt(value, 10, 64)
+    if err != nil {
+        return Config{}, fmt.Errorf("forge.config line %d: invalid value %q for key \"media_max_size\" — expected an integer number of bytes", lineNum, value)
+    }
+    cfg.MediaMaxSize = n
+```
+
+**`config.go` — `mergeFileConfig`:**
+
+Added merge guards (Go code wins when non-zero):
+
+```go
+if goCfg.MediaPath == "" && fileCfg.MediaPath != "" {
+    goCfg.MediaPath = fileCfg.MediaPath
+}
+if goCfg.MediaMaxSize == 0 && fileCfg.MediaMaxSize != 0 {
+    goCfg.MediaMaxSize = fileCfg.MediaMaxSize
+}
+```
+
+**`forge.go` — `App.Config()` accessor:**
+
+```go
+// Config returns a copy of the application configuration.
+// Intended for use by optional forge submodules (e.g. forge-media).
+func (a *App) Config() Config { return a.cfg }
+```
+
+### Consequences
+
+- `forge-media` reads `app.Config().MediaPath` and `app.Config().MediaMaxSize` without
+  requiring the developer to pass these values explicitly.
+- The accessor returns a copy — callers cannot mutate the live config.
+- No existing exported symbol changed. No call-site syntax affected.
+- `example_test.go` unaffected.
+- `REFERENCE.md` updated with `forge.config` key table including `media_path` and `media_max_size`.
+

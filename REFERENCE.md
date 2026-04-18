@@ -1283,6 +1283,41 @@ Scheduled publishing
 
 ---
 
+## forge.config file
+
+Forge reads a `forge.config` file from the working directory (or from the path
+in the `FORGE_CONFIG` environment variable) at startup. Fields set in Go code
+always take precedence over file values. The file format is one `key = value`
+pair per line; lines starting with `#` are comments.
+
+The `secret` key is forbidden in config files — it must be supplied as an
+environment variable or directly in Go code.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `base_url` | string | — | Canonical site URL, e.g. `https://example.com` |
+| `https` | bool | `false` | Force HTTP → HTTPS redirect |
+| `nav_mode` | `db` \| `code` | — | Navigation mode |
+| `org_name` | string | — | JSON-LD organisation name |
+| `org_type` | string | — | JSON-LD organisation type |
+| `twitter_site` | string | — | Twitter/X site handle, e.g. `@mysite` |
+| `og_image` | string | — | Default Open Graph image URL |
+| `media_path` | string | `./media` | Upload directory for forge-media |
+| `media_max_size` | integer | `5242880` | Max upload size in bytes (forge-media) |
+
+Example:
+
+```
+# forge.config
+base_url = https://mysite.com
+https    = true
+nav_mode = db
+media_path     = /var/data/media
+media_max_size = 10485760
+```
+
+---
+
 ## Known issues
 
 **Windows: CSS files served as `text/plain`**

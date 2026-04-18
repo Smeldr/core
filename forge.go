@@ -112,6 +112,16 @@ type Config struct {
 	// precedence. Also populated from forge.config og_image and twitter_site
 	// keys. Optional.
 	OGDefaults *OGDefaults
+
+	// MediaPath is the filesystem directory where forge-media stores uploaded
+	// files. Defaults to "./media" when zero. Optional — only read by
+	// forge-media; ignored by forge core.
+	MediaPath string
+
+	// MediaMaxSize is the maximum permitted upload size in bytes. Defaults to
+	// 5242880 (5 MB) when zero. Optional — only read by forge-media; ignored
+	// by forge core.
+	MediaMaxSize int64
 }
 
 // MustConfig validates cfg and returns it unchanged.
@@ -404,6 +414,14 @@ func (a *App) Content(v any, opts ...Option) {
 // tool registry. The returned slice is the App's live internal slice and must
 // not be modified by the caller.
 func (a *App) MCPModules() []MCPModule { return a.mcpModules }
+
+// Config returns a copy of the application configuration. It is intended for
+// use by companion packages (such as forge-media) that need access to
+// configuration fields — [Config.BaseURL], [Config.MediaPath],
+// [Config.MediaMaxSize] — without the host application repeating those values
+// at the call site. The returned value is a copy and cannot be used to mutate
+// the running configuration.
+func (a *App) Config() Config { return a.cfg }
 
 // Secret returns the HMAC signing secret from the application configuration.
 // It is intended for use by forge-mcp and other companion packages that must
