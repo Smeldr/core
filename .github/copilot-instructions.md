@@ -66,9 +66,10 @@ file is the bridge between sessions. Always read it first.
 
 ## After every commit
 
-- If `NEXT.md` exists, stage it for deletion with `git rm NEXT.md` and include
-  the deletion in the implementation commit — not as a separate commit.
-  This avoids push conflicts since `NEXT.md` already exists on the remote.
+- If `NEXT.md` exists, stage it for deletion with `git rm NEXT.md 2>$null` and
+  include the deletion in the implementation commit — not as a separate commit.
+  Use `2>$null` because NEXT.md may already be gone locally (deleted on read);
+  the suppressed error is expected and harmless.
 - If `plans/core-next-plan.md` exists locally, delete it:
   `Remove-Item "C:\Users\peter\Documents\Code\forge-architect\plans\core-next-plan.md"`
 - Update session context: write `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md`
@@ -97,6 +98,11 @@ truncates them.
 2. Add the index row to `DECISIONS.md`
 3. Commit both in the same commit
 4. Never use GitHub MCP `create_or_update_file` or `push_files` for these files
+
+**When appending to `decisions/phase2.md`:** Use enough surrounding context to
+uniquely identify the insertion point. Closing lines (e.g. `---`) repeat
+throughout the file — a match failure on the first attempt means the context
+was too short. Re-read the tail of the file and use a longer unique anchor.
 
 ## Change classification
 
@@ -343,6 +349,11 @@ that both exist, then stage.
 - Present it to the user for approval. Do not commit without explicit user approval.
 - Commits are the **only** action that requires explicit user approval. Build, vet,
   format, and test commands are executed autonomously.
+- **A "yes" answer to a review question is not commit approval.** If you asked a
+  blocking question before proposing a commit, and the user answered it, you must
+  still present the commit message and wait for a separate explicit approval before
+  committing. The confirmation of a technical fact and the approval of a commit are
+  two distinct acts. Never collapse them into one.
 
 ### Commit message format
 

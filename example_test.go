@@ -263,6 +263,7 @@ func ExamplePageHead() {
 	// accessible at the top level of homeData because PageHead is embedded
 	// anonymously. forge:head reads them identically to TemplateData[T].
 	_ = data.Head.Title // "Home — My Site"
+	_ = data.Featured   // "Welcome post"
 }
 
 // ExampleContextFunc demonstrates passing per-request sidebar data to a

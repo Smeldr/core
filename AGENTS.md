@@ -117,6 +117,37 @@ app.Handle("POST /mcp/message", mcpSrv.Handler())
 
 See `forge-mcp/README.md` for connection setup and token management.
 
+### Adding media support (forge-media)
+
+`forge-media` is an optional submodule that adds file upload, storage, and
+serving. It implements `forge.MCPModule` so AI agents can upload files via MCP.
+
+```go
+import (
+    forgemedia "github.com/forge-cms/forge/forge-media"
+    forgemcp   "github.com/forge-cms/forge-mcp"
+)
+
+app := forge.New(forge.MustConfig(forge.Config{
+    BaseURL: "https://mysite.com",
+    Secret:  []byte(os.Getenv("SECRET")),
+    DB:      db,
+}))
+
+// Register HTTP routes: POST /media, GET /media/{filename}, etc.
+store := forgemedia.NewLocalMediaStore(app)
+mediaSrv := forgemedia.Register(app, store)
+
+// Wire into MCP so agents can upload via create_file tool.
+mcpSrv := forgemcp.New(app, forgemcp.WithModule(mediaSrv))
+app.Handle("GET /mcp", mcpSrv.Handler())
+app.Handle("POST /mcp/message", mcpSrv.Handler())
+```
+
+`Config.MediaPath` (default `"./media"`) and `Config.MediaMaxSize` (default 5 MB)
+control storage. Both are set in `forge.Config` or via `forge.config` file keys
+`media_path` and `media_max_size`.
+
 ### Key rules for code generation
 
 - Zero third-party dependencies in the `forge` core package

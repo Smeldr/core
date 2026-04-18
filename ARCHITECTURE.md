@@ -68,6 +68,9 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-04-07 | Decision 27 (`mcp.go`, `module.go`, `forge-mcp/mcp.go`): `MCPField.Format string` and `MCPField.Description string` added to `mcp.go`; `mcpStructField` in `module.go` reads `forge_format` and `forge_description` struct tags; `fieldDescription` helper added to `forge-mcp/mcp.go`; `inputSchema` and `inputSchemaUpdate` emit `"description"` key in JSON Schema properties with three-case priority logic (both → description + " (" + format + ")"; format-only → "(format)"; neither → omitted). Shipped in forge v1.9.0, forge-mcp v1.3.0. |
 | 2026-04-07 | Decision 28 (`forge-cli/`): new stdlib-only submodule `github.com/forge-cms/forge/forge-cli` (`package main`); content CRUD + lifecycle via GET-then-PUT to Forge REST API; token management via MCP JSON-RPC 2.0; YAML-subset frontmatter parser; `Config` from `FORGE_URL`/`FORGE_TOKEN`/`FORGE_MCP_URL` env vars; G23 integration test validates GET→PUT round-trip contract. Tagged `forge-cli/v0.1.0`. |
 | 2026-04-10 | Fix (`forge-mcp/mcp.go`): `inputSchema` and `inputSchemaUpdate` emit `{"type":"string","format":"date-time"}` for `f.Type == "datetime"` fields (`published_at`, `scheduled_at`). Previously emitted invalid `"type":"datetime"`, blocking tool registration in strict MCP clients (VS Code Copilot). Shipped in forge-mcp v1.3.1. |
+| 2026-04-11 | Decision 29 (`nav.go`, `forge.go`, `templatedata.go`, `templates.go`, `module.go`, `forge-mcp/`): NavTree first-class navigation abstraction; NavMode, NavItem, NavTree; App.Nav(), App.NavTree(); TemplateData[T].Nav field; forge-mcp nav tools (list/create/update/delete). Shipped in forge v1.10.0 / forge-mcp v1.4.0. |
+| 2026-04-11 | Decision 30 (`config.go`, `forge.go`): `loadConfigFile`, `mergeFileConfig`; `Config.AppSchema`, `Config.OGDefaults`; `MustConfig` auto-loads `forge.config`. Shipped in forge v1.11.0. |
+| 2026-04-18 | Decision 31 (`forge.go`, `forge-media/`, `forge-mcp/`, `forge-cli/`): `Config.MediaPath string`, `Config.MediaMaxSize int64`, `App.Config() Config` accessor added to `forge.go` (Amendment A73); new optional submodule `forge-media/` — `MediaStore` interface, `LocalMediaStore`, `MediaRecord`, `MediaType`, `CreateMediaTable`, HTTP server (`Server`, `New`, `Register`, `HTTPHandler`), forge.MCPModule implementation (`MCPMeta`, `MCPSchema`, `MCPCreate`, `MCPDelete`, `MCPList`, `MCPGet`); `forge-mcp`: `WithModule(m forge.MCPModule) ServerOption` added (v1.5.0); `forge-cli`: media upload, list, delete commands. Shipped in forge v1.12.0, forge-media v1.0.0, forge-mcp v1.5.0. |
 
 ---
 
@@ -198,7 +201,8 @@ github.com/forge-cms/forge-pgx/  (separate module: ./forge-pgx/)
 
 github.com/forge-cms/forge/forge-mcp/  (sub-module: ./forge-mcp/)
 ├── mcp.go            Server (secret []byte), New(app, opts...), ServerOption,
-│                     WithSecret; handle (JSON-RPC dispatch), handleInitialize,
+│                     WithSecret, WithModule(m forge.MCPModule) (D31);
+│                     handle (JSON-RPC dispatch), handleInitialize,
 │                     JSON-RPC wire types (jsonRPCRequest/Response/Error),
 │                     mcpTool, mcpResource, allResources, mcpToolDefs,
 │                     inputSchema, inputSchemaUpdate, hasMCPOp, slugOf, snakeCase
@@ -222,8 +226,34 @@ github.com/forge-cms/forge/forge-cli/  (sub-module: ./forge-cli/)
 │                     runDelete, runList, runGet, findKey, findKeyIn
 ├── token.go          runTokenCommand, mcpCall — create/list/revoke via MCP JSON-RPC
 ├── status.go         runStatus — GET /_health
+├── media.go          runMediaCommand, runMediaUpload, runMediaList, runMediaDelete;
+│                     buildMultipart/multipartRequest helpers; printMediaUsage
 ├── main.go           Entry point + top-level subcommand router
 └── cli_test.go       Unit tests: frontmatter (9), mergeFields (2), loadEnvFile (3)
+```
+
+github.com/forge-cms/forge/forge-media/  (sub-module: ./forge-media/)
+```
+├── media.go          MediaType constants (Image/Document/Video/Other), MediaRecord struct,
+│                     MediaStore interface, LocalMediaStore + NewLocalMediaStore;
+│                     CreateMediaTable, insertMedia, listMedia, getMediaByID,
+│                     deleteMediaRecord; detectMIME, sniffMIME, detectMediaType,
+│                     generateFilename, sanitizeFilename; writeJSON helper
+├── server.go         Server struct, New(app, store) *Server,
+│                     Register(app, store) *Server convenience constructor;
+│                     HTTPHandler() http.Handler;
+│                     handleUpload (POST /media — Author+; WCAG 1.1.1 description check),
+│                     handleServe (GET /media/{filename} — public),
+│                     handleList (GET /media — Editor+; ?type= filter),
+│                     handleDelete (DELETE /media/{id} — Editor+)
+├── mcp.go            Server implements forge.MCPModule;
+│                     MCPMeta (TypeName="File", Prefix="/media"),
+│                     MCPSchema (filename/data/description/media_type fields),
+│                     MCPCreate (base64 decode → MIME detect → store → insert),
+│                     MCPDelete; MCPList; MCPGet;
+│                     MCPUpdate/MCPPublish/MCPSchedule/MCPArchive → ErrBadRequest
+├── os_helpers.go     ensureDir, writeFile, removeFile, encodeJSON (test seams)
+└── example_test.go   ExampleRegister — compile-verified minimal wiring pattern
 ```
 
 ### Shipped (Milestones 7–8)
