@@ -131,7 +131,7 @@ const forgeHeadTmpl = `{{define "forge:head"}}<title>{{.Head.Title}}</title>
 {{- end}}
 {{- range .HeadAssets.Stylesheets}}<link rel="stylesheet" href="{{.}}">
 {{- end}}
-{{- range .HeadAssets.Favicons}}<link rel="{{.Rel}}"{{if .Type}} type="{{.Type}}"{{end}}{{if .Sizes}} sizes="{{.Sizes}}"{{end}} href="{{.Href}}">
+{{- range .HeadAssets.Links}}<link rel="{{.Rel}}"{{if .Type}} type="{{.Type}}"{{end}}{{if .Sizes}} sizes="{{.Sizes}}"{{end}} href="{{.Href}}">
 {{- end}}
 {{- range .HeadAssets.Scripts}}
 {{- if .Src}}<script src="{{.Src}}"{{if .Async}} async{{end}}{{if .Defer}} defer{{end}}></script>

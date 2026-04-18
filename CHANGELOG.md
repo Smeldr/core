@@ -23,6 +23,21 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.13.0] — 2026-04-18
+
+HeadLink — rename FaviconLink → HeadLink, HeadAssets.Favicons → HeadAssets.Links (Amendment A74).
+
+### Changed
+
+- `head.go`: `FaviconLink` renamed to `HeadLink`; godoc updated to describe any HTML
+  `<link>` element, not only favicons. Breaking change — update all `FaviconLink` references.
+- `head.go`: `HeadAssets.Favicons []FaviconLink` renamed to `HeadAssets.Links []HeadLink`.
+  Breaking change — update all `.Favicons` field references.
+- `templates.go`: template range updated from `.HeadAssets.Favicons` to `.HeadAssets.Links`.
+  Generated HTML is identical.
+
+---
+
 ## [1.12.0] — 2026-04-18
 
 Media Library — optional `forge-media` submodule (Decision 31).

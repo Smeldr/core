@@ -1105,3 +1105,59 @@ Mismatch produces an agent-actionable `forge.Err("file", "expected JPEG (from .j
 - WCAG 1.1.1 is enforced at the handler level for image uploads — description required.
 - `LocalMediaStore` never stores absolute URLs in the DB; computes from `baseURL` at read time.
 
+---
+
+## Amendment A74 — Rename FaviconLink → HeadLink, HeadAssets.Favicons → HeadAssets.Links
+
+**Status:** Agreed
+**Date:** 2026-04-18
+**Files:** `head.go`, `templates.go`, `head_test.go`, `example_test.go`, `REFERENCE.md`
+
+### Problem
+
+`FaviconLink` and `HeadAssets.Favicons` implied the field only accepted favicon
+and touch-icon elements. In practice, developers and AI agents legitimately place
+any `<link>` element there — `rel="me"` (profile verification), `rel="manifest"`,
+`rel="alternate"`, `rel="canonical"` — and the name gave no indication that these
+were valid uses. A developer looking for where to add a `rel="me"` link would not
+find it by scanning the type name or field name `Favicons`.
+
+### Decision
+
+Rename:
+- `FaviconLink` → `HeadLink`
+- `HeadAssets.Favicons []FaviconLink` → `HeadAssets.Links []HeadLink`
+
+The four struct fields (`Rel`, `Href`, `Type`, `Sizes`) and the template rendering
+path are unchanged. The renaming is purely semantic — the generated HTML is identical.
+
+### Rationale
+
+`HeadLink` is the correct name: it represents any HTML `<link>` element. The struct
+already had no favicon-specific logic — it was a generic `<link>` builder from day one.
+`Links` at the call site is immediately readable:
+
+```go
+app.SEO(&forge.HeadAssets{
+    Links: []forge.HeadLink{
+        {Rel: "icon", Type: "image/png", Sizes: "32x32", Href: "/favicon-32.png"},
+        {Rel: "me", Href: "https://mastodon.social/@you"},
+        {Rel: "manifest", Href: "/site.webmanifest"},
+    },
+})
+```
+
+An AI agent or developer scanning the struct immediately understands the field's scope.
+
+### Consequences
+
+1. **Breaking change** — all callers that reference `FaviconLink` or `.Favicons` must
+   update. The struct's fields and rendering behaviour are unchanged.
+2. **Version bump** — ships as `v1.13.0`.
+3. `REFERENCE.md` updated: field name in the `HeadAssets` example, comment in the
+   `TemplateData` table.
+4. `ARCHITECTURE.md` updated: A63 row and `head.go` exports list updated to `HeadLink`.
+5. `example_test.go` updated: `ExampleHeadAssets` uses `Links: []HeadLink{…}`.
+
+---
+

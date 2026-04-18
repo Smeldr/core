@@ -847,7 +847,7 @@ type TemplateData[T Node] struct {
     Request     *http.Request
     OGDefaults  *forge.OGDefaults  // app-level OG/Twitter fallbacks (nil if not configured)
     AppSchema   template.HTML      // pre-rendered app-level JSON-LD block (empty if not configured)
-    HeadAssets  *forge.HeadAssets  // preconnect/stylesheets/favicons/scripts (nil if not configured)
+    HeadAssets  *forge.HeadAssets  // preconnect/stylesheets/links/scripts (nil if not configured)
 }
 ```
 
@@ -980,7 +980,7 @@ app.SEO(&forge.HeadAssets{
         "https://fonts.googleapis.com/css2?family=Inter&display=swap",
         "/static/app.css",
     },
-    Favicons: []forge.FaviconLink{
+    Links: []forge.HeadLink{
         {Rel: "icon", Type: "image/png", Sizes: "32x32", Href: "/favicon-32.png"},
         {Rel: "apple-touch-icon", Href: "/apple-touch-icon.png"},
     },
@@ -990,7 +990,7 @@ app.SEO(&forge.HeadAssets{
 })
 ```
 
-Assets are emitted in order: preconnect → stylesheets → favicons → scripts.
+Assets are emitted in order: preconnect → stylesheets → links → scripts.
 Inline script bodies use `template.JS` to opt in to verbatim emission:
 
 ```go

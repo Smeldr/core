@@ -262,9 +262,9 @@ func TestHeadAssets_stylesheets(t *testing.T) {
 	}
 }
 
-func TestHeadAssets_favicons_full(t *testing.T) {
+func TestHeadAssets_links_full(t *testing.T) {
 	ha := &HeadAssets{
-		Favicons: []FaviconLink{
+		Links: []HeadLink{
 			{Rel: "icon", Type: "image/png", Sizes: "32x32", Href: "/favicon-32.png"},
 		},
 	}
@@ -275,9 +275,9 @@ func TestHeadAssets_favicons_full(t *testing.T) {
 	}
 }
 
-func TestHeadAssets_favicons_minimal(t *testing.T) {
+func TestHeadAssets_links_minimal(t *testing.T) {
 	ha := &HeadAssets{
-		Favicons: []FaviconLink{
+		Links: []HeadLink{
 			{Rel: "apple-touch-icon", Href: "/apple-touch-icon.png"},
 		},
 	}

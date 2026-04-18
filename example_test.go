@@ -233,7 +233,7 @@ func ExampleHeadAssets() {
 	app.SEO(&HeadAssets{
 		Preconnect:  []string{"https://fonts.googleapis.com"},
 		Stylesheets: []string{"https://fonts.googleapis.com/css2?family=Inter&display=swap", "/static/app.css"},
-		Favicons: []FaviconLink{
+		Links: []HeadLink{
 			{Rel: "icon", Type: "image/png", Sizes: "32x32", Href: "/favicon-32.png"},
 			{Rel: "apple-touch-icon", Href: "/apple-touch-icon.png"},
 		},

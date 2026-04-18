@@ -96,10 +96,11 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A71 | `README.md`: replace tagline with plain-language framework description; add 30-second start section (clone + run) before "What Forge gives you" | Agreed | 2026-04-15 |
 | A72 | `VISION.md`: insert "What Forge is" (typed state layer for AI agents); insert "The two-layer model" (Core AGPL / Cloud commercial); replace Roadmap (Phases 1–2 ✅ DONE, Phase 3 Cloud private beta, Phase 4 Cloud GA) | Agreed | 2026-04-18 |
 | A73 | `forge.go`/`config.go`: add `MediaPath` and `MediaMaxSize` fields to `Config`; parse `media_path` and `media_max_size` from `forge.config` file; add `App.Config() Config` read-only accessor for forge-media submodule access | Agreed | 2026-04-25 |
+| A74 | `head.go`/`templates.go`/`example_test.go`: rename `FaviconLink` → `HeadLink`; rename `HeadAssets.Favicons []FaviconLink` → `HeadAssets.Links []HeadLink` — any `<link>` element, not icons only | Agreed | 2026-04-18 |
 | D31 | `forge-media/`: new optional submodule — `MediaStore` interface, `LocalMediaStore`, HTTP handlers (`Register`), `forge.MCPModule` implementation, `MediaRecord.GetSlug()`; `forge-mcp`: `WithModule` server option | Agreed | 2026-04-18 |
 | D29 | `nav.go`/`forge.go`/`templatedata.go`/`templates.go`/`module.go`/`forge-mcp`: NavTree — first-class navigation abstraction; `NavItem`, `NavTree`, `NavModeDB`/`NavModeCode`, `App.Nav()`, `App.NavTree()`, `TemplateData.Nav`, four MCP nav tools (Editor role) | Agreed | 2026-04-11 |
 | D30 | `config.go`/`forge.go`: forge.config file-based configuration — `loadConfigFile`, `mergeFileConfig`; `Config.AppSchema`, `Config.OGDefaults`; `MustConfig` loads `forge.config` (or `FORGE_CONFIG` env var path); Go-code fields always win; `secret` key panics | Agreed | 2026-04-11 |
 
 ---
 
-> **Body text** for all decisions lives in [decisions/core.md](decisions/core.md) (Decisions 1–22 + Amendments A19–A65) and [decisions/phase2.md](decisions/phase2.md) (Decision 25 + Amendments A66–A67 + Decisions 26–28, Amendment A68).
+> **Body text** for all decisions lives in [decisions/core.md](decisions/core.md) (Decisions 1–22 + Amendments A19–A65) and [decisions/phase2.md](decisions/phase2.md) (Decision 25 + Amendments A66–A67 + Decisions 26–28, Amendment A68–A74).
