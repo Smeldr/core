@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.13.1] — 2026-04-22
+
+HTML passthrough in `renderMarkdown` — lines starting with `<` are emitted verbatim.
+
+### Changed
+
+- `markdown.go`: `renderMarkdown` now emits any line whose trimmed form starts with
+  `<` verbatim, without HTML-escaping. Forge is self-hosted; content authors are
+  trusted (same role system that governs MCP write operations). This unblocks HTML
+  blocks such as `<div class="pull-quote">` and `</div>` in body content. Inline
+  markdown in non-HTML lines (bold, code, links, tables) is still escaped.
+
+---
+
 ## [1.13.0] — 2026-04-18
 
 HeadLink — rename FaviconLink → HeadLink, HeadAssets.Favicons → HeadAssets.Links (Amendment A74).

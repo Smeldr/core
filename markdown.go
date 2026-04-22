@@ -197,6 +197,18 @@ func renderMarkdown(s string) template.HTML {
 			continue
 		}
 
+		// HTML passthrough: a line whose trimmed form starts with '<' is emitted
+		// verbatim. Forge is self-hosted; content authors are trusted — the same
+		// role system that governs all MCP write operations.
+		if strings.HasPrefix(trimmed, "<") {
+			flushPara()
+			flushList()
+			flushTable()
+			out.WriteString(line)
+			out.WriteString("\n")
+			continue
+		}
+
 		// Regular paragraph text — flush any open list or table first.
 		flushList()
 		flushTable()

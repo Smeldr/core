@@ -118,9 +118,48 @@ func TestRenderMarkdown(t *testing.T) {
 	})
 
 	t.Run("XSS in paragraph content", func(t *testing.T) {
+		// A standalone line starting with '<' is emitted verbatim (HTML passthrough).
+		// Forge is self-hosted; authors are trusted. This is intentional behaviour.
 		got := string(renderMarkdown("<script>alert(1)</script>"))
+		if !containsUnescaped(got, "<script>alert(1)</script>") {
+			t.Errorf("expected verbatim passthrough, got: %q", got)
+		}
+	})
+
+	t.Run("html passthrough single div", func(t *testing.T) {
+		input := `<div class="pull-quote">text</div>`
+		got := string(renderMarkdown(input))
+		if !containsStr(got, `<div class="pull-quote">text</div>`) {
+			t.Errorf("expected verbatim div, got: %q", got)
+		}
+	})
+
+	t.Run("html passthrough multi-line block with surrounding markdown", func(t *testing.T) {
+		input := "Before.\n\n<div class=\"x\">\n<p>inner</p>\n</div>\n\nAfter."
+		got := string(renderMarkdown(input))
+		if !containsStr(got, "<p>Before.</p>") {
+			t.Errorf("expected preceding paragraph, got: %q", got)
+		}
+		if !containsStr(got, `<div class="x">`) {
+			t.Errorf("expected verbatim opening tag, got: %q", got)
+		}
+		if !containsStr(got, "<p>inner</p>") {
+			t.Errorf("expected verbatim inner line, got: %q", got)
+		}
+		if !containsStr(got, "</div>") {
+			t.Errorf("expected verbatim closing tag, got: %q", got)
+		}
+		if !containsStr(got, "<p>After.</p>") {
+			t.Errorf("expected following paragraph, got: %q", got)
+		}
+	})
+
+	t.Run("html passthrough does not affect inline xss in bold", func(t *testing.T) {
+		// Inline markdown content is still escaped — passthrough only applies to
+		// lines whose trimmed form starts with '<'.
+		got := string(renderMarkdown("**<script>xss</script>**"))
 		if containsUnescaped(got, "<script>") {
-			t.Errorf("unescaped <script> tag in output: %q", got)
+			t.Errorf("inline xss in bold must still be escaped: %q", got)
 		}
 	})
 
