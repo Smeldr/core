@@ -160,6 +160,29 @@ type Image struct {
 }
 ```
 
+### Struct tags
+
+Four struct tags control validation, storage, and AI/MCP behaviour. Use them together:
+
+```go
+type DocPage struct {
+    forge.Node
+    Title string `forge:"required,min=3" db:"title" json:"title"`
+    Body  string `forge:"required" db:"body" json:"body" forge_format:"markdown" forge_description:"Write in Markdown. Supports headings, lists, and code blocks."`
+    Embed string `db:"embed" json:"embed,omitempty" forge_format:"html" forge_description:"Raw HTML only. Use for iframes and third-party embeds. Must be trusted content."`
+}
+```
+
+| Tag | Purpose |
+|-----|---------|
+| `forge:"required,min=N"` | Validation — enforced identically across HTTP, API, and MCP calls |
+| `db:"column_name"` | SQLRepo column mapping — omit to use lowercased field name |
+| `forge_format:"markdown"` | Machine-readable format hint; currently `"markdown"` and `"html"` are supported |
+| `forge_description:"..."` | Free-text authoring guidance — appears as the field's `description` in the MCP JSON Schema tool definition |
+
+Validation via `forge` tags cannot be bypassed — an AI agent calling a write tool
+faces the same `required` and `min` rules as a direct HTTP POST.
+
 ---
 
 ## Lifecycle
@@ -837,7 +860,67 @@ The `forge:head` partial renders everything in `<head>` automatically:
 app-level JSON-LD, JSON-LD, breadcrumbs,
 and `<meta name="robots">` based on content Status.
 
+### Template functions
+
+All functions are registered in `TemplateFuncMap` and are available in every module template.
+
+| Function | Input | Output | Use case |
+|----------|-------|--------|----------|
+| `forge_markdown` | Markdown string | `template.HTML` | Body fields authored in Markdown |
+| `forge_html` | HTML string | `template.HTML` | Fields that already contain rendered HTML |
+| `forge_date` | `time.Time` | string | Human-readable date (`2 Jan 2006`) |
+| `forge_rfc3339` | `time.Time` | string | Machine-readable datetime for `<time datetime>` |
+| `forge_excerpt` | string, int | string | Truncated plain-text summary |
+| `forge_meta` | string | `template.HTML` | Escaped `<meta>` attribute value |
+| `forge_csrf_token` | — | `template.HTML` | Hidden CSRF input field |
+| `forge_llms_entries` | `.` (template data) | `template.HTML` | Rendered llms.txt entry list |
+
+#### forge_markdown
+
+`forge_markdown` converts a Markdown string to safe HTML. All content is HTML-escaped
+before tag wrapping — no XSS risk from user-authored text.
+
+```html
+{{.Content.Body | forge_markdown}}
+```
+
+**HTML passthrough:** lines whose trimmed form starts with `<` are emitted verbatim —
+they bypass the Markdown renderer and go straight to output. This allows raw HTML blocks
+(feature grids, pull quotes via CSS classes, `<div>` containers) to be embedded inline
+in a Markdown field:
+
+```markdown
+This is regular **Markdown**.
+
+<div class="pull-quote">A trusted raw HTML block.</div>
+
+More regular Markdown here.
+```
+
+Security model: Forge is self-hosted; content authors are trusted (same role system
+that governs MCP write operations). No sanitisation is applied to verbatim HTML lines.
+
+#### forge_html
+
+`forge_html` marks a string as trusted HTML, bypassing Go's default HTML escaping.
+Use it when a field already contains rendered HTML — for example, pre-rendered video
+embeds, third-party iframes, or content migrated from another system.
+
+```html
+{{.Content.Embed | forge_html}}
+```
+
+Never pass unsanitised user input to `forge_html`. The string is emitted verbatim
+with no escaping — the caller is responsible for ensuring the content is safe.
+
+| | `forge_markdown` | `forge_html` |
+|---|---|---|
+| Input format | Markdown text | Already-rendered HTML |
+| HTML passthrough | Lines starting with `<` only | Entire value verbatim |
+| Use case | Body fields authored in Markdown | Pre-rendered content, iframes, migration |
+
 ### Template data shape
+
 
 ```go
 type TemplateData[T Node] struct {
@@ -1176,7 +1259,7 @@ These are architectural guarantees, not conventions.
 ```
 GET /.well-known/cookies.json  →  cookie compliance audit
 GET /llms.txt                  →  site structure for AI crawlers
-GET /posts/hello-world.aidoc   →  token-efficient content for LLMs
+GET /posts/hello-world/aidoc   →  token-efficient content for LLMs
 GET /sitemap.xml               →  always fresh, event-driven
 ```
 
@@ -1381,6 +1464,41 @@ https    = true
 nav_mode = db
 media_path     = /var/data/media
 media_max_size = 10485760
+```
+
+### Health endpoint
+
+`GET /_health` returns HTTP 200 with a JSON body containing the framework version
+and status. No authentication is required.
+
+```
+GET /_health
+→ 200 application/json
+{"status":"ok","forge":"1.13.1"}
+```
+
+When companion modules such as `forge-mcp` are linked into the binary, their
+versions appear alongside:
+
+```json
+{"status":"ok","forge":"1.13.1","forge_mcp":"1.5.0"}
+```
+
+The same version data is written to stderr at startup:
+
+```
+forge: forge 1.13.1, forge_mcp 1.5.0
+```
+
+`/_health` is exempt from the HTTPS redirect middleware (A59) so that
+co-located reverse proxies (e.g. Caddy `health_uri`) can probe via plain HTTP
+without triggering a `301` redirect.
+
+`App.Health()` must be called once to mount the endpoint — it is not mounted
+automatically:
+
+```go
+app.Health()
 ```
 
 ---
