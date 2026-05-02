@@ -11,7 +11,7 @@ Web version: [forge-cms.dev/docs](https://forge-cms.dev/docs).
 Five minutes from `go get` to a running content API.
 
 ```bash
-go get github.com/forge-cms/forge
+go get forge-cms.dev/forge
 ```
 
 **1. Define a content type**
@@ -654,7 +654,7 @@ a thin adapter that is a separate module from Forge core.
 
 ```go
 import (
-    forgepgx "github.com/forge-cms/forge-pgx"
+    forgepgx "forge-cms.dev/forge-pgx"
     "github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -1220,7 +1220,7 @@ Schema derivation, lifecycle enforcement, and role checks are all automatic —
 no configuration beyond `forge.MCP(...)` on your existing modules.
 
 ```go
-import forgemcp "github.com/forge-cms/forge/forge-mcp"
+import forgemcp "forge-cms.dev/forge-mcp"
 
 func main() {
     app := forge.New(forge.MustConfig(forge.Config{
@@ -1282,7 +1282,7 @@ import (
     "os"
     "time"
 
-    "github.com/forge-cms/forge"
+    "forge-cms.dev/forge"
 )
 
 type Article struct {
@@ -1375,13 +1375,13 @@ Optional submodule for file upload, storage, serving, and AI-agent access via MC
 ### Install
 
 ```
-go get github.com/forge-cms/forge-media
+go get forge-cms.dev/forge-media
 ```
 
 ### Wiring
 
 ```go
-import forgemedia "github.com/forge-cms/forge-media"
+import forgemedia "forge-cms.dev/forge-media"
 
 store := forgemedia.NewLocalMediaStore(app)
 mediaSrv := forgemedia.Register(app, store)
@@ -1429,7 +1429,7 @@ Set them in your `forge.config` file or override in Go code via `forge.Config`.
 | `media_path` | `./media` | Directory where uploaded files are stored on disk. |
 | `media_max_size` | `5242880` (5 MB) | Maximum upload size in bytes. |
 
-Full reference: [forge-media README](https://github.com/forge-cms/forge/tree/main/forge-media)
+Full reference: [forge-media README](https://forge-cms.dev/forge/tree/main/forge-media)
 
 ---
 

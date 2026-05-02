@@ -1,8 +1,8 @@
-module github.com/forge-cms/forge/forge-media
+module forge-cms.dev/forge-media
 
-go 1.25.0
+go 1.26.2
 
-require github.com/forge-cms/forge v0.0.0
+require forge-cms.dev/forge v0.0.0
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -17,4 +17,4 @@ require (
 	modernc.org/sqlite v1.49.1 // indirect
 )
 
-replace github.com/forge-cms/forge => ../
+replace forge-cms.dev/forge => ../

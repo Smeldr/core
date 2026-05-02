@@ -1,9 +1,7 @@
-module github.com/forge-cms/forge/forge-mcp
+module forge-cms.dev/forge-mcp
 
-go 1.22
+go 1.26.2
 
-toolchain go1.22.0
+require forge-cms.dev/forge v0.0.0
 
-require github.com/forge-cms/forge v0.0.0
-
-replace github.com/forge-cms/forge => ../
+replace forge-cms.dev/forge => ../

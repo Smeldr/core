@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/forge-cms/forge"
+	"forge-cms.dev/forge"
 )
 
 // testMCPPost is the canonical content type for all forge-mcp tests.

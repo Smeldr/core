@@ -25,7 +25,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/forge-cms/forge"
+	"forge-cms.dev/forge"
 )
 
 // Post is the content type for a Forge devlog post.

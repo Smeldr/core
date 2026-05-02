@@ -3,7 +3,7 @@
 //
 // # Quick start
 //
-//	import forgemedia "github.com/forge-cms/forge/forge-media"
+//	import forgemedia "forge-cms.dev/forge-media"
 //
 //	store := forgemedia.NewLocalMediaStore(app)
 //	srv   := forgemedia.New(app, store)
@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	forge "github.com/forge-cms/forge"
+	forge "forge-cms.dev/forge"
 )
 
 // ─── Media types ─────────────────────────────────────────────────────────────

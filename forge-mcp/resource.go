@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/forge-cms/forge"
+	"forge-cms.dev/forge"
 )
 
 // resourceContent is the wire format for a single item returned by resources/read.

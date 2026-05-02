@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
-	forge "github.com/forge-cms/forge"
+	forge "forge-cms.dev/forge"
 )
 
 // ─── MCPModule interface implementation ───────────────────────────────────────

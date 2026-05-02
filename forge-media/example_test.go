@@ -3,8 +3,8 @@ package forgemedia_test
 import (
 	"database/sql"
 
-	forge "github.com/forge-cms/forge"
-	forgemedia "github.com/forge-cms/forge/forge-media"
+	forge "forge-cms.dev/forge"
+	forgemedia "forge-cms.dev/forge-media"
 )
 
 // ExampleRegister demonstrates the minimal forge-media wiring pattern.

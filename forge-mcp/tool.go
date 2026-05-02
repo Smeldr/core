@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/forge-cms/forge"
+	"forge-cms.dev/forge"
 )
 
 // toolName builds the MCP tool name for a given operation and content type.

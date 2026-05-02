@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/forge-cms/forge"
+	"forge-cms.dev/forge"
 )
 
 // ServeStdio runs the MCP server over newline-delimited JSON on the given

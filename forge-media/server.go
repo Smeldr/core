@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	forge "github.com/forge-cms/forge"
+	forge "forge-cms.dev/forge"
 )
 
 // ─── Server ───────────────────────────────────────────────────────────────────

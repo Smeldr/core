@@ -15,7 +15,7 @@ same code paths as the HTTP layer. There is no special MCP bypass.
 ## Quick start
 
 ```bash
-go get github.com/forge-cms/forge/forge-mcp
+go get forge-cms.dev/forge-mcp
 ```
 
 ```go
@@ -25,9 +25,9 @@ import (
 	"context"
 	"os"
 
-	forgemcp "github.com/forge-cms/forge/forge-mcp"
+	forgemcp "forge-cms.dev/forge-mcp"
 
-	"github.com/forge-cms/forge"
+	"forge-cms.dev/forge"
 )
 
 // BlogPost is your content type — embed forge.Node and add your fields.

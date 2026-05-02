@@ -8,7 +8,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	forge "github.com/forge-cms/forge"
+	forge "forge-cms.dev/forge"
 )
 
 // authorCtx returns a test Context with Author role.

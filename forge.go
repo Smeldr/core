@@ -697,13 +697,13 @@ func (a *App) RedirectManifestAuth(auth AuthFunc) {
 
 // forgeVersions reads the binary's embedded build info and returns a map of
 // short module name → version for all Forge core and companion modules
-// (github.com/forge-cms/forge and its sub-modules). The base module maps to
-// the key "forge"; sub-modules use their sub-path with hyphens replaced by
-// underscores (e.g. github.com/forge-cms/forge/forge-mcp → "forge_mcp").
+// (forge-cms.dev/forge and related modules). Each module path under
+// forge-cms.dev/ maps to a key with hyphens replaced by underscores
+// (e.g. forge-cms.dev/forge-mcp → "forge_mcp", forge-cms.dev/forge → "forge").
 // The leading "v" is stripped from version strings ("v1.1.5" → "1.1.5").
 // Returns nil when build info is unavailable or no forge modules are found.
 func forgeVersions() map[string]string {
-	const base = "github.com/forge-cms/forge"
+	const base = "forge-cms.dev/"
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return nil
@@ -714,13 +714,8 @@ func forgeVersions() map[string]string {
 			return
 		}
 		v := strings.TrimPrefix(version, "v")
-		sub := strings.TrimPrefix(path, base)
-		if sub == "" {
-			result["forge"] = v
-		} else {
-			key := strings.ReplaceAll(strings.TrimPrefix(sub, "/"), "-", "_")
-			result[key] = v
-		}
+		key := strings.ReplaceAll(strings.TrimPrefix(path, base), "-", "_")
+		result[key] = v
 	}
 	add(info.Main.Path, info.Main.Version)
 	for _, dep := range info.Deps {

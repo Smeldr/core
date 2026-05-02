@@ -66,7 +66,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-04-05 | Amendment A67 (`templatehelpers.go`): `forgeHTML(s string) template.HTML` added — trusted raw HTML passthrough registered as `forge_html` in `TemplateFuncMap`; `TemplateFuncMap` godoc updated; `TestTemplateFuncMap_keys` expected count updated from 8 to 9; `TestForgeHTML` added (3 sub-tests). Shipped in v1.7.0. |
 | 2026-04-06 | Decision 26 (`auth.go`, `errors.go`, `forge-mcp/tool.go`): `ErrLastAdmin` sentinel (409 `last_admin`) added to `errors.go`; `TokenStore.Revoke` gains pre-check — counts other active admin tokens before revoking; returns `ErrLastAdmin` if count is 0 and target is admin; `forge-mcp/tool.go` `revoke_token` surfaces actionable message for `ErrLastAdmin`. Shipped in forge v1.8.0, forge-mcp v1.2.0. |
 | 2026-04-07 | Decision 27 (`mcp.go`, `module.go`, `forge-mcp/mcp.go`): `MCPField.Format string` and `MCPField.Description string` added to `mcp.go`; `mcpStructField` in `module.go` reads `forge_format` and `forge_description` struct tags; `fieldDescription` helper added to `forge-mcp/mcp.go`; `inputSchema` and `inputSchemaUpdate` emit `"description"` key in JSON Schema properties with three-case priority logic (both → description + " (" + format + ")"; format-only → "(format)"; neither → omitted). Shipped in forge v1.9.0, forge-mcp v1.3.0. |
-| 2026-04-07 | Decision 28 (`forge-cli/`): new stdlib-only submodule `github.com/forge-cms/forge/forge-cli` (`package main`); content CRUD + lifecycle via GET-then-PUT to Forge REST API; token management via MCP JSON-RPC 2.0; YAML-subset frontmatter parser; `Config` from `FORGE_URL`/`FORGE_TOKEN`/`FORGE_MCP_URL` env vars; G23 integration test validates GET→PUT round-trip contract. Tagged `forge-cli/v0.1.0`. |
+| 2026-04-07 | Decision 28 (`forge-cli/`): new stdlib-only submodule `forge-cms.dev/forge-cli` (`package main`); content CRUD + lifecycle via GET-then-PUT to Forge REST API; token management via MCP JSON-RPC 2.0; YAML-subset frontmatter parser; `Config` from `FORGE_URL`/`FORGE_TOKEN`/`FORGE_MCP_URL` env vars; G23 integration test validates GET→PUT round-trip contract. Tagged `forge-cli/v0.1.0`. |
 | 2026-04-10 | Fix (`forge-mcp/mcp.go`): `inputSchema` and `inputSchemaUpdate` emit `{"type":"string","format":"date-time"}` for `f.Type == "datetime"` fields (`published_at`, `scheduled_at`). Previously emitted invalid `"type":"datetime"`, blocking tool registration in strict MCP clients (VS Code Copilot). Shipped in forge-mcp v1.3.1. |
 | 2026-04-11 | Decision 29 (`nav.go`, `forge.go`, `templatedata.go`, `templates.go`, `module.go`, `forge-mcp/`): NavTree first-class navigation abstraction; NavMode, NavItem, NavTree; App.Nav(), App.NavTree(); TemplateData[T].Nav field; forge-mcp nav tools (list/create/update/delete). Shipped in forge v1.10.0 / forge-mcp v1.4.0. |
 | 2026-04-11 | Decision 30 (`config.go`, `forge.go`): `loadConfigFile`, `mergeFileConfig`; `Config.AppSchema`, `Config.OGDefaults`; `MustConfig` auto-loads `forge.config`. Shipped in forge v1.11.0. |
@@ -81,7 +81,7 @@ the API surface in one place. The file names are the organisation.
 ### Implemented (Milestone 1 + Milestone 2)
 
 ```
-github.com/forge-cms/forge/
+forge-cms.dev/
 │
 ├── errors.go         Error interface, sentinel errors, WriteError(), ValidationError
 ├── roles.go          Role type, hierarchy, HasRole(), IsRole(), built-in constants, Option interface
@@ -196,10 +196,10 @@ github.com/forge-cms/forge/
                       sitemap in robots.txt, error template first-match + fallthrough,
                       TemplateData siteName + request URL
 
-github.com/forge-cms/forge-pgx/  (separate module: ./forge-pgx/)
+forge-cms.dev/forge-pgx/  (separate module: ./forge-pgx/)
 └── pgx.go            Wrap(*pgxpool.Pool) forge.DB — native pgx adapter
 
-github.com/forge-cms/forge/forge-mcp/  (sub-module: ./forge-mcp/)
+forge-cms.dev/forge-mcp/  (sub-module: ./forge-mcp/)
 ├── mcp.go            Server (secret []byte), New(app, opts...), ServerOption,
 │                     WithSecret, WithModule(m forge.MCPModule) (D31);
 │                     handle (JSON-RPC dispatch), handleInitialize,
@@ -218,7 +218,7 @@ github.com/forge-cms/forge/forge-mcp/  (sub-module: ./forge-mcp/)
 └── README.md         AI-first integration guide: quick start, Claude/Cursor  ✅ Milestone 10 Step 5
                       config, SSE Bearer auth, MCPRead vs MCPWrite table
 
-github.com/forge-cms/forge/forge-cli/  (sub-module: ./forge-cli/)
+forge-cms.dev/forge-cli/  (sub-module: ./forge-cli/)
 ├── client.go         Config{ForgeURL,Token,MCPURL}, loadConfig, loadEnvFile,
 │                     request, getItem, mergeFields, printJSON, fatal
 ├── frontmatter.go    parseFrontmatter, parseFrontmatterFile — YAML-subset parser
@@ -232,7 +232,7 @@ github.com/forge-cms/forge/forge-cli/  (sub-module: ./forge-cli/)
 └── cli_test.go       Unit tests: frontmatter (9), mergeFields (2), loadEnvFile (3)
 ```
 
-github.com/forge-cms/forge/forge-media/  (sub-module: ./forge-media/)
+forge-cms.dev/forge-media/  (sub-module: ./forge-media/)
 ```
 ├── media.go          MediaType constants (Image/Document/Video/Other), MediaRecord struct,
 │                     MediaStore interface, LocalMediaStore + NewLocalMediaStore;
@@ -743,7 +743,7 @@ This interface is satisfied by:
 `forge.Query[T]` and `forge.QueryOne[T]` accept `forge.DB`, not `*sql.DB`.
 This means switching drivers requires changing exactly one value in `forge.Config`.
 
-The `forge-pgx` adapter lives at `github.com/forge-cms/forge-pgx` — a separate
+The `forge-pgx` adapter lives at `forge-cms.dev/forge-pgx` — a separate
 module. It imports both `forge` and `pgx/v5`. Forge core never imports pgx.
 
 ---

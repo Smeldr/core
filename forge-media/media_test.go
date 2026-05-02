@@ -11,7 +11,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	forge "github.com/forge-cms/forge"
+	forge "forge-cms.dev/forge"
 )
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

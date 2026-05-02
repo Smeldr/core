@@ -101,7 +101,7 @@ forge.NewModule((*Post)(nil),
 Wire the MCP server and token store in `main.go`:
 
 ```go
-import forgemcp "github.com/forge-cms/forge-mcp"
+import forgemcp "forge-cms.dev/forge-mcp"
 
 app := forge.New(forge.MustConfig(forge.Config{
     BaseURL:    "https://mysite.com",
@@ -124,8 +124,8 @@ serving. It implements `forge.MCPModule` so AI agents can upload files via MCP.
 
 ```go
 import (
-    forgemedia "github.com/forge-cms/forge/forge-media"
-    forgemcp   "github.com/forge-cms/forge-mcp"
+    forgemedia "forge-cms.dev/forge-media"
+    forgemcp   "forge-cms.dev/forge-mcp"
 )
 
 app := forge.New(forge.MustConfig(forge.Config{

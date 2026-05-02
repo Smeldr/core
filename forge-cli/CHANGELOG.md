@@ -7,6 +7,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.2.0] — 2026-04-30
+
+Go 1.26.2 and module path migration to `forge-cms.dev` (Amendment A76).
+
+### Changed
+
+- `go.mod`: module path renamed from `github.com/forge-cms/forge-cli` to
+  `forge-cms.dev/forge-cli`; `go` directive bumped from `1.22` to `1.26.2`.
+
+---
+
 ## [0.1.0] — 2026-04-07
 
 Initial release — operator CLI for Forge instances (Decision 28).

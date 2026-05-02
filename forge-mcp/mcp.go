@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"log"
 
-	"github.com/forge-cms/forge"
+	"forge-cms.dev/forge"
 )
 
 // ServerOption configures a [Server]. Use [WithSecret] to override the HMAC

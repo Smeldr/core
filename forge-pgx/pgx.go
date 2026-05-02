@@ -23,7 +23,7 @@ import (
 	"context"
 	"database/sql"
 
-	forge "github.com/forge-cms/forge"
+	forge "forge-cms.dev/forge"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 )

@@ -5,7 +5,7 @@ All notable changes to Forge are documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**API stability promise:** every exported symbol in `github.com/forge-cms/forge`
+**API stability promise:** every exported symbol in `forge-cms.dev/forge`
 at v1.0.0 is stable. No breaking changes will be made without a new major version.
 The zero-dependency policy and zero-reflection-at-request-time guarantee are
 treated as part of the stability promise.
@@ -20,6 +20,28 @@ cross-referenced below by their Amendment ID.
 
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
+
+---
+
+## [1.14.0] — 2026-04-30
+
+Go 1.26.2 and module path migration to `forge-cms.dev` (Amendment A76).
+
+### Changed
+
+- All `go.mod` files: `go` directive bumped from `1.22` to `1.26.2` across
+  `forge`, `forge-mcp`, `forge-media`, `forge-cli`, and `forge-pgx`.
+- Module paths renamed across all modules and all import sites:
+  - `github.com/forge-cms/forge` → `forge-cms.dev/forge`
+  - `github.com/forge-cms/forge-mcp` → `forge-cms.dev/forge-mcp`
+  - `github.com/forge-cms/forge-media` → `forge-cms.dev/forge-media`
+  - `github.com/forge-cms/forge-cli` → `forge-cms.dev/forge-cli`
+  - `github.com/forge-cms/forge-pgx` → `forge-cms.dev/forge-pgx`
+- `forge.go`: `forgeVersions()` prefix logic updated — uses `forge-cms.dev/`
+  as the base prefix; sub-modules are no longer sub-paths of the root module.
+- All internal imports, documentation, and README examples updated.
+
+Closes #1, Closes #2.
 
 ---
 
@@ -946,7 +968,7 @@ module.
 - `forge.go`: `Config`, `MustConfig`, `New`, `App` (`Use`, `Content`, `Handle`,
   `Run`, `Handler`), `Registrator` interface, graceful shutdown on
   `SIGINT`/`SIGTERM`
-- `forge-pgx` (`github.com/forge-cms/forge-pgx`): `forgepgx.Wrap(*pgxpool.Pool)
+- `forge-pgx` (`forge-cms.dev/forge-pgx`): `forgepgx.Wrap(*pgxpool.Pool)
   forge.DB` — pgx/v5 adapter; no generated code, no ORM
 
 ---
@@ -990,13 +1012,13 @@ Zero third-party dependencies. All types in package `forge`.
 
 Forge uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 
-- **MAJOR** — breaking change to any exported symbol in `github.com/forge-cms/forge`
+- **MAJOR** — breaking change to any exported symbol in `forge-cms.dev/forge`
 - **MINOR** — new exported symbols; backward-compatible amendments
 - **PATCH** — bug fixes with no API change
 
 v1.0.0 and all future v1.x releases maintain full backward compatibility.
 A v2 will be introduced as a separate import path
-(`github.com/forge-cms/forge/v2`) following Go module conventions.
+(`forge-cms.dev/forge/v2`) following Go module conventions.
 
 See [DECISIONS.md](DECISIONS.md) for the architectural rationale behind every
 design choice in this release.

@@ -1,15 +1,15 @@
-Ôªø# Forge ‚Äî Decisions: Phase 2
+# Forge ó Decisions: Phase 2
 
 Decision 25 onwards.
 
-## Decision 25 ‚Äî Token management
+## Decision 25 ó Token management
 
 **Status:** Locked
 **Date:** 2026-04-05
 
 **Decision:** Forge provides a `TokenStore` that issues, lists, and revokes
 named bearer tokens backed by a SQLite table (`forge_tokens`). Tokens are
-stateless HMAC values ‚Äî the store adds a server-side record that enables
+stateless HMAC values ó the store adds a server-side record that enables
 revocation and auditing without changing the token format itself.
 
 ### Token table schema
@@ -19,8 +19,8 @@ revocation and auditing without changing the token format itself.
 | `id` | TEXT | UUID v7, primary key |
 | `name` | TEXT | Free-label set by Admin (e.g. "Desiree - Author") |
 | `role` | TEXT | Forge role string (e.g. "author", "editor") |
-| `token_hash` | TEXT | SHA-256 of the issued token ‚Äî plaintext never stored |
-| `expires_at` | TEXT | ISO 8601 ‚Äî mirrors the token TTL |
+| `token_hash` | TEXT | SHA-256 of the issued token ó plaintext never stored |
+| `expires_at` | TEXT | ISO 8601 ó mirrors the token TTL |
 | `revoked_at` | TEXT | NULL until revoked |
 | `created_at` | TEXT | ISO 8601 |
 
@@ -29,10 +29,10 @@ revocation and auditing without changing the token format itself.
 1. Admin calls `create_token(name, role, ttl)` via MCP
 2. Forge calls `SignToken` to produce a signed HMAC token
 3. SHA-256 of the token is stored in `forge_tokens`
-4. The plaintext token is returned once ‚Äî never again retrievable
+4. The plaintext token is returned once ó never again retrievable
 5. On every request, `VerifyBearerToken` checks the hash against the store
    and rejects tokens that are revoked or expired
-6. Admin calls `revoke_token(id)` to set `revoked_at` ‚Äî effective immediately
+6. Admin calls `revoke_token(id)` to set `revoked_at` ó effective immediately
 
 ### MCP tools (forge-mcp, Admin role required)
 
@@ -40,24 +40,24 @@ revocation and auditing without changing the token format itself.
 |------|-------------|
 | `create_token` | Issues a new named token with a given role and TTL |
 | `list_tokens` | Lists all tokens with name, role, expiry, revoked status |
-| `revoke_token` | Revokes a token by ID ‚Äî effective on next request |
+| `revoke_token` | Revokes a token by ID ó effective on next request |
 
 ### What this is not
 
-- No user accounts ‚Äî Forge has no user table, only tokens with roles
-- No contact field ‚Äî no personally identifiable data stored (GDPR)
-- No update_token ‚Äî revoke and re-issue is the only model
-- No UI ‚Äî token management is via MCP tools only
+- No user accounts ó Forge has no user table, only tokens with roles
+- No contact field ó no personally identifiable data stored (GDPR)
+- No update_token ó revoke and re-issue is the only model
+- No UI ó token management is via MCP tools only
 
 ### Module boundary
 
-- `forge/auth.go` ‚Äî TokenStore, CreateToken, ListTokens, RevokeToken
-- `forge-mcp/` ‚Äî three new admin MCP tools wrapping the above
+- `forge/auth.go` ó TokenStore, CreateToken, ListTokens, RevokeToken
+- `forge-mcp/` ó three new admin MCP tools wrapping the above
 - `VerifyBearerToken` in `forge/auth.go` gains a TokenStore parameter;
   when nil (no store configured), behaviour is unchanged (stateless HMAC only)
 
 **Rationale:**
-Stateless HMAC tokens cannot be revoked ‚Äî a stolen token is valid until
+Stateless HMAC tokens cannot be revoked ó a stolen token is valid until
 expiry. A server-side store adds revocation at the cost of one database
 lookup per request, which is acceptable given Forge's target workloads.
 The SHA-256 hash pattern ensures that a database breach does not expose
@@ -66,9 +66,9 @@ backward compatibility for deployments that do not need revocation.
 
 **Rejected alternatives:**
 - Session table with user accounts: Overkill for a token-first auth model.
-  Forge has no login flow ‚Äî tokens are issued by Admin via MCP.
+  Forge has no login flow ó tokens are issued by Admin via MCP.
 - JWT with blacklist: JWT parsing is more complex than HMAC verification.
-  Forge already uses HMAC tokens ‚Äî no reason to change the format.
+  Forge already uses HMAC tokens ó no reason to change the format.
 - Contact field on tokens: Would store PII. Deliberately omitted.
   Admin uses the name label as a free-text identifier.
 
@@ -78,11 +78,11 @@ backward compatibility for deployments that do not need revocation.
 - `forge_tokens` table must exist in the database for token management to work;
   Forge logs a warning at startup if TokenStore is configured but the table
   is absent
-- Stateless HMAC (current behaviour) remains the default ‚Äî no breaking change
+- Stateless HMAC (current behaviour) remains the default ó no breaking change
 
 ---
 
-## Amendment A66 ‚Äî TokenStore: implementation
+## Amendment A66 ó TokenStore: implementation
 
 **Status:** Agreed
 **Date:** 2026-04-05
@@ -94,7 +94,7 @@ backward compatibility for deployments that do not need revocation.
 - `auth.go`: Added `TokenRecord` struct, `TokenStore` struct and
   `NewTokenStore(db, secret)` constructor, `probeTable`, `Create`,
   `List`, `Revoke` methods. `VerifyBearerToken` signature extended from
-  2-arg to 3-arg `(r, secret, store *TokenStore)` ‚Äî when store is nil,
+  2-arg to 3-arg `(r, secret, store *TokenStore)` ó when store is nil,
   behaviour is unchanged (stateless HMAC only).
 - `forge.go`: `Config.TokenStore *TokenStore` field; `App.tokenStore`
   private field; `App.TokenStore() *TokenStore` accessor; startup probe
@@ -117,7 +117,7 @@ backward compatibility for deployments that do not need revocation.
 
 ---
 
-## Amendment A67 ‚Äî `forge_html`: trusted raw HTML passthrough
+## Amendment A67 ó `forge_html`: trusted raw HTML passthrough
 
 **Status:** Agreed
 **Date:** 2026-04-05
@@ -131,7 +131,7 @@ alongside Markdown content (`forge_markdown` handles the Markdown; `forge_html`
 handles the iframe).
 
 **What changed:**
-- `templatehelpers.go`: `forgeHTML(s string) template.HTML` ‚Äî one-line function
+- `templatehelpers.go`: `forgeHTML(s string) template.HTML` ó one-line function
   returning `template.HTML(s)`; registered as `"forge_html"` in `TemplateFuncMap`;
   godoc warns that the caller is responsible for trust.
 - `templatehelpers_test.go`: `TestForgeHTML` (3 sub-tests: passthrough, empty,
@@ -139,14 +139,14 @@ handles the iframe).
 
 **Consequences:**
 - `TemplateFuncMap` grows from 8 to 9 entries.
-- No exported Go symbol is added ‚Äî `forgeHTML` is package-internal; only the map
+- No exported Go symbol is added ó `forgeHTML` is package-internal; only the map
   key `"forge_html"` is visible to templates.
 - No interface, file, or behaviour change beyond the new function.
 - Root package bumps to `v1.7.0`.
 
 ---
 
-## Decision 26 ‚Äî Last-admin guard on token revocation
+## Decision 26 ó Last-admin guard on token revocation
 
 **Status:** Locked
 **Date:** 2026-04-06
@@ -161,7 +161,7 @@ is `admin`, a COUNT of other active admin tokens is performed. If that count is 
 ### Guard logic
 
 ```go
-// 1. Fetch role of target token ‚Äî skip guard for non-admin:
+// 1. Fetch role of target token ó skip guard for non-admin:
 SELECT role FROM forge_tokens WHERE id = $1
 
 // 2. Only if role = "admin": count other active admins:
@@ -176,7 +176,7 @@ If COUNT = 0, `Revoke` returns `ErrLastAdmin`.
 
 ### New exported symbol
 
-`ErrLastAdmin` ‚Äî sentinel `forge.Error`, HTTP status 409 Conflict,
+`ErrLastAdmin` ó sentinel `forge.Error`, HTTP status 409 Conflict,
 code `"last_admin"`, public message `"Cannot revoke the last active admin token"`.
 Consistent with `ErrConflict` and other package sentinels.
 
@@ -191,14 +191,14 @@ Consistent with `ErrConflict` and other package sentinels.
 
 ### What this does not cover
 
-- Natural token expiry ‚Äî not an operator action; not guarded
-- `Create` and `List` ‚Äî unchanged
-- MCP tool signatures ‚Äî unchanged
-- `forge_tokens` schema ‚Äî unchanged
+- Natural token expiry ó not an operator action; not guarded
+- `Create` and `List` ó unchanged
+- MCP tool signatures ó unchanged
+- `forge_tokens` schema ó unchanged
 
 **Rationale:**
 A single `revoke_token` call can permanently lock out all MCP-based administrative
-access. Recovery requires direct database access ‚Äî bypassing all Forge abstractions.
+access. Recovery requires direct database access ó bypassing all Forge abstractions.
 The guard makes this impossible without first creating a replacement admin token.
 The check is in core, not in the MCP layer, so it protects against any caller
 regardless of interface.
@@ -207,7 +207,7 @@ The guard is intentionally narrow: only the `admin` role is protected, only acti
 (non-revoked, non-expired) tokens are counted, and natural expiry is excluded
 because it is not a discrete operator action. The two-query implementation is
 preferred over a single-query approach so that non-admin tokens are never blocked
-when no admin tokens exist ‚Äî a correctness guarantee that the spec's single-query
+when no admin tokens exist ó a correctness guarantee that the spec's single-query
 wording did not provide.
 
 **Rejected alternatives:**
@@ -219,21 +219,21 @@ wording did not provide.
   incorrectly block revoking non-admin tokens when no admin tokens exist.
 
 **Consequences:**
-- `Revoke` is no longer unconditional ‚Äî callers must handle `ErrLastAdmin`
+- `Revoke` is no longer unconditional ó callers must handle `ErrLastAdmin`
 - forge-mcp surfaces a clear, actionable error message for this case
 - No schema changes, no breaking changes to existing call sites that do not hit the guard
 
 
-## Decision 27 ‚Äî Field format semantics: `forge_format` and `forge_description`
+## Decision 27 ó Field format semantics: `forge_format` and `forge_description`
 
 **Status:** Locked
 **Date:** 2026-04-07
 
-**Decision:** Forge introduces two optional struct tags ‚Äî `forge_format` and
-`forge_description` ‚Äî that declare the expected content format and authoring
+**Decision:** Forge introduces two optional struct tags ó `forge_format` and
+`forge_description` ó that declare the expected content format and authoring
 guidance for string fields. Both are surfaced in `MCPField` and in forge-mcp
 tool descriptions to give AI agents explicit, actionable context when authoring
-content. Neither tag triggers validation ‚Äî they are semantic hints only.
+content. Neither tag triggers validation ó they are semantic hints only.
 
 ### Struct tags
 
@@ -246,15 +246,15 @@ Embed string `forge_format:"html" forge_description:"Raw HTML only. Use for ifra
 
 | Value      | Meaning |
 |------------|---------|
-| `markdown` | CommonMark/GFM markdown ‚Äî also covers plain text |
-| `html`     | Trusted raw HTML ‚Äî caller is responsible for sanitisation |
+| `markdown` | CommonMark/GFM markdown ó also covers plain text |
+| `html`     | Trusted raw HTML ó caller is responsible for sanitisation |
 
-Fields without a `forge_format` tag have `Format = ""` ‚Äî no hint emitted.
+Fields without a `forge_format` tag have `Format = ""` ó no hint emitted.
 
 ### `forge_description`
 
 Free text written by the developer. Shown in forge-mcp tool descriptions when
-present. No fixed vocabulary ‚Äî the developer writes what the AI agent needs to
+present. No fixed vocabulary ó the developer writes what the AI agent needs to
 know to author the field correctly.
 
 When both tags are present, forge-mcp uses `forge_description` as the primary
@@ -284,14 +284,14 @@ type MCPField struct {
 
 ### What this is not
 
-- No validation ‚Äî format and description are hints only
-- No breaking change ‚Äî all new fields on `MCPField` are additive
+- No validation ó format and description are hints only
+- No breaking change ó all new fields on `MCPField` are additive
 - No impact on HTML rendering, template helpers, or non-MCP paths
 
 **Rationale:**
 `MCPSchema` exposes field types (`string`, `number`, `array`) but carries no
 semantic or authoring information. A content type with multiple string fields
-of fundamentally different kinds ‚Äî markdown body, trusted HTML embed ‚Äî gives
+of fundamentally different kinds ó markdown body, trusted HTML embed ó gives
 an AI agent no signal to distinguish them or author them correctly. The gap
 was identified with `DocPage.Body` (markdown) and `DocPage.Embed` (trusted
 HTML). The two tags close the gap at different levels: `forge_format` provides
@@ -301,10 +301,10 @@ authoring guidance.
 **Rejected alternatives:**
 - Convention-based field naming (`BodyMarkdown`, `EmbedHTML`): Fragile, not
   machine-readable, constrains naming.
-- Validation based on format: Out of scope ‚Äî semantics alone are sufficient
+- Validation based on format: Out of scope ó semantics alone are sufficient
   for agent guidance.
 - Additional format values from the start (`url`, `slug`, `plaintext`): Kept
-  minimal ‚Äî extended when concrete need arises.
+  minimal ó extended when concrete need arises.
 - `forge_description` as a separate decision: Both tags solve the same AI-DX
   problem and belong together.
 
@@ -332,7 +332,7 @@ instance from a terminal or CI/CD pipeline. The REST API and MCP endpoints are
 already stable. A thin CLI wrapping those endpoints is the minimal solution.
 
 **Decision:**
-Add a new Go submodule `github.com/forge-cms/forge/forge-cli` (package main).
+Add a new Go submodule `forge-cms.dev/forge-cli` (package main).
 
 ### Design constraints
 
@@ -352,7 +352,7 @@ Add a new Go submodule `github.com/forge-cms/forge/forge-cli` (package main).
 | status.go | status subcommand -- GET /_health |
 | main.go | Entry point + top-level subcommand router |
 | cli_test.go | Unit tests: frontmatter (9), mergeFields (2), loadEnvFile (3) |
-| go.mod | Module github.com/forge-cms/forge/forge-cli, Go 1.22, no require block |
+| go.mod | Module forge-cms.dev/forge-cli, Go 1.22, no require block |
 | CHANGELOG.md | Submodule changelog |
 | README.md | Installation, configuration, all commands |
 
@@ -383,42 +383,42 @@ Tools: create_token, list_tokens, revoke_token. Admin role required.
 
 ---
 
-## Amendment A68 ‚Äî storage.go/module.go: irregular pluralisation doc comments
+## Amendment A68 ó storage.go/module.go: irregular pluralisation doc comments
 
 **Date:** 2026-04-09
 **Status:** Agreed
-**Level:** 1 (micro-amendment ‚Äî doc-only, no exported symbol change)
+**Level:** 1 (micro-amendment ó doc-only, no exported symbol change)
 
 ### Problem
 
-Story ‚Üí "storys" by default. An implementer agent hit an internal server
+Story ? "storys" by default. An implementer agent hit an internal server
 error because neither Table nor At mentioned this class of problem. The
 correction (orge.Table("stories")) was trivially available, but neither
 doc comment surfaced it. This is a documentation gap, not a code bug.
 
 ### Changes
 
-**storage.go ‚Äî Table function doc comment:**
+**storage.go ó Table function doc comment:**
 
 Extended to name the problem class explicitly and add a *Story example:
 
 `go
 // Table returns a [SQLRepoOption] that overrides the automatically derived
 // table name for a [SQLRepo]. Use it when the default snake_case plural
-// derivation does not produce the correct name ‚Äî for example, types whose
-// plural is not formed by appending "s" (Story ‚Üí "storys", not "stories").
+// derivation does not produce the correct name ó for example, types whose
+// plural is not formed by appending "s" (Story ? "storys", not "stories").
 //
 //repo := forge.NewSQLRepo[*Story](db, forge.Table("stories"))
 //repo := forge.NewSQLRepo[*BlogPost](db, forge.Table("posts"))
 `
 
-**module.go ‚Äî NewModule doc comment, At option line:**
+**module.go ó NewModule doc comment, At option line:**
 
 Extended to name the pitfall inline:
 
 `go
 //   - [At]: override URL prefix (default: "/"+lowercase(TypeName)+"s").
-//     Use when the default pluralisation is wrong: Story ‚Üí "/storys".
+//     Use when the default pluralisation is wrong: Story ? "/storys".
 //     Example: forge.At("/solved") or forge.At("/stories").
 `
 
@@ -432,11 +432,11 @@ Extended to name the pitfall inline:
 
 ---
 
-## Decision 29 ‚Äî NavTree: first-class navigation abstraction
+## Decision 29 ó NavTree: first-class navigation abstraction
 
 **Date:** 2026-04-11
 **Status:** Agreed
-**Level:** 2 (standard ‚Äî new exported types, interface, DB migration, template injection, MCP tools)
+**Level:** 2 (standard ó new exported types, interface, DB migration, template injection, MCP tools)
 
 ### Problem
 
@@ -449,7 +449,7 @@ template authors and MCP clients.
 
 ### Decision
 
-Add a `NavTree` type with two backing modes ‚Äî DB-persisted (`NavModeDB`)
+Add a `NavTree` type with two backing modes ó DB-persisted (`NavModeDB`)
 and code-supplied (`NavModeCode`). Nav is inactive by default (zero
 `NavMode` value) so existing apps are unaffected.
 
@@ -457,7 +457,7 @@ and code-supplied (`NavModeCode`). Nav is inactive by default (zero
 
 | Value | Constant | Meaning |
 |-------|----------|---------|
-| 0 | (zero) | Nav inactive ‚Äî no tree, no migration |
+| 0 | (zero) | Nav inactive ó no tree, no migration |
 | 1 | `NavModeDB` | Tree persisted in `forge_nav` table; CRUD via MCP |
 | 2 | `NavModeCode` | Tree supplied once via `App.Nav()` at startup; read-only |
 
@@ -467,24 +467,24 @@ and code-supplied (`NavModeCode`). Nav is inactive by default (zero
 
 | Field | Type | Persisted | Notes |
 |-------|------|-----------|-------|
-| `ID` | string | ‚úÖ | Caller-supplied; primary key |
-| `Label` | string | ‚úÖ | Display text |
-| `Path` | string | ‚úÖ | Href (absolute or relative) |
-| `ParentID` | string | ‚úÖ | Empty string = root item |
-| `Module` | string | ‚úÖ | Informational; not enforced |
-| `Hidden` | bool | ‚úÖ | Exclude from nav; show in breadcrumb |
-| `Ghost` | bool | ‚úÖ | Show in nav; breadcrumb only ‚Äî not clickable |
-| `SortOrder` | int | ‚úÖ | Ascending; ties broken by Label |
-| `Children` | []*NavItem | ‚ùå | In-memory only; populated by buildTree |
+| `ID` | string | ? | Caller-supplied; primary key |
+| `Label` | string | ? | Display text |
+| `Path` | string | ? | Href (absolute or relative) |
+| `ParentID` | string | ? | Empty string = root item |
+| `Module` | string | ? | Informational; not enforced |
+| `Hidden` | bool | ? | Exclude from nav; show in breadcrumb |
+| `Ghost` | bool | ? | Show in nav; breadcrumb only ó not clickable |
+| `SortOrder` | int | ? | Ascending; ties broken by Label |
+| `Children` | []*NavItem | ? | In-memory only; populated by buildTree |
 
 ### Hidden / Ghost flag matrix
 
 | Hidden | Ghost | In nav | In breadcrumb | Clickable |
 |--------|-------|--------|---------------|-----------|
-| false | false | ‚úÖ | ‚úÖ | ‚úÖ |
-| true | false | ‚ùå | ‚úÖ | ‚úÖ |
-| false | true | ‚úÖ | ‚úÖ | ‚ùå |
-| true | true | ‚ùå | ‚úÖ | ‚ùå |
+| false | false | ? | ? | ? |
+| true | false | ? | ? | ? |
+| false | true | ? | ? | ? |
+| true | true | ? | ? | ? |
 
 ### forge_nav table schema
 
@@ -522,7 +522,7 @@ Templates access navigation via `{{range .Nav}}` and recurse into
 
 Deleting a nav item deletes all its descendants. `collectDescendantIDs`
 walks the in-memory tree under a read lock to gather all descendant IDs,
-then a single SQL `DELETE ‚Ä¶ WHERE id IN (‚Ä¶)` removes all of them. The
+then a single SQL `DELETE Ö WHERE id IN (Ö)` removes all of them. The
 in-memory cache is rebuilt via `load()` after the deletion.
 
 ### MCP nav tools
@@ -531,7 +531,7 @@ All nav tools require the **Editor** role or higher.
 
 | Tool | Condition | Description |
 |------|-----------|-------------|
-| `list_nav_items` | always (when NavTree ‚â† nil) | Returns flat list of all NavItems |
+| `list_nav_items` | always (when NavTree ? nil) | Returns flat list of all NavItems |
 | `create_nav_item` | NavModeDB only | Creates a new item |
 | `update_nav_item` | NavModeDB only | Partial-overlay update |
 | `delete_nav_item` | NavModeDB only | Recursive delete |
@@ -546,8 +546,8 @@ fields are preserved.
 In package `forge`:
 - `type NavMode int`
 - `const NavModeDB NavMode`, `const NavModeCode NavMode`
-- `type NavItem struct { ‚Ä¶ }`
-- `type NavTree struct { ‚Ä¶ }` (opaque ‚Äî fields unexported)
+- `type NavItem struct { Ö }`
+- `type NavTree struct { Ö }` (opaque ó fields unexported)
 - `(*NavTree).HasDB() bool`
 - `(*NavTree).Tree() []NavItem`
 - `(*NavTree).List() []NavItem`
@@ -562,8 +562,8 @@ In package `forge`:
 
 ### Consequences
 
-- forge core: v1.9.1 ‚Üí v1.10.0
-- forge-mcp: v1.3.1 ‚Üí v1.4.0
+- forge core: v1.9.1 ? v1.10.0
+- forge-mcp: v1.3.1 ? v1.4.0
 - Zero behaviour change for apps that do not set `Config.NavMode`
 - No new third-party dependencies
 - `example_test.go` unchanged (no new examples required for this decision)
@@ -571,7 +571,7 @@ In package `forge`:
 
 ---
 
-## Decision 30 ‚Äî forge.config: file-based configuration
+## Decision 30 ó forge.config: file-based configuration
 
 **Date:** 2026-04-11
 **Status:** Agreed
@@ -579,7 +579,7 @@ In package `forge`:
 
 ### Problem
 
-Forge Cloud agents need to provision a Forge instance by writing a file ‚Äî without
+Forge Cloud agents need to provision a Forge instance by writing a file ó without
 compiling Go code. No existing mechanism supports this. The format must be simple
 enough for an AI agent to generate without consulting docs.
 
@@ -587,13 +587,13 @@ enough for an AI agent to generate without consulting docs.
 
 Add a minimal `key = value` file parser in `config.go`. `MustConfig` loads
 `forge.config` from the working directory (or the path in `FORGE_CONFIG`) and
-merges file values into the Go `Config`. Go-code fields always take precedence ‚Äî
+merges file values into the Go `Config`. Go-code fields always take precedence ó
 no breaking change for existing applications.
 
 ### File format
 
 ```
-# forge.config ‚Äî plain key = value pairs
+# forge.config ó plain key = value pairs
 base_url = https://example.com
 https = true
 nav_mode = db
@@ -604,12 +604,12 @@ og_image = /static/og.png
 ```
 
 Rules:
-- Lines beginning with `#` are comments ‚Äî skipped
-- Blank/whitespace lines ‚Äî skipped
-- Split on the first `=` only ‚Äî values may contain `=`
+- Lines beginning with `#` are comments ó skipped
+- Blank/whitespace lines ó skipped
+- Split on the first `=` only ó values may contain `=`
 - Trim whitespace from key and value
-- Unknown keys ‚Äî silently ignored (forward compatibility)
-- `secret` as a key ‚Äî panics immediately with a descriptive message
+- Unknown keys ó silently ignored (forward compatibility)
+- `secret` as a key ó panics immediately with a descriptive message
 
 ### Key-to-field mapping (explicit table, no reflection)
 
@@ -623,7 +623,7 @@ Rules:
 | `twitter_site` | `Config.OGDefaults.TwitterSite` | `@handle` |
 | `og_image` | `Config.OGDefaults.Image.URL` | Relative or absolute path |
 
-`url` in AppSchema is always derived from `BaseURL` ‚Äî never a separate key.
+`url` in AppSchema is always derived from `BaseURL` ó never a separate key.
 `secret` in the file panics immediately.
 
 ### og_image path resolution
@@ -633,17 +633,17 @@ if the value starts with `/` and `BaseURL` is non-empty, it is resolved to an
 absolute URL by prefixing `BaseURL` (trailing slash stripped). This ensures
 `og:image` is always an absolute URL as required by scrapers.
 
-Example: `og_image = /static/og.png` + `base_url = https://example.com` ‚Üí
+Example: `og_image = /static/og.png` + `base_url = https://example.com` ?
 `OGDefaults.Image.URL = "https://example.com/static/og.png"`.
 
 ### Load order in MustConfig
 
-1. Check `FORGE_CONFIG` env var ‚Äî if set, use its value as the file path
+1. Check `FORGE_CONFIG` env var ó if set, use its value as the file path
 2. Otherwise, try `forge.config` in the working directory
 3. Merge file values into Go `Config` (Go-code non-zero values win)
-4. Validate (`BaseURL` is required; `Secret` must be ‚â• 16 bytes ‚Äî cannot come from file)
+4. Validate (`BaseURL` is required; `Secret` must be = 16 bytes ó cannot come from file)
 
-### Config.AppSchema and Config.OGDefaults ‚Äî new fields
+### Config.AppSchema and Config.OGDefaults ó new fields
 
 `AppSchema` and `OGDefaults` today only reach the `App` via `app.SEO()`. To
 support file-based provisioning, both are added as fields on `Config`. In
@@ -680,13 +680,13 @@ New unexported functions (internal):
 Parse errors include line number, the invalid value, and what is expected:
 
 ```
-forge.config line 4: invalid value "yes" for key "https" ‚Äî expected "true" or "false"
-forge.config line 7: invalid value "auto" for key "nav_mode" ‚Äî expected "db" or "code"
+forge.config line 4: invalid value "yes" for key "https" ó expected "true" or "false"
+forge.config line 7: invalid value "auto" for key "nav_mode" ó expected "db" or "code"
 ```
 
 ### Consequences
 
-- forge core: v1.10.0 ‚Üí **v1.11.0**
+- forge core: v1.10.0 ? **v1.11.0**
 - forge-mcp: no changes (no version bump)
 - forge-cli: no changes
 - Zero behaviour change for apps that do not have a `forge.config` file
@@ -697,7 +697,7 @@ forge.config line 7: invalid value "auto" for key "nav_mode" ‚Äî expected "db" o
 
 ---
 
-## Amendment A69 ‚Äî README restructure: short README + REFERENCE.md
+## Amendment A69 ó README restructure: short README + REFERENCE.md
 
 **Status:** Accepted  
 **Date:** 2026-04-14  
@@ -705,7 +705,7 @@ forge.config line 7: invalid value "auto" for key "nav_mode" ‚Äî expected "db" o
 
 ### Problem
 
-`README.md` had grown to 1 074 lines ‚Äî a full API reference that was
+`README.md` had grown to 1 074 lines ó a full API reference that was
 useful as a reference but counterproductive as an introduction. Developers
 opening the repo saw a wall of text before encountering a runnable example.
 AI assistants loading the README for context exhausted token budgets before
@@ -715,11 +715,11 @@ reaching the code examples.
 
 Split the single `README.md` into two files:
 
-- **`README.md`** ‚Äî ‚â§150 lines. Title, badge, comparison table, one
+- **`README.md`** ó =150 lines. Title, badge, comparison table, one
   complete minimal example (runnable `package main`), one feature-showcase
   snippet, a bullet summary of what you get, and a `## Reference` link
   section. Nothing else.
-- **`REFERENCE.md`** ‚Äî verbatim extraction of all detailed sections removed
+- **`REFERENCE.md`** ó verbatim extraction of all detailed sections removed
   from `README.md`: Getting started, Core concepts, Content types, Lifecycle,
   Roles & auth, SEO & structured data, AI indexing, Social sharing, Cookies &
   compliance, Storage, Middleware, Templates & rendering, Error handling,
@@ -730,12 +730,12 @@ Split the single `README.md` into two files:
 
 Two new code examples replace the old "Getting started" walkthrough:
 
-**Minimal example** ‚Äî a complete `package main` that compiles and runs.
+**Minimal example** ó a complete `package main` that compiles and runs.
 The `Post` type includes `Head()` and `Markdown()` so the showcase snippet
 can safely use `SitemapConfig` and `AIIndex(LLMsTxtFull)` without a startup
 panic (Decision A36 capability checks).
 
-**Feature showcase** ‚Äî a `NewModule(...)` call with one option per line.
+**Feature showcase** ó a `NewModule(...)` call with one option per line.
 Each line is commented with the endpoint or tag it enables. Developers can
 delete lines to reduce scope without reading docs.
 
@@ -744,15 +744,15 @@ delete lines to reduce scope without reading docs.
 - No Go code changed. No exported symbols added, removed, or renamed.
 - `go build ./...`, `go vet ./...`, `go test ./...` are green by
   construction.
-- `example_test.go` unchanged ‚Äî no Example functions compile-test README
+- `example_test.go` unchanged ó no Example functions compile-test README
   prose, only API signatures.
 - `example/blog/main.go` package comment: was already at v1.11.0.
-- `REFERENCE.md` is verbatim ‚Äî no content was altered, only relocated.
+- `REFERENCE.md` is verbatim ó no content was altered, only relocated.
 - No version bump. Stays at v1.11.0 (documentation-only change).
 
 ---
 
-## Amendment A70 ‚Äî README: tagline, named value section, showcase fixes (2026-04-14)
+## Amendment A70 ó README: tagline, named value section, showcase fixes (2026-04-14)
 
 **Status:** Agreed  
 **Scope:** Documentation only. No exported symbols changed. No version bump.
@@ -761,13 +761,13 @@ delete lines to reduce scope without reading docs.
 
 The restructured README (A69) still had several issues undermining its effectiveness for community engagement (HN, r/golang, pkg.go.dev):
 
-1. **Tagline** was generic ‚Äî could describe any web framework.
+1. **Tagline** was generic ó could describe any web framework.
 2. **Value proposition** was buried at the bottom as a flat anonymous bullet list, visible only after two full code examples.
-3. **Duplicate table row** ‚Äî "AI indexing (llms.txt + AIDoc)" and "AI-native endpoints (llms.txt, AIDoc)" said the same thing.
-4. **`(*Post)(nil)` unexplained** ‚Äî valid Go but unfamiliar to many developers.
-5. **AfterPublish noop** ‚Äî the signal callback returned `nil` with only a comment; the reader could not tell what it actually does.
+3. **Duplicate table row** ó "AI indexing (llms.txt + AIDoc)" and "AI-native endpoints (llms.txt, AIDoc)" said the same thing.
+4. **`(*Post)(nil)` unexplained** ó valid Go but unfamiliar to many developers.
+5. **AfterPublish noop** ó the signal callback returned `nil` with only a comment; the reader could not tell what it actually does.
 6. **No pointer to runnable examples** in `example/`.
-7. **"What you get" flat bullets** ‚Äî anonymous, unordered, no descriptions.
+7. **"What you get" flat bullets** ó anonymous, unordered, no descriptions.
 
 ### Changes
 
@@ -784,13 +784,13 @@ The restructured README (A69) still had several issues undermining its effective
 
 - **`(*Post)(nil)` comment added:**
   ```go
-  m := forge.NewModule((*Post)(nil), // nil pointer ‚Äî type parameter inferred, no allocation
+  m := forge.NewModule((*Post)(nil), // nil pointer ó type parameter inferred, no allocation
   ```
 
 - **AfterPublish real body:**
   ```go
   forge.On(forge.AfterPublish, func(_ forge.Context, p *Post) error {
-      log.Printf("published: %s", p.Slug) // fires on publish and scheduled‚ÜíPublished
+      log.Printf("published: %s", p.Slug) // fires on publish and scheduled?Published
       return nil
   }),
   ```
@@ -798,24 +798,24 @@ The restructured README (A69) still had several issues undermining its effective
 - **Examples pointer** added after the showcase code block, before the Reference section:
   ```markdown
   Three runnable examples are in [example/](example/):
-  - example/blog ‚Äî devlog with seeded posts, RSS, AI indexing, and scheduled publishing
-  - example/api  ‚Äî headless JSON API with role-based auth and a redirect manifest
-  - example/docs ‚Äî documentation site with AI indexing, /llms.txt, and AIDoc endpoints
+  - example/blog ó devlog with seeded posts, RSS, AI indexing, and scheduled publishing
+  - example/api  ó headless JSON API with role-based auth and a redirect manifest
+  - example/docs ó documentation site with AI indexing, /llms.txt, and AIDoc endpoints
   ```
 
-- **Flat "What you get" bullet list removed** ‚Äî all 15 features moved to the new named value section.
+- **Flat "What you get" bullet list removed** ó all 15 features moved to the new named value section.
 
 ### Consequences
 
 - README more effective for first-time visitors and community links.
 - No call-site syntax changed. No AI generation accuracy affected.
-- `example_test.go` unaffected ‚Äî uses its own `examplePost` type, not the README showcase.
+- `example_test.go` unaffected ó uses its own `examplePost` type, not the README showcase.
 - No version bump. Stays at v1.11.0 (documentation-only change).
 - NEXT.md deleted in the same commit.
 
 ---
 
-## Amendment A71 ‚Äî README: framework subtitle + 30-second start (2026-04-15)
+## Amendment A71 ó README: framework subtitle + 30-second start (2026-04-15)
 
 **Status:** Agreed  
 **Scope:** Documentation only. No exported symbols changed. No version bump.
@@ -824,11 +824,11 @@ The restructured README (A69) still had several issues undermining its effective
 
 Two remaining first-impression gaps identified after A70:
 
-1. **No plain-language description** ‚Äî the tagline ("Go get Forge. From idea to
+1. **No plain-language description** ó the tagline ("Go get Forge. From idea to
    production in one step.") is a pun, not a description. A first-time visitor
    landing from GitHub search or a link cannot tell what Forge is before scrolling.
 
-2. **No immediate runnable path** ‚Äî the quickest way to see Forge in action
+2. **No immediate runnable path** ó the quickest way to see Forge in action
    (`cd example/blog && go run .`) was buried after the feature list and comparison
    table. A developer who can run the project in 30 seconds is more likely to read on.
 
@@ -847,12 +847,12 @@ Two remaining first-impression gaps identified after A70:
 - **New `## 30-second start` section** inserted immediately after the badges/version
   line, before `## What Forge gives you`:
   ```bash
-  git clone https://github.com/forge-cms/forge
+  git clone https://forge-cms.dev/forge
   cd example/blog
   go run .
   # open http://localhost:8080
   ```
-  No prose ‚Äî four commands only. The `open` line is a comment for cross-platform safety.
+  No prose ó four commands only. The `open` line is a comment for cross-platform safety.
 
 ### Consequences
 
@@ -865,7 +865,7 @@ Two remaining first-impression gaps identified after A70:
 
 ---
 
-## Amendment A72 ‚Äî VISION.md: strategic repositioning (2026-04-18)
+## Amendment A72 ó VISION.md: strategic repositioning (2026-04-18)
 
 **Status:** Agreed  
 **Scope:** Documentation only. No exported symbols changed. No version bump.
@@ -877,7 +877,7 @@ positioning decided on 2026-04-17:
 
 1. No articulation of Forge as a typed state layer for AI agents (beyond content).
 2. No documentation of the two-layer commercial model (Core AGPL / Cloud commercial).
-3. Roadmap still described future plans for Phases 1‚Äì2, which shipped in v1.11.0
+3. Roadmap still described future plans for Phases 1ñ2, which shipped in v1.11.0
    and forge-mcp v1.4.0.
 
 ### Changes
@@ -894,8 +894,8 @@ positioning decided on 2026-04-17:
 - forge-media: LocalMediaStore with swappable interface for S3 in Phase 4
 
 **Replaced `## Roadmap`** in full:
-- Phase 1 ‚úÖ DONE: forge-mcp v1.4.0
-- Phase 2 ‚úÖ DONE: forge v1.11.0 (full production foundation)
+- Phase 1 ? DONE: forge-mcp v1.4.0
+- Phase 2 ? DONE: forge v1.11.0 (full production foundation)
 - Phase 3: Forge Cloud private beta (current focus)
 - Phase 4: Forge Cloud GA (multi-site, bureau workflow, commercial licenses)
 
@@ -909,7 +909,7 @@ positioning decided on 2026-04-17:
 
 ---
 
-## Amendment A73 ‚Äî forge.go/config.go: MediaPath, MediaMaxSize fields; App.Config() accessor (2026-04-25)
+## Amendment A73 ó forge.go/config.go: MediaPath, MediaMaxSize fields; App.Config() accessor (2026-04-25)
 
 ### Problem
 
@@ -919,7 +919,7 @@ developer does not repeat these values at the call site.
 
 ### Change
 
-**`forge.go` ‚Äî `Config` struct:**
+**`forge.go` ó `Config` struct:**
 
 Added two optional fields after `OGDefaults`:
 
@@ -933,7 +933,7 @@ MediaPath string
 MediaMaxSize int64
 ```
 
-**`config.go` ‚Äî `loadConfigFile`:**
+**`config.go` ó `loadConfigFile`:**
 
 Added `media_path` and `media_max_size` cases to the key switch:
 
@@ -943,12 +943,12 @@ case "media_path":
 case "media_max_size":
     n, err := strconv.ParseInt(value, 10, 64)
     if err != nil {
-        return Config{}, fmt.Errorf("forge.config line %d: invalid value %q for key \"media_max_size\" ‚Äî expected an integer number of bytes", lineNum, value)
+        return Config{}, fmt.Errorf("forge.config line %d: invalid value %q for key \"media_max_size\" ó expected an integer number of bytes", lineNum, value)
     }
     cfg.MediaMaxSize = n
 ```
 
-**`config.go` ‚Äî `mergeFileConfig`:**
+**`config.go` ó `mergeFileConfig`:**
 
 Added merge guards (Go code wins when non-zero):
 
@@ -961,7 +961,7 @@ if goCfg.MediaMaxSize == 0 && fileCfg.MediaMaxSize != 0 {
 }
 ```
 
-**`forge.go` ‚Äî `App.Config()` accessor:**
+**`forge.go` ó `App.Config()` accessor:**
 
 ```go
 // Config returns a copy of the application configuration.
@@ -973,20 +973,20 @@ func (a *App) Config() Config { return a.cfg }
 
 - `forge-media` reads `app.Config().MediaPath` and `app.Config().MediaMaxSize` without
   requiring the developer to pass these values explicitly.
-- The accessor returns a copy ‚Äî callers cannot mutate the live config.
+- The accessor returns a copy ó callers cannot mutate the live config.
 - No existing exported symbol changed. No call-site syntax affected.
 - `example_test.go` unaffected.
 - `REFERENCE.md` updated with `forge.config` key table including `media_path` and `media_max_size`.
 
 ---
 
-## Decision 31 ‚Äî forge-media submodule
+## Decision 31 ó forge-media submodule
 
 **Status:** Agreed
 **Date:** 2026-04-18
 
 **Decision:** Introduce `forge-media` as an optional, separately versioned Go submodule
-(`github.com/forge-cms/forge/forge-media`) that provides file upload, serving, listing,
+(`forge-cms.dev/forge-media`) that provides file upload, serving, listing,
 and deletion for Forge applications, together with a full `forge.MCPModule` implementation
 so that AI agents can manage media files through MCP. Add `WithModule` to `forge-mcp` as
 the wiring point for externally-defined `MCPModule` implementations.
@@ -995,11 +995,11 @@ the wiring point for externally-defined `MCPModule` implementations.
 
 ```
 forge-media/
-  go.mod          ‚Äî module github.com/forge-cms/forge/forge-media, requires forge v0.0.0
-  media.go        ‚Äî MediaStore interface, LocalMediaStore, MediaRecord, DB helpers
-  os_helpers.go   ‚Äî testable wrappers for OS and crypto operations
-  server.go       ‚Äî Server struct, New(), Register(), four HTTP handlers
-  mcp.go          ‚Äî forge.MCPModule implementation on *Server
+  go.mod          ó module forge-cms.dev/forge-media, requires forge v0.0.0
+  media.go        ó MediaStore interface, LocalMediaStore, MediaRecord, DB helpers
+  os_helpers.go   ó testable wrappers for OS and crypto operations
+  server.go       ó Server struct, New(), Register(), four HTTP handlers
+  mcp.go          ó forge.MCPModule implementation on *Server
 ```
 
 ### MediaStore interface (`media.go`)
@@ -1043,7 +1043,7 @@ Table: `forge_media`. Created by `CreateMediaTable(db forge.DB)`.
 `Register(app *forge.App, store MediaStore) *Server` wires all four routes
 onto the forge `App` and returns the `Server` (which also implements `MCPModule`).
 
-`New(app, store)` panics if `cfg.DB == nil` ‚Äî DB is required for record persistence.
+`New(app, store)` panics if `cfg.DB == nil` ó DB is required for record persistence.
 
 ### MCPModule implementation (`mcp.go`)
 
@@ -1056,7 +1056,7 @@ onto the forge `App` and returns the `Server` (which also implements `MCPModule`
 | `MCPList(ctx, statuses...)` | Returns all records; status filter ignored (no lifecycle) |
 | `MCPGet(ctx, slug)` | Lookup by ID; `ErrNotFound` when missing |
 | `MCPCreate(ctx, fields)` | Decode base64 `data`; detect MIME; require description for images; store + insert |
-| `MCPUpdate` | Returns `ErrBadRequest` ‚Äî delete and re-upload instead |
+| `MCPUpdate` | Returns `ErrBadRequest` ó delete and re-upload instead |
 | `MCPPublish` | Returns `ErrBadRequest` |
 | `MCPSchedule` | Returns `ErrBadRequest` |
 | `MCPArchive` | Returns `ErrBadRequest` |
@@ -1091,9 +1091,9 @@ Mismatch produces an agent-actionable `forge.Err("file", "expected JPEG (from .j
 
 - **Single package**: Ruled out because forge core has zero third-party dependencies.
   SQLite and OS I/O belong in an optional layer.
-- **Separate repository**: Ruled out to keep versioning simple ‚Äî a single repo with a
+- **Separate repository**: Ruled out to keep versioning simple ó a single repo with a
   `replace` directive for local development, same as `forge-cli` and `forge-mcp`.
-- **Struct tag on Node**: Media files are not content nodes ‚Äî they have no slug,
+- **Struct tag on Node**: Media files are not content nodes ó they have no slug,
   lifecycle, or template. A separate struct type is more honest.
 
 ### Consequences
@@ -1102,12 +1102,12 @@ Mismatch produces an agent-actionable `forge.Err("file", "expected JPEG (from .j
 - `forge-mcp` bumps to `v1.5.0` for the `WithModule` addition.
 - Forge core bumps to `v1.12.0` for `MediaPath`, `MediaMaxSize`, and `App.Config()`.
 - No existing exported symbol in `forge` core changed.
-- WCAG 1.1.1 is enforced at the handler level for image uploads ‚Äî description required.
+- WCAG 1.1.1 is enforced at the handler level for image uploads ó description required.
 - `LocalMediaStore` never stores absolute URLs in the DB; computes from `baseURL` at read time.
 
 ---
 
-## Amendment A74 ‚Äî Rename FaviconLink ‚Üí HeadLink, HeadAssets.Favicons ‚Üí HeadAssets.Links
+## Amendment A74 ó Rename FaviconLink ? HeadLink, HeadAssets.Favicons ? HeadAssets.Links
 
 **Status:** Agreed
 **Date:** 2026-04-18
@@ -1117,24 +1117,24 @@ Mismatch produces an agent-actionable `forge.Err("file", "expected JPEG (from .j
 
 `FaviconLink` and `HeadAssets.Favicons` implied the field only accepted favicon
 and touch-icon elements. In practice, developers and AI agents legitimately place
-any `<link>` element there ‚Äî `rel="me"` (profile verification), `rel="manifest"`,
-`rel="alternate"`, `rel="canonical"` ‚Äî and the name gave no indication that these
+any `<link>` element there ó `rel="me"` (profile verification), `rel="manifest"`,
+`rel="alternate"`, `rel="canonical"` ó and the name gave no indication that these
 were valid uses. A developer looking for where to add a `rel="me"` link would not
 find it by scanning the type name or field name `Favicons`.
 
 ### Decision
 
 Rename:
-- `FaviconLink` ‚Üí `HeadLink`
-- `HeadAssets.Favicons []FaviconLink` ‚Üí `HeadAssets.Links []HeadLink`
+- `FaviconLink` ? `HeadLink`
+- `HeadAssets.Favicons []FaviconLink` ? `HeadAssets.Links []HeadLink`
 
 The four struct fields (`Rel`, `Href`, `Type`, `Sizes`) and the template rendering
-path are unchanged. The renaming is purely semantic ‚Äî the generated HTML is identical.
+path are unchanged. The renaming is purely semantic ó the generated HTML is identical.
 
 ### Rationale
 
 `HeadLink` is the correct name: it represents any HTML `<link>` element. The struct
-already had no favicon-specific logic ‚Äî it was a generic `<link>` builder from day one.
+already had no favicon-specific logic ó it was a generic `<link>` builder from day one.
 `Links` at the call site is immediately readable:
 
 ```go
@@ -1151,13 +1151,133 @@ An AI agent or developer scanning the struct immediately understands the field's
 
 ### Consequences
 
-1. **Breaking change** ‚Äî all callers that reference `FaviconLink` or `.Favicons` must
+1. **Breaking change** ó all callers that reference `FaviconLink` or `.Favicons` must
    update. The struct's fields and rendering behaviour are unchanged.
-2. **Version bump** ‚Äî ships as `v1.13.0`.
+2. **Version bump** ó ships as `v1.13.0`.
 3. `REFERENCE.md` updated: field name in the `HeadAssets` example, comment in the
    `TemplateData` table.
 4. `ARCHITECTURE.md` updated: A63 row and `head.go` exports list updated to `HeadLink`.
-5. `example_test.go` updated: `ExampleHeadAssets` uses `Links: []HeadLink{‚Ä¶}`.
+5. `example_test.go` updated: `ExampleHeadAssets` uses `Links: []HeadLink{Ö}`.
+
+---
+
+## Amendment A75 ó `markdown.go`: HTML passthrough in `renderMarkdown`
+
+**Status:** Agreed ó 2026-04-22
+**Shipped in:** v1.13.1
+
+### Problem
+
+Content authors on self-hosted Forge sites need to mix Markdown prose with raw
+HTML blocks (e.g. `<div class="pull-quote">`, iframes, custom components). The
+existing `renderMarkdown` HTML-escaped every line, making such blocks impossible
+to use inside body content fields.
+
+### Decision
+
+Lines whose trimmed form starts with `<` are emitted verbatim ó without
+HTML-escaping ó by `renderMarkdown`. All other lines continue through the
+existing pipeline (HTML escape ? inline markdown ? tag wrap).
+
+### Rationale
+
+Forge is self-hosted. Content authors have the same trust level as the role
+system that governs MCP write operations ó they are the site owner or explicitly
+granted `Author`/`Editor`/`Admin` role. No anonymous or untrusted input reaches
+`renderMarkdown` directly. Treating these users the same as anonymous web users
+would prevent legitimate authoring workflows (embedded videos, styled callouts,
+third-party widgets) with no security benefit.
+
+The `<` prefix heuristic is intentionally simple: it catches both opening tags
+(`<div>`, `<iframe>`) and closing tags (`</div>`). Inline `<code>` escaping is
+unaffected because inline code is wrapped in backticks and processed after the
+HTML-escape step.
+
+### Consequences
+
+1. HTML blocks in trusted body content now render correctly.
+2. No change to the public API ó `renderMarkdown` signature is unchanged.
+3. Version bump: `v1.13.1` (patch ó no API change, behaviour fix for trusted content).
+4. `CHANGELOG.md` entry added under `[1.13.1]`.
+
+---
+
+## Amendment A76 ó Go 1.26.2 + vanity module rename to `forge-cms.dev`
+
+**Status:** Agreed ó 2026-04-30
+**Shipped in:** v1.14.0
+
+### Problem
+
+Two community issues requested via GitHub:
+
+1. **Issue #1** ó The `go` directive in all modules was `go 1.22`. Go 1.26.2 is
+   the current supported release. Staying on 1.22 prevents use of language and
+   stdlib improvements available in later releases.
+
+2. **Issue #2** ó All module paths use `github.com/forge-cms/...`. The project
+   now has a dedicated domain (`forge-cms.dev`) and a vanity URL should be the
+   canonical import path. This improves brand consistency and decouples the
+   module path from the GitHub repository URL.
+
+### Decision
+
+**Go version:** Bump the `go` directive in all modules and `go.work` from their
+current values (`1.22`, `1.24`, `1.25`) to `go 1.26.2`.
+
+**Module rename:**
+
+| Old path | New path |
+|----------|----------|
+| `github.com/forge-cms/forge` | `forge-cms.dev/forge` |
+| `github.com/forge-cms/forge-mcp` | `forge-cms.dev/forge-mcp` |
+| `github.com/forge-cms/forge-media` | `forge-cms.dev/forge-media` |
+| `github.com/forge-cms/forge-cli` | `forge-cms.dev/forge-cli` |
+| `github.com/forge-cms/forge-pgx` | `forge-cms.dev/forge-pgx` |
+
+`forge-pgx` is included even though not listed in the original issue ó it shares
+the workspace and its `replace` directive would break immediately if the root
+module path changed without updating `forge-pgx/go.mod`.
+
+Historical references in `decisions/core.md` and `decisions/phase2.md` are left
+as-is; they are permanent records of past decisions, not forward-facing API docs.
+
+### forgeVersions() logic change
+
+The old `forgeVersions()` used `strings.HasPrefix(path, "github.com/forge-cms/forge")`
+because sub-modules shared the root path as a prefix. After the rename the modules
+are independent paths (`forge-cms.dev/forge-mcp` is not a sub-path of
+`forge-cms.dev/forge`). The matching logic is updated to:
+
+```go
+const base = "forge-cms.dev/"
+// match any module under forge-cms.dev
+if !strings.HasPrefix(path, base) { return }
+key := strings.ReplaceAll(strings.TrimPrefix(path, base), "-", "_")
+result[key] = v
+```
+
+Output keys are identical to before (`"forge"`, `"forge_mcp"`, etc.).
+
+### Consequences
+
+1. **Breaking import change** for all external users ó they must update their
+   `go.mod` and import paths. A minor version bump (`v1.14.0`) signals this.
+2. All sub-modules ship coordinated version bumps:
+   - forge-mcp: `v1.6.0`
+   - forge-media: `v1.1.0`
+   - forge-cli: `v0.3.0`
+   - forge-pgx: not tagged (no behaviour change, workspace-local only)
+3. `go get` resolution requires Caddy vanity URL config on `forge-cms.dev` to be
+   deployed before external users can use the new paths. This is a deploy-day
+   task noted in `NEXT.md` and handled separately.
+4. `pkg.go.dev` badge in `README.md` updated to `forge-cms.dev/forge`.
+5. `ARCHITECTURE.md`, `AGENTS.md`, `README.md`, `REFERENCE.md`, `CHANGELOG.md`
+   all updated with the new import paths.
+6. `decisions/` historical files left unchanged.
+7. `forgeVersions()` godoc updated.
+8. `CHANGELOG.md` version policy section updated.
+9. Both `NEXT.md` (untracked) deleted after commit.
 
 ---
 

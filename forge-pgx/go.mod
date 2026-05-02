@@ -1,9 +1,9 @@
-module github.com/forge-cms/forge-pgx
+module forge-cms.dev/forge-pgx
 
-go 1.24.0
+go 1.26.2
 
 require (
-	github.com/forge-cms/forge v0.0.0
+	forge-cms.dev/forge v0.0.0
 	github.com/jackc/pgx/v5 v5.8.0
 )
 
@@ -15,4 +15,4 @@ require (
 	golang.org/x/text v0.29.0 // indirect
 )
 
-replace github.com/forge-cms/forge => ../
+replace forge-cms.dev/forge => ../

@@ -35,7 +35,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/forge-cms/forge"
+	"forge-cms.dev/forge"
 )
 
 // secret is the HMAC signing key shared between forge.BearerHMAC (which
@@ -260,7 +260,7 @@ footer a{color:#2563eb}
   <li><a href="/resources/feed.xml"><code>GET /resources/feed.xml</code></a> &#8212; RSS feed</li>
   <li><a href="/.well-known/redirects.json"><code>GET /.well-known/redirects.json</code></a> &#8212; redirect manifest</li>
 </ul>
-<footer>Built with <a href="https://github.com/forge-cms/forge">Forge</a> &#183; <a href="/robots.txt">robots.txt</a></footer>
+<footer>Built with <a href="https://forge-cms.dev/forge">Forge</a> &#183; <a href="/robots.txt">robots.txt</a></footer>
 </body></html>`)
 	}))
 

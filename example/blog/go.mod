@@ -1,7 +1,7 @@
 module example/blog
 
-go 1.22
+go 1.26.2
 
-require github.com/forge-cms/forge v0.0.0
+require forge-cms.dev/forge v0.0.0
 
-replace github.com/forge-cms/forge => ../..
+replace forge-cms.dev/forge => ../..

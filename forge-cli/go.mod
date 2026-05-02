@@ -1,5 +1,3 @@
-module github.com/forge-cms/forge/forge-cli
+module forge-cms.dev/forge-cli
 
-go 1.22
-
-toolchain go1.22.0
+go 1.26.2

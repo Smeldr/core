@@ -393,10 +393,19 @@ The sub-module tag uses the prefix convention: `forge-mcp/vX.Y.Z`.
 - At the end of every commit, explicitly state which module tags are required:
   root (`vX.Y.Z`) and/or sub-module (`forge-mcp/vX.Y.Z`).
 
+**CHANGELOG ownership — non-negotiable:**
+Each module owns its own CHANGELOG. Never add submodule release notes as subsections
+in the root `CHANGELOG.md`. The separation is strict:
+- `CHANGELOG.md` — forge core only
+- `forge-mcp/CHANGELOG.md` — forge-mcp only
+- `forge-media/CHANGELOG.md` — forge-media only
+A brief reference line in the root is acceptable: `Submodules: forge-media v1.0.0 released.`
+The detail belongs in the submodule's own file.
+
 **Pre-tag checklist — all three must be green before tagging:**
 1. `git status --short` returns nothing (working tree clean)
-2. `go test ./...` is green (root); `go test ./...` inside `forge-mcp/` is green
-3. `CHANGELOG.md` (root) and/or `forge-mcp/CHANGELOG.md` has an entry for the
+2. `go test ./...` is green (root); `go test ./...` inside each changed submodule is green
+3. `CHANGELOG.md` (root) and each changed submodule's `CHANGELOG.md` has an entry for the
    version being tagged
 
 **Tag and push sequence:**

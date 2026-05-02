@@ -2,8 +2,8 @@
 
 A Go framework for content-driven applications. Zero dependencies. AI-native by default.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/forge-cms/forge.svg)](https://pkg.go.dev/github.com/forge-cms/forge)
-**v1.12.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
+[![Go Reference](https://pkg.go.dev/badge/forge-cms.dev/forge.svg)](https://pkg.go.dev/forge-cms.dev/forge)
+**v1.14.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
 
 ## 30-second start
 
@@ -59,7 +59,7 @@ go run .
 ## Installation
 
 ```bash
-go get github.com/forge-cms/forge
+go get forge-cms.dev/forge
 ```
 
 Requires Go 1.22+. No other dependencies.
@@ -76,7 +76,7 @@ package main
 import (
 	"log"
 
-	"github.com/forge-cms/forge"
+	"forge-cms.dev/forge"
 )
 
 type Post struct {

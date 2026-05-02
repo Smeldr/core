@@ -10,7 +10,7 @@ Zero third-party dependencies — requires only Go 1.22 or later.
 ## Installation
 
 ```bash
-go install github.com/forge-cms/forge/forge-cli@latest
+go install forge-cms.dev/forge-cli@latest
 ```
 
 Or build from source:

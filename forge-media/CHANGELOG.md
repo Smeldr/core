@@ -7,6 +7,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.0] — 2026-04-30
+
+Go 1.26.2 and module path migration to `forge-cms.dev` (Amendment A76).
+
+### Changed
+
+- `go.mod`: module path renamed from `github.com/forge-cms/forge-media` to
+  `forge-cms.dev/forge-media`; `go` directive bumped from `1.22` to `1.26.2`.
+- All imports updated to `forge-cms.dev/forge` and `forge-cms.dev/forge-media`.
+
+---
+
 ## [1.0.0] — 2026-04-18
 
 Initial release — Media Library for Forge (Decision 31).
