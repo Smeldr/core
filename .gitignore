@@ -9,3 +9,5 @@ coverage
 .DS_Store
 Thumbs.db
 NOTES.md
+go.work
+go.work.sum
