@@ -344,6 +344,26 @@ app.Content(&BlogPost{},
 )
 ```
 
+### List page head with ListHeadFunc
+
+By default, a module's list page (e.g. `/posts`) renders with an empty `<title>`.
+Use `ListHeadFunc` to set the title and meta tags for the list page. The function
+receives the request context and the full slice of published items.
+
+```go
+app.Content(&BlogPost{},
+    forge.At("/posts"),
+    forge.ListHeadFunc(func(ctx forge.Context, posts []*BlogPost) forge.Head {
+        return forge.Head{
+            Title:       "All posts — " + ctx.SiteName(),
+            Description: "Browse all articles published on this site.",
+        }
+    }),
+)
+```
+
+`ListHeadFunc` is independent of `HeadFunc` — both can be set on the same module.
+
 ### Rich result types
 
 ```go

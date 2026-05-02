@@ -312,18 +312,19 @@ func stripMarkdown(s string) string {
 // Use [NewModule] to construct; Registration onto a ServeMux is done via [Register].
 // App.Content handles both steps automatically.
 type Module[T any] struct {
-	prefix      string
-	repo        Repository[T]
-	readRole    Role
-	writeRole   Role
-	deleteRole  Role
-	signals     map[Signal][]signalHandler
-	cache       *CacheStore // nil when no Cache option was given
-	middlewares []func(http.Handler) http.Handler
-	neg         contentNegotiator
-	debounce    *debouncer
-	proto       reflect.Type
-	headFunc    any // nil, or func(Context, T) Head set via HeadFunc option
+	prefix       string
+	repo         Repository[T]
+	readRole     Role
+	writeRole    Role
+	deleteRole   Role
+	signals      map[Signal][]signalHandler
+	cache        *CacheStore // nil when no Cache option was given
+	middlewares  []func(http.Handler) http.Handler
+	neg          contentNegotiator
+	debounce     *debouncer
+	proto        reflect.Type
+	headFunc     any // nil, or func(Context, T) Head set via HeadFunc option
+	listHeadFunc any // nil, or func(Context, []T) Head set via ListHeadFunc option
 
 	templateDir      string             // set by Templates or TemplatesOptional option
 	templateRequired bool               // true when Templates (not TemplatesOptional) was used
@@ -456,6 +457,10 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 		// headFuncOption[T] is generic — handled via direct type assertion.
 		if hfo, ok := o.(headFuncOption[T]); ok {
 			m.headFunc = hfo.fn
+		}
+		// listHeadFuncOption[T] is generic — handled via direct type assertion.
+		if lhfo, ok := o.(listHeadFuncOption[T]); ok {
+			m.listHeadFunc = lhfo.fn
 		}
 	}
 

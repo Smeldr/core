@@ -71,6 +71,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-04-11 | Decision 29 (`nav.go`, `forge.go`, `templatedata.go`, `templates.go`, `module.go`, `forge-mcp/`): NavTree first-class navigation abstraction; NavMode, NavItem, NavTree; App.Nav(), App.NavTree(); TemplateData[T].Nav field; forge-mcp nav tools (list/create/update/delete). Shipped in forge v1.10.0 / forge-mcp v1.4.0. |
 | 2026-04-11 | Decision 30 (`config.go`, `forge.go`): `loadConfigFile`, `mergeFileConfig`; `Config.AppSchema`, `Config.OGDefaults`; `MustConfig` auto-loads `forge.config`. Shipped in forge v1.11.0. |
 | 2026-04-18 | Decision 31 (`forge.go`, `forge-media/`, `forge-mcp/`, `forge-cli/`): `Config.MediaPath string`, `Config.MediaMaxSize int64`, `App.Config() Config` accessor added to `forge.go` (Amendment A73); new optional submodule `forge-media/` — `MediaStore` interface, `LocalMediaStore`, `MediaRecord`, `MediaType`, `CreateMediaTable`, HTTP server (`Server`, `New`, `Register`, `HTTPHandler`), forge.MCPModule implementation (`MCPMeta`, `MCPSchema`, `MCPCreate`, `MCPDelete`, `MCPList`, `MCPGet`); `forge-mcp`: `WithModule(m forge.MCPModule) ServerOption` added (v1.5.0); `forge-cli`: media upload, list, delete commands. Shipped in forge v1.12.0, forge-media v1.0.0, forge-mcp v1.5.0. |
+| 2026-05-02 | Amendment A77 (`head.go`, `module.go`, `templates.go`): `listHeadFuncOption[T]` unexported generic type; `ListHeadFunc[T any](fn func(Context, []T) Head) Option` exported option; `listHeadFunc any` field on `Module[T]`; `renderListHTML` resolves list head via type assertion after building TemplateData; `mergeOGDefaults` applied to list head for consistency with show-page behaviour. Fixes empty `<title>` on module list pages. Shipped in v1.14.1. |
 
 ---
 
@@ -137,7 +138,7 @@ forge-cms.dev/
                       TokenStore startup probe in Handler() (Amendment A66)
 └── head.go           Head (Title, Description, Author, Published, Modified, Image, Type,
                       Canonical, Tags, Breadcrumbs, Alternates, Social, NoIndex),
-                      Image, Breadcrumb, Alternate, Headable, HeadFunc[T],
+                      Image, Breadcrumb, Alternate, Headable, HeadFunc[T], ListHeadFunc[T],
                       Excerpt, URL, AbsURL, Crumbs, Crumb, rich-result constants,
                       TwitterCardType (Summary/SummaryLargeImage/AppCard/PlayerCard),
                       TwitterMeta, SocialOverrides;

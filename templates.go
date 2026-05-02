@@ -311,6 +311,13 @@ func (m *Module[T]) renderListHTML(w http.ResponseWriter, r *http.Request, ctx C
 	if m.navTree != nil {
 		data.Nav = m.navTree.Tree()
 	}
+	if m.listHeadFunc != nil {
+		if fn, ok := m.listHeadFunc.(func(Context, []T) Head); ok {
+			head := fn(ctx, items)
+			head = mergeOGDefaults(head, m.ogDefaults)
+			data.Head = head
+		}
+	}
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
 		WriteError(w, r, fmt.Errorf("forge: list template execution: %w", err))

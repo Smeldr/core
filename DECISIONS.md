@@ -102,6 +102,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | D30 | `config.go`/`forge.go`: forge.config file-based configuration — `loadConfigFile`, `mergeFileConfig`; `Config.AppSchema`, `Config.OGDefaults`; `MustConfig` loads `forge.config` (or `FORGE_CONFIG` env var path); Go-code fields always win; `secret` key panics | Agreed | 2026-04-11 |
 | A75 | `markdown.go`: `renderMarkdown` HTML passthrough — lines whose trimmed form starts with `<` are emitted verbatim without HTML-escaping, unblocking HTML blocks in trusted body content | Agreed | 2026-04-22 |
 | A76 | `go.mod` (all modules): bump minimum Go version `1.22` → `1.26.2`; rename all module paths from `github.com/forge-cms/...` to `forge-cms.dev/...`; update all imports, documentation, and `forgeVersions()` prefix logic | Agreed | 2026-04-30 |
+| A77 | `head.go`/`module.go`/`templates.go`: `ListHeadFunc` option — new `listHeadFuncOption[T]` type; `listHeadFunc any` field on `Module[T]`; `renderListHTML` resolves list head via `listHeadFunc`; fixes empty `<title>` on module list pages | Agreed | 2026-05-02 |
 
 ---
 

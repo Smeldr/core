@@ -23,6 +23,26 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.14.1] — 2026-05-02
+
+`ListHeadFunc` option — populate list page `<title>` and meta tags (Amendment A77).
+
+### Added
+
+- `forge.ListHeadFunc[T any](fn func(forge.Context, []T) forge.Head) forge.Option` —
+  new module option that sets the `<title>` and meta tags for a module's list page.
+  The function receives the current request context and the slice of published items.
+- `listHeadFuncOption[T]` unexported generic type (same pattern as `HeadFunc`).
+- `listHeadFunc any` field on `Module[T]`.
+
+### Fixed
+
+- Module list pages (e.g. `/posts`) always rendered with an empty `<title>`.
+  `renderListHTML` now resolves the list head via `listHeadFunc` when set,
+  with `mergeOGDefaults` applied for consistency with show-page behaviour.
+
+---
+
 ## [1.14.0] — 2026-04-30
 
 Go 1.26.2 and module path migration to `forge-cms.dev` (Amendment A76).

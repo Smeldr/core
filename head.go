@@ -234,6 +234,27 @@ func (headFuncOption[T]) isOption() {}
 //	)
 func HeadFunc[T any](fn func(Context, T) Head) Option { return headFuncOption[T]{fn: fn} }
 
+// — ListHeadFunc option ———————————————————————————————————————————————————
+
+// listHeadFuncOption stores a module-level head override for list pages.
+type listHeadFuncOption[T any] struct{ fn func(Context, []T) Head }
+
+func (listHeadFuncOption[T]) isOption() {}
+
+// ListHeadFunc returns an Option that sets the <title> and meta tags for a
+// module's list page. The function receives the current request context and
+// the slice of published items returned by the repository.
+//
+//	app.Content(&BlogPost{},
+//	    forge.At("/posts"),
+//	    forge.ListHeadFunc(func(ctx forge.Context, posts []*BlogPost) forge.Head {
+//	        return forge.Head{Title: "All posts — " + ctx.SiteName()}
+//	    }),
+//	)
+func ListHeadFunc[T any](fn func(Context, []T) Head) Option {
+	return listHeadFuncOption[T]{fn: fn}
+}
+
 // — Excerpt ———————————————————————————————————————————————————————————————
 
 // Excerpt returns a plain-text summary truncated at the last word boundary

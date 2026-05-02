@@ -510,3 +510,88 @@ type testContextFuncErr struct{}
 func (e *testContextFuncErr) Error() string   { return "context func error" }
 func (e *testContextFuncErr) Code() string    { return "context_func_error" }
 func (e *testContextFuncErr) HTTPStatus() int { return 500 }
+
+// ——— ListHeadFunc ————————————————————————————————————————————————————————
+
+func TestListHeadFunc_titlePopulated(t *testing.T) {
+	dir := t.TempDir()
+	writeTplFile(t, dir, "list.html", `{{template "forge:head" .}}`)
+	writeTplFile(t, dir, "show.html", ``)
+
+	m := newTplModule(t,
+		Templates(dir),
+		ListHeadFunc(func(_ Context, _ []*tdPost) Head {
+			return Head{Title: "All Posts"}
+		}),
+	)
+	if err := m.parseTemplates(); err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	m.setSiteName("example.com")
+	ctx := NewTestContext(GuestUser)
+
+	w := httptest.NewRecorder()
+	m.renderListHTML(w, ctx.Request(), ctx, nil)
+
+	body := w.Body.String()
+	want := "<title>All Posts</title>"
+	if !strings.Contains(body, want) {
+		t.Errorf("list page title not set; want %q in output:\n%s", want, body)
+	}
+}
+
+func TestListHeadFunc_absent_emptyTitle(t *testing.T) {
+	dir := t.TempDir()
+	writeTplFile(t, dir, "list.html", `{{template "forge:head" .}}`)
+	writeTplFile(t, dir, "show.html", ``)
+
+	// No ListHeadFunc — Head is zero; title element should be empty.
+	m := newTplModule(t, Templates(dir))
+	if err := m.parseTemplates(); err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	m.setSiteName("example.com")
+	ctx := NewTestContext(GuestUser)
+
+	w := httptest.NewRecorder()
+	m.renderListHTML(w, ctx.Request(), ctx, nil)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "<title></title>") {
+		t.Errorf("expected empty <title></title> when no ListHeadFunc; got:\n%s", body)
+	}
+}
+
+func TestHeadFunc_showUnaffectedByListHeadFunc(t *testing.T) {
+	dir := t.TempDir()
+	writeTplFile(t, dir, "list.html", ``)
+	writeTplFile(t, dir, "show.html", `{{template "forge:head" .}}`)
+
+	post := &tdPost{}
+	post.Slug = "hello"
+	post.Status = Published
+
+	m := newTplModule(t,
+		Templates(dir),
+		HeadFunc(func(_ Context, p *tdPost) Head {
+			return Head{Title: "Show: " + p.Slug}
+		}),
+		ListHeadFunc(func(_ Context, _ []*tdPost) Head {
+			return Head{Title: "list title"}
+		}),
+	)
+	if err := m.parseTemplates(); err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	m.setSiteName("example.com")
+	ctx := NewTestContext(GuestUser)
+
+	w := httptest.NewRecorder()
+	m.renderShowHTML(w, ctx.Request(), ctx, post)
+
+	body := w.Body.String()
+	want := "<title>Show: hello</title>"
+	if !strings.Contains(body, want) {
+		t.Errorf("HeadFunc on show broken by ListHeadFunc; want %q in:\n%s", want, body)
+	}
+}
