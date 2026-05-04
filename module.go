@@ -374,6 +374,10 @@ type Module[T any] struct {
 //   - [Cache]: enable per-module LRU response cache
 //   - [Middleware]: wrap all routes with the given middleware
 //   - [On]: register signal handlers
+//   - [HeadFunc]: provide a function that returns the [Head] metadata for a
+//     single content item page (title, description, OG tags)
+//   - [ListHeadFunc]: provide a function that returns the [Head] metadata for
+//     the list/index page of this content type
 //
 // Panics if no [Repo] option is present — this is a programming error caught
 // at startup, never at request time.

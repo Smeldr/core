@@ -186,7 +186,7 @@ type fieldConstraint struct {
 }
 
 // typeCache stores []fieldConstraint keyed by reflect.Type.
-// Populated on first call to ValidateStruct for each type.
+// Populated on first call to validateStruct for each type.
 var typeCache sync.Map
 
 // parseConstraints inspects all fields of t for `forge:"..."` tags and returns
@@ -361,18 +361,18 @@ func makeOneOf(name string, opts []string) func(reflect.Value) *fieldError {
 
 // ── Public validation API ─────────────────────────────────────────────────────
 
-// ValidateStruct runs struct-tag validation on v. v must be a struct or a
+// validateStruct runs struct-tag validation on v. v must be a struct or a
 // pointer to a struct. Field constraints are parsed once per type and cached.
 //
 // Returns a [*ValidationError] if any constraint fails, otherwise nil.
 // Returns all field errors — does not short-circuit on the first failure.
-func ValidateStruct(v any) error {
+func validateStruct(v any) error {
 	rv := reflect.ValueOf(v)
 	for rv.Kind() == reflect.Pointer {
 		rv = rv.Elem()
 	}
 	if rv.Kind() != reflect.Struct {
-		panic("forge: ValidateStruct requires a struct or pointer to struct")
+		panic("forge: RunValidation requires a struct or pointer to struct")
 	}
 	rt := rv.Type()
 
@@ -416,14 +416,14 @@ type Validatable interface {
 }
 
 // RunValidation runs the full validation pipeline on v:
-//  1. [ValidateStruct] — struct-tag constraints (required, min, max, email, …)
+//  1. Struct-tag constraints (required, min, max, email, …)
 //  2. If tags pass and v implements [Validatable], calls v.Validate()
 //
 // If step 1 fails, step 2 is skipped — the caller receives only the tag errors.
 // This matches Decision 10: "Tag validation runs before Validate(); if tags
 // fail, Validate() is not called."
 func RunValidation(v any) error {
-	if err := ValidateStruct(v); err != nil {
+	if err := validateStruct(v); err != nil {
 		return err
 	}
 	if val, ok := v.(Validatable); ok {
