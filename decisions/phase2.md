@@ -1542,3 +1542,150 @@ against a real SQL engine.
    same three criteria and must be documented as an amendment.
 
 ---
+
+## Amendment A82 — forge.go / config.go / static.go: Config.Dev + App.Static()
+
+**Date:** 2026-05-04
+**Status:** Agreed
+**Level:** 2 (new exported symbol + config key + new file)
+**Files:** `forge.go`, `config.go`, `static.go` (new), `static_test.go` (new), `REFERENCE.md`
+
+### Problem
+
+Every Forge site that serves static assets (CSS, JS, images) must implement
+~10 lines of boilerplate to switch between an embedded FS in production and
+disk-based serving in development. The pattern is identical across all sites;
+Forge should own it.
+
+### Decision
+
+**`Config.Dev bool`** — new optional field on `forge.Config`. When true, enables
+development mode for any feature that distinguishes dev from prod (currently
+`App.Static`).
+
+**`App.Static(prefix string, prod fs.FS, devDir string)`** — new method that
+mounts a static file handler at `prefix`. Behaviour:
+
+- `Dev == false` (production): serves from the embedded `prod` FS. Every
+  response carries `Cache-Control: public, max-age=31536000, immutable`.
+- `Dev == true` (development): serves from `devDir` on disk via
+  `http.FileServer(http.Dir(devDir))`. A `slog.Info` line is emitted at mount
+  time. Panics at startup if `devDir` does not exist.
+
+**forge.config key `dev`** — accepts `"true"` or `"false"`. Sets `Config.Dev`
+via the standard `loadConfigFile` / `mergeFileConfig` pipeline. Go-code value
+takes precedence (zero-value false does not overwrite a file-set true).
+
+**`withImmutableCache`** — unexported helper that wraps an `http.Handler` to
+inject the Cache-Control header. Tested independently.
+
+### Call site
+
+```go
+//go:embed static
+var staticFiles embed.FS
+
+staticFS, _ := fs.Sub(staticFiles, "static")
+app.Static("/static/", staticFS, "static")
+```
+
+Replaces the per-site boilerplate pattern.
+
+### Consequences
+
+1. New exported symbol `App.Static` — godoc on method and on `Config.Dev`.
+2. New forge.config key `dev` — `REFERENCE.md` "Static Files" section added;
+   `dev` row added to the forge.config key table.
+3. No breaking change — all existing `App` usage unaffected.
+4. `withImmutableCache` is unexported; tests exercise it directly.
+5. `App.Static` panics on missing `devDir` in dev mode — programmer error,
+   detectable at startup.
+6. 8 new tests in `static_test.go`.
+
+**Fix (2026-05-04):** `a.mux.Handle(prefix, h)` changed to
+`a.mux.Handle("GET "+prefix, h)`. Go 1.22+ `http.ServeMux` rejects mixing
+method-unqualified patterns (e.g. `"/static/"`) with method-qualified patterns
+(e.g. `"GET /"`) on the same mux. Static files are read-only; `GET` (and
+`HEAD`, handled automatically by ServeMux for `GET` routes) is the correct and
+complete set of methods. No test changes required.
+
+---
+
+## Amendment A83 — auth.go / forge.go / forge-cli/init.go: TokenStore bootstrap + forge-cli init
+
+**Date:** 2026-05-04
+**Status:** Agreed
+**Level:** 1 (additive — new unexported method, new forge-cli subcommand, no breaking change)
+**Files:** `auth.go`, `forge.go`, `auth_test.go`, `forge-cli/init.go` (new), `forge-cli/main.go`, `forge-cli/CHANGELOG.md`
+
+### Problem
+
+A new operator deploying Forge with a TokenStore had no recovery path if they
+missed the initial bootstrap token. The token is shown only once (correct by
+design — only the fingerprint is stored). If the operator missed it, they were
+forced to manipulate the database directly. Additionally, site-level code
+(`ensureBootstrapToken` in `seed.go`) was the only discovery mechanism for this
+pattern; a new developer would not know it existed.
+
+### Decision
+
+**Part 1 — `TokenStore.ensureBootstrap` (forge core):**
+
+New unexported method `ensureBootstrap(ctx context.Context)` on `*TokenStore`.
+Called by `App.Handler()` immediately after a successful `probeTable()`.
+Behaviour:
+
+- Queries `SELECT COUNT(*) FROM forge_tokens`.
+- If count > 0 or scan fails: no-op (table already has tokens, or not
+  accessible — probeTable already warned).
+- If count == 0: calls `ts.Create(ctx, "bootstrap-admin", "admin", 10yr)` and
+  emits the raw token via `slog.Warn` — impossible to miss in any log output:
+  ```
+  WARN  forge: forge_tokens is empty — bootstrap admin token created (copy now, shown once):
+        <raw token>
+  ```
+
+**Part 2 — `forge-cli init` (forge-cli v0.3.0):**
+
+New subcommand that completes the setup flow in one command:
+
+```
+forge-cli init [--url URL] [--bootstrap-token TOKEN] [--name NAME] [--days N] [--force]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--url` | `http://localhost:8080` | Base URL of the Forge instance |
+| `--bootstrap-token` | (required) | Pasted from startup log |
+| `--name` | `operator` | Name for the created admin token |
+| `--days` | `365` | Token TTL in days |
+| `--force` | false | Overwrite existing `.forge-cli.env` |
+
+Flow:
+1. `GET /_health` unauthenticated — fail fast if unreachable.
+2. `create_token` via MCP with the bootstrap token — admin role, given name, TTL.
+3. Extract `"token"` from the JSON result.
+4. Fail if `.forge-cli.env` exists and `--force` not set.
+5. Write `.forge-cli.env`: `FORGE_URL=...` + `FORGE_TOKEN=...`.
+6. `GET /_health` with the new token — warn on failure (env file preserved).
+7. Print success lines.
+
+`FORGE_MCP_URL` is not written — `client.go` defaults to `FORGE_URL/mcp/message`.
+Role is hardcoded to `admin` — `init` is a bootstrap tool only.
+
+### Consequences
+
+1. `ensureBootstrap` is unexported — no public API change.
+2. `forge_tokens` emptiness is checked on every `App.Handler()` call, but the
+   query is a single `SELECT COUNT(*)` — negligible overhead, and only when
+   `TokenStore` is configured.
+3. Sites that call `ensureBootstrapToken` in their own code will see a
+   duplicate token on the first run. Site-level code should be removed — this
+   is a follow-up task for `forge-site-working`.
+4. `forge-cli` bumped to v0.3.0 (new subcommand, no breaking change).
+5. `cliVersion` corrected from `"0.1.0"` to `"0.3.0"` (was never updated
+   through v0.2.0 / A76 module rename).
+6. 2 new tests in `auth_test.go`: `TestTokenStore_ensureBootstrap_empty` and
+   `TestTokenStore_ensureBootstrap_nonEmpty`.
+
+---

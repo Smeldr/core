@@ -23,6 +23,70 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.16.0] — 2026-05-04
+
+Static file serving, automatic bootstrap token, and repo cleanup (A82, A83).
+
+### Added
+
+- `Config.Dev bool` — dev mode flag. When true, `App.Static` serves files
+  from disk. When false (production), serves from an embedded `fs.FS` with
+  immutable `Cache-Control` headers.
+- `App.Static(prefix, prod, devDir)` — mounts a static file tree. In dev mode
+  reads from `devDir`; in production reads from `prod` (embedded FS).
+- `forge.config` key `dev` (bool) — sets `Config.Dev` from config file.
+- `TokenStore.ensureBootstrap` (unexported) — auto-creates a `bootstrap-admin`
+  token (admin role, 10-year TTL) when `forge_tokens` is empty at first startup.
+  The raw token is emitted via `slog.Warn` (shown once, never persisted).
+- `App.Handler` now calls `ensureBootstrap` after a successful `probeTable`.
+
+### Changed
+
+- Stale `forge-cli/`, `forge-mcp/`, and `forge-media/` subdirs removed from
+  this repo. These modules now live in standalone repos. `forge-pgx/` remains
+  as a subdir module.
+
+### Fixed
+
+- `App.Static` used `"/static/"` as ServeMux pattern, conflicting with
+  Go 1.22+ method-qualified routes. Fixed to `"GET " + prefix`.
+
+Amendments: A82, A83.
+
+---
+
+## [1.15.0] — 2026-05-04
+
+Go 1.26.2 modernisation sprint, SeqRepository streaming, SQLite test parity (A78, A80, A81).
+
+### Added
+
+- `SeqRepository[T]` optional interface with `Seq`, `SeqByStatus`, and
+  `SeqAll` methods — returns lazy `iter.Seq2[T, error]` for streaming without
+  full result-set load (Amendment A80).
+- `MemoryRepo[T]` and `SQLRepo[T]` both implement `SeqRepository[T]`.
+- `storage_sqlite_test.go` — `TestRepoParity_SQLRepo` runs all 11 parity
+  sub-tests against a real in-memory SQLite DB using `modernc.org/sqlite`
+  (test-only, CGO-free, Amendment A81).
+- `forge-pgx`: repository parity test suite against real PostgreSQL.
+
+### Changed
+
+- `validateStruct` unexported (was `ValidateStruct`); not part of the public
+  API (Amendment A78).
+- `sort` package replaced with `slices` across all core files.
+- `modernc.org/sqlite` added as a test-only direct dependency (Amendment A81).
+- `go.work` added to `.gitignore` (was accidentally tracked).
+
+### Documentation
+
+- `ErrRequestTooLarge` godoc clarified.
+- `App.Content` fallback comment added.
+- `REFERENCE.md` — Rate Limiting section added.
+- Decisions A78 and A79 documented in `DECISIONS.md` and `decisions/core.md`.
+
+---
+
 ## [1.14.1] — 2026-05-02
 
 `ListHeadFunc` option — populate list page `<title>` and meta tags (Amendment A77).

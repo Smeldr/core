@@ -797,3 +797,51 @@ func TestVerifyBearerTokenWithStore(t *testing.T) {
 		}
 	})
 }
+
+// — ensureBootstrap ————————————————————————————————————————————————————————
+
+// bootstrapDB is a minimal DB stub for ensureBootstrap tests.
+// It returns a configurable COUNT(*) value and tracks INSERT calls.
+type bootstrapDB struct {
+	count       int // rows in forge_tokens (returned by COUNT(*))
+	insertCount int // number of INSERT INTO forge_tokens calls
+}
+
+func (b *bootstrapDB) ExecContext(_ context.Context, query string, _ ...any) (sql.Result, error) {
+	if strings.Contains(query, "INSERT INTO forge_tokens") {
+		b.insertCount++
+		return nil, nil
+	}
+	return nil, errors.New("bootstrapDB: unhandled ExecContext")
+}
+
+func (b *bootstrapDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, errors.New("bootstrapDB: QueryContext not used")
+}
+
+func (b *bootstrapDB) QueryRowContext(ctx context.Context, query string, _ ...any) *sql.Row {
+	if strings.Contains(query, "COUNT(*)") {
+		conn := &guardRowConn{val: int64(b.count)}
+		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+	}
+	conn := &guardRowConn{noRow: true}
+	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+}
+
+func TestTokenStore_ensureBootstrap_empty(t *testing.T) {
+	db := &bootstrapDB{count: 0}
+	store := NewTokenStore(db, "test-secret-32-bytes-xxxxxxxxxxxx")
+	store.ensureBootstrap(context.Background())
+	if db.insertCount != 1 {
+		t.Errorf("ensureBootstrap on empty table: expected 1 INSERT (Create), got %d", db.insertCount)
+	}
+}
+
+func TestTokenStore_ensureBootstrap_nonEmpty(t *testing.T) {
+	db := &bootstrapDB{count: 1}
+	store := NewTokenStore(db, "test-secret-32-bytes-xxxxxxxxxxxx")
+	store.ensureBootstrap(context.Background())
+	if db.insertCount != 0 {
+		t.Errorf("ensureBootstrap on non-empty table: expected no INSERT (no-op), got %d", db.insertCount)
+	}
+}

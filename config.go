@@ -87,6 +87,15 @@ func loadConfigFile(path string) (Config, error) {
 				return Config{}, fmt.Errorf("forge.config line %d: invalid value %q for key \"media_max_size\" — expected an integer number of bytes", lineNum, value)
 			}
 			cfg.MediaMaxSize = n
+		case "dev":
+			switch value {
+			case "true":
+				cfg.Dev = true
+			case "false":
+				// explicit false: zero value, no-op
+			default:
+				return Config{}, fmt.Errorf("forge.config line %d: invalid value %q for key \"dev\" — expected \"true\" or \"false\"", lineNum, value)
+			}
 			// unknown keys are silently ignored (forward compatibility)
 		}
 	}
@@ -127,6 +136,9 @@ func mergeFileConfig(goCfg, fileCfg Config) Config {
 	}
 	if goCfg.MediaMaxSize == 0 && fileCfg.MediaMaxSize != 0 {
 		goCfg.MediaMaxSize = fileCfg.MediaMaxSize
+	}
+	if !goCfg.Dev && fileCfg.Dev {
+		goCfg.Dev = true
 	}
 	return goCfg
 }

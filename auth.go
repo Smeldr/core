@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -289,6 +290,25 @@ func (ts *TokenStore) probeTable(ctx context.Context) error {
 	row := ts.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM forge_tokens`)
 	var n int
 	return row.Scan(&n)
+}
+
+// ensureBootstrap creates a bootstrap admin token when forge_tokens is empty.
+// Called at startup by [App.Handler] after a successful [TokenStore.probeTable].
+// When the table already contains at least one row (any token, revoked or not)
+// this is a no-op. The raw token is emitted via [log/slog] at Warn level and
+// is never persisted — copy it immediately.
+func (ts *TokenStore) ensureBootstrap(ctx context.Context) {
+	row := ts.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM forge_tokens`)
+	var n int
+	if err := row.Scan(&n); err != nil || n > 0 {
+		return
+	}
+	raw, err := ts.Create(ctx, "bootstrap-admin", "admin", 10*365*24*time.Hour)
+	if err != nil {
+		slog.Warn("forge: failed to create bootstrap admin token", "err", err)
+		return
+	}
+	slog.Warn("forge: forge_tokens is empty — bootstrap admin token created (copy now, shown once):\n\t" + raw)
 }
 
 // Create generates a signed named bearer token with the given role and ttl,

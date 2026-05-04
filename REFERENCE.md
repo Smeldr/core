@@ -1481,6 +1481,69 @@ Full reference: [forge-media README](https://forge-cms.dev/forge/tree/main/forge
 
 ---
 
+## Static files
+
+✅ **Available**
+
+`App.Static` serves static assets (CSS, JS, images) from an embedded FS in
+production and from disk in development — no boilerplate required.
+
+```go
+//go:embed static
+var staticFiles embed.FS
+
+func main() {
+    app := forge.New(forge.MustConfig(forge.Config{
+        BaseURL: "https://mysite.com",
+        Secret:  []byte(os.Getenv("SECRET")),
+        Dev:     os.Getenv("DEV") == "1",
+    }))
+
+    staticFS, _ := fs.Sub(staticFiles, "static")
+    app.Static("/static/", staticFS, "static")
+
+    app.Run(":8080")
+}
+```
+
+### Production mode (`Config.Dev == false`)
+
+Serves from the embedded `prod` FS. Every response gets:
+
+```
+Cache-Control: public, max-age=31536000, immutable
+```
+
+Assets are cached by browsers and CDNs for one year. Use content-hashed
+filenames (e.g. `app.abc123.js`) so cache-busting is automatic on deploy.
+
+### Development mode (`Config.Dev == true`)
+
+Serves from `devDir` on disk. File changes are visible immediately without
+rebuilding. A startup log line confirms the active mode:
+
+```
+INFO static: serving from disk dir=static
+```
+
+`App.Static` panics at startup if `devDir` does not exist when `Dev` is true.
+
+### Enabling dev mode
+
+Two ways to set `Config.Dev`:
+
+**Go code:**
+```go
+Dev: os.Getenv("DEV") == "1",
+```
+
+**forge.config file:**
+```
+dev = true
+```
+
+---
+
 ## forge.config file
 
 Forge reads a `forge.config` file from the working directory (or from the path
@@ -1502,6 +1565,7 @@ environment variable or directly in Go code.
 | `og_image` | string | — | Default Open Graph image URL |
 | `media_path` | string | `./media` | Upload directory for forge-media |
 | `media_max_size` | integer | `5242880` | Max upload size in bytes (forge-media) |
+| `dev` | bool | `false` | Enable development mode (serve static files from disk) |
 
 Example:
 

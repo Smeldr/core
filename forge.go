@@ -122,6 +122,12 @@ type Config struct {
 	// 5242880 (5 MB) when zero. Optional — only read by forge-media; ignored
 	// by forge core.
 	MediaMaxSize int64
+
+	// Dev enables development mode. When true, [App.Static] serves files from
+	// disk (devDir) instead of the embedded FS, so changes are visible without
+	// rebuilding. Set from os.Getenv("DEV") == "1" or via the forge.config key
+	// "dev = true". Optional.
+	Dev bool
 }
 
 // MustConfig validates cfg and returns it unchanged.
@@ -562,9 +568,12 @@ func (a *App) Handler() http.Handler {
 		}
 	}
 	// A66: probe forge_tokens table at startup when a TokenStore is configured.
+	// A83: auto-create a bootstrap admin token when forge_tokens is empty.
 	if a.tokenStore != nil {
 		if err := a.tokenStore.probeTable(context.Background()); err != nil {
 			fmt.Fprintf(os.Stderr, "WARN  forge: TokenStore is configured but the forge_tokens table is missing or inaccessible — create it using the DDL in the TokenStore documentation\n")
+		} else {
+			a.tokenStore.ensureBootstrap(context.Background())
 		}
 	}
 	// D29: initialise the navigation tree when NavMode is set or App.Nav() items
