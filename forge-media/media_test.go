@@ -231,6 +231,36 @@ func TestLocalMediaStore_delete(t *testing.T) {
 	}
 }
 
+func TestLocalMediaStore_store_pathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	store := &LocalMediaStore{dir: dir, baseURL: "https://example.com"}
+	_, err := store.Store("../../etc/secret", []byte("bad"))
+	if err == nil {
+		t.Fatal("Store: expected error for path traversal, got nil")
+	}
+	// Confirm no file was written outside the directory.
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(dir), "etc", "secret")); !os.IsNotExist(statErr) {
+		t.Error("file should not exist outside store root")
+	}
+}
+
+func TestLocalMediaStore_delete_pathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(filepath.Dir(dir), "canary-forge-media-test.txt")
+	if err := os.WriteFile(outside, []byte("safe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(outside) })
+	store := &LocalMediaStore{dir: dir, baseURL: "https://example.com"}
+	err := store.Delete("../canary-forge-media-test.txt")
+	if err == nil {
+		t.Fatal("Delete: expected error for path traversal, got nil")
+	}
+	if _, statErr := os.Stat(outside); os.IsNotExist(statErr) {
+		t.Error("canary file was deleted — path traversal succeeded")
+	}
+}
+
 func TestLocalMediaStore_defaultMediaPath(t *testing.T) {
 	// When MediaPath is empty the store should default to "./media".
 	app := newTestApp(t, "", "https://example.com")
