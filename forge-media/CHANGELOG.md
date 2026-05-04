@@ -7,6 +7,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.2] — 2026-05-04
+
+Security fix: path traversal in `LocalMediaStore` (Amendment A79).
+
+### Fixed
+
+- `LocalMediaStore.Store()` and `.Delete()` now use `os.Root` (Go 1.24+)
+  instead of `filepath.Join` to construct file paths. A crafted filename such
+  as `../../etc/passwd` previously escaped the media directory; `os.OpenRoot`
+  prevents traversal at the OS level regardless of input (CWE-22).
+- `path/filepath` import removed from `media.go` (no longer needed).
+- Two path-traversal tests added: `TestLocalMediaStore_store_pathTraversal`
+  and `TestLocalMediaStore_delete_pathTraversal`.
+
+---
+
 ## [1.1.0] — 2026-04-30
 
 Go 1.26.2 and module path migration to `forge-cms.dev` (Amendment A76).
