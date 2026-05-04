@@ -1,9 +1,10 @@
 package forge
 
 import (
+	"cmp"
 	"encoding/json"
 	"net/http"
-	"sort"
+	"slices"
 	"time"
 )
 
@@ -76,8 +77,8 @@ func buildManifest(site string, decls []Cookie) cookieManifest {
 			Purpose:  c.Purpose,
 		}
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name < entries[j].Name
+	slices.SortFunc(entries, func(a, b cookieManifestEntry) int {
+		return cmp.Compare(a.Name, b.Name)
 	})
 	return cookieManifest{
 		Site:      site,

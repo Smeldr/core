@@ -9,7 +9,7 @@ import (
 	"encoding/xml"
 	"io"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -276,7 +276,7 @@ func (s *SitemapStore) Paths() []string {
 		paths = append(paths, p)
 	}
 	s.mu.RUnlock()
-	sort.Strings(paths)
+	slices.Sort(paths)
 	return paths
 }
 

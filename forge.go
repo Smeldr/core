@@ -10,7 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
-	"sort"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -750,7 +750,7 @@ func (a *App) Health() {
 			companions = append(companions, k)
 		}
 	}
-	sort.Strings(companions)
+	slices.Sort(companions)
 
 	a.mux.Handle("GET /_health", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -812,7 +812,7 @@ func (a *App) Run(addr string) error {
 				companions = append(companions, k)
 			}
 		}
-		sort.Strings(companions)
+		slices.Sort(companions)
 		for _, k := range companions {
 			parts = append(parts, k+" "+versions[k])
 		}

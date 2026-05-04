@@ -1,11 +1,12 @@
 package forge
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -401,11 +402,11 @@ func sortItems[T any](items []T, field string, desc bool) {
 	for i, item := range items {
 		pairs[i] = sortPair[T]{item: item, key: stringField(item, field)}
 	}
-	sort.SliceStable(pairs, func(i, j int) bool {
+	slices.SortStableFunc(pairs, func(a, b sortPair[T]) int {
 		if desc {
-			return pairs[i].key > pairs[j].key
+			return cmp.Compare(b.key, a.key)
 		}
-		return pairs[i].key < pairs[j].key
+		return cmp.Compare(a.key, b.key)
 	})
 	for i, p := range pairs {
 		items[i] = p.item

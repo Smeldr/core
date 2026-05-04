@@ -1,10 +1,11 @@
 package forge
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -115,8 +116,8 @@ func (s *RedirectStore) Add(e RedirectEntry) {
 
 	if e.IsPrefix {
 		s.prefix = append(s.prefix, e)
-		sort.SliceStable(s.prefix, func(i, j int) bool {
-			return len(s.prefix[i].From) > len(s.prefix[j].From)
+		slices.SortStableFunc(s.prefix, func(a, b RedirectEntry) int {
+			return cmp.Compare(len(b.From), len(a.From))
 		})
 		return
 	}
@@ -181,7 +182,7 @@ func (s *RedirectStore) All() []RedirectEntry {
 		out = append(out, e)
 	}
 	out = append(out, s.prefix...)
-	sort.Slice(out, func(i, j int) bool { return out[i].From < out[j].From })
+	slices.SortFunc(out, func(a, b RedirectEntry) int { return cmp.Compare(a.From, b.From) })
 	return out
 }
 
