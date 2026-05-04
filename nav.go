@@ -1,9 +1,10 @@
 package forge
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -175,11 +176,11 @@ func (n *NavTree) buildTree(items []NavItem) {
 
 // sortNavItems sorts a []*NavItem slice by SortOrder ascending, then Label ascending.
 func sortNavItems(items []*NavItem) {
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].SortOrder != items[j].SortOrder {
-			return items[i].SortOrder < items[j].SortOrder
+	slices.SortFunc(items, func(a, b *NavItem) int {
+		if a.SortOrder != b.SortOrder {
+			return cmp.Compare(a.SortOrder, b.SortOrder)
 		}
-		return items[i].Label < items[j].Label
+		return cmp.Compare(a.Label, b.Label)
 	})
 }
 
@@ -218,11 +219,11 @@ func (n *NavTree) List() []NavItem {
 		cp.Children = nil
 		out = append(out, cp)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].SortOrder != out[j].SortOrder {
-			return out[i].SortOrder < out[j].SortOrder
+	slices.SortFunc(out, func(a, b NavItem) int {
+		if a.SortOrder != b.SortOrder {
+			return cmp.Compare(a.SortOrder, b.SortOrder)
 		}
-		return out[i].Label < out[j].Label
+		return cmp.Compare(a.Label, b.Label)
 	})
 	return out
 }

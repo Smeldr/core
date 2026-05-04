@@ -103,6 +103,10 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A75 | `markdown.go`: `renderMarkdown` HTML passthrough — lines whose trimmed form starts with `<` are emitted verbatim without HTML-escaping, unblocking HTML blocks in trusted body content | Agreed | 2026-04-22 |
 | A76 | `go.mod` (all modules): bump minimum Go version `1.22` → `1.26.2`; rename all module paths from `github.com/forge-cms/...` to `forge-cms.dev/...`; update all imports, documentation, and `forgeVersions()` prefix logic | Agreed | 2026-04-30 |
 | A77 | `head.go`/`module.go`/`templates.go`: `ListHeadFunc` option — new `listHeadFuncOption[T]` type; `listHeadFunc any` field on `Module[T]`; `renderListHTML` resolves list head via `listHeadFunc`; fixes empty `<title>` on module list pages | Agreed | 2026-05-02 |
+| A78 | `node.go`: `ValidateStruct` unexported to `validateStruct`; `RunValidation` is now the sole public entry point for struct-tag validation. Breaking change: removes exported symbol. | Agreed | 2026-05-04 |
+| A79 | `forge-media/media.go`: `LocalMediaStore.Store()` and `.Delete()` use `os.Root` (Go 1.24+) instead of `filepath.Join` — path traversal prevented at OS level. Security fix. Two new tests added. | Agreed | 2026-05-04 |
+| A80 | `storage.go`: `SeqRepository[T]` optional interface + `Seq` methods on `MemoryRepo[T]` and `SQLRepo[T]` — lazy `iter.Seq2[T, error]` streaming without full result-set load. Additive; `Repository[T]` unchanged. | Agreed | 2026-05-04 |
+| A81 | `go.mod`: `modernc.org/sqlite` added as test-only dependency; enables `TestRepoParity_SQLRepo` against real in-memory SQLite. Exception to zero-dep rule: CGO-free, test-only, single file, documented precedent. | Agreed | 2026-05-04 |
 
 ---
 

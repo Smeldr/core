@@ -1,11 +1,13 @@
 package forge
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
+	"iter"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -237,6 +239,25 @@ type Repository[T any] interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// SeqRepository is an optional extension of [Repository] that supports lazy
+// iteration over content items without loading the full result set into memory.
+// Both [MemoryRepo] and [SQLRepo] implement this interface.
+//
+// Callers type-assert their [Repository] to [SeqRepository] to use it:
+//
+//	if sr, ok := repo.(forge.SeqRepository[*Post]); ok {
+//		for item, err := range sr.Seq(ctx, opts) {
+//			if err != nil { ... }
+//		}
+//	}
+//
+// Note: Seq does not apply sorting or pagination — it streams all items
+// matching the status filter in storage order. Use [Repository.FindAll] when
+// ordering or pagination is required.
+type SeqRepository[T any] interface {
+	Seq(ctx context.Context, opts ListOptions) iter.Seq2[T, error]
+}
+
 // MemoryRepo is a thread-safe in-memory implementation of [Repository].
 // It is intended for unit tests and prototyping — not production use.
 // Fields named ID and Slug are located via cached reflection on first use.
@@ -338,6 +359,35 @@ func (r *MemoryRepo[T]) FindAll(_ context.Context, opts ListOptions) ([]T, error
 	return all[off:end], nil
 }
 
+// Seq returns a lazy iterator over items in insertion order, yielding each
+// item that matches the status filter in opts (or all items when opts.Status
+// is empty). Iteration stops early if the caller returns false from yield.
+//
+// Seq does not apply sorting or pagination. Use [MemoryRepo.FindAll] when
+// ordering or pagination is required.
+func (r *MemoryRepo[T]) Seq(_ context.Context, opts ListOptions) iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		r.mu.RLock()
+		ids := make([]string, len(r.order))
+		copy(ids, r.order)
+		items := make(map[string]T, len(r.items))
+		for k, v := range r.items {
+			items[k] = v
+		}
+		r.mu.RUnlock()
+
+		for _, id := range ids {
+			item := items[id]
+			if !statusMatch(item, opts.Status) {
+				continue
+			}
+			if !yield(item, nil) {
+				return
+			}
+		}
+	}
+}
+
 // Delete removes the item with the given ID. Returns [ErrNotFound] if absent.
 func (r *MemoryRepo[T]) Delete(_ context.Context, id string) error {
 	r.mu.Lock()
@@ -401,11 +451,11 @@ func sortItems[T any](items []T, field string, desc bool) {
 	for i, item := range items {
 		pairs[i] = sortPair[T]{item: item, key: stringField(item, field)}
 	}
-	sort.SliceStable(pairs, func(i, j int) bool {
+	slices.SortStableFunc(pairs, func(a, b sortPair[T]) int {
 		if desc {
-			return pairs[i].key > pairs[j].key
+			return cmp.Compare(b.key, a.key)
 		}
-		return pairs[i].key < pairs[j].key
+		return cmp.Compare(a.key, b.key)
 	})
 	for i, p := range pairs {
 		items[i] = p.item
@@ -631,4 +681,62 @@ func (r *SQLRepo[T]) Delete(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// Seq returns a lazy iterator that streams rows from the database one at a
+// time, yielding each item that matches the status filter in opts (or all
+// items when opts.Status is empty). Iteration stops early if the caller
+// returns false from yield.
+//
+// Seq does not apply pagination. Use [SQLRepo.FindAll] when ordering or
+// pagination is required.
+func (r *SQLRepo[T]) Seq(ctx context.Context, opts ListOptions) iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		query := "SELECT * FROM " + r.table
+		args := make([]any, 0, len(opts.Status))
+		n := 1
+
+		if len(opts.Status) > 0 {
+			placeholders := make([]string, len(opts.Status))
+			for i, s := range opts.Status {
+				placeholders[i] = fmt.Sprintf("$%d", n)
+				args = append(args, string(s))
+				n++
+			}
+			query += " WHERE " + quoteIdent("status") + " IN (" + strings.Join(placeholders, ", ") + ")"
+		}
+
+		rows, err := r.db.QueryContext(ctx, query, args...)
+		if err != nil {
+			var zero T
+			yield(zero, err)
+			return
+		}
+		defer rows.Close()
+
+		fields := dbFields(r.elemType)
+		for rows.Next() {
+			cp := reflect.New(r.elemType)
+			dests := make([]any, len(fields))
+			for i, f := range fields {
+				dests[i] = cp.Elem().FieldByIndex(f.index).Addr().Interface()
+			}
+			if err := rows.Scan(dests...); err != nil {
+				var zero T
+				yield(zero, err)
+				return
+			}
+			item, ok := cp.Interface().(T)
+			if !ok {
+				item = cp.Elem().Interface().(T)
+			}
+			if !yield(item, nil) {
+				return
+			}
+		}
+		if err := rows.Err(); err != nil {
+			var zero T
+			yield(zero, err)
+		}
+	}
 }

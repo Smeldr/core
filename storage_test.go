@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -641,4 +642,296 @@ func TestSQLRepo_ReservedKeyword_quotes(t *testing.T) {
 	if q := getLastQuery(); q != want {
 		t.Errorf("Save query = %q, want %q", q, want)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Seq tests — MemoryRepo and SQLRepo implement SeqRepository[T]
+// ---------------------------------------------------------------------------
+
+// seqItem carries a Status field so we can exercise the status filter.
+type seqItem struct {
+	ID     string `db:"id"`
+	Title  string `db:"title"`
+	Status string `db:"status"`
+}
+
+// compile-time interface checks
+var _ SeqRepository[repoItem] = (*MemoryRepo[repoItem])(nil)
+var _ SeqRepository[BlogPost] = (*SQLRepo[BlogPost])(nil)
+
+func TestMemoryRepo_Seq_basic(t *testing.T) {
+	ctx := context.Background()
+	r := NewMemoryRepo[repoItem]()
+	items := []repoItem{
+		{ID: "1", Slug: "a", Title: "A"},
+		{ID: "2", Slug: "b", Title: "B"},
+		{ID: "3", Slug: "c", Title: "C"},
+	}
+	for _, it := range items {
+		if err := r.Save(ctx, it); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var got []repoItem
+	for item, err := range r.Seq(ctx, ListOptions{}) {
+		if err != nil {
+			t.Fatalf("Seq yielded error: %v", err)
+		}
+		got = append(got, item)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d items, want 3", len(got))
+	}
+	for i, want := range items {
+		if got[i] != want {
+			t.Errorf("item[%d] = %+v, want %+v", i, got[i], want)
+		}
+	}
+}
+
+func TestMemoryRepo_Seq_statusFilter(t *testing.T) {
+	ctx := context.Background()
+	r := NewMemoryRepo[seqItem]()
+	_ = r.Save(ctx, seqItem{ID: "1", Status: "published"})
+	_ = r.Save(ctx, seqItem{ID: "2", Status: "draft"})
+	_ = r.Save(ctx, seqItem{ID: "3", Status: "published"})
+
+	var got []seqItem
+	for item, err := range r.Seq(ctx, ListOptions{Status: []Status{Published}}) {
+		if err != nil {
+			t.Fatalf("Seq yielded error: %v", err)
+		}
+		got = append(got, item)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d items, want 2", len(got))
+	}
+	for _, it := range got {
+		if it.Status != string(Published) {
+			t.Errorf("unexpected status %q in result", it.Status)
+		}
+	}
+}
+
+func TestMemoryRepo_Seq_yieldStop(t *testing.T) {
+	ctx := context.Background()
+	r := NewMemoryRepo[repoItem]()
+	for i := range 5 {
+		id := fmt.Sprintf("%d", i+1)
+		_ = r.Save(ctx, repoItem{ID: id, Slug: id})
+	}
+
+	count := 0
+	for _, err := range r.Seq(ctx, ListOptions{}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		count++
+		if count == 2 {
+			break
+		}
+	}
+	if count != 2 {
+		t.Errorf("yielded %d items, want 2 (early stop)", count)
+	}
+}
+
+func TestSQLRepo_Seq_basic(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	setFakeResult(
+		[]string{"id", "title"},
+		[][]driver.Value{
+			{"1", "First"},
+			{"2", "Second"},
+		},
+	)
+	r := NewSQLRepo[BlogPost](db)
+
+	var got []BlogPost
+	for item, err := range r.Seq(ctx, ListOptions{}) {
+		if err != nil {
+			t.Fatalf("Seq yielded error: %v", err)
+		}
+		got = append(got, item)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d rows, want 2", len(got))
+	}
+	if got[0].ID != "1" || got[0].Title != "First" {
+		t.Errorf("row[0] = %+v, want {ID:1 Title:First}", got[0])
+	}
+	if got[1].ID != "2" || got[1].Title != "Second" {
+		t.Errorf("row[1] = %+v, want {ID:2 Title:Second}", got[1])
+	}
+}
+
+func TestSQLRepo_Seq_statusFilter_query(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	setFakeResult([]string{"id", "title", "status"}, nil)
+	r := NewSQLRepo[seqItem](db)
+
+	for _, err := range r.Seq(ctx, ListOptions{Status: []Status{Published}}) {
+		if err != nil {
+			t.Fatalf("Seq error: %v", err)
+		}
+	}
+	want := `SELECT * FROM seq_items WHERE "status" IN ($1)`
+	if q := getLastQuery(); q != want {
+		t.Errorf("query = %q, want %q", q, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Repository parity suite
+//
+// runRepoParity defines the behavioural contract shared by all Repository[T]
+// implementations. Both MemoryRepo and SQLRepo must satisfy these guarantees.
+//
+// For SQLRepo the fake driver only handles controlled query/exec results, so
+// full parity testing of SQLRepo requires a real DB (see the integration build
+// tag tests). This suite therefore runs against MemoryRepo, which is the
+// reference implementation that SQLRepo must match.
+// ---------------------------------------------------------------------------
+
+// parityItem is the content type used by the parity suite. It carries all
+// fields that parity tests exercise: ID, Slug, Title, Status.
+type parityItem struct {
+	ID     string `db:"id"`
+	Slug   string `db:"slug"`
+	Title  string `db:"title"`
+	Status string `db:"status"`
+}
+
+func runRepoParity(t *testing.T, repo Repository[parityItem]) {
+	t.Helper()
+	ctx := context.Background()
+
+	t.Run("FindByID_notFound", func(t *testing.T) {
+		_, err := repo.FindByID(ctx, "missing")
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("FindByID missing: got %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("FindBySlug_notFound", func(t *testing.T) {
+		_, err := repo.FindBySlug(ctx, "missing")
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("FindBySlug missing: got %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("FindAll_empty", func(t *testing.T) {
+		items, err := repo.FindAll(ctx, ListOptions{})
+		if err != nil {
+			t.Fatalf("FindAll empty: %v", err)
+		}
+		if len(items) != 0 {
+			t.Errorf("FindAll empty: got %d items, want 0", len(items))
+		}
+	})
+
+	alpha := parityItem{ID: "1", Slug: "alpha", Title: "Alpha", Status: "published"}
+	beta := parityItem{ID: "2", Slug: "beta", Title: "Beta", Status: "draft"}
+	gamma := parityItem{ID: "3", Slug: "gamma", Title: "Gamma", Status: "published"}
+
+	for _, it := range []parityItem{alpha, beta, gamma} {
+		if err := repo.Save(ctx, it); err != nil {
+			t.Fatalf("Save %s: %v", it.ID, err)
+		}
+	}
+
+	t.Run("Save_FindByID", func(t *testing.T) {
+		got, err := repo.FindByID(ctx, "1")
+		if err != nil {
+			t.Fatalf("FindByID: %v", err)
+		}
+		if got != alpha {
+			t.Errorf("FindByID: got %+v, want %+v", got, alpha)
+		}
+	})
+
+	t.Run("Save_FindBySlug", func(t *testing.T) {
+		got, err := repo.FindBySlug(ctx, "beta")
+		if err != nil {
+			t.Fatalf("FindBySlug: %v", err)
+		}
+		if got != beta {
+			t.Errorf("FindBySlug: got %+v, want %+v", got, beta)
+		}
+	})
+
+	t.Run("FindAll_all", func(t *testing.T) {
+		items, err := repo.FindAll(ctx, ListOptions{})
+		if err != nil {
+			t.Fatalf("FindAll: %v", err)
+		}
+		if len(items) != 3 {
+			t.Errorf("FindAll: got %d items, want 3", len(items))
+		}
+	})
+
+	t.Run("FindAll_statusFilter", func(t *testing.T) {
+		items, err := repo.FindAll(ctx, ListOptions{Status: []Status{Published}})
+		if err != nil {
+			t.Fatalf("FindAll status: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("FindAll status: got %d items, want 2", len(items))
+		}
+		for _, it := range items {
+			if it.Status != string(Published) {
+				t.Errorf("unexpected status %q", it.Status)
+			}
+		}
+	})
+
+	t.Run("Save_update", func(t *testing.T) {
+		updated := parityItem{ID: "1", Slug: "alpha", Title: "Alpha Updated", Status: "published"}
+		if err := repo.Save(ctx, updated); err != nil {
+			t.Fatalf("Save update: %v", err)
+		}
+		got, err := repo.FindByID(ctx, "1")
+		if err != nil {
+			t.Fatalf("FindByID after update: %v", err)
+		}
+		if got.Title != "Alpha Updated" {
+			t.Errorf("after update Title = %q, want %q", got.Title, "Alpha Updated")
+		}
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		if err := repo.Delete(ctx, "2"); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		_, err := repo.FindByID(ctx, "2")
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("FindByID deleted: got %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("Delete_notFound", func(t *testing.T) {
+		err := repo.Delete(ctx, "2") // already deleted above
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("Delete missing: got %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("FindAll_pagination", func(t *testing.T) {
+		items, err := repo.FindAll(ctx, ListOptions{PerPage: 1, Page: 1})
+		if err != nil {
+			t.Fatalf("FindAll page 1: %v", err)
+		}
+		if len(items) != 1 {
+			t.Errorf("FindAll page 1: got %d items, want 1", len(items))
+		}
+	})
+}
+
+// TestRepoParity_MemoryRepo runs the parity contract against MemoryRepo,
+// which is the reference implementation that all Repository backends must match.
+func TestRepoParity_MemoryRepo(t *testing.T) {
+	runRepoParity(t, NewMemoryRepo[parityItem]())
 }

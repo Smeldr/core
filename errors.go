@@ -70,6 +70,9 @@ var (
 	ErrNotAcceptable = newSentinel(http.StatusNotAcceptable, "not_acceptable", "Not acceptable")
 
 	// ErrRequestTooLarge indicates the request body exceeds the allowed size. → 413
+	// Returned when a handler reads a body that has been limited by [MaxBodySize]
+	// and the limit is exceeded. Users wrapping their own body reads should detect
+	// *http.MaxBytesError via errors.As and return this sentinel.
 	ErrRequestTooLarge = newSentinel(http.StatusRequestEntityTooLarge, "request_too_large", "Request too large")
 
 	// ErrTooManyRequests indicates the client has exceeded the rate limit. → 429

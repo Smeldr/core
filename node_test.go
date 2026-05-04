@@ -108,17 +108,17 @@ func TestUniqueSlug(t *testing.T) {
 	}
 }
 
-// ── ValidateStruct tests ──────────────────────────────────────────────────────
+// ── validation constraint tests ─────────────────────────────────────────────
 
-// TestValidateStructRequired verifies the required constraint.
-func TestValidateStructRequired(t *testing.T) {
+// TestRunValidationRequired verifies the required constraint.
+func TestRunValidationRequired(t *testing.T) {
 	type S struct {
 		Title string `forge:"required"`
 	}
-	if err := ValidateStruct(&S{Title: "hello"}); err != nil {
+	if err := RunValidation(&S{Title: "hello"}); err != nil {
 		t.Errorf("expected nil for non-empty, got %v", err)
 	}
-	err := ValidateStruct(&S{})
+	err := RunValidation(&S{})
 	if err == nil {
 		t.Fatal("expected error for empty Title")
 	}
@@ -131,38 +131,38 @@ func TestValidateStructRequired(t *testing.T) {
 	}
 }
 
-// TestValidateStructMin verifies the min= constraint on strings and ints.
-func TestValidateStructMin(t *testing.T) {
+// TestRunValidationMin verifies the min= constraint on strings and ints.
+func TestRunValidationMin(t *testing.T) {
 	type S struct {
 		Body string `forge:"min=10"`
 	}
-	if err := ValidateStruct(&S{Body: "hello world"}); err != nil {
+	if err := RunValidation(&S{Body: "hello world"}); err != nil {
 		t.Errorf("expected nil for long body, got %v", err)
 	}
-	if err := ValidateStruct(&S{Body: "hi"}); err == nil {
+	if err := RunValidation(&S{Body: "hi"}); err == nil {
 		t.Error("expected error for too-short body")
 	}
 	// empty string also fails min — use required+min together
-	if err := ValidateStruct(&S{Body: ""}); err == nil {
+	if err := RunValidation(&S{Body: ""}); err == nil {
 		t.Error("empty string should fail min=10")
 	}
 }
 
-// TestValidateStructMax verifies the max= constraint on strings.
-func TestValidateStructMax(t *testing.T) {
+// TestRunValidationMax verifies the max= constraint on strings.
+func TestRunValidationMax(t *testing.T) {
 	type S struct {
 		Name string `forge:"max=5"`
 	}
-	if err := ValidateStruct(&S{Name: "hi"}); err != nil {
+	if err := RunValidation(&S{Name: "hi"}); err != nil {
 		t.Errorf("expected nil for short name, got %v", err)
 	}
-	if err := ValidateStruct(&S{Name: "toolongname"}); err == nil {
+	if err := RunValidation(&S{Name: "toolongname"}); err == nil {
 		t.Error("expected error for too-long name")
 	}
 }
 
-// TestValidateStructEmail verifies the email constraint.
-func TestValidateStructEmail(t *testing.T) {
+// TestRunValidationEmail verifies the email constraint.
+func TestRunValidationEmail(t *testing.T) {
 	type S struct {
 		Email string `forge:"email"`
 	}
@@ -180,7 +180,7 @@ func TestValidateStructEmail(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.value, func(t *testing.T) {
-			err := ValidateStruct(&S{Email: tc.value})
+			err := RunValidation(&S{Email: tc.value})
 			if (err != nil) != tc.wantErr {
 				t.Errorf("email=%q: err=%v, wantErr=%v", tc.value, err, tc.wantErr)
 			}
@@ -188,8 +188,8 @@ func TestValidateStructEmail(t *testing.T) {
 	}
 }
 
-// TestValidateStructURL verifies the url constraint.
-func TestValidateStructURL(t *testing.T) {
+// TestRunValidationURL verifies the url constraint.
+func TestRunValidationURL(t *testing.T) {
 	type S struct {
 		Link string `forge:"url"`
 	}
@@ -206,7 +206,7 @@ func TestValidateStructURL(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.value, func(t *testing.T) {
-			err := ValidateStruct(&S{Link: tc.value})
+			err := RunValidation(&S{Link: tc.value})
 			if (err != nil) != tc.wantErr {
 				t.Errorf("url=%q: err=%v, wantErr=%v", tc.value, err, tc.wantErr)
 			}
@@ -214,48 +214,48 @@ func TestValidateStructURL(t *testing.T) {
 	}
 }
 
-// TestValidateStructSlug verifies the slug constraint.
-func TestValidateStructSlug(t *testing.T) {
+// TestRunValidationSlug verifies the slug constraint.
+func TestRunValidationSlug(t *testing.T) {
 	type S struct {
 		Slug string `forge:"slug"`
 	}
-	if err := ValidateStruct(&S{Slug: "valid-slug-123"}); err != nil {
+	if err := RunValidation(&S{Slug: "valid-slug-123"}); err != nil {
 		t.Errorf("expected nil, got %v", err)
 	}
-	if err := ValidateStruct(&S{Slug: ""}); err == nil {
+	if err := RunValidation(&S{Slug: ""}); err == nil {
 		t.Error("empty slug should fail")
 	}
 	for _, bad := range []string{"Has Spaces", "UPPER", "with/slash"} {
-		if err := ValidateStruct(&S{Slug: bad}); err == nil {
+		if err := RunValidation(&S{Slug: bad}); err == nil {
 			t.Errorf("expected error for slug %q", bad)
 		}
 	}
 }
 
-// TestValidateStructOneOf verifies the oneof= constraint using | separator.
-func TestValidateStructOneOf(t *testing.T) {
+// TestRunValidationOneOf verifies the oneof= constraint using | separator.
+func TestRunValidationOneOf(t *testing.T) {
 	type S struct {
 		Status string `forge:"oneof=draft|published|archived"`
 	}
 	for _, good := range []string{"draft", "published", "archived"} {
-		if err := ValidateStruct(&S{Status: good}); err != nil {
+		if err := RunValidation(&S{Status: good}); err != nil {
 			t.Errorf("expected nil for %q, got %v", good, err)
 		}
 	}
-	if err := ValidateStruct(&S{Status: "unknown"}); err == nil {
+	if err := RunValidation(&S{Status: "unknown"}); err == nil {
 		t.Error("expected error for invalid status")
 	}
 }
 
-// TestValidateStructMultiConstraint verifies multiple constraints on one field
+// TestRunValidationMultiConstraint verifies multiple constraints on one field
 // and multiple errors collected without short-circuit.
-func TestValidateStructMultiConstraint(t *testing.T) {
+func TestRunValidationMultiConstraint(t *testing.T) {
 	type S struct {
 		Title string `forge:"required,min=3,max=50"`
 		Body  string `forge:"required,min=10"`
 	}
 	// Both fields empty — expect two errors.
-	err := ValidateStruct(&S{})
+	err := RunValidation(&S{})
 	var ve *ValidationError
 	if !isValidationError(err, &ve) {
 		t.Fatalf("expected *ValidationError, got %T: %v", err, err)
@@ -265,9 +265,9 @@ func TestValidateStructMultiConstraint(t *testing.T) {
 	}
 }
 
-// TestValidateStructUnknownTagPanics verifies that an unrecognised forge tag
+// TestRunValidationUnknownTagPanics verifies that an unrecognised forge tag
 // key causes a panic on first use — fail-fast at startup.
-func TestValidateStructUnknownTagPanics(t *testing.T) {
+func TestRunValidationUnknownTagPanics(t *testing.T) {
 	type Bad struct {
 		X string `forge:"doesnotexist"`
 	}
@@ -276,7 +276,7 @@ func TestValidateStructUnknownTagPanics(t *testing.T) {
 			t.Error("expected panic for unknown tag, got none")
 		}
 	}()
-	_ = ValidateStruct(&Bad{})
+	_ = RunValidation(&Bad{})
 }
 
 // ── RunValidation tests ───────────────────────────────────────────────────────
@@ -362,10 +362,10 @@ func BenchmarkValidateStructCached(b *testing.B) {
 		Slug:  "hello-world",
 	}
 	// Warm the cache.
-	_ = ValidateStruct(v)
+	_ = validateStruct(v)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ValidateStruct(v)
+		_ = validateStruct(v)
 	}
 }

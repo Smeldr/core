@@ -22,7 +22,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"path/filepath"
+	"os"
 	"strings"
 	"time"
 
@@ -111,20 +111,45 @@ func NewLocalMediaStore(app *forge.App) *LocalMediaStore {
 }
 
 // Store writes data to dir/filename and returns the public URL.
+// Uses os.Root to sandbox all writes inside s.dir, preventing path traversal.
 func (s *LocalMediaStore) Store(filename string, data []byte) (string, error) {
 	if err := ensureDir(s.dir); err != nil {
 		return "", fmt.Errorf("forgemedia: create upload directory: %w", err)
 	}
-	dest := filepath.Join(s.dir, filename)
-	if err := writeFile(dest, data); err != nil {
+	root, err := os.OpenRoot(s.dir)
+	if err != nil {
+		return "", fmt.Errorf("forgemedia: open root: %w", err)
+	}
+	defer root.Close()
+	f, err := root.Create(filename)
+	if err != nil {
+		return "", fmt.Errorf("forgemedia: write file: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
 		return "", fmt.Errorf("forgemedia: write file: %w", err)
 	}
 	return s.URL(filename), nil
 }
 
 // Delete removes dir/filename. Returns nil if the file does not exist.
+// Uses os.Root to sandbox the removal inside s.dir, preventing path traversal.
 func (s *LocalMediaStore) Delete(filename string) error {
-	return removeFile(filepath.Join(s.dir, filename))
+	root, err := os.OpenRoot(s.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer root.Close()
+	if err := root.Remove(filename); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // URL returns the canonical public URL for filename without performing I/O.

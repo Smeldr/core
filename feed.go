@@ -3,7 +3,7 @@ package forge
 import (
 	"encoding/xml"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -276,8 +276,8 @@ func (s *FeedStore) IndexHandler() http.Handler {
 		}
 		s.mu.RUnlock()
 
-		sort.Slice(all, func(i, j int) bool {
-			return all[i].pubTime.After(all[j].pubTime)
+		slices.SortFunc(all, func(a, b rssItem) int {
+			return b.pubTime.Compare(a.pubTime)
 		})
 
 		writeRSSFeed(w, rssRoot{

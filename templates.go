@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 )
 
 // — Option types ——————————————————————————————————————————————————————————
@@ -183,7 +183,7 @@ func loadPartials(dir string) ([]string, error) {
 			names = append(names, e.Name())
 		}
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	srcs := make([]string, 0, len(names))
 	for _, name := range names {
 		data, err := os.ReadFile(filepath.Join(dir, name))

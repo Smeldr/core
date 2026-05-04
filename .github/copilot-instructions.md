@@ -44,7 +44,10 @@ file is the bridge between sessions. Always read it first.
 
 1. Read `NEXT.md` in the workspace root. If it exists:
    - Read the task description.
-   - **Plan your approach and present it to the user for approval before writing any code.**
+   - **Write the full implementation plan (including any questions) to the local file:
+     `C:\Users\peter\Documents\Code\forge-architect\plans\core-next-plan.md`**
+   - Notify the user in chat that the plan is ready for review at
+     `forge-architect/plans/core-next-plan.md`. Do not write any code yet.
    - Wait for explicit approval. Do not implement anything until the user confirms the plan.
    - Stop here — do not proceed with steps 2–7.
 2. Read session context from `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md`

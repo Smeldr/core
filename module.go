@@ -176,6 +176,45 @@ func ContextFunc(fn func(ctx Context, item any) (any, error)) Option {
 }
 
 // — Node field reflection cache ———————————————————————————————————————————
+//
+// Reflection reduction investigation (2026-05-04)
+//
+// Five functions in this file use reflection to access Node fields on the
+// generic type T: getNodeFields, nodeStatusOf, nodeIDOf, ptrToT, and the
+// dbField scan path in SQLRepo. This is necessary because Go generics do not
+// support field access via type constraints — a constraint cannot express
+// "T has a field ID of type string".
+//
+// Could a NodeAccessor interface eliminate this?
+//
+//   type NodeAccessor interface { GetNode() *Node }
+//
+// If Module[T] constrained T to NodeAccessor, getNodeFields, nodeStatusOf,
+// and nodeIDOf would become simple method calls with zero reflection.
+// However, this requires every content type to implement GetNode():
+//
+//   func (p *Post) GetNode() *Node { return &p.Node }
+//
+// Embedding forge.Node does not satisfy this automatically. Every existing
+// content type would need the method added — a breaking change for all users.
+//
+// Is there a non-breaking path?
+//
+// Not currently. Module[T any] and Repository[T any] use unconstrained T.
+// Adding a NodeAccessor constraint to Module[T] is a compile-time breaking
+// change (existing code passes *Post which has no GetNode method). A two-
+// constraint approach (Module[T NodeAccessor] with a fallback) is not possible
+// in Go's type system.
+//
+// Conclusion: Reflection is unavoidable in the current design without a
+// breaking change. The sync.Map caches (nodeFieldCache, autoSlugCache,
+// goFieldPathCache) amortise the cost — reflection runs once per content type,
+// never per request. The hot path hits only the cache. This is the correct
+// tradeoff for Go 1.26.2 given the zero-breaking-change requirement.
+//
+// If a future major version permits breaking changes, adding GetNode() to the
+// forge.Node embed (or as a generated method) would be the clean path.
+// That decision belongs to Phase 3 or 4. Do not implement it here.
 
 // nodeFields holds the struct field index paths for the three required Node fields.
 // Index paths are []int because fields may be in embedded structs (e.g. Node.ID).
@@ -374,6 +413,10 @@ type Module[T any] struct {
 //   - [Cache]: enable per-module LRU response cache
 //   - [Middleware]: wrap all routes with the given middleware
 //   - [On]: register signal handlers
+//   - [HeadFunc]: provide a function that returns the [Head] metadata for a
+//     single content item page (title, description, OG tags)
+//   - [ListHeadFunc]: provide a function that returns the [Head] metadata for
+//     the list/index page of this content type
 //
 // Panics if no [Repo] option is present — this is a programming error caught
 // at startup, never at request time.
