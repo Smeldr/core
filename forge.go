@@ -405,6 +405,8 @@ func (a *App) Content(v any, opts ...Option) {
 		}
 		return
 	}
+	// NewModule is called with an any-typed value — type assertion to any loses
+	// generic type safety. See App.Content godoc for the preferred Registrator path.
 	m := NewModule(v, opts...)
 	m.Register(a.mux)
 }

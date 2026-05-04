@@ -1164,6 +1164,34 @@ id := ctx.RequestID()
 
 ---
 
+## Rate limiting
+
+Forge does not include a built-in rate-limiting middleware — it is intentionally
+out of scope for the core package. Bring your own.
+
+`ErrTooManyRequests` (HTTP 429) is available as a typed sentinel for use in
+custom middleware:
+
+```go
+func myRateLimiter(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if limited(r) {
+            forge.WriteError(w, r, forge.ErrTooManyRequests)
+            return
+        }
+        next.ServeHTTP(w, r)
+    })
+}
+
+app.Use(myRateLimiter)
+```
+
+Recommended implementation: [`golang.org/x/time/rate`](https://pkg.go.dev/golang.org/x/time/rate)
+(token bucket, per-IP or global). Wire it into a standard `http.Handler` wrapper
+and apply via `app.Use()` or `forge.Middleware(...)` in `NewModule`.
+
+---
+
 ## Redirects & content mobility
 
 > ✅ **Available** — manual redirects (`app.Redirect`), prefix rewrites (`Redirects(From(...))`), 410 Gone, chain collapse, and `/.well-known/redirects.json` are implemented as of Milestone 7.
