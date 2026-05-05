@@ -373,6 +373,87 @@ Scope: the file name without extension (e.g. `errors`, `roles`, `node`)
 
 ---
 
+## Docs and content workflow
+
+Use this workflow for any task that involves updating repo docs (REFERENCE.md,
+README.md, FEATURELIST.md) or creating content for forge-cms.dev/docs.
+
+This workflow is separate from the standard step workflow. It applies to
+docs-only tasks and content tasks — not to code implementation.
+
+### On every session start — doc freshness check
+
+Before any other work, check these three files for staleness against the
+current codebase and recent amendments:
+
+1. `REFERENCE.md` — does it reflect all current exported symbols and behaviour?
+2. `README.md` — is the version line (`**vX.Y.Z — stable.**`) current?
+3. `FEATURELIST.md` — does it list all shipped features?
+
+Present any staleness findings to the user before proceeding. Do not silently
+skip this check.
+
+### Docs and content task workflow
+
+Every docs or content task follows this sequence:
+
+**1. Propose commit scope**
+Before any work: propose what the commit will cover in one sentence.
+Wait for approval to proceed. Do not write anything yet.
+
+**2. Repo doc review**
+Read REFERENCE.md, README.md, and FEATURELIST.md.
+Present what needs updating — specific, concrete findings only.
+Wait for feedback before making any changes.
+
+**3. Apply repo doc updates**
+Apply agreed changes to REFERENCE.md, README.md, and/or FEATURELIST.md.
+Do not commit yet.
+
+**4. Content suggestions (forge-cms.dev/docs)**
+Based on updated REFERENCE.md, suggest doc page title(s) that should be
+created or updated on forge-cms.dev.
+Wait for feedback.
+
+**5. Content outline**
+For each approved title, suggest content as a short bullet list.
+Wait for feedback before writing full drafts.
+
+**6. Full drafts**
+Write full draft(s) based on approved outlines.
+Wait for feedback and approval.
+
+**7. Save approved drafts**
+Save each approved draft as an individual file in:
+`C:\Users\peter\Documents\Code\Forge-site-working\content\`
+
+File naming: `YYYYMMDD-HHMMSS-<slug>.md`
+
+Example: `20260505-143022-token-management.md`
+
+These files are for sitepilot to pick up — do not commit them to the forge repo.
+
+**8. Propose commit message**
+Propose a conventional commit message covering all repo doc changes (steps 2–3).
+Wait for explicit approval before committing.
+
+**9. After commit**
+Update `forge-architect/plans/core-next-plan.md` if a plan file was created.
+Update `forge-architect/context/corepilot.md` and push from that repo.
+
+### Never push without explicit permission
+
+Commits require explicit approval (a separate "yes" after the commit message is
+proposed — not implied by answering a technical question).
+
+Pushes require a **separate** explicit instruction after the commit is made.
+"Commit approved" is not push permission. Always wait for "push it" or equivalent.
+
+Write the plan for any docs task to:
+`C:\Users\peter\Documents\Code\forge-architect\plans\core-next-plan.md`
+
+---
+
 ## Release tagging
 
 Forge uses **annotated tags only** — never lightweight tags. Annotated tags carry a

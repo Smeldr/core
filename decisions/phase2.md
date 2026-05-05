@@ -1760,3 +1760,50 @@ A full audit of `REFERENCE.md` against v1.16.0 found 5 accuracy errors and
 - `REFERENCE.md` now accurately reflects v1.16.0 across all shipped amendments.
 
 ---
+
+## Amendment A85 — copilot-instructions.md: docs/content workflow; FEATURELIST.md
+
+**Date:** 2026-05-05
+**Status:** Agreed
+**Level:** 1 (docs-only — no exported symbol changed, no code change)
+**Files:** `.github/copilot-instructions.md`, `FEATURELIST.md` (new), `DECISIONS.md`, `decisions/phase2.md`
+
+### Problem
+
+Two gaps in the repo's operational documentation:
+
+1. **No docs workflow** — Copilot instructions had a detailed standard step workflow
+   and release tagging workflow, but no parallel workflow for docs-only tasks
+   (updating REFERENCE.md, README.md, FEATURELIST.md) or for creating content
+   for forge-cms.dev/docs. Without a formal workflow, docs tasks were handled
+   ad hoc with no consistent structure for review, approval, or content drafts.
+
+2. **No feature list** — No single file enumerated what Forge generates and
+   includes automatically. New users, AI agents, and the architect had no
+   authoritative reference for the complete feature surface.
+
+### Changes
+
+**`.github/copilot-instructions.md`** — new `## Docs and content workflow` section
+inserted between `## Standard step workflow` and `## Release tagging`. The section
+defines:
+- A doc freshness check on every session start (REFERENCE.md, README.md, FEATURELIST.md)
+- A 9-step docs and content task workflow: propose scope → repo doc review → apply
+  changes → content suggestions → outline → full drafts → save drafts → propose
+  commit → update context
+- Push permission rules (explicit instruction required, separate from commit approval)
+- Draft file naming and save location (`Forge-site-working/content/YYYYMMDD-HHMMSS-<slug>.md`)
+
+**`FEATURELIST.md`** — new file in repo root. Complete feature list for v1.16.0 (A84),
+grouped into 9 categories: Routes and feeds, Storage, Rendering, Lifecycle, Access
+control, Navigation, MCP tools, Template infrastructure, SEO, Operations, forge-media,
+forge-cli, Developer and AI-agent experience.
+
+### Consequences
+
+- No exported Go symbols added, removed, or renamed.
+- No build, vet, or test changes required.
+- Future doc sessions have a consistent, auditable workflow.
+- FEATURELIST.md must be updated whenever an amendment adds or changes a feature.
+
+---
