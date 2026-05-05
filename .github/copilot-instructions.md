@@ -454,6 +454,20 @@ Write the plan for any docs task to:
 
 ---
 
+## CLI and MCP tool parity
+
+Every admin operation available via MCP tools must also be available via forge-cli.
+CLI is the human fallback when agents are unavailable.
+
+This rule applies to every milestone that ships new MCP tools: the corresponding
+forge-cli commands ship in the same release — not as a follow-up.
+
+**Current known gap:** forge-cli v0.3.0 has no nav commands despite four MCP nav
+tools existing (`list_nav_items`, `create_nav_item`, `update_nav_item`,
+`delete_nav_item`). This gap is tracked and will be closed in the nav CLI milestone.
+
+---
+
 ## Release tagging
 
 Forge uses **annotated tags only** — never lightweight tags. Annotated tags carry a

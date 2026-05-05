@@ -1807,3 +1807,40 @@ forge-cli, Developer and AI-agent experience.
 - FEATURELIST.md must be updated whenever an amendment adds or changes a feature.
 
 ---
+
+## Amendment A86 — copilot-instructions.md: CLI and MCP tool parity rule
+
+**Date:** 2026-05-05
+**Status:** Agreed
+**Level:** 1 (docs-only — no exported symbol changed, no code change)
+**Files:** `.github/copilot-instructions.md`, `DECISIONS.md`, `decisions/phase2.md`
+
+### Problem
+
+Forge ships MCP tools for every admin operation, but there was no formal rule
+requiring that forge-cli expose equivalent commands in the same release. This
+allowed CLI gaps to accumulate silently — the nav tools gap (four MCP nav tools
+with no CLI counterpart in forge-cli v0.3.0) was the first concrete instance.
+Without a written rule, future milestones could repeat the pattern.
+
+### Change
+
+**`.github/copilot-instructions.md`** — new `## CLI and MCP tool parity` section
+inserted between `## Docs and content workflow` and `## Release tagging`.
+
+The section states:
+- Every admin operation available via MCP tools must also be available via forge-cli
+- CLI is the human fallback when agents are unavailable
+- The rule applies per milestone: CLI commands ship in the same release as MCP tools
+- Current known gap documented: forge-cli v0.3.0 has no nav commands despite
+  `list_nav_items`, `create_nav_item`, `update_nav_item`, `delete_nav_item` existing
+- Gap is tracked and will be closed in the nav CLI milestone
+
+### Consequences
+
+- No exported Go symbols added, removed, or renamed.
+- No build, vet, or test changes required.
+- Future milestone planning must include CLI commands whenever MCP tools are added.
+- Nav CLI gap is formally acknowledged and tracked.
+
+---

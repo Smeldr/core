@@ -111,6 +111,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A83 | `auth.go` / `forge.go`: `TokenStore.ensureBootstrap` — auto-creates a bootstrap admin token (slog.Warn) when `forge_tokens` is empty at startup. `forge-cli/init.go`: new `init` subcommand bootstraps a new instance using the bootstrap token. `forge-cli` v0.3.0. | Agreed | 2026-05-04 |
 | A84 | `REFERENCE.md`: accuracy fixes and gap-fill for v1.16.0 — corrects 5 inaccuracies (version examples, broken links, RateLimit section, `app.Content` fallback path); adds 6 missing sections (TokenStore, NavTree, OGDefaults/AppSchema, AbsURL, SeqRepository, forge-cli); adds `ErrLastAdmin` sentinel. | Agreed | 2026-05-05 |
 | A85 | `.github/copilot-instructions.md`: new "Docs and content workflow" section inserted between "Standard step workflow" and "Release tagging". `FEATURELIST.md`: new file — complete feature list for v1.16.0. | Agreed | 2026-05-05 |
+| A86 | `.github/copilot-instructions.md`: new "CLI and MCP tool parity" section — every MCP tool must have a CLI equivalent in the same release; notes current nav commands gap. | Agreed | 2026-05-05 |
 
 ---
 
