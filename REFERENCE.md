@@ -40,14 +40,14 @@ app := forge.New(forge.Config{
     Secret:  []byte(os.Getenv("SECRET")),
 })
 
-app.Content(&Post{},
+app.Content(forge.NewModule((*Post)(nil),
     forge.At("/posts"),
     forge.Auth(
         forge.Read(forge.Guest),
         forge.Write(forge.Author),
         forge.Delete(forge.Editor),
     ),
-)
+))
 
 app.Run(":8080")
 ```
@@ -298,6 +298,84 @@ forge.On(forge.BeforeCreate, func(ctx forge.Context, p *BlogPost) error {
 
 ---
 
+## Token management
+
+> ✅ **Available**
+
+`TokenStore` adds server-side named bearer tokens with revocation. When
+configured, every request validates the token against the database — a revoked
+or expired token is rejected immediately, even if the HMAC signature is valid.
+
+### Wiring
+
+```go
+app := forge.New(forge.MustConfig(forge.Config{
+    BaseURL:    "https://mysite.com",
+    Secret:     []byte(os.Getenv("SECRET")),
+    DB:         db,
+    TokenStore: forge.NewTokenStore(db, os.Getenv("SECRET")),
+}))
+```
+
+Create the `forge_tokens` table once before starting:
+
+```sql
+CREATE TABLE forge_tokens (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    role       TEXT NOT NULL,
+    token_hash TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL
+);
+```
+
+### Bootstrap
+
+On first startup with an empty `forge_tokens` table, Forge auto-creates a
+bootstrap admin token and emits it via `slog.Warn`:
+
+```
+WARN forge: bootstrap admin token created token=<plaintext>
+```
+
+Copy this token immediately. Use it with `forge-cli init` or with the
+`create_token` MCP tool to issue long-lived named tokens, then discard it.
+
+**Critical:** a token produced by `forge.SignToken` in `main()` is rejected
+when `TokenStore` is configured — `VerifyBearerToken` only accepts tokens
+that exist in the store. Use `TokenStore.Create` or `forge-cli` instead.
+
+### Go API
+
+```go
+// Issue a named token — returns plaintext once, never retrievable again
+token, err := app.TokenStore().Create(ctx, "alice-author", "author", 365*24*time.Hour)
+
+// List all tokens
+records, err := app.TokenStore().List(ctx)
+
+// Revoke by ID
+err := app.TokenStore().Revoke(ctx, id)
+```
+
+`ErrLastAdmin` (HTTP 409) is returned if you attempt to revoke the last
+active admin token. Create a replacement first.
+
+### MCP tools (Admin role required)
+
+| Tool | Description |
+|------|-------------|
+| `create_token` | Issues a new named token with a given role and TTL |
+| `list_tokens` | Lists all tokens with name, role, expiry, revoked status |
+| `revoke_token` | Revokes a token by ID — effective immediately |
+
+`create_token` returns the plaintext token once. Copy it immediately —
+it cannot be retrieved again. See [AGENTS.md](AGENTS.md) for full details.
+
+---
+
 ## SEO & structured data
 
 Define metadata once on your content type. Forge renders it correctly
@@ -323,6 +401,15 @@ func (p *BlogPost) Head() forge.Head {
         ),
     }
 }
+```
+
+`forge.URL(prefix, slug)` builds a root-relative path.
+`forge.AbsURL(base, path)` joins it with the site base URL to produce
+an absolute `https://...` URL — use this when `Head.Canonical` or
+`Head.Image.URL` must be absolute:
+
+```go
+Canonical: forge.AbsURL("https://mysite.com", forge.URL("/posts/", p.Slug)),
 ```
 
 ### Advanced: context-aware head with HeadFunc
@@ -376,6 +463,24 @@ forge.Recipe        // recipes with ingredients
 forge.Review        // reviews with ratings
 forge.Organization  // company / about pages
 ```
+
+### App-level JSON-LD (AppSchema)
+
+Emit site-wide Organisation or WebSite structured data on every page via
+`app.SEO`:
+
+```go
+app.SEO(&forge.AppSchema{
+    Type: "Organization",
+    Name: "Acme Corp",
+    URL:  "https://acme.com",
+    Logo: "https://acme.com/logo.png",
+})
+```
+
+The `<script type="application/ld+json">` block is injected by `forge:head`
+automatically on every page. Use it for WebSite, Organization, or any other
+app-level schema type that does not vary per content item.
 
 ### Sitemap
 
@@ -547,6 +652,27 @@ Forge renders in `<head>`:
 <meta name="twitter:creator"            content="@alice" />
 ```
 
+### Site-wide OG and Twitter fallbacks (OGDefaults)
+
+Set a fallback OG image and Twitter handles for pages where the content
+type's `Head()` does not provide them:
+
+```go
+app.SEO(&forge.OGDefaults{
+    Image: forge.Image{
+        URL:    "https://mysite.com/og-default.png",
+        Width:  1200,
+        Height: 630,
+    },
+    TwitterSite:    "@mysite",
+    TwitterCreator: "@defaultauthor",
+})
+```
+
+`OGDefaults.Image` is used when `Head().Image.URL` is empty.
+`TwitterSite` is emitted on every page. `TwitterCreator` is the fallback
+when the content item's own creator is not set.
+
 ---
 
 ## Cookies & compliance
@@ -641,6 +767,75 @@ Any developer or AI agent can audit your cookie compliance with a single request
   ]
 }
 ```
+
+---
+
+## Navigation
+
+> ✅ **Available**
+
+Forge provides a first-class navigation tree with two modes: database-backed
+(`NavModeDB`) and code-defined (`NavModeCode`).
+
+### Wiring
+
+```go
+// Code-defined — no database required
+app := forge.New(forge.MustConfig(forge.Config{
+    NavMode: forge.NavModeCode,
+    // ...
+}))
+
+app.Nav(
+    forge.NavItem{Label: "Home",  Path: "/"},
+    forge.NavItem{Label: "Blog",  Path: "/posts"},
+    forge.NavItem{Label: "Docs",  Path: "/docs"},
+)
+```
+
+```go
+// Database-backed — items persisted in forge_nav table (auto-created)
+app := forge.New(forge.MustConfig(forge.Config{
+    NavMode: forge.NavModeDB,
+    DB:      db,
+    // ...
+}))
+```
+
+### NavItem fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Label` | string | Display text in nav and breadcrumbs |
+| `Path` | string | URL prefix, e.g. `/posts`. Empty path = ghost item |
+| `ParentID` | string | ID of parent item; empty for top-level |
+| `Module` | string | Forge module table name, e.g. `posts` |
+| `Hidden` | bool | Excluded from rendered nav; still accessible in breadcrumbs |
+| `Ghost` | bool | Non-clickable; appears in nav unless also Hidden |
+| `SortOrder` | int | Display order within parent; lower = first |
+| `Children` | []*NavItem | Populated in memory; never persisted |
+
+### In templates
+
+`.Nav` on every module template holds the top-level items with `Children` populated:
+
+```html
+<nav>
+  {{range .Nav}}
+    {{if not .Ghost}}
+      <a href="{{.Path}}">{{.Label}}</a>
+    {{end}}
+  {{end}}
+</nav>
+```
+
+### MCP nav tools (Editor role, NavModeDB only)
+
+When `NavModeDB` is configured, MCP tools are available for runtime nav
+management: create, update, delete, and list nav items.
+
+Obtain the live tree at any time via `app.NavTree()` after `app.Handler()` or
+`app.Run()` is called.
 
 ---
 
@@ -752,6 +947,26 @@ type Repository[T any] interface {
 // Zero-config in-memory implementation
 repo := forge.NewMemoryRepo[*BlogPost]()
 ```
+
+### Streaming with SeqRepository
+
+Both `MemoryRepo[T]` and `SQLRepo[T]` implement the optional
+`SeqRepository[T]` interface, which provides a lazy `iter.Seq2` stream
+without loading the full result set into memory at once:
+
+```go
+if sr, ok := repo.(forge.SeqRepository[*BlogPost]); ok {
+    for post, err := range sr.Seq(ctx, forge.ListOptions{}) {
+        if err != nil {
+            break
+        }
+        process(post)
+    }
+}
+```
+
+Use `Seq` for export pipelines, bulk operations, or any case where
+loading all items at once would be memory-prohibitive.
 
 ### Production SQL repository
 
@@ -1116,6 +1331,7 @@ forge.ErrGone       // 410 — resource existed but was intentionally removed
 forge.ErrForbidden  // 403 — authenticated but insufficient role
 forge.ErrUnauth     // 401 — not authenticated
 forge.ErrConflict   // 409 — state conflict (e.g. duplicate slug)
+forge.ErrLastAdmin  // 409 — attempt to revoke the last active admin token
 ```
 
 ### In hooks and custom handlers
@@ -1166,11 +1382,28 @@ id := ctx.RequestID()
 
 ## Rate limiting
 
-Forge does not include a built-in rate-limiting middleware — it is intentionally
-out of scope for the core package. Bring your own.
+Forge includes a built-in per-IP token bucket rate limiter.
 
-`ErrTooManyRequests` (HTTP 429) is available as a typed sentinel for use in
-custom middleware:
+```go
+app.Use(
+    forge.RateLimit(100, time.Minute),  // 100 requests per IP per minute
+)
+```
+
+Behind a reverse proxy, supply `TrustedProxy` so the real client IP is read
+from the forwarded header rather than the connection address:
+
+```go
+app.Use(
+    forge.RateLimit(100, time.Minute,
+        forge.TrustedProxy("X-Real-IP"),
+    ),
+)
+```
+
+`ErrTooManyRequests` (HTTP 429) is the typed sentinel returned to the client
+when the limit is exceeded. Use it directly in custom middleware when
+`forge.RateLimit` is insufficient for your logic:
 
 ```go
 func myRateLimiter(next http.Handler) http.Handler {
@@ -1185,10 +1418,6 @@ func myRateLimiter(next http.Handler) http.Handler {
 
 app.Use(myRateLimiter)
 ```
-
-Recommended implementation: [`golang.org/x/time/rate`](https://pkg.go.dev/golang.org/x/time/rate)
-(token bucket, per-IP or global). Wire it into a standard `http.Handler` wrapper
-and apply via `app.Use()` or `forge.Middleware(...)` in `NewModule`.
 
 ---
 
@@ -1283,7 +1512,7 @@ func main() {
 ```
 
 For Claude Desktop, Cursor, and SSE remote transport configuration see
-[forge-mcp/README.md](forge-mcp/README.md).
+[forge-mcp README](https://github.com/forge-cms/forge-mcp).
 
 ---
 
@@ -1383,7 +1612,7 @@ func main() {
     app.SEO(forge.SitemapConfig{ChangeFreq: forge.Weekly, Priority: 0.8})
     app.SEO(forge.RobotsConfig{AIScraper: forge.AskFirst})
 
-    app.Content(&Article{},
+    app.Content(forge.NewModule((*Article)(nil),
         forge.At("/articles"),
         forge.Auth(
             forge.Read(forge.Guest),
@@ -1398,7 +1627,7 @@ func main() {
             a.Author = ctx.User().Name
             return nil
         }),
-    )
+    ))
 
     app.Run(":8080")
 }
@@ -1477,7 +1706,67 @@ Set them in your `forge.config` file or override in Go code via `forge.Config`.
 | `media_path` | `./media` | Directory where uploaded files are stored on disk. |
 | `media_max_size` | `5242880` (5 MB) | Maximum upload size in bytes. |
 
-Full reference: [forge-media README](https://forge-cms.dev/forge/tree/main/forge-media)
+Full reference: [forge-media README](https://github.com/forge-cms/forge-media)
+
+---
+
+## forge-cli
+
+✅ **Available**
+
+`forge-cli` is a standalone operator tool for managing a running Forge instance
+from the command line. No MCP client required. Install it with:
+
+```bash
+go install forge-cms.dev/forge-cli@latest
+```
+
+### Configuration
+
+`forge-cli` reads connection details from a `.forge-cli.env` file in the
+current directory:
+
+```
+FORGE_URL=https://mysite.com
+FORGE_TOKEN=<bearer-token>
+```
+
+Use `forge-cli init` to bootstrap a new instance in one step:
+
+```bash
+forge-cli init --url https://mysite.com --bootstrap-token <token-from-startup-log>
+```
+
+`init` calls `/_health`, issues a long-lived admin token via MCP, and writes
+`.forge-cli.env`. Use `--force` to overwrite an existing env file.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `init` | Bootstrap a new instance from the startup bootstrap token |
+| `status` | Show the site URL and authenticated user |
+| `create <type>` | Create a Draft from a YAML-frontmatter file |
+| `update <type> <slug>` | Update a content item |
+| `publish <type> <slug>` | Publish a Draft |
+| `schedule <type> <slug> <datetime>` | Schedule for future publication (RFC3339) |
+| `archive <type> <slug>` | Archive a published item |
+| `delete <type> <slug>` | Delete an item permanently |
+| `token create` | Issue a new named token |
+| `token list` | List all tokens |
+| `token revoke <id>` | Revoke a token by ID |
+
+Content files use YAML-subset frontmatter (metadata before `---`, body after):
+
+```
+---
+title: My Post
+author: Alice
+---
+Body content goes here.
+```
+
+Full reference: [forge-cli README](https://github.com/forge-cms/forge-cli)
 
 ---
 
@@ -1586,20 +1875,20 @@ and status. No authentication is required.
 ```
 GET /_health
 → 200 application/json
-{"status":"ok","forge":"1.13.1"}
+{"status":"ok","forge":"1.16.0"}
 ```
 
 When companion modules such as `forge-mcp` are linked into the binary, their
 versions appear alongside:
 
 ```json
-{"status":"ok","forge":"1.13.1","forge_mcp":"1.5.0"}
+{"status":"ok","forge":"1.16.0","forge_mcp":"1.6.1"}
 ```
 
 The same version data is written to stderr at startup:
 
 ```
-forge: forge 1.13.1, forge_mcp 1.5.0
+forge: forge 1.16.0, forge_mcp 1.6.1
 ```
 
 `/_health` is exempt from the HTTPS redirect middleware (A59) so that

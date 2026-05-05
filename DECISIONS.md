@@ -109,6 +109,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A81 | `go.mod`: `modernc.org/sqlite` added as test-only dependency; enables `TestRepoParity_SQLRepo` against real in-memory SQLite. Exception to zero-dep rule: CGO-free, test-only, single file, documented precedent. | Agreed | 2026-05-04 |
 | A82 | `forge.go` / `config.go` / `static.go`: `Config.Dev bool` + `App.Static(prefix, prod, devDir)` + forge.config `dev` key. Dev mode serves from disk; prod mode serves embedded FS with immutable Cache-Control. Replaces per-site boilerplate. | Agreed | 2026-05-04 |
 | A83 | `auth.go` / `forge.go`: `TokenStore.ensureBootstrap` — auto-creates a bootstrap admin token (slog.Warn) when `forge_tokens` is empty at startup. `forge-cli/init.go`: new `init` subcommand bootstraps a new instance using the bootstrap token. `forge-cli` v0.3.0. | Agreed | 2026-05-04 |
+| A84 | `REFERENCE.md`: accuracy fixes and gap-fill for v1.16.0 — corrects 5 inaccuracies (version examples, broken links, RateLimit section, `app.Content` fallback path); adds 6 missing sections (TokenStore, NavTree, OGDefaults/AppSchema, AbsURL, SeqRepository, forge-cli); adds `ErrLastAdmin` sentinel. | Agreed | 2026-05-05 |
 
 ---
 

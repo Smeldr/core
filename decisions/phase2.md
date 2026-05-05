@@ -1689,3 +1689,74 @@ Role is hardcoded to `admin` — `init` is a bootstrap tool only.
    `TestTokenStore_ensureBootstrap_nonEmpty`.
 
 ---
+
+## Amendment A84 — REFERENCE.md: accuracy fixes and gap-fill for v1.16.0
+
+**Date:** 2026-05-05
+**Status:** Agreed
+**Level:** 1 (docs-only — no exported symbol changed, no code change)
+**Files:** `REFERENCE.md`, `DECISIONS.md`, `decisions/phase2.md`
+
+### Problem
+
+A full audit of `REFERENCE.md` against v1.16.0 found 5 accuracy errors and
+6 missing sections covering features shipped in Amendments A66–A83.
+
+### Accuracy corrections
+
+1. **Version examples** — health endpoint example showed `"version":"1.13.1"`
+   and `"forge_mcp":"1.5.0"`; corrected to `"1.16.0"` and `"1.6.1"`.
+
+2. **forge-mcp README link** — pointed to `forge-mcp/README.md` (removed subdir);
+   corrected to `https://github.com/forge-cms/forge-mcp`.
+
+3. **forge-media README link** — pointed to dead `https://forge-cms.dev/forge/tree/main/forge-media`;
+   corrected to `https://github.com/forge-cms/forge-media`.
+
+4. **Rate Limiting section** — falsely stated "Forge does not include a built-in
+   rate-limiting middleware". `forge.RateLimit` has existed since a prior amendment.
+   Section rewritten to document `forge.RateLimit(100, time.Minute)` and
+   `forge.TrustedProxy`.
+
+5. **`app.Content` fallback path in examples** — both "Getting Started" and
+   "Minimal Complete Example" used `app.Content(&Post{}, forge.At("/posts"), ...)`
+   which silently skips AI/sitemap/feed wiring when a raw struct pointer is passed
+   instead of a `Registrator`. Corrected to `forge.NewModule((*Post)(nil), ...)`.
+
+### Missing sections added
+
+6. **Token management** — new section (between "Roles & auth" and "SEO") covering
+   `NewTokenStore`, `Config.TokenStore`, `forge_tokens` DDL, bootstrap flow with
+   `slog.Warn`, `TokenStore.Create/List/Revoke`, `ErrLastAdmin`, MCP tools table,
+   and a critical footgun warning about using `SignToken` alongside `TokenStore`.
+
+7. **Navigation** — new section (between "Cookies & compliance" and "Storage")
+   covering `NavModeDB`/`NavModeCode`, `Config.NavMode`, `App.Nav()`, `NavItem`
+   fields table, template `.Nav` usage, and the MCP nav tools note.
+
+8. **AppSchema** — new subsection in "SEO & structured data" after "Rich result
+   types" documenting `app.SEO(&forge.AppSchema{Type, Name, URL, Logo})`.
+
+9. **OGDefaults** — new subsection at end of "Social sharing" documenting
+   `app.SEO(&forge.OGDefaults{Image, TwitterSite, TwitterCreator})`.
+
+10. **AbsURL** — new note in "Head" section (after Breadcrumbs, before HeadFunc)
+    documenting `forge.AbsURL(base, path)` helper.
+
+11. **SeqRepository** — new subsection in "Storage" (between MemoryRepo and
+    Production SQL repository) covering type-assert pattern and `iter.Seq2` loop.
+
+12. **forge-cli** — new section (between forge-media and Static files) covering
+    install, `init` subcommand, all commands table, and frontmatter file format.
+
+### Additional fix
+
+13. **`ErrLastAdmin`** added to the sentinel errors list in "Error handling".
+
+### Consequences
+
+- No exported Go symbols added, removed, or renamed.
+- No build, vet, or test changes required.
+- `REFERENCE.md` now accurately reflects v1.16.0 across all shipped amendments.
+
+---
