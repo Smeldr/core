@@ -468,6 +468,25 @@ tools existing (`list_nav_items`, `create_nav_item`, `update_nav_item`,
 
 ---
 
+## Branching and commit timestamps
+All milestone work happens on a local feature branch. Commits on the branch are
+free checkpoints — their timestamps do not matter and the branch is never pushed
+to GitHub unless explicitly requested.
+Branch naming: feature/m{N}-{slug} — e.g. feature/m11-webhooks.
+When the architect approves push, squash the branch to main:
+    git checkout main
+    git merge --squash feature/m{N}-{slug}
+    git commit -m "{conventional commit message}"
+    git push
+    git branch -d feature/m{N}-{slug}
+The squash commit timestamp = push timestamp. This is the only commit that
+appears on GitHub. "Commit approved" means: squash to main now. Push follows
+immediately after — do not wait for a separate push instruction.
+This applies to all three repos (forge core, forge-mcp, forge-cli) when a
+milestone touches multiple repos. Each repo gets its own squash commit.
+
+---
+
 ## Release tagging
 
 Forge uses **annotated tags only** — never lightweight tags. Annotated tags carry a
