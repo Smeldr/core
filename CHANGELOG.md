@@ -23,6 +23,60 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.17.0] — 2026-05-08
+
+Outbound webhooks, MCP resource subscriptions, and `AfterSchedule` signal (Milestone 11).
+
+### Added
+
+- `WebhookEndpoint` — struct representing a registered outbound webhook (ID,
+  events, target URL, active flag, created timestamp).
+- `WebhookStore` — SQLite-backed store for managing webhook endpoints. Methods:
+  `Create`, `List`, `Delete`, `EndpointsForEvent`, `DecryptSecret`.
+  URL validation (HTTPS-only, no private/loopback IPs) is enforced on `Create`.
+- `validateWebhookURL` (unexported) — SSRF-safe URL validator shared by store
+  and MCP tools.
+- `OutboundJob` — struct representing a delivery task (ID, endpoint ID, target
+  URL, encrypted secret, payload, event, attempt count, retry schedule, status).
+- `DeliveryLog` — struct representing a single delivery attempt record.
+- `WebhookJobQueue` interface — `Enqueue`, `ListJobsForEndpoint`,
+  `ListDeliveryLogs` methods consumed by the rest of the app.
+- `WorkerPool` (unexported `workerPool`) — background goroutine pool that
+  delivers webhook payloads with HMAC-SHA256 signing, exponential backoff
+  (4^attempt ±20% jitter, max 1 hour), per-endpoint circuit breakers
+  (5 consecutive failures → open for 5 minutes), and dead-letter after
+  7 attempts.
+- `App.Webhooks(store *WebhookStore)` — wires outbound webhooks into the app.
+  Registers the store and creates a `workerPool` backed by `Config.DB`.
+- `App.WebhookPool() WebhookJobQueue` — returns the active pool for testing
+  and admin introspection.
+- `App.injectWebhookHooks` (unexported) — registers an `afterHook` on every
+  module that dispatches `AfterPublish`, `AfterUpdate`, `AfterDelete`, and
+  `AfterSchedule` signals as webhook delivery jobs.
+- `AfterSchedule Signal` — new signal constant in `signals.go` emitted after a
+  node is successfully scheduled via `MCPSchedule` (Amendment A87).
+- `Module.afterHook`, `Module.setAfterHook`, `Module.notifyAfter` (unexported)
+  — post-lifecycle callback slot for webhook wiring (Amendment A89).
+- `forge-mcp`: `create_webhook`, `list_webhooks`, `delete_webhook`,
+  `list_webhook_deliveries`, `retry_webhook` MCP tools (Admin role required).
+- `forge-mcp`: MCP resource subscriptions — `resources/subscribe` and
+  `resources/unsubscribe` JSON-RPC methods. The SSE transport now assigns a
+  session ID and notifies subscribed clients via `notifications/resources/updated`
+  events when content changes.
+- `forge-cli`: `forge webhook` command with subcommands: `create`, `list`,
+  `delete`, `deliveries`, `retry`.
+
+### Changed
+
+- `Module.MCPSchedule` (Amendment A87) — now dispatches `AfterSchedule` signal
+  after a successful schedule operation.
+- `forge-mcp` `handleInitialize` — capabilities response now includes
+  `"resources": {"subscribe": true, "listChanged": true}`.
+- `forge-mcp` SSE transport — now emits `event: endpoint` with a session ID
+  before entering the notification loop.
+
+---
+
 ## [1.16.0] — 2026-05-04
 
 Static file serving, automatic bootstrap token, and repo cleanup (A82, A83).

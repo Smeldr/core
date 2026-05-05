@@ -9,6 +9,8 @@ import (
 )
 
 // newSQLiteDB opens an in-memory SQLite database and registers cleanup.
+// MaxOpenConns is set to 1 because SQLite :memory: databases are per-connection
+// — allowing multiple connections would give each its own empty database.
 // The test is skipped if SQLite is unavailable.
 func newSQLiteDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -16,6 +18,7 @@ func newSQLiteDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Skipf("sqlite unavailable: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 	return db
 }

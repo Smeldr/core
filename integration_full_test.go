@@ -2460,3 +2460,524 @@ func TestFull_G23_CLIRoundTrip(t *testing.T) {
 		t.Errorf("after delete: GET status = %d; want 404", w9.Code)
 	}
 }
+
+// — G24: SSRF validation (M11) ——————————————————————————————————————————————
+
+// TestFull_G24_SSRFValidation verifies that validateWebhookURL rejects HTTP,
+// localhost, .local hostnames, and private IPs, while accepting a well-formed
+// HTTPS URL with a routable public IP.
+func TestFull_G24_SSRFValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+		errSnip string
+	}{
+		{"http rejected", "http://8.8.8.8/hook", true, "HTTPS"},
+		{"localhost rejected", "https://localhost/hook", true, "localhost"},
+		{"dot-local rejected", "https://myserver.local/hook", true, ".local"},
+		{"private 10.x rejected", "https://10.0.0.1/hook", true, "private"},
+		{"private 192.168.x rejected", "https://192.168.100.1/hook", true, "private"},
+		{"private 172.16.x rejected", "https://172.16.0.1/hook", true, "private"},
+		{"valid public IP accepted", "https://8.8.8.8/hook", false, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateWebhookURL(tc.url)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want error containing %q, got nil", tc.errSnip)
+				}
+				if tc.errSnip != "" && !strings.Contains(err.Error(), tc.errSnip) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.errSnip)
+				}
+			} else if err != nil {
+				t.Fatalf("want no error, got: %v", err)
+			}
+		})
+	}
+}
+
+// — G25: WebhookStore encrypt/decrypt roundtrip (M11) ————————————————————————
+
+// TestFull_G25_WebhookStoreRoundtrip verifies that:
+//   - Create inserts an endpoint and returns a plaintext secret
+//   - List returns the endpoint without exposing the raw secret
+//   - DecryptSecret recovers the original plaintext secret
+//   - Delete removes the endpoint
+func TestFull_G25_WebhookStoreRoundtrip(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, `
+		CREATE TABLE forge_webhook_endpoints (
+			id TEXT PRIMARY KEY, events TEXT NOT NULL, target_url TEXT NOT NULL,
+			secret_enc TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL
+		)`)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	appSecret := []byte("32-bytes-app-secret-for-testing!")
+	store := NewWebhookStore(db, appSecret)
+
+	// Insert an endpoint directly (bypasses URL SSRF validation).
+	ep := WebhookEndpoint{
+		ID:        "ep-g25",
+		Events:    []string{"post.published"},
+		TargetURL: "https://example.com/deliver",
+	}
+	evJSON, _ := json.Marshal(ep.Events)
+	enc, err := store.encryptSecret([]byte("my-signing-secret"))
+	if err != nil {
+		t.Fatalf("encryptSecret: %v", err)
+	}
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO forge_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
+		 VALUES ($1,$2,$3,$4,1,datetime('now'))`,
+		ep.ID, string(evJSON), ep.TargetURL, enc,
+	)
+	if err != nil {
+		t.Fatalf("insert endpoint: %v", err)
+	}
+
+	// List must return the endpoint without leaking the raw secret.
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("List: want 1, got %d", len(list))
+	}
+	if list[0].secretEnc != "" {
+		t.Error("List must not populate secretEnc — secret must not be exposed")
+	}
+
+	// DecryptSecret must recover the plaintext secret via EndpointsForEvent
+	// (which populates secretEnc for the pool to use).
+	eps, err := store.EndpointsForEvent(ctx, "post.published")
+	if err != nil {
+		t.Fatalf("EndpointsForEvent: %v", err)
+	}
+	if len(eps) != 1 {
+		t.Fatalf("EndpointsForEvent: want 1, got %d", len(eps))
+	}
+	decrypted, err := store.DecryptSecret(eps[0])
+	if err != nil {
+		t.Fatalf("DecryptSecret: %v", err)
+	}
+	if string(decrypted) != "my-signing-secret" {
+		t.Errorf("DecryptSecret: got %q, want %q", decrypted, "my-signing-secret")
+	}
+
+	// Delete must remove the endpoint.
+	if err := store.Delete(ctx, ep.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	list2, _ := store.List(ctx)
+	if len(list2) != 0 {
+		t.Errorf("after Delete: want 0 endpoints, got %d", len(list2))
+	}
+}
+
+// — G26: Signal → enqueue (M11 + M10 + M1) ——————————————————————————————————
+
+// g26Post is the content type used by the G26 App-wiring integration group.
+// TypeName "g26Post" → event suffix = "g26post.published".
+type g26Post struct {
+	Node
+	Title string `forge:"required,min=3"`
+	Body  string `forge:"required"`
+}
+
+// TestFull_G26_SignalEnqueue verifies that publishing a post via the MCP
+// interface causes injectWebhookHooks to enqueue a delivery job for any
+// active endpoint subscribed to the relevant event. This exercises the full
+// App → module.go afterHook → forge.go injectWebhookHooks → outbound.go
+// Enqueue pipeline (M11 + M1 cross-milestone).
+func TestFull_G26_SignalEnqueue(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	createG26Tables(t, db)
+
+	appSecret := []byte("32-bytes-g26-secret-for-testing!")
+	store := NewWebhookStore(db, appSecret)
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  appSecret,
+		DB:      db,
+	}))
+	app.Webhooks(store)
+
+	repo := NewMemoryRepo[*g26Post]()
+	m := NewModule((*g26Post)(nil),
+		Repo(repo),
+		At("/g26posts"),
+		MCP(MCPRead, MCPWrite),
+	)
+	app.Content(m)
+
+	// Insert a webhook endpoint that subscribes to "g26post.published".
+	enc, _ := store.encryptSecret([]byte("g26-secret"))
+	evJSON, _ := json.Marshal([]string{"g26post.published"})
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO forge_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
+		 VALUES ('ep-g26',$1,'https://8.8.8.8/hook',$2,1,datetime('now'))`,
+		string(evJSON), enc,
+	)
+	if err != nil {
+		t.Fatalf("insert endpoint: %v", err)
+	}
+
+	// Wire afterHook into the module (simulates what Run() does).
+	app.injectWebhookHooks()
+
+	mod := app.MCPModules()[0]
+	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
+
+	// Create and publish a post.
+	item, err := mod.MCPCreate(userCtx, map[string]any{
+		"title": "G26 Webhook",
+		"body":  "This triggers AfterPublish signal.",
+	})
+	if err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+	post := item.(*g26Post)
+	if err := mod.MCPPublish(userCtx, post.Slug); err != nil {
+		t.Fatalf("MCPPublish: %v", err)
+	}
+
+	// Wait for the async afterHook to fire and enqueue the job.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	var jobs []OutboundJob
+	for time.Now().Before(deadline) {
+		jobs, _ = app.WebhookPool().ListJobsForEndpoint(userCtx, "ep-g26")
+		if len(jobs) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(jobs) == 0 {
+		t.Fatal("no webhook job enqueued after MCPPublish; expected 1 job for ep-g26")
+	}
+	if jobs[0].Event != "g26post.published" {
+		t.Errorf("job.Event = %q; want %q", jobs[0].Event, "g26post.published")
+	}
+}
+
+// createG26Tables sets up all three tables needed for the G26–G29 webhook
+// integration groups in the given DB.
+func createG26Tables(t *testing.T, db DB) {
+	t.Helper()
+	ctx := context.Background()
+	for _, ddl := range []string{
+		`CREATE TABLE IF NOT EXISTS forge_webhook_endpoints (
+			id TEXT PRIMARY KEY, events TEXT NOT NULL, target_url TEXT NOT NULL,
+			secret_enc TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS forge_outbound_jobs (
+			id TEXT PRIMARY KEY, endpoint_id TEXT NOT NULL, target_url TEXT NOT NULL,
+			secret_enc TEXT NOT NULL, payload BLOB NOT NULL, event TEXT NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0, next_retry_at DATETIME NOT NULL,
+			created_at DATETIME NOT NULL, expires_at DATETIME NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending'
+		)`,
+		`CREATE TABLE IF NOT EXISTS forge_delivery_logs (
+			id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempted_at DATETIME NOT NULL,
+			status_code INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT ''
+		)`,
+	} {
+		if _, err := db.ExecContext(ctx, ddl); err != nil {
+			t.Fatalf("createG26Tables: %v", err)
+		}
+	}
+}
+
+// — G27: Pool retry on transient failure (M11) ———————————————————————————————
+
+// TestFull_G27_RetryOnTransientFailure verifies that a job that fails on
+// the first attempt is retried and eventually delivered. Two delivery log
+// entries are expected: one failure, one success.
+func TestFull_G27_RetryOnTransientFailure(t *testing.T) {
+	pool, store := outboundTestDB(t)
+
+	clock := newFakeClock(time.Now())
+	pool.clock = clock
+
+	var deliverCount int32
+	pool.deliver = func(ctx context.Context, job OutboundJob, _ []byte) error {
+		n := atomic.AddInt32(&deliverCount, 1)
+		if n == 1 {
+			return &webhookHTTPError{statusCode: 500}
+		}
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool.Start(ctx)
+
+	enc, _ := store.encryptSecret([]byte("g27-secret"))
+	now := time.Now()
+	job := OutboundJob{
+		ID:          NewID(),
+		EndpointID:  "ep-g27",
+		TargetURL:   "https://8.8.8.8/hook",
+		SecretEnc:   enc,
+		Payload:     []byte(`{"event":"post.published"}`),
+		Event:       "post.published",
+		NextRetryAt: now,
+		CreatedAt:   now,
+		ExpiresAt:   now.Add(24 * time.Hour),
+		Status:      "pending",
+	}
+	if err := pool.Enqueue(ctx, job); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Advance clock past retry delay so the second attempt fires.
+	time.Sleep(100 * time.Millisecond)
+	clock.Advance(5 * time.Minute)
+
+	deadline := time.Now().Add(2 * time.Second)
+	var logs []DeliveryLog
+	for time.Now().Before(deadline) {
+		var err error
+		logs, err = pool.ListDeliveryLogs(ctx, job.ID)
+		if err == nil && len(logs) >= 2 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if len(logs) < 2 {
+		t.Fatalf("want ≥2 delivery logs (1 failure + 1 success), got %d", len(logs))
+	}
+
+	cancel()
+	pool.Stop()
+}
+
+// — G28: Dead-letter after max attempts (M11) ————————————————————————————————
+
+// TestFull_G28_DeadLetterAfterMaxAttempts verifies that a job that always
+// fails transitions to "dead" status after reaching the maximum attempt count.
+func TestFull_G28_DeadLetterAfterMaxAttempts(t *testing.T) {
+	pool, store := outboundTestDB(t)
+
+	clock := newFakeClock(time.Now())
+	pool.clock = clock
+	pool.deliver = func(_ context.Context, _ OutboundJob, _ []byte) error {
+		return &webhookHTTPError{statusCode: 500}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool.Start(ctx)
+
+	enc, _ := store.encryptSecret([]byte("g28-secret"))
+	now := time.Now()
+	job := OutboundJob{
+		ID:          NewID(),
+		EndpointID:  "ep-g28",
+		TargetURL:   "https://8.8.8.8/hook",
+		SecretEnc:   enc,
+		Payload:     []byte(`{"event":"post.updated"}`),
+		Event:       "post.updated",
+		NextRetryAt: now,
+		CreatedAt:   now,
+		ExpiresAt:   now.Add(24 * time.Hour),
+		Status:      "pending",
+	}
+	if err := pool.Enqueue(ctx, job); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Advance the clock repeatedly to push the job through all retry delays.
+	deadline := time.Now().Add(5 * time.Second)
+	var finalStatus string
+	for time.Now().Before(deadline) {
+		clock.Advance(2 * time.Hour) // skip past exponential backoff
+		time.Sleep(50 * time.Millisecond)
+		rows, _ := pool.db.QueryContext(ctx,
+			`SELECT status FROM forge_outbound_jobs WHERE id = $1`, job.ID)
+		func() {
+			defer rows.Close()
+			if rows.Next() {
+				_ = rows.Scan(&finalStatus)
+			}
+		}()
+		if finalStatus == "dead" {
+			break
+		}
+	}
+
+	cancel()
+	pool.Stop()
+
+	if finalStatus != "dead" {
+		t.Errorf("job status = %q; want %q after max attempts", finalStatus, "dead")
+	}
+}
+
+// — G29: Circuit breaker opens after consecutive failures (M11) ——————————————
+
+// TestFull_G29_CircuitBreakerOpens verifies that after circuitThreshold
+// consecutive delivery failures for a single endpoint, the circuit breaker
+// opens and subsequent jobs for the same endpoint are skipped (logged as
+// "circuit open") rather than attempting delivery.
+func TestFull_G29_CircuitBreakerOpens(t *testing.T) {
+	pool, store := outboundTestDB(t)
+
+	clock := newFakeClock(time.Now())
+	pool.clock = clock
+
+	var deliverCalls int32
+	pool.deliver = func(_ context.Context, _ OutboundJob, _ []byte) error {
+		atomic.AddInt32(&deliverCalls, 1)
+		return &webhookHTTPError{statusCode: 503}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool.Start(ctx)
+
+	enc, _ := store.encryptSecret([]byte("g29-secret"))
+	now := time.Now()
+
+	// Enqueue 6 jobs — 5 to trip the circuit, 1 to verify it's now open.
+	const total = 6
+	ids := make([]string, total)
+	for i := 0; i < total; i++ {
+		id := NewID()
+		ids[i] = id
+		job := OutboundJob{
+			ID:          id,
+			EndpointID:  "ep-g29-cb",
+			TargetURL:   "https://8.8.8.8/hook",
+			SecretEnc:   enc,
+			Payload:     []byte(`{"event":"post.deleted"}`),
+			Event:       "post.deleted",
+			NextRetryAt: now,
+			CreatedAt:   now,
+			ExpiresAt:   now.Add(24 * time.Hour),
+			Status:      "pending",
+		}
+		if err := pool.Enqueue(ctx, job); err != nil {
+			t.Fatalf("Enqueue job %d: %v", i, err)
+		}
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		calls := atomic.LoadInt32(&deliverCalls)
+		if calls >= circuitOpenThreshold {
+			break
+		}
+		clock.Advance(10 * time.Minute)
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Wait for the 6th job to be processed (circuit should be open now).
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	pool.Stop()
+
+	// The 6th job should have been skipped (0 HTTP calls for it) — total
+	// deliver calls must equal exactly circuitOpenThreshold (5), not 6.
+	calls := atomic.LoadInt32(&deliverCalls)
+	if calls > circuitOpenThreshold {
+		t.Errorf("deliver called %d times; circuit should have opened after %d failures",
+			calls, circuitOpenThreshold)
+	}
+}
+
+// — G30: MCPSchedule → AfterSchedule webhook (M11 + M10 + M8) ———————————————
+
+// g30Post is the content type for the G30 cross-milestone group.
+// TypeName "g30Post" → event name "g30post.scheduled".
+type g30Post struct {
+	Node
+	Title string `forge:"required,min=3"`
+	Body  string `forge:"required"`
+}
+
+// TestFull_G30_MCPScheduleWebhook verifies the cross-milestone path:
+// MCPSchedule (M10 MCP interface) → AfterSchedule signal (A87/M11 signals.go)
+// → injectWebhookHooks (M11 forge.go) → Enqueue. This proves that scheduling
+// a post via MCP triggers the correct webhook event "g30post.scheduled".
+func TestFull_G30_MCPScheduleWebhook(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	createG26Tables(t, db)
+
+	appSecret := []byte("32-bytes-g30-secret-for-testing!")
+	store := NewWebhookStore(db, appSecret)
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  appSecret,
+		DB:      db,
+	}))
+	app.Webhooks(store)
+
+	repo := NewMemoryRepo[*g30Post]()
+	m := NewModule((*g30Post)(nil),
+		Repo(repo),
+		At("/g30posts"),
+		MCP(MCPRead, MCPWrite),
+	)
+	app.Content(m)
+
+	// Subscribe endpoint to the "scheduled" event for this type.
+	enc, _ := store.encryptSecret([]byte("g30-secret"))
+	evJSON, _ := json.Marshal([]string{"g30post.scheduled"})
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO forge_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
+		 VALUES ('ep-g30',$1,'https://8.8.8.8/hook',$2,1,datetime('now'))`,
+		string(evJSON), enc,
+	)
+	if err != nil {
+		t.Fatalf("insert endpoint: %v", err)
+	}
+
+	// Wire afterHook (equivalent of what Run() does).
+	app.injectWebhookHooks()
+
+	mod := app.MCPModules()[0]
+	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
+
+	// Create a draft first.
+	item, err := mod.MCPCreate(userCtx, map[string]any{
+		"title": "G30 Scheduled Post",
+		"body":  "Scheduled via MCP to test AfterSchedule webhook.",
+	})
+	if err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+	post := item.(*g30Post)
+
+	// Schedule it for 1 hour from now.
+	if err := mod.MCPSchedule(userCtx, post.Slug, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("MCPSchedule: %v", err)
+	}
+
+	// Wait for the async afterHook to fire and enqueue the job.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	var jobs []OutboundJob
+	for time.Now().Before(deadline) {
+		jobs, _ = app.WebhookPool().ListJobsForEndpoint(userCtx, "ep-g30")
+		if len(jobs) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if len(jobs) == 0 {
+		t.Fatal("no webhook job enqueued after MCPSchedule; expected job for ep-g30")
+	}
+	if jobs[0].Event != "g30post.scheduled" {
+		t.Errorf("job.Event = %q; want %q", jobs[0].Event, "g30post.scheduled")
+	}
+}

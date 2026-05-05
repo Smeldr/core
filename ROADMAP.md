@@ -22,6 +22,7 @@ All architectural decisions are locked in `DECISIONS.md`.
 | M8 | Scheduled publishing (v0.8.0) | ✅ Done |
 | M9 | v1.0.0 stabilisation | ✅ Done |
 | M10 | MCP support (v2) | ✅ Done |
+| M11 | Outbound webhooks + MCP subscriptions (v1.17.0) | ✅ Done |
 
 ---
 
@@ -224,6 +225,37 @@ Implementation of Decision 19. Syntax reserved in v1 via mcp.go.
 
 ---
 
+## Milestone 11 — Outbound webhooks + MCP subscriptions (v1.17.0)
+
+Signal-driven HTTP delivery to external endpoints; encrypted secrets; retries;
+circuit breaker; five Admin MCP tools and five forge-cli subcommands; MCP
+resource subscriptions for real-time AI agent notification.
+**Detail:** see git history — `Milestone11_BACKLOG.md` removed at close.
+
+| Step | File | Status | Completed |
+|------|------|--------|----------|
+| A87 | signals.go | ✅ Done | 2026-05-06 |
+| 1 | webhook.go | ✅ Done | 2026-05-06 |
+| 2 | outbound.go | ✅ Done | 2026-05-06 |
+| A89 | module.go | ✅ Done | 2026-05-06 |
+| A88 | forge.go | ✅ Done | 2026-05-06 |
+| 3 | forge-mcp/webhook_tools.go | ✅ Done | 2026-05-06 |
+| 4 | forge-cli/webhook.go | ✅ Done | 2026-05-06 |
+| 5 | forge-mcp/subscription.go | ✅ Done | 2026-05-06 |
+| 6 | integration_full_test.go | ✅ Done | 2026-05-08 |
+
+- [x] A87 — `signals.go`: AfterSchedule Signal constant
+- [x] Step 1 — `webhook.go`: WebhookStore, SSRF validation, payload building, AES-256-GCM secret encryption
+- [x] Step 2 — `outbound.go`: workerPool, retry, circuit breaker, HMAC signing, HTTP delivery
+- [x] A89 — `module.go`: contentTypeName field, afterHook, notifyAfter helper, AfterSchedule dispatch
+- [x] A88 — `forge.go`: App.Webhooks(), App.WebhookPool(), injectWebhookHooks, Run wiring
+- [x] Step 3 — `forge-mcp/webhook_tools.go`: 5 Admin webhook MCP tools
+- [x] Step 4 — `forge-cli/webhook.go`: 5 webhook subcommands (CLI parity)
+- [x] Step 5 — `forge-mcp/subscription.go`: MCP resource subscriptions + transport handlers
+- [x] Step 6 — `integration_full_test.go`: cross-milestone groups G24–G30
+
+---
+
 ## Phase 2 — Production foundation
 
 See [VISION.md](VISION.md) for context. Steps are ordered by dependency
@@ -247,7 +279,7 @@ These topics require a new Tier 1 decision round before planning begins.
 - **Forge AI** — content assistant built on MCP + AIDoc + llms.txt
 - **Admin UI** — `forge-studio` as a separate package
 - **Search** — SQLite FTS5 integration, `forge.Searchable` interface
-- **Webhooks** — outbound HTTP on content events
+- **Webhooks** — outbound HTTP on content events ✅ Done (Milestone 11)
 - **Multi-tenancy** — multiple sites from one instance
 - **GraphQL** — auto-generated schema from content types
 - **Edge/CDN** — surrogate keys, automatic CDN purge

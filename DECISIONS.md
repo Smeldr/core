@@ -112,6 +112,9 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A84 | `REFERENCE.md`: accuracy fixes and gap-fill for v1.16.0 — corrects 5 inaccuracies (version examples, broken links, RateLimit section, `app.Content` fallback path); adds 6 missing sections (TokenStore, NavTree, OGDefaults/AppSchema, AbsURL, SeqRepository, forge-cli); adds `ErrLastAdmin` sentinel. | Agreed | 2026-05-05 |
 | A85 | `.github/copilot-instructions.md`: new "Docs and content workflow" section inserted between "Standard step workflow" and "Release tagging". `FEATURELIST.md`: new file — complete feature list for v1.16.0. | Agreed | 2026-05-05 |
 | A86 | `.github/copilot-instructions.md`: new "CLI and MCP tool parity" section — every MCP tool must have a CLI equivalent in the same release; notes current nav commands gap. | Agreed | 2026-05-05 |
+| A87 | `signals.go`: `AfterSchedule Signal = "after_schedule"` — fires after Scheduled transition, alongside AfterUpdate. Enables `post.scheduled` webhook events and per-signal MCP subscription routing. | Agreed | 2026-05-06 |
+| A88 | `forge.go`: `App.Webhooks(store *WebhookStore)`, `App.WebhookPool() WebhookJobQueue`, `App.injectWebhookHooks()` — wires outbound webhook infrastructure into the App; pool started/stopped with server lifecycle. | Agreed | 2026-05-08 |
+| A89 | `module.go`: `afterHook`/`setAfterHook`/`notifyAfter` — post-lifecycle callback slot on `Module[T]`; `notifyAfter` wraps `dispatchAfter`+`afterHook`; `MCPSchedule` dispatches `AfterSchedule`. CLI parity: `forge webhook` ships with `forge-mcp` webhook tools (A86 gap closed). | Agreed | 2026-05-08 |
 
 ---
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -128,6 +129,11 @@ type Config struct {
 	// rebuilding. Set from os.Getenv("DEV") == "1" or via the forge.config key
 	// "dev = true". Optional.
 	Dev bool
+
+	// WebhookWorkers is the number of concurrent goroutines that poll and
+	// deliver outbound webhook jobs. Defaults to 10 when zero. Optional —
+	// only used when [App.Webhooks] is called.
+	WebhookWorkers int
 }
 
 // MustConfig validates cfg and returns it unchanged.
@@ -239,6 +245,13 @@ type App struct {
 	navTree                *NavTree                            // non-nil when NavMode is set or App.Nav() is called
 	navCodeItems           []NavItem                           // items supplied via App.Nav() for NavModeCode
 	navTreeModules         []interface{ setNavTree(*NavTree) } // modules that receive the navTree after startup
+
+	webhookStore    *WebhookStore               // non-nil when App.Webhooks() was called
+	webhookPool     *workerPool                 // non-nil when App.Webhooks() was called
+	signalListeners []func(Signal, string, any) // registered via AddSignalListener
+	hookableModules []interface {
+		setAfterHook(func(Context, Signal, string, any))
+	} // modules whose afterHook is wired at Run time
 }
 
 // New creates a new [App] from cfg.
@@ -409,6 +422,11 @@ func (a *App) Content(v any, opts ...Option) {
 		if nt, ok := r.(interface{ setNavTree(*NavTree) }); ok {
 			a.navTreeModules = append(a.navTreeModules, nt)
 		}
+		if hk, ok := r.(interface {
+			setAfterHook(func(Context, Signal, string, any))
+		}); ok {
+			a.hookableModules = append(a.hookableModules, hk)
+		}
 		return
 	}
 	// NewModule is called with an any-typed value — type assertion to any loses
@@ -440,6 +458,131 @@ func (a *App) Secret() []byte { return a.cfg.Secret }
 // token management, or nil when token management is not configured. forge-mcp
 // calls this in its New constructor to wire token tools and revocation checks.
 func (a *App) TokenStore() *TokenStore { return a.tokenStore }
+
+// Webhooks wires an outbound webhook delivery engine into the application.
+// Call this after [App.Content] has registered all modules and before
+// [App.Run]:
+//
+//	store := forge.NewWebhookStore(db, secret)
+//	app.Webhooks(store)
+//
+// At [App.Run] time, Forge injects a delivery hook into every registered
+// content module. After each lifecycle signal (create, update, publish,
+// schedule, archive, delete), the hook looks up active subscriptions from the
+// store, builds the event payload, and enqueues an [OutboundJob] for the
+// worker pool to deliver.
+//
+// The worker pool starts when [App.Run] is called and stops on graceful
+// shutdown. The number of workers defaults to 10; set [Config.WebhookWorkers]
+// to override.
+//
+// Webhooks requires [Config.DB] to be set — the same DB is shared with the
+// store and the outbound job tables.
+func (a *App) Webhooks(store *WebhookStore) *App {
+	a.webhookStore = store
+	workers := a.cfg.WebhookWorkers
+	if workers == 0 {
+		workers = 10
+	}
+	a.webhookPool = newWorkerPool(a.cfg.DB, store, realClock{}, workers)
+	return a
+}
+
+// WebhookStore returns the configured [WebhookStore], or nil when outbound
+// webhooks have not been configured via [App.Webhooks].
+// forge-mcp calls this in its New constructor to wire webhook admin tools.
+func (a *App) WebhookStore() *WebhookStore { return a.webhookStore }
+
+// WebhookJobQueue is the interface through which forge-mcp accesses the
+// outbound webhook worker pool. It is satisfied by the unexported workerPool
+// type returned by [App.WebhookPool].
+type WebhookJobQueue interface {
+	Enqueue(ctx context.Context, job OutboundJob) error
+	RetryDead(ctx context.Context, jobID string) error
+	ListDeliveryLogs(ctx context.Context, jobID string) ([]DeliveryLog, error)
+	ListJobsForEndpoint(ctx context.Context, endpointID string) ([]OutboundJob, error)
+	DeliveryStats(ctx context.Context, endpointID string) (total, success, failed int, lastAttempt *time.Time, err error)
+}
+
+// WebhookPool returns the outbound webhook worker pool as a [WebhookJobQueue],
+// or nil when webhooks have not been configured via [App.Webhooks].
+// forge-mcp calls this in its New constructor to wire delivery log tools.
+func (a *App) WebhookPool() WebhookJobQueue {
+	if a.webhookPool == nil {
+		return nil
+	}
+	return a.webhookPool
+}
+
+// AddSignalListener registers a function that is called after every lifecycle
+// signal fired by any registered content module. fn receives the signal, the
+// unqualified content type name (e.g. "Post"), and the content item.
+//
+// Listeners are invoked synchronously inside the afterHook goroutine — keep
+// them non-blocking or spawn their own goroutines for heavy work.
+//
+// AddSignalListener is the low-level hook used by forge-mcp to implement
+// resource subscription notifications. Application code can also use it to
+// build custom event pipelines.
+func (a *App) AddSignalListener(fn func(Signal, string, any)) {
+	a.signalListeners = append(a.signalListeners, fn)
+}
+
+// injectWebhookHooks constructs the afterHook closure and injects it into
+// every hookable module collected by Content(). Called once by Run() before
+// starting the HTTP server.
+func (a *App) injectWebhookHooks() {
+	if a.webhookPool == nil && len(a.signalListeners) == 0 {
+		return
+	}
+	pool := a.webhookPool
+	store := a.webhookStore
+	listeners := a.signalListeners
+
+	fn := func(ctx Context, sig Signal, typeName string, item any) {
+		if pool != nil {
+			eventName, ok := buildEventName(typeName, sig)
+			if !ok {
+				return
+			}
+			payload, err := buildWebhookPayload(typeName, item, sig)
+			if err != nil {
+				slog.ErrorContext(ctx, "webhook payload build failed", "error", err, "signal", sig)
+				return
+			}
+			endpoints, err := store.EndpointsForEvent(ctx, eventName)
+			if err != nil {
+				slog.ErrorContext(ctx, "webhook endpoints lookup failed", "error", err, "event", eventName)
+				return
+			}
+			now := time.Now()
+			for _, ep := range endpoints {
+				job := OutboundJob{
+					ID:          NewID(),
+					EndpointID:  ep.ID,
+					TargetURL:   ep.TargetURL,
+					SecretEnc:   ep.secretEnc,
+					Payload:     payload,
+					Event:       eventName,
+					NextRetryAt: now,
+					CreatedAt:   now,
+					ExpiresAt:   now.Add(24 * time.Hour),
+					Status:      "pending",
+				}
+				if err := pool.Enqueue(ctx, job); err != nil {
+					slog.ErrorContext(ctx, "webhook enqueue failed", "error", err, "endpoint", ep.ID)
+				}
+			}
+		}
+		for _, l := range listeners {
+			l(sig, typeName, item)
+		}
+	}
+
+	for _, m := range a.hookableModules {
+		m.setAfterHook(fn)
+	}
+}
 
 // Nav registers navigation items for [NavModeCode]. Calling Nav implicitly
 // activates code-mode navigation — no database table is created or read.
@@ -838,6 +981,17 @@ func (a *App) Run(addr string) error {
 
 	// serveErr receives the result of ListenAndServe.
 	serveErr := make(chan error, 1)
+
+	// Inject webhook delivery hooks and signal listeners into all modules.
+	a.injectWebhookHooks()
+
+	// Start the webhook worker pool if configured.
+	poolCtx, poolCancel := context.WithCancel(context.Background())
+	defer poolCancel()
+	if a.webhookPool != nil {
+		a.webhookPool.Start(poolCtx)
+		defer a.webhookPool.Stop()
+	}
 
 	// Start the scheduled-publishing ticker if any modules were registered.
 	if len(a.schedulerModules) > 0 {

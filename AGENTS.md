@@ -211,6 +211,20 @@ raw HTML. Do not mix formats.
 - `resources/list` — all Published items across all MCPRead modules
 - `resources/read` — single item by URI (`forge://{prefix}/{slug}`)
 
+### Resource subscriptions
+
+When connected via SSE, you can subscribe to real-time content change
+notifications:
+
+- `resources/subscribe` — subscribe to a resource URI; you will receive
+  `notifications/resources/updated` when that item is published, updated,
+  or deleted.
+- `resources/unsubscribe` — cancel a subscription.
+
+Use subscriptions to keep cached content fresh without polling.
+The `capabilities.resources.subscribe` flag in the `initialize` response
+confirms subscriptions are available on this server.
+
 ### Token management tools (Admin role required)
 
 These tools are available when the site has `TokenStore` configured:
@@ -230,6 +244,24 @@ These tools are available when the site has `TokenStore` configured:
 - Never revoke a token without explicit instruction from the site owner
 - `create_token` returns the plaintext token once — copy it immediately
   and deliver it through a secure channel. It cannot be retrieved again.
+
+### Webhook management tools (Admin role required)
+
+These tools are available when the site has `App.Webhooks(store)` configured:
+
+| Tool | Description |
+|------|-------------|
+| `create_webhook` | Registers a new outbound endpoint (HTTPS only). Returns signing secret once. |
+| `list_webhooks` | Lists all registered endpoints with delivery statistics. |
+| `delete_webhook` | Removes an endpoint by ID. |
+| `list_webhook_deliveries` | Shows delivery log for a specific job ID. |
+| `retry_webhook` | Re-queues a dead job for delivery. |
+
+**Webhook rules:**
+- `create_webhook` requires `url` (HTTPS, no private/localhost IPs) and `events` (list of event names such as `post.published`)
+- The signing secret is returned once at creation — deliver it securely
+- `list_webhooks` never returns secrets
+- Use `list_webhooks` before `delete_webhook` to confirm the ID
 
 ### Connection setup
 

@@ -61,6 +61,18 @@ Per content type — automatically derived, no manual definition:
 - `list_[type]s` — Editor+
 - `get_[type]` — Editor+
 
+Admin tools (require Admin role):
+
+- `create_webhook`, `list_webhooks`, `delete_webhook` — manage outbound endpoints
+- `list_webhook_deliveries`, `retry_webhook` — delivery introspection and retry
+- `create_token`, `list_tokens`, `revoke_token` — token management
+
+MCP resource subscriptions:
+
+- `resources/subscribe` and `resources/unsubscribe` JSON-RPC methods
+- SSE transport assigns per-connection session ID; notifies via `notifications/resources/updated`
+- Clients receive real-time push when published content changes
+
 ## Template infrastructure
 
 - Shared partials — `App.Partials` + `MustParseTemplate`
@@ -98,6 +110,21 @@ Per content type — automatically derived, no manual definition:
 - Content CRUD — create, update, publish, unpublish, archive, delete, list, get
 - Token management — create, list, revoke (Admin role required)
 - Media operations — upload, list, delete
+- Webhook management — create, list, delete, view deliveries, retry
+
+## Outbound webhooks
+
+- `WebhookStore` — SQLite-backed endpoint registry with AES-256-GCM secret encryption
+- SSRF-safe URL validation — HTTPS required, no private/loopback IPs permitted
+- HMAC-SHA256 payload signing — signed string `"<ts>.<body>"`, header `sha256=<hex>`
+- Exponential backoff — 4^attempt ±20% jitter, cap 1 hour
+- Per-endpoint circuit breakers — open after 5 consecutive failures for 5 minutes
+- Dead-letter after 7 attempts — job status transitions to "dead"
+- `App.Webhooks(store)` — wires store and starts the background worker pool
+- MCP tools for Admin agents: `create_webhook`, `list_webhooks`, `delete_webhook`,
+  `list_webhook_deliveries`, `retry_webhook`
+- `AfterPublish`, `AfterUpdate`, `AfterDelete`, `AfterSchedule` signals trigger jobs automatically
+- `forge-cli webhook` subcommands for all operations
 
 ## Developer and AI-agent experience
 

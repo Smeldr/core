@@ -1,9 +1,9 @@
-# Forge — Decisions: Core
+# Forge ï¿½ Decisions: Core
 
-Decisions 1–22 and all amendments up to A65. For Decision 25 onwards see `decisions/phase2.md`.
+Decisions 1ï¿½22 and all amendments up to A65. For Decision 25 onwards see `decisions/phase2.md`.
 
 
-## Decision 1 — Node identity
+## Decision 1 ï¿½ Node identity
 
 **Status:** Locked  
 **Decision:** Every content node has both a UUID (`ID`) and a URL-safe slug (`Slug`).
@@ -33,7 +33,7 @@ The combination gives us the best of both: stable identity and readable URLs.
 
 ---
 
-## Decision 2 — Storage model
+## Decision 2 ï¿½ Storage model
 
 **Status:** Locked  
 **Decision:** SQL-first. Forge provides `forge.Query[T]` and `forge.QueryOne[T]`
@@ -43,7 +43,7 @@ No ORM. No query builder.
 **Rationale:**
 SQL is the most widely understood query language in existence.
 It is unambiguous, composable, and directly optimisable.
-AI assistants write SQL extremely well — better than most DSLs.
+AI assistants write SQL extremely well ï¿½ better than most DSLs.
 
 A query builder (`Where("published", true).OrderBy("created_at")`) looks elegant
 but introduces a translation layer that fails on edge cases, produces suboptimal SQL,
@@ -70,7 +70,7 @@ Forge aligns with this philosophy.
 
 ---
 
-## Decision 3 — Head/SEO ownership
+## Decision 3 ï¿½ Head/SEO ownership
 
 **Status:** Locked  
 **Decision:** Hybrid. The content type implements `Head() forge.Head` as the default.
@@ -84,7 +84,7 @@ Placing `Head()` on the content type keeps all knowledge about that content in o
 However, there are legitimate cases where the module needs to override:
 - Content types you don't own (third-party, generated)
 - Head values that depend on request context (locale, A/B testing, user state)
-- Site-wide title formatting (`Title + " — Site Name"`)
+- Site-wide title formatting (`Title + " ï¿½ Site Name"`)
 
 The hybrid model handles all cases without forcing complexity on the common path.
 
@@ -92,7 +92,7 @@ The hybrid model handles all cases without forcing complexity on the common path
 - *Content-type only (pull):* Cannot handle context-dependent metadata or
   content types you don't control.
 - *Module-only (push):* Separates content knowledge from content type.
-  `BlogPost` knows its title — it should own its head.
+  `BlogPost` knows its title ï¿½ it should own its head.
 
 **Consequences:**
 - Content types implementing `Head() forge.Head` get correct SEO automatically
@@ -103,7 +103,7 @@ The hybrid model handles all cases without forcing complexity on the common path
 
 ---
 
-## Decision 4 — Rendering model
+## Decision 4 ï¿½ Rendering model
 
 **Status:** Locked  
 **Decision:** Content negotiation via `Accept` header. Same route, same handler,
@@ -116,7 +116,7 @@ Forcing developers to choose "am I building an API or a website" is a false cons
 A well-built content system should serve all consumers: browsers, API clients, AI agents.
 
 Content negotiation is a mature HTTP standard (RFC 7231). It is the correct mechanism.
-Forge implementing it automatically means developers never think about it — they just
+Forge implementing it automatically means developers never think about it ï¿½ they just
 register templates if they want HTML, and everything else works.
 
 **Rejected alternatives:**
@@ -135,25 +135,25 @@ register templates if they want HTML, and everything else works.
 
 ---
 
-## Decision 5 — Cookie consent enforcement
+## Decision 5 ï¿½ Cookie consent enforcement
 
 **Status:** Locked  
 **Decision:** Design-time enforcement. Cookie category determines which API is available.
 `forge.Necessary` cookies use `forge.SetCookie`. All other categories
 must use `forge.SetCookieIfConsented`, which silently skips if consent is absent.
-There is no runtime error — the architecture makes the wrong thing impossible.
+There is no runtime error ï¿½ the architecture makes the wrong thing impossible.
 
 **Rationale:**
 The question "what happens when you set a non-consented cookie?" arose during planning.
 The correct answer is: that situation should not be reachable.
 
-Runtime consent checks encourage developers to write `if hasConsent { setCookie(...) }` —
+Runtime consent checks encourage developers to write `if hasConsent { setCookie(...) }` ï¿½
 which is easy to forget, easy to get wrong, and impossible to audit.
 
 Design-time enforcement via distinct API functions means:
 1. A code review can confirm compliance by searching for `SetCookie` vs `SetCookieIfConsented`
 2. An AI assistant can audit compliance by reading cookie declarations
-3. The compiler enforces the contract — not tests, not runtime, not documentation
+3. The compiler enforces the contract ï¿½ not tests, not runtime, not documentation
 
 **Rejected alternatives:**
 - *Silent skip at runtime (original proposal):* Correct behaviour but wrong mechanism.
@@ -171,11 +171,11 @@ Design-time enforcement via distinct API functions means:
 - Consent state is stored in a `Necessary` cookie (so it is always readable)
 - `forge.ConsentFor(r, forge.Preferences)` reads current consent state
 - `/.well-known/cookies.json` provides a machine-readable compliance manifest
-- Forge never touches third-party cookie consent — only cookies it sets itself
+- Forge never touches third-party cookie consent ï¿½ only cookies it sets itself
 
 ---
 
-## Decision 6 — Context type
+## Decision 6 ï¿½ Context type
 
 **Status:** Locked  
 **Decision:** `forge.Context` is a custom interface that embeds `context.Context`
@@ -186,7 +186,7 @@ and adds Forge-specific methods: `User()`, `Locale()`, `SiteName()`,
 `context.Context` with typed keys is idiomatic Go but produces verbose, unsafe code:
 
 ```go
-// stdlib approach — verbose and not type-safe at call sites
+// stdlib approach ï¿½ verbose and not type-safe at call sites
 user := r.Context().Value(userKey).(forge.User)
 ```
 
@@ -213,12 +213,12 @@ and handler signatures. Everything else is either stdlib or the user's own types
 - All hooks receive `forge.Context` as first argument
 - `forge.ContextFrom(r *http.Request) forge.Context` is the bridge from stdlib handlers
 - `forge.Context` carries: `User`, `Locale` (default "en" until i18n v2), `SiteName`
-- `forge.Context` is always non-nil — Forge guarantees this before calling user code
-- Custom middleware that doesn't use Forge types uses plain `http.Handler` — no forced adoption
+- `forge.Context` is always non-nil ï¿½ Forge guarantees this before calling user code
+- Custom middleware that doesn't use Forge types uses plain `http.Handler` ï¿½ no forced adoption
 
 ---
 
-## Decision 7 — AIDoc format
+## Decision 7 ï¿½ AIDoc format
 
 **Status:** Locked  
 **Decision:** AIDoc is a structured text format for serving content to AI agents.
@@ -247,10 +247,10 @@ JSON is verbose for long-form text (requires escaping). Markdown lacks structure
 
 The AIDoc format is designed specifically for token efficiency and unambiguous parsing:
 - The delimiter `+++aidoc+v1+++` is globally unique and immediately identifies the format
-- Header fields are flat key-value — no nesting, no ambiguity
+- Header fields are flat key-value ï¿½ no nesting, no ambiguity
 - ISO 8601 dates are unambiguous across all locales and LLM training data
 - The version in the delimiter (`v1`) enables future evolution without breaking parsers
-- Body content is clean text or markdown — no HTML noise
+- Body content is clean text or markdown ï¿½ no HTML noise
 
 The delimiter style `+++aidoc+v1+++` was chosen over `---forge-aidoc-v1---` for brevity
 while remaining unique and machine-identifiable.
@@ -271,22 +271,22 @@ while remaining unique and machine-identifiable.
 - Content types can implement `AIDocSummary() string` for a custom summary field
 - The spec will live in `/spec/aidoc-v1.md` (created in Milestone 4 alongside the AIDoc implementation)
 
-### Amendment B — AIDoc URL uses path segment (A15)
+### Amendment B ï¿½ AIDoc URL uses path segment (A15)
 
 **Date:** 2026-03-06
 
 The URL pattern changed from `/{prefix}/{slug}.aidoc` to `/{prefix}/{slug}/aidoc`.
 
-Go’s `net/http.ServeMux` (Go 1.22+) requires that wildcard segments are complete
+Goï¿½s `net/http.ServeMux` (Go 1.22+) requires that wildcard segments are complete
 path components separated by `/`. A pattern like `{slug}.aidoc` contains a
-wildcard followed by a literal suffix within the same segment — this is invalid
+wildcard followed by a literal suffix within the same segment ï¿½ this is invalid
 and causes a panic at route registration time.
 
 `/{prefix}/{slug}/aidoc` is the Go-idiomatic equivalent: the slug is a full
 segment and `aidoc` is a separate literal segment. It is unambiguous, parses
 correctly, and does not conflict with any other module routes.
 
-### Amendment A — Token optimisation (supersedes field list above)
+### Amendment A ï¿½ Token optimisation (supersedes field list above)
 
 **Date:** 2025-06-01
 
@@ -294,7 +294,7 @@ Three changes to reduce token count without introducing a new format or
 sacrificing direct LLM readability:
 
 **1. `status` field removed**
-AIDoc endpoints only serve Published content — the status field always said
+AIDoc endpoints only serve Published content ï¿½ the status field always said
 `published` and carried zero information. Removed.
 
 **2. Compact date format**
@@ -308,11 +308,11 @@ After:   created:  2025-01-15              (5 tokens)
 ```
 
 **3. HTTP `Content-Encoding: gzip` on AIDoc responses**
-Gzip is applied at the transport layer — not to reduce token count (the LLM
+Gzip is applied at the transport layer ï¿½ not to reduce token count (the LLM
 sees decompressed text) but to reduce network overhead during bulk crawling.
-Long body content typically compresses 70–80%. Handled by middleware or
+Long body content typically compresses 70ï¿½80%. Handled by middleware or
 reverse proxy, not by `forge.RenderAIDoc` itself.
-*(Superseded by Amendment A17: gzip is now applied directly by Forge’s AI endpoint handlers for compact, full, and AIDoc responses.)*
+*(Superseded by Amendment A17: gzip is now applied directly by Forgeï¿½s AI endpoint handlers for compact, full, and AIDoc responses.)*
 
 **Updated format:**
 
@@ -333,11 +333,11 @@ Body content here. Clean text or markdown.
 
 **What was considered and rejected:**
 
-- *Compact field names (`t:`, `s:`, `tl:`)* — saves ~30 tokens but introduces
+- *Compact field names (`t:`, `s:`, `tl:`)* ï¿½ saves ~30 tokens but introduces
   a new mini-syntax that is harder to document, debug, and explain. Not worth it.
-- *Binary formats (MessagePack, CBOR)* — would require a tool-call to decode
+- *Binary formats (MessagePack, CBOR)* ï¿½ would require a tool-call to decode
   before the LLM can read it. More latency, not less. Defeats the purpose.
-- *Separate `Accept: application/aidoc+v1+compact` variant* — two formats to
+- *Separate `Accept: application/aidoc+v1+compact` variant* ï¿½ two formats to
   maintain, document, and test. The three changes above achieve the same goal
   with no new surface area.
 
@@ -346,12 +346,12 @@ Body content here. Clean text or markdown.
 
 ---
 
-## Decision 8 — llms.txt generation
+## Decision 8 ï¿½ llms.txt generation
 
 **Status:** Locked  
 **Decision:** Forge generates `/llms.txt` automatically from all registered modules.
 Only Published content is included. The file regenerates on every publish/unpublish Signal.
-Override by providing `templates/llms.txt` — Forge injects `{{forge_llms_entries .}}`.
+Override by providing `templates/llms.txt` ï¿½ Forge injects `{{forge_llms_entries .}}`.
 
 **Rationale:**
 `/llms.txt` is an emerging standard for helping AI systems efficiently understand
@@ -364,18 +364,18 @@ The template override gives developers full control for sites that need custom s
 **Consequences:**
 - `/llms.txt` is served automatically when any module has `forge.AIIndex(forge.LLMsTxt)`
 - Format follows the llmstxt.org specification
-- Only Published content appears — Forge enforces this regardless of template content
+- Only Published content appears ï¿½ Forge enforces this regardless of template content
 - Forge also serves `/llms-full.txt` with full content summaries (from `AIDocSummary()`)
 - Template helper `{{forge_llms_entries .}}` renders all module entries
 
 ---
 
-## Decision 9 — Sitemap strategy
+## Decision 9 ï¿½ Sitemap strategy
 
 **Status:** Locked  
 **Decision:** Each module owns a fragment sitemap (e.g. `/posts/sitemap.xml`).
 Forge merges all fragments into `/sitemap.xml` as a sitemap index.
-Sitemaps regenerate via Signal on every publish/unpublish — not on-demand, not on a timer.
+Sitemaps regenerate via Signal on every publish/unpublish ï¿½ not on-demand, not on a timer.
 
 **Rationale:**
 On-demand generation is correct but slow for large sites and hammers the database
@@ -386,7 +386,7 @@ milliseconds of a publish action) without the performance cost of on-demand gene
 The sitemap is pre-computed and served as a static file.
 
 Per-module fragment sitemaps keep each module's sitemap small and independently cacheable.
-The sitemap index at `/sitemap.xml` ties them together — this is the Google-recommended
+The sitemap index at `/sitemap.xml` ties them together ï¿½ this is the Google-recommended
 approach for large sites.
 
 **Rejected alternatives:**
@@ -404,7 +404,7 @@ approach for large sites.
 
 ---
 
-## Decision 10 — Validation API
+## Decision 10 ï¿½ Validation API
 
 **Status:** Locked  
 **Decision:** Hybrid. Struct tags handle simple constraints. `Validate() error` handles
@@ -450,11 +450,11 @@ forge:"max=N"              string max length / number max value
 forge:"email"              valid email address
 forge:"url"                valid URL
 forge:"slug"               valid URL slug (a-z, 0-9, -)
-forge:"oneof=a|b|c"        value must be one of the listed options (| separator — see Amendment R2)
+forge:"oneof=a|b|c"        value must be one of the listed options (| separator ï¿½ see Amendment R2)
 ```
 
 **Consequences:**
-- Tag validation runs before `Validate()` — if tags fail, `Validate()` is not called
+- Tag validation runs before `Validate()` ï¿½ if tags fail, `Validate()` is not called
 - `forge.Err("field", "message")` returns a `*forge.ValidationError` with field context
 - `forge.Require(err1, err2, ...)` collects multiple errors into one return value
 - Validation errors produce HTTP 422 with a structured JSON body:
@@ -462,7 +462,7 @@ forge:"oneof=a|b|c"        value must be one of the listed options (| separator 
 
 ---
 
-## Decision 11 — Internationalisation
+## Decision 11 ï¿½ Internationalisation
 
 **Status:** Locked (deferred to v2)  
 **Decision:** i18n is not implemented in v1. However, the architecture is designed
@@ -493,7 +493,7 @@ deferring it. The current design ensures it can be added cleanly.
 
 ---
 
-## Decision 12 — Image type
+## Decision 12 ï¿½ Image type
 
 **Status:** Locked  
 **Decision:** `forge.Image` is a value type with four fields: `URL`, `Alt`, `Width`, `Height`.
@@ -512,7 +512,7 @@ type Image struct {
 Open Graph requires image dimensions for optimal social sharing previews.
 Twitter Cards benefit from knowing the image aspect ratio.
 Without a typed `forge.Image`, developers store images as raw URL strings and
-forget dimensions — producing degraded social previews.
+forget dimensions ï¿½ producing degraded social previews.
 
 A typed `forge.Image` struct nudges developers toward complete image metadata
 without requiring any framework logic around storage or processing.
@@ -523,7 +523,7 @@ without requiring any framework logic around storage or processing.
   image processing library or external service. Deferred to v2 or a separate package.
 
 **Consequences:**
-- `forge.Image` zero value (empty URL) renders no image tags — safe to leave empty
+- `forge.Image` zero value (empty URL) renders no image tags ï¿½ safe to leave empty
 - Forge renders `og:image:width` and `og:image:height` only when dimensions are non-zero
 - `Alt` is recommended but not required (some images are decorative)
 - Storage: `forge.Image` marshals to/from JSON as a nested object
@@ -531,7 +531,7 @@ without requiring any framework logic around storage or processing.
 
 ---
 
-## Decision 13 — RSS feeds
+## Decision 13 ï¿½ RSS feeds
 
 **Status:** Locked  
 **Decision:** RSS feeds are generated automatically for any content module whose
@@ -543,7 +543,7 @@ RSS feeds are valuable for content discoverability and are expected by feed read
 podcast apps, and aggregators. They are also useful for AI content indexing.
 
 The auto-generation approach means developers never forget to add feeds, and feeds
-are always correct — they use the same data as the sitemap and content API.
+are always correct ï¿½ they use the same data as the sitemap and content API.
 
 The `GetPublishedAt()` method is already present on `forge.Node` via the lifecycle
 system (Decision 14). No additional interface is needed.
@@ -555,11 +555,11 @@ system (Decision 14). No additional interface is needed.
   published date, author, categories (from tags)
 - Only Published items appear in the feed
 - Feed regenerates on the same Signal as the sitemap (AfterPublish, AfterUnpublish)
-- Feed title defaults to module prefix (e.g. "Posts") — override with `forge.Feed(forge.FeedConfig{Title: "..."})`
+- Feed title defaults to module prefix (e.g. "Posts") ï¿½ override with `forge.Feed(forge.FeedConfig{Title: "..."})`
 
 ---
 
-### Amendment A16 — RSS opt-in (not auto-generated)
+### Amendment A16 ï¿½ RSS opt-in (not auto-generated)
 
 **Date:** 2026-03-06  
 **Status:** Agreed  
@@ -569,12 +569,12 @@ system (Decision 14). No additional interface is needed.
 
 **Rationale:**
 - Explicit over implicit: admin modules, API-only modules, and single-record config modules should not silently sprout public `/feed.xml` endpoints.
-- Consistent with `AIIndex` and `SitemapConfig` — both require explicit opt-in.
+- Consistent with `AIIndex` and `SitemapConfig` ï¿½ both require explicit opt-in.
 - `FeedDisabled()` is retained as a defensive explicit opt-out marker, useful when default behaviour changes in future or when subclassing patterns require it.
 
 **Call-site impact:**
 ```go
-// Before (Decision 13 intent — never implemented):
+// Before (Decision 13 intent ï¿½ never implemented):
 // Every module auto-gets /{prefix}/feed.xml
 
 // After (implemented):
@@ -592,26 +592,26 @@ app.Content(&Post{},
 
 ---
 
-### Amendment A17 — gzip applied directly in AI endpoint handlers
+### Amendment A17 ï¿½ gzip applied directly in AI endpoint handlers
 
 **Date:** 2026-03-06  
 **Status:** Agreed  
 **Amends:** Decision 13 (Amendment A, clause 3)
 
-**Change:** Decision 13 Amendment A stated gzip on AIDoc responses would be “handled by middleware or reverse proxy, not by forge.RenderAIDoc itself.” That clause is superseded. Gzip compression is now applied directly by Forge’s AI endpoint handlers via the unexported `compressIfAccepted` helper in `ai.go`.
+**Change:** Decision 13 Amendment A stated gzip on AIDoc responses would be ï¿½handled by middleware or reverse proxy, not by forge.RenderAIDoc itself.ï¿½ That clause is superseded. Gzip compression is now applied directly by Forgeï¿½s AI endpoint handlers via the unexported `compressIfAccepted` helper in `ai.go`.
 
 **Endpoints affected:** `/llms.txt` (`CompactHandler`), `/llms-full.txt` (`FullHandler`), `/{prefix}/{slug}/aidoc` (`aiDocHandler` ? `renderAIDoc`).
 
 **Behaviour:**
 - When `Accept-Encoding: gzip` is present **and** the response body is = 1024 bytes, the response is gzip-compressed.
 - `Content-Encoding: gzip`, `Content-Length`, and `Vary: Accept-Encoding` headers are set on all three endpoints (Content-Length is set on plain responses too).
-- Below 1024 bytes the plain body is returned — compression overhead would exceed the saving on small responses.
+- Below 1024 bytes the plain body is returned ï¿½ compression overhead would exceed the saving on small responses.
 
 **Rationale:**
-- `llms-full.txt` is a full Markdown corpus that can reach hundreds of KB on large sites; gzip saves 70–80% on the wire, meaningfully reducing crawl bandwidth.
-- Requiring operators to wrap Forge AI handlers with a custom gzip middleware creates unnecessary friction and is inconsistent with the “production-ready by default” principle.
+- `llms-full.txt` is a full Markdown corpus that can reach hundreds of KB on large sites; gzip saves 70ï¿½80% on the wire, meaningfully reducing crawl bandwidth.
+- Requiring operators to wrap Forge AI handlers with a custom gzip middleware creates unnecessary friction and is inconsistent with the ï¿½production-ready by defaultï¿½ principle.
 - The 1024-byte threshold aligns with the industry consensus used by NGINX, Cloudflare, Spring Boot, and Akamai for text/plain and text/markdown content (2026 defaults).
-- The helper is scoped to AI endpoints only — HTML/JSON/RSS responses are not affected.
+- The helper is scoped to AI endpoints only ï¿½ HTML/JSON/RSS responses are not affected.
 
 **Consequences of amendment:**
 - `renderAIDoc` now takes `r *http.Request` as its second parameter (unexported function, no external API change).
@@ -622,7 +622,7 @@ app.Content(&Post{},
 
 ---
 
-### Amendment A18 — App.Cookies() and /.well-known/cookies.json wired into forge.go
+### Amendment A18 ï¿½ App.Cookies() and /.well-known/cookies.json wired into forge.go
 
 **Date:** 2026-03-07  
 **Status:** Agreed  
@@ -634,7 +634,7 @@ app.Content(&Post{},
 - `App.CookiesManifestAuth(auth AuthFunc)` method (sets manifest auth guard)
 - `App.Handler()`: mounts `GET /.well-known/cookies.json` when `len(a.cookieDecls) > 0`
 
-This crosses the file boundary from `cookiemanifest.go` into `forge.go`. It was pre-specified in `Milestone6_BACKLOG.md` §2.1 and §2.5 and agreed as part of the Milestone 6 plan.
+This crosses the file boundary from `cookiemanifest.go` into `forge.go`. It was pre-specified in `Milestone6_BACKLOG.md` ï¿½2.1 and ï¿½2.5 and agreed as part of the Milestone 6 plan.
 
 **Consequences:**
 - `App` gains two new exported methods (`Cookies`, `CookiesManifestAuth`) and three unexported fields.
@@ -644,13 +644,13 @@ This crosses the file boundary from `cookiemanifest.go` into `forge.go`. It was 
 
 ---
 
-## Decision 14 — Content lifecycle
+## Decision 14 ï¿½ Content lifecycle
 
 **Status:** Locked  
 **Decision:** Lifecycle is built into `forge.Node` for all content types.
 It cannot be opted out of. Four states: `Draft`, `Published`, `Scheduled`, `Archived`.
 Forge enforces lifecycle rules automatically for all public endpoints, sitemaps, feeds,
-and AI endpoints — regardless of developer configuration.
+and AI endpoints ï¿½ regardless of developer configuration.
 
 ```go
 const (
@@ -664,7 +664,7 @@ const (
 **Rationale:**
 The question arose during planning: "should lifecycle be opt-in?"
 
-The answer is no — and the reason is architectural safety. If lifecycle is opt-in
+The answer is no ï¿½ and the reason is architectural safety. If lifecycle is opt-in
 (via an interface), a content type that forgets to implement it has no protection.
 Draft posts could leak to public endpoints, sitemaps, and AI crawlers.
 
@@ -687,7 +687,7 @@ Forge runs an internal ticker (default: every 60 seconds) that queries for
 
 **Consequences:**
 - `forge.Node.Status` is always present and always enforced
-- Public GET endpoints return 404 for non-Published content (not 403 — do not leak existence)
+- Public GET endpoints return 404 for non-Published content (not 403 ï¿½ do not leak existence)
 - Editor+ can access non-Published content via the same endpoints when authenticated
 - Author can access own Draft/Scheduled/Archived content when authenticated
 - Sitemap, feed, AIDoc, and llms.txt never include non-Published content
@@ -695,7 +695,7 @@ Forge runs an internal ticker (default: every 60 seconds) that queries for
 
 ---
 
-## Decision 15 — Role system
+## Decision 15 ï¿½ Role system
 
 **Status:** Locked  
 **Decision:** Hierarchical role system with four built-in roles and support for custom roles.
@@ -703,12 +703,12 @@ Higher roles inherit all permissions of lower roles.
 
 ```
 Admin   (level 40)  ?  full access including app configuration
-Editor  (level 30)  ?  create, update, delete any content — sees all drafts
-Author  (level 20)  ?  create, update own content — sees own drafts
+Editor  (level 30)  ?  create, update, delete any content ï¿½ sees all drafts
+Author  (level 20)  ?  create, update own content ï¿½ sees own drafts
 Guest   (level 10)  ?  read Published content (unauthenticated)
 ```
 
-> **Note:** Levels use a spacing of 10 — see Amendment R1. Absolute values are not
+> **Note:** Levels use a spacing of 10 ï¿½ see Amendment R1. Absolute values are not
 > part of the public API; only relative ordering is guaranteed.
 
 Custom roles are inserted into the hierarchy:
@@ -739,56 +739,56 @@ It can always be layered on top via custom middleware for projects that need it.
 - `user.HasRole(forge.Editor)` returns true for Editor, Admin
 - `user.Is(forge.Editor)` returns true only for exactly Editor
 - `forge.Read(role)`, `forge.Write(role)`, `forge.Delete(role)` accept a minimum role level
-- Guest is the implicit role for unauthenticated requests — never needs to be declared
+- Guest is the implicit role for unauthenticated requests ï¿½ never needs to be declared
 - `forge.Admin` has access to `app.Config` endpoints (future: admin UI)
 - Custom roles inserted into the hierarchy are fully composable with built-in roles
 - Role is stored as a string in tokens and sessions for forward compatibility
 
 ---
 
-## Appendix — Decisions not taken (Tier 3 roadmap)
+## Appendix ï¿½ Decisions not taken (Tier 3 roadmap)
 
 The following topics were discussed and explicitly deferred to v2 or later:
 
-**Admin UI** — A web-based admin interface for content management.
+**Admin UI** ï¿½ A web-based admin interface for content management.
 Planned as a separate package (`forge-admin`), not in core.
 Blocked by: stable core API, role system (done), template system (done).
 
-**Webhooks** — Outbound HTTP calls on content events.
+**Webhooks** ï¿½ Outbound HTTP calls on content events.
 Useful for search indexing, CDN invalidation, notification systems.
 Will be implemented as a Signal handler in core, with a convenience wrapper.
 
-**Search** — Full-text search over content.
+**Search** ï¿½ Full-text search over content.
 SQLite FTS5 integration is the likely v1 path. Planned as an optional module.
 
-**Multi-tenancy** — Multiple sites from one Forge instance.
+**Multi-tenancy** ï¿½ Multiple sites from one Forge instance.
 Complex enough to require its own design phase. Not blocking v1.
 
-**GraphQL** — Auto-generated GraphQL schema from content types.
+**GraphQL** ï¿½ Auto-generated GraphQL schema from content types.
 Requires reflection or code generation. Likely a separate package.
 
-**Edge/CDN integration** — Surrogate key support, automatic CDN purge on publish.
+**Edge/CDN integration** ï¿½ Surrogate key support, automatic CDN purge on publish.
 Signal-based approach makes this straightforward to add. Not blocking v1.
 
-**Image resizing** — On-the-fly or pre-computed image variants.
+**Image resizing** ï¿½ On-the-fly or pre-computed image variants.
 Separate package. Core provides `forge.Image` type as the integration point.
 
 ---
 
-## Addenda — Security & Performance review (2025-06-01)
+## Addenda ï¿½ Security & Performance review (2025-06-01)
 
 The following amendments were added after a dedicated security and performance review.
 Each is an amendment to an existing decision or a new sub-decision.
 
 ---
 
-### Amendment S1 — UUID v7 (amends Decision 1)
+### Amendment S1 ï¿½ UUID v7 (amends Decision 1)
 
 **Decision:** Forge uses UUID v7 (time-ordered random) for all generated IDs, not UUID v4.
 
 **Rationale:**
 UUID v7 is time-ordered, which means database B-tree indexes stay compact and sequential
-inserts do not cause page splits. UUID v4 is fully random — good for security but causes
+inserts do not cause page splits. UUID v4 is fully random ï¿½ good for security but causes
 index fragmentation at scale. UUID v7 provides the same security guarantees as v4
 (122 random bits) while being naturally sortable by creation time.
 This eliminates the need for a separate `created_at` index in many query patterns.
@@ -800,7 +800,7 @@ This eliminates the need for a separate `created_at` index in many query pattern
 
 ---
 
-### Amendment S6 — CSRF protection (new, relates to Decision 6)
+### Amendment S6 ï¿½ CSRF protection (new, relates to Decision 6)
 
 **Decision:** `forge.CookieSession` automatically enables CSRF protection.
 Bearer token routes are exempt. Cookie-based write routes (POST, PUT, DELETE)
@@ -813,7 +813,7 @@ require a valid CSRF token.
 - The CSRF token rotates on every successful authentication
 
 **Consequences:**
-- `forge.CookieSession` middleware automatically handles CSRF — no additional config
+- `forge.CookieSession` middleware automatically handles CSRF ï¿½ no additional config
 - `forge.BearerHMAC` routes skip CSRF validation entirely
 - HTML templates get `{{forge_csrf_token}}` helper for form embedding
 - AJAX clients read the token from the `forge_csrf` cookie and send it as `X-CSRF-Token`
@@ -821,7 +821,7 @@ require a valid CSRF token.
 
 ---
 
-### Amendment S7 — BasicAuth production warning (amends Decision 15)
+### Amendment S7 ï¿½ BasicAuth production warning (amends Decision 15)
 
 **Decision:** `forge.BasicAuth` logs a structured warning at startup when
 `app.Config.Env` is not `forge.Development`.
@@ -840,7 +840,7 @@ WARN  forge: BasicAuth is enabled in a non-development environment.
 
 ---
 
-### Amendment S8 — AIDoc ID field is configurable (amends Decision 7)
+### Amendment S8 ï¿½ AIDoc ID field is configurable (amends Decision 7)
 
 **Decision:** The `id` field in AIDoc responses is included by default but
 can be suppressed per-module with `forge.AIDoc(forge.WithoutID)`.
@@ -857,13 +857,13 @@ choose to omit it to reduce information exposure.
 
 ---
 
-### Amendment S9 — Cookie manifest access control (amends Cookie compliance)
+### Amendment S9 ï¿½ Cookie manifest access control (amends Cookie compliance)
 
-**Decision:** `/.well-known/cookies.json` is public by default (intentional — compliance transparency).
+**Decision:** `/.well-known/cookies.json` is public by default (intentional ï¿½ compliance transparency).
 Operators can restrict access with `forge.ManifestAuth(minRole)`.
 
 ```go
-// Default — public
+// Default ï¿½ public
 app.Cookies(SessionCookie, PreferenceCookie)
 
 // Restricted
@@ -877,12 +877,12 @@ The manifest is designed for compliance auditing and should generally be public.
 The option to restrict it exists for operators with specific security requirements.
 
 **Consequences:**
-- Default behaviour is unchanged — manifest is always public unless `ManifestAuth` is set
-- When restricted, unauthenticated requests receive 401 (not 404 — do not hide the endpoint)
+- Default behaviour is unchanged ï¿½ manifest is always public unless `ManifestAuth` is set
+- When restricted, unauthenticated requests receive 401 (not 404 ï¿½ do not hide the endpoint)
 
 ---
 
-### Amendment S2 — Generic `On[T]` replaces exported `SignalHandler` (amends Decision 8)
+### Amendment S2 ï¿½ Generic `On[T]` replaces exported `SignalHandler` (amends Decision 8)
 
 **Decision:** `forge.On` is a generic function `On[T any](signal Signal, h func(Context, T) error) Option`.
 The exported `SignalHandler` named type is removed. Internal dispatch uses an unexported
@@ -907,11 +907,11 @@ func On[T any](signal Signal, h func(Context, T) error) Option {
 The type assertion `payload.(T)` appears exactly once, written by the framework, never by developers.
 
 **Consequences for developer/AI experience:**
-1. **Call-site syntax** — fully typed; no visible `any`, no assertion, matches README verbatim
-2. **README** — no changes required; README already assumed this form
-3. **AI generation accuracy** — AI assistants write `func(ctx forge.Context, p *BlogPost) error`
+1. **Call-site syntax** ï¿½ fully typed; no visible `any`, no assertion, matches README verbatim
+2. **README** ï¿½ no changes required; README already assumed this form
+3. **AI generation accuracy** ï¿½ AI assistants write `func(ctx forge.Context, p *BlogPost) error`
    directly; correct without consulting docs
-4. **Consistency** — `On[T]` follows the same generic helper pattern as `Query[T]`/`QueryOne[T]`
+4. **Consistency** ï¿½ `On[T]` follows the same generic helper pattern as `Query[T]`/`QueryOne[T]`
    (Step 7); one pattern, applied everywhere
 
 **Trade-off:** Internal dispatch stores `[]signalHandler` (erased type); this is invisible to
@@ -919,10 +919,10 @@ developers and confined entirely to signals.go.
 
 ---
 
-### Amendment S3 — `Repository[T any]` and `MemoryRepo[T any]` use unconstrained type parameter (amends ARCHITECTURE.md)
+### Amendment S3 ï¿½ `Repository[T any]` and `MemoryRepo[T any]` use unconstrained type parameter (amends ARCHITECTURE.md)
 
 **Decision:** `Repository[T any]` and `MemoryRepo[T any]` use an unconstrained type parameter
-`[T any]`, not `[T forge.Node]`. `ARCHITECTURE.md` incorrectly specified `[T forge.Node]` —
+`[T any]`, not `[T forge.Node]`. `ARCHITECTURE.md` incorrectly specified `[T forge.Node]` ï¿½
 Go generics do not support struct types as type constraints; only interfaces may appear there.
 This is consistent with `Query[T any]`, `QueryOne[T any]`, and `On[T any]`.
 
@@ -932,19 +932,19 @@ type ArticleRepo = forge.MemoryRepo[Article]
 ```
 
 **Consequences for developer/AI experience:**
-1. **Call-site syntax** — identical; no impact on how the type is used
-2. **ARCHITECTURE.md** — corrected in the same step; `Repository[T Node]` ? `Repository[T any]`
-3. **README.md** — corrected in the same step
-4. **AI generation accuracy** — `[T any]` is the idiomatic Go pattern; AI assistants generate
+1. **Call-site syntax** ï¿½ identical; no impact on how the type is used
+2. **ARCHITECTURE.md** ï¿½ corrected in the same step; `Repository[T Node]` ? `Repository[T any]`
+3. **README.md** ï¿½ corrected in the same step
+4. **AI generation accuracy** ï¿½ `[T any]` is the idiomatic Go pattern; AI assistants generate
    it correctly without consulting docs
-5. **Consistency** — matches every other generic helper in the package
+5. **Consistency** ï¿½ matches every other generic helper in the package
 
 **Rule:** All generic helpers in the `forge` package use `[T any]`. Type safety is enforced by
 the caller's concrete type argument, not by a package-level constraint.
 
 ---
 
-### Amendment S8 — `AuthFunc` is an interface, not a named function type (amends Decision 15)
+### Amendment S8 ï¿½ `AuthFunc` is an interface, not a named function type (amends Decision 15)
 
 **Decision:** `forge.AuthFunc` is declared as an interface with one unexported method:
 
@@ -962,28 +962,28 @@ capability detection on `AuthFunc` values without package-level globals:
   warning (`productionWarner` interface with `warnIfProduction(io.Writer)`).
 
 With a named function type, both requirements demand a parallel registry (a `sync.Map` or
-global slice keyed by function pointer) — fragile, not thread-safe at init time, and
+global slice keyed by function pointer) ï¿½ fragile, not thread-safe at init time, and
 impossible to test in isolation. With an interface, each concrete `AuthFunc` struct
 implements whichever capability interfaces apply; detection is a simple type assertion.
 
-**Call-site syntax** — identical before and after this amendment:
+**Call-site syntax** ï¿½ identical before and after this amendment:
 ```go
 app.Auth(forge.BearerHMAC(secret))
 app.Auth(forge.CookieSession("forge_session", secret))
 app.Auth(forge.BearerHMAC(secret), forge.CookieSession("forge_session", secret))
 ```
 
-Developers never call `.authenticate()` directly — they only pass `AuthFunc` values to
+Developers never call `.authenticate()` directly ï¿½ they only pass `AuthFunc` values to
 factory functions and to `app.Auth(...)`.
 
 **Consequences for developer/AI experience:**
-1. **Call-site syntax** — unchanged; no visible difference at the point of use
-2. **README** — no changes required; all factory-function examples remain valid
-3. **AI generation accuracy** — AI assistants only write factory calls, never the interface
+1. **Call-site syntax** ï¿½ unchanged; no visible difference at the point of use
+2. **README** ï¿½ no changes required; all factory-function examples remain valid
+3. **AI generation accuracy** ï¿½ AI assistants only write factory calls, never the interface
    method directly; correct code generated without consulting docs
-4. **Consistency** — `AuthFunc` joins `Option` (roles.go) and `Signal` (signals.go) as an
+4. **Consistency** ï¿½ `AuthFunc` joins `Option` (roles.go) and `Signal` (signals.go) as an
    unexported-method interface; one pattern applied across all extension points
-5. **Step 9/11 detection** — type assertions against `productionWarner` / `csrfAware`;
+5. **Step 9/11 detection** ï¿½ type assertions against `productionWarner` / `csrfAware`;
    clean, idiomatic, zero globals
 
 **Rule:** `forge.AuthFunc` is an interface. Custom authentication schemes implement it by
@@ -991,7 +991,7 @@ declaring a struct and an unexported `authenticate(*http.Request) (User, bool)` 
 
 ---
 
-### Amendment P1 — Asynchronous sitemap regeneration (amends Decision 9)
+### Amendment P1 ï¿½ Asynchronous sitemap regeneration (amends Decision 9)
 
 **Decision:** Sitemap regeneration runs asynchronously in a dedicated goroutine.
 A 2-second debounce coalesces burst publishes into a single rebuild.
@@ -1006,15 +1006,15 @@ AfterPublish signal fires
 ```
 
 **Consequences:**
-- Publish requests return immediately — never blocked by sitemap I/O
+- Publish requests return immediately ï¿½ never blocked by sitemap I/O
 - A burst of 50 simultaneous publishes produces one sitemap rebuild, not 50
 - Maximum sitemap staleness after a publish: ~2 seconds
-- If the app shuts down during a rebuild, the rebuild is lost (acceptable — next startup rebuilds)
+- If the app shuts down during a rebuild, the rebuild is lost (acceptable ï¿½ next startup rebuilds)
 - RSS feed regeneration uses the same goroutine and debounce
 
 ---
 
-### Amendment M1 — Storage injection via forge.Repo[T any] Option (amends Decision 2)
+### Amendment M1 ï¿½ Storage injection via forge.Repo[T any] Option (amends Decision 2)
 
 **Decision:** `Module[T any]` receives its `Repository[T]` via `forge.Repo[T any](r Repository[T]) Option`.
 This option is never written by application developers. `App.Content` (Step 11) calls it
@@ -1024,7 +1024,7 @@ Tests supply it directly using `forge.NewMemoryRepo[T]()`.
 **Rationale:**
 The README shows `app.Content(&BlogPost{}, forge.At("/posts"), ...)` with no visible repo argument.
 A hidden injection mechanism (e.g., a method on `Module`) would require `Module[T]` to carry
-a pointer that is only valid after `App.Content` completes registration — a partial construction
+a pointer that is only valid after `App.Content` completes registration ï¿½ a partial construction
 pattern that violates the invariant that all options are resolved at `NewModule` time.
 The `Option` pattern resolves this cleanly: `App.Content` builds a `Repository[T]` from the DB
 and calls `forge.Repo(repo)` as the last option before constructing the module. Call sites
@@ -1034,13 +1034,13 @@ fail-fast contract rather than a nil-dereference at first request.
 
 **Consequences:**
 - `forge.Repo[T any](r Repository[T]) Option` added to `module.go`
-- `App.Content` (Step 11) always supplies `forge.Repo(repo)` — it is never a user concern
+- `App.Content` (Step 11) always supplies `forge.Repo(repo)` ï¿½ it is never a user concern
 - Module construction panics if no `forge.Repo(...)` is provided (dev-time safety)
 - Power users who need a custom repo (read-through cache, audit repo, etc.) can supply it
 
 ---
 
-### Amendment M2 — Export CacheStore from middleware.go (amends Amendment P2)
+### Amendment M2 ï¿½ Export CacheStore from middleware.go (amends Amendment P2)
 
 **Decision:** The unexported `lruCache` type in `middleware.go` is promoted to an exported
 `CacheStore` struct with an exported API: `NewCacheStore(ttl time.Duration, max int) *CacheStore`,
@@ -1066,7 +1066,7 @@ func (c *CacheStore) Flush()
 func (c *CacheStore) Sweep()
 ```
 
-**`InMemoryCache` middleware is unchanged at the call site** — it creates its own `*CacheStore`
+**`InMemoryCache` middleware is unchanged at the call site** ï¿½ it creates its own `*CacheStore`
 internally. `CacheMaxEntries(n)` option continues to work as before.
 
 **Consequences:**
@@ -1074,11 +1074,11 @@ internally. `CacheMaxEntries(n)` option continues to work as before.
 - `middleware_test.go` may reference `CacheStore` directly (optional)
 - `module.go` uses `*CacheStore` for all module-level caching
 - `forge.Cache(ttl)` option enables module caching; `forge.Middleware(forge.InMemoryCache(ttl))`
-  is middleware-scoped caching — distinct concepts, clear in godoc
+  is middleware-scoped caching ï¿½ distinct concepts, clear in godoc
 
 ---
 
-### Amendment M3 — Module[T any] type parameter (amends Step 10 spec)
+### Amendment M3 ï¿½ Module[T any] type parameter (amends Step 10 spec)
 
 **Decision:** `Module[T any]` uses the unconstrained `[T any]` type parameter, not
 `[T forge.Node]`. The backlog spec was written before Amendment S3 locked all generic helpers
@@ -1093,19 +1093,19 @@ func nodeSlug(v any) string   { /* reflect field "Slug" ? string */ }
 func nodeID(v any) string     { /* reflect field "ID" ? string */ }
 ```
 
-**Rationale:** Identical to Amendment S3 — a `forge.Node` type constraint creates a hidden
+**Rationale:** Identical to Amendment S3 ï¿½ a `forge.Node` type constraint creates a hidden
 coupling between the generic type system and one concrete struct, excluding future content
 types that embed `Node` via pointer or composition patterns not yet anticipated.
 
 **Consequences:**
-- `Module[T any]` — not `Module[T forge.Node]`
+- `Module[T any]` ï¿½ not `Module[T forge.Node]`
 - Reflection helpers read `Status`, `Slug`, `ID` by name; reflect.Type cached in `sync.Map`
 - `NewModule[T any](proto T, opts ...Option) *Module[T]` captures `reflect.TypeOf(proto)` once
 - The Step 10 backlog spec text is updated to reflect `[T any]`
 
 ---
 
-### Amendment M4 — MemoryRepo supports embedded struct fields (amends Step 7)
+### Amendment M4 ï¿½ MemoryRepo supports embedded struct fields (amends Step 7)
 
 **Decision:** `stringField` in `storage.go` is updated to handle embedded struct field
 promotion via `reflect.Type.FieldByName` with a `sync.Map`-backed path cache
@@ -1126,7 +1126,7 @@ traverses embedded structs. The returned `[]int` index path is cached per
 `(reflect.Type, fieldName)` pair to avoid repeated reflection work.
 
 **Impact on existing code:** Zero. The `repoItem` type used in `storage_test.go`
-has flat fields — `FieldByName` returns the same single-element path `[i]` as
+has flat fields ï¿½ `FieldByName` returns the same single-element path `[i]` as
 before, and all existing storage tests continue to pass.
 
 **Consequences:**
@@ -1139,7 +1139,7 @@ before, and all existing storage tests continue to pass.
 
 ---
 
-### Amendment P2 — Cache eviction policy (amends Middleware)
+### Amendment P2 ï¿½ Cache eviction policy (amends Middleware)
 
 **Decision:** `forge.InMemoryCache` implements LRU eviction with a configurable
 maximum entry count (default: 1000 entries).
@@ -1147,10 +1147,10 @@ maximum entry count (default: 1000 entries).
 **Mechanism:**
 - Entries are evicted in LRU order when `maxEntries` is reached
 - TTL expiry check runs on every read (lazy expiry) plus a background sweep every 60 seconds
-- Cache size is bounded: `maxEntries × avgResponseSize` is the approximate memory bound
+- Cache size is bounded: `maxEntries ï¿½ avgResponseSize` is the approximate memory bound
 
 ```go
-// Default — 1000 entries, LRU eviction
+// Default ï¿½ 1000 entries, LRU eviction
 forge.InMemoryCache(5*time.Minute)
 
 // Custom max entries
@@ -1158,20 +1158,20 @@ forge.InMemoryCache(5*time.Minute, forge.CacheMaxEntries(500))
 ```
 
 **Consequences:**
-- Memory usage is bounded — no unbounded growth from query parameter explosion
+- Memory usage is bounded ï¿½ no unbounded growth from query parameter explosion
 - LRU implementation uses a doubly-linked list + map (stdlib-only, ~40 lines)
 - Cache keys include the full URL including query parameters
 - `X-Cache: HIT` / `X-Cache: MISS` headers are always set
 
 ---
 
-### Amendment P3 — Template parsing at startup (amends Decision 4)
+### Amendment P3 ï¿½ Template parsing at startup (amends Decision 4)
 
 **Decision:** Templates are parsed at `app.Run()`, not lazily on first request.
 A missing or invalid template causes an immediate, descriptive startup failure.
 
 **Rationale:**
-Lazy parsing means a template error surfaces only when the relevant route is first hit —
+Lazy parsing means a template error surfaces only when the relevant route is first hit ï¿½
 potentially in production, under load, observed by real users.
 Eager parsing at startup provides a fast feedback loop: the application either starts
 correctly or fails with a clear error message.
@@ -1193,14 +1193,14 @@ app.Run() ?
 
 ---
 
-### Amendment R1 — Role levels use spacing of 10 (amends Decision 15)
+### Amendment R1 ï¿½ Role levels use spacing of 10 (amends Decision 15)
 
 **Decision:** Built-in role levels are assigned in multiples of 10 (Guest=10, Author=20,
 Editor=30, Admin=40) rather than consecutive integers (1, 2, 3, 4).
 
 **Rationale:**
 With consecutive levels, registering a custom role between two adjacent built-ins
-(e.g. between Author=2 and Editor=3) is mathematically impossible — there is no integer
+(e.g. between Author=2 and Editor=3) is mathematically impossible ï¿½ there is no integer
 strictly between 2 and 3. The fluent builder API in Decision 15 (`Above(Author).Below(Editor)`)
 would silently produce an incorrect level (the last call wins, resulting in the
 lower bound rather than a midpoint).
@@ -1219,7 +1219,7 @@ built-in roles, making the intent of the builder API correct and testable.
 
 ---
 
-### Amendment R3 — `forge.User` is defined in `context.go` (amends Decision 21)
+### Amendment R3 ï¿½ `forge.User` is defined in `context.go` (amends Decision 21)
 
 **Decision:** The `forge.User` struct is defined in `context.go` (Layer 1), not in
 `auth.go` (Layer 3).
@@ -1233,7 +1233,7 @@ would need to reference a type from auth.go (Layer 3), violating the dependency 
 in ARCHITECTURE.md.
 
 Moving the declaration to `context.go` resolves this cleanly:
-- `forge.User` only depends on `forge.Role` (Layer 0) — it fits in Layer 1
+- `forge.User` only depends on `forge.Role` (Layer 0) ï¿½ it fits in Layer 1
 - `auth.go` builds on top of the User type without moving it
 - The User struct is a pure data type with no behaviour; behaviour (token signing,
   password hashing, session management) belongs in auth.go
@@ -1246,7 +1246,7 @@ Moving the declaration to `context.go` resolves this cleanly:
 
 ---
 
-### Amendment R2 — `oneof` tag uses `|` as value separator (amends Decision 10)
+### Amendment R2 ï¿½ `oneof` tag uses `|` as value separator (amends Decision 10)
 
 **Decision:** The `oneof=` tag constraint uses `|` (pipe) as the separator between
 allowed values, not `,` (comma) as shown in the Decision 10 example.
@@ -1254,7 +1254,7 @@ allowed values, not `,` (comma) as shown in the Decision 10 example.
 **Rationale:**
 The `forge:"..."` tag parser splits the entire tag value on `,` to find individual
 constraints. A tag such as `forge:"oneof=draft,published,archived"` would be parsed as
-three separate constraints — `oneof=draft`, `published`, and `archived` — the last two
+three separate constraints ï¿½ `oneof=draft`, `published`, and `archived` ï¿½ the last two
 being unrecognised keys that trigger a panic.
 
 Using `|` as the within-`oneof` separator avoids this ambiguity entirely:
@@ -1271,13 +1271,13 @@ forge:"required,oneof=draft|published|archived"
 
 ---
 
-## Decision 16 — Error handling model
+## Decision 16 ï¿½ Error handling model
 
 **Status:** Locked
 **Date:** 2025-06-01
 
 **Decision:** Forge uses a typed error hierarchy. All Forge errors implement
-`forge.Error` — an interface that carries an HTTP status code, a machine-readable
+`forge.Error` ï¿½ an interface that carries an HTTP status code, a machine-readable
 code, and a public-safe message. Internal error details are never exposed to clients.
 Every request gets a `X-Request-ID` (UUID v7) header for end-to-end traceability.
 
@@ -1311,7 +1311,7 @@ forge.Err("title", "required")                 // single field error ? 422
 forge.Require(forge.Err(...), forge.Err(...))  // multiple field errors ? 422
 ```
 
-### Error response format (follows Accept header — Decision 4)
+### Error response format (follows Accept header ï¿½ Decision 4)
 
 JSON (`Accept: application/json`):
 ```json
@@ -1374,7 +1374,7 @@ for that exact request".
 
 ---
 
-## Decision 17 — Redirects and content mobility
+## Decision 17 ï¿½ Redirects and content mobility
 
 **Status:** Locked
 **Date:** 2025-06-01
@@ -1382,7 +1382,7 @@ for that exact request".
 **Decision:** Forge automatically maintains a redirect table for all content modules.
 When a node's slug or prefix changes, Forge records the previous path and serves
 the appropriate redirect automatically. Archived and deleted content always returns
-`410 Gone` — never `404`.
+`410 Gone` ï¿½ never `404`.
 
 ### Automatic behaviours
 
@@ -1392,7 +1392,7 @@ the appropriate redirect automatically. Archived and deleted content always retu
 | Prefix changed | `301 Moved Permanently` ? new prefix + slug |
 | Node archived | `410 Gone` |
 | Node deleted | `410 Gone` |
-| Node scheduled | `404 Not Found` (does not exist yet — no redirect) |
+| Node scheduled | `404 Not Found` (does not exist yet ï¿½ no redirect) |
 | Node drafted (unpublished) | `404 Not Found` (does not leak existence) |
 
 ### Redirect table
@@ -1402,9 +1402,9 @@ The redirect table is stored alongside content. Each entry:
 ```go
 type RedirectEntry struct {
     FromPath   string    // e.g. "/posts/helo-world"
-    ToPath     string    // e.g. "/posts/hello-world" — empty string means 410
+    ToPath     string    // e.g. "/posts/hello-world" ï¿½ empty string means 410
     StatusCode int       // 301 or 410
-    NodeID     string    // UUID of the node — stable across renames
+    NodeID     string    // UUID of the node ï¿½ stable across renames
     CreatedAt  time.Time
 }
 ```
@@ -1427,7 +1427,7 @@ Request arrives at /posts/old-slug
 ### API
 
 ```go
-// Default — automatic, no configuration needed
+// Default ï¿½ automatic, no configuration needed
 app.Content(&BlogPost{},
     forge.At("/posts"),
 )
@@ -1443,21 +1443,21 @@ app.Redirect("/old-path", "/new-path", forge.Permanent)
 app.Redirect("/removed", "",            forge.Gone)
 ```
 
-### 410 vs 404 — rationale
+### 410 vs 404 ï¿½ rationale
 
 `410 Gone` tells search engines that content was *intentionally* removed.
 Google removes `410` pages from its index significantly faster than `404` pages.
-For a CMS, archived and deleted content should always be `410` — the content
+For a CMS, archived and deleted content should always be `410` ï¿½ the content
 existed, was indexed, and has been deliberately retired.
 
 `404` is reserved for paths that never existed or content that is not yet published.
 Leaking that a draft exists (by returning `410` instead of `404`) would be a
-security issue — Forge always returns `404` for draft and scheduled content.
+security issue ï¿½ Forge always returns `404` for draft and scheduled content.
 
 **Rationale:**
 Redirect management is one of the most neglected aspects of CMS development.
 Developers rename slugs during editing, reorganise content into new sections,
-and archive old posts — and silently break every inbound link and SEO ranking
+and archive old posts ï¿½ and silently break every inbound link and SEO ranking
 in the process. Making redirect tracking automatic and default means it is
 never forgotten.
 
@@ -1468,27 +1468,27 @@ current canonical URL.
 **Consequences:**
 - Redirect table is populated automatically by Forge on every slug/prefix change
 - Redirect table entries are included in content exports and migrations
-- `forge.Context` has no special redirect API — it is fully automatic
+- `forge.Context` has no special redirect API ï¿½ it is fully automatic
 - Redirect chains are collapsed: A?B?C becomes A?C (avoids redirect chains)
 - Maximum redirect chain length before collapse: 1 (Forge always points to current URL)
 - Redirect table can be inspected at `GET /.well-known/redirects.json` (Editor+)
 
 ---
 
-## Decision 18 — Licensing strategy
+## Decision 18 ï¿½ Licensing strategy
 
 **Status:** Locked
 **Date:** 2025-06-01
 
 **Decision:** MIT license at launch. Dual-license model introduced when Forge Cloud
 is ready for commercial offering. The project lives under the `forge-cms` GitHub
-organisation from day one — not a personal namespace.
+organisation from day one ï¿½ not a personal namespace.
 
-### Phase 1 — MIT (now)
+### Phase 1 ï¿½ MIT (now)
 All usage permitted without restriction. Maximum adoption, zero friction.
 No legal review required for enterprise evaluation.
 
-### Phase 2 — Dual license (when Forge Cloud launches)
+### Phase 2 ï¿½ Dual license (when Forge Cloud launches)
 ```
 MIT         ?  open source projects, personal use, startups
 Forge Pro   ?  commercial hosted use, enterprise support, SLA
@@ -1499,7 +1499,7 @@ for organisations running Forge as a hosted service for others.
 **Rationale:**
 A restrictive license (AGPL, BSL) at launch would reduce adoption before
 there is anything to protect. The community and trust built under MIT
-becomes the moat — not the license. The dual-license model is introduced
+becomes the moat ï¿½ not the license. The dual-license model is introduced
 only when a commercial product exists to sell.
 
 **Consequences:**
@@ -1508,27 +1508,27 @@ only when a commercial product exists to sell.
 - `LICENSE` file is MIT from commit 1
 - A `COMMERCIAL.md` file is added at launch explaining future dual-license intent
   so it is never a surprise to contributors or users
-- Contributors sign a CLA (Contributor License Agreement) from day one —
+- Contributors sign a CLA (Contributor License Agreement) from day one ï¿½
   this is required to relicense later without contacting every contributor
 
 ### On the CLA
 
 A CLA is a legal agreement where contributors grant the project owner the right
 to relicense their contributions. Without it, changing from MIT to a dual-license
-model requires consent from every contributor — which becomes impossible at scale.
+model requires consent from every contributor ï¿½ which becomes impossible at scale.
 
 Tools: `cla-assistant.io` integrates with GitHub PRs and is free for open source.
 
 ---
 
-## Decision 19 — MCP (Model Context Protocol) support
+## Decision 19 ï¿½ MCP (Model Context Protocol) support
 
 **Status:** Locked (v1 syntax reservation, v2 implementation)
 **Date:** 2025-06-01
 
 **Decision:** Forge will support MCP in v2. The `forge.MCP(...)` option is
 reserved in v1 syntax to prevent API breaks when implementation lands.
-Using `forge.MCP(...)` in v1 is a no-op — it compiles but does nothing.
+Using `forge.MCP(...)` in v1 is a no-op ï¿½ it compiles but does nothing.
 
 ### Syntax reserved in v1
 
@@ -1544,7 +1544,7 @@ app.Content(&BlogPost{},
 
 MCP (Model Context Protocol) is an open standard for AI assistants to
 connect to external systems in a structured way. A Forge app with MCP
-support exposes content as typed resources and operations as typed tools —
+support exposes content as typed resources and operations as typed tools ï¿½
 allowing AI assistants to interact with the CMS directly:
 
 ```
@@ -1564,14 +1564,14 @@ forge.Validation          ?  MCP tool input validation (same rules)
 ```
 
 The MCP layer is a thin translation layer over Forge's existing
-semantics — not a new system. Struct tags already define the schema.
+semantics ï¿½ not a new system. Struct tags already define the schema.
 Lifecycle rules already define what operations are allowed.
 Auth already defines who can do what.
 
 ### Security constraints (v2 planning notes)
 
-- MCP endpoints require authentication — no anonymous MCP access
-- `forge.MCPRead` respects lifecycle — Draft content not exposed to Guest
+- MCP endpoints require authentication ï¿½ no anonymous MCP access
+- `forge.MCPRead` respects lifecycle ï¿½ Draft content not exposed to Guest
 - `forge.MCPWrite` requires minimum `forge.Author` role
 - Rate limiting applies to MCP endpoints (same as HTTP endpoints)
 - MCP transport: stdio (local tools) and SSE (remote, authenticated)
@@ -1581,12 +1581,12 @@ Auth already defines who can do what.
 MCP is the technical foundation for the "Forge AI" product described
 in Decision 18's monetisation roadmap. Forge Cloud + MCP enables a
 content assistant that understands your content model, your SEO rules,
-your lifecycle states, and your role constraints — because it reads them
+your lifecycle states, and your role constraints ï¿½ because it reads them
 directly from your running Forge app.
 
 **Rationale:**
 MCP syntax reserved in v1 because:
-1. Cost is zero — `forge.MCP(...)` is a no-op compile-time placeholder
+1. Cost is zero ï¿½ `forge.MCP(...)` is a no-op compile-time placeholder
 2. Prevents breaking change when v2 implementation lands
 3. Signals intent to early adopters and contributors
 4. Forces the architectural question: what does a Forge MCP resource look like?
@@ -1600,7 +1600,7 @@ MCP syntax reserved in v1 because:
 
 ---
 
-## Decision 20 — Configuration model
+## Decision 20 ï¿½ Configuration model
 
 **Status:** Locked
 **Date:** 2025-06-01
@@ -1610,7 +1610,7 @@ Five environment variables are read automatically as fallback.
 No YAML/TOML files. No global singleton. No hot-reload.
 Config is validated at `app.Run()` with precise, actionable error messages.
 
-### Layer 1 — forge.Config (explicit, always wins)
+### Layer 1 ï¿½ forge.Config (explicit, always wins)
 
 ```go
 app := forge.New(forge.Config{
@@ -1622,15 +1622,15 @@ app := forge.New(forge.Config{
 
 | Field | Required | Default | Notes |
 |-------|----------|---------|-------|
-| `BaseURL` | Yes* | — | Falls back to `FORGE_BASE_URL`, then `http://localhost:{PORT}` |
-| `Secret` | Yes* | — | Falls back to `FORGE_SECRET`. Warning logged if weak or missing |
+| `BaseURL` | Yes* | ï¿½ | Falls back to `FORGE_BASE_URL`, then `http://localhost:{PORT}` |
+| `Secret` | Yes* | ï¿½ | Falls back to `FORGE_SECRET`. Warning logged if weak or missing |
 | `Env` | No | `forge.Development` | Falls back to `FORGE_ENV` |
 | `Logger` | No | `slog.Default()` | Custom `slog.Logger` |
 | `LogLevel` | No | `slog.LevelInfo` | Falls back to `FORGE_LOG_LEVEL` |
 
 *Required in production. In development, Forge provides safe defaults.
 
-### Layer 2 — Environment variables (fallback, auto-read)
+### Layer 2 ï¿½ Environment variables (fallback, auto-read)
 
 Forge reads these automatically. Explicit Config fields always take precedence.
 
@@ -1645,9 +1645,9 @@ PORT             ? used by app.Run() if no addr provided
 **FORGE_SECRET behaviour:**
 - Not set in production ? startup warning: *"FORGE_SECRET is not set. Sessions and tokens are insecure."*
 - Set but under 32 bytes ? startup warning: *"FORGE_SECRET is short. Use at least 32 random bytes."*
-- Never a fatal error — developer's responsibility to act on the warning
+- Never a fatal error ï¿½ developer's responsibility to act on the warning
 
-### Layer 3 — .env files (not Forge's responsibility)
+### Layer 3 ï¿½ .env files (not Forge's responsibility)
 
 Forge does not parse `.env` files. Zero-dependencies means zero `.env` parsers.
 Developers use whatever they already use: `direnv`, `docker --env-file`,
@@ -1656,7 +1656,7 @@ Developers use whatever they already use: `direnv`, `docker --env-file`,
 This is a deliberate non-feature. The question "does .env win over environment
 variable?" is a source of subtle bugs Forge should not introduce.
 
-### Startup validation — forge.MustConfig
+### Startup validation ï¿½ forge.MustConfig
 
 `forge.New()` calls `forge.MustConfig(cfg)` internally. It runs at startup,
 never at request time. Failures are fatal with precise, actionable messages:
@@ -1677,35 +1677,35 @@ WARN  forge: BasicAuth is enabled in a non-development environment.
 ### app.Run() addr resolution
 
 ```go
-app.Run(":8080")          // explicit — always used
+app.Run(":8080")          // explicit ï¿½ always used
 app.Run("")               // empty ? uses PORT env var ? falls back to :8080
 app.Run()                 // no arg ? same as Run("")
 ```
 
 ### What is explicitly NOT supported
 
-- YAML or TOML config files — requires parser, introduces ambiguity
-- Global config singleton (`forge.SetGlobalConfig`) — untestable, order-dependent
-- Hot-reload of config — introduces race conditions
+- YAML or TOML config files ï¿½ requires parser, introduces ambiguity
+- Global config singleton (`forge.SetGlobalConfig`) ï¿½ untestable, order-dependent
+- Hot-reload of config ï¿½ introduces race conditions
 - Merging config from multiple sources beyond the two layers above
 
 **Rationale:**
 Configuration is where "helpful" frameworks become magic frameworks.
-Every layer of indirection — YAML files, global singletons, hot-reload —
+Every layer of indirection ï¿½ YAML files, global singletons, hot-reload ï¿½
 adds a class of bugs that are hard to reproduce and harder to explain to
 an AI assistant. Two layers (explicit + env vars) cover 99% of real use
 cases. The third layer (.env files) is a solved problem Forge should not re-solve.
 
 **Consequences:**
-- `forge.Config` has exactly the fields in the table above — no more
+- `forge.Config` has exactly the fields in the table above ï¿½ no more
 - `forge.Development`, `forge.Production`, `forge.Test` are the three env constants
-- `forge.MustConfig` is exported for testing — lets tests validate config directly
+- `forge.MustConfig` is exported for testing ï¿½ lets tests validate config directly
 - All five env vars are documented in README under "Configuration"
-- `forge.Env` type is a string constant — safe to store in config files by the user
+- `forge.Env` type is a string constant ï¿½ safe to store in config files by the user
 
 ---
 
-## Decision 21 — forge.Context is an interface
+## Decision 21 ï¿½ forge.Context is an interface
 
 **Status:** Locked
 **Date:** 2025-06-01
@@ -1744,22 +1744,22 @@ running server) is significant.
 
 **Consequences:**
 - `forge.Context` is an interface in `context.go`
-- Internal implementation is `contextImpl` — unexported
-- `forge.ContextFrom(r *http.Request) forge.Context` — production constructor
-- `forge.NewTestContext(user forge.User) forge.Context` — test constructor
-- All hooks and handlers receive `forge.Context` — never `*contextImpl`
+- Internal implementation is `contextImpl` ï¿½ unexported
+- `forge.ContextFrom(r *http.Request) forge.Context` ï¿½ production constructor
+- `forge.NewTestContext(user forge.User) forge.Context` ï¿½ test constructor
+- All hooks and handlers receive `forge.Context` ï¿½ never `*contextImpl`
 - ARCHITECTURE.md documents this in the Stable interfaces section
 
 ---
 
-## Decision 22 — Storage interface and database drivers
+## Decision 22 ï¿½ Storage interface and database drivers
 
 **Status:** Locked
 **Date:** 2025-06-01
 
 **Decision:** Forge defines a minimal `forge.DB` interface internally.
 The default and recommended implementation uses `pgx` via the official
-`pgx/v5/stdlib` compatibility shim — which provides `*sql.DB` semantics
+`pgx/v5/stdlib` compatibility shim ï¿½ which provides `*sql.DB` semantics
 with pgx's native performance. A `forge-pgx` sibling package provides
 a native `pgxpool.Pool` adapter for maximum throughput.
 SQLite and MySQL work via standard `database/sql` drivers with no changes.
@@ -1768,7 +1768,7 @@ SQLite and MySQL work via standard `database/sql` drivers with no changes.
 
 ```go
 // forge.DB is satisfied by *sql.DB, *sql.Tx, and any pgx adapter.
-// Users never reference this type directly — they pass a *sql.DB or
+// Users never reference this type directly ï¿½ they pass a *sql.DB or
 // a wrapped pgxpool.Pool to forge.Config{DB: ...}.
 type DB interface {
     QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -1779,7 +1779,7 @@ type DB interface {
 
 ### Usage
 
-**Recommended default — pgx via stdlib shim (one dependency, near-native speed)**
+**Recommended default ï¿½ pgx via stdlib shim (one dependency, near-native speed)**
 
 ```go
 import (
@@ -1790,7 +1790,7 @@ db := stdlib.OpenDB(connConfig) // returns *sql.DB backed by pgx
 app := forge.New(forge.Config{DB: db})
 ```
 
-**Maximum performance — native pgx pool (separate forge-pgx package)**
+**Maximum performance ï¿½ native pgx pool (separate forge-pgx package)**
 
 ```go
 import (
@@ -1802,7 +1802,7 @@ pool, _ := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 app := forge.New(forge.Config{DB: forgepgx.Wrap(pool)})
 ```
 
-**Zero dependency — standard database/sql with any driver**
+**Zero dependency ï¿½ standard database/sql with any driver**
 
 ```go
 import (
@@ -1820,19 +1820,19 @@ app := forge.New(forge.Config{DB: db})
 
 | Approach | Relative throughput | Dependencies |
 |----------|--------------------:|-------------|
-| `database/sql` + `lib/pq` | 1× (baseline) | 1 (lib/pq) |
-| `pgx/v5/stdlib` shim | ~1.8× | 1 (pgx) |
-| `forge-pgx` native pool | ~2.5× | 1 (pgx) |
+| `database/sql` + `lib/pq` | 1ï¿½ (baseline) | 1 (lib/pq) |
+| `pgx/v5/stdlib` shim | ~1.8ï¿½ | 1 (pgx) |
+| `forge-pgx` native pool | ~2.5ï¿½ | 1 (pgx) |
 | `database/sql` + SQLite | n/a (different use case) | 1 (driver) |
 
-Forge core has zero dependencies. `pgx` is a user dependency — Forge does
+Forge core has zero dependencies. `pgx` is a user dependency ï¿½ Forge does
 not import it. `forge-pgx` is a separate module (`forge-cms.dev/forge-pgx`)
 that imports both `forge` and `pgx`.
 
 ### Why not bundle pgx in core
 
 Forge's zero-dependency guarantee applies to the core module. Bundling pgx
-would force every Forge user — including those using SQLite or MySQL — to
+would force every Forge user ï¿½ including those using SQLite or MySQL ï¿½ to
 download and compile pgx. The adapter pattern keeps core clean while making
 the fast path a one-import upgrade.
 
@@ -1865,7 +1865,7 @@ The `forge.DB` interface is the correct abstraction level. It matches exactly
 what `database/sql` already exposes, meaning zero friction for existing Go
 developers. It enables driver substitution without any changes to user code
 beyond swapping the value passed to `forge.Config{DB: ...}`.
-Performance is not sacrificed by default — the recommended path uses pgx.
+Performance is not sacrificed by default ï¿½ the recommended path uses pgx.
 Zero-dependency is preserved for the core module.
 
 **Consequences:**
@@ -1878,7 +1878,7 @@ Zero-dependency is preserved for the core module.
 
 ---
 
-### Amendment S10 — Token expiry in SignToken (amends auth.go)
+### Amendment S10 ï¿½ Token expiry in SignToken (amends auth.go)
 
 **Decision:** `SignToken(user User, secret string, ttl time.Duration) (string, error)` gains
 a `ttl` parameter. When `ttl > 0` an `exp` (Unix seconds) field is embedded in the token
@@ -1886,7 +1886,7 @@ payload. `decodeToken` rejects tokens whose `exp` is non-zero and in the past wi
 `ErrUnauth`. `ttl = 0` means no expiry (default for tests and long-lived service tokens).
 
 **Rationale:**
-Tokens with no expiry are a common attack vector — a stolen token is valid forever until
+Tokens with no expiry are a common attack vector ï¿½ a stolen token is valid forever until
 the signing secret is rotated (which invalidates all users). An explicit TTL limits the
 blast radius of a token leak to the configured window.
 
@@ -1900,14 +1900,14 @@ tok, err := forge.SignToken(user, secret, 0)
 ```
 
 **Consequences:**
-- `tokenPayload` gains `Exp int64 \`json:"exp,omitempty"\`` field (backward-compatible — old tokens without `exp` decode fine with `Exp = 0` ? no expiry)
+- `tokenPayload` gains `Exp int64 \`json:"exp,omitempty"\`` field (backward-compatible ï¿½ old tokens without `exp` decode fine with `Exp = 0` ? no expiry)
 - `encodeToken` gains `ttl time.Duration` parameter
 - `decodeToken` validates `Exp` before returning the user
 - All existing `SignToken` call sites in tests updated to pass `0`
 
 ---
 
-### Amendment S11 — CSRF middleware (amends middleware.go / auth.go)
+### Amendment S11 ï¿½ CSRF middleware (amends middleware.go / auth.go)
 
 **Decision:** `forge.CSRF(auth AuthFunc) func(http.Handler) http.Handler` enforces
 the double-submit cookie pattern for cookie-session authentication.
@@ -1934,7 +1934,7 @@ forge.NewModule(&Post{}, forge.Middleware(forge.CSRF(myAuth)), forge.Repo(repo))
 
 ---
 
-### Amendment S12 — RateLimit trusted proxy support (amends middleware.go)
+### Amendment S12 ï¿½ RateLimit trusted proxy support (amends middleware.go)
 
 **Decision:** `RateLimit(n int, d time.Duration, opts ...Option)` gains an optional
 `forge.TrustedProxy()` option. When set, the real client IP is read from
@@ -1961,16 +1961,16 @@ app.Use(forge.RateLimit(100, time.Minute, forge.TrustedProxy()))
 
 ---
 
-### Amendment M5 — ListOptions.Status filter (amends storage.go)
+### Amendment M5 ï¿½ ListOptions.Status filter (amends storage.go)
 
 **Decision:** `ListOptions` gains a `Status []Status` field. `MemoryRepo.FindAll`
 applies the filter server-side (in the repository), not in application memory.
 
 **Rationale:**
-The previous implementation in `listHandler` fetched all items with `FindAll(ctx, ListOptions{})` then filtered in Go memory. For a 100k-post repository this allocates the full collection on every unauthenticated list request. Pushing the filter into the repository is the correct abstraction — real DB implementations can apply a `WHERE status = ?` clause.
+The previous implementation in `listHandler` fetched all items with `FindAll(ctx, ListOptions{})` then filtered in Go memory. For a 100k-post repository this allocates the full collection on every unauthenticated list request. Pushing the filter into the repository is the correct abstraction ï¿½ real DB implementations can apply a `WHERE status = ?` clause.
 
 **Consequences:**
-- `Status []Status` added to `ListOptions` (zero value = return all statuses — backward-compatible)
+- `Status []Status` added to `ListOptions` (zero value = return all statuses ï¿½ backward-compatible)
 - `statusMatch[T any](item T, statuses []Status) bool` unexported helper in `storage.go`
 - `MemoryRepo.FindAll` filters via `statusMatch` before collecting items
 - `listHandler` passes `Status: []Status{Published}` for guest users; `nil` for authors
@@ -1978,7 +1978,7 @@ The previous implementation in `listHandler` fetched all items with `FindAll(ctx
 
 ---
 
-## Decision 23 — SQLRepo SQL placeholder style
+## Decision 23 ï¿½ SQLRepo SQL placeholder style
 
 **Status:** Locked  
 **Date:** 2026-03-07
@@ -1992,17 +1992,17 @@ generated SQL. This is the PostgreSQL/pgx native format and is also accepted by
 without wrapping. Since `pgx/v5` is the recommended driver (Decision 22) and the
 primary supported database is PostgreSQL, `$N` is the correct default. SQLite
 users who pass a `*sql.DB` backed by `modernc.org/sqlite` get `$N` support
-automatically — no placeholder translation layer needed.
+automatically ï¿½ no placeholder translation layer needed.
 
 **Consequences:**
 - All `SQLRepo[T]` generated queries use `$N` positional parameters
-- MySQL is not supported by `SQLRepo[T]` out of the box — a `forge-mysql` sibling
+- MySQL is not supported by `SQLRepo[T]` out of the box ï¿½ a `forge-mysql` sibling
   package can provide a `MySQLRepo[T]` with `?` placeholders in a future milestone
 - `MemoryRepo[T]` is unaffected
 
 ---
 
-## Decision 24 — Redirect lookup on the 404 path; chain collapse depth limit
+## Decision 24 ï¿½ Redirect lookup on the 404 path; chain collapse depth limit
 
 **Status:** Locked  
 **Date:** 2026-03-07
@@ -2021,31 +2021,31 @@ legitimate content migration. Panicking at startup (when `app.Redirect()` is cal
 in `main.go`) surfaces the problem immediately rather than at request time.
 
 **Consequences:**
-- `RedirectStore.handler()` is `a.mux.Handle("/", ...)` — always registered in `Handler()`
-- Empty store: `handler()` calls `http.NotFound` — identical to default ServeMux 404
+- `RedirectStore.handler()` is `a.mux.Handle("/", ...)` ï¿½ always registered in `Handler()`
+- Empty store: `handler()` calls `http.NotFound` ï¿½ identical to default ServeMux 404
 - `Add()` collapses chains on every insert; max depth 10 = panic guard
 - `Get()` is always O(1) for exact matches; O(prefix count) for prefix fallback
 
 ---
 
-### Amendment A19 — SQLRepo[T] added to storage.go (Milestone 7, Step 1)
+### Amendment A19 ï¿½ SQLRepo[T] added to storage.go (Milestone 7, Step 1)
 
 **Date:** 2026-03-07  
 **Status:** Agreed  
 **Amends:** Decision 22 (Storage interface and database drivers)
 
 **Change:** `SQLRepo[T]` is added to `storage.go` alongside `MemoryRepo[T]`. Both
-implement `Repository[T]`. No new file — one step = one logical unit.
+implement `Repository[T]`. No new file ï¿½ one step = one logical unit.
 
 **New in storage.go:**
-- `type SQLRepoOption interface{ isSQLRepoOption() }` — marker interface for SQL repo options
-- `func Table(name string) SQLRepoOption` — overrides auto-derived table name
+- `type SQLRepoOption interface{ isSQLRepoOption() }` ï¿½ marker interface for SQL repo options
+- `func Table(name string) SQLRepoOption` ï¿½ overrides auto-derived table name
 - `type SQLRepo[T any] struct` with fields `db DB`, `table string`
 - `func NewSQLRepo[T any](db DB, opts ...SQLRepoOption) *SQLRepo[T]`
-- `(r *SQLRepo[T]) FindByID`, `FindBySlug`, `FindAll`, `Save`, `Delete` — all satisfy `Repository[T]`
+- `(r *SQLRepo[T]) FindByID`, `FindBySlug`, `FindAll`, `Save`, `Delete` ï¿½ all satisfy `Repository[T]`
 - Auto-derived table name: snake_case plural of type name (`BlogPost` ? `blog_posts`)
 - All SQL uses `$N` placeholders (Decision 23)
-- Reuses existing `dbFields` cache — no duplication
+- Reuses existing `dbFields` cache ï¿½ no duplication
 
 **Consequences:**
 - `MemoryRepo[T]` is unchanged
@@ -2055,7 +2055,7 @@ implement `Repository[T]`. No new file — one step = one logical unit.
 
 ---
 
-### Amendment A20 — forge.go: RedirectStore, App.Redirect(), fallback handler (Milestone 7, Step 2)
+### Amendment A20 ï¿½ forge.go: RedirectStore, App.Redirect(), fallback handler (Milestone 7, Step 2)
 
 **Date:** 2026-03-07  
 **Status:** Agreed  
@@ -2066,14 +2066,14 @@ implement `Repository[T]`. No new file — one step = one logical unit.
 **New in forge.go:**
 - `redirectStore *RedirectStore` field on `App` struct
 - `New()` initialises `redirectStore: NewRedirectStore()`
-- `func (a *App) Redirect(from, to string, code RedirectCode)` — manual one-off redirect
+- `func (a *App) Redirect(from, to string, code RedirectCode)` ï¿½ manual one-off redirect
 - `App.Content()`: extracts `redirectsOption`; registers prefix `RedirectEntry` in store
-- `App.Handler()`: `a.mux.Handle("/", a.redirectStore.handler())` — unconditional fallback
+- `App.Handler()`: `a.mux.Handle("/", a.redirectStore.handler())` ï¿½ unconditional fallback
 
-**Decision 17 amendment — IsPrefix field:**  
+**Decision 17 amendment ï¿½ IsPrefix field:**  
 `RedirectEntry` gains `IsPrefix bool`. When `true`, the handler performs a
 runtime path rewrite: `/old-prefix/X` ? `entry.To + "/X"`. This is a single
-in-memory entry — no DB expansion, zero per-request allocation beyond string concat.
+in-memory entry ï¿½ no DB expansion, zero per-request allocation beyond string concat.
 
 **Consequences:**
 - All existing `App.Redirect()` callers unaffected (exact redirects, `IsPrefix=false`)
@@ -2082,7 +2082,7 @@ in-memory entry — no DB expansion, zero per-request allocation beyond string con
 
 ---
 
-### Amendment A21 — forge.go: /.well-known/redirects.json (Milestone 7, Step 3)
+### Amendment A21 ï¿½ forge.go: /.well-known/redirects.json (Milestone 7, Step 3)
 
 **Date:** 2026-03-07  
 **Status:** Agreed  
@@ -2096,16 +2096,16 @@ Redirect entries change at runtime so the manifest serialises on each request.
 - `redirectManifestReg bool` field on `App` struct
 - `App.Handler()`: mounts `GET /.well-known/redirects.json` unconditionally via
   `newRedirectManifestHandler(hostname, a.redirectStore)`
-- Reuses `manifestAuthOption` from `cookiemanifest.go` — no new option type
+- Reuses `manifestAuthOption` from `cookiemanifest.go` ï¿½ no new option type
 
 **Consequences:**
-- Empty store returns `{"count": 0, "entries": []}` — never 404
+- Empty store returns `{"count": 0, "entries": []}` ï¿½ never 404
 - Live serialisation: manifest always reflects the current store state
 - `ManifestAuth` is optional; endpoint is public by default
 
 ---
 
-### Amendment A22 — forge.go: App.RedirectManifestAuth() (Milestone 7, Step 4)
+### Amendment A22 ï¿½ forge.go: App.RedirectManifestAuth() (Milestone 7, Step 4)
 
 **Date:** 2026-03-07  
 **Status:** Agreed  
@@ -2118,7 +2118,7 @@ which is not accessible from outside the package.
 
 **New in forge.go:**
 - `redirectManifestOpts []Option` field on `App` struct
-- `func (a *App) RedirectManifestAuth(auth AuthFunc)` — appends `ManifestAuth(auth)` to `redirectManifestOpts`
+- `func (a *App) RedirectManifestAuth(auth AuthFunc)` ï¿½ appends `ManifestAuth(auth)` to `redirectManifestOpts`
 - `App.Handler()`: passes `a.redirectManifestOpts...` to `newRedirectManifestHandler`
 
 **Call-site syntax:**
@@ -2127,18 +2127,18 @@ app.RedirectManifestAuth(forge.BearerHMAC(secret, forge.Editor))
 ```
 
 **Consequences:**
-- Mirrors `CookiesManifestAuth` exactly — no new patterns introduced
+- Mirrors `CookiesManifestAuth` exactly ï¿½ no new patterns introduced
 - No existing callers broken (opts are additive; nil slice = public endpoint)
-- README does not document this method yet — will be added in M7 final docs pass
+- README does not document this method yet ï¿½ will be added in M7 final docs pass
 
 
 ---
 
-### Amendment A23 — node.go: `db` struct tags on `Node` time fields (Milestone 8, Step 1)
+### Amendment A23 ï¿½ node.go: `db` struct tags on `Node` time fields (Milestone 8, Step 1)
 
 **Date:** 2026-03-07
 **Status:** Agreed
-**Amends:** Decision 14 (Content lifecycle) — `Node` struct
+**Amends:** Decision 14 (Content lifecycle) ï¿½ `Node` struct
 
 **Change:** `dbFields` lowercases Go field names without inserting underscores, so
 `ScheduledAt` maps to `scheduledat` (no underscore). SQL columns use `snake_case`
@@ -2160,7 +2160,7 @@ UpdatedAt   time.Time  `db:"updated_at"`
 
 ---
 
-### Amendment A24 — context.go: `NewBackgroundContext` (Milestone 8, Step 1)
+### Amendment A24 ï¿½ context.go: `NewBackgroundContext` (Milestone 8, Step 1)
 
 **Date:** 2026-03-07
 **Status:** Agreed
@@ -2173,17 +2173,17 @@ by `context.Background()` is needed.
 
 **New in context.go:** `func NewBackgroundContext(siteName string) Context`
 - Creates a synthetic `GET /` `*http.Request` (same pattern as `NewTestContext`)
-- Wraps with `context.Background()` — never times out
+- Wraps with `context.Background()` ï¿½ never times out
 - `user: GuestUser`, `locale: "en"`, `requestID: NewID()`
 - `siteName` set from parameter
 
 **Consequences:**
 - Scheduler can make repository calls and fire signals without an HTTP request
-- `NewTestContext` is unchanged — test code is unaffected
+- `NewTestContext` is unchanged ï¿½ test code is unaffected
 
 ---
 
-### Amendment A25 — module.go: `processScheduled` + helpers (Milestone 8, Step 1)
+### Amendment A25 ï¿½ module.go: `processScheduled` + helpers (Milestone 8, Step 1)
 
 **Date:** 2026-03-07
 **Status:** Agreed
@@ -2193,9 +2193,9 @@ by `context.Background()` is needed.
 `Scheduler` can drive the Scheduled to Published transition.
 
 **New in module.go:**
-- `setNodeStatus(item any, s Status)` — sets Status field via reflection
-- `setNodeTime(item any, field string, t time.Time)` — sets time.Time field
-- `setNodeTimePtr(item any, field string, t *time.Time)` — sets *time.Time field
+- `setNodeStatus(item any, s Status)` ï¿½ sets Status field via reflection
+- `setNodeTime(item any, field string, t time.Time)` ï¿½ sets time.Time field
+- `setNodeTimePtr(item any, field string, t *time.Time)` ï¿½ sets *time.Time field
 - `func (m *Module[T]) processScheduled(ctx Context, now time.Time) (int, *time.Time, error)`
 
 **Consequences:**
@@ -2205,7 +2205,7 @@ by `context.Background()` is needed.
 
 ---
 
-### Amendment A26 — forge.go: scheduler wiring (Milestone 8, Step 1)
+### Amendment A26 ï¿½ forge.go: scheduler wiring (Milestone 8, Step 1)
 
 **Date:** 2026-03-07
 **Status:** Agreed
@@ -2221,17 +2221,17 @@ by `context.Background()` is needed.
 **Consequences:**
 - Scheduler goroutine starts before HTTP server and stops cleanly after graceful shutdown
 - `App` with no content modules: no goroutine spawned
-- `App.Run()` return paths unchanged — defer handles all cleanup paths
+- `App.Run()` return paths unchanged ï¿½ defer handles all cleanup paths
 
 ---
 
-### Amendment A27 — middleware.go: `forge.Authenticate(AuthFunc)` (Milestone 9, Step 6)
+### Amendment A27 ï¿½ middleware.go: `forge.Authenticate(AuthFunc)` (Milestone 9, Step 6)
 
 **Date:** 2026-03-08
 **Status:** Agreed
 **Amends:** Decision 15 (Role system), middleware.go, ARCHITECTURE.md
 
-**The gap:** Decision 15 defines `forge.Auth(forge.Read(r), forge.Write(r))` as module options and `BearerHMAC`/`CookieSession`/`BasicAuth` for issuing `AuthFunc` values. However, `AuthFunc` does not implement `Option` and `userContextKey` is unexported — application code outside the `forge` package had no way to inject a `User` into the request context. Module role checks at `ctx.User().HasRole(m.writeRole)` always evaluated against `GuestUser` in production, making `forge.Auth` useless without internal access.
+**The gap:** Decision 15 defines `forge.Auth(forge.Read(r), forge.Write(r))` as module options and `BearerHMAC`/`CookieSession`/`BasicAuth` for issuing `AuthFunc` values. However, `AuthFunc` does not implement `Option` and `userContextKey` is unexported ï¿½ application code outside the `forge` package had no way to inject a `User` into the request context. Module role checks at `ctx.User().HasRole(m.writeRole)` always evaluated against `GuestUser` in production, making `forge.Auth` useless without internal access.
 
 **Change:** Add one exported function to `middleware.go`:
 
@@ -2239,7 +2239,7 @@ by `context.Background()` is needed.
 func Authenticate(auth AuthFunc) func(http.Handler) http.Handler
 ```
 
-The implementation calls `auth.authenticate(r)` and, on success, attaches the returned `User` to the request context via `context.WithValue(r.Context(), userContextKey, user)`. Unauthenticated requests pass through, so `ContextFrom` falls back to `GuestUser` — correct for public read endpoints.
+The implementation calls `auth.authenticate(r)` and, on success, attaches the returned `User` to the request context via `context.WithValue(r.Context(), userContextKey, user)`. Unauthenticated requests pass through, so `ContextFrom` falls back to `GuestUser` ï¿½ correct for public read endpoints.
 
 **Call-site:**
 
@@ -2248,37 +2248,37 @@ app.Use(forge.Authenticate(forge.BearerHMAC(secret)))
 
 m := forge.NewModule[*Resource](&Resource{},
     forge.Auth(
-        forge.Read(forge.Guest),    // GET list + show — no token required
-        forge.Write(forge.Editor),  // POST/PUT/DELETE — Editor role required
+        forge.Read(forge.Guest),    // GET list + show ï¿½ no token required
+        forge.Write(forge.Editor),  // POST/PUT/DELETE ï¿½ Editor role required
     ),
 )
 ```
 
 **Consequences:**
 - Explicit two-step wiring: `Authenticate` for the request user layer, `Auth(Read/Write)` for the module threshold policy. Separation of concerns is intentional.
-- Identical signature pattern to `CSRF(auth AuthFunc)` — no new API shape.
+- Identical signature pattern to `CSRF(auth AuthFunc)` ï¿½ no new API shape.
 - Purely additive: no breaking change to any existing symbol.
 - File boundary: one function added to `middleware.go` only.
 
 **Rejected alternatives:**
-- `forge.Auth(forge.BearerHMAC(secret), forge.Read(Guest), ...)` — mixes authentication (request layer) with authorisation (module threshold layer).
-- Exporting `userContextKey` — breaks encapsulation of `Context`'s internal request state.
+- `forge.Auth(forge.BearerHMAC(secret), forge.Read(Guest), ...)` ï¿½ mixes authentication (request layer) with authorisation (module threshold layer).
+- Exporting `userContextKey` ï¿½ breaks encapsulation of `Context`'s internal request state.
 
 ---
 
-### Amendment A28 — Auto-detect `Headable` in `Module[T]` (amends Decision 3 + Decision 14)
+### Amendment A28 ï¿½ Auto-detect `Headable` in `Module[T]` (amends Decision 3 + Decision 14)
 
 **Status:** Agreed  
-**Amends:** Decision 3 (Head/SEO ownership), Decision 14 (Content lifecycle) — `module.go`, `head.go`
+**Amends:** Decision 3 (Head/SEO ownership), Decision 14 (Content lifecycle) ï¿½ `module.go`, `head.go`
 
-**The gap:** `Headable` was documented as "implemented by content types that provide their own SEO metadata" but `Module[T]` never called it. The only way to wire SEO metadata was via the explicit `HeadFunc` option — a closure the developer must write by hand. A content type that correctly implemented `Head() forge.Head` still received a zero `Head` in sitemaps, feeds, AI endpoints, and HTML rendering unless `HeadFunc` was also supplied. This made the interface decorative and broke the zero-config production-ready promise.
+**The gap:** `Headable` was documented as "implemented by content types that provide their own SEO metadata" but `Module[T]` never called it. The only way to wire SEO metadata was via the explicit `HeadFunc` option ï¿½ a closure the developer must write by hand. A content type that correctly implemented `Head() forge.Head` still received a zero `Head` in sitemaps, feeds, AI endpoints, and HTML rendering unless `HeadFunc` was also supplied. This made the interface decorative and broke the zero-config production-ready promise.
 
 **Change:** Add `resolveHead(ctx Context, item T) Head` to `Module[T]` in `module.go`:
 
 ```go
 // resolveHead returns the Head for item using the highest-priority source available:
-//  1. HeadFunc option — explicit module-level override (context-aware)
-//  2. Headable interface on T — type-level default (no context)
+//  1. HeadFunc option ï¿½ explicit module-level override (context-aware)
+//  2. Headable interface on T ï¿½ type-level default (no context)
 //  3. Zero Head
 func (m *Module[T]) resolveHead(ctx Context, item T) Head {
     if m.headFunc != nil {
@@ -2321,23 +2321,23 @@ forge.NewModule[*Article](&Article{},
 )
 ```
 
-`HeadFunc` remains supported and takes priority over `Headable` when both are present — no breaking change.
+`HeadFunc` remains supported and takes priority over `Headable` when both are present ï¿½ no breaking change.
 
 **Consequences:**
 - `Headable` delivers its documented promise without an explicit `HeadFunc` option
 - `HeadFunc` is still the correct choice for context-aware or database-enriched metadata
-- The `any(item).(Headable)` assertion fires only in regeneration and show handlers — not on the list hot path
+- The `any(item).(Headable)` assertion fires only in regeneration and show handlers ï¿½ not on the list hot path
 - README hero examples and tweet-length demos are now accurate
-- Existing code with `HeadFunc` is unaffected — priority order ensures no behaviour change
+- Existing code with `HeadFunc` is unaffected ï¿½ priority order ensures no behaviour change
 
 **Rejected alternatives:**
-- `forge.DefaultHead()` option — requires an extra call-site token; still leaves `Headable` decorative
-- Reflection on struct field names — fragile, no compile-time contract, inconsistent with codebase patterns
-- Exporting a head-resolution function — adds surface area with no benefit over an interface
+- `forge.DefaultHead()` option ï¿½ requires an extra call-site token; still leaves `Headable` decorative
+- Reflection on struct field names ï¿½ fragile, no compile-time contract, inconsistent with codebase patterns
+- Exporting a head-resolution function ï¿½ adds surface area with no benefit over an interface
 
 ---
 
-## Amendment A29 — `errors.go` error handling gaps
+## Amendment A29 ï¿½ `errors.go` error handling gaps
 
 **Status:** Agreed  
 **Date:** 2026-03-11  
@@ -2357,14 +2357,14 @@ forge.NewModule[*Article](&Article{},
 - Extend `errors_test.go` with the four missing cases
 
 **Consequences:**
-- No public API change — new sentinels are additive
+- No public API change ï¿½ new sentinels are additive
 - `example_test.go` unaffected
 - `respond` is now safe to call from paths other than `WriteError` without risking silent field omission
-- `errorTemplateLookup` write is guarded; second call to `App.Handler()` is silently a no-op (consistent with existing behaviour — `App.Handler()` is documented as one-shot)
+- `errorTemplateLookup` write is guarded; second call to `App.Handler()` is silently a no-op (consistent with existing behaviour ï¿½ `App.Handler()` is documented as one-shot)
 
 ---
 
-## Amendment A30 — `module.go` error handling gaps
+## Amendment A30 ï¿½ `module.go` error handling gaps
 
 **Status:** Agreed  
 **Date:** 2026-03-11  
@@ -2382,14 +2382,14 @@ forge.NewModule[*Article](&Article{},
 - Replace both JSON decode error paths with `errors.As(*http.MaxBytesError)` ? `ErrRequestTooLarge` (413), else `ErrBadRequest` (400), both via `WriteError`
 
 **Consequences:**
-- `writeContent` and `writeContentCached` gain a `r *http.Request` parameter — internal functions only, no public API change
+- `writeContent` and `writeContentCached` gain a `r *http.Request` parameter ï¿½ internal functions only, no public API change
 - Content-negotiation 406 responses now carry `X-Request-ID` and JSON/HTML format
 - Clients that exceed `MaxBodySize` receive 413 instead of 400
 - `example_test.go` unaffected
 
 ---
 
-## Amendment A31 — `templates.go` error handling gaps
+## Amendment A31 ï¿½ `templates.go` error handling gaps
 
 **Status:** Agreed  
 **Date:** 2026-03-11  
@@ -2406,7 +2406,7 @@ forge.NewModule[*Article](&Article{},
 
 ---
 
-## Amendment A32 — `middleware.go` error handling gaps
+## Amendment A32 ï¿½ `middleware.go` error handling gaps
 
 **Status:** Agreed  
 **Date:** 2026-03-11  
@@ -2540,7 +2540,7 @@ if n.md && strings.Contains(a, "text/markdown") {
 - `example_test.go` unaffected
 - `go test ./...` green
 
-## Amendment A36 — `module.go` startup capability mismatch detection
+## Amendment A36 ï¿½ `module.go` startup capability mismatch detection
 
 **Status:** Agreed
 **Date:** 2026-03-11
@@ -2551,16 +2551,16 @@ with no error or warning:
 
 1. `SitemapConfig{}` given but `T` does not implement `SitemapNode` (missing
    `Head() forge.Head`). `regenerateSitemap` performs a type assertion on each
-   item and exits the loop on the first failure — `/{prefix}/sitemap.xml` is
+   item and exits the loop on the first failure ï¿½ `/{prefix}/sitemap.xml` is
    always served empty. The `example/api` bug required live testing to discover.
 
 2. `AIIndex(LLMsTxtFull)` given but `T` does not implement `Markdownable`
-   (missing `Markdown() string`). `regenerateAI` skips the full-corpus path —
+   (missing `Markdown() string`). `regenerateAI` skips the full-corpus path ï¿½
    `/llms-full.txt` contains no body text. Silent, same root cause.
 
 Both are unambiguous programming errors: the developer requested a feature that
 requires an interface their type does not satisfy. The correct remedy is always
-to add the missing method — there is no valid use-case for a silently empty
+to add the missing method ï¿½ there is no valid use-case for a silently empty
 sitemap or AI corpus.
 
 **Decision:** Add two `panic` checks in `NewModule`, immediately after the
@@ -2593,23 +2593,23 @@ The `m.neg.md` flag is already set before option parsing by the existing
 
 **Consequences:**
 
-1. **Call-site syntax** — unchanged; no public API change. The new panics are
+1. **Call-site syntax** ï¿½ unchanged; no public API change. The new panics are
    unreachable for correctly-written code.
-2. **README / examples** — all documented examples already satisfy the required
+2. **README / examples** ï¿½ all documented examples already satisfy the required
    interfaces; no README change needed.
-3. **AI generation accuracy** — improved; the panic messages state exactly which
+3. **AI generation accuracy** ï¿½ improved; the panic messages state exactly which
    method to add, making correct code trivially recoverable.
-4. **Consistency** — matches `getNodeFields` and `!repoFound` patterns exactly.
-5. **Existing tests** — three test types used `SitemapConfig{}` without `Head()`:
+4. **Consistency** ï¿½ matches `getNodeFields` and `!repoFound` patterns exactly.
+5. **Existing tests** ï¿½ three test types used `SitemapConfig{}` without `Head()`:
    `*testPost` (module_test.go) and `*testAIPost` (ai_test.go). Fixed by adding
    `func (p *testPost) Head() Head` and `func (p *testAIPost) Head() Head`.
    A new `testNoHeadPost` type (no `Head()`) serves as the intentional-failure
    fixture for the A36 panic test.
-6. **New tests** — `TestNewModule_sitemapConfig_panicsWithoutSitemapNode` and
+6. **New tests** ï¿½ `TestNewModule_sitemapConfig_panicsWithoutSitemapNode` and
    `TestNewModule_aiIndexLLMsFull_panicsWithoutMarkdownable` added to `module_test.go`.
-7. **No breaking change** — correctly-written code is unaffected.
+7. **No breaking change** ï¿½ correctly-written code is unaffected.
 
-## Amendment A37 — `WriteError` pipeline: replace `http.Error`/`http.NotFound` bypasses
+## Amendment A37 ï¿½ `WriteError` pipeline: replace `http.Error`/`http.NotFound` bypasses
 
 **Status:** Agreed  
 **Date:** 2026-03-12  
@@ -2632,19 +2632,19 @@ All five bypass `WriteError`, so these responses:
 - `http.NotFound` ? `WriteError(w, r, ErrNotFound)`
 - `http.Error(..., 401)` ? `WriteError(w, r, ErrUnauth)`
 - `http.Error(..., 410)` ? `WriteError(w, r, ErrGone)`
-- `http.Error(..., 500)` ? `WriteError(w, r, ErrInternal)` (underlying XML encode error is extremely rare—ResponseWriter wrapping an in-memory buffer—and is logged via `slog.Error` inside `WriteError`)
+- `http.Error(..., 500)` ? `WriteError(w, r, ErrInternal)` (underlying XML encode error is extremely rareï¿½ResponseWriter wrapping an in-memory bufferï¿½and is logged via `slog.Error` inside `WriteError`)
 
 All are in handler closures that already receive `*http.Request`, so no signature change is needed.
 
 **Consequences:**
 
-1. **Call-site syntax** — unchanged; no public API change.
-2. **Response shape** — 404, 410, 401, and 500 responses from these handlers now include `X-Request-ID` and respect `Accept: application/json`.
-3. **Logging** — 500 responses from `IndexHandler` are now logged via `slog.Error` in `WriteError`.
-4. **Tests** — existing test assertions on status code are unaffected. New assertions added for `X-Request-ID` presence.
-5. **No breaking change** — clients that parse only the status code see no difference.
+1. **Call-site syntax** ï¿½ unchanged; no public API change.
+2. **Response shape** ï¿½ 404, 410, 401, and 500 responses from these handlers now include `X-Request-ID` and respect `Accept: application/json`.
+3. **Logging** ï¿½ 500 responses from `IndexHandler` are now logged via `slog.Error` in `WriteError`.
+4. **Tests** ï¿½ existing test assertions on status code are unaffected. New assertions added for `X-Request-ID` presence.
+5. **No breaking change** ï¿½ clients that parse only the status code see no difference.
 
-## Amendment A38 — `auth.go`: `SignToken` error return implements `forge.Error`
+## Amendment A38 ï¿½ `auth.go`: `SignToken` error return implements `forge.Error`
 
 **Status:** Agreed  
 **Date:** 2026-03-12  
@@ -2652,31 +2652,31 @@ All are in handler closures that already receive `*http.Request`, so no signatur
 
 **Problem:** `encodeToken` (called by the public `SignToken`) returned a raw `fmt.Errorf` value on `json.Marshal` failure. This is the only non-`forge.Error` error return from a public API function, violating Decision 16.
 
-**Decision:** Replace `fmt.Errorf("forge: encodeToken marshal: %w", err)` with `ErrInternal`. The `json.Marshal` call serialises `tokenPayload{string, string, []string, int64}` — none of those types can fail JSON serialisation, so this path is unreachable in practice. Returning `ErrInternal` is the correct defensive choice: it satisfies `forge.Error`, is already imported, and requires no new types.
+**Decision:** Replace `fmt.Errorf("forge: encodeToken marshal: %w", err)` with `ErrInternal`. The `json.Marshal` call serialises `tokenPayload{string, string, []string, int64}` ï¿½ none of those types can fail JSON serialisation, so this path is unreachable in practice. Returning `ErrInternal` is the correct defensive choice: it satisfies `forge.Error`, is already imported, and requires no new types.
 
 A compile-time assertion `var _ Error = ErrInternal` is added to `auth_test.go` to document the contract explicitly.
 
 **Consequences:**
 
-1. **Call-site syntax** — `SignToken` signature is unchanged; only the error type improves.
-2. **Error inspectability** — callers using `errors.As(err, new(forge.Error))` now correctly identify the error.
-3. **No breaking change** — the error path was already unreachable; no caller in production can observe the difference.
+1. **Call-site syntax** ï¿½ `SignToken` signature is unchanged; only the error type improves.
+2. **Error inspectability** ï¿½ callers using `errors.As(err, new(forge.Error))` now correctly identify the error.
+3. **No breaking change** ï¿½ the error path was already unreachable; no caller in production can observe the difference.
 
 ---
 
-## Amendment A39 — `Module[T]`: cache sweep goroutine lifecycle and `Stop()` method
+## Amendment A39 ï¿½ `Module[T]`: cache sweep goroutine lifecycle and `Stop()` method
 
 **Status:** Agreed  
 **Date:** 2026-03-12  
 **Amends:** Decision 1 (zero-dependency, production-ready defaults)
 
-**Problem:** When `Cache(ttl)` is used with a module, `NewModule` spawns a `time.Ticker` goroutine that calls `CacheStore.Sweep()` every 60 seconds. The goroutine had no exit path — it ran until the process terminated, leaking across test runs and preventing clean graceful shutdown.
+**Problem:** When `Cache(ttl)` is used with a module, `NewModule` spawns a `time.Ticker` goroutine that calls `CacheStore.Sweep()` every 60 seconds. The goroutine had no exit path ï¿½ it ran until the process terminated, leaking across test runs and preventing clean graceful shutdown.
 
 **Decision:**
 
 1. Add `stopCh chan struct{}` to `Module[T]`. Initialised unconditionally in `NewModule` via `make(chan struct{})` so `Stop()` is always safe to call regardless of options.
 2. The cache sweep goroutine uses `select { case <-ticker.C: ... case <-m.stopCh: return }` instead of `for range ticker.C`.
-3. Add exported `Stop()` method on `Module[T]`. Idempotent — closing an already-closed channel is guarded by a non-blocking select. Also calls `debounce.Stop()` to cancel any pending `time.AfterFunc` timer.
+3. Add exported `Stop()` method on `Module[T]`. Idempotent ï¿½ closing an already-closed channel is guarded by a non-blocking select. Also calls `debounce.Stop()` to cancel any pending `time.AfterFunc` timer.
 4. Add `Stop()` method to `debouncer` in `signals.go` (cancels pending `time.Timer` under the mutex).
 5. Add `stoppable` interface (unexported, matching the `rebuilder`/`schedulableModule` pattern) and `stoppableModules []stoppable` field on `App`.
 6. `App.Content` appends every registered module that implements `stoppable` to `stoppableModules`.
@@ -2684,14 +2684,14 @@ A compile-time assertion `var _ Error = ErrInternal` is added to `auth_test.go` 
 
 **Consequences:**
 
-1. **No API change** — `Module[T]` gains one exported method (`Stop()`). No existing call sites break.
-2. **Test isolation** — modules created in unit tests no longer leak goroutines between test cases.
-3. **Graceful shutdown** — the cache sweep ticker and any pending debounce timer are cancelled within the 5-second shutdown window.
-4. **Debouncer** — `debouncer.Stop()` is safe to call even before `Trigger()` has been called (`d.timer == nil` guard).
+1. **No API change** ï¿½ `Module[T]` gains one exported method (`Stop()`). No existing call sites break.
+2. **Test isolation** ï¿½ modules created in unit tests no longer leak goroutines between test cases.
+3. **Graceful shutdown** ï¿½ the cache sweep ticker and any pending debounce timer are cancelled within the 5-second shutdown window.
+4. **Debouncer** ï¿½ `debouncer.Stop()` is safe to call even before `Trigger()` has been called (`d.timer == nil` guard).
 
 ---
 
-## Amendment A40 — Rename `FeedDisabled()` ? `DisableFeed()` and `forgeLLMSEntries` ? `forgeLLMsEntries`
+## Amendment A40 ï¿½ Rename `FeedDisabled()` ? `DisableFeed()` and `forgeLLMSEntries` ? `forgeLLMsEntries`
 
 **Status:** Agreed  
 **Date:** 2026-03-12  
@@ -2699,57 +2699,57 @@ A compile-time assertion `var _ Error = ErrInternal` is added to `auth_test.go` 
 
 **Problem:** Two symbol names violated the `forge.Verb(Noun)` / `forge.Noun` naming convention:
 
-1. `FeedDisabled()` reads as an adjective predicate rather than a command. Option constructors follow the imperative verb pattern (`Feed`, `Cache`, `Auth`, `On`, `Redirect`). The consistent name is `DisableFeed()` — verb first, noun second.
+1. `FeedDisabled()` reads as an adjective predicate rather than a command. Option constructors follow the imperative verb pattern (`Feed`, `Cache`, `Auth`, `On`, `Redirect`). The consistent name is `DisableFeed()` ï¿½ verb first, noun second.
 2. `forgeLLMSEntries` used the all-caps acronym `LLMS`. Go convention (and the rest of the codebase: `LLMsStore`, `LLMsEntry`, `LLMsTxt`) uses mixed-case `LLMs`. The correct unexported name is `forgeLLMsEntries`.
 
 **Decision:**
 
 1. Rename exported `FeedDisabled() Option` ? `DisableFeed() Option` in `feed.go`. Godoc updated. `feedDisabledOption` struct and `feedDisabledOption` case in `module.go` are internal and unchanged.
-2. Rename unexported `forgeLLMSEntries` ? `forgeLLMsEntries` in `templatehelpers.go`. The map key `"forge_llms_entries"` is unchanged — no template call sites break.
+2. Rename unexported `forgeLLMSEntries` ? `forgeLLMsEntries` in `templatehelpers.go`. The map key `"forge_llms_entries"` is unchanged ï¿½ no template call sites break.
 3. All call sites updated: `feed_test.go`, `templatehelpers_test.go`, `module.go` comment.
 
 **Consequences:**
 
-1. **Breaking change for `FeedDisabled()`** — any application code calling `FeedDisabled()` must be updated to `DisableFeed()`. Since Forge is pre-v1.1.0 and this is a cosmetic rename of a rarely-used option, the breakage is acceptable and preferable to locking in the wrong name.
-2. **No template break** — `{{forge_llms_entries .}}` in user templates is unaffected; the Go function name is unexported.
-3. **AI generation accuracy** — `DisableFeed()` is immediately parseable as an imperative option; `forgeLLMsEntries` matches the casing of all other `LLMs*` symbols.
+1. **Breaking change for `FeedDisabled()`** ï¿½ any application code calling `FeedDisabled()` must be updated to `DisableFeed()`. Since Forge is pre-v1.1.0 and this is a cosmetic rename of a rarely-used option, the breakage is acceptable and preferable to locking in the wrong name.
+2. **No template break** ï¿½ `{{forge_llms_entries .}}` in user templates is unaffected; the Go function name is unexported.
+3. **AI generation accuracy** ï¿½ `DisableFeed()` is immediately parseable as an imperative option; `forgeLLMsEntries` matches the casing of all other `LLMs*` symbols.
 
 ---
 
-## Amendment A41 — `Module[T]`: debounce callback must use `NewBackgroundContext`, not stashed request context
+## Amendment A41 ï¿½ `Module[T]`: debounce callback must use `NewBackgroundContext`, not stashed request context
 
 **Status:** Agreed
 **Date:** 2026-03-12
-**Amends:** Amendment A24 (`NewBackgroundContext`) — missed application; Decision 9 (event-driven regeneration)
+**Amends:** Amendment A24 (`NewBackgroundContext`) ï¿½ missed application; Decision 9 (event-driven regeneration)
 
-**Problem:** `triggerSitemap(ctx Context)` stashed the triggering HTTP request's `forge.Context` in `m.debounceCtx` (protected by `debounceMu`) and the debounce callback read it back 2 seconds later. `forge.Context` embeds `context.Context`, and the request's underlying context is cancelled as soon as the HTTP handler returns — typically well within the 2-second debounce window. When `SQLRepo.FindAll` or `SQLRepo.Save` received this cancelled context, they returned a context error. All three regeneration paths (`regenerateSitemap`, `regenerateAI`, `regenerateFeed`) and `dispatchAfter(SitemapRegenerate)` silently swallowed the error via `if err != nil { return }`, so every write event in production caused a silent no-op rebuild. `MemoryRepo` ignores its context argument, which is why tests never caught this.
+**Problem:** `triggerSitemap(ctx Context)` stashed the triggering HTTP request's `forge.Context` in `m.debounceCtx` (protected by `debounceMu`) and the debounce callback read it back 2 seconds later. `forge.Context` embeds `context.Context`, and the request's underlying context is cancelled as soon as the HTTP handler returns ï¿½ typically well within the 2-second debounce window. When `SQLRepo.FindAll` or `SQLRepo.Save` received this cancelled context, they returned a context error. All three regeneration paths (`regenerateSitemap`, `regenerateAI`, `regenerateFeed`) and `dispatchAfter(SitemapRegenerate)` silently swallowed the error via `if err != nil { return }`, so every write event in production caused a silent no-op rebuild. `MemoryRepo` ignores its context argument, which is why tests never caught this.
 
-Amendment A24 added `NewBackgroundContext` precisely to solve this class of problem — it was not applied here when the debouncer was first implemented.
+Amendment A24 added `NewBackgroundContext` precisely to solve this class of problem ï¿½ it was not applied here when the debouncer was first implemented.
 
 **Decision:**
 
 1. Remove `debounceMu sync.Mutex` and `debounceCtx Context` fields from `Module[T]`.
-2. The debounce callback builds its own `Context` at fire time via `NewBackgroundContext(m.siteName)` — `m.siteName` is a plain string field, safe to read from a goroutine after module construction.
-3. Rename `triggerSitemap(ctx Context)` to `triggerRebuild()` — no ctx parameter needed; the callback is fully self-contained.
+2. The debounce callback builds its own `Context` at fire time via `NewBackgroundContext(m.siteName)` ï¿½ `m.siteName` is a plain string field, safe to read from a goroutine after module construction.
+3. Rename `triggerSitemap(ctx Context)` to `triggerRebuild()` ï¿½ no ctx parameter needed; the callback is fully self-contained.
 4. Update all four call sites (create, update, delete handlers and `processScheduled`).
 
 **Consequences:**
 
-1. **Correctness** — `SQLRepo` users: `regenerateSitemap/AI/Feed` now execute with a live `context.Background()`-backed context; database queries succeed.
-2. **Signal handlers** — `dispatchAfter(SitemapRegenerate)` receives a non-cancelled context; any repo calls inside signal handlers also succeed.
-3. **Simpler struct** — `debounceMu` and `debounceCtx` removed; no lock needed for the debounce path.
-4. **`siteName` at fire time** — may be empty string if module is used without `App.Content`; `NewBackgroundContext("")` is valid and safe.
-5. **No exported API change** — `triggerRebuild` is unexported; `Module[T]`'s public surface is unchanged.
+1. **Correctness** ï¿½ `SQLRepo` users: `regenerateSitemap/AI/Feed` now execute with a live `context.Background()`-backed context; database queries succeed.
+2. **Signal handlers** ï¿½ `dispatchAfter(SitemapRegenerate)` receives a non-cancelled context; any repo calls inside signal handlers also succeed.
+3. **Simpler struct** ï¿½ `debounceMu` and `debounceCtx` removed; no lock needed for the debounce path.
+4. **`siteName` at fire time** ï¿½ may be empty string if module is used without `App.Content`; `NewBackgroundContext("")` is valid and safe.
+5. **No exported API change** ï¿½ `triggerRebuild` is unexported; `Module[T]`'s public surface is unchanged.
 
 ---
 
-## Amendment A42 — `forge.go`: `Config.Version` field and `App.Health()` endpoint
+## Amendment A42 ï¿½ `forge.go`: `Config.Version` field and `App.Health()` endpoint
 
 **Status:** Agreed
 **Date:** 2026-03-12
 **Amends:** Decision 2 (App bootstrap)
 
-**Problem:** Forge apps running in Kubernetes, Docker, or behind a load balancer need a dedicated liveness/readiness endpoint. Developers currently use `app.Handle("GET /healthz", ...)` by hand — a repetitive, error-prone pattern with no standard response shape. The version string has no first-class home in the framework; developers hard-code it in separate handler closures.
+**Problem:** Forge apps running in Kubernetes, Docker, or behind a load balancer need a dedicated liveness/readiness endpoint. Developers currently use `app.Handle("GET /healthz", ...)` by hand ï¿½ a repetitive, error-prone pattern with no standard response shape. The version string has no first-class home in the framework; developers hard-code it in separate handler closures.
 
 **Decision:**
 
@@ -2761,12 +2761,12 @@ Amendment A24 added `NewBackgroundContext` precisely to solve this class of prob
    - Body: `{"status":"ok"}` when `Config.Version` is empty.
    - Body: `{"status":"ok","version":"X.Y.Z"}` when `Config.Version` is set
      (version string JSON-quoted via `fmt.Fprintf`).
-   - `Health()` is explicit opt-in — not mounted automatically by `New` or `Run`.
+   - `Health()` is explicit opt-in ï¿½ not mounted automatically by `New` or `Run`.
      Callers who prefer a custom path continue to use `app.Handle`.
 3. Three tests added to `forge_test.go`:
-   - `TestApp_health_ok` — no version, body is `{"status":"ok"}`
-   - `TestApp_health_version` — version `"1.2.3"`, body is `{"status":"ok","version":"1.2.3"}`
-   - `TestApp_health_notMounted` — `Health()` not called, `/_health` returns 404
+   - `TestApp_health_ok` ï¿½ no version, body is `{"status":"ok"}`
+   - `TestApp_health_version` ï¿½ version `"1.2.3"`, body is `{"status":"ok","version":"1.2.3"}`
+   - `TestApp_health_notMounted` ï¿½ `Health()` not called, `/_health` returns 404
 
 **Call-site syntax:**
 ```go
@@ -2780,16 +2780,16 @@ app.Health()
 
 **Consequences:**
 
-1. **Call-site syntax** — `Config.Version` is a zero-value string; all existing `Config` literals are backward-compatible.
-2. **No forced mount** — the endpoint is not registered unless `Health()` is called. Apps that already use `app.Handle("GET /_health", ...)` are unaffected.
-3. **Response shape** — fixed JSON schema; serialisation uses `fmt.Fprintf` with `%q` for the version field to ensure correct JSON string escaping.
-4. **No middleware** — `/_health` bypasses rate limiting and authentication by design. Liveness probes must not be auth-gated.
-5. **Consistency** — matches `Cookies()`, `Redirect()`, `RedirectManifestAuth()` as an explicit opt-in method on `App`.
-6. **No breaking change** — existing code is unaffected.
+1. **Call-site syntax** ï¿½ `Config.Version` is a zero-value string; all existing `Config` literals are backward-compatible.
+2. **No forced mount** ï¿½ the endpoint is not registered unless `Health()` is called. Apps that already use `app.Handle("GET /_health", ...)` are unaffected.
+3. **Response shape** ï¿½ fixed JSON schema; serialisation uses `fmt.Fprintf` with `%q` for the version field to ensure correct JSON string escaping.
+4. **No middleware** ï¿½ `/_health` bypasses rate limiting and authentication by design. Liveness probes must not be auth-gated.
+5. **Consistency** ï¿½ matches `Cookies()`, `Redirect()`, `RedirectManifestAuth()` as an explicit opt-in method on `App`.
+6. **No breaking change** ï¿½ existing code is unaffected.
 
 ---
 
-## Amendment A43 — NewSQLRepo pointer type documentation (amends Decision 22)
+## Amendment A43 ï¿½ NewSQLRepo pointer type documentation (amends Decision 22)
 
 **Date:** 2026-03-14  
 **Status:** Agreed
@@ -2799,11 +2799,11 @@ README wiring example. T must be a pointer type and must match the proto
 passed to `NewModule`. Value types compile but produce a type mismatch at
 `forge.Repo(repo)`.
 
-**Consequences:** Documentation only — no API or behaviour change.
+**Consequences:** Documentation only ï¿½ no API or behaviour change.
 
 ---
 
-## Amendment A44 — `dbFields`: flatten embedded (anonymous) struct fields via `[]int` index path
+## Amendment A44 ï¿½ `dbFields`: flatten embedded (anonymous) struct fields via `[]int` index path
 
 **Date:** 2026-03-15  
 **Status:** Agreed
@@ -2827,7 +2827,7 @@ runtime. No API surface change; the fix is internal to the reflection layer.
 
 ---
 
-## Amendment A45 — `Config.Auth` field + default `BearerHMAC` wired in `New()`
+## Amendment A45 ï¿½ `Config.Auth` field + default `BearerHMAC` wired in `New()`
 
 **Date:** 2026-03-15  
 **Status:** Agreed
@@ -2848,19 +2848,19 @@ mention the default auth behaviour.
   call or set `Config.Auth` to their preferred `AuthFunc`. The double-wrapping
   is safe (inner wins for role population) but redundant.
 - Auth can be disabled by setting `Config.Auth` to a no-op `AuthFunc` that
-  always returns `GuestUser` — no API change is required for that pattern.
+  always returns `GuestUser` ï¿½ no API change is required for that pattern.
 
 ---
 
-## Amendment A46 — `markdown.go`: minimal Markdown?HTML renderer added to `TemplateFuncMap`
+## Amendment A46 ï¿½ `markdown.go`: minimal Markdown?HTML renderer added to `TemplateFuncMap`
 
 **Date:** 2026-03-15  
 **Status:** Agreed
 
 **Change:** New file `markdown.go` implements `renderMarkdown(s string)
-template.HTML` — a zero-dependency, XSS-safe Markdown?HTML converter
+template.HTML` ï¿½ a zero-dependency, XSS-safe Markdown?HTML converter
 exposed in `TemplateFuncMap` as the `"markdown"` key. Supported elements:
-h1–h6, fenced code blocks with `class="language-<lang>"`, unordered lists,
+h1ï¿½h6, fenced code blocks with `class="language-<lang>"`, unordered lists,
 GFM tables (header + separator + body rows), `**bold**`, `` `inline code` ``,
 blank-line-separated `<p>` paragraphs, and standalone `---` as `<hr>`. All
 content is HTML-entity-escaped before being wrapped in tags. The existing
@@ -2874,7 +2874,7 @@ without any third-party dependency. `TemplateFuncMap` gains one new key
 
 ---
 
-## Amendment A47 — `templatehelpers.go`: `forge_markdown` delegates to `renderMarkdown`
+## Amendment A47 ï¿½ `templatehelpers.go`: `forge_markdown` delegates to `renderMarkdown`
 
 **Date:** 2026-03-15  
 **Status:** Agreed
@@ -2886,13 +2886,13 @@ and `markdown` template keys now use the identical full renderer.
 
 **Reason:** A46 added `renderMarkdown` and exposed it as the `"markdown"` key,
 but left `forge_markdown` / `forgeMarkdown` unchanged. Any template using
-`forge_markdown` continued to produce incorrect output for tables — the
+`forge_markdown` continued to produce incorrect output for tables ï¿½ the
 original stub had no table parsing at all.
 
 **Consequences:** `forge_markdown` gains full parity with `markdown`: GFM
 table rendering, language-tagged fenced code blocks (`class="language-X"`),
 `<hr>` from `---`, and XSS-safe HTML-entity escaping. Features that existed
-only in `forgeMarkdown` — `*italic*` and `[link](url)` — are dropped; they
+only in `forgeMarkdown` ï¿½ `*italic*` and `[link](url)` ï¿½ are dropped; they
 were not part of the documented API and were not present in `renderMarkdown`.
 The `applyInline` helper and regex vars (`reMdLink`, `reMdBold`, `reMdItalic`,
 `reMdCode`, `reMdHeading`) in `templatehelpers.go` become dead code; they
@@ -2900,7 +2900,7 @@ compile cleanly and are left in place to avoid a cross-file change.
 
 ---
 
-## Amendment A48 — `module.go`: set `PublishedAt` on manual publish in `updateHandler`
+## Amendment A48 ï¿½ `module.go`: set `PublishedAt` on manual publish in `updateHandler`
 
 **Date:** 2026-03-15  
 **Status:** Agreed
@@ -2927,7 +2927,7 @@ returned by `updateHandler` reflects the updated `PublishedAt` value because
 
 ---
 
-### Amendment A49 — `mcp.go`/`module.go`/`forge.go`: `MCPModule` contract
+### Amendment A49 ï¿½ `mcp.go`/`module.go`/`forge.go`: `MCPModule` contract
 
 **Date:** 2026-03-16
 **Status:** Agreed
@@ -2945,7 +2945,7 @@ consume without accessing `Module[T]` internals directly.
   (`"string" | "number" | "boolean" | "datetime"`), `Required bool`,
   `MinLength int`, `MaxLength int`, `Enum []string`. Derived automatically from
   Go struct fields and `forge:` struct tags.
-- `MCPModule` interface added (exported): 10 methods — `MCPMeta() MCPMeta`,
+- `MCPModule` interface added (exported): 10 methods ï¿½ `MCPMeta() MCPMeta`,
   `MCPSchema() []MCPField`, `MCPList`, `MCPGet`, `MCPCreate`, `MCPUpdate`,
   `MCPPublish`, `MCPSchedule`, `MCPArchive`, `MCPDelete`. This interface is the
   sole boundary `forge-mcp` crosses into `forge` core.
@@ -2960,13 +2960,13 @@ consume without accessing `Module[T]` internals directly.
   persistent MCP state on the struct.
 - All 10 `MCPModule` methods implemented on `*Module[T]`. Mutating methods share
   the same `repo`, `signals`, `RunValidation`, `invalidateCache`,
-  `triggerRebuild`, and `dispatchAfter` calls as the existing HTTP handlers—no
+  `triggerRebuild`, and `dispatchAfter` calls as the existing HTTP handlersï¿½no
   new I/O paths, no new lifecycle rules.
 - Four private helpers added: `typeName(reflect.Type) string`,
   `snakeCase(string) string`, `mcpGoTypeStr(reflect.Type) string`,
   `mcpJSONName(reflect.StructField) string`, `mcpParseForgeTag(string)`,
   `mcpStructField(reflect.StructField) MCPField`.
-- `snakeCase` rule: consecutive uppercase letters form one word—
+- `snakeCase` rule: consecutive uppercase letters form one wordï¿½
   `MCPPost ? mcp_post`, `BlogID ? blog_id`.
 - Compile-time assertion: `var _ MCPModule = (*Module[struct{ Node }])(nil)`.
 
@@ -2978,7 +2978,7 @@ consume without accessing `Module[T]` internals directly.
 - `App.MCPModules() []MCPModule` accessor added. Returns the live internal slice.
   `forge-mcp` calls this once in `New(app)` to build its registry.
 
-**Call-site syntax** — unchanged before and after:
+**Call-site syntax** ï¿½ unchanged before and after:
 
 ```go
 app.Content(&BlogPost{},
@@ -2990,7 +2990,7 @@ app.Content(&BlogPost{},
 **Consequences:**
 1. `forge.MCP(...)` options are no longer a no-op at runtime. `App.MCPModules()`
    returns a non-empty slice for apps that use `forge.MCP(...)`.
-2. Three new exported types — `MCPMeta`, `MCPField`, `MCPModule` — are the
+2. Three new exported types ï¿½ `MCPMeta`, `MCPField`, `MCPModule` ï¿½ are the
    stable API surface for `forge-mcp`. No existing exported symbol is removed
    or renamed.
 3. `forge` never imports `forge-mcp`. The import direction is one-way.
@@ -3004,7 +3004,7 @@ app.Content(&BlogPost{},
 
 ---
 
-## Amendment A50 — `auth.go`/`forge.go`/`context.go`/`forge-mcp/mcp.go`: `VerifyBearerToken`, `App.Secret()`, `NewContextWithUser`, `Server` secret auto-inherit
+## Amendment A50 ï¿½ `auth.go`/`forge.go`/`context.go`/`forge-mcp/mcp.go`: `VerifyBearerToken`, `App.Secret()`, `NewContextWithUser`, `Server` secret auto-inherit
 
 **Date:** 2026-03-16
 **Status:** Agreed
@@ -3013,7 +3013,7 @@ app.Content(&BlogPost{},
 without leaking test-scoped helpers into production code and without silent
 misconfiguration of SSE bearer-token authentication.
 
-**Part 1 — `forge/auth.go`: `VerifyBearerToken`**
+**Part 1 ï¿½ `forge/auth.go`: `VerifyBearerToken`**
 
 Add a new exported free function:
 
@@ -3043,7 +3043,7 @@ The signature takes `*http.Request` and `secret []byte` (not two strings) to
 match HTTP handler call sites directly and to accept the `[]byte` secret stored
 in `Config.Secret` without a conversion at the call site.
 
-**Part 2 — `forge/forge.go`: `App.Secret()`**
+**Part 2 ï¿½ `forge/forge.go`: `App.Secret()`**
 
 Add one exported accessor method:
 
@@ -3054,7 +3054,7 @@ Add one exported accessor method:
 func (a *App) Secret() []byte { return a.cfg.Secret }
 ```
 
-**Part 3 — `forge/context.go`: `NewContextWithUser`**
+**Part 3 ï¿½ `forge/context.go`: `NewContextWithUser`**
 
 Add a new exported constructor:
 
@@ -3080,10 +3080,10 @@ func NewContextWithUser(user User) Context {
 }
 ```
 
-`net/http/httptest` was already imported by `NewTestContext` in `context.go` —
+`net/http/httptest` was already imported by `NewTestContext` in `context.go` ï¿½
 no new dependency is introduced.
 
-**Part 4 — `forge-mcp/mcp.go`: `Server` secret auto-inherit**
+**Part 4 ï¿½ `forge-mcp/mcp.go`: `Server` secret auto-inherit**
 
 Replace the `auth forge.AuthFunc` placeholder field with `secret []byte` and
 update `New` to auto-inherit the app's secret. Add a `ServerOption` type and
@@ -3110,7 +3110,7 @@ func New(app *forge.App, opts ...ServerOption) *Server {
         o(s)
     }
     if len(s.secret) > 0 && !bytes.Equal(s.secret, app.Secret()) {
-        log.Printf("forge-mcp: WithSecret value differs from app Config.Secret — " +
+        log.Printf("forge-mcp: WithSecret value differs from app Config.Secret ï¿½ " +
             "tokens minted by forge.SignToken will fail SSE verification")
     }
     return s
@@ -3130,14 +3130,14 @@ func New(app *forge.App, opts ...ServerOption) *Server {
    []forge.Role{forge.Admin}})`. `NewTestContext` continues to exist unchanged
    for test code; the new function is the non-test equivalent.
 4. `Server.auth forge.AuthFunc` is removed. The field was unexported and only
-   ever used as a placeholder — no call site outside `forge-mcp` referenced it.
+   ever used as a placeholder ï¿½ no call site outside `forge-mcp` referenced it.
 5. `New(app *forge.App, opts ...ServerOption)` is backward-compatible at
    existing call sites where `New(app)` is called with no options. The
    variadic `opts` parameter adds no obligation.
 6. The `bytes` and `log` standard library packages are added to `forge-mcp/mcp.go`
    imports (needed for `bytes.Equal` and `log.Printf` in the mismatch warning).
 
-## Amendment A51 — `templates.go`: `twitter:card` derives from `Head.Type`
+## Amendment A51 ï¿½ `templates.go`: `twitter:card` derives from `Head.Type`
 
 **Status:** Agreed  
 **Date:** 2026-03-17  
@@ -3155,9 +3155,9 @@ Extend the `twitter:card` conditional to emit `"summary_large_image"` when
 `Head.Type` is `"Article"` or `"Product"`, regardless of whether an image is
 present. Priority order (highest to lowest):
 
-1. `Head.Social.Twitter.Card` explicit override — unchanged
-2. `Head.Type == "Article"` or `"Product"` — new, derives card from content type
-3. `Head.Image.URL` non-empty — existing behaviour preserved
+1. `Head.Social.Twitter.Card` explicit override ï¿½ unchanged
+2. `Head.Type == "Article"` or `"Product"` ï¿½ new, derives card from content type
+3. `Head.Image.URL` non-empty ï¿½ existing behaviour preserved
 4. Default `"summary"`
 
 **Change:**
@@ -3177,17 +3177,17 @@ present. Priority order (highest to lowest):
 1. Article and product pages automatically emit the correct Twitter Card type
    without requiring developers to set `Head.Social.Twitter.Card` explicitly
    or provide a placeholder image.
-2. No exported API change — `Head.Type` is already part of `Head` and is set
+2. No exported API change ï¿½ `Head.Type` is already part of `Head` and is set
    by the existing `Article`, `Product` constants in `head.go`.
-3. Existing pages that set `Head.Image.URL` are unaffected — the `or`
+3. Existing pages that set `Head.Image.URL` are unaffected ï¿½ the `or`
    short-circuits and the image path still triggers `summary_large_image`.
 4. Pages that explicitly set `Head.Social.Twitter.Card = Summary` continue to
-   emit `"summary"` even when `Head.Type` is `"Article"` — the override
+   emit `"summary"` even when `Head.Type` is `"Article"` ï¿½ the override
    remains the highest-priority branch.
 5. No README examples break. `example_test.go` requires no changes.
-6. Shipped as patch v1.1.1 — no breaking change.
+6. Shipped as patch v1.1.1 ï¿½ no breaking change.
 
-## Amendment A52 — `module.go`/`forge-mcp/mcp.go`: `[]string` fields in MCPSchema and comma-string coercion
+## Amendment A52 ï¿½ `module.go`/`forge-mcp/mcp.go`: `[]string` fields in MCPSchema and comma-string coercion
 
 **Status:** Agreed
 **Date:** 2026-03-17
@@ -3197,7 +3197,7 @@ present. Priority order (highest to lowest):
 
 **Problem (three related bugs):**
 
-1. `mcpGoTypeStr` in `module.go` has no `case reflect.Slice` branch — slice types
+1. `mcpGoTypeStr` in `module.go` has no `case reflect.Slice` branch ï¿½ slice types
    fall through to `default: return "string"`, so a `[]string` field on a content
    type is advertised to MCP clients as `{"type":"string"}`. Claude Desktop and
    other clients therefore send a plain string value, which `json.Unmarshal` into
@@ -3217,13 +3217,13 @@ present. Priority order (highest to lowest):
 
 Fix all three bugs as a single patch:
 
-1. **`mcpGoTypeStr`** — add `case reflect.Slice: return "array"` before `default`.
+1. **`mcpGoTypeStr`** ï¿½ add `case reflect.Slice: return "array"` before `default`.
 
-2. **`inputSchema` / `inputSchemaUpdate`** — when `f.Type == "array"`, emit
+2. **`inputSchema` / `inputSchemaUpdate`** ï¿½ when `f.Type == "array"`, emit
    `{"type":"array","items":{"type":"string"}}` and skip `minLength`/`maxLength`/`enum`
    constraints (which apply to string entries, not arrays).
 
-3. **`coerceSliceFields`** — new unexported helper in `module.go`. Before the
+3. **`coerceSliceFields`** ï¿½ new unexported helper in `module.go`. Before the
    `json.Marshal(fields)` ? `json.Unmarshal(data, pv)` round-trip in `MCPCreate`
    and `MCPUpdate`, walk every struct field of the target type; for any `[]string`
    (or `[]*string`) field whose corresponding `fields` map entry is a plain `string`,
@@ -3239,10 +3239,10 @@ Fix all three bugs as a single patch:
    in the MCP tools/list schema, so conforming MCP clients send proper JSON arrays.
 2. Clients that send comma-separated strings are transparently normalised; no change
    required at the application layer.
-3. No exported API change — `MCPCreate`, `MCPUpdate`, and `MCPSchema` signatures are
+3. No exported API change ï¿½ `MCPCreate`, `MCPUpdate`, and `MCPSchema` signatures are
    unchanged. `coerceSliceFields` is unexported.
 4. No README examples break. `example_test.go` requires no changes.
-5. Shipped as patch v1.1.2 — no breaking change.
+5. Shipped as patch v1.1.2 ï¿½ no breaking change.
 
 ## Amendment A53 ? `module.go`: `negotiate()` prefers `text/html` for absent or wildcard Accept
 
@@ -3287,7 +3287,7 @@ and more useful response.
 6. Shipped as patch v1.1.3 ? no breaking change.
 
 
-## Amendment A56 — `head.go`: `AbsURL(base, path string) string` helper
+## Amendment A56 ï¿½ `head.go`: `AbsURL(base, path string) string` helper
 
 **Status:** Agreed
 **Date:** 2026-03-20
@@ -3327,10 +3327,10 @@ integration (automatic BaseURL prepend) is deferred to A57.
 2. `forge-site` S19 workaround (manual string prepend) can be replaced with
    `forge.AbsURL()` in a follow-up amendment.
 3. No breaking change. No exported API removed or modified. `strings` is already
-   imported in `head.go` — no new imports.
-4. Shipped as patch v1.1.4 — no breaking change.
+   imported in `head.go` ï¿½ no new imports.
+4. Shipped as patch v1.1.4 ï¿½ no breaking change.
 
-## Amendment A57 — `storage.go`: `quoteIdent()` — double-quote all generated SQL identifiers
+## Amendment A57 ï¿½ `storage.go`: `quoteIdent()` ï¿½ double-quote all generated SQL identifiers
 
 **Status:** Agreed
 **Date:** 2026-03-20
@@ -3361,16 +3361,16 @@ supported by both SQLite (= 3.x) and PostgreSQL.
 
 1. Reserved keywords (`order`, `group`, `index`, `references`, etc.) work as
    `db` tag values without any workaround.
-2. No breaking change — quoting a valid identifier is semantically identical to
+2. No breaking change ï¿½ quoting a valid identifier is semantically identical to
    the unquoted form. Existing schemas and queries are unaffected.
 3. Existing unit tests updated to assert the now-quoted query strings.
    New `TestSQLRepo_ReservedKeyword_quotes` asserts the `"order"` column is
-   quoted in the generated `INSERT … ON CONFLICT … DO UPDATE SET` statement.
-4. Shipped as patch v1.1.5 — no breaking change.
+   quoted in the generated `INSERT ï¿½ ON CONFLICT ï¿½ DO UPDATE SET` statement.
+4. Shipped as patch v1.1.5 ï¿½ no breaking change.
 
 ---
 
-## Amendment A58 — `forge.go`: `forgeVersions()` — framework version reporting in `/_health` and startup log
+## Amendment A58 ï¿½ `forge.go`: `forgeVersions()` ï¿½ framework version reporting in `/_health` and startup log
 
 **Status:** Agreed
 **Date:** 2026-03-20
@@ -3413,21 +3413,21 @@ forge: forge (devel)        // development build
 forge: forge 1.1.6, forge_mcp 1.0.5  // production build
 ```
 
-`Config.Version` is retained in the `Config` struct — its godoc is updated to
+`Config.Version` is retained in the `Config` struct ï¿½ its godoc is updated to
 clarify it is for application use only and is no longer consumed by `Health()`.
 
 **Consequences:**
 
 1. Observability tooling and health-check consumers can now discover the exact
    Forge version from the health endpoint without any application configuration.
-2. The `"version"` key is removed from the `/_health` response — callers that
+2. The `"version"` key is removed from the `/_health` response ï¿½ callers that
    relied on it must read `Config.Version` themselves and add it to a custom
    response if needed. This is a **breaking change to the Health() JSON shape**;
    however, because `Config.Version` was seldom set in practice and the new
    behaviour is strictly more informative, this is shipped as a patch (v1.1.6)
    rather than a minor version bump.
 3. In development builds (go test, local go run), the version will be `"(devel)"`
-   — this is the correct representation from `runtime/debug` and is intentional.
+   ï¿½ this is the correct representation from `runtime/debug` and is intentional.
 4. `TestApp_health_ok` and `TestApp_health_version` updated; new tests
    `TestApp_health_forgeVersion` and `TestApp_health_configVersion_notExposed`
    added.
@@ -3437,7 +3437,7 @@ clarify it is for application use only and is no longer consumed by `Health()`.
 
 ---
 
-## Amendment A59 — `forge.go`: `httpsRedirect()` — exempt `/_health` from HTTPS redirect
+## Amendment A59 ï¿½ `forge.go`: `httpsRedirect()` ï¿½ exempt `/_health` from HTTPS redirect
 
 **Status:** Agreed
 **Date:** 2026-03-20
@@ -3464,7 +3464,7 @@ skips the TLS check entirely.
 2. All other plain-HTTP requests are still redirected to HTTPS as before.
 3. Security note: `/_health` is exempt from HTTPS redirect but not exempt from
    DDoS risk. The risk is considered acceptable: the endpoint performs no
-   database queries, no file I/O, and no computation — it returns a static JSON
+   database queries, no file I/O, and no computation ï¿½ it returns a static JSON
    response of ~50 bytes. A reverse proxy (e.g. Caddy) sits in front and
    handles connection limiting independently of Forge. An attacker targeting
    `/_health` gains no meaningful advantage over targeting any other public endpoint.
@@ -3473,7 +3473,7 @@ skips the TLS check entirely.
 
 ---
 
-## Amendment A60 — `forge.go`: `New()` enforces `MustConfig()` automatically
+## Amendment A60 ï¿½ `forge.go`: `New()` enforces `MustConfig()` automatically
 
 **Status:** Agreed
 **Date:** 2026-04-02
@@ -3497,7 +3497,7 @@ invalid.
 
 1. Breaking change: apps that passed an invalid `Config` to `New()` directly
    (without calling `MustConfig`) and somehow started will now panic at startup.
-   This is intentional — a misconfigured app must not silently start.
+   This is intentional ï¿½ a misconfigured app must not silently start.
 2. The godoc on `New()` is updated to document the panic behaviour and remove
    the recommendation to call `MustConfig` manually.
 3. Calling `forge.New(forge.MustConfig(cfg))` remains correct and is still the
@@ -3508,7 +3508,7 @@ invalid.
 
 ---
 
-## Amendment A61 — `OGDefaults`, `AppSchema`, and `forge:head` receiver change
+## Amendment A61 ï¿½ `OGDefaults`, `AppSchema`, and `forge:head` receiver change
 
 **Status:** Agreed
 **Date:** 2026-04-02
@@ -3524,15 +3524,15 @@ Organization block) without duplicating it in every content type.
 
 **Decision:**
 
-1. **`OGDefaults`** (`social.go`) — new `SEOOption` applied via `app.SEO()`.
+1. **`OGDefaults`** (`social.go`) ï¿½ new `SEOOption` applied via `app.SEO()`.
    Fields: `Image Image`, `TwitterSite string`, `TwitterCreator string`.
    `mergeOGDefaults(head, d)` applies fallbacks at render time: `Head.Image`
    is replaced when empty; `Head.Social.Twitter.Creator` is replaced when empty.
    `TwitterSite` is app-level only (no per-item override).
-2. **`AppSchema`** (`schema.go`) — new `SEOOption` applied via `app.SEO()`.
+2. **`AppSchema`** (`schema.go`) ï¿½ new `SEOOption` applied via `app.SEO()`.
    Fields: `Type`, `Name`, `URL`, `Logo`. `renderAppSchema` produces a
    pre-rendered `template.HTML` JSON-LD block at `Handler()` time.
-3. **`forge:head` receiver change** — the partial now receives the full
+3. **`forge:head` receiver change** ï¿½ the partial now receives the full
    `TemplateData` value (`{{template "forge:head" .}}`) instead of just `Head`
    (`{{template "forge:head" .Head}}`). All field references inside the partial
    are prefixed with `.Head.`. New tags added: `twitter:site` (from
@@ -3549,7 +3549,7 @@ Organization block) without duplicating it in every content type.
    updated to `{{template "forge:head" .}}` in all developer templates. The
    three built-in example apps and all `README.md` examples are updated in this
    commit. The `example_test.go` compile tests remain green.
-2. `twitter:site` is now emitted when `OGDefaults.TwitterSite` is set —
+2. `twitter:site` is now emitted when `OGDefaults.TwitterSite` is set ï¿½
    previously this tag was never emitted by Forge at all.
 3. `AppSchema` JSON-LD is auto-emitted every page when configured; no per-
    template change required.
@@ -3560,7 +3560,7 @@ Organization block) without duplicating it in every content type.
 
 ---
 
-## Amendment A62 — Shared template partials
+## Amendment A62 ï¿½ Shared template partials
 
 **Status:** Agreed  
 **Date:** 2026-04-02  
@@ -3574,21 +3574,21 @@ all templates.
 
 **Decision:**
 
-1. **`App.Partials(dir string) *App`** (`forge.go`) — stores a partials
+1. **`App.Partials(dir string) *App`** (`forge.go`) ï¿½ stores a partials
    directory path; returns `*App` for chaining. Any `*.html` file in `dir` is
    treated as a shared partial and registered into every module template set.
    Files must use `{{define "name"}}...{{end}}` syntax (same convention as
    `forge:head`). Files are loaded and registered in alphabetical order for
    determinism. Opt-in: sites with no `Partials()` call are unaffected.
-2. **`loadPartials(dir string) ([]string, error)`** (`templates.go`) — reads
+2. **`loadPartials(dir string) ([]string, error)`** (`templates.go`) ï¿½ reads
    all `*.html` files from `dir` alphabetically. Returns `(nil, nil)` when
    `dir` is empty. Returns an error if the directory does not exist.
-3. **`Module[T].setPartials([]string)`** (`templates.go`) — stores partial
+3. **`Module[T].setPartials([]string)`** (`templates.go`) ï¿½ stores partial
    sources on the module. Called by `App.Run()` before `parseTemplates()` via
    the same inline interface pattern as `setSiteName` and `setSEODefaults`.
 4. **`parseOneTemplate`** now accepts a `partials []string` argument and
    registers each source into the template set after `forge:head`.
-5. **`App.MustParseTemplate(path string) *template.Template`** (`forge.go`) —
+5. **`App.MustParseTemplate(path string) *template.Template`** (`forge.go`) ï¿½
    loads a single template file, registers `TemplateFuncMap`, `forge:head`, and
    all partials from `a.partialsDir`. Panics on error (consistent with
    `MustConfig`). For custom `app.Handle()` route handlers that need shared
@@ -3600,7 +3600,7 @@ all templates.
    call-site change to `list.html` / `show.html`.
 2. Custom handler templates: developer calls `app.MustParseTemplate(path)` once
    in `main()` before `app.Run()`.
-3. `parseOneTemplate` signature change is internal — no exported API touched.
+3. `parseOneTemplate` signature change is internal ï¿½ no exported API touched.
 4. `loadPartials` / `setPartials` / `partialsDir` are all internal; the only
    exported symbols added are `App.Partials` and `App.MustParseTemplate`.
 5. Missing partials directory returns an error from `App.Run()` (not a panic)
@@ -3609,37 +3609,37 @@ all templates.
 
 ---
 
-## Amendment A63 — HeadAssets: static linked assets via forge:head
+## Amendment A63 ï¿½ HeadAssets: static linked assets via forge:head
 
 **Status:** Agreed  
 **Date:** 2026-04-03  
 **Scope:** `head.go`, `templates.go`, `templatedata.go`, `forge.go`, `module.go`
 
 **Problem:**
-Forge provided no built-in way to inject site-wide static assets — preconnect
-hints, stylesheets, favicon `<link>` elements, and `<script>` tags — into
+Forge provided no built-in way to inject site-wide static assets ï¿½ preconnect
+hints, stylesheets, favicon `<link>` elements, and `<script>` tags ï¿½ into
 `forge:head`. Developers had to hard-code these in every list/show template or
 create a shared partial that duplicated the logic. Neither approach let the
 framework manage the `<head>` consistently.
 
 **Decision:**
 
-1. **`HeadAssets`** (`head.go`) — new `SEOOption` struct. Applied via
+1. **`HeadAssets`** (`head.go`) ï¿½ new `SEOOption` struct. Applied via
    `app.SEO(&forge.HeadAssets{...})`. Fields:
-   - `Preconnect []string` — emitted as `<link rel="preconnect" href="…">`
-   - `Stylesheets []string` — emitted as `<link rel="stylesheet" href="…">`
-   - `Favicons []FaviconLink` — emitted as typed `<link>` elements
-   - `Scripts []ScriptTag` — emitted as `<script>` elements (external or inline)
-2. **`FaviconLink`** (`head.go`) — struct with `Rel`, `Type`, `Sizes`, `Href`.
+   - `Preconnect []string` ï¿½ emitted as `<link rel="preconnect" href="ï¿½">`
+   - `Stylesheets []string` ï¿½ emitted as `<link rel="stylesheet" href="ï¿½">`
+   - `Favicons []FaviconLink` ï¿½ emitted as typed `<link>` elements
+   - `Scripts []ScriptTag` ï¿½ emitted as `<script>` elements (external or inline)
+2. **`FaviconLink`** (`head.go`) ï¿½ struct with `Rel`, `Type`, `Sizes`, `Href`.
    `Type` and `Sizes` are omitted from the emitted `<link>` when empty.
-3. **`ScriptTag`** (`head.go`) — struct with `Src`, `Body template.JS`, `Async`,
+3. **`ScriptTag`** (`head.go`) ï¿½ struct with `Src`, `Body template.JS`, `Async`,
    `Defer`. `Async`/`Defer` are only emitted for external scripts (`Src`
    non-empty). `Body` is typed `template.JS` (an alias for `string` from
    `html/template`) so Go's context-aware escaping does not quote inline bodies.
 4. **Emission order** in `forgeHeadTmpl` (`templates.go`): preconnect ?
    stylesheets ? favicons ? scripts. Scripts are always last to give
    stylesheets time to load.
-5. **Propagation chain** — mirrors `OGDefaults` and `AppSchema`:
+5. **Propagation chain** ï¿½ mirrors `OGDefaults` and `AppSchema`:
    - `seoState.headAssets *HeadAssets` added to `forge.go`
    - `App.Handler()` interface assertion updated to 3-arg `setSEODefaults`:
      `interface{ setSEODefaults(*OGDefaults, *AppSchema, *HeadAssets) }`
@@ -3656,12 +3656,12 @@ framework manage the `<head>` consistently.
 
 1. `HeadAssets`, `FaviconLink`, `ScriptTag` are new exported types in `head.go`.
    The `html/template` import is added to `head.go`.
-2. `setSEODefaults` signature change (2-arg ? 3-arg) is internal — the method
+2. `setSEODefaults` signature change (2-arg ? 3-arg) is internal ï¿½ the method
    is unexported and called only via the inline interface assertion in
    `App.Handler()`.
 3. `TemplateData[T]` gains one new field (`HeadAssets`). Existing templates that
    do not use `HeadAssets` are unaffected.
-4. Nil `HeadAssets` (no `app.SEO(&HeadAssets{...})` call) produces no output —
+4. Nil `HeadAssets` (no `app.SEO(&HeadAssets{...})` call) produces no output ï¿½
    the template block is guarded by `{{- if .HeadAssets}}`.
 5. Inline script bodies must be wrapped with `template.JS(...)` at the call
    site. This is explicit and secure: it reminds developers never to pass
@@ -3669,7 +3669,7 @@ framework manage the `<head>` consistently.
 
 ---
 
-## Amendment A64 — PageHead: embeddable head struct for custom handlers
+## Amendment A64 ï¿½ PageHead: embeddable head struct for custom handlers
 
 **Status:** Agreed  
 **Date:** 2026-04-03  
@@ -3678,23 +3678,23 @@ framework manage the `<head>` consistently.
 **Problem:**
 `forge:head` works in module templates (list.html, show.html) because they
 receive `TemplateData[T]`, which carries `.Head`, `.OGDefaults`, `.AppSchema`,
-and `.HeadAssets`. Custom handlers — like a home page — define their own data
+and `.HeadAssets`. Custom handlers ï¿½ like a home page ï¿½ define their own data
 structs and could not use `{{template "forge:head" .}}` because those fields
 were absent from any struct they defined.
 
 **Decision:**
 
-1. **`PageHead`** (`head.go`) — new exported struct holding exactly the four
+1. **`PageHead`** (`head.go`) ï¿½ new exported struct holding exactly the four
    fields that `forge:head` reads: `Head Head`, `OGDefaults *OGDefaults`,
    `AppSchema template.HTML`, `HeadAssets *HeadAssets`.
-2. **`TemplateData[T]`** (`templatedata.go`) — refactored to embed `PageHead`
+2. **`TemplateData[T]`** (`templatedata.go`) ï¿½ refactored to embed `PageHead`
    as an **anonymous (unnamed) field**. Go's `html/template` engine promotes
    all fields of the embedded struct to the top level, so existing template
    access paths (`.Head`, `.OGDefaults`, `.AppSchema`, `.HeadAssets`) are
    preserved without modification.
-3. **`NewTemplateData`** constructor — signature unchanged. The body now writes
+3. **`NewTemplateData`** constructor ï¿½ signature unchanged. The body now writes
    `PageHead: PageHead{Head: head}` instead of `Head: head`.
-4. **Zero breaking changes** — field access paths in templates, the
+4. **Zero breaking changes** ï¿½ field access paths in templates, the
    `NewTemplateData` signature, and the `templates.go` render paths (which use
    field assignment, not struct-literal syntax) are all unaffected.
 
@@ -3710,18 +3710,18 @@ were absent from any struct they defined.
    ```
 2. Struct literal initialization of `TemplateData[T]` with `Head:`,
    `OGDefaults:`, `AppSchema:`, or `HeadAssets:` keys directly is no longer
-   valid — callers must use `PageHead: forge.PageHead{Head: ...}`. This affects
+   valid ï¿½ callers must use `PageHead: forge.PageHead{Head: ...}`. This affects
    only internal test files (updated in the same commit); public API callers use
    `NewTemplateData` which is unchanged.
 3. `templatedata.go` drops its `"html/template"` import (now unused); the import
    lives in `head.go` where `PageHead.AppSchema template.HTML` is declared.
-4. `forgeHeadTmpl` is unchanged — it already accesses `.Head`, `.OGDefaults`,
+4. `forgeHeadTmpl` is unchanged ï¿½ it already accesses `.Head`, `.OGDefaults`,
    `.AppSchema`, `.HeadAssets` at the top level, which anonymous embedding
    satisfies.
 
 ---
 
-## Amendment A65 — ContextFunc: per-request extra data for module templates
+## Amendment A65 ï¿½ ContextFunc: per-request extra data for module templates
 
 **Status:** Agreed  
 **Date:** 2026-04-04  
@@ -3730,29 +3730,29 @@ were absent from any struct they defined.
 **Problem:**
 Module show and list templates receive only `TemplateData[T]`, which contains
 the single content item being rendered (or a slice for list). There is no
-framework-supported way to pass additional data — for example, all published
-docs for a sidebar — into a template without writing a custom handler that
+framework-supported way to pass additional data ï¿½ for example, all published
+docs for a sidebar ï¿½ into a template without writing a custom handler that
 bypasses the module's routing, authentication, caching, and lifecycle layers.
 
 **Decision:**
 
-1. **`ContextFunc(fn)`** (`module.go`) — new module `Option`. Accepts a
+1. **`ContextFunc(fn)`** (`module.go`) ï¿½ new module `Option`. Accepts a
    function `func(Context, any) (any, error)`. The function is called once
    per list or show render, after all module wiring has run. Its return value
    is stored in `TemplateData.Extra`. The function receives the current
    `Context` and the item being rendered (T for show, []T for list).
-2. **`TemplateData.Extra any`** (`templatedata.go`) — new field. Zero value is
+2. **`TemplateData.Extra any`** (`templatedata.go`) ï¿½ new field. Zero value is
    `nil` when no `ContextFunc` is configured. Templates access it as `{{.Extra}}`
    and may assign it to a named variable:
    ```
    {{- $nav := .Extra}}
    {{template "sidebar" $nav}}
    ```
-3. **`resolveExtra`** (`templates.go`) — unexported method on `Module[T]`.
+3. **`resolveExtra`** (`templates.go`) ï¿½ unexported method on `Module[T]`.
    Called by `renderListHTML` and `renderShowHTML` after all other `data`
    fields are set. If `contextFunc` is nil it returns nil immediately (zero
    overhead for all sites that do not use the option). If the function returns
-   an error, `resolveExtra` logs and returns nil — the render is never aborted.
+   an error, `resolveExtra` logs and returns nil ï¿½ the render is never aborted.
 4. **`NewTemplateData` signature unchanged.** `Extra` is set by the render
    path via direct field assignment, consistent with how `OGDefaults`,
    `AppSchema`, and `HeadAssets` are set after construction.
@@ -3760,14 +3760,14 @@ bypasses the module's routing, authentication, caching, and lifecycle layers.
 **Rationale for `any` item parameter:**
 `ContextFunc` uses `any` rather than `T` because a single function type must
 work for both list (`[]T`) and show (`T`) call sites. A `T`-typed overload
-would require two distinct options, two fields, and two call sites — more
+would require two distinct options, two fields, and two call sites ï¿½ more
 surface area for one pattern that is already clear at the call site.
 
 **Consequences:**
 
 1. Sites without `ContextFunc` are unaffected; `resolveExtra` is a nil-check
    short-circuit with no allocation.
-2. `ContextFunc` errors must never abort the render — log and return nil.
+2. `ContextFunc` errors must never abort the render ï¿½ log and return nil.
    This is consistent with how signal errors are handled: they are logged but
    do not surface to the HTTP client.
 3. `resolveExtra` lives in `templates.go`, not `module.go`, because it is
@@ -3775,6 +3775,85 @@ surface area for one pattern that is already clear at the call site.
    logic belongs in the file where it is consumed.
 4. No change to `forgeHeadTmpl`, `NewTemplateData` signature, or any existing
    template field paths.
+
+---
+
+### Amendment A88 â€” `forge.go`: App webhook wiring
+
+**Date:** 2026-05-08
+**Status:** Agreed
+
+**Change:**
+Added three exported/unexported symbols to `forge.go` to wire outbound webhook
+infrastructure into the App lifecycle:
+
+1. **`App.Webhooks(store *WebhookStore)`** â€” sets `a.webhookStore = store`,
+   creates a `workerPool` backed by `a.cfg.DB`, and stores it as
+   `a.webhookPool`. Called before `Run` by site authors that want webhooks.
+2. **`App.WebhookPool() WebhookJobQueue`** â€” returns the active pool for
+   introspection and testing. Returns nil if `Webhooks` has not been called.
+3. **`App.injectWebhookHooks()`** (unexported) â€” iterates `a.modules` and
+   calls `setAfterHook` on each module with a closure that:
+   - reads all active endpoints for the relevant event from the store,
+   - calls `pool.Enqueue` for each endpoint.
+   Invoked by `Run` immediately before starting the HTTP server.
+
+**Rationale:**
+The pool must be started and stopped with the server lifecycle. Registering
+the after-hooks at `Run` time (not `Webhooks` time) ensures all modules are
+registered before any hooks are wired â€” modules call `app.Content()` between
+`New()` and `Run()`.
+
+**Consequences:**
+1. Sites that do not call `Webhooks` are unaffected â€” `injectWebhookHooks`
+   is a no-op when `webhookStore` is nil.
+2. `App.Run` now calls `injectWebhookHooks()` before `ListenAndServe`.
+3. `App.Run` starts `webhookPool.Start(ctx)` and defers `webhookPool.Stop()`
+   alongside the server shutdown sequence.
+4. `WebhookJobQueue` interface is the stable surface; `workerPool` is unexported.
+
+---
+
+### Amendment A89 â€” `module.go`: afterHook and notifyAfter
+
+**Date:** 2026-05-08
+**Status:** Agreed
+
+**Change:**
+Added a post-lifecycle callback slot to `Module[T]`:
+
+1. **`afterHook func(ctx Context, sig Signal, item any) error`** â€” unexported
+   field on `Module[T]`. Zero value nil means no hook. Set by
+   `App.injectWebhookHooks` via `setAfterHook`.
+2. **`setAfterHook(fn func(Context, Signal, any) error)`** â€” unexported setter;
+   satisfies the `moduleAfterHookSetter` interface used by `injectWebhookHooks`.
+3. **`notifyAfter(ctx Context, sig Signal, item T)`** â€” unexported method.
+   Calls `dispatchAfter` (existing async signal dispatch) and then, if
+   `afterHook` is set, calls it synchronously in the same goroutine. Errors
+   from `afterHook` are logged via `slog.Error` and not returned to the caller.
+4. **`MCPSchedule`** now dispatches `AfterSchedule` (A87) via `notifyAfter`.
+   All other MCP lifecycle methods (`MCPPublish`, `MCPUpdate`, `MCPDelete`)
+   already called `dispatchAfter`; they are updated to call `notifyAfter` instead.
+
+**Rationale:**
+The `afterHook` pattern isolates webhook wiring from the module's own signal
+machinery. The module does not know about webhooks; it only knows it can call
+a registered hook. This keeps the dependency direction clean: `forge.go`
+depends on `module.go`, not the reverse.
+
+The `moduleAfterHookSetter` interface (unexported, defined in `forge.go`)
+lets `injectWebhookHooks` accept both `*Module[T]` for any `T` without
+reflection.
+
+**Consequences:**
+1. All existing module behaviour is unchanged â€” `dispatchAfter` still fires.
+2. `afterHook` errors are logged, not propagated, consistent with signal-error
+   policy (signals never abort HTTP responses).
+3. `notifyAfter` is the canonical call site for both signals and the after-hook
+   going forward; direct calls to `dispatchAfter` in MCP methods are replaced.
+4. CLI parity requirement (Amendment A86) is satisfied: `forge webhook`
+   subcommands ship in `forge-cli v0.4.0` alongside the `forge-mcp` webhook
+   tools. The nav commands gap remains (tracked separately).
 
 ---
 

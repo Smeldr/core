@@ -1916,3 +1916,187 @@ add this to your `main()` before starting the server:
 import "mime"
 mime.AddExtensionType(".css", "text/css")
 ```
+
+---
+
+## Outbound webhooks
+
+### `WebhookEndpoint`
+
+```go
+type WebhookEndpoint struct {
+    ID        string
+    Events    []string
+    TargetURL string
+    Active    bool
+    CreatedAt time.Time
+}
+```
+
+Registered outbound delivery destination. `secretEnc` is unexported — the
+plaintext signing secret is returned once by `WebhookStore.Create` and
+cannot be retrieved again.
+
+### `WebhookStore`
+
+```go
+func NewWebhookStore(db DB, appSecret []byte) *WebhookStore
+func (s *WebhookStore) Create(ctx context.Context, targetURL string, events []string) (WebhookEndpoint, string, error)
+func (s *WebhookStore) List(ctx context.Context) ([]WebhookEndpoint, error)
+func (s *WebhookStore) Delete(ctx context.Context, id string) error
+func (s *WebhookStore) EndpointsForEvent(ctx context.Context, event string) ([]WebhookEndpoint, error)
+func (s *WebhookStore) DecryptSecret(ep WebhookEndpoint) ([]byte, error)
+```
+
+`Create` validates `targetURL` for SSRF safety (HTTPS required, no private or
+loopback IPs). Secrets are encrypted with AES-256-GCM using a key derived from
+`appSecret`. Rotating `Config.Secret` invalidates all stored secrets.
+
+Required tables — run once at startup:
+
+```sql
+CREATE TABLE IF NOT EXISTS forge_webhook_endpoints (
+    id TEXT PRIMARY KEY,
+    events TEXT NOT NULL,
+    target_url TEXT NOT NULL,
+    secret_enc TEXT NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL
+);
+```
+
+### `WebhookJobQueue`
+
+```go
+type WebhookJobQueue interface {
+    Enqueue(ctx context.Context, job OutboundJob) error
+    ListJobsForEndpoint(ctx context.Context, endpointID string) ([]OutboundJob, error)
+    ListDeliveryLogs(ctx context.Context, jobID string) ([]DeliveryLog, error)
+}
+```
+
+Returned by `App.WebhookPool()`. Use in tests to inspect enqueued jobs.
+
+### `OutboundJob`
+
+```go
+type OutboundJob struct {
+    ID          string
+    EndpointID  string
+    TargetURL   string
+    SecretEnc   string
+    Payload     []byte
+    Event       string
+    Attempts    int
+    NextRetryAt time.Time
+    CreatedAt   time.Time
+    ExpiresAt   time.Time
+    Status      string // "pending" | "dead"
+}
+```
+
+### `DeliveryLog`
+
+```go
+type DeliveryLog struct {
+    ID          string
+    JobID       string
+    AttemptedAt time.Time
+    StatusCode  int
+    DurationMS  int64
+    Error       string
+}
+```
+
+### App webhook wiring
+
+```go
+app.Webhooks(store)           // wire WebhookStore; starts worker pool with App.Run
+pool := app.WebhookPool()     // WebhookJobQueue — nil if Webhooks not called
+```
+
+`App.Webhooks` must be called before `App.Run`. The worker pool starts and
+stops with the server lifecycle. `injectWebhookHooks` runs at `Run` time so
+all `app.Content(m)` calls are visible before hooks are wired.
+
+### `Titled` interface
+
+```go
+type Titled interface {
+    ContentTitle() string
+}
+```
+
+Implement `ContentTitle() string` on your content type to include the item
+title in outbound webhook payloads. Types that do not implement `Titled` emit
+an empty title field.
+
+### `AfterSchedule` signal
+
+```go
+const AfterSchedule Signal = "after_schedule"
+```
+
+Fires after a node transitions to `Scheduled` status via `MCPSchedule`.
+Subscribe with `m.On(forge.AfterSchedule, ...)` or use it as a webhook
+event name suffix (`"mytype.scheduled"`).
+
+### Webhook delivery
+
+- **Signing:** HMAC-SHA256 of `"<unix_ts>.<body>"`. Response header:
+  `X-Forge-Signature: sha256=<hex>`.
+- **Headers:** `X-Forge-Event`, `X-Forge-Delivery` (UUIDv4), `X-Forge-Timestamp`.
+- **Backoff:** `4^attempt` seconds ± 20% jitter, capped at 1 hour.
+- **Circuit breaker:** endpoint skipped after 5 consecutive failures for 5 minutes.
+- **Dead-letter:** job marked `"dead"` after 7 attempts.
+
+### MCP webhook tools (Admin role)
+
+Available when `App.Webhooks(store)` is configured:
+
+| Tool | Description |
+|------|-------------|
+| `create_webhook` | HTTPS URL + event list → endpoint + one-time secret |
+| `list_webhooks` | All endpoints with delivery stats (no secrets) |
+| `delete_webhook` | Remove endpoint by ID |
+| `list_webhook_deliveries` | Delivery log for a job ID |
+| `retry_webhook` | Re-queue a dead job |
+
+### forge-cli webhook commands
+
+```
+forge webhook create --url https://example.com/hook --events post.published,post.updated
+forge webhook list
+forge webhook delete <endpoint-id>
+forge webhook deliveries <job-id>
+forge webhook retry <job-id>
+```
+
+---
+
+## MCP resource subscriptions
+
+Available in `forge-mcp` when `App.AddSignalListener` is wired (set up
+automatically by `New(app)` in `forge-mcp`).
+
+### Subscribe to a resource
+
+Send `resources/subscribe` with `{"uri": "forge:///posts/my-slug"}` to receive
+`notifications/resources/updated` events over the SSE connection when that
+resource changes.
+
+### Unsubscribe
+
+Send `resources/unsubscribe` with the same URI to stop receiving notifications.
+
+### Server capability
+
+The `initialize` response includes:
+
+```json
+{
+  "capabilities": {
+    "resources": { "subscribe": true, "listChanged": true }
+  }
+}
+```

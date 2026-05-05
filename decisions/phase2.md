@@ -1844,3 +1844,42 @@ The section states:
 - Nav CLI gap is formally acknowledged and tracked.
 
 ---
+
+## Amendment A87 — signals.go: AfterSchedule Signal constant
+
+**Date:** 2026-05-06
+**Status:** Agreed
+**Milestone:** 11 / Layer 1
+
+### Problem
+
+The Scheduled status transition fires AfterUpdate but no dedicated signal. Webhook
+consumers and MCP subscription listeners cannot distinguish a scheduling event from
+a plain content edit without inspecting the payload. This makes it impossible to
+subscribe to post.scheduled webhook events or react to scheduling via signal handlers.
+
+### Change
+
+**signals.go** — new constant added to the Signal const block:
+
+`go
+// AfterSchedule fires after a content item transitions to Scheduled status.
+// It fires in addition to AfterUpdate — not instead of it. Runs
+// asynchronously — errors and panics are logged, never returned.
+AfterSchedule Signal = "after_schedule"
+`
+
+AfterSchedule is dispatched in module.go alongside AfterUpdate whenever
+
+ewStatus == Scheduled && prevStatus != Scheduled. It fires from both HTTP
+updateHandler and MCPSchedule.
+
+### Consequences
+
+- New exported Signal constant: additive only; no existing handlers affected.
+- All code that ranges over m.signals is range-based; the new key is ignored
+  unless a handler is registered with orge.On[T](AfterSchedule, fn).
+- ARCHITECTURE.md updated: AfterSchedule added to the signal constants table.
+- No breaking change; no required application updates.
+
+---

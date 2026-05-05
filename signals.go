@@ -49,6 +49,11 @@ const (
 	// Runs asynchronously — triggers sitemap and feed regeneration.
 	AfterArchive Signal = "after_archive"
 
+	// AfterSchedule fires after a content item transitions to Scheduled status.
+	// It fires in addition to AfterUpdate — not instead of it. Runs
+	// asynchronously — errors and panics are logged, never returned.
+	AfterSchedule Signal = "after_schedule"
+
 	// SitemapRegenerate is fired internally after AfterPublish, AfterUnpublish,
 	// AfterArchive, and AfterDelete. It is debounced to coalesce burst changes
 	// into a single sitemap and feed rebuild.
