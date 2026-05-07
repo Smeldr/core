@@ -1875,20 +1875,20 @@ and status. No authentication is required.
 ```
 GET /_health
 → 200 application/json
-{"status":"ok","forge":"1.16.0"}
+{"status":"ok","forge":"x.y.z"}
 ```
 
 When companion modules such as `forge-mcp` are linked into the binary, their
 versions appear alongside:
 
 ```json
-{"status":"ok","forge":"1.16.0","forge_mcp":"1.6.1"}
+{"status":"ok","forge":"x.y.z","forge_mcp":"x.y.z"}
 ```
 
 The same version data is written to stderr at startup:
 
 ```
-forge: forge 1.16.0, forge_mcp 1.6.1
+forge: forge x.y.z, forge_mcp x.y.z
 ```
 
 `/_health` is exempt from the HTTPS redirect middleware (A59) so that

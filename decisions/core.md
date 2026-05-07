@@ -3857,3 +3857,32 @@ reflection.
 
 ---
 
+### Amendment A90 — Documentation corrections: health version placeholders and delete role
+
+**Status:** Agreed — 2026-05-07
+
+**Problem:**
+Two factual errors in reference documentation:
+
+1. `REFERENCE.md` — the Health endpoint section contained hardcoded version
+   literals (`1.16.0`, `1.6.1`) in three places (single-module JSON, multi-module
+   JSON, startup stderr line). These become stale with every release.
+
+2. `FEATURELIST.md` — `delete_[type]` was listed as requiring `Author+` role.
+   The actual enforcement in `forge-mcp/tool.go` calls `authoriseEditor()`,
+   requiring `Editor+`. This has been the behaviour since the MCP tool was
+   implemented.
+
+**Decision:**
+1. Replace all three hardcoded version occurrences in the Health endpoint section
+   with the generic placeholder `x.y.z`. This ensures the examples remain
+   accurate regardless of the current release.
+2. Correct `delete_[type]` role in `FEATURELIST.md` from `Author+` to `Editor+`.
+
+**Consequences:**
+1. Health endpoint examples are now version-independent.
+2. `FEATURELIST.md` accurately reflects the enforced role for delete operations.
+3. No code changes — docs only.
+
+---
+

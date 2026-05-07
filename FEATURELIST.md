@@ -57,7 +57,7 @@ Per content type — automatically derived, no manual definition:
 - `publish_[type]` — Author+
 - `schedule_[type]` — Author+
 - `archive_[type]` — Author+
-- `delete_[type]` — Author+
+- `delete_[type]` — Editor+
 - `list_[type]s` — Editor+
 - `get_[type]` — Editor+
 

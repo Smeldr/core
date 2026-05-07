@@ -115,6 +115,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A87 | `signals.go`: `AfterSchedule Signal = "after_schedule"` — fires after Scheduled transition, alongside AfterUpdate. Enables `post.scheduled` webhook events and per-signal MCP subscription routing. | Agreed | 2026-05-06 |
 | A88 | `forge.go`: `App.Webhooks(store *WebhookStore)`, `App.WebhookPool() WebhookJobQueue`, `App.injectWebhookHooks()` — wires outbound webhook infrastructure into the App; pool started/stopped with server lifecycle. | Agreed | 2026-05-08 |
 | A89 | `module.go`: `afterHook`/`setAfterHook`/`notifyAfter` — post-lifecycle callback slot on `Module[T]`; `notifyAfter` wraps `dispatchAfter`+`afterHook`; `MCPSchedule` dispatches `AfterSchedule`. CLI parity: `forge webhook` ships with `forge-mcp` webhook tools (A86 gap closed). | Agreed | 2026-05-08 |
+| A90 | `REFERENCE.md`: replace hardcoded `1.16.0`/`1.6.1` version literals in health endpoint examples with `x.y.z` placeholder (3 occurrences). `FEATURELIST.md`: correct `delete_[type]` role from `Author+` to `Editor+` — matches `authoriseEditor()` enforcement in `forge-mcp/tool.go`. | Agreed | 2026-05-07 |
 
 ---
 
