@@ -23,6 +23,36 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.18.0] — 2026-05-08
+
+Draft preview via HMAC-signed URL token (Milestone 12, Amendment A92).
+
+### Added
+
+- `Config.PreviewTokenExpiry time.Duration` — configures preview token lifetime.
+  Defaults to 12 hours when zero.
+- `App.GeneratePreviewToken(prefix, slug string) string` — returns a signed
+  preview token binding the module prefix and content slug. Pass it to the
+  module's show endpoint via `?preview=<token>` to serve Draft or Scheduled
+  content to unauthenticated viewers.
+- `App.BaseURL() string` — returns `Config.BaseURL` without a trailing slash.
+  Intended for companion packages (forge-mcp, forge-cli) that build absolute URLs.
+- `encodePreviewToken` / `decodePreviewToken` (unexported) — HMAC-SHA256 token
+  encoding and constant-time validation in `auth.go`. Token payload encodes
+  prefix, slug, and expiry so a token for `/posts/foo` cannot be replayed on
+  `/docs/foo` or any other slug.
+
+### Changed
+
+- `Module[T].showHandler`: valid `?preview=<token>` now bypasses the
+  Published-only visibility guard for **Draft and Scheduled** items only.
+  Archived items are never previewable — a valid token for an Archived item
+  falls through silently to 404.
+- `Module[T]` gains an unexported `secret []byte` field injected by
+  `App.Content` via the new `setSecret([]byte)` method.
+
+---
+
 ## [1.17.0] — 2026-05-08
 
 Outbound webhooks, MCP resource subscriptions, and `AfterSchedule` signal (Milestone 11).

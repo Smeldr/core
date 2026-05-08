@@ -2,7 +2,7 @@
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.16.0 (A84).
+Last updated: v1.18.0 (A92).
 
 ---
 
@@ -35,6 +35,7 @@ Last updated: v1.16.0 (A84).
 - Draft / Scheduled / Published / Archived enforcement — hardwired, cannot be disabled
 - Scheduled publishing — automatic `Scheduled → Published` transition at `ScheduledAt`; no external cron
 - 404 on everything non-Published — guests, search engines, and AI crawlers see nothing until explicitly published
+- Draft preview — signed `?preview=<token>` URL grants read access to Draft or Scheduled content without login; Archived items are never previewable
 
 ## Access control
 
@@ -63,6 +64,7 @@ Per content type — automatically derived, no manual definition:
 
 Admin tools (require Admin role):
 
+- `create_preview_url` — generates a signed draft preview URL for a Draft or Scheduled item
 - `create_webhook`, `list_webhooks`, `delete_webhook` — manage outbound endpoints
 - `list_webhook_deliveries`, `retry_webhook` — delivery introspection and retry
 - `create_token`, `list_tokens`, `revoke_token` — token management
@@ -111,6 +113,7 @@ MCP resource subscriptions:
 - Token management — create, list, revoke (Admin role required)
 - Media operations — upload, list, delete
 - Webhook management — create, list, delete, view deliveries, retry
+- Draft preview — `forge preview <prefix> <slug>` prints a signed preview URL (Admin role required)
 
 ## Outbound webhooks
 

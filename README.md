@@ -3,7 +3,7 @@
 A Go framework for content-driven applications. Zero dependencies. AI-native by default.
 
 [![Go Reference](https://pkg.go.dev/badge/forge-cms.dev/forge.svg)](https://pkg.go.dev/forge-cms.dev/forge)
-**v1.17.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
+**v1.18.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
 
 ## 30-second start
 
@@ -19,6 +19,7 @@ go run .
 **Content**
 - **Full CRUD** — create, update, publish, archive, and delete through a single `Module[T]`
 - **Draft-safe lifecycle** — drafts return 404 to guests; only Published content is visible
+- **Draft preview** — share a signed `?preview=<token>` URL to let reviewers see a draft without logging in
 - **Scheduled publishing** — set a future `ScheduledAt`; Forge transitions to Published automatically
 - **Content negotiation** — one endpoint serves JSON, HTML, or Markdown based on `Accept`
 
@@ -152,7 +153,8 @@ Each runs with: `cd example/blog && go run .`
 Full API reference: [REFERENCE.md](REFERENCE.md)  
 Web docs: [forge-cms.dev/docs](https://forge-cms.dev/docs)
 
-For full token management reference (create, list, revoke) see [REFERENCE.md — Token management](REFERENCE.md#token-management).
+For full token management reference (create, list, revoke) see [REFERENCE.md — Token management](REFERENCE.md#token-management).  
+For draft preview tokens see [REFERENCE.md — Draft preview](REFERENCE.md#draft-preview).
 
 ---
 

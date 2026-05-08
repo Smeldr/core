@@ -2100,3 +2100,90 @@ The `initialize` response includes:
   }
 }
 ```
+
+---
+
+## Draft preview
+
+Forge enforces Published-only visibility by default — drafts return 404 to guests.
+Draft preview provides a stateless way to share draft content with reviewers
+before publishing, without requiring a login.
+
+### How it works
+
+A preview token is a HMAC-SHA256-signed URL parameter. It encodes the module
+prefix, content slug, and expiry timestamp. The server validates the token
+inline on each request — no database lookup, no cookie.
+
+The token binds both prefix and slug: a token for `/posts/my-draft` cannot
+be replayed on `/docs/my-draft` or on any other slug.
+
+**Archived items are never previewable.** A valid token for an Archived item
+falls through to 404, as Archived means explicitly taken offline by an editor.
+
+### `Config.PreviewTokenExpiry`
+
+```go
+type Config struct {
+    // ...
+    PreviewTokenExpiry time.Duration // default 12 h when zero
+}
+```
+
+### `App.GeneratePreviewToken`
+
+```go
+func (a *App) GeneratePreviewToken(prefix, slug string) string
+```
+
+Returns a signed preview token valid for `Config.PreviewTokenExpiry` (default 12 h).
+Build the full preview URL by combining the token with the app's base URL:
+
+```go
+token := app.GeneratePreviewToken("/posts", "my-draft")
+previewURL := app.BaseURL() + "/posts/my-draft?preview=" + token
+```
+
+### `App.BaseURL`
+
+```go
+func (a *App) BaseURL() string
+```
+
+Returns `Config.BaseURL` without a trailing slash.
+
+### Module behaviour
+
+When `?preview=<token>` is present on a `GET /{prefix}/{slug}` request:
+
+1. The HMAC signature is verified (constant-time).
+2. The expiry timestamp is checked.
+3. The token prefix is verified to match this module's prefix.
+4. The token slug is verified to match the requested slug.
+5. The item's status must be `Draft` or `Scheduled`.
+6. If all checks pass: the item is served regardless of Published status.
+7. If any check fails: silent fall-through to the normal visibility check (404 for guests).
+
+### forge-mcp: `create_preview_url`
+
+Admin-only MCP tool that generates a preview URL.
+
+Parameters:
+- `prefix` (string, required) — module prefix including the leading slash, e.g. `"/posts"`
+- `slug` (string, required) — content slug, e.g. `"my-draft-post"`
+
+Returns the full preview URL as a string.
+
+### forge-cli: `forge preview`
+
+```
+forge-cli preview <prefix> <slug>
+```
+
+Calls `create_preview_url` via MCP and prints the full preview URL to stdout.
+Requires Admin role.
+
+```bash
+forge-cli preview /posts my-draft-post
+# → https://example.com/posts/my-draft-post?preview=<token>
+```
