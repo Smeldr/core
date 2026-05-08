@@ -23,6 +23,7 @@ All architectural decisions are locked in `DECISIONS.md`.
 | M9 | v1.0.0 stabilisation | ✅ Done |
 | M10 | MCP support (v2) | ✅ Done |
 | M11 | Outbound webhooks + MCP subscriptions (v1.17.0) | ✅ Done |
+| M12 | Draft preview via HMAC-signed URL token (v1.18.0) | ✅ Done |
 
 ---
 
@@ -253,6 +254,27 @@ resource subscriptions for real-time AI agent notification.
 - [x] Step 4 — `forge-cli/webhook.go`: 5 webhook subcommands (CLI parity)
 - [x] Step 5 — `forge-mcp/subscription.go`: MCP resource subscriptions + transport handlers
 - [x] Step 6 — `integration_full_test.go`: cross-milestone groups G24–G30
+
+---
+
+## Milestone 12 — Draft preview (v1.18.0)
+
+Stateless HMAC-SHA256 signed URL token granting read access to Draft and
+Scheduled content without login. Prefix-bound — tokens cannot replay across
+modules. Archived items are never previewable.
+**Detail:** see git history — no separate backlog file.
+
+| Step | File | Status | Completed |
+|------|------|--------|-----------|
+| A92 | auth.go, forge.go, module.go | ✅ Done | 2026-05-08 |
+| 1 | forge-mcp/preview_tools.go | ✅ Done | 2026-05-08 |
+| 2 | forge-cli/preview.go | ✅ Done | 2026-05-08 |
+
+- [x] A92 — `auth.go`: `encodePreviewToken` / `decodePreviewToken` (prefix+slug+expiry, HMAC-SHA256)
+- [x] A92 — `forge.go`: `Config.PreviewTokenExpiry`, `App.GeneratePreviewToken(prefix, slug)`, `App.BaseURL()`
+- [x] A92 — `module.go`: `secret` field, `setSecret`, preview bypass in `showHandler` (Draft/Scheduled only — Archived → 404)
+- [x] Step 1 — `forge-mcp/preview_tools.go`: `create_preview_url` Admin MCP tool; always in `tools/list`
+- [x] Step 2 — `forge-cli/preview.go`: `forge-cli preview <prefix> <slug>` subcommand
 
 ---
 
