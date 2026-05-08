@@ -2981,3 +2981,109 @@ func TestFull_G30_MCPScheduleWebhook(t *testing.T) {
 		t.Errorf("job.Event = %q; want %q", jobs[0].Event, "g30post.scheduled")
 	}
 }
+
+// — G31: Draft preview token (M12) ———————————————————————————————————————————
+
+// g31Post is the content type for the G31 preview token cross-milestone group.
+type g31Post struct {
+	Node
+	Title string `json:"title"`
+}
+
+func (p *g31Post) Head() Head { return Head{Title: p.Title} }
+
+// TestFull_G31_PreviewToken verifies the end-to-end preview token path:
+//   - GeneratePreviewToken(prefix, slug) produces a token accepted by the module
+//   - A Draft item is served (200) when a valid token is present
+//   - An expired token is rejected (404)
+//   - A token for slug A is rejected on slug B (404)
+//   - A token for prefix A is rejected on a module with prefix B (404)
+//   - Published content remains accessible without a token (regression)
+func TestFull_G31_PreviewToken(t *testing.T) {
+	const prefix = "/g31posts"
+	secret := []byte("g31-secret-32-bytes-xxxxxxxxxxx!")
+
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost",
+		Secret:  secret,
+	}))
+	repo := NewMemoryRepo[*g31Post]()
+	m := NewModule((*g31Post)(nil), At(prefix), Repo(repo))
+	app.Content(m)
+	handler := app.Handler()
+
+	// Seed a Draft and a Published item.
+	draft := &g31Post{Node: Node{ID: NewID(), Slug: GenerateSlug("G31 Draft"), Status: Draft}, Title: "G31 Draft"}
+	if err := repo.Save(context.Background(), draft); err != nil {
+		t.Fatalf("seed draft: %v", err)
+	}
+	pub := &g31Post{Node: Node{ID: NewID(), Slug: GenerateSlug("G31 Published"), Status: Published}, Title: "G31 Published"}
+	if err := repo.Save(context.Background(), pub); err != nil {
+		t.Fatalf("seed published: %v", err)
+	}
+
+	doGet := func(path string) int {
+		r := httptest.NewRequest("GET", path, nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w.Code
+	}
+
+	t.Run("valid token, draft → 200", func(t *testing.T) {
+		token := app.GeneratePreviewToken(prefix, draft.Slug)
+		url := prefix + "/" + draft.Slug + "?preview=" + token
+		if code := doGet(url); code != http.StatusOK {
+			t.Errorf("got %d, want 200", code)
+		}
+	})
+
+	t.Run("expired token (negative TTL), draft → 404", func(t *testing.T) {
+		// Use a negative TTL so the expiry is in the past.
+		token := encodePreviewToken(prefix, draft.Slug, secret, -time.Second)
+		url := prefix + "/" + draft.Slug + "?preview=" + token
+		if code := doGet(url); code != http.StatusNotFound {
+			t.Errorf("got %d, want 404", code)
+		}
+	})
+
+	// Seed a second draft to test slug mismatch (published items are always
+	// visible so cannot be used to verify rejection).
+	draft2 := &g31Post{Node: Node{ID: NewID(), Slug: GenerateSlug("G31 Draft Two"), Status: Draft}, Title: "G31 Draft Two"}
+	if err := repo.Save(context.Background(), draft2); err != nil {
+		t.Fatalf("seed draft2: %v", err)
+	}
+
+	t.Run("token for slug A used on slug B (both drafts) → 404", func(t *testing.T) {
+		token := app.GeneratePreviewToken(prefix, draft.Slug)
+		url := prefix + "/" + draft2.Slug + "?preview=" + token
+		if code := doGet(url); code != http.StatusNotFound {
+			t.Errorf("got %d, want 404", code)
+		}
+	})
+
+	t.Run("token for prefix /other used on /g31posts → 404", func(t *testing.T) {
+		token := encodePreviewToken("/other", draft.Slug, secret, time.Hour)
+		url := prefix + "/" + draft.Slug + "?preview=" + token
+		if code := doGet(url); code != http.StatusNotFound {
+			t.Errorf("got %d, want 404", code)
+		}
+	})
+
+	t.Run("valid token, archived item → 404 (archived not previewable)", func(t *testing.T) {
+		archived := &g31Post{Node: Node{ID: NewID(), Slug: GenerateSlug("G31 Archived"), Status: Archived}, Title: "G31 Archived"}
+		if err := repo.Save(context.Background(), archived); err != nil {
+			t.Fatalf("seed archived: %v", err)
+		}
+		token := app.GeneratePreviewToken(prefix, archived.Slug)
+		url := prefix + "/" + archived.Slug + "?preview=" + token
+		if code := doGet(url); code != http.StatusNotFound {
+			t.Errorf("got %d, want 404", code)
+		}
+	})
+
+	t.Run("published content without token → 200 (regression)", func(t *testing.T) {
+		if code := doGet(prefix + "/" + pub.Slug); code != http.StatusOK {
+			t.Errorf("got %d, want 200", code)
+		}
+	})
+}

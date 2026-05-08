@@ -3920,3 +3920,44 @@ Three issues found after Milestone 11 ship:
 
 ---
 
+### Amendment A92 — Draft preview via HMAC-signed URL token (Milestone 12)
+
+**Status:** Agreed — 2026-05-08
+
+**Problem:**
+Forge returns 404 for all non-Published content for unauthenticated requests —
+correct lifecycle enforcement, but no way to preview a draft visually before
+publishing without granting a full login.
+
+**Decision:**
+Stateless draft preview via a HMAC-signed `?preview=<token>` URL parameter.
+No new database table. No cookie. Token validation is inline in the module's
+show handler. Token payload encodes both prefix and slug to prevent cross-module
+replay attacks.
+
+Token format:
+```
+payload = base64url( prefix + ":" + slug + ":" + expUnix )
+token   = payload + "." + base64url( hmac-sha256(Config.Secret, payload) )
+```
+
+New symbols:
+- `auth.go`: `encodePreviewToken(prefix, slug string, secret []byte, ttl time.Duration) string` (internal)
+- `auth.go`: `decodePreviewToken(token string, secret []byte) (prefix, slug string, err error)` (internal)
+- `forge.go`: `Config.PreviewTokenExpiry time.Duration` (default 12 h when zero)
+- `forge.go`: `App.GeneratePreviewToken(prefix, slug string) string`
+- `forge.go`: `App.BaseURL() string`
+- `module.go`: `secret []byte` field + `setSecret([]byte)` + preview bypass in `showHandler`
+- forge-mcp: `create_preview_url` tool (Admin role) — prefix + slug → full preview URL
+- forge-cli: `forge-cli preview <prefix> <slug>`
+
+**Consequences:**
+- A valid token for `/posts/foo` cannot be replayed on `/docs/foo` (prefix-bound).
+- Failed or missing tokens fall through silently to the normal 404 path — no information leak.
+- Token validation uses constant-time comparison (`subtle.ConstantTimeCompare`).
+- No new database table. No cookie. Stateless.
+- `App.BaseURL()` is a new exported method — no breaking change.
+- forge core → v1.18.0, forge-mcp → v1.8.0, forge-cli → v0.5.0.
+
+---
+

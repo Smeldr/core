@@ -833,3 +833,91 @@ func TestMCPCreate_commaStringCoercion(t *testing.T) {
 		}
 	}
 }
+
+// — Preview token bypass tests ————————————————————————————————————————————
+
+func TestModule_previewToken(t *testing.T) {
+	secret := []byte("test-secret-32-bytes-xxxxxxxxxxxx")
+	const prefix = "/posts"
+
+	newModule := func() (*Module[*testPost], Repository[*testPost]) {
+		repo := NewMemoryRepo[*testPost]()
+		m := NewModule((*testPost)(nil), At(prefix), Repo(repo))
+		m.setSecret(secret)
+		return m, repo
+	}
+
+	showReq := func(m *Module[*testPost], slug, token string) *httptest.ResponseRecorder {
+		url := prefix + "/" + slug
+		if token != "" {
+			url += "?preview=" + token
+		}
+		r := httptest.NewRequest("GET", url, nil)
+		r.SetPathValue("slug", slug)
+		w := httptest.NewRecorder()
+		m.showHandler(w, r)
+		return w
+	}
+
+	t.Run("valid token, draft item returns 200", func(t *testing.T) {
+		m, repo := newModule()
+		draft := seedPost(t, repo, "Draft Post", Draft)
+		token := encodePreviewToken(prefix, draft.Slug, secret, time.Hour)
+		if w := showReq(m, draft.Slug, token); w.Code != http.StatusOK {
+			t.Errorf("got %d, want 200", w.Code)
+		}
+	})
+
+	t.Run("expired token, draft item returns 404", func(t *testing.T) {
+		m, repo := newModule()
+		draft := seedPost(t, repo, "Draft Post2", Draft)
+		token := encodePreviewToken(prefix, draft.Slug, secret, -time.Second)
+		if w := showReq(m, draft.Slug, token); w.Code != http.StatusNotFound {
+			t.Errorf("got %d, want 404", w.Code)
+		}
+	})
+
+	t.Run("valid token for wrong slug returns 404", func(t *testing.T) {
+		m, repo := newModule()
+		draft := seedPost(t, repo, "Draft Post3", Draft)
+		token := encodePreviewToken(prefix, "other-slug", secret, time.Hour)
+		if w := showReq(m, draft.Slug, token); w.Code != http.StatusNotFound {
+			t.Errorf("got %d, want 404", w.Code)
+		}
+	})
+
+	t.Run("valid token for wrong prefix (cross-module) returns 404", func(t *testing.T) {
+		m, repo := newModule()
+		draft := seedPost(t, repo, "Draft Post4", Draft)
+		token := encodePreviewToken("/docs", draft.Slug, secret, time.Hour)
+		if w := showReq(m, draft.Slug, token); w.Code != http.StatusNotFound {
+			t.Errorf("got %d, want 404", w.Code)
+		}
+	})
+
+	t.Run("no token, draft item, guest returns 404", func(t *testing.T) {
+		m, repo := newModule()
+		draft := seedPost(t, repo, "Draft Post5", Draft)
+		if w := showReq(m, draft.Slug, ""); w.Code != http.StatusNotFound {
+			t.Errorf("got %d, want 404", w.Code)
+		}
+	})
+
+	t.Run("valid token, published item returns 200", func(t *testing.T) {
+		m, repo := newModule()
+		pub := seedPost(t, repo, "Published Post", Published)
+		token := encodePreviewToken(prefix, pub.Slug, secret, time.Hour)
+		if w := showReq(m, pub.Slug, token); w.Code != http.StatusOK {
+			t.Errorf("got %d, want 200", w.Code)
+		}
+	})
+
+	t.Run("valid token, archived item returns 404", func(t *testing.T) {
+		m, repo := newModule()
+		arch := seedPost(t, repo, "Archived Post", Archived)
+		token := encodePreviewToken(prefix, arch.Slug, secret, time.Hour)
+		if w := showReq(m, arch.Slug, token); w.Code != http.StatusNotFound {
+			t.Errorf("got %d, want 404 (archived must not be previewable)", w.Code)
+		}
+	})
+}

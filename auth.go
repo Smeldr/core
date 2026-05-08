@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -149,6 +150,51 @@ func tokenHMAC(payload, secret string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(payload))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// encodePreviewToken returns a signed preview token binding prefix and slug,
+// valid for ttl. The payload encodes prefix, slug, and expiry as a
+// colon-separated string before signing so that a token for one module
+// prefix cannot be replayed on a different module.
+//
+// Token format: base64url(prefix+":"+slug+":"+expUnix) + "." + tokenHMAC(payload, secret)
+func encodePreviewToken(prefix, slug string, secret []byte, ttl time.Duration) string {
+	exp := strconv.FormatInt(time.Now().Add(ttl).Unix(), 10)
+	payload := base64.RawURLEncoding.EncodeToString([]byte(prefix + ":" + slug + ":" + exp))
+	return payload + "." + tokenHMAC(payload, string(secret))
+}
+
+// decodePreviewToken validates the HMAC signature and expiry of a preview token
+// produced by [encodePreviewToken]. Returns the prefix and slug bound to the
+// token, or [ErrNotFound] if the token is missing, malformed, expired, or the
+// signature does not match. Comparison is constant-time to prevent timing attacks.
+func decodePreviewToken(token string, secret []byte) (prefix, slug string, err error) {
+	parts := strings.SplitN(token, ".", 2)
+	if len(parts) != 2 {
+		return "", "", ErrNotFound
+	}
+	payload, sig := parts[0], parts[1]
+
+	expected := tokenHMAC(payload, string(secret))
+	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
+		return "", "", ErrNotFound
+	}
+
+	raw, decErr := base64.RawURLEncoding.DecodeString(payload)
+	if decErr != nil {
+		return "", "", ErrNotFound
+	}
+	// payload is "prefix:slug:expUnix" — split on ":" with a max of 3 parts
+	// so slugs or prefixes that happen to contain no colons are handled safely.
+	fields := strings.SplitN(string(raw), ":", 3)
+	if len(fields) != 3 {
+		return "", "", ErrNotFound
+	}
+	expUnix, convErr := strconv.ParseInt(fields[2], 10, 64)
+	if convErr != nil || time.Now().Unix() > expUnix {
+		return "", "", ErrNotFound
+	}
+	return fields[0], fields[1], nil
 }
 
 // SignToken produces a signed token encoding the given User. Pass the token to

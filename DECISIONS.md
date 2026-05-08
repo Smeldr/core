@@ -117,6 +117,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A89 | `module.go`: `afterHook`/`setAfterHook`/`notifyAfter` — post-lifecycle callback slot on `Module[T]`; `notifyAfter` wraps `dispatchAfter`+`afterHook`; `MCPSchedule` dispatches `AfterSchedule`. CLI parity: `forge webhook` ships with `forge-mcp` webhook tools (A86 gap closed). | Agreed | 2026-05-08 |
 | A90 | `REFERENCE.md`: replace hardcoded `1.16.0`/`1.6.1` version literals in health endpoint examples with `x.y.z` placeholder (3 occurrences). `FEATURELIST.md`: correct `delete_[type]` role from `Author+` to `Editor+` — matches `authoriseEditor()` enforcement in `forge-mcp/tool.go`. | Agreed | 2026-05-07 |
 | A91 | `webhook.go`: `WHERE active = 1` → `WHERE active` (Postgres BOOLEAN parity). DDL godoc: `DEFAULT 1`→`DEFAULT TRUE`, `DATETIME`→`TIMESTAMPTZ` in `webhook.go`; `BLOB`→`BYTEA`, `DATETIME`→`TIMESTAMPTZ` (5 occurrences) in `outbound.go`. `README.md`: add token management reference link. | Agreed | 2026-05-08 |
+| A92 | `auth.go`: `encodePreviewToken(prefix,slug,...)`/`decodePreviewToken` (internal, prefix-bound). `forge.go`: `Config.PreviewTokenExpiry`, `App.GeneratePreviewToken(prefix,slug)`, `App.BaseURL()`. `module.go`: `secret` field, `setSecret`, preview bypass in `showHandler`. forge-mcp: `create_preview_url` Admin tool. forge-cli: `preview` subcommand. Milestone 12 — v1.18.0. | Agreed | 2026-05-08 |
 
 ---
 

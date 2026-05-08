@@ -397,6 +397,7 @@ type Module[T any] struct {
 
 	contentTypeName string                             // unqualified type name; set by NewModule
 	afterHook       func(Context, Signal, string, any) // nil until wired by App; called async on delivery signals
+	secret          []byte                             // set by App.Content via setSecret; used for preview token validation
 
 	stopCh chan struct{} // closed by Stop() to terminate the cache sweep goroutine
 }
@@ -591,6 +592,13 @@ func (m *Module[T]) Stop() {
 // dispatch into every module.
 func (m *Module[T]) setAfterHook(fn func(Context, Signal, string, any)) {
 	m.afterHook = fn
+}
+
+// setSecret injects the application signing secret into the module so that
+// [Module.showHandler] can validate preview tokens without a reference to App.
+// Called by [App.Content] for every registered module.
+func (m *Module[T]) setSecret(secret []byte) {
+	m.secret = secret
 }
 
 // notifyAfter fires the registered signal handlers for sig asynchronously
@@ -1211,6 +1219,28 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		WriteError(w, r, err)
 		return
+	}
+
+	// Preview bypass: a valid HMAC-signed ?preview=<token> grants read access to
+	// Draft and Scheduled content for the lifetime of the token. Archived items
+	// are explicitly offline and are never previewable — they fall through to the
+	// normal isVisible → 404 path regardless of token validity.
+	// The token encodes both module prefix and slug, so a token for /posts/foo
+	// cannot be replayed on /docs/foo or on a different slug within the same module.
+	// Failed or missing tokens fall through silently to the normal visibility check.
+	itemStatus := nodeStatusOf(item)
+	if token := r.URL.Query().Get("preview"); token != "" && len(m.secret) > 0 &&
+		(itemStatus == Draft || itemStatus == Scheduled) {
+		if previewPrefix, previewSlug, tokErr := decodePreviewToken(token, m.secret); tokErr == nil &&
+			previewPrefix == m.prefix && previewSlug == slug {
+			ct := m.neg.negotiate(r)
+			if ct == "text/html" {
+				m.renderShowHTML(w, r, ctx, item)
+				return
+			}
+			m.writeContentCached(w, r, ct, item)
+			return
+		}
 	}
 
 	// Lifecycle enforcement: non-Published → 404 for Guest.

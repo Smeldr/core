@@ -845,3 +845,72 @@ func TestTokenStore_ensureBootstrap_nonEmpty(t *testing.T) {
 		t.Errorf("ensureBootstrap on non-empty table: expected no INSERT (no-op), got %d", db.insertCount)
 	}
 }
+
+// — Preview token tests ———————————————————————————————————————————————————
+
+func TestEncodeDecodePreviewToken(t *testing.T) {
+	secret := []byte("test-secret-32-bytes-xxxxxxxxxxxx")
+	const prefix = "posts"
+	const slug = "my-draft"
+
+	t.Run("valid token returns correct prefix and slug", func(t *testing.T) {
+		token := encodePreviewToken(prefix, slug, secret, time.Hour)
+		gotPrefix, gotSlug, err := decodePreviewToken(token, secret)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotPrefix != prefix {
+			t.Errorf("prefix: got %q, want %q", gotPrefix, prefix)
+		}
+		if gotSlug != slug {
+			t.Errorf("slug: got %q, want %q", gotSlug, slug)
+		}
+	})
+
+	t.Run("expired token returns error", func(t *testing.T) {
+		token := encodePreviewToken(prefix, slug, secret, -time.Second)
+		_, _, err := decodePreviewToken(token, secret)
+		if err == nil {
+			t.Fatal("expected error for expired token, got nil")
+		}
+	})
+
+	t.Run("wrong secret returns error", func(t *testing.T) {
+		token := encodePreviewToken(prefix, slug, secret, time.Hour)
+		_, _, err := decodePreviewToken(token, []byte("different-secret-xxxxxxxxxxxxxxxxxxxxx"))
+		if err == nil {
+			t.Fatal("expected error for wrong secret, got nil")
+		}
+	})
+
+	t.Run("tampered payload returns error", func(t *testing.T) {
+		token := encodePreviewToken(prefix, slug, secret, time.Hour)
+		// Flip a character in the payload portion (before the dot)
+		bs := []byte(token)
+		bs[0] ^= 0x01
+		_, _, err := decodePreviewToken(string(bs), secret)
+		if err == nil {
+			t.Fatal("expected error for tampered token, got nil")
+		}
+	})
+
+	t.Run("malformed token (no dot) returns error", func(t *testing.T) {
+		_, _, err := decodePreviewToken("nodothere", secret)
+		if err == nil {
+			t.Fatal("expected error for malformed token, got nil")
+		}
+	})
+
+	t.Run("cross-module: different prefix in token vs check", func(t *testing.T) {
+		// Token is for "posts" but caller checks "docs" — caller responsibility
+		token := encodePreviewToken("posts", slug, secret, time.Hour)
+		gotPrefix, _, err := decodePreviewToken(token, secret)
+		if err != nil {
+			t.Fatalf("unexpected decode error: %v", err)
+		}
+		// The decoded prefix must be "posts", not "docs"
+		if gotPrefix == "docs" {
+			t.Error("cross-module: decoded prefix should not match 'docs'")
+		}
+	})
+}
