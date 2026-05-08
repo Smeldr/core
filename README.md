@@ -152,6 +152,8 @@ Each runs with: `cd example/blog && go run .`
 Full API reference: [REFERENCE.md](REFERENCE.md)  
 Web docs: [forge-cms.dev/docs](https://forge-cms.dev/docs)
 
+For full token management reference (create, list, revoke) see [REFERENCE.md — Token management](REFERENCE.md#token-management).
+
 ---
 
 ## License

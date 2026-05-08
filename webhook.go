@@ -36,8 +36,8 @@ type Titled interface {
 //	    events     TEXT    NOT NULL,      -- JSON array of event names
 //	    target_url TEXT    NOT NULL,
 //	    secret_enc TEXT    NOT NULL,      -- AES-256-GCM encrypted, base64
-//	    active     BOOLEAN NOT NULL DEFAULT 1,
-//	    created_at DATETIME NOT NULL
+//	    active     BOOLEAN NOT NULL DEFAULT TRUE,
+//	    created_at TIMESTAMPTZ NOT NULL
 //	);
 type WebhookEndpoint struct {
 	ID        string    `json:"id"`
@@ -211,7 +211,7 @@ func (s *WebhookStore) Delete(ctx context.Context, id string) error {
 // pool can decrypt the signing secret at delivery time.
 func (s *WebhookStore) EndpointsForEvent(ctx context.Context, event string) ([]WebhookEndpoint, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, events, target_url, secret_enc, active, created_at FROM forge_webhook_endpoints WHERE active = 1`,
+		`SELECT id, events, target_url, secret_enc, active, created_at FROM forge_webhook_endpoints WHERE active`,
 	)
 	if err != nil {
 		return nil, err

@@ -3886,3 +3886,37 @@ Two factual errors in reference documentation:
 
 ---
 
+### Amendment A91 — Postgres parity fixes and README token link
+
+**Status:** Agreed — 2026-05-08
+
+**Problem:**
+Three issues found after Milestone 11 ship:
+
+1. `EndpointsForEvent` in `webhook.go` uses `WHERE active = 1`. On a Postgres
+   BOOLEAN column this raises a type mismatch error. SQLite treats 1 as truthy
+   but Postgres requires a boolean expression.
+
+2. DDL godoc comments in `webhook.go` and `outbound.go` use SQLite-specific
+   types (`BOOLEAN DEFAULT 1`, `DATETIME`, `BLOB`). Developers following these
+   examples to create Postgres schemas will get invalid DDL.
+
+3. `README.md` has no link to the token management section of REFERENCE.md,
+   making it easy to miss for developers looking for the Create/List/Revoke API.
+
+**Decision:**
+1. `webhook.go` line 214: change `WHERE active = 1` to `WHERE active` — valid
+   on both SQLite (truthy integer) and Postgres (boolean expression).
+2. `webhook.go` DDL godoc: `DEFAULT 1` → `DEFAULT TRUE`, `DATETIME` → `TIMESTAMPTZ`.
+3. `outbound.go` DDL godocs: `BLOB` → `BYTEA`, all `DATETIME` → `TIMESTAMPTZ` (5 occurrences).
+4. `README.md` Reference section: add one line linking to REFERENCE.md#token-management.
+
+**Consequences:**
+- No behaviour change. Runtime queries other than Fix 1 are already
+  database-agnostic (parameterised, no type literals).
+- DDL examples in godoc are now valid Postgres DDL.
+- README gains a discoverable pointer to the token management API.
+- No exported symbol changes. No test changes required.
+
+---
+

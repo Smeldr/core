@@ -116,6 +116,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A88 | `forge.go`: `App.Webhooks(store *WebhookStore)`, `App.WebhookPool() WebhookJobQueue`, `App.injectWebhookHooks()` — wires outbound webhook infrastructure into the App; pool started/stopped with server lifecycle. | Agreed | 2026-05-08 |
 | A89 | `module.go`: `afterHook`/`setAfterHook`/`notifyAfter` — post-lifecycle callback slot on `Module[T]`; `notifyAfter` wraps `dispatchAfter`+`afterHook`; `MCPSchedule` dispatches `AfterSchedule`. CLI parity: `forge webhook` ships with `forge-mcp` webhook tools (A86 gap closed). | Agreed | 2026-05-08 |
 | A90 | `REFERENCE.md`: replace hardcoded `1.16.0`/`1.6.1` version literals in health endpoint examples with `x.y.z` placeholder (3 occurrences). `FEATURELIST.md`: correct `delete_[type]` role from `Author+` to `Editor+` — matches `authoriseEditor()` enforcement in `forge-mcp/tool.go`. | Agreed | 2026-05-07 |
+| A91 | `webhook.go`: `WHERE active = 1` → `WHERE active` (Postgres BOOLEAN parity). DDL godoc: `DEFAULT 1`→`DEFAULT TRUE`, `DATETIME`→`TIMESTAMPTZ` in `webhook.go`; `BLOB`→`BYTEA`, `DATETIME`→`TIMESTAMPTZ` (5 occurrences) in `outbound.go`. `README.md`: add token management reference link. | Agreed | 2026-05-08 |
 
 ---
 

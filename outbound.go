@@ -42,12 +42,12 @@ func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) 
 //	    endpoint_id   TEXT    NOT NULL,
 //	    target_url    TEXT    NOT NULL,
 //	    secret_enc    TEXT    NOT NULL,
-//	    payload       BLOB    NOT NULL,
+//	    payload       BYTEA   NOT NULL,
 //	    event         TEXT    NOT NULL,
 //	    attempts      INTEGER NOT NULL DEFAULT 0,
-//	    next_retry_at DATETIME NOT NULL,
-//	    created_at    DATETIME NOT NULL,
-//	    expires_at    DATETIME NOT NULL,
+//	    next_retry_at TIMESTAMPTZ NOT NULL,
+//	    created_at    TIMESTAMPTZ NOT NULL,
+//	    expires_at    TIMESTAMPTZ NOT NULL,
 //	    status        TEXT    NOT NULL DEFAULT 'pending'
 //	);
 type OutboundJob struct {
@@ -71,7 +71,7 @@ type OutboundJob struct {
 //	CREATE TABLE forge_delivery_logs (
 //	    id           TEXT    PRIMARY KEY,
 //	    job_id       TEXT    NOT NULL,
-//	    attempted_at DATETIME NOT NULL,
+//	    attempted_at TIMESTAMPTZ NOT NULL,
 //	    status_code  INTEGER NOT NULL DEFAULT 0,
 //	    duration_ms  INTEGER NOT NULL DEFAULT 0,
 //	    error        TEXT    NOT NULL DEFAULT ''
