@@ -2187,3 +2187,90 @@ Requires Admin role.
 forge-cli preview /posts my-draft-post
 # → https://example.com/posts/my-draft-post?preview=<token>
 ```
+
+---
+
+## Media upload token
+
+The upload token lets an HTTP client (or AI agent) upload directly to
+`POST /media` without a full admin bearer token. The token is short-lived,
+stateless, and carries no slug or prefix binding — it authorises any upload
+within the TTL.
+
+UploadToken uploads are restricted to image MIME types:
+`image/jpeg`, `image/png`, `image/webp`, `image/gif`, `image/avif`.
+Bearer-token uploads retain full MIME access.
+
+### `Config.MediaUploadTokenExpiry`
+
+```go
+type Config struct {
+    // ...
+    MediaUploadTokenExpiry time.Duration // default 15 m when zero
+}
+```
+
+### `App.GenerateUploadToken`
+
+```go
+func (a *App) GenerateUploadToken() string
+```
+
+Returns a signed upload token valid for `Config.MediaUploadTokenExpiry` (default 15 m).
+
+### `App.ValidateUploadToken`
+
+```go
+func (a *App) ValidateUploadToken(token string) error
+```
+
+Validates an upload token. Returns `ErrUnauth` on any failure (expired, tampered,
+wrong secret). Used by forge-media's upload handler.
+
+### Upload flow
+
+```bash
+# 1. Generate a token via MCP (Author+ role)
+#    Returns: { token, upload_url, expires_in }
+
+# 2. POST directly to /media
+curl -X POST https://example.com/media \
+  -H "Authorization: UploadToken <token>" \
+  -F "file=@hero.jpg" \
+  -F "description=Hero image for landing page"
+# → 201 { "id": "...", "url": "https://example.com/media/abc123-hero.jpg", ... }
+```
+
+### forge-mcp: `create_upload_token`
+
+Author+ MCP tool that generates an upload token.
+
+Parameters: none
+
+Returns:
+```json
+{
+  "token": "<signed-token>",
+  "upload_url": "https://example.com/media",
+  "expires_in": 900
+}
+```
+
+### forge-cli: `forge media`
+
+```
+forge-cli media upload <file> [--description <text>]
+forge-cli media list [--type image|document|video|audio|other]
+forge-cli media delete <id>
+```
+
+`upload` POSTs to `/media` with the configured bearer token. `--description` is
+required for image files (WCAG 1.1.1).
+
+```bash
+forge-cli media upload hero.jpg --description "Hero image"
+# → https://example.com/media/abc123-hero.jpg
+
+forge-cli media list --type image
+forge-cli media delete <id>
+```

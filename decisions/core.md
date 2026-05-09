@@ -3961,3 +3961,57 @@ New symbols:
 
 ---
 
+
+---
+
+## Amendment A93 — forge-media upload token, AVIF, hex filename prefix (Milestone 13)
+
+**Date:** 2026-05-09
+**Status:** Agreed
+
+**Context:**
+The `create_file` MCP tool encodes file data as base64, making real image uploads
+impractical — a 2 MB image consumes ~1 M tokens in a tool call. A short-lived
+HMAC-signed upload token lets any HTTP client POST directly to `/media` without
+carrying a full admin bearer token.
+
+**Decision:**
+Extend forge core, forge-media, forge-mcp, and forge-cli with a minimal upload
+token mechanism. The token is stateless (no DB table), signs only an expiry
+timestamp (no slug/prefix binding — any upload is permitted within the TTL), and
+is validated inline in the upload handler.
+
+Token format (mirrors preview tokens without payload fields):
+```
+payload = base64url( strconv.FormatInt(expUnix, 10) )
+token   = payload + "." + base64url( hmac-sha256(Config.Secret, payload) )
+```
+
+UploadToken-authorised uploads are restricted to image MIME types only
+(jpeg, png, webp, gif, avif). Bearer-token uploads retain full MIME access
+(video, audio, PDF, SVG). AVIF is added as a first-class supported type.
+
+Stored filenames use a 32-character lowercase hex prefix (16 random bytes) instead
+of the previous timestamp+random format. Hex encoding guarantees the prefix never
+contains a hyphen, making the separator between prefix and sanitised filename
+unambiguous.
+
+**New symbols:**
+- `auth.go`: `encodeUploadToken(secret []byte, ttl time.Duration) string` (internal)
+- `auth.go`: `decodeUploadToken(token string, secret []byte) error` (internal)
+- `forge.go`: `Config.MediaUploadTokenExpiry time.Duration` (default 15 m when zero)
+- `forge.go`: `App.GenerateUploadToken() string`
+- `forge.go`: `App.ValidateUploadToken(token string) error`
+- forge-media `server.go`: `Authorization: UploadToken <token>` path in `handleUpload`
+- forge-media `server.go`: `uploadAllowedMIMEs` whitelist (image types only)
+- forge-media `media.go`: `.avif` / `image/avif` in MIME maps and `sniffMIME`
+- forge-media `media.go`: `generateFilename` — 32-char hex prefix replaces timestamp+random
+- forge-mcp `upload_tools.go`: `create_upload_token` tool (Author+)
+- forge-cli `media.go`: `.avif` added to `imageExts`; media subcommands first documented
+
+**Consequences:**
+- Token validation uses `subtle.ConstantTimeCompare` — no timing attack surface.
+- Failed or expired tokens return 401; MIME-rejected uploads return 422.
+- forge-mcp and forge-media have no new inter-module dependency — forge-mcp calls
+  `app.GenerateUploadToken()` via the existing `*forge.App` reference.
+- forge core → v1.19.0, forge-media → v1.2.0, forge-mcp → v1.9.0, forge-cli → v0.6.0.

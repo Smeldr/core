@@ -2,7 +2,7 @@
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.18.0 (A92).
+Last updated: v1.19.0 (A93).
 
 ---
 
@@ -65,6 +65,7 @@ Per content type — automatically derived, no manual definition:
 Admin tools (require Admin role):
 
 - `create_preview_url` — generates a signed draft preview URL for a Draft or Scheduled item
+- `create_upload_token` — generates a short-lived upload token for `POST /media` (Author+)
 - `create_webhook`, `list_webhooks`, `delete_webhook` — manage outbound endpoints
 - `list_webhook_deliveries`, `retry_webhook` — delivery introspection and retry
 - `create_token`, `list_tokens`, `revoke_token` — token management
@@ -105,6 +106,9 @@ MCP resource subscriptions:
 - Alt text enforced on image uploads (WCAG 1.1.1)
 - `os.Root` path traversal protection (Go 1.24+)
 - Configurable upload directory and max file size
+- AVIF support — `image/avif` accepted and magic-byte detected alongside JPEG, PNG, WebP, GIF
+- Upload token — `Authorization: UploadToken <token>` accepted on `POST /media`; image-only MIME whitelist for token uploads; Bearer-token uploads unaffected
+- Hex filename prefix — stored as `<32-hex>-<sanitized>` preventing collisions without exposing upload timing
 
 ## forge-cli (separate module)
 

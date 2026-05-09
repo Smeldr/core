@@ -24,6 +24,7 @@ All architectural decisions are locked in `DECISIONS.md`.
 | M10 | MCP support (v2) | ✅ Done |
 | M11 | Outbound webhooks + MCP subscriptions (v1.17.0) | ✅ Done |
 | M12 | Draft preview via HMAC-signed URL token (v1.18.0) | ✅ Done |
+| M13 | Media upload token + AVIF + hex filename prefix (v1.19.0) | ✅ Done |
 
 ---
 
@@ -275,6 +276,27 @@ modules. Archived items are never previewable.
 - [x] A92 — `module.go`: `secret` field, `setSecret`, preview bypass in `showHandler` (Draft/Scheduled only — Archived → 404)
 - [x] Step 1 — `forge-mcp/preview_tools.go`: `create_preview_url` Admin MCP tool; always in `tools/list`
 - [x] Step 2 — `forge-cli/preview.go`: `forge-cli preview <prefix> <slug>` subcommand
+
+---
+
+## Milestone 13 — Media upload token (v1.19.0)
+
+Short-lived HMAC-SHA256 upload token for `POST /media`; image-only MIME whitelist
+for token uploads; AVIF as a first-class image type; hex filename prefix.
+**Detail:** see git history — no separate backlog file.
+
+| Step | File | Status | Completed |
+|------|------|--------|-----------|
+| A93 | auth.go, forge.go | ✅ Done | 2026-05-09 |
+| 1 | forge-media/server.go, media.go | ✅ Done | 2026-05-09 |
+| 2 | forge-mcp/upload_tools.go, tool.go | ✅ Done | 2026-05-09 |
+| 3 | forge-cli/media.go, main.go | ✅ Done | 2026-05-09 |
+
+- [x] A93 — `auth.go`: `encodeUploadToken` / `decodeUploadToken`
+- [x] A93 — `forge.go`: `Config.MediaUploadTokenExpiry`, `App.GenerateUploadToken()`, `App.ValidateUploadToken()`
+- [x] Step 1 — `forge-media`: `UploadToken` header, image MIME whitelist, AVIF, hex filename prefix
+- [x] Step 2 — `forge-mcp/upload_tools.go`: `create_upload_token` Author+ MCP tool
+- [x] Step 3 — `forge-cli/media.go`: media upload/list/delete first documented; AVIF extension
 
 ---
 

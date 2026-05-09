@@ -23,6 +23,25 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.19.0] — 2026-05-09
+
+Media upload token (Milestone 13, Amendment A93).
+
+### Added
+
+- `Config.MediaUploadTokenExpiry time.Duration` — upload token lifetime.
+  Defaults to 15 minutes when zero.
+- `App.GenerateUploadToken() string` — returns a short-lived HMAC-SHA256 signed
+  token. Pass it in the `Authorization: UploadToken <token>` header to POST /media
+  without a full bearer token. No slug or prefix binding — authorises any upload
+  within the TTL.
+- `App.ValidateUploadToken(token string) error` — validates an upload token inline.
+  Returns `ErrUnauth` on any failure. Intended for use by forge-media's upload handler.
+- `encodeUploadToken` / `decodeUploadToken` (unexported) — HMAC-SHA256 token
+  encoding and constant-time validation in `auth.go`.
+
+---
+
 ## [1.18.0] — 2026-05-08
 
 Draft preview via HMAC-signed URL token (Milestone 12, Amendment A92).
