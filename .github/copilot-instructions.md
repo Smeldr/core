@@ -524,10 +524,16 @@ The detail belongs in the submodule's own file.
 2. `go test ./...` is green (root); `go test ./...` inside each changed submodule is green
 3. `CHANGELOG.md` (root) and each changed submodule's `CHANGELOG.md` has an entry for the
    version being tagged
-4. For standalone modules that depend on forge core (forge-mcp, forge-media, forge-cli):
-   verify `go.mod` requires the correct forge version (`grep forge-cms.dev/forge go.mod`),
-   then run `go mod tidy` and confirm `go.sum` is clean before tagging. This check must
-   happen before the tag — not after.
+4. For standalone modules that depend on forge core (forge-mcp, forge-media, forge-cli),
+   run this full checklist before tagging — every time, without exception:
+   - `head -1 go.mod` → must be `module forge-cms.dev/<module-name>` (not any github.com path)
+   - `grep forge-cms.dev/forge go.mod` → correct forge version in require block
+   - `go mod tidy` → no diff
+   - `go build ./...` → green
+   - `go test ./...` → green
+   - `git status --short` → clean tree
+   The module proxy caches go.mod permanently on first fetch — a bad tag requires a new patch
+   version. Running this checklist before tagging is the only way to avoid that.
 
 **Tag and push sequence:**
 ```
