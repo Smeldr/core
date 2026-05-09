@@ -519,11 +519,15 @@ in the root `CHANGELOG.md`. The separation is strict:
 A brief reference line in the root is acceptable: `Submodules: forge-media v1.0.0 released.`
 The detail belongs in the submodule's own file.
 
-**Pre-tag checklist — all three must be green before tagging:**
+**Pre-tag checklist — all must be green before tagging:**
 1. `git status --short` returns nothing (working tree clean)
 2. `go test ./...` is green (root); `go test ./...` inside each changed submodule is green
 3. `CHANGELOG.md` (root) and each changed submodule's `CHANGELOG.md` has an entry for the
    version being tagged
+4. For standalone modules that depend on forge core (forge-mcp, forge-media, forge-cli):
+   verify `go.mod` requires the correct forge version (`grep forge-cms.dev/forge go.mod`),
+   then run `go mod tidy` and confirm `go.sum` is clean before tagging. This check must
+   happen before the tag — not after.
 
 **Tag and push sequence:**
 ```
