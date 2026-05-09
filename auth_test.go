@@ -914,3 +914,36 @@ func TestEncodeDecodePreviewToken(t *testing.T) {
 		}
 	})
 }
+
+func TestEncodeDecodeUploadToken(t *testing.T) {
+	secret := []byte("test-secret-upload")
+
+	t.Run("valid token round-trips without error", func(t *testing.T) {
+		token := encodeUploadToken(secret, time.Hour)
+		if err := decodeUploadToken(token, secret); err != nil {
+			t.Fatalf("expected nil, got %v", err)
+		}
+	})
+
+	t.Run("expired token returns ErrUnauth", func(t *testing.T) {
+		token := encodeUploadToken(secret, -time.Second)
+		if err := decodeUploadToken(token, secret); err == nil {
+			t.Fatal("expected error for expired token, got nil")
+		}
+	})
+
+	t.Run("wrong secret returns ErrUnauth", func(t *testing.T) {
+		token := encodeUploadToken(secret, time.Hour)
+		if err := decodeUploadToken(token, []byte("wrong-secret")); err == nil {
+			t.Fatal("expected error for wrong secret, got nil")
+		}
+	})
+
+	t.Run("tampered payload returns ErrUnauth", func(t *testing.T) {
+		token := encodeUploadToken(secret, time.Hour)
+		tampered := "X" + token[1:]
+		if err := decodeUploadToken(tampered, secret); err == nil {
+			t.Fatal("expected error for tampered token, got nil")
+		}
+	})
+}

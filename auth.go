@@ -197,6 +197,44 @@ func decodePreviewToken(token string, secret []byte) (prefix, slug string, err e
 	return fields[0], fields[1], nil
 }
 
+// encodeUploadToken returns a short-lived HMAC-SHA256-signed upload token.
+// Unlike preview tokens the token carries no slug or prefix — it authorises
+// any upload to POST /media within the TTL.
+//
+// Token format: base64url(expUnix) + "." + base64url(hmac-sha256(secret, payload))
+func encodeUploadToken(secret []byte, ttl time.Duration) string {
+	exp := strconv.FormatInt(time.Now().Add(ttl).Unix(), 10)
+	payload := base64.RawURLEncoding.EncodeToString([]byte(exp))
+	return payload + "." + tokenHMAC(payload, string(secret))
+}
+
+// decodeUploadToken validates the HMAC signature and expiry of an upload token
+// produced by [encodeUploadToken]. Returns [ErrUnauth] if the token is
+// malformed, expired, or the signature does not match. Comparison is
+// constant-time to prevent timing attacks.
+func decodeUploadToken(token string, secret []byte) error {
+	parts := strings.SplitN(token, ".", 2)
+	if len(parts) != 2 {
+		return ErrUnauth
+	}
+	payload, sig := parts[0], parts[1]
+
+	expected := tokenHMAC(payload, string(secret))
+	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
+		return ErrUnauth
+	}
+
+	raw, err := base64.RawURLEncoding.DecodeString(payload)
+	if err != nil {
+		return ErrUnauth
+	}
+	expUnix, convErr := strconv.ParseInt(string(raw), 10, 64)
+	if convErr != nil || time.Now().Unix() > expUnix {
+		return ErrUnauth
+	}
+	return nil
+}
+
 // SignToken produces a signed token encoding the given User. Pass the token to
 // the client (e.g. as a JSON response body); validate it later with [BearerHMAC]
 // or [CookieSession].
