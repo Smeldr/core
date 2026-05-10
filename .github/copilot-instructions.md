@@ -408,22 +408,49 @@ Wait for feedback before making any changes.
 
 **3. Apply repo doc updates**
 Apply agreed changes to REFERENCE.md, README.md, and/or FEATURELIST.md.
+Also update `.claude/skills/forge.md` when any of the following changed:
+- MCP tools or CLI commands (update both sections; verify CLI/MCP parity)
+- Config keys (update forge.config section)
+- New failure modes confirmed in this release (update gotchas)
+- Any of the above → bump the version line at the top of the skill file
+- Copy updated skill file to `Forge-site-working/.claude/skills/forge.md`
 Do not commit yet.
 
-**4. Content suggestions (forge-cms.dev/docs)**
+**4. Content brief**
+After repo doc updates are applied, write a content brief covering:
+- What shipped: plain-language summary (one paragraph)
+- Amendment ID (e.g. A93)
+- REFERENCE.md section: relevant header
+- Devlog: yes/no + suggested angle (or "covered by Axx")
+- Solved: which story this feature supports, if any
+- Docs: which forge-cms.dev/docs pages need updating
+
+Release type guidance:
+
+| Release type | Devlog | Solved | Docs |
+|---|---|---|---|
+| New milestone (M-number) | yes | possibly | yes |
+| New MCP/CLI feature | yes | possibly | yes |
+| Bugfix / patch | no | no | only if API changed |
+| Doc/infra fix | no | no | no |
+
+The content brief is handed to the architect, who converts it into a sitepilot NEXT.md.
+Wait for feedback before proceeding.
+
+**5. Content suggestions (forge-cms.dev/docs)**
 Based on updated REFERENCE.md, suggest doc page title(s) that should be
 created or updated on forge-cms.dev.
 Wait for feedback.
 
-**5. Content outline**
+**6. Content outline**
 For each approved title, suggest content as a short bullet list.
 Wait for feedback before writing full drafts.
 
-**6. Full drafts**
+**7. Full drafts**
 Write full draft(s) based on approved outlines.
 Wait for feedback and approval.
 
-**7. Save approved drafts**
+**8. Save approved drafts**
 Save each approved draft as an individual file in:
 `C:\Users\peter\Documents\Code\Forge-site-working\content\`
 
@@ -433,11 +460,11 @@ Example: `20260505-143022-token-management.md`
 
 These files are for sitepilot to pick up — do not commit them to the forge repo.
 
-**8. Propose commit message**
+**9. Propose commit message**
 Propose a conventional commit message covering all repo doc changes (steps 2–3).
 Wait for explicit approval before committing.
 
-**9. After commit**
+**10. After commit**
 Update `forge-architect/plans/core-next-plan.md` if a plan file was created.
 Update `forge-architect/context/corepilot.md` and push from that repo.
 
