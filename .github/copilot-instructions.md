@@ -218,6 +218,11 @@ must use PowerShell syntax. Never use Unix-only tools.
 
 `go`, `gofmt`, `git` are available directly — no path qualification needed.
 
+**File encoding:** Always use the VS Code edit tool (`replace_string_in_file` /
+`create_file`) to write markdown files. Never use PowerShell `Set-Content` or
+`Out-File` without `-Encoding utf8` — PowerShell's default encoding corrupts
+em dashes, bullets, and other non-ASCII characters (mojibake).
+
 ---
 
 ## Standard step workflow
