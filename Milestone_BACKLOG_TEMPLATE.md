@@ -31,7 +31,6 @@ One-line description of the milestone goal.
 - [ ] `go vet ./...` — clean
 - [ ] `gofmt -l .` — returns nothing
 - [ ] `go test -v -run Test{Name} ./...` — all green
-- [ ] `ROADMAP.md` — step table row and summary checkbox updated
 - [ ] `README.md` — no examples broken by this step
 - [ ] `README.md` — section status badges updated if this step ships a documented feature
 - [ ] `integration_full_test.go` — new cross-milestone groups added (final step of each milestone only)

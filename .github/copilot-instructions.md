@@ -57,13 +57,12 @@ file is the bridge between sessions. Always read it first.
    Read the relevant body file when a specific decision is needed.
    Do not work around locked decisions. If a decision seems wrong, raise it explicitly.
 4. Read `ARCHITECTURE.md` — package structure, request lifecycle, stable interfaces.
-5. Read `ROADMAP.md` — current milestone and implementation order.
-6. Read the milestone backlog file for the **current milestone only**
+5. Read the milestone backlog file for the **current milestone only**
    (e.g. `Milestone11_BACKLOG.md`). This is the authoritative task list.
    Do not read completed milestone backlogs — they are historical record only.
    Do not implement anything not listed in the current backlog.
    Do not skip steps — the order is load-bearing (dependency layers).
-7. Apply document economy: completed items are removed from lists, not checked
+6. Apply document economy: completed items are removed from lists, not checked
    off. Resolved known issues are deleted. A document that does not influence
    a decision must be reduced or removed.
 
@@ -257,7 +256,7 @@ Every step — without exception — follows this exact sequence:
   are the ONLY action that requires explicit user approval.**
 - Read any file in the workspace automatically — no permission needed.
   Use PowerShell (`Get-Content`, `Select-String`, etc.) or the read_file tool
-  to read `DECISIONS.md`, `ARCHITECTURE.md`, `ROADMAP.md`, milestone backlog
+  to read `DECISIONS.md`, `ARCHITECTURE.md`, milestone backlog
   files, or any source file before planning or implementing. Never ask the user
   whether to read a file that already exists in the workspace.
 
@@ -344,9 +343,8 @@ that both exist, then stage.
   planned files that are now implemented. Update it before proposing the commit.
 - The step is not complete until the review checkbox is ticked.
 
-### 5. Update the roadmap, backlog, and session context
+### 5. Update the backlog and session context
 - Mark the step `✅ Done` in the `Milestone{N}_BACKLOG.md` Progress table with the completion date.
-- Tick the step's summary checkbox in `ROADMAP.md` and update its row in the step table.
 - Write `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md` locally,
   then commit and push from that repo (see "After every commit" for the command sequence).
 - Never batch updates — update immediately after the step is verified.
@@ -505,7 +503,8 @@ All milestone work happens on a local feature branch. Commits on the branch are
 free checkpoints — their timestamps do not matter and the branch is never pushed
 to GitHub unless explicitly requested.
 Branch naming: feature/m{N}-{slug} — e.g. feature/m11-webhooks.
-When the architect approves push, squash the branch to main:
+When the architect approves push via a separate NEXT.md, squash the branch to main.
+"Commit approved" means commit on the feature branch only — never auto-squash to main:
     git checkout main
     git merge --squash feature/m{N}-{slug}
     git commit -m "{conventional commit message}"
@@ -607,37 +606,26 @@ Release title(s) alongside the commit message. Paste the relevant
 Before implementing any milestone, a dedicated backlog file must be created and
 agreed upon. This file is the single source of truth for that milestone's detail.
 
-### Two-tier structure
+### Planning documentation
 
-Forge uses two tiers of planning documentation:
+Forge uses one tier of planning documentation per active milestone:
 
-**Tier 1 — `ROADMAP.md` (repo root)**
-- High-level roadmap for all milestones
-- Progress table at the top tracks milestone-level status
-- Each milestone section has a per-step progress table and one-line step
-  summary checkboxes — no sub-tasks, no implementation detail
-- One-line step format: `- [ ] Step {N} — \`{filename}\`: {one sentence summary}`
-- Updated when: a step is completed (tick the step checkbox + update step table)
-  or a milestone status changes (update the top Progress table)
-
-**Tier 2 — `Milestone{N}_BACKLOG.md` (repo root)**
+**`Milestone{N}_BACKLOG.md` (repo root)**
 - Full implementation plan for one milestone only
 - Contains numbered sub-sections (N.M), atomic checkboxes, verification blocks,
   and the architecture review checkbox
 - The authoritative task list — implementation follows this file exactly
 - Updated after every step: tick all checkboxes, mark step ✅ in Progress table
 
-### Keeping the two tiers in sync
+Delivery history lives in `CHANGELOG.md`. Current state and active sprint are
+tracked in `context/corepilot.md` and `plans/core-next-plan.md` in forge-architect
+(written locally — never committed to this repo mid-sprint).
 
-After completing a step:
+### After completing a step
+
 1. Tick all sub-task checkboxes in `Milestone{N}_BACKLOG.md`
 2. Mark step ✅ Done in the `Milestone{N}_BACKLOG.md` Progress table
-3. Tick the step checkbox in `ROADMAP.md` under the relevant milestone section
-4. Update the step row status in `ROADMAP.md` step table
-5. If all steps in a milestone are done, mark the milestone ✅ in the top
-   `ROADMAP.md` Progress table
-
-Never update only one file — always keep both in sync.
+3. Write `context/corepilot.md` and push from forge-architect
 
 ### Structure of a milestone backlog file
 
