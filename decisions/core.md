@@ -4015,3 +4015,107 @@ unambiguous.
 - forge-mcp and forge-media have no new inter-module dependency — forge-mcp calls
   `app.GenerateUploadToken()` via the existing `*forge.App` reference.
 - forge core → v1.19.0, forge-media → v1.2.0, forge-mcp → v1.9.0, forge-cli → v0.6.0.
+
+---
+
+## Amendment A94 — Signal bus + OutboundDelivery (Milestone 14)
+
+**Date:** 2026-05-11
+**Status:** Agreed
+
+**Context:**
+Milestone 11 (webhooks) wired delivery directly inside `injectWebhookHooks` —
+a single private method that set the `afterHook` on every content module at
+`App.Run()` time. The hook signature was `func(Context, Signal, string, any)`.
+This was sufficient for webhooks but made it impossible for application code to
+subscribe to lifecycle signals without monkey-patching a module option. As Forge
+grows toward social/audit/notification features, a first-class signal bus is
+needed so multiple independent subscribers can each react to content events.
+
+**Decision:**
+Replace `injectWebhookHooks` with a typed signal bus (`App.OnSignal`,
+`App.dispatchBus`, `App.wireSignalBus`) and introduce `SignalEvent` as the
+structured event type delivered to bus subscribers.
+
+**`SignalEvent` struct (`signals.go`):**
+```go
+type SignalEvent struct {
+    Type          string    // Go type name of the content item
+    Slug          string
+    Title         string    // empty when type does not implement Titled
+    URL           string    // BaseURL + prefix + "/" + slug
+    Timestamp     time.Time
+    PreviousState string    // status before the transition, or "" for creates
+    ActorRole     string    // first role of the actor, or "guest"
+    ActorID       string    // user ID of the actor, or ""
+    raw           any       // unexported; the concrete content item for webhook payload building
+}
+```
+
+**`afterHookMeta` struct (`signals.go`):**
+Carries `TypeName`, `Prefix`, and `PrevState` from the call site into the hook
+closure so that `buildSignalEvent` can populate `SignalEvent` without needing
+access to App config inside the module.
+
+**Signal bus methods (`forge.go`):**
+```go
+func (a *App) OnSignal(sig Signal, h func(context.Context, SignalEvent) error) *App
+func (a *App) dispatchBus(ctx context.Context, ev SignalEvent, sig Signal)
+func (a *App) wireSignalBus()
+```
+`OnSignal` appends a handler to `busHandlers[sig]` (guarded by `busMu sync.RWMutex`).
+`dispatchBus` calls each handler sequentially with a 100 ms per-handler timeout
+derived from `context.WithoutCancel(ctx)` (detached from the request lifecycle).
+`wireSignalBus` replaces `injectWebhookHooks`; it injects a single `afterHook`
+closure into every hookable module that calls `buildSignalEvent` → `dispatchBus`
+→ `signalListeners`.
+
+**`webhookDispatch` function (`webhook.go`):**
+Moved webhook delivery logic out of the old `injectWebhookHooks` inline closure
+into a standalone `webhookDispatch(ctx, ev, sig, store, pool) error` function.
+`App.Webhooks()` registers this function as an `OnSignal` handler for all seven
+lifecycle signals, so webhooks are now just one bus subscriber among many.
+
+**`OutboundDelivery` interface (`outbound.go`):**
+```go
+type OutboundDelivery interface {
+    Enqueue(ctx context.Context, job OutboundJob) error
+}
+```
+The unexported `workerPool` satisfies `OutboundDelivery`. `WebhookJobQueue`
+(used by forge-mcp) is kept unchanged for compatibility.
+
+**`notifyAfter` signature change (`module.go`):**
+`notifyAfter(ctx, sig, prevState, item)` — `prevState string` added.
+All call sites updated to pass the correct previous status string (`"draft"`,
+`"published"`, `"scheduled"`, `"archived"`, or `""` for creates).
+
+**Bus dispatch semantics:**
+- Bus runs in the `afterHook` goroutine (already async from the HTTP request).
+- Each handler receives a `context.WithTimeout(context.WithoutCancel(ctx), 100ms)`.
+- Handler errors are logged at Warn level; the bus continues to the next handler.
+- Handler panics propagate into the goroutine's deferred recovery — not to the bus.
+
+**Rejected alternatives:**
+- **Exported `raw any` on `SignalEvent`:** exposes the concrete item and
+  couples downstream subscribers to forge's internal type model. Rejected —
+  `raw` is unexported; webhook payload building uses it internally via
+  `buildWebhookPayload(ev.Type, ev.raw, sig)`.
+- **Separate goroutine per bus dispatch:** adds overhead per event with no
+  benefit since delivery is already async from the HTTP request.
+
+**New / changed symbols:**
+- `signals.go`: `SignalEvent` (exported struct), `afterHookMeta` (unexported), `buildSignalEvent` (unexported)
+- `forge.go`: `App.OnSignal`, `App.dispatchBus` (unexported), `App.wireSignalBus` (unexported, replaces `injectWebhookHooks`)
+- `forge.go`: `App` struct fields `busMu sync.RWMutex`, `busHandlers map[Signal][]func(context.Context, SignalEvent) error`
+- `forge.go`: `App.Webhooks` — refactored to register `webhookDispatch` as `OnSignal` handlers
+- `webhook.go`: `webhookDispatch` (unexported)
+- `outbound.go`: `OutboundDelivery` (exported interface)
+- `module.go`: `afterHook` field type, `setAfterHook` and `notifyAfter` signatures changed
+
+**Consequences:**
+- Application code can now react to any content lifecycle event without module options:
+  `app.OnSignal(forge.AfterPublish, func(ctx context.Context, ev forge.SignalEvent) error {...})`
+- Multiple subscribers are supported; order of registration is preserved.
+- Webhook delivery is one bus subscriber; custom subscribers and webhooks coexist.
+- forge core → v1.20.0.

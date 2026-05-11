@@ -23,6 +23,27 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.20.0] — 2026-05-11
+
+Signal bus (Milestone 14, Amendment A94).
+
+### Added
+- `SignalEvent` struct — structured event type delivered to signal bus subscribers.
+  Fields: `Type`, `Slug`, `Title`, `URL`, `Timestamp`, `PreviousState`, `ActorRole`, `ActorID`.
+- `App.OnSignal(sig Signal, h func(context.Context, SignalEvent) error) *App` —
+  registers a handler that fires after every matching lifecycle event. Multiple
+  handlers per signal are supported; registration order is preserved.
+- `OutboundDelivery` interface — minimal `{ Enqueue(ctx, OutboundJob) error }` used
+  by any engine that needs retry-backed outbound HTTP without coupling to `WebhookStore`.
+
+### Changed
+- `App.Webhooks` now registers webhook delivery as `OnSignal` handlers, making it one
+  subscriber among many. Behaviour is unchanged; the change is internal only.
+- `injectWebhookHooks` replaced by `wireSignalBus` (unexported). The signal bus is
+  wired at `App.Run()` time as before.
+
+---
+
 ## [1.19.0] — 2026-05-09
 
 Media upload token (Milestone 13, Amendment A93).

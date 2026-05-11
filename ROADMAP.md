@@ -25,6 +25,7 @@ All architectural decisions are locked in `DECISIONS.md`.
 | M11 | Outbound webhooks + MCP subscriptions (v1.17.0) | ✅ Done |
 | M12 | Draft preview via HMAC-signed URL token (v1.18.0) | ✅ Done |
 | M13 | Media upload token + AVIF + hex filename prefix (v1.19.0) | ✅ Done |
+| M14 | Signal bus + OutboundDelivery (v1.20.0) | ✅ Done |
 
 ---
 
@@ -297,6 +298,24 @@ for token uploads; AVIF as a first-class image type; hex filename prefix.
 - [x] Step 1 — `forge-media`: `UploadToken` header, image MIME whitelist, AVIF, hex filename prefix
 - [x] Step 2 — `forge-mcp/upload_tools.go`: `create_upload_token` Author+ MCP tool
 - [x] Step 3 — `forge-cli/media.go`: media upload/list/delete first documented; AVIF extension
+
+---
+
+## Milestone 14 — Signal bus (v1.20.0)
+
+First-class signal bus with typed `SignalEvent`; `App.OnSignal` for multiple subscribers;
+webhook delivery migrated to `OnSignal`; `OutboundDelivery` interface.
+**Detail:** see git history — no separate backlog file.
+
+| Step | File | Status | Completed |
+|------|------|--------|----------|
+| A94 | signals.go, forge.go, webhook.go, outbound.go, module.go | ✅ Done | 2026-05-11 |
+
+- [x] A94 — `signals.go`: `SignalEvent`, `afterHookMeta`, `buildSignalEvent`
+- [x] A94 — `forge.go`: `App.OnSignal`, `App.dispatchBus`, `App.wireSignalBus` (replaces `injectWebhookHooks`)
+- [x] A94 — `webhook.go`: `webhookDispatch`; `App.Webhooks` migrated to `OnSignal`
+- [x] A94 — `outbound.go`: `OutboundDelivery` interface
+- [x] A94 — `module.go`: `notifyAfter` extended with `afterHookMeta`; all call sites updated
 
 ---
 

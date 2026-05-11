@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -259,8 +260,10 @@ type App struct {
 	webhookStore    *WebhookStore               // non-nil when App.Webhooks() was called
 	webhookPool     *workerPool                 // non-nil when App.Webhooks() was called
 	signalListeners []func(Signal, string, any) // registered via AddSignalListener
+	busMu           sync.RWMutex
+	busHandlers     map[Signal][]func(context.Context, SignalEvent) error // registered via OnSignal
 	hookableModules []interface {
-		setAfterHook(func(Context, Signal, string, any))
+		setAfterHook(func(Context, Signal, afterHookMeta, any))
 	} // modules whose afterHook is wired at Run time
 }
 
@@ -436,7 +439,7 @@ func (a *App) Content(v any, opts ...Option) {
 			ps.setSecret(a.cfg.Secret)
 		}
 		if hk, ok := r.(interface {
-			setAfterHook(func(Context, Signal, string, any))
+			setAfterHook(func(Context, Signal, afterHookMeta, any))
 		}); ok {
 			a.hookableModules = append(a.hookableModules, hk)
 		}
@@ -531,11 +534,12 @@ func (a *App) TokenStore() *TokenStore { return a.tokenStore }
 //	store := forge.NewWebhookStore(db, secret)
 //	app.Webhooks(store)
 //
-// At [App.Run] time, Forge injects a delivery hook into every registered
+// At [App.Run] time, Forge injects the signal bus into every registered
 // content module. After each lifecycle signal (create, update, publish,
-// schedule, archive, delete), the hook looks up active subscriptions from the
-// store, builds the event payload, and enqueues an [OutboundJob] for the
-// worker pool to deliver.
+// schedule, archive, delete), the bus dispatches to all registered handlers,
+// including the webhook delivery handler registered here. The handler looks up
+// active subscriptions from the store, builds the event payload, and enqueues
+// an [OutboundJob] for the worker pool to deliver.
 //
 // The worker pool starts when [App.Run] is called and stops on graceful
 // shutdown. The number of workers defaults to 10; set [Config.WebhookWorkers]
@@ -549,7 +553,20 @@ func (a *App) Webhooks(store *WebhookStore) *App {
 	if workers == 0 {
 		workers = 10
 	}
-	a.webhookPool = newWorkerPool(a.cfg.DB, store, realClock{}, workers)
+	pool := newWorkerPool(a.cfg.DB, store, realClock{}, workers)
+	a.webhookPool = pool
+
+	// Register webhook delivery as signal bus subscribers so that every
+	// content lifecycle event enqueues delivery jobs.
+	for _, sig := range []Signal{
+		AfterCreate, AfterUpdate, AfterPublish, AfterUnpublish,
+		AfterSchedule, AfterArchive, AfterDelete,
+	} {
+		s := sig
+		a.OnSignal(s, func(ctx context.Context, ev SignalEvent) error {
+			return webhookDispatch(ctx, ev, s, store, pool)
+		})
+	}
 	return a
 }
 
@@ -593,54 +610,74 @@ func (a *App) AddSignalListener(fn func(Signal, string, any)) {
 	a.signalListeners = append(a.signalListeners, fn)
 }
 
-// injectWebhookHooks constructs the afterHook closure and injects it into
-// every hookable module collected by Content(). Called once by Run() before
-// starting the HTTP server.
-func (a *App) injectWebhookHooks() {
-	if a.webhookPool == nil && len(a.signalListeners) == 0 {
+// OnSignal registers a handler that is called after every lifecycle signal
+// matching sig. Handlers are called sequentially in registration order within
+// the signal bus goroutine (see [App.wireSignalBus]).
+//
+// The bus wraps the context with [context.WithoutCancel] and enforces a 100 ms
+// per-handler deadline. Handler errors and deadline exceeded are logged with
+// [slog.Warn] and never propagated to the caller that triggered the signal.
+//
+// Use OnSignal to build custom delivery pipelines that react to content
+// lifecycle events:
+//
+//	app.OnSignal(forge.AfterPublish, func(ctx context.Context, ev forge.SignalEvent) error {
+//	    return myQueue.Enqueue(ctx, ev)
+//	})
+func (a *App) OnSignal(sig Signal, h func(context.Context, SignalEvent) error) *App {
+	a.busMu.Lock()
+	defer a.busMu.Unlock()
+	if a.busHandlers == nil {
+		a.busHandlers = make(map[Signal][]func(context.Context, SignalEvent) error)
+	}
+	a.busHandlers[sig] = append(a.busHandlers[sig], h)
+	return a
+}
+
+// dispatchBus dispatches ev to all handlers registered for sig via [App.OnSignal].
+// Called from the wireSignalBus closure inside the afterHook goroutine.
+// Each handler runs with a fresh context derived from context.WithoutCancel(ctx)
+// and a 100 ms timeout so that client disconnects do not abort delivery.
+// Handler errors are logged; nothing is returned or propagated.
+func (a *App) dispatchBus(ctx context.Context, ev SignalEvent, sig Signal) {
+	a.busMu.RLock()
+	handlers := a.busHandlers[sig]
+	a.busMu.RUnlock()
+	if len(handlers) == 0 {
 		return
 	}
-	pool := a.webhookPool
-	store := a.webhookStore
+	base := context.WithoutCancel(ctx)
+	for _, h := range handlers {
+		hCtx, cancel := context.WithTimeout(base, 100*time.Millisecond)
+		err := h(hCtx, ev)
+		cancel()
+		if err != nil {
+			slog.WarnContext(ctx, "signal bus handler error",
+				"signal", sig, "type", ev.Type, "slug", ev.Slug, "error", err)
+		}
+	}
+}
+
+// wireSignalBus constructs the afterHook closure and injects it into every
+// hookable module collected by Content(). Called once by Run() before
+// starting the HTTP server. The closure builds a [SignalEvent], dispatches
+// it to all registered [App.OnSignal] handlers, then calls any legacy
+// [App.AddSignalListener] callbacks.
+func (a *App) wireSignalBus() {
+	a.busMu.RLock()
+	hasBus := len(a.busHandlers) > 0
+	a.busMu.RUnlock()
+	if !hasBus && len(a.signalListeners) == 0 {
+		return
+	}
+	app := a
 	listeners := a.signalListeners
 
-	fn := func(ctx Context, sig Signal, typeName string, item any) {
-		if pool != nil {
-			eventName, ok := buildEventName(typeName, sig)
-			if !ok {
-				return
-			}
-			payload, err := buildWebhookPayload(typeName, item, sig)
-			if err != nil {
-				slog.ErrorContext(ctx, "webhook payload build failed", "error", err, "signal", sig)
-				return
-			}
-			endpoints, err := store.EndpointsForEvent(ctx, eventName)
-			if err != nil {
-				slog.ErrorContext(ctx, "webhook endpoints lookup failed", "error", err, "event", eventName)
-				return
-			}
-			now := time.Now()
-			for _, ep := range endpoints {
-				job := OutboundJob{
-					ID:          NewID(),
-					EndpointID:  ep.ID,
-					TargetURL:   ep.TargetURL,
-					SecretEnc:   ep.secretEnc,
-					Payload:     payload,
-					Event:       eventName,
-					NextRetryAt: now,
-					CreatedAt:   now,
-					ExpiresAt:   now.Add(24 * time.Hour),
-					Status:      "pending",
-				}
-				if err := pool.Enqueue(ctx, job); err != nil {
-					slog.ErrorContext(ctx, "webhook enqueue failed", "error", err, "endpoint", ep.ID)
-				}
-			}
-		}
+	fn := func(ctx Context, sig Signal, meta afterHookMeta, item any) {
+		ev := buildSignalEvent(ctx, sig, meta, item, app.cfg.BaseURL)
+		app.dispatchBus(ctx, ev, sig)
 		for _, l := range listeners {
-			l(sig, typeName, item)
+			l(sig, meta.TypeName, item)
 		}
 	}
 
@@ -1048,7 +1085,7 @@ func (a *App) Run(addr string) error {
 	serveErr := make(chan error, 1)
 
 	// Inject webhook delivery hooks and signal listeners into all modules.
-	a.injectWebhookHooks()
+	a.wireSignalBus()
 
 	// Start the webhook worker pool if configured.
 	poolCtx, poolCancel := context.WithCancel(context.Background())

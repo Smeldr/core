@@ -1919,6 +1919,62 @@ mime.AddExtensionType(".css", "text/css")
 
 ---
 
+## Signal bus
+
+`App.OnSignal` lets application code subscribe to content lifecycle events.
+Multiple handlers per signal are supported; handlers fire in registration order
+inside the existing async `afterHook` goroutine.
+
+### `SignalEvent`
+
+```go
+type SignalEvent struct {
+    Type          string    // Go type name of the content item (e.g. "Post")
+    Slug          string
+    Title         string    // empty when the type does not implement Titled
+    URL           string    // BaseURL + module prefix + "/" + slug
+    Timestamp     time.Time
+    PreviousState string    // status before the transition; "" on creates
+    ActorRole     string    // first role of the acting user, or "guest"
+    ActorID       string    // user ID of the acting user, or ""
+}
+```
+
+### `App.OnSignal`
+
+```go
+func (a *App) OnSignal(sig Signal, h func(context.Context, SignalEvent) error) *App
+```
+
+Registers `h` to fire whenever `sig` is dispatched. Returns `*App` for chaining.
+The handler receives a `context.Context` with a 100 ms timeout, detached from the
+originating HTTP request (via `context.WithoutCancel`). Handler errors are logged
+at Warn level; subsequent handlers still fire.
+
+```go
+app.OnSignal(forge.AfterPublish, func(ctx context.Context, ev forge.SignalEvent) error {
+    log.Printf("published: %s %s", ev.Type, ev.Slug)
+    return nil
+})
+```
+
+`App.OnSignal` must be called before `App.Run`. Handlers registered after `Run`
+are silently ignored.
+
+### `OutboundDelivery`
+
+```go
+type OutboundDelivery interface {
+    Enqueue(ctx context.Context, job OutboundJob) error
+}
+```
+
+Minimal interface for any engine that needs retry-backed outbound HTTP delivery
+without coupling to `WebhookStore`. The unexported `workerPool` (returned by
+`App.WebhookPool() WebhookJobQueue`) satisfies this interface.
+
+---
+
 ## Outbound webhooks
 
 ### `WebhookEndpoint`
@@ -2016,8 +2072,9 @@ pool := app.WebhookPool()     // WebhookJobQueue — nil if Webhooks not called
 ```
 
 `App.Webhooks` must be called before `App.Run`. The worker pool starts and
-stops with the server lifecycle. `injectWebhookHooks` runs at `Run` time so
-all `app.Content(m)` calls are visible before hooks are wired.
+stops with the server lifecycle. `wireSignalBus` runs at `Run` time so
+all `app.Content(m)` and `app.OnSignal(...)` calls are visible before hooks
+are wired.
 
 ### `Titled` interface
 

@@ -395,9 +395,9 @@ type Module[T any] struct {
 
 	navTree *NavTree // non-nil when App.NavTree is active; set by App.Handler via setNavTree
 
-	contentTypeName string                             // unqualified type name; set by NewModule
-	afterHook       func(Context, Signal, string, any) // nil until wired by App; called async on delivery signals
-	secret          []byte                             // set by App.Content via setSecret; used for preview token validation
+	contentTypeName string                                    // unqualified type name; set by NewModule
+	afterHook       func(Context, Signal, afterHookMeta, any) // nil until wired by App; called async on delivery signals
+	secret          []byte                                    // set by App.Content via setSecret; used for preview token validation
 
 	stopCh chan struct{} // closed by Stop() to terminate the cache sweep goroutine
 }
@@ -588,9 +588,8 @@ func (m *Module[T]) Stop() {
 }
 
 // setAfterHook registers the function that is called asynchronously after each
-// delivery signal. App.Content uses this to wire webhook and signal-listener
-// dispatch into every module.
-func (m *Module[T]) setAfterHook(fn func(Context, Signal, string, any)) {
+// delivery signal. App.Content uses this to wire the signal bus into every module.
+func (m *Module[T]) setAfterHook(fn func(Context, Signal, afterHookMeta, any)) {
 	m.afterHook = fn
 }
 
@@ -603,20 +602,24 @@ func (m *Module[T]) setSecret(secret []byte) {
 
 // notifyAfter fires the registered signal handlers for sig asynchronously
 // (via dispatchAfter) and then, if an afterHook has been wired by the App,
-// invokes it in a separate goroutine with the content type name, signal, and
-// item. Panics in the afterHook are recovered and logged.
-func (m *Module[T]) notifyAfter(ctx Context, sig Signal, item any) {
+// invokes it in a separate goroutine carrying [afterHookMeta] and the item.
+// Panics in the afterHook are recovered and logged.
+func (m *Module[T]) notifyAfter(ctx Context, sig Signal, prevState string, item any) {
 	dispatchAfter(ctx, m.signals[sig], item)
 	if m.afterHook != nil {
+		meta := afterHookMeta{
+			TypeName:  m.contentTypeName,
+			Prefix:    m.prefix,
+			PrevState: prevState,
+		}
 		fn := m.afterHook
-		typName := m.contentTypeName
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					slog.ErrorContext(ctx, "afterHook panic", "panic", r, "signal", sig)
 				}
 			}()
-			fn(ctx, sig, typName, item)
+			fn(ctx, sig, meta, item)
 		}()
 	}
 }
@@ -1141,7 +1144,7 @@ func (m *Module[T]) processScheduled(ctx Context, now time.Time) (int, *time.Tim
 		if err := m.repo.Save(ctx.Request().Context(), item); err != nil {
 			return published, next, err
 		}
-		m.notifyAfter(ctx, AfterPublish, item)
+		m.notifyAfter(ctx, AfterPublish, "scheduled", item)
 		published++
 	}
 
@@ -1315,11 +1318,11 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// AfterCreate hooks (asynchronous).
-	m.notifyAfter(ctx, AfterCreate, item)
+	m.notifyAfter(ctx, AfterCreate, "", item)
 
 	// Status-based publish hooks.
 	if nodeStatusOf(item) == Published {
-		m.notifyAfter(ctx, AfterPublish, item)
+		m.notifyAfter(ctx, AfterPublish, "draft", item)
 	}
 
 	m.invalidateCache()
@@ -1393,19 +1396,19 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	m.notifyAfter(ctx, AfterUpdate, item)
+	m.notifyAfter(ctx, AfterUpdate, string(prevStatus), item)
 
 	// Status-transition hooks.
 	if prevStatus != Published && newStatus == Published {
-		m.notifyAfter(ctx, AfterPublish, item)
+		m.notifyAfter(ctx, AfterPublish, string(prevStatus), item)
 	} else if prevStatus == Published && newStatus != Published {
-		m.notifyAfter(ctx, AfterUnpublish, item)
+		m.notifyAfter(ctx, AfterUnpublish, "published", item)
 	}
 	if newStatus == Archived {
-		m.notifyAfter(ctx, AfterArchive, item)
+		m.notifyAfter(ctx, AfterArchive, string(prevStatus), item)
 	}
 	if prevStatus != Scheduled && newStatus == Scheduled {
-		m.notifyAfter(ctx, AfterSchedule, item)
+		m.notifyAfter(ctx, AfterSchedule, string(prevStatus), item)
 	}
 
 	m.invalidateCache()
@@ -1441,7 +1444,7 @@ func (m *Module[T]) deleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.notifyAfter(ctx, AfterDelete, existing)
+	m.notifyAfter(ctx, AfterDelete, string(nodeStatusOf(existing)), existing)
 
 	m.invalidateCache()
 	m.triggerRebuild()
@@ -1731,7 +1734,7 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	if err := m.repo.Save(ctx, item); err != nil {
 		return nil, err
 	}
-	m.notifyAfter(ctx, AfterCreate, item)
+	m.notifyAfter(ctx, AfterCreate, "", item)
 	m.invalidateCache()
 	return item, nil
 }
@@ -1774,7 +1777,7 @@ func (m *Module[T]) MCPUpdate(ctx Context, slug string, fields map[string]any) (
 	if err := m.repo.Save(ctx, item); err != nil {
 		return nil, err
 	}
-	m.notifyAfter(ctx, AfterUpdate, item)
+	m.notifyAfter(ctx, AfterUpdate, string(nodeStatusOf(existing)), item)
 	m.invalidateCache()
 	return item, nil
 }
@@ -1786,12 +1789,13 @@ func (m *Module[T]) MCPPublish(ctx Context, slug string) error {
 	if err != nil {
 		return err
 	}
+	prevStatus := nodeStatusOf(item)
 	setNodeStatus(item, Published)
 	setNodeTime(item, "PublishedAt", time.Now().UTC())
 	if err := m.repo.Save(ctx, item); err != nil {
 		return err
 	}
-	m.notifyAfter(ctx, AfterPublish, item)
+	m.notifyAfter(ctx, AfterPublish, string(prevStatus), item)
 	m.invalidateCache()
 	m.triggerRebuild()
 	return nil
@@ -1804,13 +1808,14 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time) error {
 	if err != nil {
 		return err
 	}
+	prevStatus := nodeStatusOf(item)
 	setNodeStatus(item, Scheduled)
 	atCopy := at
 	setNodeTimePtr(item, "ScheduledAt", &atCopy)
 	if err := m.repo.Save(ctx, item); err != nil {
 		return err
 	}
-	m.notifyAfter(ctx, AfterSchedule, item)
+	m.notifyAfter(ctx, AfterSchedule, string(prevStatus), item)
 	m.invalidateCache()
 	return nil
 }
@@ -1822,11 +1827,12 @@ func (m *Module[T]) MCPArchive(ctx Context, slug string) error {
 	if err != nil {
 		return err
 	}
+	prevStatus := nodeStatusOf(item)
 	setNodeStatus(item, Archived)
 	if err := m.repo.Save(ctx, item); err != nil {
 		return err
 	}
-	m.notifyAfter(ctx, AfterArchive, item)
+	m.notifyAfter(ctx, AfterArchive, string(prevStatus), item)
 	m.invalidateCache()
 	m.triggerRebuild()
 	return nil
@@ -1842,7 +1848,7 @@ func (m *Module[T]) MCPDelete(ctx Context, slug string) error {
 	if err := m.repo.Delete(ctx, nodeIDOf(item)); err != nil {
 		return err
 	}
-	m.notifyAfter(ctx, AfterDelete, item)
+	m.notifyAfter(ctx, AfterDelete, string(nodeStatusOf(item)), item)
 	m.invalidateCache()
 	m.triggerRebuild()
 	return nil

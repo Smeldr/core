@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/url"
 	"strings"
@@ -302,6 +303,47 @@ func buildWebhookPayload(typeName string, item any, sig Signal) ([]byte, error) 
 		Data:      json.RawMessage(dataJSON),
 	}
 	return json.Marshal(payload)
+}
+
+// webhookDispatch is the [App.OnSignal] handler registered by [App.Webhooks].
+// It builds the webhook event payload from ev and enqueues an [OutboundJob]
+// for each active endpoint subscribed to the event. Errors during payload
+// build or endpoint lookup are logged but not returned, because the bus logs
+// handler errors at Warn level; returning nil avoids double-logging.
+func webhookDispatch(ctx context.Context, ev SignalEvent, sig Signal, store *WebhookStore, pool *workerPool) error {
+	eventName, ok := buildEventName(ev.Type, sig)
+	if !ok {
+		return nil
+	}
+	payload, err := buildWebhookPayload(ev.Type, ev.raw, sig)
+	if err != nil {
+		slog.WarnContext(ctx, "webhook payload build failed", "error", err, "signal", sig, "type", ev.Type)
+		return nil
+	}
+	endpoints, err := store.EndpointsForEvent(ctx, eventName)
+	if err != nil {
+		slog.WarnContext(ctx, "webhook endpoints lookup failed", "error", err, "event", eventName)
+		return nil
+	}
+	now := time.Now()
+	for _, ep := range endpoints {
+		job := OutboundJob{
+			ID:          NewID(),
+			EndpointID:  ep.ID,
+			TargetURL:   ep.TargetURL,
+			SecretEnc:   ep.secretEnc,
+			Payload:     payload,
+			Event:       eventName,
+			NextRetryAt: now,
+			CreatedAt:   now,
+			ExpiresAt:   now.Add(24 * time.Hour),
+			Status:      "pending",
+		}
+		if err := pool.Enqueue(ctx, job); err != nil {
+			slog.WarnContext(ctx, "webhook enqueue failed", "error", err, "endpoint", ep.ID)
+		}
+	}
+	return nil
 }
 
 // validateWebhookURL validates rawURL for SSRF safety. Returns a

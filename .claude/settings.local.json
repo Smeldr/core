@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(Remove-Item \"C:\\\\Users\\\\peter\\\\Documents\\\\Code\\\\Forge\\\\NEXT.md\" -ErrorAction SilentlyContinue)",
+      "Bash(go test *)",
+      "Bash(go build *)",
+      "Bash(go vet *)",
+      "Bash(gofmt -l .)",
+      "Bash(gh release create v1.18.0 --title 'v1.18.0 — Draft preview' --notes ' *)",
+      "Bash(gh release create v1.8.0 --title 'v1.8.0 — create_preview_url MCP tool' --notes ' *)",
+      "Bash(gh release create v0.5.0 --title 'v0.5.0 — forge preview subcommand' --notes ' *)",
+      "Bash(ls \"C:\\\\Users\\\\peter\\\\Documents\\\\Code\\\\forge-architect\\\\context\\\\\")",
+      "Bash(ls C:/Users/peter/Documents/Code/forge-media/)",
+      "Bash(git commit -m 'feat\\(auth,forge\\): upload token encode/decode \\(Milestone 13, Step 1\\) *)",
+      "Bash(git push *)",
+      "Bash(gh release create v1.19.0 --title 'v1.19.0 — Media upload token' --notes 'Media upload token \\(Milestone 13, Step 1\\). *)",
+      "Bash(go get *)",
+      "Bash(go mod *)",
+      "Bash(git commit -m 'docs\\(changelog,reference,featurelist,roadmap\\): Milestone 13 — upload token \\(v1.19.0\\) *)",
+      "Bash(git commit *)",
+      "Bash(git tag *)",
+      "Bash(gh release *)"
+    ]
+  }
+}

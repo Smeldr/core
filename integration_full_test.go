@@ -2628,8 +2628,8 @@ func TestFull_G26_SignalEnqueue(t *testing.T) {
 		t.Fatalf("insert endpoint: %v", err)
 	}
 
-	// Wire afterHook into the module (simulates what Run() does).
-	app.injectWebhookHooks()
+	// Wire signal bus into the module (simulates what Run() does).
+	app.wireSignalBus()
 
 	mod := app.MCPModules()[0]
 	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
@@ -2942,8 +2942,8 @@ func TestFull_G30_MCPScheduleWebhook(t *testing.T) {
 		t.Fatalf("insert endpoint: %v", err)
 	}
 
-	// Wire afterHook (equivalent of what Run() does).
-	app.injectWebhookHooks()
+	// Wire signal bus (equivalent of what Run() does).
+	app.wireSignalBus()
 
 	mod := app.MCPModules()[0]
 	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
@@ -3086,4 +3086,143 @@ func TestFull_G31_PreviewToken(t *testing.T) {
 			t.Errorf("got %d, want 200", code)
 		}
 	})
+}
+
+// — G32: Signal bus — OnSignal + dispatchBus cross-milestone (M14 + M10 + M11) —————
+
+// g32Post is the content type for G32 signal bus cross-milestone tests.
+type g32Post struct {
+	Node
+	Title string `forge:"required,min=3"`
+	Body  string `forge:"required"`
+}
+
+// TestFull_G32_OnSignalCalledOnMCPCreate verifies the cross-milestone path:
+// App.OnSignal (M14) + MCPCreate (M10) → AfterCreate bus handler fires with
+// a correctly populated SignalEvent.
+func TestFull_G32_OnSignalCalledOnMCPCreate(t *testing.T) {
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("test-g32-signal-bus-secret!"),
+	}))
+	repo := NewMemoryRepo[*g32Post]()
+	m := NewModule((*g32Post)(nil),
+		At("/g32posts"),
+		Repo(repo),
+		MCP(MCPRead, MCPWrite),
+	)
+	app.Content(m)
+
+	done := make(chan SignalEvent, 1)
+	app.OnSignal(AfterCreate, func(ctx context.Context, ev SignalEvent) error {
+		done <- ev
+		return nil
+	})
+	app.wireSignalBus()
+
+	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
+	_, err := app.MCPModules()[0].MCPCreate(userCtx, map[string]any{
+		"title": "G32 Bus Post",
+		"body":  "Cross-milestone bus integration.",
+	})
+	if err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+
+	select {
+	case ev := <-done:
+		if ev.Slug == "" {
+			t.Error("SignalEvent.Slug is empty")
+		}
+		if ev.URL == "" {
+			t.Error("SignalEvent.URL is empty")
+		}
+		if !strings.Contains(ev.URL, "/g32posts/") {
+			t.Errorf("SignalEvent.URL = %q; want prefix /g32posts/", ev.URL)
+		}
+		if ev.ActorID != "u1" {
+			t.Errorf("SignalEvent.ActorID = %q; want u1", ev.ActorID)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("OnSignal handler not called within 500 ms")
+	}
+}
+
+// TestFull_G32_OnSignalAndWebhookCoexist verifies that App.OnSignal custom
+// handlers and App.Webhooks webhook delivery coexist in the same signal bus —
+// both receive the event after MCPPublish (M14 + M11 cross-milestone).
+func TestFull_G32_OnSignalAndWebhookCoexist(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	createG26Tables(t, db)
+
+	appSecret := []byte("32-bytes-g32-coexist-secret-key!")
+	store := NewWebhookStore(db, appSecret)
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  appSecret,
+		DB:      db,
+	}))
+	app.Webhooks(store)
+
+	repo := NewMemoryRepo[*g32Post]()
+	m := NewModule((*g32Post)(nil),
+		At("/g32posts"),
+		Repo(repo),
+		MCP(MCPRead, MCPWrite),
+	)
+	app.Content(m)
+
+	// Subscribe a webhook endpoint to publish events.
+	enc, _ := store.encryptSecret([]byte("g32-coexist-secret"))
+	evJSON, _ := json.Marshal([]string{"g32post.published"})
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO forge_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
+		 VALUES ('ep-g32','`+string(evJSON)+`','https://8.8.8.8/hook','`+enc+`',1,datetime('now'))`,
+	); err != nil {
+		t.Fatalf("insert endpoint: %v", err)
+	}
+
+	// Register a custom bus handler alongside the webhook handler.
+	busHandlerFired := make(chan struct{}, 1)
+	app.OnSignal(AfterPublish, func(ctx context.Context, ev SignalEvent) error {
+		busHandlerFired <- struct{}{}
+		return nil
+	})
+	app.wireSignalBus()
+
+	mod := app.MCPModules()[0]
+	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
+
+	item, err := mod.MCPCreate(userCtx, map[string]any{
+		"title": "G32 Coexist Post",
+		"body":  "Tests OnSignal + Webhooks coexistence.",
+	})
+	if err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+	post := item.(*g32Post)
+	if err := mod.MCPPublish(userCtx, post.Slug); err != nil {
+		t.Fatalf("MCPPublish: %v", err)
+	}
+
+	// Both the custom bus handler and webhook job must be triggered.
+	select {
+	case <-busHandlerFired:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("custom OnSignal handler not called within 500 ms")
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	var jobs []OutboundJob
+	for time.Now().Before(deadline) {
+		jobs, _ = app.WebhookPool().ListJobsForEndpoint(userCtx, "ep-g32")
+		if len(jobs) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(jobs) == 0 {
+		t.Fatal("no webhook job enqueued; Webhooks handler must coexist with OnSignal handlers")
+	}
 }

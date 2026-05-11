@@ -2,6 +2,7 @@ package forge
 
 import (
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -171,5 +172,92 @@ func (d *debouncer) Stop() {
 	defer d.mu.Unlock()
 	if d.timer != nil {
 		d.timer.Stop()
+	}
+}
+
+// — Signal bus types ——————————————————————————————————————————————————————
+
+// SignalEvent is the enriched payload passed to every [App.OnSignal] handler.
+// It carries structured metadata about a content lifecycle transition,
+// allowing downstream subscribers (webhooks, audit trail, social syndication)
+// to act on the event without importing content types directly.
+type SignalEvent struct {
+	// Type is the unqualified content type name (e.g. "Post").
+	Type string
+
+	// Slug is the URL slug of the content item.
+	Slug string
+
+	// Title is the human-readable content title. Populated when the content
+	// type implements [Titled]; empty otherwise.
+	Title string
+
+	// URL is the absolute canonical URL of the content item, built from
+	// Config.BaseURL + module prefix + "/" + Slug.
+	URL string
+
+	// Timestamp is the wall-clock time at which the signal was dispatched.
+	Timestamp time.Time
+
+	// PreviousState is the lifecycle state before the transition.
+	// Empty for AfterCreate (no previous state).
+	// Possible values: "draft", "scheduled", "published", "archived".
+	PreviousState string
+
+	// ActorRole is the role of the authenticated user who triggered the signal.
+	// "guest" for unauthenticated requests.
+	ActorRole string
+
+	// ActorID is the stable ID of the authenticated user. Empty for
+	// unauthenticated requests.
+	ActorID string
+
+	// raw holds the original content item. Used internally by the webhook
+	// delivery handler to build the full payload. Not exposed to external
+	// OnSignal subscribers.
+	raw any
+}
+
+// afterHookMeta carries module-level metadata from notifyAfter to the App's
+// wireSignalBus closure. Using a struct avoids a stringly-typed parameter list
+// and makes future extension non-breaking.
+type afterHookMeta struct {
+	// TypeName is the unqualified content type name (e.g. "Post").
+	TypeName string
+
+	// Prefix is the module's URL prefix (e.g. "/posts").
+	Prefix string
+
+	// PrevState is the lifecycle state before the transition.
+	// Empty for AfterCreate.
+	PrevState string
+}
+
+// buildSignalEvent constructs a [SignalEvent] from the parameters available
+// in the wireSignalBus closure. Called once per signal dispatch.
+func buildSignalEvent(ctx Context, sig Signal, meta afterHookMeta, item any, baseURL string) SignalEvent {
+	n := extractNode(item)
+	slug := n.Slug
+	title := ""
+	if t, ok := item.(Titled); ok {
+		title = t.ContentTitle()
+	}
+	role := "guest"
+	actorID := ""
+	if u := ctx.User(); len(u.Roles) > 0 {
+		role = string(u.Roles[0])
+		actorID = u.ID
+	}
+	url := strings.TrimRight(baseURL, "/") + meta.Prefix + "/" + slug
+	return SignalEvent{
+		Type:          meta.TypeName,
+		Slug:          slug,
+		Title:         title,
+		URL:           url,
+		Timestamp:     time.Now(),
+		PreviousState: meta.PrevState,
+		ActorRole:     role,
+		ActorID:       actorID,
+		raw:           item,
 	}
 }

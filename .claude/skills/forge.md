@@ -172,3 +172,4 @@ media_upload_token_expiry     duration
 - [ ] New failure modes confirmed in this release? → update gotchas
 - [ ] Bump version line at top of this file
 - [ ] Copy updated file to Forge-site-working/.claude/skills/forge.md
+      and to forge-architect/.claude/skills/forge.md

@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -200,4 +201,213 @@ func TestDebouncerStop(t *testing.T) {
 	}
 	// Second Stop must not panic.
 	d.Stop()
+}
+
+// ---- Signal bus tests (App.OnSignal / dispatchBus) ----------------------
+
+// sbPost is the content type used by signal bus unit tests.
+type sbPost struct {
+	Node
+	Title string `forge:"required,min=1" db:"title"`
+}
+
+func (p *sbPost) ContentTitle() string { return p.Title }
+
+// newBusApp builds a minimal *App for signal bus tests without a database.
+func newBusApp(t *testing.T, secret string) (*App, MCPModule) {
+	t.Helper()
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte(secret),
+	}))
+	repo := NewMemoryRepo[*sbPost]()
+	m := NewModule((*sbPost)(nil), At("/sb"), Repo(repo), MCP(MCPRead, MCPWrite))
+	app.Content(m)
+	return app, app.MCPModules()[0]
+}
+
+// TestSignalBus_OnSignalChaining verifies that OnSignal returns *App.
+func TestSignalBus_OnSignalChaining(t *testing.T) {
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte("test-secret-bus-chain"),
+	}))
+	got := app.OnSignal(AfterCreate, func(ctx context.Context, ev SignalEvent) error { return nil })
+	if got != app {
+		t.Errorf("OnSignal did not return *App")
+	}
+}
+
+// TestSignalBus_HandlerCalled verifies that an OnSignal handler receives the
+// SignalEvent when a content item is created.
+func TestSignalBus_HandlerCalled(t *testing.T) {
+	app, mod := newBusApp(t, "test-secret-bus-handler")
+
+	var mu sync.Mutex
+	var got SignalEvent
+	done := make(chan struct{})
+
+	app.OnSignal(AfterCreate, func(ctx context.Context, ev SignalEvent) error {
+		mu.Lock()
+		got = ev
+		mu.Unlock()
+		close(done)
+		return nil
+	})
+	app.wireSignalBus()
+
+	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
+	if _, err := mod.MCPCreate(userCtx, map[string]any{"title": "Bus test"}); err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("signal bus handler not called within deadline")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if got.Slug == "" {
+		t.Errorf("SignalEvent.Slug is empty")
+	}
+	if got.URL == "" {
+		t.Errorf("SignalEvent.URL is empty")
+	}
+}
+
+// TestSignalBus_MultipleHandlers verifies that two handlers registered for the
+// same signal both receive the event.
+func TestSignalBus_MultipleHandlers(t *testing.T) {
+	app, mod := newBusApp(t, "test-secret-bus-multi")
+
+	var count atomic.Int32
+	done := make(chan struct{})
+
+	for range 2 {
+		app.OnSignal(AfterCreate, func(ctx context.Context, ev SignalEvent) error {
+			if count.Add(1) == 2 {
+				close(done)
+			}
+			return nil
+		})
+	}
+	app.wireSignalBus()
+
+	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
+	if _, err := mod.MCPCreate(userCtx, map[string]any{"title": "Multi"}); err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("not all handlers called; count=%d", count.Load())
+	}
+}
+
+// TestSignalBus_HandlerError verifies that a handler returning an error does
+// not prevent subsequent handlers from running.
+func TestSignalBus_HandlerError(t *testing.T) {
+	app, mod := newBusApp(t, "test-secret-bus-error")
+
+	secondCalled := make(chan struct{})
+
+	app.OnSignal(AfterCreate, func(ctx context.Context, ev SignalEvent) error {
+		return errors.New("deliberate bus error")
+	})
+	app.OnSignal(AfterCreate, func(ctx context.Context, ev SignalEvent) error {
+		close(secondCalled)
+		return nil
+	})
+	app.wireSignalBus()
+
+	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
+	if _, err := mod.MCPCreate(userCtx, map[string]any{"title": "Error test"}); err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+
+	select {
+	case <-secondCalled:
+		// second handler ran despite first returning an error — correct
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("second handler not called after first handler error")
+	}
+}
+
+// TestSignalBus_HandlerTimeout verifies that a handler blocking longer than
+// 100 ms has its context cancelled by dispatchBus but does not stall the bus.
+func TestSignalBus_HandlerTimeout(t *testing.T) {
+	app, mod := newBusApp(t, "test-secret-bus-timeout")
+
+	handlerStarted := make(chan struct{})
+	handlerCtxDone := make(chan struct{})
+	app.OnSignal(AfterCreate, func(ctx context.Context, ev SignalEvent) error {
+		close(handlerStarted)
+		<-ctx.Done() // blocks until 100 ms timeout cancels the context
+		close(handlerCtxDone)
+		return ctx.Err()
+	})
+
+	secondDone := make(chan struct{})
+	app.OnSignal(AfterCreate, func(ctx context.Context, ev SignalEvent) error {
+		close(secondDone)
+		return nil
+	})
+	app.wireSignalBus()
+
+	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
+	if _, err := mod.MCPCreate(userCtx, map[string]any{"title": "Timeout test"}); err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+
+	select {
+	case <-handlerStarted:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("blocking handler never started")
+	}
+	select {
+	case <-handlerCtxDone:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("handler context not cancelled within 300 ms; per-handler timeout may not be 100 ms")
+	}
+	select {
+	case <-secondDone:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("second handler not called after first timed out; bus may have stalled")
+	}
+}
+
+// TestSignalBus_WithoutCancel verifies that the handler context is not derived
+// from the request context — if the request context were cancelled, the handler
+// would still run. dispatchBus uses context.WithoutCancel to detach from the
+// request lifecycle.
+func TestSignalBus_WithoutCancel(t *testing.T) {
+	app, mod := newBusApp(t, "test-secret-bus-withoutcancel")
+
+	handlerRan := make(chan struct{})
+	app.OnSignal(AfterCreate, func(ctx context.Context, ev SignalEvent) error {
+		// If this context were tied to the request, it could already be Done.
+		// We simply verify the handler receives a non-nil, non-cancelled context.
+		select {
+		case <-ctx.Done():
+			t.Errorf("handler context is already cancelled at handler entry")
+		default:
+		}
+		close(handlerRan)
+		return nil
+	})
+	app.wireSignalBus()
+
+	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
+	if _, err := mod.MCPCreate(userCtx, map[string]any{"title": "WithoutCancel"}); err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+
+	select {
+	case <-handlerRan:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("handler not called")
+	}
 }
