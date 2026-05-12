@@ -1755,6 +1755,7 @@ forge-cli init --url https://mysite.com --bootstrap-token <token-from-startup-lo
 | `token create` | Issue a new named token |
 | `token list` | List all tokens |
 | `token revoke <id>` | Revoke a token by ID |
+| `social <resource> <verb>` | Manage forge-social posts, credentials, and schedules. Requires forge-social v0.4.0+. See forge-social docs. |
 
 Content files use YAML-subset frontmatter (metadata before `---`, body after):
 
