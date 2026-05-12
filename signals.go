@@ -235,7 +235,7 @@ type afterHookMeta struct {
 
 // buildSignalEvent constructs a [SignalEvent] from the parameters available
 // in the wireSignalBus closure. Called once per signal dispatch.
-func buildSignalEvent(ctx Context, sig Signal, meta afterHookMeta, item any, baseURL string) SignalEvent {
+func buildSignalEvent(ctx Context, _ Signal, meta afterHookMeta, item any, baseURL string) SignalEvent {
 	n := extractNode(item)
 	slug := n.Slug
 	title := ""

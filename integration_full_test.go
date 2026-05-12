@@ -2737,8 +2737,16 @@ func TestFull_G27_RetryOnTransientFailure(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 
-	// Advance clock past retry delay so the second attempt fires.
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the first delivery attempt to be recorded before advancing the
+	// clock. On slow CI runners, 100ms is not enough — we poll instead.
+	pollDeadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(pollDeadline) {
+		logs, _ := pool.ListDeliveryLogs(ctx, job.ID)
+		if len(logs) >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	clock.Advance(5 * time.Minute)
 
 	deadline := time.Now().Add(2 * time.Second)
