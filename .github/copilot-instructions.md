@@ -384,6 +384,24 @@ README.md, FEATURELIST.md) or creating content for forge-cms.dev/docs.
 This workflow is separate from the standard step workflow. It applies to
 docs-only tasks and content tasks — not to code implementation.
 
+**Milestone trigger (non-negotiable):** After every milestone commit that carries
+an M-number — including standalone module milestones (forge-social, forge-mcp,
+forge-media, forge-cli) — run this workflow starting at step 2 before proposing
+the commit. Do not wait for the architect to request it.
+
+For every M-number milestone, the following must be updated before the commit:
+- The module's own `README.md`
+- `REFERENCE.md` — CLI table and any new commands or tools
+- `FEATURELIST.md` — add new capabilities, bump "Last updated" version line
+- `.claude/skills/forge.md` — version line, MCP tools, CLI commands, new sections;
+  then copy to `Forge-site-working/.claude/skills/forge.md`
+  and to `C:\Users\peter\Documents\Code\forge-architect\.claude\skills\forge.md`
+
+"No changes needed" is only valid if you have explicitly read each file and
+confirmed it already reflects the shipped milestone. Never assume — always verify.
+
+The content brief (step 4) is always required for any new M-number milestone.
+
 ### On every session start — doc freshness check
 
 Before any other work, check these three files for staleness against the
@@ -391,7 +409,9 @@ current codebase and recent amendments:
 
 1. `REFERENCE.md` — does it reflect all current exported symbols and behaviour?
 2. `README.md` — is the version line (`**vX.Y.Z — stable.**`) current?
-3. `FEATURELIST.md` — does it list all shipped features?
+3. `FEATURELIST.md` — does it list all shipped features? Check "Last updated" version.
+4. `.claude/skills/forge.md` — does the version line match current versions?
+   Are all MCP tools and CLI commands listed?
 
 Present any staleness findings to the user before proceeding. Do not silently
 skip this check.
@@ -417,6 +437,7 @@ Also update `.claude/skills/forge.md` when any of the following changed:
 - New failure modes confirmed in this release (update gotchas)
 - Any of the above → bump the version line at the top of the skill file
 - Copy updated skill file to `Forge-site-working/.claude/skills/forge.md`
+  and to `C:\Users\peter\Documents\Code\forge-architect\.claude\skills\forge.md`
 Do not commit yet.
 
 **4. Content brief**

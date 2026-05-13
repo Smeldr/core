@@ -2,7 +2,7 @@
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.19.0 (A93).
+Last updated: v1.20.0 (A94) + forge-social v0.4.0 + forge-cli v0.7.0.
 
 ---
 
@@ -99,6 +99,7 @@ MCP resource subscriptions:
 - Redirect tracking — automatic 301 on slug rename, 410 Gone on archive/delete; `/.well-known/redirects.json` for audit
 - Security headers — CSP, HSTS, X-Frame-Options, Referrer-Policy in one middleware call
 - Graceful shutdown — drains in-flight requests on SIGINT/SIGTERM
+- Signal bus — `app.OnSignal(Signal, handler)` registers subscribers for `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete`; `SignalEvent` carries Type, Slug, Title, URL, Timestamp, PreviousState, ActorRole, ActorID; handlers run synchronously in the publish goroutine and must enqueue-and-return
 
 ## forge-media (separate module)
 
@@ -118,6 +119,18 @@ MCP resource subscriptions:
 - Media operations — upload, list, delete
 - Webhook management — create, list, delete, view deliveries, retry
 - Draft preview — `forge preview <prefix> <slug>` prints a signed preview URL (Admin role required)
+- Social commands (v0.7.0): `social credential create/list`, `social post create/list/get/publish/archive/delete`, `social post queue`, `social schedule create/show/pause/resume/delete`
+
+## forge-social (separate module)
+
+- `forge-cms.dev/forge-social` — social post scheduling and AI agent routing
+- Two scheduling models: explicit `scheduled_at` (Model 1) and slot-queue via `PublicationSchedule` (Model 2, v0.4.0+)
+- Platforms: Mastodon, LinkedIn
+- OAuth credentials encrypted at rest (AES-256-GCM)
+- `PublicationSchedule` — recurring weekly slots (weekday, HH:MM, IANA timezone) per credential; FIFO queue; catch-up policy on restart
+- Layer 1 agent routing — `social.AddRoutes(app, forgesocial.OnPublish(...))` fires outbound HTTP on lifecycle signals; HMAC-signed payload; exponential backoff retry
+- 14 MCP tools across PostModule, CredentialModule, ScheduleModule
+- Full CLI parity in forge-cli v0.7.0
 
 ## Outbound webhooks
 
