@@ -393,9 +393,8 @@ For every M-number milestone, the following must be updated before the commit:
 - The module's own `README.md`
 - `REFERENCE.md` — CLI table and any new commands or tools
 - `FEATURELIST.md` — add new capabilities, bump "Last updated" version line
-- `.claude/skills/forge.md` — version line, MCP tools, CLI commands, new sections;
-  then copy to `Forge-site-working/.claude/skills/forge.md`
-  and to `C:\Users\peter\Documents\Code\forge-architect\.claude\skills\forge.md`
+- `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` — version line, MCP tools, CLI commands, new sections
+  (canonical source — read it directly with the Read tool, no copies to distribute)
 
 "No changes needed" is only valid if you have explicitly read each file and
 confirmed it already reflects the shipped milestone. Never assume — always verify.
@@ -410,8 +409,8 @@ current codebase and recent amendments:
 1. `REFERENCE.md` — does it reflect all current exported symbols and behaviour?
 2. `README.md` — is the version line (`**vX.Y.Z — stable.**`) current?
 3. `FEATURELIST.md` — does it list all shipped features? Check "Last updated" version.
-4. `.claude/skills/forge.md` — does the version line match current versions?
-   Are all MCP tools and CLI commands listed?
+4. `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` — does the version line match current versions?
+   Are all MCP tools and CLI commands listed? Read it with the Read tool.
 
 Present any staleness findings to the user before proceeding. Do not silently
 skip this check.
@@ -436,8 +435,8 @@ Also update `.claude/skills/forge.md` when any of the following changed:
 - Config keys (update forge.config section)
 - New failure modes confirmed in this release (update gotchas)
 - Any of the above → bump the version line at the top of the skill file
-- Copy updated skill file to `Forge-site-working/.claude/skills/forge.md`
-  and to `C:\Users\peter\Documents\Code\forge-architect\.claude\skills\forge.md`
+- Update `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` only
+  (no copies — all pilots read from forge-common directly)
 Do not commit yet.
 
 **4. Content brief**
