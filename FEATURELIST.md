@@ -2,7 +2,7 @@
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.20.0 (A94) + forge-social v0.4.0 + forge-cli v0.7.0.
+Last updated: v1.20.0 (A94) + forge-social v0.5.1 + forge-cli v0.8.0.
 
 ---
 
@@ -120,17 +120,20 @@ MCP resource subscriptions:
 - Webhook management — create, list, delete, view deliveries, retry
 - Draft preview — `forge preview <prefix> <slug>` prints a signed preview URL (Admin role required)
 - Social commands (v0.7.0): `social credential create/list`, `social post create/list/get/publish/archive/delete`, `social post queue`, `social schedule create/show/pause/resume/delete`
+- Social commands (v0.8.0): `social credential get/delete`, `social platform configure` (DB-driven OAuth app config for mastodon/linkedin/x); `social credential create` now accepts `--platform x`
 
 ## forge-social (separate module)
 
 - `forge-cms.dev/forge-social` — social post scheduling and AI agent routing
 - Two scheduling models: explicit `scheduled_at` (Model 1) and slot-queue via `PublicationSchedule` (Model 2, v0.4.0+)
-- Platforms: Mastodon, LinkedIn
+- Platforms: Mastodon, LinkedIn, **X (Twitter)** (v0.5.0+)
+- **DB-driven platform config** (v0.5.0+): OAuth 2.0 app credentials stored AES-256-GCM encrypted in DB; `create_platform_config` MCP tool (Admin role); no environment variables required after initial setup
+- **X OAuth 2.0 + PKCE** (v0.5.0+): `S256` code challenge; server-side verifier storage; 280-char body limit (terminal error, never truncated)
 - OAuth credentials encrypted at rest (AES-256-GCM)
 - `PublicationSchedule` — recurring weekly slots (weekday, HH:MM, IANA timezone) per credential; FIFO queue; catch-up policy on restart
 - Layer 1 agent routing — `social.AddRoutes(app, forgesocial.OnPublish(...))` fires outbound HTTP on lifecycle signals; HMAC-signed payload; exponential backoff retry
-- 14 MCP tools across PostModule, CredentialModule, ScheduleModule
-- Full CLI parity in forge-cli v0.7.0
+- 15 MCP tools across PostModule, CredentialModule, ConfigModule, ScheduleModule
+- Full CLI parity in forge-cli v0.8.0
 
 ## Outbound webhooks
 
