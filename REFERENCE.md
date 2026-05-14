@@ -1838,7 +1838,9 @@ dev = true
 
 Forge reads a `forge.config` file from the working directory (or from the path
 in the `FORGE_CONFIG` environment variable) at startup. Fields set in Go code
-always take precedence over file values. The file format is one `key = value`
+take precedence over file values — with one deliberate exception: `og_image`
+overrides the Go-code `OGDefaults.Image.URL` so operators can update the site
+OG image without a rebuild (see below). The file format is one `key = value`
 pair per line; lines starting with `#` are comments.
 
 The `secret` key is forbidden in config files — it must be supplied as an
@@ -1852,10 +1854,20 @@ environment variable or directly in Go code.
 | `org_name` | string | — | JSON-LD organisation name |
 | `org_type` | string | — | JSON-LD organisation type |
 | `twitter_site` | string | — | Twitter/X site handle, e.g. `@mysite` |
-| `og_image` | string | — | Default Open Graph image URL |
+| `og_image` | string | — | Site-level OG image URL. **Overrides** `OGDefaults.Image` set in Go code — file value wins. Go-code value is the fallback when key is absent. Root-relative paths (e.g. `/media/og.png`) are resolved against `base_url` at startup. |
 | `media_path` | string | `./media` | Upload directory for forge-media |
 | `media_max_size` | integer | `5242880` | Max upload size in bytes (forge-media) |
 | `dev` | bool | `false` | Enable development mode (serve static files from disk) |
+
+**Operator flow — updating the OG image without a rebuild:**
+
+```
+# 1. Upload the new image via forge-media or place it in the media directory.
+# 2. Add or update og_image in forge.config:
+og_image = /media/site-og.png
+
+# 3. Restart the container — no rebuild required.
+```
 
 Example:
 
@@ -1864,6 +1876,7 @@ Example:
 base_url = https://mysite.com
 https    = true
 nav_mode = db
+og_image = /media/site-og.png
 media_path     = /var/data/media
 media_max_size = 10485760
 ```

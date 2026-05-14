@@ -4119,3 +4119,46 @@ All call sites updated to pass the correct previous status string (`"draft"`,
 - Multiple subscribers are supported; order of registration is preserved.
 - Webhook delivery is one bus subscriber; custom subscribers and webhooks coexist.
 - forge core → v1.20.0.
+
+---
+
+## Amendment A95 — og_image overrides Go-code Image.URL in mergeFileConfig
+
+**Date:** 2026-05-14
+**Status:** Agreed
+**Scope:** `config.go` — `mergeFileConfig` (Level 1)
+
+**Problem:**
+`og_image` has been a parsed `forge.config` key since v1.11.0 (D30), but
+`mergeFileConfig` applied a whole-struct guard: if Go code set any `OGDefaults`
+field (even just `TwitterSite`), the file's `og_image` was silently ignored.
+The intended operator flow — upload image, set `og_image` in config, restart —
+did not work when the application also set `Config.OGDefaults` in Go code.
+
+**Decision:**
+Change `mergeFileConfig` to do a field-level merge for `OGDefaults`. When
+`forge.config` contains `og_image`, that value overrides `OGDefaults.Image.URL`
+regardless of whether Go code also set `OGDefaults`. All other `OGDefaults`
+fields (`TwitterSite`, `TwitterCreator`, width, height) retain their Go-code
+values. When `og_image` is absent from the file, Go-code `Image.URL` is the
+fallback (unchanged).
+
+**Precedence rationale:**
+`og_image` is the only `forge.config` key intentionally designed to override
+Go code rather than yield to it. All other keys follow "Go code wins". The
+exception is justified because `og_image` is an operational concern (change
+without rebuild) rather than a structural one (framework configuration).
+
+**Call-site syntax:** No change — `MustConfig`, `Config`, `OGDefaults` are
+unaffected. The change is invisible to application code.
+
+**Consequences for developer/AI experience:**
+- Existing apps that set `Config.OGDefaults.Image` in Go code can now override
+  the image at deploy time without a code change.
+- No existing Example functions break.
+- REFERENCE.md updated: precedence exception documented; operator flow example added.
+- FEATURELIST.md updated: `og_image` override noted in config section.
+
+**New / changed symbols:** None — `mergeFileConfig` is unexported.
+
+**Forge core → v1.21.0.**

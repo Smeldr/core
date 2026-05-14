@@ -304,6 +304,61 @@ func TestMergeFileConfig_fileApplied(t *testing.T) {
 	}
 }
 
+func TestMergeFileConfig_ogImageOverridesGoCode(t *testing.T) {
+	// File og_image must override Go-code Image.URL.
+	goCfg := Config{OGDefaults: &OGDefaults{Image: Image{URL: "https://example.com/old.png"}}}
+	fileCfg := Config{OGDefaults: &OGDefaults{Image: Image{URL: "/new.png"}}}
+	result := mergeFileConfig(goCfg, fileCfg)
+	if result.OGDefaults == nil {
+		t.Fatal("expected OGDefaults to be non-nil")
+	}
+	if result.OGDefaults.Image.URL != "/new.png" {
+		t.Errorf("og_image: file should override Go code; got %q", result.OGDefaults.Image.URL)
+	}
+}
+
+func TestMergeFileConfig_ogImagePreservesOtherFields(t *testing.T) {
+	// File og_image overrides Image.URL but leaves TwitterSite intact.
+	goCfg := Config{OGDefaults: &OGDefaults{
+		Image:       Image{URL: "https://example.com/old.png"},
+		TwitterSite: "@gocode",
+	}}
+	fileCfg := Config{OGDefaults: &OGDefaults{Image: Image{URL: "/new.png"}}}
+	result := mergeFileConfig(goCfg, fileCfg)
+	if result.OGDefaults.Image.URL != "/new.png" {
+		t.Errorf("Image.URL: file should win; got %q", result.OGDefaults.Image.URL)
+	}
+	if result.OGDefaults.TwitterSite != "@gocode" {
+		t.Errorf("TwitterSite: Go-code value should be preserved; got %q", result.OGDefaults.TwitterSite)
+	}
+}
+
+func TestMergeFileConfig_ogImageAbsentGoCodePreserved(t *testing.T) {
+	// When file has no og_image, Go-code Image.URL is preserved unchanged.
+	goCfg := Config{OGDefaults: &OGDefaults{Image: Image{URL: "https://example.com/go.png"}}}
+	fileCfg := Config{OGDefaults: &OGDefaults{TwitterSite: "@file"}} // og_image absent
+	result := mergeFileConfig(goCfg, fileCfg)
+	if result.OGDefaults.Image.URL != "https://example.com/go.png" {
+		t.Errorf("Image.URL: Go-code value should be preserved when og_image absent; got %q", result.OGDefaults.Image.URL)
+	}
+}
+
+func TestMergeFileConfig_ogImageGoCodeNilFileApplied(t *testing.T) {
+	// Regression guard: when Go code has no OGDefaults, file config is used wholesale.
+	goCfg := Config{}
+	fileCfg := Config{OGDefaults: &OGDefaults{Image: Image{URL: "/from-file.png"}, TwitterSite: "@file"}}
+	result := mergeFileConfig(goCfg, fileCfg)
+	if result.OGDefaults == nil {
+		t.Fatal("expected OGDefaults from file when Go code has none")
+	}
+	if result.OGDefaults.Image.URL != "/from-file.png" {
+		t.Errorf("Image.URL: file should apply; got %q", result.OGDefaults.Image.URL)
+	}
+	if result.OGDefaults.TwitterSite != "@file" {
+		t.Errorf("TwitterSite: file should apply; got %q", result.OGDefaults.TwitterSite)
+	}
+}
+
 func TestMergeFileConfig_navModeZeroValue(t *testing.T) {
 	// Go code has zero NavMode (no nav); file sets NavModeCode — file wins.
 	goCfg := Config{}

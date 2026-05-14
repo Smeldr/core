@@ -23,6 +23,21 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.21.0] — 2026-05-14
+
+`og_image` operator override (forge.config).
+
+### Changed
+
+- `mergeFileConfig`: `og_image` in `forge.config` now overrides `OGDefaults.Image.URL`
+  set in Go code, so operators can update the site OG image with a config change
+  and container restart — no rebuild required. All other `OGDefaults` fields
+  (`TwitterSite`, `TwitterCreator`, width, height) retain Go-code values.
+  When `og_image` is absent from the file, Go-code `Image.URL` is the fallback
+  (existing behaviour preserved).
+
+---
+
 ## [1.20.0] — 2026-05-11
 
 Signal bus (Milestone 14, Amendment A94).

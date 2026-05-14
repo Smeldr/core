@@ -92,7 +92,7 @@ MCP resource subscriptions:
 
 ## Operations
 
-- File-based configuration — `key = value` format, fail-fast at startup; 10 keys
+- File-based configuration — `key = value` format, fail-fast at startup; 10 keys including `og_image` (operator override for site OG image without rebuild; file value takes precedence over Go-code default)
 - `/_health` endpoint — returns framework version and status; exempt from HTTPS redirect
 - Zero third-party dependencies in core — pure stdlib; driver is always your choice
 - Cookie compliance — `/.well-known/cookies.json` declares all cookies with category and consent requirements

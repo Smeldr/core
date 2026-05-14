@@ -128,8 +128,18 @@ func mergeFileConfig(goCfg, fileCfg Config) Config {
 	if goCfg.AppSchema == nil && fileCfg.AppSchema != nil {
 		goCfg.AppSchema = fileCfg.AppSchema
 	}
-	if goCfg.OGDefaults == nil && fileCfg.OGDefaults != nil {
-		goCfg.OGDefaults = fileCfg.OGDefaults
+	if fileCfg.OGDefaults != nil {
+		if goCfg.OGDefaults == nil {
+			// No Go-code defaults — use file config wholesale.
+			goCfg.OGDefaults = fileCfg.OGDefaults
+		} else if fileCfg.OGDefaults.Image.URL != "" {
+			// og_image in forge.config overrides the Go-code Image.URL so
+			// operators can update the site OG image without a rebuild.
+			// All other OGDefaults fields retain their Go-code values.
+			merged := *goCfg.OGDefaults
+			merged.Image.URL = fileCfg.OGDefaults.Image.URL
+			goCfg.OGDefaults = &merged
+		}
 	}
 	if goCfg.MediaPath == "" && fileCfg.MediaPath != "" {
 		goCfg.MediaPath = fileCfg.MediaPath
