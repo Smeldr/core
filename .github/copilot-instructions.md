@@ -275,21 +275,6 @@ When a milestone ships a feature, update its badge from `🔲 Coming in Mileston
 to `✅ **Available**` in the same commit. Never leave a badge pointing to a shipped
 milestone — it becomes a lie the moment the code merges.
 
-**README version and consistency rule:**
-Before proposing any commit, review `README.md` for:
-- **Version number** — the `**vX.Y.Z — stable.**` line on line 7 must match the
-  latest tag in `CHANGELOG.md`. Update it if behind.
-- **Milestone comments** — code examples that say `// — Milestone N` or
-  `*(feature — Milestone N)*` must be updated when that milestone ships:
-  remove the comment (feature is now always available), or update the badge.
-- **Section consistency** — any section that documents a feature shipped in this
-  commit must reflect the current behaviour (signatures, option names, endpoint
-  paths). A README that misrepresents the API is a documentation bug.
-- **No ✅ badge may claim a feature is available if it is not yet implemented.**
-  No `🔲 Coming in Milestone N` badge may remain for a milestone that has shipped.
-
-This review is part of every commit preparation, not only milestone commits.
-Do not propose a commit message until README has been checked and updated.
 
 **README compile test rule:**
 Forge maintains `example_test.go` in the root package. Every Example function
@@ -349,16 +334,29 @@ that both exist, then stage.
   then commit and push from that repo (see "After every commit" for the command sequence).
 - Never batch updates — update immediately after the step is verified.
 
-### 6. Propose a commit message
-- Write a conventional commit message (format below).
-- Present it to the user for approval. Do not commit without explicit user approval.
-- Commits are the **only** action that requires explicit user approval. Build, vet,
-  format, and test commands are executed autonomously.
-- **A "yes" answer to a review question is not commit approval.** If you asked a
-  blocking question before proposing a commit, and the user answered it, you must
-  still present the commit message and wait for a separate explicit approval before
-  committing. The confirmation of a technical fact and the approval of a commit are
-  two distinct acts. Never collapse them into one.
+### 6. Pre-commit documentation gate — then propose commit message
+
+**Complete this checklist before writing the commit message.
+All items must be resolved. Do not propose a commit until the gate is clear.**
+
+**Every commit — mandatory:**
+- [ ] `README.md` version line (`**vX.Y.Z — stable.**`) matches the version being shipped. Update if behind.
+- [ ] No `🔲 Coming in Milestone N` badge remains for a milestone that has shipped.
+- [ ] `go test ./...` is green (re-run if any file changed since last verification).
+- [ ] If this commit implements an Amendment: both the DECISIONS.md index row and the body section in `decisions/core.md` or `decisions/phase2.md` are present. Verify with `Select-String`.
+
+**M-number milestone commits — additionally mandatory:**
+- [ ] Module `README.md` updated to reflect shipped behaviour.
+- [ ] `Forge/REFERENCE.md` updated (new commands, tools, config keys, changed signatures).
+- [ ] `Forge/FEATURELIST.md` updated and "Last updated" version line bumped.
+- [ ] `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` updated: version line, MCP tools, CLI commands, any new sections. Read it with the Read tool.
+
+"No changes needed" is only valid after explicitly reading each file and confirming it already reflects the shipped code. Never assume.
+
+After the gate is clear, write the commit message and present it to the user.
+
+- Commits are the **only** action that requires explicit user approval. Build, vet, format, and test commands are executed autonomously.
+- **A "yes" answer to a review question is not commit approval.** The confirmation of a technical fact and the approval of a commit are two distinct acts. Never collapse them into one.
 
 ### Commit message format
 
@@ -384,20 +382,10 @@ README.md, FEATURELIST.md) or creating content for forge-cms.dev/docs.
 This workflow is separate from the standard step workflow. It applies to
 docs-only tasks and content tasks — not to code implementation.
 
-**Milestone trigger (non-negotiable):** After every milestone commit that carries
-an M-number — including standalone module milestones (forge-social, forge-mcp,
-forge-media, forge-cli) — run this workflow starting at step 2 before proposing
-the commit. Do not wait for the architect to request it.
-
-For every M-number milestone, the following must be updated before the commit:
-- The module's own `README.md`
-- `REFERENCE.md` — CLI table and any new commands or tools
-- `FEATURELIST.md` — add new capabilities, bump "Last updated" version line
-- `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` — version line, MCP tools, CLI commands, new sections
-  (canonical source — read it directly with the Read tool, no copies to distribute)
-
-"No changes needed" is only valid if you have explicitly read each file and
-confirmed it already reflects the shipped milestone. Never assume — always verify.
+**When to use this workflow:** For docs-only tasks and content operations (devlog,
+solved stories, doc page drafts) that follow a code commit. Repo doc updates
+(README, REFERENCE.md, FEATURELIST.md, forge-common skill) are gated in the
+standard step workflow (step 6) — complete those before proposing any commit.
 
 The content brief (step 4) is always required for any new M-number milestone.
 
