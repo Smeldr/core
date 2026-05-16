@@ -1845,7 +1845,7 @@ The section states:
 
 ---
 
-## Amendment A87 — signals.go: AfterSchedule Signal constant
+## Amendment A87 ï¿½ signals.go: AfterSchedule Signal constant
 
 **Date:** 2026-05-06
 **Status:** Agreed
@@ -1860,12 +1860,12 @@ subscribe to post.scheduled webhook events or react to scheduling via signal han
 
 ### Change
 
-**signals.go** — new constant added to the Signal const block:
+**signals.go** ï¿½ new constant added to the Signal const block:
 
 `go
 // AfterSchedule fires after a content item transitions to Scheduled status.
-// It fires in addition to AfterUpdate — not instead of it. Runs
-// asynchronously — errors and panics are logged, never returned.
+// It fires in addition to AfterUpdate ï¿½ not instead of it. Runs
+// asynchronously ï¿½ errors and panics are logged, never returned.
 AfterSchedule Signal = "after_schedule"
 `
 
@@ -1881,5 +1881,50 @@ updateHandler and MCPSchedule.
   unless a handler is registered with orge.On[T](AfterSchedule, fn).
 - ARCHITECTURE.md updated: AfterSchedule added to the signal constants table.
 - No breaking change; no required application updates.
+
+---
+
+## Non-Decision A96 â€” Sitemap ping (T39)
+
+**Date:** 2026-05-16
+**Status:** Agreed
+**Level:** 1 (docs-only â€” no code change)
+
+### What was considered
+
+An opt-in `SitemapPingURL string` field on `Config` that fires an HTTP GET
+after every `AfterPublish` signal to notify search engines of new content.
+
+### Decision
+
+Forge will not provide sitemap ping.
+
+### Rationale
+
+Google deprecated their ping endpoint in June 2023. The only remaining
+protocol with real adoption is IndexNow (Bing, Yandex), which requires an
+API key and a verification file hosted on the site â€” this is
+application-level setup, not framework responsibility. Forge must not own
+deployment-specific integrations.
+
+### Developer pattern
+
+Register an `AfterPublish` signal handler in `main.go` that calls your
+preferred indexing API. `SignalEvent` carries the slug and URL:
+
+```go
+app.OnSignal(forge.AfterPublish, func(ctx context.Context, ev forge.SignalEvent) error {
+    // ev.URL is the canonical URL of the published content item.
+    // Call your indexing API here (IndexNow, etc.)
+    return nil
+})
+```
+
+See REFERENCE.md â€” "Search engine indexing" for a full example.
+
+### Consequences
+
+No exported Go symbols added, removed, or renamed.
+No build, vet, or test changes required.
 
 ---

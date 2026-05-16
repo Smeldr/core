@@ -121,6 +121,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A93 | `auth.go`: `encodeUploadToken(secret,ttl)`/`decodeUploadToken` (internal). `forge.go`: `Config.MediaUploadTokenExpiry`, `App.GenerateUploadToken()`, `App.ValidateUploadToken(token)`. forge-media: `UploadToken` header in `handleUpload`, image-only MIME whitelist for token uploads, AVIF support, hex filename prefix. forge-mcp: `create_upload_token` Author+ tool. forge-cli: media subcommands documented + AVIF. Milestone 13 — v1.19.0. | Agreed | 2026-05-09 |
 | A94 | Signal bus: `SignalEvent`, `afterHookMeta`, `buildSignalEvent` (`signals.go`). `App.OnSignal`, `App.dispatchBus`, `App.wireSignalBus` replacing `injectWebhookHooks` (`forge.go`). `webhookDispatch` (`webhook.go`). `OutboundDelivery` interface (`outbound.go`). `notifyAfter` signature extended with `afterHookMeta`. Milestone 14 — v1.20.0. | Agreed | 2026-05-11 |
 | A95 | `mergeFileConfig`: field-level `OGDefaults` merge — `og_image` in `forge.config` overrides Go-code `Image.URL`; all other `OGDefaults` fields retain Go-code values. Only `forge.config` key designed to take precedence over Go code. No exported symbols changed. v1.21.0. | Agreed | 2026-05-14 |
+| A96 | Non-Decision: sitemap ping (T39) — Forge will not provide opt-in sitemap ping. Google deprecated their endpoint in 2023; IndexNow requires API key + verification file (app-level setup). Developer pattern: `App.OnSignal(AfterPublish, ...)`. REFERENCE.md: new "Search engine indexing" section. | Agreed | 2026-05-16 |
 
 ---
 

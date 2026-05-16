@@ -2145,6 +2145,43 @@ forge webhook retry <job-id>
 
 ---
 
+## Search engine indexing
+
+Forge does not provide built-in sitemap ping. Google deprecated their ping
+endpoint in June 2023, and IndexNow (Bing, Yandex) requires an API key and a
+verification file hosted on your site — application-level setup, not framework
+responsibility.
+
+Use `App.OnSignal` with `AfterPublish` to call your preferred indexing API.
+`SignalEvent.URL` is the fully-qualified canonical URL of the published item.
+
+```go
+app.OnSignal(forge.AfterPublish, func(ctx context.Context, ev forge.SignalEvent) error {
+    // IndexNow example
+    req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+        "https://api.indexnow.org/indexnow?url="+url.QueryEscape(ev.URL)+
+            "&key=YOUR_INDEXNOW_KEY", nil)
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return nil // log and move on — never block the signal bus
+    }
+    defer resp.Body.Close()
+    return nil
+})
+```
+
+`SignalEvent` fields available in the handler:
+
+| Field | Description |
+|-------|-------------|
+| `URL` | Absolute canonical URL (`Config.BaseURL` + prefix + slug) |
+| `Slug` | URL slug of the content item |
+| `Type` | Unqualified content type name (e.g. `"Post"`) |
+| `Title` | Human-readable title (if type implements `Titled`) |
+| `ActorID` | Token UUID of the actor who triggered the publish |
+
+---
+
 ## MCP resource subscriptions
 
 Available in `forge-mcp` when `App.AddSignalListener` is wired (set up
