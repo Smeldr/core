@@ -2,7 +2,7 @@
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.20.0 (A94) + forge-social v0.5.1 + forge-cli v0.8.0.
+Last updated: v1.21.0 (A95) + forge-social v0.6.0 + forge-agent v0.3.4 + forge-cli v0.8.0.
 
 ---
 
@@ -96,7 +96,7 @@ MCP resource subscriptions:
 - `/_health` endpoint — returns framework version and status; exempt from HTTPS redirect
 - Zero third-party dependencies in core — pure stdlib; driver is always your choice
 - Cookie compliance — `/.well-known/cookies.json` declares all cookies with category and consent requirements
-- Redirect tracking — automatic 301 on slug rename, 410 Gone on archive/delete; `/.well-known/redirects.json` for audit
+- Redirect tracking — `App.Redirect` / `RedirectStore` registers 301 Permanent and 410 Gone entries; `/.well-known/redirects.json` serves the full redirect table for audit and CDN sync
 - Security headers — CSP, HSTS, X-Frame-Options, Referrer-Policy in one middleware call
 - Graceful shutdown — drains in-flight requests on SIGINT/SIGTERM
 - Signal bus — `app.OnSignal(Signal, handler)` registers subscribers for `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete`; `SignalEvent` carries Type, Slug, Title, URL, Timestamp, PreviousState, ActorRole, ActorID; handlers run synchronously in the publish goroutine and must enqueue-and-return
@@ -134,6 +134,17 @@ MCP resource subscriptions:
 - Layer 1 agent routing — `social.AddRoutes(app, forgesocial.OnPublish(...))` fires outbound HTTP on lifecycle signals; HMAC-signed payload; exponential backoff retry
 - 15 MCP tools across PostModule, CredentialModule, ConfigModule, ScheduleModule
 - Full CLI parity in forge-cli v0.8.0
+- **X media upload** (v0.6.0): images in `media_url` are fetched and uploaded to `api.x.com/2/media/upload` before tweeting; `media_ids` attached to tweet payload; requires `media.write` OAuth scope — existing X credentials must be re-authorised
+
+## forge-agent (separate module)
+
+- `forge-cms.dev/forge-agent` — MIT-licensed agent runtime; `forge-cms.dev/forge-agent/flow` — AGPL-3.0 Forge integration adapter
+- `AgentJob` — Forge content type (embeds `forge.Node`) with full lifecycle management: Draft → Published → Archived; auto-generated MCP tools (`create_agent_job`, `get_agent_job`, `list_agent_jobs`, `update_agent_job`, `publish_agent_job`, `archive_agent_job`, `delete_agent_job`)
+- Signal-triggered jobs — any `forge.Signal` value as `Trigger`; `ContentTypeFilter` restricts to a named content type; full `forge.SignalEvent` serialised as JSON in the agent task string so the agent knows what content item fired it
+- Cron-triggered jobs — 5-field cron expression as `Trigger`; scheduler rebuilds atomically on AgentJob publish/archive
+- `WebhookURL` — when set, agent task prompt includes an instruction to POST output via `http_post`
+- Guard: AgentJob lifecycle events never trigger other jobs (prevents self-activation loops)
+- `Module.Register(*forge.App)` — wires MCP tools, subscribes to all 7 after-signals, starts the cron scheduler
 
 ## Outbound webhooks
 
