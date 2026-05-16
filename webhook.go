@@ -210,9 +210,18 @@ func (s *WebhookStore) Delete(ctx context.Context, id string) error {
 // EndpointsForEvent returns all active endpoints subscribed to the given event
 // name. The secretEnc field IS populated on returned values so the worker
 // pool can decrypt the signing secret at delivery time.
+//
+// The SQL LIKE filter pre-screens rows by checking whether the events JSON
+// array contains the event string as a quoted element. Event names are
+// well-controlled internal constants and never contain % or ", making the
+// LIKE pattern safe. A Go-level exact match is still applied after scanning
+// to handle any false positives from the substring match.
 func (s *WebhookStore) EndpointsForEvent(ctx context.Context, event string) ([]WebhookEndpoint, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, events, target_url, secret_enc, active, created_at FROM forge_webhook_endpoints WHERE active`,
+		`SELECT id, events, target_url, secret_enc, active, created_at
+		 FROM forge_webhook_endpoints
+		 WHERE active AND events LIKE '%"' || $1 || '"%'`,
+		event,
 	)
 	if err != nil {
 		return nil, err
@@ -385,11 +394,13 @@ func validateWebhookURL(rawURL string) error {
 	return nil
 }
 
-// isPrivateIP reports whether ip falls within a private, loopback, or
-// link-local range: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
-// ::1/128, fc00::/7 (IPv6 ULA), or fe80::/10 (IPv6 link-local).
-func isPrivateIP(ip net.IP) bool {
-	privateRanges := []string{
+// privateRanges holds the pre-compiled private, loopback, and link-local CIDR
+// blocks checked by isPrivateIP. Compiled once at init to avoid repeated
+// allocations on every validateWebhookURL call.
+var privateRanges []*net.IPNet
+
+func init() {
+	for _, cidr := range []string{
 		"127.0.0.0/8",
 		"10.0.0.0/8",
 		"172.16.0.0/12",
@@ -397,12 +408,20 @@ func isPrivateIP(ip net.IP) bool {
 		"::1/128",
 		"fc00::/7",
 		"fe80::/10",
-	}
-	for _, cidr := range privateRanges {
+	} {
 		_, block, err := net.ParseCIDR(cidr)
 		if err != nil {
-			continue
+			panic("forge: invalid private CIDR: " + cidr)
 		}
+		privateRanges = append(privateRanges, block)
+	}
+}
+
+// isPrivateIP reports whether ip falls within a private, loopback, or
+// link-local range: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+// ::1/128, fc00::/7 (IPv6 ULA), or fe80::/10 (IPv6 link-local).
+func isPrivateIP(ip net.IP) bool {
+	for _, block := range privateRanges {
 		if block.Contains(ip) {
 			return true
 		}

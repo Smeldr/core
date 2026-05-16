@@ -96,11 +96,10 @@ type DeliveryLog struct {
 	Error       string
 }
 
-// circuitState tracks failure counts and open/half-open timing for one endpoint.
+// circuitState tracks failure counts and open timing for one endpoint.
 type circuitState struct {
-	failures   int
-	openUntil  time.Time
-	halfOpenAt time.Time
+	failures  int
+	openUntil time.Time
 }
 
 const (
@@ -277,9 +276,8 @@ func (p *workerPool) processJob(ctx context.Context, job OutboundJob, rng *rand.
 	}
 
 	if deliverErr != nil {
-		var httpErr *webhookHTTPError
-		if asWebhookHTTPErr(deliverErr, &httpErr) {
-			dl.StatusCode = httpErr.statusCode
+		if e, ok := deliverErr.(*webhookHTTPError); ok {
+			dl.StatusCode = e.statusCode
 		}
 		dl.Error = deliverErr.Error()
 		p.recordCircuitResult(job.EndpointID, false)
@@ -306,18 +304,6 @@ type webhookHTTPError struct {
 
 func (e *webhookHTTPError) Error() string {
 	return fmt.Sprintf("webhook: upstream returned %d", e.statusCode)
-}
-
-// asWebhookHTTPErr is a nil-safe helper that assigns target from err.
-func asWebhookHTTPErr(err error, target **webhookHTTPError) bool {
-	if err == nil {
-		return false
-	}
-	if e, ok := err.(*webhookHTTPError); ok {
-		*target = e
-		return true
-	}
-	return false
 }
 
 // logDelivery inserts a DeliveryLog row.
@@ -518,13 +504,21 @@ func signPayload(secret []byte, timestamp int64, body []byte) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-// httpDeliver performs a single HTTP POST delivery for job. It sets all
-// required X-Forge-* headers, signs the payload, and enforces a 30-second
-// timeout. Returns a *webhookHTTPError for non-2xx responses.
-func httpDeliver(ctx context.Context, job OutboundJob, secret []byte) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+// outboundClient is the HTTP client used for all webhook deliveries.
+// It enforces a 30-second timeout and blocks all redirects: webhook targets
+// must not redirect, and following a redirect to a private IP would bypass
+// the SSRF validation performed at endpoint creation time.
+var outboundClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 
+// httpDeliver performs a single HTTP POST delivery for job. It sets all
+// required X-Forge-* headers, signs the payload, and returns a
+// *webhookHTTPError for non-2xx responses.
+func httpDeliver(ctx context.Context, job OutboundJob, secret []byte) error {
 	ts := time.Now().Unix()
 	sig := signPayload(secret, ts, job.Payload)
 
@@ -538,7 +532,7 @@ func httpDeliver(ctx context.Context, job OutboundJob, secret []byte) error {
 	req.Header.Set("X-Forge-Event", job.Event)
 	req.Header.Set("X-Forge-Delivery", job.ID)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := outboundClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("forge: webhook: http: %w", err)
 	}
