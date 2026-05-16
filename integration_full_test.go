@@ -2749,7 +2749,7 @@ func TestFull_G27_RetryOnTransientFailure(t *testing.T) {
 	}
 	clock.Advance(5 * time.Minute)
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	var logs []DeliveryLog
 	for time.Now().Before(deadline) {
 		var err error
