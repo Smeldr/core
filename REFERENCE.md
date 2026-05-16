@@ -2182,6 +2182,95 @@ app.OnSignal(forge.AfterPublish, func(ctx context.Context, ev forge.SignalEvent)
 
 ---
 
+## Audit trail
+
+`App.Audit(store AuditStore)` subscribes to `AfterPublish`, `AfterSchedule`,
+`AfterArchive`, and `AfterDelete` via the signal bus and persists each transition
+to a SQL table. It also mounts `GET /_audit` (Editor role required).
+
+### Setup
+
+```go
+// 1. Create the table once at startup
+forge.CreateAuditTable(db)
+
+// 2. Wire the audit store
+app.Audit(forge.NewAuditStore(db))
+```
+
+DDL (also created by `CreateAuditTable`):
+
+```sql
+CREATE TABLE IF NOT EXISTS forge_audit_log (
+    id           TEXT PRIMARY KEY,
+    timestamp    TIMESTAMPTZ NOT NULL,
+    signal       TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    slug         TEXT NOT NULL,
+    actor_id     TEXT NOT NULL,
+    actor_role   TEXT NOT NULL,
+    prev_state   TEXT NOT NULL
+);
+```
+
+### Custom store
+
+Implement `AuditStore` to use a different backend:
+
+```go
+type AuditStore interface {
+    Append(ctx context.Context, r AuditRecord) error
+    List(ctx context.Context, f AuditFilter) ([]AuditRecord, error)
+}
+```
+
+### HTTP endpoint
+
+`GET /_audit` — requires Editor role; returns `[]AuditRecord` as JSON, newest first.
+
+Query parameters:
+
+| Parameter | Format | Description |
+|-----------|--------|-------------|
+| `from` | RFC3339 | Lower bound (inclusive) on timestamp |
+| `to` | RFC3339 | Upper bound (inclusive) on timestamp |
+| `type` | string | Filter by content type name (e.g. `"Post"`) |
+| `actor` | string | Filter by actor ID |
+
+### AuditRecord fields
+
+| Field | JSON | Description |
+|-------|------|-------------|
+| `ID` | `id` | Unique record ID (UUIDv7) |
+| `Timestamp` | `timestamp` | UTC time of the transition |
+| `Signal` | `signal` | One of `after_publish`, `after_schedule`, `after_archive`, `after_delete` |
+| `ContentType` | `content_type` | Unqualified Go type name (e.g. `"Post"`) |
+| `Slug` | `slug` | URL slug of the content item |
+| `ActorID` | `actor_id` | Token UUID of the actor |
+| `ActorRole` | `actor_role` | Role at time of action |
+| `PreviousState` | `previous_state` | Status before the transition |
+
+### forge-cli
+
+```
+forge-cli audit list [--from RFC3339] [--to RFC3339] [--type TYPE] [--actor ACTOR]
+```
+
+Prints a tab-aligned table to stdout. Requires `FORGE_TOKEN` with Editor role.
+
+### Which signals are recorded
+
+| Signal | Recorded |
+|--------|----------|
+| `AfterPublish` | ✅ |
+| `AfterSchedule` | ✅ |
+| `AfterArchive` | ✅ |
+| `AfterDelete` | ✅ |
+| `AfterCreate` | ❌ — drafts fire on every auto-save; excluded to prevent unbounded noise |
+| `AfterUpdate` | ❌ — same reason |
+
+---
+
 ## MCP resource subscriptions
 
 Available in `forge-mcp` when `App.AddSignalListener` is wired (set up

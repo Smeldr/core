@@ -122,6 +122,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A94 | Signal bus: `SignalEvent`, `afterHookMeta`, `buildSignalEvent` (`signals.go`). `App.OnSignal`, `App.dispatchBus`, `App.wireSignalBus` replacing `injectWebhookHooks` (`forge.go`). `webhookDispatch` (`webhook.go`). `OutboundDelivery` interface (`outbound.go`). `notifyAfter` signature extended with `afterHookMeta`. Milestone 14 — v1.20.0. | Agreed | 2026-05-11 |
 | A95 | `mergeFileConfig`: field-level `OGDefaults` merge — `og_image` in `forge.config` overrides Go-code `Image.URL`; all other `OGDefaults` fields retain Go-code values. Only `forge.config` key designed to take precedence over Go code. No exported symbols changed. v1.21.0. | Agreed | 2026-05-14 |
 | A96 | Non-Decision: sitemap ping (T39) — Forge will not provide opt-in sitemap ping. Google deprecated their endpoint in 2023; IndexNow requires API key + verification file (app-level setup). Developer pattern: `App.OnSignal(AfterPublish, ...)`. REFERENCE.md: new "Search engine indexing" section. | Agreed | 2026-05-16 |
+| A97 | Audit trail (T21) — `App.Audit(AuditStore)` subscribes to `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete` via signal bus; persists `AuditRecord` to SQL. `NewAuditStore(DB)`, `CreateAuditTable(DB)`. GET `/_audit` (Editor+). `forge audit list` CLI. New exported types: `AuditRecord`, `AuditFilter`, `AuditStore`. v1.22.0. | Agreed | 2026-05-16 |
 
 ---
 

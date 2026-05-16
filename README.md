@@ -3,7 +3,7 @@
 A Go framework for content-driven applications. Zero dependencies. AI-native by default.
 
 [![Go Reference](https://pkg.go.dev/badge/forge-cms.dev/forge.svg)](https://pkg.go.dev/forge-cms.dev/forge)
-**v1.21.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
+**v1.22.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
 
 ## 30-second start
 

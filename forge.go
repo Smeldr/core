@@ -257,6 +257,9 @@ type App struct {
 	navCodeItems           []NavItem                           // items supplied via App.Nav() for NavModeCode
 	navTreeModules         []interface{ setNavTree(*NavTree) } // modules that receive the navTree after startup
 
+	auditStore      AuditStore // non-nil when App.Audit() was called
+	auditHandlerReg bool       // true once GET /_audit is registered
+
 	webhookStore    *WebhookStore               // non-nil when App.Webhooks() was called
 	webhookPool     *workerPool                 // non-nil when App.Webhooks() was called
 	signalListeners []func(Signal, string, any) // registered via AddSignalListener
@@ -570,6 +573,42 @@ func (a *App) Webhooks(store *WebhookStore) *App {
 	return a
 }
 
+// Audit wires store as the audit trail for this application. It subscribes to
+// [AfterPublish], [AfterSchedule], [AfterArchive], and [AfterDelete] on the
+// signal bus and persists an [AuditRecord] for each event. Errors from
+// [AuditStore.Append] are logged at Warn level and never propagated to the caller.
+//
+// Audit also mounts GET /_audit — an Editor-or-higher HTTP endpoint that
+// returns a JSON array of [AuditRecord] values. Optional query parameters:
+// from, to (RFC3339), type (content type name), actor (actor ID).
+//
+// The forge_audit_log table must exist before Audit is called.
+// See [NewAuditStore] for the required DDL.
+func (a *App) Audit(store AuditStore) *App {
+	a.auditStore = store
+	for _, sig := range []Signal{AfterPublish, AfterSchedule, AfterArchive, AfterDelete} {
+		s := sig
+		a.OnSignal(s, func(ctx context.Context, ev SignalEvent) error {
+			r := AuditRecord{
+				ID:            NewID(),
+				Timestamp:     ev.Timestamp,
+				Signal:        s,
+				ContentType:   ev.Type,
+				Slug:          ev.Slug,
+				ActorID:       ev.ActorID,
+				ActorRole:     ev.ActorRole,
+				PreviousState: ev.PreviousState,
+			}
+			if err := store.Append(ctx, r); err != nil {
+				slog.WarnContext(ctx, "forge: audit append failed",
+					"error", err, "signal", s, "type", ev.Type, "slug", ev.Slug)
+			}
+			return nil
+		})
+	}
+	return a
+}
+
 // WebhookStore returns the configured [WebhookStore], or nil when outbound
 // webhooks have not been configured via [App.Webhooks].
 // forge-mcp calls this in its New constructor to wire webhook admin tools.
@@ -811,6 +850,14 @@ func (a *App) Handler() http.Handler {
 				s.setSEODefaults(a.seo.ogDefaults, a.seo.appSchema, a.seo.headAssets)
 			}
 		}
+	}
+	if a.auditStore != nil && !a.auditHandlerReg {
+		a.auditHandlerReg = true
+		auditAuth := a.cfg.Auth
+		if auditAuth == nil {
+			auditAuth = BearerHMAC(string(a.cfg.Secret))
+		}
+		a.mux.Handle("GET /_audit", newAuditHandler(auditAuth, a.auditStore))
 	}
 	// A66: probe forge_tokens table at startup when a TokenStore is configured.
 	// A83: auto-create a bootstrap admin token when forge_tokens is empty.

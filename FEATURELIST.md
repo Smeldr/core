@@ -2,7 +2,7 @@
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.21.0 (A95) + forge-social v0.6.0 + forge-agent v0.3.4 + forge-cli v0.8.0.
+Last updated: v1.22.0 (A97) + forge-social v0.6.0 + forge-agent v0.3.4 + forge-cli v0.9.0.
 
 ---
 
@@ -145,6 +145,15 @@ MCP resource subscriptions:
 - `WebhookURL` — when set, agent task prompt includes an instruction to POST output via `http_post`
 - Guard: AgentJob lifecycle events never trigger other jobs (prevents self-activation loops)
 - `Module.Register(*forge.App)` — wires MCP tools, subscribes to all 7 after-signals, starts the cron scheduler
+
+## Audit trail
+
+- `App.Audit(store AuditStore)` — opt-in; subscribes to `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete` via the signal bus
+- `AuditRecord` — immutable entry: ID, Timestamp, Signal, ContentType, Slug, ActorID, ActorRole, PreviousState
+- `NewAuditStore(db DB)` — default SQL implementation; timestamps stored as RFC3339 for SQLite compatibility
+- `CreateAuditTable(db DB)` — DDL helper; creates `forge_audit_log` table
+- `GET /_audit` — Editor-or-higher; returns JSON array; supports `from`, `to` (RFC3339), `type`, and `actor` query filters
+- `forge-cli audit list [--from RFC3339] [--to RFC3339] [--type TYPE] [--actor ACTOR]` — table output, newest first
 
 ## Outbound webhooks
 

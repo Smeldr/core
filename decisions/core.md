@@ -4162,3 +4162,4 @@ unaffected. The change is invisible to application code.
 **New / changed symbols:** None — `mergeFileConfig` is unexported.
 
 **Forge core → v1.21.0.**
+

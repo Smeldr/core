@@ -3234,3 +3234,181 @@ func TestFull_G32_OnSignalAndWebhookCoexist(t *testing.T) {
 		t.Fatal("no webhook job enqueued; Webhooks handler must coexist with OnSignal handlers")
 	}
 }
+
+// — G33 ———————————————————————————————————————————————————————————————————
+
+type g33Post struct {
+	Node
+	Title string `json:"title" forge:"required"`
+}
+
+// chanAuditStore wraps fakeAuditStore and signals a channel on each Append.
+type chanAuditStore struct {
+	mu       sync.Mutex
+	records  []AuditRecord
+	appended chan AuditRecord
+}
+
+func newChanAuditStore() *chanAuditStore {
+	return &chanAuditStore{appended: make(chan AuditRecord, 10)}
+}
+
+func (s *chanAuditStore) Append(_ context.Context, r AuditRecord) error {
+	s.mu.Lock()
+	s.records = append(s.records, r)
+	s.mu.Unlock()
+	s.appended <- r
+	return nil
+}
+
+func (s *chanAuditStore) List(_ context.Context, f AuditFilter) ([]AuditRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []AuditRecord
+	for _, r := range s.records {
+		if f.ContentType != "" && r.ContentType != f.ContentType {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// TestFull_G33_AuditTrailLifecycle verifies App.Audit() integration with the
+// signal bus (M14/A94) and the /_audit HTTP endpoint (A97).
+//
+// Scenarios:
+//   - MCPPublish fires AfterPublish → AuditRecord appended with correct fields
+//   - MCPCreate does NOT produce an audit record (AfterCreate not subscribed)
+//   - GET /_audit with Guest → 401; with Author → 403; with Editor → 200
+//   - GET /_audit?type=g33Post filters to matching records only
+func TestFull_G33_AuditTrailLifecycle(t *testing.T) {
+	secret := []byte("g33-audit-trail-integration-test")
+	store := newChanAuditStore()
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  secret,
+	}))
+	app.Audit(store)
+
+	repo := NewMemoryRepo[*g33Post]()
+	m := NewModule((*g33Post)(nil),
+		At("/g33posts"),
+		Repo(repo),
+		MCP(MCPRead, MCPWrite),
+	)
+	app.Content(m)
+	app.wireSignalBus()
+
+	editorCtx := NewTestContext(User{ID: "editor-1", Roles: []Role{Editor}})
+
+	// MCPCreate: AfterCreate fires — must NOT be recorded by audit trail.
+	item, err := m.MCPCreate(editorCtx, map[string]any{"title": "G33 Post"})
+	if err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+	post := item.(*g33Post)
+
+	// Give AfterCreate goroutine time to run, then verify nothing was appended.
+	time.Sleep(150 * time.Millisecond)
+	select {
+	case r := <-store.appended:
+		t.Errorf("unexpected audit record for AfterCreate: signal=%s", r.Signal)
+	default:
+		// correct — AfterCreate is not subscribed
+	}
+
+	// MCPPublish: AfterPublish fires → AuditRecord must be appended.
+	if err := m.MCPPublish(editorCtx, post.Slug); err != nil {
+		t.Fatalf("MCPPublish: %v", err)
+	}
+
+	var rec AuditRecord
+	select {
+	case rec = <-store.appended:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("AuditStore.Append not called within 500 ms after MCPPublish")
+	}
+	if rec.Signal != AfterPublish {
+		t.Errorf("Signal = %q, want %q", rec.Signal, AfterPublish)
+	}
+	if rec.ContentType != "g33Post" {
+		t.Errorf("ContentType = %q, want g33Post", rec.ContentType)
+	}
+	if rec.Slug != post.Slug {
+		t.Errorf("Slug = %q, want %q", rec.Slug, post.Slug)
+	}
+	if rec.ActorID != "editor-1" {
+		t.Errorf("ActorID = %q, want editor-1", rec.ActorID)
+	}
+	if rec.ID == "" {
+		t.Error("AuditRecord.ID is empty")
+	}
+
+	h := app.Handler()
+
+	// GET /_audit — Guest → 401.
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/_audit", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Guest: status = %d, want 401", w.Code)
+	}
+
+	// GET /_audit — Author → 403.
+	authorTok, _ := SignToken(User{ID: "a1", Roles: []Role{Author}}, string(secret), 0)
+	w = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/_audit", nil)
+	req.Header.Set("Authorization", "Bearer "+authorTok)
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Author: status = %d, want 403", w.Code)
+	}
+
+	// GET /_audit — Editor → 200 with JSON array containing the AfterPublish record.
+	editorTok, _ := SignToken(User{ID: "editor-1", Roles: []Role{Editor}}, string(secret), 0)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/_audit", nil)
+	req.Header.Set("Authorization", "Bearer "+editorTok)
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("Editor: status = %d, want 200", w.Code)
+	}
+	var records []AuditRecord
+	if err := json.NewDecoder(w.Body).Decode(&records); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(records) == 0 {
+		t.Error("expected at least one record, got empty")
+	}
+
+	// GET /_audit?type=g33Post filters correctly.
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/_audit?type=g33Post", nil)
+	req.Header.Set("Authorization", "Bearer "+editorTok)
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("type filter: status = %d, want 200", w.Code)
+	}
+	var filtered []AuditRecord
+	if err := json.NewDecoder(w.Body).Decode(&filtered); err != nil {
+		t.Fatalf("decode filtered: %v", err)
+	}
+	for _, r := range filtered {
+		if r.ContentType != "g33Post" {
+			t.Errorf("type filter: got ContentType=%q, want g33Post", r.ContentType)
+		}
+	}
+
+	// GET /_audit?type=OtherType returns empty array, not error.
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/_audit?type=OtherType", nil)
+	req.Header.Set("Authorization", "Bearer "+editorTok)
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("other type filter: status = %d, want 200", w.Code)
+	}
+	body := strings.TrimSpace(w.Body.String())
+	if !strings.HasPrefix(body, "[") {
+		t.Errorf("expected JSON array for empty result, got: %q", body)
+	}
+}

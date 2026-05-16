@@ -1928,3 +1928,62 @@ No exported Go symbols added, removed, or renamed.
 No build, vet, or test changes required.
 
 ---
+
+## Amendment A97 — Built-in opt-in audit trail (T21)
+
+**Date:** 2026-05-16
+**Status:** Agreed
+**Scope:** `audit.go` (new file), `forge.go` — `App.Audit`, `App.Handler` (Level 3 — new exported API)
+
+**Problem:**
+Applications built on Forge have no standard way to record who changed what and
+when. Each team rolls bespoke audit tables. The signal bus (A94) already captures
+every lifecycle transition with actor identity, content type, slug, and previous
+state — but only for webhook delivery. There is no built-in persistence path.
+
+**Decision:**
+Add `App.Audit(store AuditStore) *App` — a single opt-in call that:
+1. Subscribes to `AfterPublish`, `AfterSchedule`, `AfterArchive`, and `AfterDelete`
+   via the existing signal bus.
+2. On each event, appends an `AuditRecord` to the provided `AuditStore`.
+3. Mounts `GET /_audit` (Editor-or-higher) that returns the stored records as a
+   JSON array, filterable by `from`, `to` (RFC3339), `type`, and `actor`.
+
+`AfterCreate` and `AfterUpdate` are intentionally excluded: they fire on every
+save (including auto-saves / draft cycles) and would produce unbounded noise in
+the audit log. The audit trail records only transitions that change publication
+state.
+
+**Implementation:**
+- `AuditRecord` — immutable struct: `ID`, `Timestamp`, `Signal`, `ContentType`,
+  `Slug`, `ActorID`, `ActorRole`, `PreviousState`.
+- `AuditFilter` — query narrowing: `From`, `To time.Time`, `ContentType`, `ActorID string`.
+- `AuditStore` interface — `Append(ctx, AuditRecord) error` + `List(ctx, AuditFilter) ([]AuditRecord, error)`.
+- `NewAuditStore(db DB) AuditStore` — default SQL implementation; timestamps
+  stored as RFC3339 strings for SQLite compatibility (same pattern as `auth.go`).
+- `CreateAuditTable(db DB) error` — DDL helper; creates `forge_audit_log` table.
+- `GET /_audit` mounted lazily in `App.Handler()` when `auditStore != nil`.
+  Auth resolved with same nil-check pattern as `New()`.
+
+**Why signal bus and not a module option:**
+`App.Audit` is a third independent `OnSignal` subscriber, parallel to `App.Webhooks`
+and forge-agent's subscriber. No shared helper is needed — the signal bus IS the
+abstraction. Adding a module option would couple every content type to the audit
+path unconditionally.
+
+**Rejected alternatives:**
+- *Module option `WithAudit()`*: couples audit to module registration; modules
+  added after `App.Audit()` would require re-wiring.
+- *Middleware/interceptor*: would require access to the HTTP handler layer, not
+  the lifecycle layer. Actor identity is cleanly available on `SignalEvent`.
+- *`AfterCreate`/`AfterUpdate` included*: rejected — drafts fire these on every
+  auto-save; audit log would grow unboundedly with low-value entries.
+
+**New exported symbols:**
+- `audit.go`: `AuditRecord`, `AuditFilter`, `AuditStore`, `NewAuditStore`, `CreateAuditTable`
+- `forge.go`: `App.Audit`
+
+**New HTTP surface:**
+- `GET /_audit` — requires Editor role; returns `[]AuditRecord` JSON.
+
+**Forge core → v1.22.0.**

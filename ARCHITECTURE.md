@@ -75,6 +75,8 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-05-08 | Milestone 11 (v1.17.0): A87 (`signals.go`): `AfterSchedule Signal = "after_schedule"`. A89 (`module.go`): `afterHook` callback field, `setAfterHook`, `notifyAfter`; `MCPSchedule` dispatches `AfterSchedule`. A88 (`forge.go`): `App.Webhooks(*WebhookStore)`, `App.WebhookPool() WebhookJobQueue`, `App.injectWebhookHooks()`; pool started/stopped with server lifecycle. Step 1 (`webhook.go`): `WebhookEndpoint`, `WebhookStore` (AES-256-GCM secret encryption, SSRF validation), `WebhookJobQueue` interface, `Titled` interface, `OutboundJob`, `DeliveryLog`, payload-building helpers, `buildWebhookPayload`, `signalToEventSuffix`. Step 2 (`outbound.go`): `workerPool` with exponential backoff (4^attempt ±20% jitter, max 1h), per-endpoint circuit breaker (threshold 5, open 5min), dead-letter at 7 attempts, HMAC-SHA256 signing, injectable `deliver` func for testing, `fakeClock` test helper. `forge-mcp`: `webhookStore` field, 5 Admin MCP tools (`create_webhook`, `list_webhooks`, `delete_webhook`, `list_webhook_deliveries`, `retry_webhook`), `subscriptionRegistry` (fan-out SSE push), `resources/subscribe` + `resources/unsubscribe` JSON-RPC methods, session-ID-based SSE transport, `capabilities.resources.subscribe=true`. `forge-cli` v0.4.0: `forge webhook` subcommands (create, list, delete, deliveries, retry). `integration_full_test.go`: G24–G30 cross-milestone groups. |
 | 2026-05-08 | Milestone 12 (v1.18.0) / A92: `auth.go`: `encodePreviewToken(prefix, slug string, secret []byte, ttl time.Duration) string` + `decodePreviewToken(token string, secret []byte) (prefix, slug string, err error)` (internal; reuse `tokenHMAC`; constant-time comparison). `forge.go`: `Config.PreviewTokenExpiry time.Duration`, `App.GeneratePreviewToken(prefix, slug string) string`, `App.BaseURL() string`. `module.go`: `secret []byte` field + `setSecret([]byte)` (wired by `App.Content`) + preview bypass block in `showHandler` (checks prefix + slug; falls through silently on failure). `forge-mcp/preview_tools.go`: `create_preview_url` Admin tool; `Server.app *forge.App` field added to `mcp.go`. `forge-cli` v0.5.0: `preview.go` + `forge-cli preview <prefix> <slug>`. `integration_full_test.go`: G31 cross-milestone group. |
 | 2026-05-11 | Milestone 14 (v1.20.0) / A94: Signal bus. `signals.go`: `SignalEvent` exported struct, `afterHookMeta` unexported struct, `buildSignalEvent` unexported func. `forge.go`: `App.OnSignal(sig Signal, h func(context.Context, SignalEvent) error) *App` (exported), `App.dispatchBus` (unexported), `App.wireSignalBus` (unexported, replaces `injectWebhookHooks`); `App` gains `busMu sync.RWMutex` and `busHandlers map[Signal][]func(context.Context, SignalEvent) error`; `App.Webhooks` refactored to register `webhookDispatch` as `OnSignal` handlers. `webhook.go`: `webhookDispatch` unexported func. `outbound.go`: `OutboundDelivery` exported interface `{ Enqueue(ctx, OutboundJob) error }`. `module.go`: `afterHook` field type, `setAfterHook`, `notifyAfter` signatures extended with `afterHookMeta`; all call sites updated with prevState. `integration_full_test.go`: G32 cross-milestone group. |
+| 2026-05-16 | A96 (Non-Decision, docs-only): sitemap ping. REFERENCE.md: "Search engine indexing" section with `App.OnSignal(AfterPublish, ...)` developer pattern. No code changes. |
+| 2026-05-16 | A97 (v1.22.0): Built-in opt-in audit trail. `audit.go` (new): `AuditRecord`, `AuditFilter`, `AuditStore` interface, `NewAuditStore(DB)`, `CreateAuditTable(DB)`, `newAuditHandler` (unexported). `forge.go`: `App.Audit(AuditStore) *App`; `App` gains `auditStore AuditStore` and `auditHandlerReg bool` fields; `App.Handler()` lazily mounts `GET /_audit` when `auditStore != nil`. `audit_test.go` (new): 13 unit tests. `integration_full_test.go`: G33 cross-milestone group. `forge-cli` v0.9.0: `forge audit list` subcommand. |
 
 ---
 
@@ -99,6 +101,8 @@ forge-cms.dev/
 ├── signals.go        Signal type, On[T]() option, dispatchBefore(), dispatchAfter(), debouncer,
 │                     debouncer.Stop() (Amendment A39)
 ├── storage.go        DB interface, Query[T], QueryOne[T], Repository[T], MemoryRepo[T], ListOptions
+├── audit.go          AuditRecord, AuditFilter, AuditStore interface, NewAuditStore(DB), CreateAuditTable(DB),
+│                     newAuditHandler (unexported); GET /_audit mounted by App.Handler() (Amendment A97)
 ├── auth.go           AuthFunc interface, BearerHMAC, CookieSession, BasicAuth, AnyAuth, SignToken,
 │                     VerifyBearerToken(r, secret, store *TokenStore);
 │                     TokenRecord, TokenStore, NewTokenStore (Amendment A66);
@@ -138,7 +142,9 @@ forge-cms.dev/
                       App.Partials() / App.MustParseTemplate(), partialsDir field,
                       setPartials push loop in Run() (Amendment A62);
                       Config.TokenStore, App.tokenStore, App.TokenStore(),
-                      TokenStore startup probe in Handler() (Amendment A66)
+                      TokenStore startup probe in Handler() (Amendment A66);
+                      App.Audit(AuditStore) *App, auditStore/auditHandlerReg fields,
+                      GET /_audit lazy mount in Handler() (Amendment A97)
 └── head.go           Head (Title, Description, Author, Published, Modified, Image, Type,
                       Canonical, Tags, Breadcrumbs, Alternates, Social, NoIndex),
                       Image, Breadcrumb, Alternate, Headable, HeadFunc[T], ListHeadFunc[T],
@@ -194,11 +200,13 @@ forge-cms.dev/
                       IndexHandler → /feed.xml aggregate (reverse-chronological)
 └── integration_test.go 15 integration tests: HTML render cycle, forge:head, error pages,
                       CSRF round-trip, App-level SEO/sitemap, TemplateData correctness
-└── integration_full_test.go 19 cross-milestone tests (M1–M4): multi-module routing,
-                      global middleware order, role guards, AfterCreate/AfterDelete/isolation,
-                      content negotiation, forge_meta/forge_markdown/BreadcrumbList,
-                      sitemap in robots.txt, error template first-match + fallthrough,
-                      TemplateData siteName + request URL
+└── integration_full_test.go cross-milestone test groups G1–G33 (M1–M4 + milestones 5–14 + A97):
+                      multi-module routing, global middleware order, role guards,
+                      AfterCreate/AfterDelete/isolation, content negotiation,
+                      forge_meta/forge_markdown/BreadcrumbList, sitemap in robots.txt,
+                      error template first-match + fallthrough, TemplateData siteName + request URL;
+                      G33: audit trail lifecycle (AfterCreate excluded, AfterPublish recorded,
+                      GET /_audit auth enforcement, content-type filter)
 
 forge-cms.dev/forge-pgx/  (separate module: ./forge-pgx/)
 └── pgx.go            Wrap(*pgxpool.Pool) forge.DB — native pgx adapter
@@ -545,6 +553,25 @@ type ListOptions struct {
 }
 ```
 
+### Shipped (A94, A97)
+
+```go
+// AuditStore — implement to provide a custom audit persistence backend    (audit.go) ✅ A97
+type AuditStore interface {
+    Append(ctx context.Context, r AuditRecord) error
+    List(ctx context.Context, f AuditFilter) ([]AuditRecord, error)
+}
+// Use NewAuditStore(db DB) for the built-in SQL implementation.
+// Use CreateAuditTable(db DB) to create the forge_audit_log table.
+// Wire via App.Audit(store AuditStore) — subscribes to AfterPublish, AfterSchedule,
+// AfterArchive, AfterDelete. Mounts GET /_audit (Editor role required).
+
+// OutboundDelivery — implement to provide a custom delivery backend       (outbound.go) ✅ A94
+type OutboundDelivery interface {
+    Enqueue(ctx context.Context, job OutboundJob) error
+}
+```
+
 ### Shipped (Milestones 3–5)
 
 ```go
@@ -597,6 +624,9 @@ rss.go          — depends on: node, signals, head                       ✅ Mi
 ai.go           — depends on: node, head                                ✅ Milestone 5
 social.go       — depends on: head                                      ✅ Milestone 5
 scheduler.go    — depends on: node, signals, storage                    ✅ Milestone 8
+webhook.go      — depends on: errors, auth, node, signals                ✅ Milestone 11
+outbound.go     — depends on: errors, auth, signals                      ✅ Milestone 11
+audit.go        — depends on: errors, auth, roles, storage               ✅ A97 (v1.22.0)
 ```
 
 The dependency graph has no cycles. `errors.go` and `roles.go` are the only
