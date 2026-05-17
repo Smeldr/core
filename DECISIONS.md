@@ -1,4 +1,4 @@
-﻿# Forge — Decision Log
+# Forge — Decision Log
 
 This document is the permanent record of every architectural decision made for Forge.
 Each entry captures what was decided, why, what was rejected, and what consequences follow.
@@ -19,7 +19,13 @@ Revisions to existing decisions require a new entry that supersedes the original
 | `decisions/recent.md` | Rolling working file (~20KB limit) | Yes — new decisions |
 | `decisions/nondecisions.md` | Non-Decisions only | Yes — Non-Decisions directly |
 | `decisions/core.md` | Archive: D1–D22, A19–A65, A88–A95 | No |
-| `decisions/phase2-archive.md` | Archive: D25–A87, A96–A97 | No |
+| `decisions/phase2-archive.md` | Superseded archive (was phase2.md; content now in topic files) | No |
+| `decisions/auth.md` | Archive: D25, A66, D26, A83 | No |
+| `decisions/content-api.md` | Archive: D27, A67, A74, A75, A77 | No |
+| `decisions/docs.md` | Archive: D28, A69–A72, A76, A84–A86 | No |
+| `decisions/media.md` | Archive: A73, D31, A79 | No |
+| `decisions/nav.md` | Archive: D29, D30, A82 | No |
+| `decisions/storage.md` | Archive: A68, A78, A80, A81 | No |
 | `decisions/[topic].md` | Topic files on architect instruction | Only when instructed |
 
 **Archiving rule:** When `recent.md` reaches ~20KB, corepilot reports it at session start:
@@ -30,6 +36,8 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 ---
 
 ## Decision index
+
+### Core — [decisions/core.md](decisions/core.md)
 
 | # | Title | Status | Date |
 |---|-------|--------|------|
@@ -55,7 +63,6 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 | 20 | Configuration model | Locked | 2025-06-01 |
 | 21 | forge.Context is an interface | Locked | 2025-06-01 |
 | 22 | Storage interface and database drivers | Locked | 2025-06-01 |
-| 25 | Token management | Locked | 2026-04-05 |
 | A19 | `storage.go`: `SQLRepo[T]` production repository | Agreed | 2026-03-07 |
 | A20 | `forge.go`: `RedirectStore`, `App.Redirect()`, fallback handler | Agreed | 2026-03-07 |
 | A21 | `forge.go`: `/.well-known/redirects.json` handler | Agreed | 2026-03-07 |
@@ -101,34 +108,6 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 | A63 | `head.go`/`templates.go`/`templatedata.go`/`forge.go`/`module.go`: `HeadAssets`, `FaviconLink`, `ScriptTag` SEOOption — injects static assets (preconnect, stylesheets, favicons, scripts) into forge:head on every page via `app.SEO(&HeadAssets{...})` | Agreed | 2026-04-03 |
 | A64 | `head.go`/`templatedata.go`: `PageHead` exported struct — embeddable head fields for custom handler data structs; `TemplateData[T]` refactored to embed `PageHead` anonymously | Agreed | 2026-04-03 |
 | A65 | `module.go`/`templatedata.go`/`templates.go`: `ContextFunc` module option — per-request extra data injected into `TemplateData.Extra` for list and show renders | Agreed | 2026-04-04 |
-| A66 | `auth.go`/`forge.go`/`forge-mcp`: `TokenStore` — named revocable bearer tokens, DB-backed `VerifyBearerToken`, three Admin MCP tools (`create_token`, `list_tokens`, `revoke_token`) | Agreed | 2026-04-05 |
-| A67 | `templatehelpers.go`: `forgeHTML` / `forge_html` — trusted raw HTML passthrough added to `TemplateFuncMap` | Agreed | 2026-04-05 |
-| D26 | `auth.go`/`errors.go`/`forge-mcp/tool.go`: last-admin guard on `TokenStore.Revoke` — `ErrLastAdmin` sentinel (409); `Revoke` refuses to revoke the last active admin token; `revoke_token` MCP tool surfaces actionable message | Agreed | 2026-04-06 |
-| D27 | `mcp.go`/`module.go`/`forge-mcp/mcp.go`: field format semantics — `forge_format` and `forge_description` struct tags populate `MCPField.Format` and `MCPField.Description`; forge-mcp emits `"description"` key in JSON Schema properties with priority logic | Agreed | 2026-04-07 |
-| D28 | `forge-cli/`: operator CLI — stdlib-only submodule; content CRUD + lifecycle via HTTP REST; token management via MCP JSON-RPC; YAML-subset frontmatter parser; `forge-cli/v0.1.0` | Agreed | 2026-04-07 |
-| A68 | `storage.go`/`module.go`: doc comments on `Table` and `At` extended to surface irregular pluralisation pitfalls (Story → "storys") | Agreed | 2026-04-09 |
-| A69 | `README.md`: shortened to <150 lines; `REFERENCE.md`: new full API reference file; `example/blog/main.go` package comment updated to v1.11.0 | Agreed | 2026-04-14 |
-| A70 | `README.md`: tagline, named value section (15 features), remove duplicate table row, `(*Post)(nil)` comment, real AfterPublish body, examples pointer, remove flat bullet list | Agreed | 2026-04-14 |
-| A71 | `README.md`: replace tagline with plain-language framework description; add 30-second start section (clone + run) before "What Forge gives you" | Agreed | 2026-04-15 |
-| A72 | `VISION.md`: insert "What Forge is" (typed state layer for AI agents); insert "The two-layer model" (Core AGPL / Cloud commercial); replace Roadmap (Phases 1–2 ✅ DONE, Phase 3 Cloud private beta, Phase 4 Cloud GA) | Agreed | 2026-04-18 |
-| A73 | `forge.go`/`config.go`: add `MediaPath` and `MediaMaxSize` fields to `Config`; parse `media_path` and `media_max_size` from `forge.config` file; add `App.Config() Config` read-only accessor for forge-media submodule access | Agreed | 2026-04-25 |
-| A74 | `head.go`/`templates.go`/`example_test.go`: rename `FaviconLink` → `HeadLink`; rename `HeadAssets.Favicons []FaviconLink` → `HeadAssets.Links []HeadLink` — any `<link>` element, not icons only | Agreed | 2026-04-18 |
-| D31 | `forge-media/`: new optional submodule — `MediaStore` interface, `LocalMediaStore`, HTTP handlers (`Register`), `forge.MCPModule` implementation, `MediaRecord.GetSlug()`; `forge-mcp`: `WithModule` server option | Agreed | 2026-04-18 |
-| D29 | `nav.go`/`forge.go`/`templatedata.go`/`templates.go`/`module.go`/`forge-mcp`: NavTree — first-class navigation abstraction; `NavItem`, `NavTree`, `NavModeDB`/`NavModeCode`, `App.Nav()`, `App.NavTree()`, `TemplateData.Nav`, four MCP nav tools (Editor role) | Agreed | 2026-04-11 |
-| D30 | `config.go`/`forge.go`: forge.config file-based configuration — `loadConfigFile`, `mergeFileConfig`; `Config.AppSchema`, `Config.OGDefaults`; `MustConfig` loads `forge.config` (or `FORGE_CONFIG` env var path); Go-code fields always win; `secret` key panics | Agreed | 2026-04-11 |
-| A75 | `markdown.go`: `renderMarkdown` HTML passthrough — lines whose trimmed form starts with `<` are emitted verbatim without HTML-escaping, unblocking HTML blocks in trusted body content | Agreed | 2026-04-22 |
-| A76 | `go.mod` (all modules): bump minimum Go version `1.22` → `1.26.2`; rename all module paths from `github.com/forge-cms/...` to `forge-cms.dev/...`; update all imports, documentation, and `forgeVersions()` prefix logic | Agreed | 2026-04-30 |
-| A77 | `head.go`/`module.go`/`templates.go`: `ListHeadFunc` option — new `listHeadFuncOption[T]` type; `listHeadFunc any` field on `Module[T]`; `renderListHTML` resolves list head via `listHeadFunc`; fixes empty `<title>` on module list pages | Agreed | 2026-05-02 |
-| A78 | `node.go`: `ValidateStruct` unexported to `validateStruct`; `RunValidation` is now the sole public entry point for struct-tag validation. Breaking change: removes exported symbol. | Agreed | 2026-05-04 |
-| A79 | `forge-media/media.go`: `LocalMediaStore.Store()` and `.Delete()` use `os.Root` (Go 1.24+) instead of `filepath.Join` — path traversal prevented at OS level. Security fix. Two new tests added. | Agreed | 2026-05-04 |
-| A80 | `storage.go`: `SeqRepository[T]` optional interface + `Seq` methods on `MemoryRepo[T]` and `SQLRepo[T]` — lazy `iter.Seq2[T, error]` streaming without full result-set load. Additive; `Repository[T]` unchanged. | Agreed | 2026-05-04 |
-| A81 | `go.mod`: `modernc.org/sqlite` added as test-only dependency; enables `TestRepoParity_SQLRepo` against real in-memory SQLite. Exception to zero-dep rule: CGO-free, test-only, single file, documented precedent. | Agreed | 2026-05-04 |
-| A82 | `forge.go` / `config.go` / `static.go`: `Config.Dev bool` + `App.Static(prefix, prod, devDir)` + forge.config `dev` key. Dev mode serves from disk; prod mode serves embedded FS with immutable Cache-Control. Replaces per-site boilerplate. | Agreed | 2026-05-04 |
-| A83 | `auth.go` / `forge.go`: `TokenStore.ensureBootstrap` — auto-creates a bootstrap admin token (slog.Warn) when `forge_tokens` is empty at startup. `forge-cli/init.go`: new `init` subcommand bootstraps a new instance using the bootstrap token. `forge-cli` v0.3.0. | Agreed | 2026-05-04 |
-| A84 | `REFERENCE.md`: accuracy fixes and gap-fill for v1.16.0 — corrects 5 inaccuracies (version examples, broken links, RateLimit section, `app.Content` fallback path); adds 6 missing sections (TokenStore, NavTree, OGDefaults/AppSchema, AbsURL, SeqRepository, forge-cli); adds `ErrLastAdmin` sentinel. | Agreed | 2026-05-05 |
-| A85 | `.github/copilot-instructions.md`: new "Docs and content workflow" section inserted between "Standard step workflow" and "Release tagging". `FEATURELIST.md`: new file — complete feature list for v1.16.0. | Agreed | 2026-05-05 |
-| A86 | `.github/copilot-instructions.md`: new "CLI and MCP tool parity" section — every MCP tool must have a CLI equivalent in the same release; notes current nav commands gap. | Agreed | 2026-05-05 |
-| A87 | `signals.go`: `AfterSchedule Signal = "after_schedule"` — fires after Scheduled transition, alongside AfterUpdate. Enables `post.scheduled` webhook events and per-signal MCP subscription routing. | Agreed | 2026-05-06 |
 | A88 | `forge.go`: `App.Webhooks(store *WebhookStore)`, `App.WebhookPool() WebhookJobQueue`, `App.injectWebhookHooks()` — wires outbound webhook infrastructure into the App; pool started/stopped with server lifecycle. | Agreed | 2026-05-08 |
 | A89 | `module.go`: `afterHook`/`setAfterHook`/`notifyAfter` — post-lifecycle callback slot on `Module[T]`; `notifyAfter` wraps `dispatchAfter`+`afterHook`; `MCPSchedule` dispatches `AfterSchedule`. CLI parity: `forge webhook` ships with `forge-mcp` webhook tools (A86 gap closed). | Agreed | 2026-05-08 |
 | A90 | `REFERENCE.md`: replace hardcoded `1.16.0`/`1.6.1` version literals in health endpoint examples with `x.y.z` placeholder (3 occurrences). `FEATURELIST.md`: correct `delete_[type]` role from `Author+` to `Editor+` — matches `authoriseEditor()` enforcement in `forge-mcp/tool.go`. | Agreed | 2026-05-07 |
@@ -137,10 +116,85 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 | A93 | `auth.go`: `encodeUploadToken(secret,ttl)`/`decodeUploadToken` (internal). `forge.go`: `Config.MediaUploadTokenExpiry`, `App.GenerateUploadToken()`, `App.ValidateUploadToken(token)`. forge-media: `UploadToken` header in `handleUpload`, image-only MIME whitelist for token uploads, AVIF support, hex filename prefix. forge-mcp: `create_upload_token` Author+ tool. forge-cli: media subcommands documented + AVIF. Milestone 13 — v1.19.0. | Agreed | 2026-05-09 |
 | A94 | Signal bus: `SignalEvent`, `afterHookMeta`, `buildSignalEvent` (`signals.go`). `App.OnSignal`, `App.dispatchBus`, `App.wireSignalBus` replacing `injectWebhookHooks` (`forge.go`). `webhookDispatch` (`webhook.go`). `OutboundDelivery` interface (`outbound.go`). `notifyAfter` signature extended with `afterHookMeta`. Milestone 14 — v1.20.0. | Agreed | 2026-05-11 |
 | A95 | `mergeFileConfig`: field-level `OGDefaults` merge — `og_image` in `forge.config` overrides Go-code `Image.URL`; all other `OGDefaults` fields retain Go-code values. Only `forge.config` key designed to take precedence over Go code. No exported symbols changed. v1.21.0. | Agreed | 2026-05-14 |
-| A96 | Non-Decision: sitemap ping (T39) — Forge will not provide opt-in sitemap ping. Google deprecated their endpoint in 2023; IndexNow requires API key + verification file (app-level setup). Developer pattern: `App.OnSignal(AfterPublish, ...)`. REFERENCE.md: new "Search engine indexing" section. | Agreed | 2026-05-16 |
+
+### Token management — [decisions/auth.md](decisions/auth.md)
+
+| # | Title | Status | Date |
+|---|-------|--------|------|
+| [decisions/auth.md](decisions/auth.md) | Token management archive | Archive | 2026-05-17 |
+| D25 | Token management | Locked | 2026-04-05 |
+| A66 | `auth.go`/`forge.go`/`forge-mcp`: `TokenStore` — named revocable bearer tokens, DB-backed `VerifyBearerToken`, three Admin MCP tools (`create_token`, `list_tokens`, `revoke_token`) | Agreed | 2026-04-05 |
+| D26 | `auth.go`/`errors.go`/`forge-mcp/tool.go`: last-admin guard on `TokenStore.Revoke` — `ErrLastAdmin` sentinel (409); `Revoke` refuses to revoke the last active admin token; `revoke_token` MCP tool surfaces actionable message | Agreed | 2026-04-06 |
+| A83 | `auth.go` / `forge.go`: `TokenStore.ensureBootstrap` — auto-creates a bootstrap admin token (slog.Warn) when `forge_tokens` is empty at startup. `forge-cli/init.go`: new `init` subcommand bootstraps a new instance using the bootstrap token. `forge-cli` v0.3.0. | Agreed | 2026-05-04 |
+
+### Content API — [decisions/content-api.md](decisions/content-api.md)
+
+| # | Title | Status | Date |
+|---|-------|--------|------|
+| [decisions/content-api.md](decisions/content-api.md) | Content API archive | Archive | 2026-05-17 |
+| D27 | `mcp.go`/`module.go`/`forge-mcp/mcp.go`: field format semantics — `forge_format` and `forge_description` struct tags populate `MCPField.Format` and `MCPField.Description`; forge-mcp emits `"description"` key in JSON Schema properties with priority logic | Agreed | 2026-04-07 |
+| A67 | `templatehelpers.go`: `forgeHTML` / `forge_html` — trusted raw HTML passthrough added to `TemplateFuncMap` | Agreed | 2026-04-05 |
+| A74 | `head.go`/`templates.go`/`example_test.go`: rename `FaviconLink` → `HeadLink`; rename `HeadAssets.Favicons []FaviconLink` → `HeadAssets.Links []HeadLink` — any `<link>` element, not icons only | Agreed | 2026-04-18 |
+| A75 | `markdown.go`: `renderMarkdown` HTML passthrough — lines whose trimmed form starts with `<` are emitted verbatim without HTML-escaping, unblocking HTML blocks in trusted body content | Agreed | 2026-04-22 |
+| A77 | `head.go`/`module.go`/`templates.go`: `ListHeadFunc` option — new `listHeadFuncOption[T]` type; `listHeadFunc any` field on `Module[T]`; `renderListHTML` resolves list head via `listHeadFunc`; fixes empty `<title>` on module list pages | Agreed | 2026-05-02 |
+
+### Documentation — [decisions/docs.md](decisions/docs.md)
+
+| # | Title | Status | Date |
+|---|-------|--------|------|
+| [decisions/docs.md](decisions/docs.md) | Documentation archive | Archive | 2026-05-17 |
+| D28 | `forge-cli/`: operator CLI — stdlib-only submodule; content CRUD + lifecycle via HTTP REST; token management via MCP JSON-RPC; YAML-subset frontmatter parser; `forge-cli/v0.1.0` | Agreed | 2026-04-07 |
+| A69 | `README.md`: shortened to <150 lines; `REFERENCE.md`: new full API reference file; `example/blog/main.go` package comment updated to v1.11.0 | Agreed | 2026-04-14 |
+| A70 | `README.md`: tagline, named value section (15 features), remove duplicate table row, `(*Post)(nil)` comment, real AfterPublish body, examples pointer, remove flat bullet list | Agreed | 2026-04-14 |
+| A71 | `README.md`: replace tagline with plain-language framework description; add 30-second start section (clone + run) before "What Forge gives you" | Agreed | 2026-04-15 |
+| A72 | `VISION.md`: insert "What Forge is" (typed state layer for AI agents); insert "The two-layer model" (Core AGPL / Cloud commercial); replace Roadmap (Phases 1–2 ✅ DONE, Phase 3 Cloud private beta, Phase 4 Cloud GA) | Agreed | 2026-04-18 |
+| A76 | `go.mod` (all modules): bump minimum Go version `1.22` → `1.26.2`; rename all module paths from `github.com/forge-cms/...` to `forge-cms.dev/...`; update all imports, documentation, and `forgeVersions()` prefix logic | Agreed | 2026-04-30 |
+| A84 | `REFERENCE.md`: accuracy fixes and gap-fill for v1.16.0 — corrects 5 inaccuracies (version examples, broken links, RateLimit section, `app.Content` fallback path); adds 6 missing sections (TokenStore, NavTree, OGDefaults/AppSchema, AbsURL, SeqRepository, forge-cli); adds `ErrLastAdmin` sentinel. | Agreed | 2026-05-05 |
+| A85 | `.github/copilot-instructions.md`: new "Docs and content workflow" section inserted between "Standard step workflow" and "Release tagging". `FEATURELIST.md`: new file — complete feature list for v1.16.0. | Agreed | 2026-05-05 |
+| A86 | `.github/copilot-instructions.md`: new "CLI and MCP tool parity" section — every MCP tool must have a CLI equivalent in the same release; notes current nav commands gap. | Agreed | 2026-05-05 |
+
+### Media — [decisions/media.md](decisions/media.md)
+
+| # | Title | Status | Date |
+|---|-------|--------|------|
+| [decisions/media.md](decisions/media.md) | Media archive | Archive | 2026-05-17 |
+| A73 | `forge.go`/`config.go`: add `MediaPath` and `MediaMaxSize` fields to `Config`; parse `media_path` and `media_max_size` from `forge.config` file; add `App.Config() Config` read-only accessor for forge-media submodule access | Agreed | 2026-04-25 |
+| D31 | `forge-media/`: new optional submodule — `MediaStore` interface, `LocalMediaStore`, HTTP handlers (`Register`), `forge.MCPModule` implementation, `MediaRecord.GetSlug()`; `forge-mcp`: `WithModule` server option | Agreed | 2026-04-18 |
+| A79 | `forge-media/media.go`: `LocalMediaStore.Store()` and `.Delete()` use `os.Root` (Go 1.24+) instead of `filepath.Join` — path traversal prevented at OS level. Security fix. Two new tests added. | Agreed | 2026-05-04 |
+
+### Navigation — [decisions/nav.md](decisions/nav.md)
+
+| # | Title | Status | Date |
+|---|-------|--------|------|
+| [decisions/nav.md](decisions/nav.md) | Navigation archive | Archive | 2026-05-17 |
+| D29 | `nav.go`/`forge.go`/`templatedata.go`/`templates.go`/`module.go`/`forge-mcp`: NavTree — first-class navigation abstraction; `NavItem`, `NavTree`, `NavModeDB`/`NavModeCode`, `App.Nav()`, `App.NavTree()`, `TemplateData.Nav`, four MCP nav tools (Editor role) | Agreed | 2026-04-11 |
+| D30 | `config.go`/`forge.go`: forge.config file-based configuration — `loadConfigFile`, `mergeFileConfig`; `Config.AppSchema`, `Config.OGDefaults`; `MustConfig` loads `forge.config` (or `FORGE_CONFIG` env var path); Go-code fields always win; `secret` key panics | Agreed | 2026-04-11 |
+| A82 | `forge.go` / `config.go` / `static.go`: `Config.Dev bool` + `App.Static(prefix, prod, devDir)` + forge.config `dev` key. Dev mode serves from disk; prod mode serves embedded FS with immutable Cache-Control. Replaces per-site boilerplate. | Agreed | 2026-05-04 |
+
+### Storage — [decisions/storage.md](decisions/storage.md)
+
+| # | Title | Status | Date |
+|---|-------|--------|------|
+| [decisions/storage.md](decisions/storage.md) | Storage archive | Archive | 2026-05-17 |
+| A68 | `storage.go`/`module.go`: doc comments on `Table` and `At` extended to surface irregular pluralisation pitfalls (Story → "storys") | Agreed | 2026-04-09 |
+| A78 | `node.go`: `ValidateStruct` unexported to `validateStruct`; `RunValidation` is now the sole public entry point for struct-tag validation. Breaking change: removes exported symbol. | Agreed | 2026-05-04 |
+| A80 | `storage.go`: `SeqRepository[T]` optional interface + `Seq` methods on `MemoryRepo[T]` and `SQLRepo[T]` — lazy `iter.Seq2[T, error]` streaming without full result-set load. Additive; `Repository[T]` unchanged. | Agreed | 2026-05-04 |
+| A81 | `go.mod`: `modernc.org/sqlite` added as test-only dependency; enables `TestRepoParity_SQLRepo` against real in-memory SQLite. Exception to zero-dep rule: CGO-free, test-only, single file, documented precedent. | Agreed | 2026-05-04 |
+
+### Recent — [decisions/recent.md](decisions/recent.md)
+
+| # | Title | Status | Date |
+|---|-------|--------|------|
+| A87 | `signals.go`: `AfterSchedule Signal = "after_schedule"` — fires after Scheduled transition, alongside AfterUpdate. Enables `post.scheduled` webhook events and per-signal MCP subscription routing. | Agreed | 2026-05-06 |
 | A97 | Audit trail (T21) — `App.Audit(AuditStore)` subscribes to `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete` via signal bus; persists `AuditRecord` to SQL. `NewAuditStore(DB)`, `CreateAuditTable(DB)`. GET `/_audit` (Editor+). `forge audit list` CLI. New exported types: `AuditRecord`, `AuditFilter`, `AuditStore`. v1.22.0. | Agreed | 2026-05-16 |
 | D32 | decisions/ file system restructure — flat role-separated system with rolling working file (`recent.md`), Non-Decisions file (`nondecisions.md`), phase2.md archived as `phase2-archive.md`. Archiving is architect-directed at ~20KB. | Active | 2026-05-17 |
 
+### Non-Decisions — [decisions/nondecisions.md](decisions/nondecisions.md)
+
+| # | Title | Status | Date |
+|---|-------|--------|------|
+| A96 | Non-Decision: sitemap ping (T39) — Forge will not provide opt-in sitemap ping. Google deprecated their endpoint in 2023; IndexNow requires API key + verification file (app-level setup). Developer pattern: `App.OnSignal(AfterPublish, ...)`. REFERENCE.md: new "Search engine indexing" section. | Agreed | 2026-05-16 |
+
 ---
 
-> **Body text** for each entry: D1–D22, A19–A65, A88–A95 → [`decisions/core.md`](decisions/core.md) · D25–A87, A96–A97 → [`decisions/phase2-archive.md`](decisions/phase2-archive.md) · D32+ → [`decisions/recent.md`](decisions/recent.md) · Non-Decisions → [`decisions/nondecisions.md`](decisions/nondecisions.md)
+> **Body text:** D1–D22, A19–A65, A88–A95 → [`decisions/core.md`](decisions/core.md) · D25, A66, D26, A83 → [`decisions/auth.md`](decisions/auth.md) · D27, A67, A74, A75, A77 → [`decisions/content-api.md`](decisions/content-api.md) · D28, A69–A72, A76, A84–A86 → [`decisions/docs.md`](decisions/docs.md) · A73, D31, A79 → [`decisions/media.md`](decisions/media.md) · D29, D30, A82 → [`decisions/nav.md`](decisions/nav.md) · A68, A78, A80, A81 → [`decisions/storage.md`](decisions/storage.md) · A87, A97, D32 → [`decisions/recent.md`](decisions/recent.md) · A96 → [`decisions/nondecisions.md`](decisions/nondecisions.md) · phase2-archive.md — superseded; use topic files above

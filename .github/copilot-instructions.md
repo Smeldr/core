@@ -53,8 +53,9 @@ file is the bridge between sessions. Always read it first.
 2. Read session context from `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md`
    (local file). This is your state from the previous session.
 3. Read `DECISIONS.md` — index table only. Body text lives in `decisions/core.md`
-   (Decisions 1–22 + amendments) and `decisions/phase2.md` (Decision 25 onwards).
-   Read the relevant body file when a specific decision is needed.
+   (D1–D22, A19–A65, A88–A95), `decisions/recent.md` (current rolling window),
+   and topic archive files (auth.md, content-api.md, docs.md, media.md, nav.md,
+   storage.md). Read the relevant body file when a specific decision is needed.
    Do not work around locked decisions. If a decision seems wrong, raise it explicitly.
 4. Read `ARCHITECTURE.md` — package structure, request lifecycle, stable interfaces.
 5. Read the milestone backlog file for the **current milestone only**
@@ -82,14 +83,20 @@ file is the bridge between sessions. Always read it first.
 
 ## DECISIONS.md file structure (CRITICAL)
 
-DECISIONS.md is the index. Body text lives in separate files by era:
+DECISIONS.md is the index. Body text lives in separate files by topic:
 
 | File | Contents | Add new entries? |
 |------|----------|-----------------|
 | `decisions/recent.md` | Rolling working file (~20KB limit) | **Yes — new decisions go here** |
 | `decisions/nondecisions.md` | Non-Decisions only | **Yes — Non-Decisions go here directly** |
 | `decisions/core.md` | Archive: D1–D22, A19–A65, A88–A95 | No — archive only |
-| `decisions/phase2-archive.md` | Archive: D25–A87, A96–A97 | No — archive only |
+| `decisions/phase2-archive.md` | Superseded archive (was phase2.md; content now in topic files) | No — archive only |
+| `decisions/auth.md` | Archive: D25, A66, D26, A83 | No — archive only |
+| `decisions/content-api.md` | Archive: D27, A67, A74, A75, A77 | No — archive only |
+| `decisions/docs.md` | Archive: D28, A69–A72, A76, A84–A86 | No — archive only |
+| `decisions/media.md` | Archive: A73, D31, A79 | No — archive only |
+| `decisions/nav.md` | Archive: D29, D30, A82 | No — archive only |
+| `decisions/storage.md` | Archive: A68, A78, A80, A81 | No — archive only |
 | `decisions/[topic].md` | Topic files on architect instruction | Only when instructed |
 
 **Archiving rule:** When `recent.md` reaches ~20KB, report at session start:
@@ -322,8 +329,7 @@ edits — neither is optional:
 
 1. **Index table row** — a new row added to the Amendment index table in
    `DECISIONS.md` (columns: ID, description, status, date).
-2. **Body section** — the full Amendment text appended to `decisions/core.md`
-   (for amendments) or `decisions/phase2.md` (for new decisions).
+2. **Body section** — the full Amendment text appended to `decisions/recent.md`.
 
 Both edits must be made locally via git — never via GitHub MCP.
 A commit that adds a body without an index row (or vice versa) is incomplete.
@@ -357,7 +363,7 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
 - [ ] `README.md` version line (`**vX.Y.Z — stable.**`) matches the version being shipped. Update if behind.
 - [ ] No `🔲 Coming in Milestone N` badge remains for a milestone that has shipped.
 - [ ] `go test ./...` is green (re-run if any file changed since last verification).
-- [ ] If this commit implements an Amendment: both the DECISIONS.md index row and the body section in `decisions/core.md` or `decisions/phase2.md` are present. Verify with `Select-String`.
+- [ ] If this commit implements an Amendment: both the DECISIONS.md index row and the body section in `decisions/recent.md` are present. Verify with `Select-String`.
 
 **M-number milestone commits — additionally mandatory:**
 - [ ] Module `README.md` updated to reflect shipped behaviour.
