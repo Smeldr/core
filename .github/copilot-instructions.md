@@ -82,11 +82,21 @@ file is the bridge between sessions. Always read it first.
 
 ## DECISIONS.md file structure (CRITICAL)
 
-DECISIONS.md is now split into three files:
+DECISIONS.md is the index. Body text lives in separate files by era:
 
-- `DECISIONS.md` — index table only. Always small.
-- `decisions/core.md` — Decisions 1–22 + all amendments (A19–A65). ~173KB.
-- `decisions/phase2.md` — Decision 25 onwards.
+| File | Contents | Add new entries? |
+|------|----------|-----------------|
+| `decisions/recent.md` | Rolling working file (~20KB limit) | **Yes — new decisions go here** |
+| `decisions/nondecisions.md` | Non-Decisions only | **Yes — Non-Decisions go here directly** |
+| `decisions/core.md` | Archive: D1–D22, A19–A65, A88–A95 | No — archive only |
+| `decisions/phase2-archive.md` | Archive: D25–A87, A96–A97 | No — archive only |
+| `decisions/[topic].md` | Topic files on architect instruction | Only when instructed |
+
+**Archiving rule:** When `recent.md` reaches ~20KB, report at session start:
+"recent.md is Xkb — ready for archiving." Wait for NEXT.md with archiving instructions.
+The architect decides groupings and topic file names. Never archive autonomously.
+Non-Decisions are exempt — they go to `nondecisions.md` directly and do not count
+toward the rolling window.
 
 **Corepilot owns all writes to `decisions/` and `DECISIONS.md`.**
 These files must be edited locally via git — never via GitHub MCP API calls.
@@ -94,16 +104,20 @@ The files are too large for `create_or_update_file` and `push_files` silently
 truncates them.
 
 **When adding a new Decision or Amendment:**
-1. Edit the relevant file locally (`decisions/core.md` for amendments,
-   `decisions/phase2.md` for new decisions)
+1. Edit `decisions/recent.md` locally (append to end)
 2. Add the index row to `DECISIONS.md`
 3. Commit both in the same commit
 4. Never use GitHub MCP `create_or_update_file` or `push_files` for these files
 
-**When appending to `decisions/phase2.md`:** Use enough surrounding context to
-uniquely identify the insertion point. Closing lines (e.g. `---`) repeat
-throughout the file — a match failure on the first attempt means the context
-was too short. Re-read the tail of the file and use a longer unique anchor.
+**When adding a Non-Decision:**
+1. Edit `decisions/nondecisions.md` locally (append to end)
+2. Add the index row to `DECISIONS.md`
+3. Commit both in the same commit
+
+**When appending to `decisions/recent.md`:** Append to the end of the file.
+Closing lines (e.g. `---`) repeat throughout the file — if editing mid-file,
+use enough surrounding context to uniquely identify the insertion point.
+Re-read the tail of the file and use a longer unique anchor on match failure.
 
 ## Change classification
 

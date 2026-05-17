@@ -11,6 +11,22 @@ Revisions to existing decisions require a new entry that supersedes the original
 - Before changing an interface, check what depends on it here
 - When onboarding (human or AI), read this before touching code
 
+## decisions/ file structure
+
+| File | Contents | New entries? |
+|------|----------|-------------|
+| `DECISIONS.md` | Index only — this file | No |
+| `decisions/recent.md` | Rolling working file (~20KB limit) | Yes — new decisions |
+| `decisions/nondecisions.md` | Non-Decisions only | Yes — Non-Decisions directly |
+| `decisions/core.md` | Archive: D1–D22, A19–A65, A88–A95 | No |
+| `decisions/phase2-archive.md` | Archive: D25–A87, A96–A97 | No |
+| `decisions/[topic].md` | Topic files on architect instruction | Only when instructed |
+
+**Archiving rule:** When `recent.md` reaches ~20KB, corepilot reports it at session start:
+"recent.md is Xkb — ready for archiving." The architect decides groupings and topic file
+names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
+`nondecisions.md` directly and do not count toward the limit.
+
 ---
 
 ## Decision index
@@ -123,7 +139,8 @@ Revisions to existing decisions require a new entry that supersedes the original
 | A95 | `mergeFileConfig`: field-level `OGDefaults` merge — `og_image` in `forge.config` overrides Go-code `Image.URL`; all other `OGDefaults` fields retain Go-code values. Only `forge.config` key designed to take precedence over Go code. No exported symbols changed. v1.21.0. | Agreed | 2026-05-14 |
 | A96 | Non-Decision: sitemap ping (T39) — Forge will not provide opt-in sitemap ping. Google deprecated their endpoint in 2023; IndexNow requires API key + verification file (app-level setup). Developer pattern: `App.OnSignal(AfterPublish, ...)`. REFERENCE.md: new "Search engine indexing" section. | Agreed | 2026-05-16 |
 | A97 | Audit trail (T21) — `App.Audit(AuditStore)` subscribes to `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete` via signal bus; persists `AuditRecord` to SQL. `NewAuditStore(DB)`, `CreateAuditTable(DB)`. GET `/_audit` (Editor+). `forge audit list` CLI. New exported types: `AuditRecord`, `AuditFilter`, `AuditStore`. v1.22.0. | Agreed | 2026-05-16 |
+| D32 | decisions/ file system restructure — flat role-separated system with rolling working file (`recent.md`), Non-Decisions file (`nondecisions.md`), phase2.md archived as `phase2-archive.md`. Archiving is architect-directed at ~20KB. | Active | 2026-05-17 |
 
 ---
 
-> **Body text** for all decisions lives in [decisions/core.md](decisions/core.md) (Decisions 1–22 + Amendments A19–A65) and [decisions/phase2.md](decisions/phase2.md) (Decision 25 + Amendments A66–A67 + Decisions 26–28, Amendment A68–A76).
+> **Body text** for each entry: D1–D22, A19–A65, A88–A95 → [`decisions/core.md`](decisions/core.md) · D25–A87, A96–A97 → [`decisions/phase2-archive.md`](decisions/phase2-archive.md) · D32+ → [`decisions/recent.md`](decisions/recent.md) · Non-Decisions → [`decisions/nondecisions.md`](decisions/nondecisions.md)
