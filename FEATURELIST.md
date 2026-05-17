@@ -2,7 +2,7 @@
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.22.0 (A97) + forge-social v0.6.0 + forge-agent v0.3.5 + forge-cli v0.9.0.
+Last updated: v1.22.0 (A97) + forge-mcp v1.9.3 + forge-social v0.6.0 + forge-agent v0.3.5 + forge-cli v0.9.0.
 
 ---
 
