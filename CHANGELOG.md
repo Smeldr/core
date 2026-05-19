@@ -23,6 +23,38 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.22.1] — 2026-05-19
+
+Fix data race in `notifyAfter` (Amendment A98).
+
+### Fixed
+
+- `module.go`: `notifyAfter` now takes a shallow snapshot of `item` before
+  spawning any goroutine. Previously the original pointer was passed to both
+  `dispatchAfter` and the `afterHook` goroutine, allowing a concurrent
+  lifecycle transition (`setNodeStatus`/`setNodeTime`) to race with the
+  signal handlers reading the same `Node` fields via reflection. The new
+  `snapshotItem` helper (unexported) uses `reflect.New` + `Elem().Set` to copy
+  the pointed-to struct; both goroutines receive the snapshot and no longer
+  share mutable state with the caller. Races G26, G30, G32, and G33 are resolved.
+
+---
+
+## [1.22.0] — 2026-05-16
+
+Built-in opt-in audit trail (Amendment A97).
+
+### Added
+
+- `audit.go` (new): `AuditRecord`, `AuditFilter`, `AuditStore` interface,
+  `NewAuditStore(DB)` (SQL-backed implementation), `CreateAuditTable(DB)`.
+- `App.Audit(AuditStore) *App` — wire an audit store to subscribe to
+  `AfterPublish`, `AfterSchedule`, `AfterArchive`, and `AfterDelete` signals.
+  `App.Handler()` lazily mounts `GET /_audit` (Editor role required) when
+  an audit store is configured.
+
+---
+
 ## [1.21.0] — 2026-05-14
 
 `og_image` operator override (forge.config).

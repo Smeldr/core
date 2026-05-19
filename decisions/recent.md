@@ -149,3 +149,64 @@ path unconditionally.
 - `GET /_audit` — requires Editor role; returns `[]AuditRecord` JSON.
 
 **Forge core → v1.22.0.**
+
+---
+
+## Amendment A98 — Fix data race in notifyAfter (module.go)
+
+**Date:** 2026-05-19
+**Status:** Agreed
+
+**Context:**
+The `-race` gate added in the consolidation sprint CI immediately caught a
+genuine production data race. The race detector reported concurrent read/write
+at the same memory address:
+
+- Write: `forge-cms.dev/forge.setNodeStatus()` — `module.go:1064`
+- Read:  `forge-cms.dev/forge.extractNode()` — `ai.go:285`
+
+Root cause: `notifyAfter` passes the original `item` pointer to two goroutines
+without any synchronisation:
+
+1. `dispatchAfter` → goroutine → `buildSignalEvent(item)` → `extractNode(item)`
+   reads `Node` fields via reflection.
+2. `afterHook` goroutine → reads `item` in the `fn` callback.
+
+A subsequent MCP call on the same slug (e.g. MCPPublish after MCPSchedule)
+calls `setNodeStatus`/`setNodeTime` on the same pointer before those goroutines
+finish reading. This is a real production race — not a test-only artefact.
+
+**Decision:**
+Before passing `item` to any goroutine in `notifyAfter`, take a shallow copy
+of the struct the pointer points to. Both goroutines receive the snapshot; the
+caller retains the original pointer for subsequent operations.
+
+A shallow struct copy is sufficient: the raced fields (`Status`, `PublishedAt`,
+`ScheduledAt`) are value types or pointers to values fully written before
+`notifyAfter` is called. No deep copy is needed.
+
+**Implementation:**
+New unexported function `snapshotItem(item any) any` in `module.go`:
+
+```go
+func snapshotItem(item any) any {
+    rv := reflect.ValueOf(item)
+    if rv.Kind() != reflect.Ptr || rv.IsNil() {
+        return item
+    }
+    cp := reflect.New(rv.Elem().Type())
+    cp.Elem().Set(rv.Elem())
+    return cp.Interface()
+}
+```
+
+`notifyAfter` calls `snapshotItem` once and passes `snap` to both goroutines.
+
+**Alternatives rejected:**
+- *Mutex on Node fields*: heavyweight; every read path would need locking.
+- *Copy at call sites*: 17 call sites; error-prone.
+- *Channel rendezvous*: adds latency to every post-lifecycle transition.
+
+**No exported symbols changed. No interface changes.**
+
+**Forge core → v1.22.1.**

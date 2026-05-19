@@ -600,12 +600,29 @@ func (m *Module[T]) setSecret(secret []byte) {
 	m.secret = secret
 }
 
+// snapshotItem returns a shallow copy of the struct pointed to by item so
+// that goroutines spawned by notifyAfter own an immutable snapshot and cannot
+// race with a subsequent setNodeStatus or setNodeTime call on the original
+// pointer. Falls back to item unchanged for non-pointer or nil inputs.
+func snapshotItem(item any) any {
+	rv := reflect.ValueOf(item)
+	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+		return item
+	}
+	cp := reflect.New(rv.Elem().Type())
+	cp.Elem().Set(rv.Elem())
+	return cp.Interface()
+}
+
 // notifyAfter fires the registered signal handlers for sig asynchronously
 // (via dispatchAfter) and then, if an afterHook has been wired by the App,
 // invokes it in a separate goroutine carrying [afterHookMeta] and the item.
-// Panics in the afterHook are recovered and logged.
+// A snapshot of item is taken before any goroutine is spawned so that
+// concurrent lifecycle transitions on the same pointer cannot race with the
+// signal handlers. Panics in the afterHook are recovered and logged.
 func (m *Module[T]) notifyAfter(ctx Context, sig Signal, prevState string, item any) {
-	dispatchAfter(ctx, m.signals[sig], item)
+	snap := snapshotItem(item)
+	dispatchAfter(ctx, m.signals[sig], snap)
 	if m.afterHook != nil {
 		meta := afterHookMeta{
 			TypeName:  m.contentTypeName,
@@ -619,7 +636,7 @@ func (m *Module[T]) notifyAfter(ctx Context, sig Signal, prevState string, item 
 					slog.ErrorContext(ctx, "afterHook panic", "panic", r, "signal", sig)
 				}
 			}()
-			fn(ctx, sig, meta, item)
+			fn(ctx, sig, meta, snap)
 		}()
 	}
 }
