@@ -4,9 +4,31 @@ Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
 Last updated: v1.22.0 (A97) + forge-mcp v1.9.3 + forge-social v0.6.0 + forge-agent v0.3.7 + forge-cli v0.9.0.
 
+## Module stability
+
+| Package | Version | Stability |
+|---------|---------|-----------|
+| `forge` (core) | v1.22.0 | Stable |
+| `forge-mcp` | v1.9.3 | Stable |
+| `forge-pgx` | — | Beta |
+| `forge-media` | v1.2.0 | Beta |
+| `forge-cli` | v0.9.0 | Beta |
+| `forge-social` | v0.6.0 | Experimental |
+| `forge-agent` | v0.3.7 | Experimental |
+
+**Stable** — API will not break without a deprecation notice.  
+**Beta** — Functional and tested; API may change in minor releases.  
+**Experimental** — Working implementation; API is actively evolving.
+
+Stability label changes require architect sign-off.  
+Graduation criteria: Experimental → Beta requires API unchanged across three
+consecutive minor releases with integration tests present. Beta → Stable requires
+architect approval and a major version bump for any future breaking changes.
+Labels are reviewed at every module minor or major version bump.
+
 ---
 
-## Routes and feeds
+## Routes and feeds — Stable
 
 - List route — `GET /{prefix}` returns all Published items as JSON or HTML
 - Detail route — `GET /{prefix}/{slug}` returns a single Published item
@@ -18,38 +40,38 @@ Last updated: v1.22.0 (A97) + forge-mcp v1.9.3 + forge-social v0.6.0 + forge-age
 - AI index formats — `/llms.txt` compact index, `/llms-full.txt` Markdown corpus, per-item `/aidoc` token-efficient endpoint
 - Content negotiation — one URL returns HTML to browsers, JSON to APIs, and AI-optimised format to agents; no extra code
 
-## Storage
+## Storage — Stable
 
 - Database table derived from struct — works with PostgreSQL, SQLite, and MySQL
 - SQLRepo — production SQL repository with automatic table naming and upserts
-- SeqRepository — lazy streaming interface for large datasets (`iter.Seq2[T, error]`)
+- SeqRepository (Beta) — lazy streaming interface for large datasets (`iter.Seq2[T, error]`)
 
-## Rendering
+## Rendering — Stable
 
 - Markdown rendering (`forge_markdown`) — including HTML passthrough for trusted blocks
 - Trusted HTML (`forge_html`) — verbatim emission of pre-rendered HTML fields
 - Field semantics in MCP schema — `forge_format` and `forge_description` struct tags; AI agents understand field intent without extra prompting
 
-## Lifecycle
+## Lifecycle — Stable
 
 - Draft / Scheduled / Published / Archived enforcement — hardwired, cannot be disabled
 - Scheduled publishing — automatic `Scheduled → Published` transition at `ScheduledAt`; no external cron
 - 404 on everything non-Published — guests, search engines, and AI crawlers see nothing until explicitly published
 - Draft preview — signed `?preview=<token>` URL grants read access to Draft or Scheduled content without login; Archived items are never previewable
 
-## Access control
+## Access control — Stable
 
 - Role-based access — Guest → Author → Editor → Admin enforced per module per operation
 - Struct-tag validation — `forge:"required,min=3"` enforced identically for HTTP, API, and MCP calls
 - Token management — named revocable tokens with role scoping; `ensureBootstrap` auto-creates the first admin token on first start
 - ErrLastAdmin guard — cannot revoke the last admin token
 
-## Navigation
+## Navigation — Stable
 
 - NavTree — first-class navigation abstraction (`NavModeDB` / `NavModeCode`)
 - 4 MCP nav tools — `list_nav_items`, `create_nav_item`, `update_nav_item`, `delete_nav_item`
 
-## MCP tools (forge-mcp)
+## MCP tools (forge-mcp) — Stable
 
 Per content type — automatically derived, no manual definition:
 
@@ -70,38 +92,38 @@ Admin tools (require Admin role):
 - `list_webhook_deliveries`, `retry_webhook` — delivery introspection and retry
 - `create_token`, `list_tokens`, `revoke_token` — token management
 
-MCP resource subscriptions:
+MCP resource subscriptions (Beta):
 
 - `resources/subscribe` and `resources/unsubscribe` JSON-RPC methods
 - SSE transport assigns per-connection session ID; notifies via `notifications/resources/updated`
 - Clients receive real-time push when published content changes
 
-## Template infrastructure
+## Template infrastructure — Stable
 
 - Shared partials — `App.Partials` + `MustParseTemplate`
 - HeadAssets — favicons, stylesheets, preconnect, scripts injected via `forge:head` on every page
 - ContextFunc — per-request extra data passed to module templates
 - Static file serving — `App.Static` serves from embedded FS in production (immutable cache headers) and from disk in development
 
-## SEO and structured data
+## SEO and structured data — Stable
 
 - JSON-LD — Article, Product, FAQ, HowTo, Event, Recipe, Review, Organisation rich results
 - OGDefaults — site-wide fallback OG image and Twitter handles
 - AppSchema — site-wide Organisation/WebSite JSON-LD on every page
 - Robots — `<meta name="robots">` set per lifecycle status; configurable AI crawler policy (`AskFirst`, `Allow`, `Disallow`)
 
-## Operations
+## Operations — Stable
 
 - File-based configuration — `key = value` format, fail-fast at startup; 10 keys including `og_image` (operator override for site OG image without rebuild; file value takes precedence over Go-code default)
 - `/_health` endpoint — returns framework version and status; exempt from HTTPS redirect
-- Zero third-party dependencies in core — pure stdlib; driver is always your choice
+- Zero runtime dependencies in core — pure stdlib; driver is always your choice (test suite uses `modernc.org/sqlite` for in-process SQL integration tests)
 - Cookie compliance — `/.well-known/cookies.json` declares all cookies with category and consent requirements
 - Redirect tracking — `App.Redirect` / `RedirectStore` registers 301 Permanent and 410 Gone entries; `/.well-known/redirects.json` serves the full redirect table for audit and CDN sync
 - Security headers — CSP, HSTS, X-Frame-Options, Referrer-Policy in one middleware call
 - Graceful shutdown — drains in-flight requests on SIGINT/SIGTERM
 - Signal bus — `app.OnSignal(Signal, handler)` registers subscribers for `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete`; `SignalEvent` carries Type, Slug, Title, URL, Timestamp, PreviousState, ActorRole, ActorID; handlers run synchronously in the publish goroutine and must enqueue-and-return
 
-## forge-media (separate module)
+## forge-media — Beta
 
 - Upload, serve, list, and delete files via HTTP and MCP
 - Alt text enforced on image uploads (WCAG 1.1.1)
@@ -111,7 +133,7 @@ MCP resource subscriptions:
 - Upload token — `Authorization: UploadToken <token>` accepted on `POST /media`; image-only MIME whitelist for token uploads; Bearer-token uploads unaffected
 - Hex filename prefix — stored as `<32-hex>-<sanitized>` preventing collisions without exposing upload timing
 
-## forge-cli (separate module)
+## forge-cli — Beta
 
 - `forge-cli init` — bootstrap a new instance from the terminal
 - Content CRUD — create, update, publish, unpublish, archive, delete, list, get
@@ -122,7 +144,7 @@ MCP resource subscriptions:
 - Social commands (v0.7.0): `social credential create/list`, `social post create/list/get/publish/archive/delete`, `social post queue`, `social schedule create/show/pause/resume/delete`
 - Social commands (v0.8.0): `social credential get/delete`, `social platform configure` (DB-driven OAuth app config for mastodon/linkedin/x); `social credential create` now accepts `--platform x`
 
-## forge-social (separate module)
+## forge-social — Experimental
 
 - `forge-cms.dev/forge-social` — social post scheduling and AI agent routing
 - Two scheduling models: explicit `scheduled_at` (Model 1) and slot-queue via `PublicationSchedule` (Model 2, v0.4.0+)
@@ -136,7 +158,7 @@ MCP resource subscriptions:
 - Full CLI parity in forge-cli v0.8.0
 - **X media upload** (v0.6.0): images in `media_url` are fetched and uploaded to `api.x.com/2/media/upload` before tweeting; `media_ids` attached to tweet payload; requires `media.write` OAuth scope — existing X credentials must be re-authorised
 
-## forge-agent (separate module)
+## forge-agent — Experimental
 
 - `forge-cms.dev/forge-agent` — MIT-licensed agent runtime; `forge-cms.dev/forge-agent/flow` — AGPL-3.0 Forge integration adapter
 - `AgentJob` — Forge content type (embeds `forge.Node`) with full lifecycle management: Draft → Published → Archived; auto-generated MCP tools (`create_agent_job`, `get_agent_job`, `list_agent_jobs`, `update_agent_job`, `publish_agent_job`, `archive_agent_job`, `delete_agent_job`)
@@ -146,7 +168,7 @@ MCP resource subscriptions:
 - Guard: AgentJob lifecycle events never trigger other jobs (prevents self-activation loops)
 - `Module.Register(*forge.App)` — wires MCP tools, subscribes to all 7 after-signals, starts the cron scheduler
 
-## Audit trail
+## Audit trail — Stable
 
 - `App.Audit(store AuditStore)` — opt-in; subscribes to `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete` via the signal bus
 - `AuditRecord` — immutable entry: ID, Timestamp, Signal, ContentType, Slug, ActorID, ActorRole, PreviousState
@@ -155,7 +177,7 @@ MCP resource subscriptions:
 - `GET /_audit` — Editor-or-higher; returns JSON array; supports `from`, `to` (RFC3339), `type`, and `actor` query filters
 - `forge-cli audit list [--from RFC3339] [--to RFC3339] [--type TYPE] [--actor ACTOR]` — table output, newest first
 
-## Outbound webhooks
+## Outbound webhooks — Stable
 
 - `WebhookStore` — SQLite-backed endpoint registry with AES-256-GCM secret encryption
 - SSRF-safe URL validation — HTTPS required, no private/loopback IPs permitted
@@ -169,7 +191,7 @@ MCP resource subscriptions:
 - `AfterPublish`, `AfterUpdate`, `AfterDelete`, `AfterSchedule` signals trigger jobs automatically
 - `forge-cli webhook` subcommands for all operations
 
-## Developer and AI-agent experience
+## Developer and AI-agent experience — Stable
 
 - Typed MCP tools derived directly from content type — no manual schema definition
 - Field semantics — AI agents understand what each field means without extra prompting

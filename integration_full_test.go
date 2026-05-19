@@ -2738,8 +2738,9 @@ func TestFull_G27_RetryOnTransientFailure(t *testing.T) {
 	}
 
 	// Wait for the first delivery attempt to be recorded before advancing the
-	// clock. On slow CI runners, 100ms is not enough — we poll instead.
-	pollDeadline := time.Now().Add(1 * time.Second)
+	// clock. On slow CI runners, 1s is not enough — use 5s to match the outer
+	// retry poll and avoid advancing the clock before the first attempt lands.
+	pollDeadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(pollDeadline) {
 		logs, _ := pool.ListDeliveryLogs(ctx, job.ID)
 		if len(logs) >= 1 {

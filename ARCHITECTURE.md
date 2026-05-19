@@ -99,7 +99,9 @@ forge-cms.dev/
 ├── context.go        Context interface, contextImpl, ContextFrom(), NewTestContext(), User, GuestUser,
 │                     NewBackgroundContext, NewContextWithUser
 ├── signals.go        Signal type, On[T]() option, dispatchBefore(), dispatchAfter(), debouncer,
-│                     debouncer.Stop() (Amendment A39)
+│                     debouncer.Stop() (Amendment A39);
+│                     SignalEvent{Type, Slug, Title, URL, Timestamp, PreviousState, ActorRole, ActorID},
+│                     afterHookMeta (unexported), buildSignalEvent (unexported) (Amendment A94)
 ├── storage.go        DB interface, Query[T], QueryOne[T], Repository[T], MemoryRepo[T], ListOptions
 ├── audit.go          AuditRecord, AuditFilter, AuditStore interface, NewAuditStore(DB), CreateAuditTable(DB),
 │                     newAuditHandler (unexported); GET /_audit mounted by App.Handler() (Amendment A97)
@@ -834,3 +836,21 @@ mux.ServeHTTP(w, r)
 Use `net/http/httptest` with `m.Register(mux)` for module integration tests.
 Use `forge.NewTestContext()` with direct signal handler calls for unit tests.
 `forge.App` / `app.Handler()` will be available from Milestone 2.
+
+---
+
+## External modules
+
+These modules are maintained separately and consume the forge core API
+via the published interfaces documented above.
+
+| Module | Role |
+|--------|------|
+| `forge-cms.dev/forge-mcp` | MCP server — exposes forge content over JSON-RPC 2.0 / SSE |
+| `forge-cms.dev/forge-media` | Media storage and serving; implements `forge.MCPModule` |
+| `forge-cms.dev/forge-cli` | CLI admin tool — content CRUD, tokens, webhooks, audit |
+| `forge-cms.dev/forge-social` | Social publishing scheduler (Twitter/X, LinkedIn, Mastodon) |
+| `forge-cms.dev/forge-agent` | MIT-licensed agent runtime; `forge-agent/flow` (AGPL-3.0) is the Forge integration adapter — subscribes to `App.OnSignal` and dispatches agent jobs in response to content lifecycle signals |
+
+None of these modules are imported by forge core. All integration is outbound:
+forge core defines the interfaces; external modules implement or consume them.

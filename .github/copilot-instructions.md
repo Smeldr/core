@@ -368,7 +368,9 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
 **M-number milestone commits — additionally mandatory:**
 - [ ] Module `README.md` updated to reflect shipped behaviour.
 - [ ] `Forge/REFERENCE.md` updated (new commands, tools, config keys, changed signatures).
-- [ ] `Forge/FEATURELIST.md` updated and "Last updated" version line bumped.
+- [ ] `Forge/FEATURELIST.md` updated, "Last updated" version line bumped, and
+      module registry: version updated, stability label reviewed if this release
+      changes API surface, adds a module, or materially changes production confidence.
 - [ ] `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` updated: version line, MCP tools, CLI commands, any new sections. Read it with the Read tool.
 
 "No changes needed" is only valid after explicitly reading each file and confirming it already reflects the shipped code. Never assume.
@@ -417,6 +419,7 @@ current codebase and recent amendments:
 1. `REFERENCE.md` — does it reflect all current exported symbols and behaviour?
 2. `README.md` — is the version line (`**vX.Y.Z — stable.**`) current?
 3. `FEATURELIST.md` — does it list all shipped features? Check "Last updated" version.
+   Module registry versions and stability labels current?
 4. `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` — does the version line match current versions?
    Are all MCP tools and CLI commands listed? Read it with the Read tool.
 

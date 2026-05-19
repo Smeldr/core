@@ -1,6 +1,6 @@
 # Forge
 
-A Go framework for content-driven applications. Zero dependencies. AI-native by default.
+A Go framework for content-driven applications. Zero runtime dependencies. AI-native by default.
 
 [![Go Reference](https://pkg.go.dev/badge/forge-cms.dev/forge.svg)](https://pkg.go.dev/forge-cms.dev/forge)
 **v1.22.0 — stable.** All exported symbols are stable. No breaking changes without a major version bump. See [CHANGELOG.md](CHANGELOG.md).
@@ -46,7 +46,7 @@ go run .
 
 | | Forge | Echo | Gin | Chi |
 |---|---|---|---|---|
-| Zero dependencies | ✓ | ✗ | ✗ | ~ |
+| Zero runtime dependencies¹ | ✓ | ✗ | ✗ | ~ |
 | Content lifecycle built-in | ✓ | ✗ | ✗ | ✗ |
 | Draft-safe by default | ✓ | ✗ | ✗ | ✗ |
 | SEO + structured data | ✓ | ✗ | ✗ | ✗ |
@@ -54,6 +54,8 @@ go run .
 | Cookie compliance built-in | ✓ | ✗ | ✗ | ✗ |
 | Social sharing built-in | ✓ | ✗ | ✗ | ✗ |
 | Role hierarchy built-in | ✓ | ✗ | ✗ | ✗ |
+
+> ¹ The test suite uses `modernc.org/sqlite` for in-process SQL integration tests. There are no runtime dependencies in the core package.
 
 ---
 
