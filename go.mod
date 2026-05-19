@@ -1,6 +1,6 @@
 module forge-cms.dev/forge
 
-go 1.26.2
+go 1.26.3
 
 require modernc.org/sqlite v1.50.0
 

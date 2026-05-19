@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.22.2] — 2026-05-19
+
+Go 1.26.3 toolchain upgrade (A99 policy — govulncheck fix).
+
+### Changed
+
+- `go.mod`: `go` directive bumped from `go 1.26.2` to `go 1.26.3`.
+  Resolves four stdlib CVEs reported by govulncheck: GO-2026-4982
+  (XSS in `html/template`), GO-2026-4980 (XSS in `html/template`),
+  GO-2026-4971 (panic in `net` on Windows), GO-2026-4918 (infinite
+  loop in HTTP/2 transport). All fixed in Go 1.26.3.
+
+---
+
 ## [1.22.1] — 2026-05-19
 
 Fix data race in `notifyAfter` (Amendment A98).

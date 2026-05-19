@@ -78,6 +78,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-05-16 | A96 (Non-Decision, docs-only): sitemap ping. REFERENCE.md: "Search engine indexing" section with `App.OnSignal(AfterPublish, ...)` developer pattern. No code changes. |
 | 2026-05-16 | A97 (v1.22.0): Built-in opt-in audit trail. `audit.go` (new): `AuditRecord`, `AuditFilter`, `AuditStore` interface, `NewAuditStore(DB)`, `CreateAuditTable(DB)`, `newAuditHandler` (unexported). `forge.go`: `App.Audit(AuditStore) *App`; `App` gains `auditStore AuditStore` and `auditHandlerReg bool` fields; `App.Handler()` lazily mounts `GET /_audit` when `auditStore != nil`. `audit_test.go` (new): 13 unit tests. `integration_full_test.go`: G33 cross-milestone group. `forge-cli` v0.9.0: `forge audit list` subcommand. |
 | 2026-05-19 | A98 (v1.22.1): Fix data race in `notifyAfter`. `module.go`: `snapshotItem(item any) any` (new unexported func) — shallow reflect copy of the pointed-to struct; `notifyAfter` calls `snapshotItem` once and passes the snapshot to both `dispatchAfter` and the `afterHook` goroutine. Eliminates concurrent read/write on `Node` fields (races G26, G30, G32, G33). No exported symbols changed. |
+| 2026-05-19 | A100 (v1.22.2): Go 1.26.3 toolchain bump. `go.mod`: `go 1.26.2` → `go 1.26.3`. Closes GO-2026-4982, GO-2026-4980, GO-2026-4971, GO-2026-4918. No exported symbols changed. |
 
 ---
 

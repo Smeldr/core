@@ -241,3 +241,18 @@ toolchain upgrade cadence.
 once Go 1.26.3 is available in the local toolchain.
 
 ---
+
+## Amendment A100 — Go 1.26.3 toolchain bump (v1.22.2)
+
+**Context:** govulncheck CI failure on four stdlib CVEs (GO-2026-4982,
+GO-2026-4980, GO-2026-4971, GO-2026-4918 — all fixed in Go 1.26.3).
+Go 1.26.3 became available on 2026-05-19. Per A99 policy, patch upgrades
+are followed within one sprint.
+
+**Change:** `go.mod` `go` directive bumped from `go 1.26.2` to `go 1.26.3`.
+CI uses `go-version-file: go.mod` so it auto-picks Go 1.26.3. No other
+changes to go.mod or go.sum.
+
+**Forge core → v1.22.2.**
+
+---
