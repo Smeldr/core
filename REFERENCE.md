@@ -1937,7 +1937,7 @@ mime.AddExtensionType(".css", "text/css")
 
 `App.OnSignal` lets application code subscribe to content lifecycle events.
 Multiple handlers per signal are supported; handlers fire in registration order
-inside the existing async `afterHook` goroutine.
+in a dedicated goroutine, independent of the `afterHook` goroutine.
 
 ### `SignalEvent`
 
