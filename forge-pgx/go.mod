@@ -1,6 +1,6 @@
 module forge-cms.dev/forge-pgx
 
-go 1.26.2
+go 1.26.3
 
 require (
 	forge-cms.dev/forge v0.0.0
