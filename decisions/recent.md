@@ -210,3 +210,34 @@ func snapshotItem(item any) any {
 **No exported symbols changed. No interface changes.**
 
 **Forge core → v1.22.1.**
+
+---
+
+## Amendment A99 — Go toolchain upgrade policy
+
+**Context:** govulncheck CI failure on Go 1.26.2 (GO-2026-4982, GO-2026-4980,
+GO-2026-4971, GO-2026-4918 — all fixed in Go 1.26.3) prompted formalising the
+toolchain upgrade cadence.
+
+**Decision:** Forge adopts the following Go toolchain upgrade policy:
+
+- **Patch releases (1.26.x):** Follow promptly — within one sprint of release.
+  Patch releases contain only bugfixes and security fixes, no breaking changes.
+  govulncheck in CI acts as the practical trigger.
+
+- **Minor releases (1.27, 1.28, …):** Upgrade within 1–2 months of release,
+  or no later than when Go drops support for the previous minor. Go officially
+  supports only the two most recent minor versions; running an unsupported minor
+  means no security patches from the Go team.
+
+- **go.mod `go` directive:** Always tracks the latest patch of the current minor
+  (e.g. `go 1.26.3`, not `go 1.26.2`, once 1.26.3 is out).
+
+- **`toolchain` directive:** Use when a patch bump is needed for govulncheck but
+  the minimum language version for users should stay stable. Prefer bumping both
+  `go` and `toolchain` together on patch upgrades to keep go.mod unambiguous.
+
+**Policy recorded:** 2026-05-19. Next action: bump `go.mod` to `go 1.26.3`
+once Go 1.26.3 is available in the local toolchain.
+
+---
