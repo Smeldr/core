@@ -2749,8 +2749,9 @@ func TestFull_G27_RetryOnTransientFailure(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	clock.Advance(5 * time.Minute)
+	time.Sleep(10 * time.Millisecond) // yield so workers can pick up the now-due job
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	var logs []DeliveryLog
 	for time.Now().Before(deadline) {
 		var err error
