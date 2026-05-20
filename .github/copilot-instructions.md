@@ -377,6 +377,7 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       `forge_format`/`forge_description` tag values: verify all code examples in `AGENTS.md`
       are still accurate before committing.
 - [ ] If this commit implements an Amendment: both the DECISIONS.md index row and the body section in `decisions/recent.md` are present. Verify with `Select-String`.
+- [ ] **Stability map**: if a shipped feature moves an area between tiers (e.g. SQLRepo graduates from Dogfooding to Stable, or a new module enters as Experimental), update the stability map in `README.md` in the same commit.
 
 **M-number milestone commits — additionally mandatory:**
 - [ ] Module `README.md` updated to reflect shipped behaviour.
