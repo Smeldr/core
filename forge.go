@@ -153,6 +153,13 @@ type Config struct {
 //   - Config.BaseURL is empty or not a valid absolute URL
 //   - Config.Secret is fewer than 16 bytes
 //
+// MustConfig also loads a forge.config file from the working directory (or the
+// path set in the FORGE_CONFIG environment variable) and merges its key/value
+// pairs into cfg. Go-code field values always take precedence over file values.
+// Supported forge.config keys: base_url, https, nav_mode, org_name, org_type,
+// twitter_site, og_image, media_path, media_max_size, dev.
+// The key "secret" is explicitly forbidden in forge.config and causes a panic.
+//
 // Typical usage:
 //
 //	app := forge.New(forge.MustConfig(forge.Config{
@@ -915,13 +922,22 @@ func (a *App) Handler() http.Handler {
 	return Chain(a.mux, mws...)
 }
 
-// SEO applies one or more app-level SEO options.
+// SEO applies one or more app-level SEO options. Valid SEOOption types are:
+//
+//   - [*RobotsConfig] — robots.txt policy and AI-crawler directives
+//   - [*OGDefaults] — fallback Open Graph image and Twitter site handle
+//   - [*AppSchema] — JSON-LD Organization/Person schema emitted on every page
+//   - [*HeadAssets] — canonical CSS/JS asset paths included in every page <head>
 //
 // Call SEO before [App.Handler] or [App.Run] so the configuration is applied
 // before routes are registered. SEO may be called multiple times; later calls
 // override earlier values for the same option type.
 //
-//	app.SEO(&forge.RobotsConfig{AIScraper: forge.AskFirst, Sitemaps: true})
+//	app.SEO(
+//		&forge.RobotsConfig{AIScraper: forge.AskFirst, Sitemaps: true},
+//		&forge.OGDefaults{Image: "https://example.com/og.png", TwitterSite: "@example"},
+//		&forge.AppSchema{OrgName: "Example Inc", OrgType: "Organization"},
+//	)
 func (a *App) SEO(opts ...SEOOption) {
 	for _, opt := range opts {
 		opt.applySEO(&a.seo)

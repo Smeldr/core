@@ -47,8 +47,8 @@ type Context interface {
 	// Always "en" in v1; i18n support is planned for v2 (Decision 11).
 	Locale() string
 
-	// SiteName returns the configured site name. Always "" in v1 until
-	// wired in forge.go (Step 11).
+	// SiteName returns the hostname portion of Config.BaseURL
+	// (e.g. "example.com"). Set automatically at startup.
 	SiteName() string
 
 	// RequestID returns the UUID v7 assigned to this request for

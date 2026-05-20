@@ -65,7 +65,7 @@ go run .
 go get forge-cms.dev/forge
 ```
 
-Requires Go 1.22+. No other dependencies.
+Requires Go 1.26+. No other dependencies.
 
 ---
 
@@ -152,11 +152,11 @@ Each runs with: `cd example/blog && go run .`
 
 ## Reference
 
-Full API reference: [REFERENCE.md](REFERENCE.md)  
+Full API reference: [REFERENCE.md](docs/REFERENCE.md)  
 Web docs: [forge-cms.dev/docs](https://forge-cms.dev/docs)
 
-For full token management reference (create, list, revoke) see [REFERENCE.md — Token management](REFERENCE.md#token-management).  
-For draft preview tokens see [REFERENCE.md — Draft preview](REFERENCE.md#draft-preview).
+For full token management reference (create, list, revoke) see [REFERENCE.md — Token management](docs/REFERENCE.md#token-management).  
+For draft preview tokens see [REFERENCE.md — Draft preview](docs/REFERENCE.md#draft-preview).
 
 ---
 

@@ -57,7 +57,7 @@ file is the bridge between sessions. Always read it first.
    and topic archive files (auth.md, content-api.md, docs.md, media.md, nav.md,
    storage.md). Read the relevant body file when a specific decision is needed.
    Do not work around locked decisions. If a decision seems wrong, raise it explicitly.
-4. Read `ARCHITECTURE.md` — package structure, request lifecycle, stable interfaces.
+4. Read `docs/ARCHITECTURE.md` — package structure, request lifecycle, stable interfaces.
 5. Read the milestone backlog file for the **current milestone only**
    (e.g. `Milestone11_BACKLOG.md`). This is the authoritative task list.
    Do not read completed milestone backlogs — they are historical record only.
@@ -140,7 +140,7 @@ Examples: dependency version bumps, single-file config, docs-only changes.
 
 **Level 2 — standard amendment or milestone step** (full cycle)
 Requires architect involvement, DECISIONS.md entry with both index row and body,
-ARCHITECTURE.md check, and explicit user approval before commit.
+docs/ARCHITECTURE.md check, and explicit user approval before commit.
 Criteria: touches an exported Go symbol, interface, or function signature;
 affects a route or middleware behaviour; has consequences in more than one file.
 
@@ -161,9 +161,9 @@ When in doubt: Level 2.
 - A fix or improvement that changes a file **other than** the current step's file
   is an **Amendment**, not a fix. Stop, draft the Amendment, get approval, then implement.
 - Every Amendment commit — not just milestone steps — must include an explicit check
-  of `ARCHITECTURE.md`. If the amendment adds, removes, or changes any exported symbol,
-  interface, file, or behaviour, `ARCHITECTURE.md` must be updated in the same commit.
-  Never update `ARCHITECTURE.md` from a plan or backlog description — only from
+  of `docs/ARCHITECTURE.md`. If the amendment adds, removes, or changes any exported symbol,
+  interface, file, or behaviour, `docs/ARCHITECTURE.md` must be updated in the same commit.
+  Never update `docs/ARCHITECTURE.md` from a plan or backlog description — only from
   verified, running code.
 - A step that is deferred or descoped must be documented in `Milestone{N}_BACKLOG.md`
   immediately with the reason and the target milestone. Never silently skip.
@@ -271,17 +271,19 @@ Every step — without exception — follows this exact sequence:
   that overlap with what you are about to implement. Reuse and extend — never duplicate.
 - Tick checkboxes in the backlog as each task is completed.
 - Run verification after implementation automatically — no permission needed:
-  `go build ./...`, `go vet ./...`, `gofmt -l .`, `go test ./...`.
-  Fix any failures before proceeding. Never ask the user whether to run these.
+  `go build ./...`, `go vet ./...`, `golangci-lint run ./...`, `gofmt -l .`, `go test ./...`.
+  Fix any failures before proceeding. If `golangci-lint` is not installed, skip it
+  with a warning — it must not block a commit when the tool is absent.
+  Never ask the user whether to run these.
 - **NEVER ask, announce, or request approval before running any of the following:
-  `go build`, `go vet`, `go test`, `gofmt`, or any read-only PowerShell file
+  `go build`, `go vet`, `go test`, `gofmt`, `golangci-lint`, or any read-only PowerShell file
   command (`Get-Content`, `Select-String`, `Get-ChildItem`, `git diff`, `git log`,
   `git status`). Just run them. Do not narrate the process. Only surface results
   when they are unexpected (build failure, test failure, format diff). Commits
   are the ONLY action that requires explicit user approval.**
 - Read any file in the workspace automatically — no permission needed.
   Use PowerShell (`Get-Content`, `Select-String`, etc.) or the read_file tool
-  to read `DECISIONS.md`, `ARCHITECTURE.md`, milestone backlog
+  to read `DECISIONS.md`, `docs/ARCHITECTURE.md`, milestone backlog
   files, or any source file before planning or implementing. Never ask the user
   whether to read a file that already exists in the workspace.
 
@@ -341,13 +343,13 @@ Treat these as a single atomic unit: write both, verify with `Select-String`
 that both exist, then stage.
 
 ### 4. Architecture and decision review
-- After verification passes, review `ARCHITECTURE.md` and `DECISIONS.md`.
+- After verification passes, review `docs/ARCHITECTURE.md` and `DECISIONS.md`.
 - Ask: does this implementation reveal a gap, ambiguity, or conflict?
 - If yes: draft a new Decision or Amendment and present it to the user before proceeding.
 - Check this step's implementation against all previously implemented files: does it
   duplicate logic, diverge from an established pattern, or require a change to another
   file? Any change that crosses a file boundary requires an Amendment — not a fix.
-- After each step, consider whether `ARCHITECTURE.md` needs updating: new exported
+- After each step, consider whether `docs/ARCHITECTURE.md` needs updating: new exported
   symbols, corrected interface locations, changed behaviour, new middleware, or
   planned files that are now implemented. Update it before proposing the commit.
 - The step is not complete until the review checkbox is ticked.
@@ -367,12 +369,19 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
 - [ ] `README.md` version line (`**vX.Y.Z — stable.**`) matches the version being shipped. Update if behind.
 - [ ] No `🔲 Coming in Milestone N` badge remains for a milestone that has shipped.
 - [ ] `go test ./...` is green (re-run if any file changed since last verification).
+- [ ] `golangci-lint run ./...` is clean, or golangci-lint is not installed (skip with warning).
+- [ ] If this commit touches module wiring API (`forge.MCP`, `forge.Repo`, `forge.At`, `forge.NewModule`),
+      MCP server wiring (`forgemcp.New`, `mcpSrv.Handler()`, `forgemcp.WithModule`),
+      forge-media registration (`forgemedia.Register`, `forgemedia.NewLocalMediaStore`),
+      token API (`forge.NewTokenStore`, `forge.SignToken`), `forge.Config` fields, or
+      `forge_format`/`forge_description` tag values: verify all code examples in `AGENTS.md`
+      are still accurate before committing.
 - [ ] If this commit implements an Amendment: both the DECISIONS.md index row and the body section in `decisions/recent.md` are present. Verify with `Select-String`.
 
 **M-number milestone commits — additionally mandatory:**
 - [ ] Module `README.md` updated to reflect shipped behaviour.
-- [ ] `Forge/REFERENCE.md` updated (new commands, tools, config keys, changed signatures).
-- [ ] `Forge/FEATURELIST.md` updated, "Last updated" version line bumped, and
+- [ ] `Forge/docs/REFERENCE.md` updated (new commands, tools, config keys, changed signatures).
+- [ ] `Forge/docs/FEATURELIST.md` updated, "Last updated" version line bumped, and
       module registry: version updated, stability label reviewed if this release
       changes API surface, adds a module, or materially changes production confidence.
 - [ ] `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` updated: version line, MCP tools, CLI commands, any new sections. Read it with the Read tool.
@@ -402,15 +411,15 @@ Scope: the file name without extension (e.g. `errors`, `roles`, `node`)
 
 ## Docs and content workflow
 
-Use this workflow for any task that involves updating repo docs (REFERENCE.md,
-README.md, FEATURELIST.md) or creating content for forge-cms.dev/docs.
+Use this workflow for any task that involves updating repo docs (docs/REFERENCE.md,
+README.md, docs/FEATURELIST.md) or creating content for forge-cms.dev/docs.
 
 This workflow is separate from the standard step workflow. It applies to
 docs-only tasks and content tasks — not to code implementation.
 
 **When to use this workflow:** For docs-only tasks and content operations (devlog,
 solved stories, doc page drafts) that follow a code commit. Repo doc updates
-(README, REFERENCE.md, FEATURELIST.md, forge-common skill) are gated in the
+(README, docs/REFERENCE.md, docs/FEATURELIST.md, forge-common skill) are gated in the
 standard step workflow (step 6) — complete those before proposing any commit.
 
 The content brief (step 4) is always required for any new M-number milestone.
@@ -420,9 +429,9 @@ The content brief (step 4) is always required for any new M-number milestone.
 Before any other work, check these three files for staleness against the
 current codebase and recent amendments:
 
-1. `REFERENCE.md` — does it reflect all current exported symbols and behaviour?
+1. `docs/REFERENCE.md` — does it reflect all current exported symbols and behaviour?
 2. `README.md` — is the version line (`**vX.Y.Z — stable.**`) current?
-3. `FEATURELIST.md` — does it list all shipped features? Check "Last updated" version.
+3. `docs/FEATURELIST.md` — does it list all shipped features? Check "Last updated" version.
    Module registry versions and stability labels current?
 4. `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` — does the version line match current versions?
    Are all MCP tools and CLI commands listed? Read it with the Read tool.
@@ -439,12 +448,12 @@ Before any work: propose what the commit will cover in one sentence.
 Wait for approval to proceed. Do not write anything yet.
 
 **2. Repo doc review**
-Read REFERENCE.md, README.md, and FEATURELIST.md.
+Read docs/REFERENCE.md, README.md, and docs/FEATURELIST.md.
 Present what needs updating — specific, concrete findings only.
 Wait for feedback before making any changes.
 
 **3. Apply repo doc updates**
-Apply agreed changes to REFERENCE.md, README.md, and/or FEATURELIST.md.
+Apply agreed changes to docs/REFERENCE.md, README.md, and/or docs/FEATURELIST.md.
 Also update `.claude/skills/forge.md` when any of the following changed:
 - MCP tools or CLI commands (update both sections; verify CLI/MCP parity)
 - Config keys (update forge.config section)
@@ -458,7 +467,7 @@ Do not commit yet.
 After repo doc updates are applied, write a content brief covering:
 - What shipped: plain-language summary (one paragraph)
 - Amendment ID (e.g. A93)
-- REFERENCE.md section: relevant header
+- docs/REFERENCE.md section: relevant header
 - Devlog: yes/no + suggested angle (or "covered by Axx")
 - Solved: which story this feature supports, if any
 - Docs: which forge-cms.dev/docs pages need updating
@@ -476,7 +485,7 @@ The content brief is handed to the architect, who converts it into a sitepilot N
 Wait for feedback before proceeding.
 
 **5. Content suggestions (forge-cms.dev/docs)**
-Based on updated REFERENCE.md, suggest doc page title(s) that should be
+Based on updated docs/REFERENCE.md, suggest doc page title(s) that should be
 created or updated on forge-cms.dev.
 Wait for feedback.
 
@@ -694,10 +703,10 @@ internal planning history. `Milestone_BACKLOG_TEMPLATE.md` is never removed.
 - **Checkboxes are atomic** — each `- [ ]` item must be a single, unambiguous task.
   Never write "implement X" without specifying what X requires.
 - **Every step ends with an architecture and decision review.** After the verification
-  block passes, review `ARCHITECTURE.md` and `DECISIONS.md` and ask:
+  block passes, review `docs/ARCHITECTURE.md` and `DECISIONS.md` and ask:
   - Does the implementation reveal a gap, ambiguity, or conflict in an existing decision?
   - Did any implementation choice introduce a pattern or constraint not yet captured?
-  - Does the file's dependency graph still match the rules in `ARCHITECTURE.md`?
+  - Does the file's dependency graph still match the rules in `docs/ARCHITECTURE.md`?
   If yes to any of the above, a new Decision or Amendment must be proposed and agreed
   upon before the next step begins. The step is not complete until this review is done.
 - **Every step ends with a commit.** After the architecture review, write a commit
@@ -705,6 +714,6 @@ internal planning history. `Milestone_BACKLOG_TEMPLATE.md` is never removed.
   Never commit without approval.
   Add the following checkbox at the end of every step's verification block:
   ```
-  - [ ] Review ARCHITECTURE.md and DECISIONS.md — no new decisions required,
+  - [ ] Review docs/ARCHITECTURE.md and DECISIONS.md — no new decisions required,
         or new Decision/Amendment drafted and agreed upon
   ```

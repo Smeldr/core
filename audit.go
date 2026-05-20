@@ -12,14 +12,14 @@ import (
 // AuditRecord is one immutable audit log entry written after every lifecycle
 // transition subscribed to by [App.Audit].
 type AuditRecord struct {
-	ID            string    `json:"id"`
-	Timestamp     time.Time `json:"timestamp"`
-	Signal        Signal    `json:"signal"`
-	ContentType   string    `json:"content_type"`
-	Slug          string    `json:"slug"`
-	ActorID       string    `json:"actor_id"`
-	ActorRole     string    `json:"actor_role"`
-	PreviousState string    `json:"previous_state"`
+	ID            string    `json:"id"`             // UUID v7 primary key
+	Timestamp     time.Time `json:"timestamp"`      // wall-clock time the lifecycle signal was dispatched (UTC)
+	Signal        Signal    `json:"signal"`         // lifecycle signal that triggered this record (e.g. AfterPublish)
+	ContentType   string    `json:"content_type"`   // unqualified Go type name of the content item (e.g. "Post")
+	Slug          string    `json:"slug"`           // URL slug of the content item at the time of the event
+	ActorID       string    `json:"actor_id"`       // stable UUID of the authenticated user; empty for unauthenticated actions
+	ActorRole     string    `json:"actor_role"`     // role string of the actor ("guest", "author", "editor", "admin")
+	PreviousState string    `json:"previous_state"` // lifecycle state before the transition; empty for AfterCreate
 }
 
 // AuditFilter narrows an [AuditStore.List] query.
