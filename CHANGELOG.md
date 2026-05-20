@@ -23,6 +23,36 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.23.0] — 2026-05-23
+
+`SingleInstance()` and `Standalone()` module routing options (Amendment A100).
+
+### Added
+
+- `forge.SingleInstance() Option` — marks a module as having at most one canonical
+  item. `GET /{prefix}` serves the first Published item directly (no slug in URL).
+  `GET /{prefix}/{slug}` is not registered (404). Useful for About, Contact, and
+  other singleton pages.
+- `forge.Standalone() Option` — removes the per-item slug URL from the module prefix
+  and instead dispatches `GET /{slug}` at the top level via `App`. Useful when item
+  slugs should appear as first-class top-level URLs (e.g. `/my-post` rather than
+  `/posts/my-post`). The list endpoint `GET /{prefix}` remains.
+- `MCPMeta.SingleInstance bool` field — `true` when the module uses `SingleInstance()`.
+  Used by `forge-mcp` to suppress the `list_{type}s` admin tool for single-instance
+  modules.
+- `standaloneDispatcher` internal interface — implemented by `Module[T]`; used by
+  `App` to route top-level slug requests to the correct Standalone module.
+- `App.standaloneModules` / `App.standaloneReg` — internal fields supporting
+  Standalone dispatch registration in `App.Handler()`.
+- Integration test groups G34 (SingleInstance) and G35 (Standalone, two modules).
+
+### Changed
+
+- `forge-mcp`: `mcpAdminReadToolDefs` suppresses `list_{type}s` when
+  `MCPMeta.SingleInstance` is true.
+
+---
+
 ## [1.22.2] — 2026-05-19
 
 Go 1.26.3 toolchain upgrade (A99 policy — govulncheck fix).

@@ -231,6 +231,68 @@ regenerates the sitemap, and adds the item to the RSS feed.
 
 ---
 
+## Routing variants
+
+✅ **Available**
+
+Forge modules expose a list endpoint and a per-item show endpoint by default.
+Two options change this for common patterns.
+
+### SingleInstance — singleton page modules
+
+Use `forge.SingleInstance()` when a module holds exactly one canonical item
+(About, Contact, Terms, Privacy). The item is served directly at the module
+prefix with no slug in the URL.
+
+```go
+forge.NewModule((*AboutPage)(nil),
+    forge.At("/about"),
+    forge.Repo(repo),
+    forge.SingleInstance(),
+)
+// GET /about → serves the first Published item as JSON (or HTML if Templates is set)
+// GET /about/{slug} → 404 (route not registered)
+```
+
+Rules:
+- `GET /{prefix}` serves `items[0]` from the repository filtered to `Published`.
+  Author and Editor roles see items at any status.
+- `GET /{prefix}/{slug}` is not registered. Requests to it return 404.
+- Preview tokens work the same as the standard show handler.
+- `MCPMeta().SingleInstance` returns `true`. The `forge-mcp` server suppresses
+  the `list_{type}s` admin tool for SingleInstance modules.
+
+### Standalone — first-class top-level URLs
+
+Use `forge.Standalone()` when items should appear at `/{slug}` rather than
+`/{prefix}/{slug}`. This is useful for landing pages, blog posts as root-level
+pages, or wiki entries.
+
+```go
+forge.NewModule((*Post)(nil),
+    forge.At("/posts"),
+    forge.Repo(repo),
+    forge.Standalone(),
+)
+// GET /my-post → serves the Published Post with slug "my-post"
+// GET /posts   → list of all Published posts (unchanged)
+// GET /posts/my-post → 404 (slug URL not registered under prefix)
+```
+
+Rules:
+- `GET /{prefix}` still serves the list of all Published items.
+- `GET /{slug}` is registered at the App level, dispatched to whichever
+  Standalone module owns the item with that slug.
+- Multiple Standalone modules coexist. Each slug is tried in registration
+  order; the first module that can serve it wins.
+- If no module has the slug, the request falls through to the redirect
+  handler (which 404s if no redirect rule matches).
+- Draft items are not served to guests via the top-level `/{slug}` route.
+- If the module also uses `forge.AIIndex(forge.AIDoc)`, AI doc is served
+  at `GET /{slug}/aidoc` rather than `GET /{prefix}/{slug}/aidoc`.
+
+---
+
 ## Roles & auth
 
 ### Built-in role hierarchy

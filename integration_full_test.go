@@ -1,35 +1,37 @@
 package forge
 
-// integration_full_test.go — cross-milestone integration suite (M1–M5).
+// integration_full_test.go â€” cross-milestone integration suite (M1â€“M5).
 //
 // Each test exercises behaviour that requires at least two milestone components
 // working together. No test in this file duplicates coverage from
 // integration_test.go (which covers single-module M4 scenarios).
 //
 // Groups:
-//   G1  — Multi-module routing (M2)
-//   G2  — Role-based access via inline middleware (M1 + M2)
-//   G3  — Signal fire-through across modules (M1 + M2)
-//   G4  — Content negotiation: two modules, mixed template configuration (M2 + M4)
-//   G5  — forge:head + schema helpers through real render (M3 + M4)
-//   G6  — SEO wiring: robots.txt + sitemap registration (M2 + M3)
-//   G7  — Error template fallback across two modules (M2 + M4)
-//   G8  — TemplateData end-to-end (M3 + M4)
-//   G9  — Social + SitemapConfig (M5 + M3)
-//   G10 — AI indexing + content negotiation (M5 + M4)
-//   G11 — RSS feed + AfterPublish signal (M5 + M1)
-//   G12 — Full M5 stack (M5 + M3 + M4)
-//   G13 — Cookie consent enforcement (M6, Decision 5)
-//   G14 — Consent lifecycle wired through a handler (M6 + M2)
-//   G15 — Cookie manifest + App integration (M6 + M2 + M1)
-//   G16 — Redirect enforcement: 301/410/404 + chain collapse (M7, Decision 17)
-//   G17 — Prefix redirect via Redirects(From) + exact-beats-prefix (M7 + M2)
-//   G18 — Full M7 stack: SQLRepo interface check + redirect manifest + ManifestAuth (M7 + M6 + M1)
-//   G19 — Scheduler end-to-end: processScheduled + AfterPublish signal (M8 + M1)
-//   G20 — Scheduler wired through App.Content(): schedulerModules populated, tick publishes (M8 + M2 + M3)
-//   G21 — Full v1.0.0 stack: scheduler + sitemap + feed + AI index + redirects (M1+M2+M3+M5+M7+M8)
-//   G22 — forge-mcp MCPModule interface + lifecycle (M10)
-//   G23 — CLI round-trip: GET→PUT lifecycle and field preservation (Decision 28)
+//   G1  â€” Multi-module routing (M2)
+//   G2  â€” Role-based access via inline middleware (M1 + M2)
+//   G3  â€” Signal fire-through across modules (M1 + M2)
+//   G4  â€” Content negotiation: two modules, mixed template configuration (M2 + M4)
+//   G5  â€” forge:head + schema helpers through real render (M3 + M4)
+//   G6  â€” SEO wiring: robots.txt + sitemap registration (M2 + M3)
+//   G7  â€” Error template fallback across two modules (M2 + M4)
+//   G8  â€” TemplateData end-to-end (M3 + M4)
+//   G9  â€” Social + SitemapConfig (M5 + M3)
+//   G10 â€” AI indexing + content negotiation (M5 + M4)
+//   G11 â€” RSS feed + AfterPublish signal (M5 + M1)
+//   G12 â€” Full M5 stack (M5 + M3 + M4)
+//   G13 â€” Cookie consent enforcement (M6, Decision 5)
+//   G14 â€” Consent lifecycle wired through a handler (M6 + M2)
+//   G15 â€” Cookie manifest + App integration (M6 + M2 + M1)
+//   G16 â€” Redirect enforcement: 301/410/404 + chain collapse (M7, Decision 17)
+//   G17 â€” Prefix redirect via Redirects(From) + exact-beats-prefix (M7 + M2)
+//   G18 â€” Full M7 stack: SQLRepo interface check + redirect manifest + ManifestAuth (M7 + M6 + M1)
+//   G19 â€” Scheduler end-to-end: processScheduled + AfterPublish signal (M8 + M1)
+//   G20 â€” Scheduler wired through App.Content(): schedulerModules populated, tick publishes (M8 + M2 + M3)
+//   G21 â€” Full v1.0.0 stack: scheduler + sitemap + feed + AI index + redirects (M1+M2+M3+M5+M7+M8)
+//   G22 â€” forge-mcp MCPModule interface + lifecycle (M10)
+//   G23 â€” CLI round-trip: GETâ†’PUT lifecycle and field preservation (Decision 28)
+//   G34 â€” SingleInstance routing: GET /{prefix} serves item; MCPMeta.SingleInstance = true (T50)
+//   G35 â€” Standalone routing: GET /{slug} dispatched by App; two standalone modules (T50)
 
 import (
 	"bytes"
@@ -47,7 +49,7 @@ import (
 	"time"
 )
 
-// — Helpers ———————————————————————————————————————————————————————————————
+// â€” Helpers â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // fullTestApp is the shared state for two-module integration tests.
 type fullTestApp struct {
@@ -136,7 +138,7 @@ func writeErrTemplate(t *testing.T, dir string, status int, body string) {
 	}
 }
 
-// — G1: Multi-module routing (M2) ————————————————————————————————————————
+// â€” G1: Multi-module routing (M2) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_multiModuleRouting verifies that two modules registered at different
 // prefixes route independently without cross-contamination.
@@ -177,7 +179,7 @@ func TestFull_multiModuleRouting(t *testing.T) {
 	})
 
 	t.Run("posts_slug_does_not_hit_pages", func(t *testing.T) {
-		// /posts/about should 404 — About Page is in /pages, not /posts.
+		// /posts/about should 404 â€” About Page is in /pages, not /posts.
 		r := httptest.NewRequest("GET", "/posts/about", nil)
 		r.Header.Set("Accept", "application/json")
 		w := httptest.NewRecorder()
@@ -225,7 +227,7 @@ func TestFull_customHandleRoute(t *testing.T) {
 }
 
 // TestFull_globalMiddlewareOrder verifies that App.Use applies middleware in
-// registration order — first Use argument is the outermost wrapper.
+// registration order â€” first Use argument is the outermost wrapper.
 func TestFull_globalMiddlewareOrder(t *testing.T) {
 	var mu sync.Mutex
 	var order []string
@@ -259,14 +261,14 @@ func TestFull_globalMiddlewareOrder(t *testing.T) {
 	mu.Unlock()
 
 	if len(got) < 2 {
-		t.Fatalf("expected ≥2 middleware invocations, got %d: %v", len(got), got)
+		t.Fatalf("expected â‰¥2 middleware invocations, got %d: %v", len(got), got)
 	}
 	if got[0] != "A" || got[1] != "B" {
 		t.Errorf("middleware order = %v; want [A B ...]", got)
 	}
 }
 
-// — G2: Role-based access via inline middleware (M1 + M2) —————————————————
+// â€” G2: Role-based access via inline middleware (M1 + M2) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_roleCheck_denies verifies that an inline middleware using HasRole
 // rejects unauthenticated requests with 403.
@@ -293,7 +295,7 @@ func TestFull_roleCheck_denies(t *testing.T) {
 	app.Content(m)
 	handler := app.Handler()
 
-	// No user → GuestUser → denied.
+	// No user â†’ GuestUser â†’ denied.
 	r := httptest.NewRequest("GET", "/posts", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
@@ -326,7 +328,7 @@ func TestFull_roleCheck_allows(t *testing.T) {
 	app.Content(m)
 	handler := app.Handler()
 
-	// Editor role → allowed.
+	// Editor role â†’ allowed.
 	r := httptest.NewRequest("GET", "/posts", nil)
 	r = withUser(r, editorUser())
 	w := httptest.NewRecorder()
@@ -336,7 +338,7 @@ func TestFull_roleCheck_allows(t *testing.T) {
 	}
 }
 
-// — G3: Signal fire-through (M1 + M2) ————————————————————————————————————
+// â€” G3: Signal fire-through (M1 + M2) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_signalOnCreate verifies that AfterCreate fires when an item is
 // created through the module's create handler.
@@ -477,7 +479,7 @@ func TestFull_signalCrossModuleIsolation(t *testing.T) {
 	_ = pagesMod
 }
 
-// — G4: Content negotiation, two modules (M2 + M4) ————————————————————————
+// â€” G4: Content negotiation, two modules (M2 + M4) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_jsonModule_noTemplates verifies that a module without templates
 // returns JSON (200) when the client requests text/html -- not 406 (A35).
@@ -557,7 +559,7 @@ func TestFull_htmlModule_templateFallback(t *testing.T) {
 	})
 }
 
-// — G5: forge:head + schema through real render (M3 + M4) —————————————————
+// â€” G5: forge:head + schema through real render (M3 + M4) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_schemaForThroughTemplate verifies that forge_meta in a real
 // template render produces a JSON-LD <script> block for Article content.
@@ -665,14 +667,14 @@ func TestFull_breadcrumbs(t *testing.T) {
 	if !strings.Contains(body, "BreadcrumbList") {
 		t.Errorf("expected BreadcrumbList in body, got:\n%s", body)
 	}
-	// Two separate ld+json script blocks — Article + BreadcrumbList.
+	// Two separate ld+json script blocks â€” Article + BreadcrumbList.
 	count := strings.Count(body, `application/ld+json`)
 	if count < 2 {
 		t.Errorf("expected 2 ld+json script blocks, got %d:\n%s", count, body)
 	}
 }
 
-// — G6: SEO wiring (M2 + M3) ——————————————————————————————————————————————
+// â€” G6: SEO wiring (M2 + M3) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_sitemapAppendsInRobots verifies that App.SEO with Sitemaps: true
 // produces a robots.txt containing a Sitemap directive.
@@ -703,7 +705,7 @@ func TestFull_sitemapAppendsInRobots(t *testing.T) {
 	}
 }
 
-// — G7: Error template fallback across two modules (M2 + M4) ——————————————
+// â€” G7: Error template fallback across two modules (M2 + M4) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_errorTemplate_firstMatch verifies that when both modules have an
 // errors/404.html, the first registered module's template is used.
@@ -768,7 +770,7 @@ func TestFull_errorTemplate_fallsThrough(t *testing.T) {
 	}
 }
 
-// — G8: TemplateData end-to-end (M3 + M4) ————————————————————————————————
+// â€” G8: TemplateData end-to-end (M3 + M4) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_templateData_siteName verifies that Config.BaseURL hostname is
 // propagated to {{.SiteName}} inside a rendered HTML template.
@@ -786,7 +788,7 @@ func TestFull_templateData_siteName(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
 	}
-	// Config.BaseURL is "https://example.com" → hostname is "example.com".
+	// Config.BaseURL is "https://example.com" â†’ hostname is "example.com".
 	if !strings.Contains(w.Body.String(), "site:example.com") {
 		t.Errorf("expected site:example.com in body, got: %s", w.Body.String())
 	}
@@ -813,7 +815,7 @@ func TestFull_templateData_requestURL(t *testing.T) {
 	}
 }
 
-// — G9: Social + SitemapConfig (M5 + M3) ——————————————————————————————————
+// â€” G9: Social + SitemapConfig (M5 + M3) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_social_ogTagsInHTML verifies that a module configured with
 // Social(OpenGraph, TwitterCard) and SitemapConfig{} (M3) renders og:title and
@@ -849,7 +851,7 @@ func TestFull_social_ogTagsInHTML(t *testing.T) {
 }
 
 // TestFull_social_draftReturns404 verifies that a Draft post returns 404
-// when Social and SitemapConfig options are active — lifecycle is enforced
+// when Social and SitemapConfig options are active â€” lifecycle is enforced
 // regardless of which M5 options are present.
 func TestFull_social_draftReturns404(t *testing.T) {
 	dir := intTmpDir(t, `<p>list</p>`, `<p>{{.Content.Title}}</p>`)
@@ -877,7 +879,7 @@ func TestFull_social_draftReturns404(t *testing.T) {
 	}
 }
 
-// — G10: AI indexing + content negotiation (M5 + M4) ————————————————————
+// â€” G10: AI indexing + content negotiation (M5 + M4) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_ai_llmsTxt_publishedPresent verifies that /llms.txt lists Published
 // items and excludes Draft items when AIIndex(LLMsTxt) is configured.
@@ -947,7 +949,7 @@ func TestFull_ai_aiDoc_published(t *testing.T) {
 }
 
 // TestFull_ai_aiDoc_draftReturns404 verifies that /posts/{slug}/aidoc returns
-// 404 for a Draft item — lifecycle enforcement on the AIDoc endpoint.
+// 404 for a Draft item â€” lifecycle enforcement on the AIDoc endpoint.
 func TestFull_ai_aiDoc_draftReturns404(t *testing.T) {
 	repo := NewMemoryRepo[*testAIPost]()
 	draft := seedAIPost(t, repo, "AIDoc Draft", "body text", Draft)
@@ -1008,7 +1010,7 @@ func TestFull_ai_markdownContentNeg(t *testing.T) {
 	}
 }
 
-// — G11: RSS feed + AfterPublish signal (M5 + M1) ————————————————————————
+// â€” G11: RSS feed + AfterPublish signal (M5 + M1) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_feed_publishedInFeed verifies that /posts/feed.xml returns a valid
 // RSS 2.0 document containing Published items.
@@ -1128,7 +1130,7 @@ func TestFull_feed_afterPublishSignalFires(t *testing.T) {
 	}
 }
 
-// — G12: Full M5 stack (M5 + M3 + M4) ———————————————————————————————————
+// â€” G12: Full M5 stack (M5 + M3 + M4) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_fullM5_htmlHasOGTags verifies that a module with all M5 options
 // (Social, AIIndex, Feed, SitemapConfig) plus M3/M4 (HeadFunc, Templates)
@@ -1295,7 +1297,7 @@ func TestFull_fullM5_feed(t *testing.T) {
 	}
 }
 
-// — G13: Cookie consent enforcement (M6, Decision 5) ————————————————————
+// â€” G13: Cookie consent enforcement (M6, Decision 5) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_consent_setNecessarySetsHeader verifies that SetCookie writes a
 // Set-Cookie header for a Necessary cookie, and that ConsentFor(Necessary)
@@ -1400,7 +1402,7 @@ func TestFull_consent_revokeConsentFalse(t *testing.T) {
 	}
 }
 
-// — G14: Consent lifecycle wired through a handler (M6 + M2) ————————————
+// â€” G14: Consent lifecycle wired through a handler (M6 + M2) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_consent_moduleHandlerSetsPreferences verifies the full consent
 // lifecycle wired through an HTTP handler (M2 pattern): without consent the
@@ -1465,7 +1467,7 @@ func TestFull_consent_clearCookieExpiresHeader(t *testing.T) {
 		t.Errorf("Expires = %v is in the future; want past", cookies[0].Expires)
 	}
 
-	// ConsentFor(Necessary) is always true — even with corrupted forge_consent.
+	// ConsentFor(Necessary) is always true â€” even with corrupted forge_consent.
 	r := httptest.NewRequest("GET", "/", nil)
 	r.AddCookie(&http.Cookie{Name: "forge_consent", Value: "garbage-data,,,"})
 	if !ConsentFor(r, Necessary) {
@@ -1473,7 +1475,7 @@ func TestFull_consent_clearCookieExpiresHeader(t *testing.T) {
 	}
 }
 
-// — G15: Cookie manifest + App integration (M6 + M2 + M1) ———————————————
+// â€” G15: Cookie manifest + App integration (M6 + M2 + M1) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_manifest_mountedWhenDeclared verifies that /.well-known/cookies.json
 // is mounted by App.Handler() when App.Cookies() has been called, returns 200,
@@ -1546,7 +1548,7 @@ func TestFull_manifest_sortedByName(t *testing.T) {
 }
 
 // TestFull_manifest_notMountedWhenNoDecls verifies that /.well-known/cookies.json
-// returns 404 when App.Cookies() has never been called — no leaking of empty manifests.
+// returns 404 when App.Cookies() has never been called â€” no leaking of empty manifests.
 func TestFull_manifest_notMountedWhenNoDecls(t *testing.T) {
 	app := New(MustConfig(Config{
 		BaseURL: "https://example.com",
@@ -1575,7 +1577,7 @@ func TestFull_manifest_authGuard(t *testing.T) {
 	app.CookiesManifestAuth(BearerHMAC(secret))
 	h := app.Handler()
 
-	// Unauthenticated request — 401.
+	// Unauthenticated request â€” 401.
 	r1 := httptest.NewRequest("GET", "/.well-known/cookies.json", nil)
 	w1 := httptest.NewRecorder()
 	h.ServeHTTP(w1, r1)
@@ -1583,7 +1585,7 @@ func TestFull_manifest_authGuard(t *testing.T) {
 		t.Errorf("unauthenticated: status = %d; want 401", w1.Code)
 	}
 
-	// Authenticated Editor — 200.
+	// Authenticated Editor â€” 200.
 	tok, err := SignToken(User{ID: "u1", Roles: []Role{Editor}}, secret, 0)
 	if err != nil {
 		t.Fatalf("SignToken: %v", err)
@@ -1597,7 +1599,7 @@ func TestFull_manifest_authGuard(t *testing.T) {
 	}
 }
 
-// — G16: Redirect enforcement (M7, Decision 17) ——————————————————————————
+// â€” G16: Redirect enforcement (M7, Decision 17) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_redirect_permanent verifies that app.Redirect("/old", "/new", Permanent)
 // issues a 301 with the correct Location header.
@@ -1659,8 +1661,8 @@ func TestFull_redirect_unknownPath(t *testing.T) {
 }
 
 // TestFull_redirect_chainCollapsed verifies that two Redirect calls that form
-// a chain are collapsed: when B→C is registered before A→B, the forward
-// collapse fires so A is stored directly as A→C (Decision 24).
+// a chain are collapsed: when Bâ†’C is registered before Aâ†’B, the forward
+// collapse fires so A is stored directly as Aâ†’C (Decision 24).
 func TestFull_redirect_chainCollapsed(t *testing.T) {
 	app := New(MustConfig(Config{
 		BaseURL: "https://example.com",
@@ -1683,10 +1685,10 @@ func TestFull_redirect_chainCollapsed(t *testing.T) {
 	}
 }
 
-// — G17: Prefix redirect via Redirects(From) (M7 + M2) ——————————————————
+// â€” G17: Prefix redirect via Redirects(From) (M7 + M2) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_prefix_redirect_rewritesPath verifies that a Redirects(From("/posts"), "/articles")
-// option on app.Content() rewrites GET /posts/hello to 301 → /articles/hello.
+// option on app.Content() rewrites GET /posts/hello to 301 â†’ /articles/hello.
 func TestFull_prefix_redirect_rewritesPath(t *testing.T) {
 	repo := NewMemoryRepo[*testPost]()
 	m := NewModule((*testPost)(nil), Repo(repo), At("/articles"))
@@ -1735,7 +1737,7 @@ func TestFull_prefix_redirect_exactBeatsPrefix(t *testing.T) {
 	}
 }
 
-// — G18: Full M7 stack — SQLRepo + manifest + ManifestAuth (M7 + M6 + M1) —
+// â€” G18: Full M7 stack â€” SQLRepo + manifest + ManifestAuth (M7 + M6 + M1) â€”
 
 // TestFull_sqlrepo_satisfiesInterface verifies at compile time that
 // *SQLRepo[*testPost] satisfies Repository[*testPost], and that NewSQLRepo
@@ -1811,7 +1813,7 @@ func TestFull_manifest_redirect_authGuard(t *testing.T) {
 	app.RedirectManifestAuth(BearerHMAC(secret))
 	h := app.Handler()
 
-	// Unauthenticated — 401.
+	// Unauthenticated â€” 401.
 	r1 := httptest.NewRequest("GET", "/.well-known/redirects.json", nil)
 	w1 := httptest.NewRecorder()
 	h.ServeHTTP(w1, r1)
@@ -1819,7 +1821,7 @@ func TestFull_manifest_redirect_authGuard(t *testing.T) {
 		t.Errorf("unauthenticated: status = %d; want 401", w1.Code)
 	}
 
-	// Authenticated Editor — 200.
+	// Authenticated Editor â€” 200.
 	tok, err := SignToken(User{ID: "u1", Roles: []Role{Editor}}, secret, 0)
 	if err != nil {
 		t.Fatalf("SignToken: %v", err)
@@ -1833,9 +1835,9 @@ func TestFull_manifest_redirect_authGuard(t *testing.T) {
 	}
 }
 
-// — G19: Scheduler end-to-end + AfterPublish signal (M8 + M1) ——————————————
+// â€” G19: Scheduler end-to-end + AfterPublish signal (M8 + M1) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
-// TestFull_scheduler_publishesOverdue verifies the end-to-end Scheduled→Published
+// TestFull_scheduler_publishesOverdue verifies the end-to-end Scheduledâ†’Published
 // transition: a past-due item is published, a future item is left Scheduled,
 // and the AfterPublish signal (M1) fires exactly once.
 func TestFull_scheduler_publishesOverdue(t *testing.T) {
@@ -1874,7 +1876,7 @@ func TestFull_scheduler_publishesOverdue(t *testing.T) {
 		t.Errorf("published = %d; want 1", published)
 	}
 	if next == nil {
-		t.Fatal("next should not be nil — pending item has a future ScheduledAt")
+		t.Fatal("next should not be nil â€” pending item has a future ScheduledAt")
 	}
 
 	// Overdue item must be Published with ScheduledAt cleared.
@@ -1901,7 +1903,7 @@ func TestFull_scheduler_publishesOverdue(t *testing.T) {
 		t.Errorf("pending status = %v; want Scheduled", gotPending.Status)
 	}
 
-	// AfterPublish (M1 signal) must fire exactly once — give dispatchAfter time.
+	// AfterPublish (M1 signal) must fire exactly once â€” give dispatchAfter time.
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) && fired.Load() < 1 {
 		time.Sleep(5 * time.Millisecond)
@@ -1911,7 +1913,7 @@ func TestFull_scheduler_publishesOverdue(t *testing.T) {
 	}
 }
 
-// — G20: Scheduler wired via App.Content() (M8 + M2 + M3) —————————————————
+// â€” G20: Scheduler wired via App.Content() (M8 + M2 + M3) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_scheduler_appWiring verifies that App.Content() registers modules
 // into schedulerModules (Amendment A26), that a Scheduler built from those
@@ -1974,14 +1976,14 @@ func TestFull_scheduler_appWiring(t *testing.T) {
 
 	// Adaptive timer: next must point to the future item's ScheduledAt.
 	if next == nil {
-		t.Fatal("next should not be nil — future item exists")
+		t.Fatal("next should not be nil â€” future item exists")
 	}
 	if !next.Equal(future) {
 		t.Errorf("next = %v; want %v", *next, future)
 	}
 }
 
-// — G21: Full v1.0.0 stack (M1+M2+M3+M5+M7+M8) ——————————————————————————
+// â€” G21: Full v1.0.0 stack (M1+M2+M3+M5+M7+M8) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_G21_V1FullStack wires a single App with every cross-milestone
 // feature that shipped in v1.0.0: Auth (M1), App routing (M2), SitemapConfig
@@ -2050,7 +2052,7 @@ func TestFull_G21_V1FullStack(t *testing.T) {
 
 	h := app.Handler()
 
-	// M2: GET /posts → 200 JSON, both posts present.
+	// M2: GET /posts â†’ 200 JSON, both posts present.
 	r := httptest.NewRequest("GET", "/posts", nil)
 	r.Header.Set("Accept", "application/json")
 	w := httptest.NewRecorder()
@@ -2066,7 +2068,7 @@ func TestFull_G21_V1FullStack(t *testing.T) {
 		t.Errorf("GET /posts missing scheduler-promoted post slug (M8+M2 cross-check)")
 	}
 
-	// M3: GET /sitemap.xml → 200.
+	// M3: GET /sitemap.xml â†’ 200.
 	r = httptest.NewRequest("GET", "/sitemap.xml", nil)
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -2074,7 +2076,7 @@ func TestFull_G21_V1FullStack(t *testing.T) {
 		t.Errorf("GET /sitemap.xml status = %d; want 200", w.Code)
 	}
 
-	// M5 (Feed): GET /feed.xml (aggregate) → 200 RSS 2.0.
+	// M5 (Feed): GET /feed.xml (aggregate) â†’ 200 RSS 2.0.
 	// Note: per-module /posts/feed.xml requires store injection before Register;
 	// tested directly in G11/G12. Aggregate feed verified here.
 	r = httptest.NewRequest("GET", "/feed.xml", nil)
@@ -2087,7 +2089,7 @@ func TestFull_G21_V1FullStack(t *testing.T) {
 		t.Errorf("GET /feed.xml missing RSS version attribute")
 	}
 
-	// M5 (AIIndex): GET /llms.txt → 200, contains published slug.
+	// M5 (AIIndex): GET /llms.txt â†’ 200, contains published slug.
 	r = httptest.NewRequest("GET", "/llms.txt", nil)
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -2098,7 +2100,7 @@ func TestFull_G21_V1FullStack(t *testing.T) {
 		t.Errorf("GET /llms.txt missing published post slug")
 	}
 
-	// M7 (Redirects): GET /.well-known/redirects.json → 200.
+	// M7 (Redirects): GET /.well-known/redirects.json â†’ 200.
 	r = httptest.NewRequest("GET", "/.well-known/redirects.json", nil)
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -2106,7 +2108,7 @@ func TestFull_G21_V1FullStack(t *testing.T) {
 		t.Errorf("GET /.well-known/redirects.json status = %d; want 200", w.Code)
 	}
 
-	// M7 (prefix redirect): GET /old-posts/hello-world → 301 → /posts/hello-world.
+	// M7 (prefix redirect): GET /old-posts/hello-world â†’ 301 â†’ /posts/hello-world.
 	r = httptest.NewRequest("GET", "/old-posts/hello-world", nil)
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -2117,7 +2119,7 @@ func TestFull_G21_V1FullStack(t *testing.T) {
 		t.Errorf("Location = %q; want /posts/hello-world", loc)
 	}
 
-	// M1 (Auth): POST /posts as Guest (no token) → 403 Forbidden.
+	// M1 (Auth): POST /posts as Guest (no token) â†’ 403 Forbidden.
 	// 403 is correct: the request is authenticated as Guest (role level 10)
 	// but Write requires Author (level 20). 401 would indicate unknown identity.
 	r = httptest.NewRequest("POST", "/posts", nil)
@@ -2129,7 +2131,7 @@ func TestFull_G21_V1FullStack(t *testing.T) {
 	}
 }
 
-// — G22: forge-mcp core — MCPModule interface + lifecycle (M10) ——————————————
+// â€” G22: forge-mcp core â€” MCPModule interface + lifecycle (M10) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // testMCPPost is the canonical MCP test content type for the G22 group.
 // Required fields with min constraints exercise MCPCreate validation and
@@ -2144,7 +2146,7 @@ type testMCPPost struct {
 
 // cliRoundTripPost is the content type used by the G23 CLI round-trip group.
 // It carries a []string Tags field to verify that array values survive a
-// GET→PUT round-trip without conversion errors.
+// GETâ†’PUT round-trip without conversion errors.
 type cliRoundTripPost struct {
 	Node
 	Title string `forge:"required"`
@@ -2225,7 +2227,7 @@ func TestFull_G22_MCPModuleInterface(t *testing.T) {
 	}
 }
 
-// TestFull_G22_MCPCreatePublishLifecycle exercises the create→publish lifecycle
+// TestFull_G22_MCPCreatePublishLifecycle exercises the createâ†’publish lifecycle
 // through the MCPModule interface: Draft status on create, Published after
 // MCPPublish, AfterPublish signal fires, MCPList status filtering is correct.
 func TestFull_G22_MCPCreatePublishLifecycle(t *testing.T) {
@@ -2278,7 +2280,7 @@ func TestFull_G22_MCPCreatePublishLifecycle(t *testing.T) {
 	}
 	slug := got.Slug
 
-	// MCPPublish: Draft → Published.
+	// MCPPublish: Draft â†’ Published.
 	if err := mod.MCPPublish(ctx, slug); err != nil {
 		t.Fatalf("MCPPublish: %v", err)
 	}
@@ -2311,10 +2313,10 @@ func TestFull_G22_MCPCreatePublishLifecycle(t *testing.T) {
 	}
 }
 
-// — G23: CLI round-trip — GET→PUT lifecycle and field preservation (Decision 28) —
+// â€” G23: CLI round-trip â€” GETâ†’PUT lifecycle and field preservation (Decision 28) â€”
 
 // TestFull_G23_CLIRoundTrip verifies that the HTTP API correctly handles
-// the GET→PUT round-trip pattern used by forge-cli for lifecycle operations.
+// the GETâ†’PUT round-trip pattern used by forge-cli for lifecycle operations.
 // Specifically it checks:
 //   - PublishedAt is set server-side on publish (not taken from the body)
 //   - PublishedAt is preserved on a subsequent update (no re-publish)
@@ -2362,7 +2364,7 @@ func TestFull_G23_CLIRoundTrip(t *testing.T) {
 		return m
 	}
 
-	// Step 1: Create a draft with Tags — POST /posts.
+	// Step 1: Create a draft with Tags â€” POST /posts.
 	createBody := `{"Title":"Round-trip Post","Body":"Hello world","Status":"draft","Tags":["go","forge"]}`
 	w1 := do("POST", "/posts", []byte(createBody), author)
 	if w1.Code != http.StatusCreated {
@@ -2377,7 +2379,7 @@ func TestFull_G23_CLIRoundTrip(t *testing.T) {
 		t.Errorf("create: Status = %q; want %q", got, "draft")
 	}
 
-	// Step 2: GET the item — verify Tags in initial draft.
+	// Step 2: GET the item â€” verify Tags in initial draft.
 	w2 := do("GET", "/posts/"+slug, nil, author)
 	if w2.Code != http.StatusOK {
 		t.Fatalf("GET draft: status = %d; want 200", w2.Code)
@@ -2388,7 +2390,7 @@ func TestFull_G23_CLIRoundTrip(t *testing.T) {
 		t.Errorf("GET draft: Tags len = %d; want 2", len(tags))
 	}
 
-	// Step 3: Simulate CLI `publish` — set Status=published and PUT back.
+	// Step 3: Simulate CLI `publish` â€” set Status=published and PUT back.
 	// PublishedAt in the body is zero (from the GET response); the server
 	// must set it to now regardless.
 	getItem["Status"] = "published"
@@ -2406,7 +2408,7 @@ func TestFull_G23_CLIRoundTrip(t *testing.T) {
 		t.Errorf("after publish: PublishedAt = %q; want non-zero server-set timestamp", pa)
 	}
 
-	// Step 4: Simulate CLI `update` — GET the published item, change Title only,
+	// Step 4: Simulate CLI `update` â€” GET the published item, change Title only,
 	// PUT back. Verify PublishedAt and Tags are preserved unchanged.
 	w4 := do("GET", "/posts/"+slug, nil, author)
 	if w4.Code != http.StatusOK {
@@ -2435,7 +2437,7 @@ func TestFull_G23_CLIRoundTrip(t *testing.T) {
 		t.Errorf("after update: Tags len = %d; want 2 (array must survive round-trip)", len(updatedTags))
 	}
 
-	// Step 5: Simulate CLI `archive` — GET then PUT with Status=archived.
+	// Step 5: Simulate CLI `archive` â€” GET then PUT with Status=archived.
 	w6 := do("GET", "/posts/"+slug, nil, author)
 	archiveItem := decode(t, w6)
 	archiveItem["Status"] = "archived"
@@ -2449,7 +2451,7 @@ func TestFull_G23_CLIRoundTrip(t *testing.T) {
 		t.Errorf("after archive: Status = %q; want %q", got, "archived")
 	}
 
-	// Step 6: CLI `delete` — DELETE /posts/{slug} requires Editor role.
+	// Step 6: CLI `delete` â€” DELETE /posts/{slug} requires Editor role.
 	w8 := do("DELETE", "/posts/"+slug, nil, editor)
 	if w8.Code != http.StatusNoContent {
 		t.Fatalf("delete: status = %d; want 204", w8.Code)
@@ -2461,7 +2463,7 @@ func TestFull_G23_CLIRoundTrip(t *testing.T) {
 	}
 }
 
-// — G24: SSRF validation (M11) ——————————————————————————————————————————————
+// â€” G24: SSRF validation (M11) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_G24_SSRFValidation verifies that validateWebhookURL rejects HTTP,
 // localhost, .local hostnames, and private IPs, while accepting a well-formed
@@ -2498,7 +2500,7 @@ func TestFull_G24_SSRFValidation(t *testing.T) {
 	}
 }
 
-// — G25: WebhookStore encrypt/decrypt roundtrip (M11) ————————————————————————
+// â€” G25: WebhookStore encrypt/decrypt roundtrip (M11) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_G25_WebhookStoreRoundtrip verifies that:
 //   - Create inserts an endpoint and returns a plaintext secret
@@ -2549,7 +2551,7 @@ func TestFull_G25_WebhookStoreRoundtrip(t *testing.T) {
 		t.Fatalf("List: want 1, got %d", len(list))
 	}
 	if list[0].secretEnc != "" {
-		t.Error("List must not populate secretEnc — secret must not be exposed")
+		t.Error("List must not populate secretEnc â€” secret must not be exposed")
 	}
 
 	// DecryptSecret must recover the plaintext secret via EndpointsForEvent
@@ -2579,10 +2581,10 @@ func TestFull_G25_WebhookStoreRoundtrip(t *testing.T) {
 	}
 }
 
-// — G26: Signal → enqueue (M11 + M10 + M1) ——————————————————————————————————
+// â€” G26: Signal â†’ enqueue (M11 + M10 + M1) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // g26Post is the content type used by the G26 App-wiring integration group.
-// TypeName "g26Post" → event suffix = "g26post.published".
+// TypeName "g26Post" â†’ event suffix = "g26post.published".
 type g26Post struct {
 	Node
 	Title string `forge:"required,min=3"`
@@ -2592,7 +2594,7 @@ type g26Post struct {
 // TestFull_G26_SignalEnqueue verifies that publishing a post via the MCP
 // interface causes injectWebhookHooks to enqueue a delivery job for any
 // active endpoint subscribed to the relevant event. This exercises the full
-// App → module.go afterHook → forge.go injectWebhookHooks → outbound.go
+// App â†’ module.go afterHook â†’ forge.go injectWebhookHooks â†’ outbound.go
 // Enqueue pipeline (M11 + M1 cross-milestone).
 func TestFull_G26_SignalEnqueue(t *testing.T) {
 	db := newSQLiteDB(t)
@@ -2665,7 +2667,7 @@ func TestFull_G26_SignalEnqueue(t *testing.T) {
 	}
 }
 
-// createG26Tables sets up all three tables needed for the G26–G29 webhook
+// createG26Tables sets up all three tables needed for the G26â€“G29 webhook
 // integration groups in the given DB.
 func createG26Tables(t *testing.T, db DB) {
 	t.Helper()
@@ -2695,7 +2697,7 @@ func createG26Tables(t *testing.T, db DB) {
 	}
 }
 
-// — G27: Pool retry on transient failure (M11) ———————————————————————————————
+// â€” G27: Pool retry on transient failure (M11) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_G27_RetryOnTransientFailure verifies that a job that fails on
 // the first attempt is retried and eventually delivered. Two delivery log
@@ -2738,7 +2740,7 @@ func TestFull_G27_RetryOnTransientFailure(t *testing.T) {
 	}
 
 	// Wait for the first delivery attempt to be recorded before advancing the
-	// clock. On slow CI runners, 1s is not enough — use 5s to match the outer
+	// clock. On slow CI runners, 1s is not enough â€” use 5s to match the outer
 	// retry poll and avoid advancing the clock before the first attempt lands.
 	pollDeadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(pollDeadline) {
@@ -2763,14 +2765,14 @@ func TestFull_G27_RetryOnTransientFailure(t *testing.T) {
 	}
 
 	if len(logs) < 2 {
-		t.Fatalf("want ≥2 delivery logs (1 failure + 1 success), got %d", len(logs))
+		t.Fatalf("want â‰¥2 delivery logs (1 failure + 1 success), got %d", len(logs))
 	}
 
 	cancel()
 	pool.Stop()
 }
 
-// — G28: Dead-letter after max attempts (M11) ————————————————————————————————
+// â€” G28: Dead-letter after max attempts (M11) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_G28_DeadLetterAfterMaxAttempts verifies that a job that always
 // fails transitions to "dead" status after reaching the maximum attempt count.
@@ -2832,7 +2834,7 @@ func TestFull_G28_DeadLetterAfterMaxAttempts(t *testing.T) {
 	}
 }
 
-// — G29: Circuit breaker opens after consecutive failures (M11) ——————————————
+// â€” G29: Circuit breaker opens after consecutive failures (M11) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // TestFull_G29_CircuitBreakerOpens verifies that after circuitThreshold
 // consecutive delivery failures for a single endpoint, the circuit breaker
@@ -2857,7 +2859,7 @@ func TestFull_G29_CircuitBreakerOpens(t *testing.T) {
 	enc, _ := store.encryptSecret([]byte("g29-secret"))
 	now := time.Now()
 
-	// Enqueue 6 jobs — 5 to trip the circuit, 1 to verify it's now open.
+	// Enqueue 6 jobs â€” 5 to trip the circuit, 1 to verify it's now open.
 	const total = 6
 	ids := make([]string, total)
 	for i := 0; i < total; i++ {
@@ -2895,7 +2897,7 @@ func TestFull_G29_CircuitBreakerOpens(t *testing.T) {
 	cancel()
 	pool.Stop()
 
-	// The 6th job should have been skipped (0 HTTP calls for it) — total
+	// The 6th job should have been skipped (0 HTTP calls for it) â€” total
 	// deliver calls must equal exactly circuitOpenThreshold (5), not 6.
 	calls := atomic.LoadInt32(&deliverCalls)
 	if calls > circuitOpenThreshold {
@@ -2904,10 +2906,10 @@ func TestFull_G29_CircuitBreakerOpens(t *testing.T) {
 	}
 }
 
-// — G30: MCPSchedule → AfterSchedule webhook (M11 + M10 + M8) ———————————————
+// â€” G30: MCPSchedule â†’ AfterSchedule webhook (M11 + M10 + M8) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // g30Post is the content type for the G30 cross-milestone group.
-// TypeName "g30Post" → event name "g30post.scheduled".
+// TypeName "g30Post" â†’ event name "g30post.scheduled".
 type g30Post struct {
 	Node
 	Title string `forge:"required,min=3"`
@@ -2915,8 +2917,8 @@ type g30Post struct {
 }
 
 // TestFull_G30_MCPScheduleWebhook verifies the cross-milestone path:
-// MCPSchedule (M10 MCP interface) → AfterSchedule signal (A87/M11 signals.go)
-// → injectWebhookHooks (M11 forge.go) → Enqueue. This proves that scheduling
+// MCPSchedule (M10 MCP interface) â†’ AfterSchedule signal (A87/M11 signals.go)
+// â†’ injectWebhookHooks (M11 forge.go) â†’ Enqueue. This proves that scheduling
 // a post via MCP triggers the correct webhook event "g30post.scheduled".
 func TestFull_G30_MCPScheduleWebhook(t *testing.T) {
 	db := newSQLiteDB(t)
@@ -2992,7 +2994,7 @@ func TestFull_G30_MCPScheduleWebhook(t *testing.T) {
 	}
 }
 
-// — G31: Draft preview token (M12) ———————————————————————————————————————————
+// â€” G31: Draft preview token (M12) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 // g31Post is the content type for the G31 preview token cross-milestone group.
 type g31Post struct {
@@ -3039,7 +3041,7 @@ func TestFull_G31_PreviewToken(t *testing.T) {
 		return w.Code
 	}
 
-	t.Run("valid token, draft → 200", func(t *testing.T) {
+	t.Run("valid token, draft â†’ 200", func(t *testing.T) {
 		token := app.GeneratePreviewToken(prefix, draft.Slug)
 		url := prefix + "/" + draft.Slug + "?preview=" + token
 		if code := doGet(url); code != http.StatusOK {
@@ -3047,7 +3049,7 @@ func TestFull_G31_PreviewToken(t *testing.T) {
 		}
 	})
 
-	t.Run("expired token (negative TTL), draft → 404", func(t *testing.T) {
+	t.Run("expired token (negative TTL), draft â†’ 404", func(t *testing.T) {
 		// Use a negative TTL so the expiry is in the past.
 		token := encodePreviewToken(prefix, draft.Slug, secret, -time.Second)
 		url := prefix + "/" + draft.Slug + "?preview=" + token
@@ -3063,7 +3065,7 @@ func TestFull_G31_PreviewToken(t *testing.T) {
 		t.Fatalf("seed draft2: %v", err)
 	}
 
-	t.Run("token for slug A used on slug B (both drafts) → 404", func(t *testing.T) {
+	t.Run("token for slug A used on slug B (both drafts) â†’ 404", func(t *testing.T) {
 		token := app.GeneratePreviewToken(prefix, draft.Slug)
 		url := prefix + "/" + draft2.Slug + "?preview=" + token
 		if code := doGet(url); code != http.StatusNotFound {
@@ -3071,7 +3073,7 @@ func TestFull_G31_PreviewToken(t *testing.T) {
 		}
 	})
 
-	t.Run("token for prefix /other used on /g31posts → 404", func(t *testing.T) {
+	t.Run("token for prefix /other used on /g31posts â†’ 404", func(t *testing.T) {
 		token := encodePreviewToken("/other", draft.Slug, secret, time.Hour)
 		url := prefix + "/" + draft.Slug + "?preview=" + token
 		if code := doGet(url); code != http.StatusNotFound {
@@ -3079,7 +3081,7 @@ func TestFull_G31_PreviewToken(t *testing.T) {
 		}
 	})
 
-	t.Run("valid token, archived item → 404 (archived not previewable)", func(t *testing.T) {
+	t.Run("valid token, archived item â†’ 404 (archived not previewable)", func(t *testing.T) {
 		archived := &g31Post{Node: Node{ID: NewID(), Slug: GenerateSlug("G31 Archived"), Status: Archived}, Title: "G31 Archived"}
 		if err := repo.Save(context.Background(), archived); err != nil {
 			t.Fatalf("seed archived: %v", err)
@@ -3091,14 +3093,14 @@ func TestFull_G31_PreviewToken(t *testing.T) {
 		}
 	})
 
-	t.Run("published content without token → 200 (regression)", func(t *testing.T) {
+	t.Run("published content without token â†’ 200 (regression)", func(t *testing.T) {
 		if code := doGet(prefix + "/" + pub.Slug); code != http.StatusOK {
 			t.Errorf("got %d, want 200", code)
 		}
 	})
 }
 
-// — G32: Signal bus — OnSignal + dispatchBus cross-milestone (M14 + M10 + M11) —————
+// â€” G32: Signal bus â€” OnSignal + dispatchBus cross-milestone (M14 + M10 + M11) â€”â€”â€”â€”â€”
 
 // g32Post is the content type for G32 signal bus cross-milestone tests.
 type g32Post struct {
@@ -3108,7 +3110,7 @@ type g32Post struct {
 }
 
 // TestFull_G32_OnSignalCalledOnMCPCreate verifies the cross-milestone path:
-// App.OnSignal (M14) + MCPCreate (M10) → AfterCreate bus handler fires with
+// App.OnSignal (M14) + MCPCreate (M10) â†’ AfterCreate bus handler fires with
 // a correctly populated SignalEvent.
 func TestFull_G32_OnSignalCalledOnMCPCreate(t *testing.T) {
 	app := New(MustConfig(Config{
@@ -3159,7 +3161,7 @@ func TestFull_G32_OnSignalCalledOnMCPCreate(t *testing.T) {
 }
 
 // TestFull_G32_OnSignalAndWebhookCoexist verifies that App.OnSignal custom
-// handlers and App.Webhooks webhook delivery coexist in the same signal bus —
+// handlers and App.Webhooks webhook delivery coexist in the same signal bus â€”
 // both receive the event after MCPPublish (M14 + M11 cross-milestone).
 func TestFull_G32_OnSignalAndWebhookCoexist(t *testing.T) {
 	db := newSQLiteDB(t)
@@ -3237,7 +3239,7 @@ func TestFull_G32_OnSignalAndWebhookCoexist(t *testing.T) {
 	}
 }
 
-// — G33 ———————————————————————————————————————————————————————————————————
+// â€” G33 â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
 type g33Post struct {
 	Node
@@ -3280,9 +3282,9 @@ func (s *chanAuditStore) List(_ context.Context, f AuditFilter) ([]AuditRecord, 
 // signal bus (M14/A94) and the /_audit HTTP endpoint (A97).
 //
 // Scenarios:
-//   - MCPPublish fires AfterPublish → AuditRecord appended with correct fields
+//   - MCPPublish fires AfterPublish â†’ AuditRecord appended with correct fields
 //   - MCPCreate does NOT produce an audit record (AfterCreate not subscribed)
-//   - GET /_audit with Guest → 401; with Author → 403; with Editor → 200
+//   - GET /_audit with Guest â†’ 401; with Author â†’ 403; with Editor â†’ 200
 //   - GET /_audit?type=g33Post filters to matching records only
 func TestFull_G33_AuditTrailLifecycle(t *testing.T) {
 	secret := []byte("g33-audit-trail-integration-test")
@@ -3304,7 +3306,7 @@ func TestFull_G33_AuditTrailLifecycle(t *testing.T) {
 
 	editorCtx := NewTestContext(User{ID: "editor-1", Roles: []Role{Editor}})
 
-	// MCPCreate: AfterCreate fires — must NOT be recorded by audit trail.
+	// MCPCreate: AfterCreate fires â€” must NOT be recorded by audit trail.
 	item, err := m.MCPCreate(editorCtx, map[string]any{"title": "G33 Post"})
 	if err != nil {
 		t.Fatalf("MCPCreate: %v", err)
@@ -3317,10 +3319,10 @@ func TestFull_G33_AuditTrailLifecycle(t *testing.T) {
 	case r := <-store.appended:
 		t.Errorf("unexpected audit record for AfterCreate: signal=%s", r.Signal)
 	default:
-		// correct — AfterCreate is not subscribed
+		// correct â€” AfterCreate is not subscribed
 	}
 
-	// MCPPublish: AfterPublish fires → AuditRecord must be appended.
+	// MCPPublish: AfterPublish fires â†’ AuditRecord must be appended.
 	if err := m.MCPPublish(editorCtx, post.Slug); err != nil {
 		t.Fatalf("MCPPublish: %v", err)
 	}
@@ -3349,14 +3351,14 @@ func TestFull_G33_AuditTrailLifecycle(t *testing.T) {
 
 	h := app.Handler()
 
-	// GET /_audit — Guest → 401.
+	// GET /_audit â€” Guest â†’ 401.
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/_audit", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("Guest: status = %d, want 401", w.Code)
 	}
 
-	// GET /_audit — Author → 403.
+	// GET /_audit â€” Author â†’ 403.
 	authorTok, _ := SignToken(User{ID: "a1", Roles: []Role{Author}}, string(secret), 0)
 	w = httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/_audit", nil)
@@ -3366,7 +3368,7 @@ func TestFull_G33_AuditTrailLifecycle(t *testing.T) {
 		t.Errorf("Author: status = %d, want 403", w.Code)
 	}
 
-	// GET /_audit — Editor → 200 with JSON array containing the AfterPublish record.
+	// GET /_audit â€” Editor â†’ 200 with JSON array containing the AfterPublish record.
 	editorTok, _ := SignToken(User{ID: "editor-1", Roles: []Role{Editor}}, string(secret), 0)
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/_audit", nil)
@@ -3413,4 +3415,237 @@ func TestFull_G33_AuditTrailLifecycle(t *testing.T) {
 	if !strings.HasPrefix(body, "[") {
 		t.Errorf("expected JSON array for empty result, got: %q", body)
 	}
+}
+
+// â€” G34: SingleInstance routing (T50) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
+
+// g34Page is the content type for the G34 SingleInstance group.
+type g34Page struct {
+	Node
+	Title string `forge:"required" db:"title"`
+}
+
+// TestFull_G34_SingleInstanceRouting verifies that a SingleInstance() module:
+//   - serves GET /{prefix} with the first Published item (JSON)
+//   - returns 404 for GET /{prefix} when no Published item exists
+//   - has MCPMeta().SingleInstance == true
+//   - does not register GET /{prefix}/{slug} (404)
+func TestFull_G34_SingleInstanceRouting(t *testing.T) {
+	repo := NewMemoryRepo[*g34Page]()
+	m := NewModule((*g34Page)(nil),
+		At("/about"),
+		Repo(repo),
+		SingleInstance(),
+		MCP(MCPRead, MCPWrite),
+	)
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost",
+		Secret:  []byte("g34-single-instance-test-secret!"),
+	}))
+	app.Content(m)
+	h := app.Handler()
+
+	t.Run("MCPMeta.SingleInstance is true", func(t *testing.T) {
+		meta := m.MCPMeta()
+		if !meta.SingleInstance {
+			t.Error("MCPMeta().SingleInstance = false; want true")
+		}
+	})
+
+	t.Run("GET /about â†’ 404 when no published items", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/about", nil)
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("status = %d; want 404", w.Code)
+		}
+	})
+
+	// Insert a Draft â€” should still 404 for unauthenticated request.
+	draft := &g34Page{
+		Node:  Node{ID: NewID(), Slug: GenerateSlug("About Us"), Status: Draft},
+		Title: "About Us Draft",
+	}
+	if err := repo.Save(context.Background(), draft); err != nil {
+		t.Fatalf("save draft: %v", err)
+	}
+
+	t.Run("GET /about â†’ 404 when only Draft exists (guest)", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/about", nil)
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("status = %d; want 404", w.Code)
+		}
+	})
+
+	// Publish the page.
+	draft.Status = Published
+	if err := repo.Save(context.Background(), draft); err != nil {
+		t.Fatalf("save published: %v", err)
+	}
+
+	t.Run("GET /about â†’ 200 JSON with published item", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/about", nil)
+		req.Header.Set("Accept", "application/json")
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("status = %d; want 200", w.Code)
+		}
+		var out map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if out["Title"] != "About Us Draft" {
+			t.Errorf("Title = %v; want 'About Us Draft'", out["Title"])
+		}
+	})
+
+	t.Run("GET /about/{slug} â†’ 404 (route not registered)", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/about/"+draft.Slug, nil)
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("status = %d; want 404", w.Code)
+		}
+	})
+}
+
+// â€” G35: Standalone routing (T50) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
+
+// g35Post is the content type for the G35 Standalone group.
+type g35Post struct {
+	Node
+	Title string `forge:"required" db:"title"`
+}
+
+// g35Article is a second Standalone content type for multi-module dispatch.
+type g35Article struct {
+	Node
+	Title string `forge:"required" db:"title"`
+}
+
+// TestFull_G35_StandaloneRouting verifies that a Standalone() module:
+//   - serves GET /{slug} at the top level (dispatched by App)
+//   - returns 404 via redirect fallback when slug is absent
+//   - list at GET /{prefix} still works normally
+//   - two standalone modules coexist: each slug dispatches to correct module
+func TestFull_G35_StandaloneRouting(t *testing.T) {
+	postRepo := NewMemoryRepo[*g35Post]()
+	articleRepo := NewMemoryRepo[*g35Article]()
+
+	posts := NewModule((*g35Post)(nil),
+		At("/posts"),
+		Repo(postRepo),
+		Standalone(),
+	)
+	articles := NewModule((*g35Article)(nil),
+		At("/articles"),
+		Repo(articleRepo),
+		Standalone(),
+	)
+
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost",
+		Secret:  []byte("g35-standalone-routing-secret!!"),
+	}))
+	app.Content(posts)
+	app.Content(articles)
+	h := app.Handler()
+
+	// Insert a published post and a published article.
+	post := &g35Post{
+		Node:  Node{ID: NewID(), Slug: GenerateSlug("Hello World"), Status: Published},
+		Title: "Hello World",
+	}
+	article := &g35Article{
+		Node:  Node{ID: NewID(), Slug: GenerateSlug("First Article"), Status: Published},
+		Title: "First Article",
+	}
+	if err := postRepo.Save(context.Background(), post); err != nil {
+		t.Fatalf("save post: %v", err)
+	}
+	if err := articleRepo.Save(context.Background(), article); err != nil {
+		t.Fatalf("save article: %v", err)
+	}
+
+	t.Run("GET /hello-world â†’ 200 JSON from posts module", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/"+post.Slug, nil)
+		req.Header.Set("Accept", "application/json")
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("status = %d; want 200", w.Code)
+		}
+		var out map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if out["Title"] != "Hello World" {
+			t.Errorf("Title = %v; want 'Hello World'", out["Title"])
+		}
+	})
+
+	t.Run("GET /first-article â†’ 200 JSON from articles module", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/"+article.Slug, nil)
+		req.Header.Set("Accept", "application/json")
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("status = %d; want 200", w.Code)
+		}
+		var out map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if out["Title"] != "First Article" {
+			t.Errorf("Title = %v; want 'First Article'", out["Title"])
+		}
+	})
+
+	t.Run("GET /nonexistent â†’ 404 (no module has this slug)", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/nonexistent-slug", nil)
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("status = %d; want 404", w.Code)
+		}
+	})
+
+	t.Run("GET /posts â†’ list still works (module prefix unaffected)", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/posts", nil)
+		req.Header.Set("Accept", "application/json")
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("status = %d; want 200", w.Code)
+		}
+	})
+
+	t.Run("GET /posts/{slug} â†’ 404 (not registered for standalone module)", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/posts/"+post.Slug, nil)
+		req.Header.Set("Accept", "application/json")
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("status = %d; want 404", w.Code)
+		}
+	})
+
+	t.Run("Draft item not served to guest via /{slug}", func(t *testing.T) {
+		draft := &g35Post{
+			Node:  Node{ID: NewID(), Slug: GenerateSlug("Draft Post"), Status: Draft},
+			Title: "Draft Post",
+		}
+		if err := postRepo.Save(context.Background(), draft); err != nil {
+			t.Fatalf("save draft: %v", err)
+		}
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/"+draft.Slug, nil)
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("draft slug: status = %d; want 404", w.Code)
+		}
+	})
 }

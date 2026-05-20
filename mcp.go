@@ -41,9 +41,10 @@ func MCP(ops ...MCPOperation) Option {
 // MCPMeta describes the MCP registration of a content module.
 // Returned by [MCPModule.MCPMeta].
 type MCPMeta struct {
-	Prefix     string         // URL prefix, e.g. "/posts"
-	TypeName   string         // content type name, e.g. "BlogPost"
-	Operations []MCPOperation // MCPRead and/or MCPWrite
+	Prefix         string         // URL prefix, e.g. "/posts"
+	TypeName       string         // content type name, e.g. "BlogPost"
+	Operations     []MCPOperation // MCPRead and/or MCPWrite
+	SingleInstance bool           // true when the module uses the SingleInstance() option
 }
 
 // MCPField describes a single field in a content type's MCP schema, derived

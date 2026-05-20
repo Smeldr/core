@@ -79,6 +79,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-05-16 | A97 (v1.22.0): Built-in opt-in audit trail. `audit.go` (new): `AuditRecord`, `AuditFilter`, `AuditStore` interface, `NewAuditStore(DB)`, `CreateAuditTable(DB)`, `newAuditHandler` (unexported). `forge.go`: `App.Audit(AuditStore) *App`; `App` gains `auditStore AuditStore` and `auditHandlerReg bool` fields; `App.Handler()` lazily mounts `GET /_audit` when `auditStore != nil`. `audit_test.go` (new): 13 unit tests. `integration_full_test.go`: G33 cross-milestone group. `forge-cli` v0.9.0: `forge audit list` subcommand. |
 | 2026-05-19 | A98 (v1.22.1): Fix data race in `notifyAfter`. `module.go`: `snapshotItem(item any) any` (new unexported func) — shallow reflect copy of the pointed-to struct; `notifyAfter` calls `snapshotItem` once and passes the snapshot to both `dispatchAfter` and the `afterHook` goroutine. Eliminates concurrent read/write on `Node` fields (races G26, G30, G32, G33). No exported symbols changed. |
 | 2026-05-19 | A100 (v1.22.2): Go 1.26.3 toolchain bump. `go.mod`: `go 1.26.2` → `go 1.26.3`. Closes GO-2026-4982, GO-2026-4980, GO-2026-4971, GO-2026-4918. No exported symbols changed. |
+| 2026-05-23 | A101 (v1.23.0): `SingleInstance()` and `Standalone()` module routing options. `mcp.go`: `MCPMeta.SingleInstance bool` field. `module.go`: `singleInstance bool` + `standalone bool` fields on `Module[T]`; `singleInstanceOption`/`standaloneOption` types; `SingleInstance()`/`Standalone()` exported constructors; `singleInstanceHandler`; `standaloneEnabled()`/`findAndServe()`/`findAndServeAIDoc()` dispatch helpers; `Register()` routing branches; URL generation 3-way branch in `regenerateSitemap`/`regenerateFeed`/`regenerateAI`. `forge.go`: `standaloneDispatcher` internal interface; `App.standaloneModules []standaloneDispatcher` + `App.standaloneReg bool`; `App.Content()` detects standalone modules; `App.Handler()` registers `GET /{slug}` + `GET /{slug}/aidoc` dispatch when standalone modules present. `forge-mcp/mcp.go`: `mcpAdminReadToolDefs` suppresses `list_{type}s` when `MCPMeta.SingleInstance` is true. `integration_full_test.go`: G34 (SingleInstance) + G35 (Standalone, two modules). |
 
 ---
 
@@ -94,7 +95,8 @@ forge-cms.dev/
 ├── errors.go         Error interface, sentinel errors, WriteError(), ValidationError
 ├── roles.go          Role type, hierarchy, HasRole(), IsRole(), built-in constants, Option interface
 ├── mcp.go            MCPOperation type, MCPRead/MCPWrite constants, MCP() option,
-│                     MCPMeta struct, MCPField struct (incl. Format/Description — D27), MCPModule interface
+│                     MCPMeta struct (Prefix, TypeName, Operations, SingleInstance), MCPField struct
+│                     (incl. Format/Description — D27), MCPModule interface
 │                     (Amendment A49)
 ├── node.go           Node, Status, lifecycle constants, NewID(), GenerateSlug(), UniqueSlug(), ValidateStruct()
 │                     GetSlug(), GetPublishedAt(), GetStatus() getter methods (Amendment A2)
@@ -115,17 +117,20 @@ forge-cms.dev/
 │                     RateLimit, TrustedProxy, InMemoryCache, CacheStore, Authenticate, CSRF, Chain
 ├── module.go         Module[T], NewModule, Register, Stop, At, Cache, Auth,
                       Middleware, Repo, On, SitemapConfig, AIIndex, WithoutID,
-                      Feed, DisableFeed, ContextFunc options;
+                      Feed, DisableFeed, ContextFunc, SingleInstance, Standalone options;
                       setSitemap, regenerateSitemap, setAIRegistry, regenerateAI, aiDocHandler;
                       setFeedStore, regenerateFeed; triggerRebuild();
+                      singleInstanceHandler; standaloneEnabled/findAndServe/findAndServeAIDoc
+                      (standaloneDispatcher helpers);
                       aiFeatures, llmsStore, withoutID, feedCfg, feedStore,
-                      contextFunc fields;
+                      contextFunc, singleInstance, standalone fields;
                       stoppable interface, stopCh field (Amendment A39);
                       debounce callback uses NewBackgroundContext (Amendment A41);
                       contextFuncOption, ContextFunc (Amendment A65)
 │                     (Markdownable migrated to ai.go — Amendment A11)
 ├── forge.go          Config, MustConfig, New, App (Use/Content/Handle/Run/Handler/SEO),
 │                     Registrator, SEOOption, seoState (robots/ogDefaults/appSchema), httpsRedirect,
+│                     standaloneDispatcher internal interface (A101),
 │                     graceful shutdown via SIGINT/SIGTERM;
 │                     SitemapStore wiring in Content+Handler (Amendment A4);
 │                     SEO option loop, robotsTxtRegistered guard in Handler (Amendment A5);
@@ -148,7 +153,9 @@ forge-cms.dev/
                       Config.TokenStore, App.tokenStore, App.TokenStore(),
                       TokenStore startup probe in Handler() (Amendment A66);
                       App.Audit(AuditStore) *App, auditStore/auditHandlerReg fields,
-                      GET /_audit lazy mount in Handler() (Amendment A97)
+                      GET /_audit lazy mount in Handler() (Amendment A97);
+                      standaloneModules/standaloneReg fields, GET /{slug} + GET /{slug}/aidoc
+                      dispatch in Handler() (Amendment A101)
 └── head.go           Head (Title, Description, Author, Published, Modified, Image, Type,
                       Canonical, Tags, Breadcrumbs, Alternates, Social, NoIndex),
                       Image, Breadcrumb, Alternate, Headable, HeadFunc[T], ListHeadFunc[T],
@@ -204,13 +211,17 @@ forge-cms.dev/
                       IndexHandler → /feed.xml aggregate (reverse-chronological)
 └── integration_test.go 15 integration tests: HTML render cycle, forge:head, error pages,
                       CSRF round-trip, App-level SEO/sitemap, TemplateData correctness
-└── integration_full_test.go cross-milestone test groups G1–G33 (M1–M4 + milestones 5–14 + A97):
+└── integration_full_test.go cross-milestone test groups G1–G35 (M1–M4 + milestones 5–14 + A97 + A101):
                       multi-module routing, global middleware order, role guards,
                       AfterCreate/AfterDelete/isolation, content negotiation,
                       forge_meta/forge_markdown/BreadcrumbList, sitemap in robots.txt,
                       error template first-match + fallthrough, TemplateData siteName + request URL;
                       G33: audit trail lifecycle (AfterCreate excluded, AfterPublish recorded,
-                      GET /_audit auth enforcement, content-type filter)
+                      GET /_audit auth enforcement, content-type filter);
+                      G34: SingleInstance routing (GET /prefix serves first Published item,
+                      MCPMeta.SingleInstance=true, slug URL 404);
+                      G35: Standalone routing (two modules, GET /{slug} dispatched by App,
+                      draft not served to guest, list endpoint unaffected)
 
 forge-cms.dev/forge-pgx/  (separate module: ./forge-pgx/)
 └── pgx.go            Wrap(*pgxpool.Pool) forge.DB — native pgx adapter
@@ -228,7 +239,8 @@ forge-cms.dev/forge-mcp/  (sub-module: ./forge-mcp/)
 ├── tool.go           handleToolMethod, handleToolsList, handleToolsCall,  ✅ Milestone 10 Step 3
 │                     toolName, parseToolName, moduleForType, moduleForAdminList,
 │                     authorise, authoriseEditor, errorFor, stringArg, toolResult;
-│                     mcpAdminReadToolDefs (Amendment A54); delete→Editor auth (Amendment A55)
+│                     mcpAdminReadToolDefs (Amendment A54); delete→Editor auth (Amendment A55);
+│                     list_{type}s suppressed for SingleInstance modules (Amendment A101)
 ├── transport.go      ServeStdio(ctx, in, out), Handler(),                 ✅ Milestone 10 Step 4
 │                     sseHandler, messageHandler
 └── README.md         AI-first integration guide: quick start, Claude/Cursor  ✅ Milestone 10 Step 5

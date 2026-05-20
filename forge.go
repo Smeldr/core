@@ -219,6 +219,15 @@ type seoState struct {
 	headAssets *HeadAssets
 }
 
+// standaloneDispatcher is the internal interface implemented by [Module] instances
+// that use the [Standalone] option. [App] uses it to route GET /{slug} and
+// GET /{slug}/aidoc requests at the top level rather than under the module prefix.
+type standaloneDispatcher interface {
+	standaloneEnabled() bool
+	findAndServe(w http.ResponseWriter, r *http.Request, slug string) bool
+	findAndServeAIDoc(w http.ResponseWriter, r *http.Request, slug string) bool
+}
+
 // App is the central registry for a Forge application. It couples the HTTP
 // router, global middleware, and all content modules into a single value.
 //
@@ -257,6 +266,8 @@ type App struct {
 	rebuilderModules       []rebuilder                         // modules with derived content (sitemap, feed, AI)
 	stoppableModules       []stoppable                         // modules with background goroutines to stop at shutdown
 	mcpModules             []MCPModule                         // modules registered with forge.MCP(...)
+	standaloneModules      []standaloneDispatcher              // Standalone() modules; for top-level /{slug} dispatch
+	standaloneReg          bool                                // true once GET /{slug} and GET /{slug}/aidoc are registered
 	rebuildDone            bool                                // true once startup rebuildAll goroutine is launched
 	partialsDir            string                              // set by App.Partials(); shared partial templates loaded at Run() time
 	tokenStore             *TokenStore                         // non-nil when Config.TokenStore is set; enables DB-backed token management
@@ -441,6 +452,9 @@ func (a *App) Content(v any, opts ...Option) {
 		}
 		if mm, ok := r.(MCPModule); ok && len(mm.MCPMeta().Operations) > 0 {
 			a.mcpModules = append(a.mcpModules, mm)
+		}
+		if sd, ok := r.(standaloneDispatcher); ok && sd.standaloneEnabled() {
+			a.standaloneModules = append(a.standaloneModules, sd)
 		}
 		if nt, ok := r.(interface{ setNavTree(*NavTree) }); ok {
 			a.navTreeModules = append(a.navTreeModules, nt)
@@ -819,6 +833,34 @@ func (a *App) Handler() http.Handler {
 		a.mux.Handle("GET /.well-known/redirects.json",
 			newRedirectManifestHandler(u2.Hostname(), a.redirectStore, a.redirectManifestOpts...),
 		)
+	}
+	// Standalone module dispatch: route GET /{slug} and GET /{slug}/aidoc to the
+	// module that owns the item. Must be registered before the "/" fallback so that
+	// the ServeMux specificity rules route single-segment paths here first; if no
+	// module matches, the handler delegates to the redirect store (which 404s as
+	// a last resort).
+	if len(a.standaloneModules) > 0 && !a.standaloneReg {
+		a.standaloneReg = true
+		sds := a.standaloneModules
+		rs := a.redirectStore
+		a.mux.Handle("GET /{slug}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			slug := r.PathValue("slug")
+			for _, sd := range sds {
+				if sd.findAndServe(w, r, slug) {
+					return
+				}
+			}
+			rs.handler().ServeHTTP(w, r)
+		}))
+		a.mux.Handle("GET /{slug}/aidoc", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			slug := r.PathValue("slug")
+			for _, sd := range sds {
+				if sd.findAndServeAIDoc(w, r, slug) {
+					return
+				}
+			}
+			WriteError(w, r, ErrNotFound)
+		}))
 	}
 	if !a.redirectFallbackReg {
 		a.redirectFallbackReg = true

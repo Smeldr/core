@@ -176,6 +176,44 @@ func ContextFunc(fn func(ctx Context, item any) (any, error)) Option {
 	return contextFuncOption{fn: fn}
 }
 
+// singleInstanceOption signals that a module has exactly one meaningful item.
+// Use [SingleInstance] to create one.
+type singleInstanceOption struct{}
+
+func (singleInstanceOption) isOption() {}
+
+// SingleInstance returns an [Option] that changes GET routing for content types
+// that have exactly one meaningful published item — for example a landing page,
+// about page, or campaign page.
+//
+// Instead of mounting a list at GET /{prefix} and an item at GET /{prefix}/{slug},
+// only GET /{prefix} is registered and it serves the first Published item directly.
+// A 404 is returned when no Published item exists.
+//
+// Slug-based mutation routes (PUT /{prefix}/{slug}, DELETE /{prefix}/{slug}) and
+// the create route (POST /{prefix}) are unchanged — the slug remains the internal
+// identity key.
+func SingleInstance() Option { return singleInstanceOption{} }
+
+// standaloneOption signals that items in a module are accessible at top-level
+// slug paths (/{slug}) instead of /{prefix}/{slug}.
+// Use [Standalone] to create one.
+type standaloneOption struct{}
+
+func (standaloneOption) isOption() {}
+
+// Standalone returns an [Option] that mounts each item at its slug as a
+// top-level path (/{slug}) instead of /{prefix}/{slug}). This is intended
+// for marketing pages, landing pages, or other content where clean URLs
+// without a category prefix are required.
+//
+// The list endpoint (GET /{prefix}) and mutation endpoints (POST, PUT, DELETE)
+// are unchanged. [App] registers the top-level /{slug} dispatch handler
+// automatically when at least one Standalone module is registered.
+// AI doc endpoints (/{slug}/aidoc) are also dispatched at the top level
+// when the module has [AIDoc] enabled.
+func Standalone() Option { return standaloneOption{} }
+
 // — Node field reflection cache ———————————————————————————————————————————
 //
 // Reflection reduction investigation (2026-05-04)
@@ -391,6 +429,9 @@ type Module[T any] struct {
 
 	mcpOps []MCPOperation // non-nil when MCP(...) option was given
 
+	singleInstance bool // true when SingleInstance() option was given
+	standalone     bool // true when Standalone() option was given
+
 	contextFunc func(Context, any) (any, error) // nil when no ContextFunc option given
 
 	navTree *NavTree // non-nil when App.NavTree is active; set by App.Handler via setNavTree
@@ -497,6 +538,10 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 			m.mcpOps = v.ops
 		case contextFuncOption:
 			m.contextFunc = v.fn
+		case singleInstanceOption:
+			m.singleInstance = true
+		case standaloneOption:
+			m.standalone = true
 		}
 		// repoOption[T] requires a concrete type assertion — handled separately.
 		if ro, ok := o.(repoOption[T]); ok {
@@ -641,31 +686,54 @@ func (m *Module[T]) notifyAfter(ctx Context, sig Signal, prevState string, item 
 	}
 }
 
-// Register mounts the five standard routes for this module onto mux.
+// Register mounts the standard routes for this module onto mux.
 // Called automatically by App.Content.
+//
+// Normal module:
 //
 //	GET    /{prefix}          → list
 //	GET    /{prefix}/{slug}   → show
 //	POST   /{prefix}          → create
 //	PUT    /{prefix}/{slug}   → update
 //	DELETE /{prefix}/{slug}   → delete
+//
+// With [SingleInstance]: GET /{prefix} serves the first Published item directly;
+// GET /{prefix}/{slug} is not registered.
+//
+// With [Standalone]: GET /{prefix}/{slug} is not registered here; the App
+// registers a top-level /{slug} dispatch handler that routes to this module.
 func (m *Module[T]) Register(mux *http.ServeMux) {
-	list := http.HandlerFunc(m.listHandler)
-	show := http.HandlerFunc(m.showHandler)
 	create := http.HandlerFunc(m.createHandler)
 	update := http.HandlerFunc(m.updateHandler)
 	del := http.HandlerFunc(m.deleteHandler)
 
 	if len(m.middlewares) > 0 {
-		list = http.HandlerFunc(Chain(list, m.middlewares...).ServeHTTP)
-		show = http.HandlerFunc(Chain(show, m.middlewares...).ServeHTTP)
 		create = http.HandlerFunc(Chain(create, m.middlewares...).ServeHTTP)
 		update = http.HandlerFunc(Chain(update, m.middlewares...).ServeHTTP)
 		del = http.HandlerFunc(Chain(del, m.middlewares...).ServeHTTP)
 	}
 
-	mux.Handle("GET "+m.prefix, list)
-	mux.Handle("GET "+m.prefix+"/{slug}", show)
+	if m.singleInstance {
+		si := http.HandlerFunc(m.singleInstanceHandler)
+		if len(m.middlewares) > 0 {
+			si = http.HandlerFunc(Chain(si, m.middlewares...).ServeHTTP)
+		}
+		mux.Handle("GET "+m.prefix, si)
+	} else {
+		list := http.HandlerFunc(m.listHandler)
+		if len(m.middlewares) > 0 {
+			list = http.HandlerFunc(Chain(list, m.middlewares...).ServeHTTP)
+		}
+		mux.Handle("GET "+m.prefix, list)
+		if !m.standalone {
+			show := http.HandlerFunc(m.showHandler)
+			if len(m.middlewares) > 0 {
+				show = http.HandlerFunc(Chain(show, m.middlewares...).ServeHTTP)
+			}
+			mux.Handle("GET "+m.prefix+"/{slug}", show)
+		}
+	}
+
 	mux.Handle("POST "+m.prefix, create)
 	mux.Handle("PUT "+m.prefix+"/{slug}", update)
 	mux.Handle("DELETE "+m.prefix+"/{slug}", del)
@@ -681,7 +749,7 @@ func (m *Module[T]) Register(mux *http.ServeMux) {
 			m.sitemapStore.Handler().ServeHTTP(w, r)
 		}))
 	}
-	if hasAIFeature(m.aiFeatures, AIDoc) {
+	if hasAIFeature(m.aiFeatures, AIDoc) && !m.standalone {
 		aidoc := http.HandlerFunc(m.aiDocHandler)
 		if len(m.middlewares) > 0 {
 			aidoc = http.HandlerFunc(Chain(aidoc, m.middlewares...).ServeHTTP)
@@ -775,8 +843,14 @@ func (m *Module[T]) regenerateFeed(ctx Context) {
 		head := m.resolveHead(ctx, item)
 		n := extractNode(item)
 		canonical := head.Canonical
-		if canonical == "" && n.Slug != "" {
-			canonical = strings.TrimRight(m.baseURL, "/") + m.prefix + "/" + n.Slug
+		if canonical == "" {
+			if m.singleInstance {
+				canonical = strings.TrimRight(m.baseURL, "/") + m.prefix
+			} else if m.standalone && n.Slug != "" {
+				canonical = strings.TrimRight(m.baseURL, "/") + "/" + n.Slug
+			} else if n.Slug != "" {
+				canonical = strings.TrimRight(m.baseURL, "/") + m.prefix + "/" + n.Slug
+			}
 		}
 		rssItems = append(rssItems, buildRSSItem(head, n, canonical))
 	}
@@ -815,8 +889,14 @@ func (m *Module[T]) regenerateAI(ctx Context) {
 				continue
 			}
 			canonical := r.head.Canonical
-			if canonical == "" && r.node.Slug != "" {
-				canonical = strings.TrimRight(m.baseURL, "/") + m.prefix + "/" + r.node.Slug
+			if canonical == "" {
+				if m.singleInstance {
+					canonical = strings.TrimRight(m.baseURL, "/") + m.prefix
+				} else if m.standalone && r.node.Slug != "" {
+					canonical = strings.TrimRight(m.baseURL, "/") + "/" + r.node.Slug
+				} else if r.node.Slug != "" {
+					canonical = strings.TrimRight(m.baseURL, "/") + m.prefix + "/" + r.node.Slug
+				}
 			}
 			var summary string
 			if as, ok := any(r.item).(AIDocSummary); ok {
@@ -836,8 +916,14 @@ func (m *Module[T]) regenerateAI(ctx Context) {
 				fmt.Fprintf(&buf, "## %s\n", r.head.Title)
 			}
 			canonical := r.head.Canonical
-			if canonical == "" && r.node.Slug != "" {
-				canonical = strings.TrimRight(m.baseURL, "/") + m.prefix + "/" + r.node.Slug
+			if canonical == "" {
+				if m.singleInstance {
+					canonical = strings.TrimRight(m.baseURL, "/") + m.prefix
+				} else if m.standalone && r.node.Slug != "" {
+					canonical = strings.TrimRight(m.baseURL, "/") + "/" + r.node.Slug
+				} else if r.node.Slug != "" {
+					canonical = strings.TrimRight(m.baseURL, "/") + m.prefix + "/" + r.node.Slug
+				}
 			}
 			if canonical != "" {
 				fmt.Fprintf(&buf, "URL: %s\n", canonical)
@@ -901,7 +987,13 @@ func (m *Module[T]) regenerateSitemap(ctx Context) {
 		}
 		loc := sn.Head().Canonical
 		if loc == "" {
-			loc = strings.TrimRight(m.baseURL, "/") + "/" + sn.GetSlug()
+			if m.singleInstance {
+				loc = strings.TrimRight(m.baseURL, "/") + m.prefix
+			} else if m.standalone {
+				loc = strings.TrimRight(m.baseURL, "/") + "/" + sn.GetSlug()
+			} else {
+				loc = strings.TrimRight(m.baseURL, "/") + m.prefix + "/" + sn.GetSlug()
+			}
 		}
 		priority := cfg.Priority
 		if sp, ok := any(item).(SitemapPrioritiser); ok {
@@ -1278,6 +1370,66 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 	m.writeContentCached(w, r, ct, item)
 }
 
+// singleInstanceHandler serves GET /{prefix} for modules using [SingleInstance].
+// It returns the first Published item as a single-item response (using the show
+// layout, not the list layout). Returns 404 when no Published item exists.
+//
+// Preview support: a valid ?preview=<token> allows viewing the item regardless
+// of its Draft or Scheduled status. The token is slug-bound — the item is
+// loaded first, its slug is read, and the token is validated against that slug.
+// Archived items are always 404 regardless of token.
+func (m *Module[T]) singleInstanceHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := ContextFrom(w, r)
+
+	if m.serveCached(w, r) {
+		return
+	}
+
+	// Preview bypass: load the item first, extract its slug, then validate the token.
+	if token := r.URL.Query().Get("preview"); token != "" && len(m.secret) > 0 {
+		all, err := m.repo.FindAll(ctx, ListOptions{})
+		if err == nil && len(all) > 0 {
+			item := all[0]
+			itemStatus := nodeStatusOf(item)
+			if itemStatus == Draft || itemStatus == Scheduled {
+				itemSlug := extractNode(item).Slug
+				if previewPrefix, previewSlug, tokErr := decodePreviewToken(token, m.secret); tokErr == nil &&
+					previewPrefix == m.prefix && previewSlug == itemSlug {
+					ct := m.neg.negotiate(r)
+					if ct == "text/html" {
+						m.renderShowHTML(w, r, ctx, item)
+						return
+					}
+					m.writeContentCached(w, r, ct, item)
+					return
+				}
+			}
+		}
+	}
+
+	// Lifecycle filter: Guests see only Published; Authors and above see all statuses.
+	var statuses []Status
+	if !ctx.User().HasRole(Author) {
+		statuses = []Status{Published}
+	}
+	items, err := m.repo.FindAll(ctx, ListOptions{Status: statuses})
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	if len(items) == 0 {
+		WriteError(w, r, ErrNotFound)
+		return
+	}
+	item := items[0]
+	ct := m.neg.negotiate(r)
+	if ct == "text/html" {
+		m.renderShowHTML(w, r, ctx, item)
+		return
+	}
+	m.writeContentCached(w, r, ct, item)
+}
+
 // createHandler serves POST /{prefix}.
 func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := ContextFrom(w, r)
@@ -1593,9 +1745,10 @@ func (m *Module[T]) MCPMeta() MCPMeta {
 		t = t.Elem()
 	}
 	return MCPMeta{
-		Prefix:     m.prefix,
-		TypeName:   typeName(t),
-		Operations: m.mcpOps,
+		Prefix:         m.prefix,
+		TypeName:       typeName(t),
+		Operations:     m.mcpOps,
+		SingleInstance: m.singleInstance,
 	}
 }
 
@@ -1869,4 +2022,73 @@ func (m *Module[T]) MCPDelete(ctx Context, slug string) error {
 	m.invalidateCache()
 	m.triggerRebuild()
 	return nil
+}
+
+// — Standalone dispatch helpers ————————————————————————————————————————————
+
+// standaloneEnabled reports whether this module uses the [Standalone] routing
+// option. Used by [App.Content] to register the module as a top-level slug
+// dispatcher. Implements [standaloneDispatcher].
+func (m *Module[T]) standaloneEnabled() bool { return m.standalone }
+
+// findAndServe attempts to find the item with the given slug in this module's
+// repository and serve it. Returns true when the item was found and served;
+// returns false when the slug is absent so the App's dispatch handler can try
+// the next Standalone module. Preview tokens are honoured for Draft and
+// Scheduled items using the same security model as [showHandler].
+// Implements [standaloneDispatcher].
+func (m *Module[T]) findAndServe(w http.ResponseWriter, r *http.Request, slug string) bool {
+	ctx := ContextFrom(w, r)
+	item, err := m.repo.FindBySlug(ctx, slug)
+	if err != nil {
+		return false // slug not in this module
+	}
+
+	// Preview bypass for Draft/Scheduled items (same model as showHandler).
+	itemStatus := nodeStatusOf(item)
+	if token := r.URL.Query().Get("preview"); token != "" && len(m.secret) > 0 &&
+		(itemStatus == Draft || itemStatus == Scheduled) {
+		if previewPrefix, previewSlug, tokErr := decodePreviewToken(token, m.secret); tokErr == nil &&
+			previewPrefix == m.prefix && previewSlug == slug {
+			ct := m.neg.negotiate(r)
+			if ct == "text/html" {
+				m.renderShowHTML(w, r, ctx, item)
+				return true
+			}
+			m.writeContentCached(w, r, ct, item)
+			return true
+		}
+	}
+
+	if !isVisible(item, ctx.User()) {
+		return false
+	}
+	ct := m.neg.negotiate(r)
+	if ct == "text/html" {
+		m.renderShowHTML(w, r, ctx, item)
+		return true
+	}
+	m.writeContentCached(w, r, ct, item)
+	return true
+}
+
+// findAndServeAIDoc attempts to find the item with the given slug and serve
+// its AI doc representation. Returns false when AIDoc is not enabled for this
+// module or the slug is absent. Implements [standaloneDispatcher].
+func (m *Module[T]) findAndServeAIDoc(w http.ResponseWriter, r *http.Request, slug string) bool {
+	if !hasAIFeature(m.aiFeatures, AIDoc) {
+		return false
+	}
+	ctx := ContextFrom(w, r)
+	item, err := m.repo.FindBySlug(ctx, slug)
+	if err != nil {
+		return false
+	}
+	if !isVisible(item, ctx.User()) {
+		return false
+	}
+	head := m.resolveHead(ctx, item)
+	n := extractNode(item)
+	renderAIDoc(w, r, head, n, item, m.withoutID)
+	return true
 }

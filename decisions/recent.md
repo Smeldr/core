@@ -256,3 +256,96 @@ changes to go.mod or go.sum.
 **Forge core → v1.22.2.**
 
 ---
+
+## Amendment A101 — `SingleInstance()` and `Standalone()` module routing options (v1.23.0)
+
+**Date:** 2026-05-23
+**Status:** Agreed
+
+**Context:**
+Some content modules hold exactly one item (About, Contact, Terms) where the
+canonical URL is the module prefix (`/about`), not a slug URL (`/about/some-slug`).
+Other modules benefit from first-class top-level URLs where items live at
+`/{slug}` rather than `/{prefix}/{slug}` (e.g. blog posts as landing pages).
+Neither use-case is expressible with the existing Option set.
+
+**Decision:**
+
+### `SingleInstance() Option`
+- Marks a module as single-instance.
+- `Register()` mounts `singleInstanceHandler` at `GET /{prefix}` only.
+- `GET /{prefix}/{slug}` is not registered — requests to it 404 via the
+  redirect fallback.
+- `singleInstanceHandler`: uses `repo.FindAll` with `Published` filter for
+  guests; Author+ see all statuses. Serves `items[0]` via `renderShowHTML` or
+  `writeContentCached`; 404 when the list is empty.
+- Preview token support: loads all items, reads slug from the first item,
+  validates the preview token (same HMAC model as `showHandler`). One extra
+  repo read on preview path only.
+- `MCPMeta().SingleInstance` returns `true`. forge-mcp suppresses the
+  `list_{type}s` admin tool for SingleInstance modules (a single `get_{type}`
+  is sufficient).
+- aidoc (`/{prefix}/aidoc`) not registered for SingleInstance modules — the
+  single-instance pattern implies no slug, so aidoc has no natural URL.
+
+### `Standalone() Option`
+- Marks a module as standalone-routed.
+- `Register()` mounts the list handler at `GET /{prefix}` only. It does NOT
+  mount `GET /{prefix}/{slug}` or `GET /{prefix}/{slug}/aidoc`.
+- `App.Content()` detects Standalone modules via the `standaloneDispatcher`
+  interface and appends them to `App.standaloneModules`.
+- `App.Handler()` registers `GET /{slug}` and `GET /{slug}/aidoc` dispatch
+  handlers when at least one Standalone module is present. These are
+  registered before the `"/"` redirect fallback.
+- `GET /{slug}` dispatch: iterates `standaloneModules`, calls
+  `findAndServe(w, r, slug)` on each. First match wins. If none match, falls
+  through to `redirectStore.handler()` (preserving redirect rules for
+  single-segment paths).
+- `GET /{slug}/aidoc` dispatch: same iteration, calls `findAndServeAIDoc`.
+  Returns 404 if no module serves it.
+- `findAndServe` honours preview tokens (same model as `showHandler`).
+  Items not visible to the requester return `false` (dispatch continues).
+- Sitemap, feed, and AI index URL generation uses `/{slug}` (not
+  `/{prefix}/{slug}`) when `m.standalone` is true.
+- aidoc registered via `standaloneDispatcher` only when module has AIDoc
+  feature (`findAndServeAIDoc` returns false otherwise).
+
+### URL generation 3-way branch
+All three derived-content generators (sitemap, feed, AI index) apply the same
+branching logic:
+```
+singleInstance → baseURL + prefix           (one URL for the whole module)
+standalone     → baseURL + "/" + slug       (top-level slug URL)
+normal         → baseURL + prefix + "/" + slug
+```
+
+### Call-site syntax
+```go
+// Single About page at /about
+forge.NewModule((*About)(nil),
+    forge.At("/about"),
+    forge.Repo(repo),
+    forge.SingleInstance(),
+)
+
+// Blog posts at /{slug} instead of /posts/{slug}
+forge.NewModule((*Post)(nil),
+    forge.At("/posts"),
+    forge.Repo(repo),
+    forge.Standalone(),
+)
+```
+
+**Consequences:**
+- No breaking changes. Both options are additive.
+- `example_test.go` unaffected (no existing Example uses these options).
+- `standaloneDispatcher` is unexported — no API surface risk.
+- `MCPMeta.SingleInstance` is a new field (additive, zero-value = false for
+  existing modules — no behavioural change).
+
+**Files changed:** `mcp.go`, `module.go`, `forge.go`, `forge-mcp/mcp.go`,
+`integration_full_test.go` (G34, G35), `CHANGELOG.md`, `docs/ARCHITECTURE.md`.
+
+**Forge core → v1.23.0. forge-mcp → v1.10.0.**
+
+---
