@@ -32,7 +32,7 @@ The CLA is handled automatically via cla-assistant.io when you open a PR.
 ## Questions
 
 If you have questions about commercial use, licensing, or the CLA,
-email [peter@thers.net](mailto:peter@thers.net) or open an issue tagged `licensing`.
+email [xwink@proton.me](mailto:xwink@proton.me) or open an issue tagged `licensing`.
 
 ## Frequently asked questions
 
@@ -68,5 +68,5 @@ With Forge Cloud (Phase 3). No date is set. If you need a commercial license
 before then, contact us directly — see below.
 
 **How do I contact you about licensing?**  
-Email [peter@thers.net](mailto:peter@thers.net). For non-urgent questions,
+Email [xwink@proton.me](mailto:xwink@proton.me). For non-urgent questions,
 open an issue tagged `licensing`.
