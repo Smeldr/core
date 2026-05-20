@@ -13,7 +13,7 @@ and tagged immediately.
 
 ## Reporting a vulnerability
 
-Email **peter@thers.net** with the subject line `[forge] Security vulnerability`.
+Email **xwink@proton.me** with the subject line `[forge] Security vulnerability`.
 
 Please include:
 - A clear description of the issue
