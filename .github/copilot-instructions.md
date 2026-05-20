@@ -167,6 +167,10 @@ When in doubt: Level 2.
   verified, running code.
 - A step that is deferred or descoped must be documented in `Milestone{N}_BACKLOG.md`
   immediately with the reason and the target milestone. Never silently skip.
+- **Email addresses in public documents:** Never infer, guess, or construct email
+  addresses. Only use an address that is explicitly stated in the NEXT.md task prompt.
+  If a document requires a contact address and none is provided, use the placeholder
+  `[contact@example.com]` and flag it in the plan for Peter to fill in.
 
 ## Before planning or writing anything
 
