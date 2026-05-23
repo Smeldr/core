@@ -3649,3 +3649,124 @@ func TestFull_G35_StandaloneRouting(t *testing.T) {
 		}
 	})
 }
+
+// g36HomePage is an admin-only content type with no public HTML surface.
+type g36HomePage struct {
+	Node
+	Title   string `json:"title"    forge:"required" db:"title"`
+	HeroURL string `json:"hero_url" db:"hero_url"`
+}
+
+// TestFull_G36_APIOnly verifies that an APIOnly() module (T51/A102):
+//   - GET /{prefix} with Accept: text/html → 404
+//   - GET /{prefix} with Accept: application/json → 200 with items
+//   - GET /{prefix}/{slug} with Accept: text/html → 404
+//   - GET /{prefix}/{slug} with Accept: application/json → 200
+//   - Preview token bypass for Draft item via JSON → 200
+func TestFull_G36_APIOnly(t *testing.T) {
+	secret := []byte("g36-api-only-test-secret-32byte!")
+	repo := NewMemoryRepo[*g36HomePage]()
+	m := NewModule((*g36HomePage)(nil),
+		At("/home-pages"),
+		Repo(repo),
+		MCP(MCPWrite),
+		APIOnly(),
+	)
+
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost",
+		Secret:  secret,
+	}))
+	app.Content(m)
+	h := app.Handler()
+
+	// Seed a Published item and a Draft item.
+	published := &g36HomePage{
+		Node:    Node{ID: NewID(), Slug: "home", Status: Published},
+		Title:   "Home Page",
+		HeroURL: "https://example.com/hero.jpg",
+	}
+	draft := &g36HomePage{
+		Node:    Node{ID: NewID(), Slug: "home-draft", Status: Draft},
+		Title:   "Home Page Draft",
+		HeroURL: "https://example.com/hero-draft.jpg",
+	}
+	if err := repo.Save(context.Background(), published); err != nil {
+		t.Fatalf("save published: %v", err)
+	}
+	if err := repo.Save(context.Background(), draft); err != nil {
+		t.Fatalf("save draft: %v", err)
+	}
+
+	t.Run("GET /home-pages Accept:text/html → 404", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/home-pages", nil)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("status = %d; want 404", w.Code)
+		}
+	})
+
+	t.Run("GET /home-pages Accept:application/json → 200 with items", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/home-pages", nil)
+		req.Header.Set("Accept", "application/json")
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("status = %d; want 200", w.Code)
+		}
+		var items []map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&items); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(items) == 0 {
+			t.Error("expected at least one item in response")
+		}
+	})
+
+	t.Run("GET /home-pages/home Accept:text/html → 404", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/home-pages/home", nil)
+		req.Header.Set("Accept", "text/html")
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("status = %d; want 404", w.Code)
+		}
+	})
+
+	t.Run("GET /home-pages/home Accept:application/json → 200", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/home-pages/home", nil)
+		req.Header.Set("Accept", "application/json")
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("status = %d; want 200", w.Code)
+		}
+		var out map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if out["title"] != "Home Page" {
+			t.Errorf("title = %v; want 'Home Page'", out["title"])
+		}
+	})
+
+	t.Run("Preview token bypass for Draft item via JSON → 200", func(t *testing.T) {
+		token := app.GeneratePreviewToken("/home-pages", draft.Slug)
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/home-pages/"+draft.Slug+"?preview="+token, nil)
+		req.Header.Set("Accept", "application/json")
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("preview status = %d; want 200", w.Code)
+		}
+		var out map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if out["title"] != "Home Page Draft" {
+			t.Errorf("title = %v; want 'Home Page Draft'", out["title"])
+		}
+	})
+}

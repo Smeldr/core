@@ -349,3 +349,65 @@ forge.NewModule((*Post)(nil),
 **Forge core → v1.23.0. forge-mcp → v1.10.0.**
 
 ---
+
+### A102 — `module.go`: `APIOnly()` module option
+
+**Date:** 2026-05-22
+**Status:** Agreed
+**File:** `module.go`
+
+**What:**
+`APIOnly() Option` marks a module as REST/MCP/CLI-only with no public HTML surface.
+`GET /{prefix}` and `GET /{prefix}/{slug}` with `Accept: text/html` return 404. JSON
+routes (`Accept: application/json` or absent `Accept`) are unchanged. MCP tools are
+generated in full — the same as a regular module. forge-cli works via the REST JSON
+API without any changes.
+
+**Why:**
+Forge registers HTML routes for all modules. For content types with no public HTML
+representation — such as `HomePage` or platform config — a browser visiting the prefix
+receives JSON rather than a 404. This is confusing and incorrect: the prefix should not
+be a browsable URL at all. APIOnly() makes the intent explicit and enforceable.
+
+**How:**
+- `apiOnlyOption struct{}` + `APIOnly() Option` constructor
+- `apiOnly bool` field on `Module[T]`
+- `listHandler`, `showHandler`, `singleInstanceHandler`: early return 404 when
+  `m.apiOnly` and `Accept` header contains `text/html` (explicit, non-wildcard)
+- Startup panic when `APIOnly()` and `SingleInstance()` are combined — they are
+  logically incompatible (`SingleInstance` serves HTML at `GET /{prefix}`)
+- No change to `Register()`, `contentNegotiator`, `MCPMeta`, or `forge-mcp`
+
+**Status resolution — 404 vs 406:**
+404 chosen over 406. 404 signals "this URL has no browsable surface" — search engines
+will not index it and browsers will not attempt to render it. Consistent with the
+lifecycle enforcement precedent: Draft → 404 intentionally hides existence.
+
+**Call-site syntax:**
+```go
+forge.NewModule((*HomePage)(nil),
+    forge.At("/home-pages"),
+    forge.Repo(repo),
+    forge.MCP(forge.MCPWrite),
+    forge.APIOnly(),
+)
+```
+
+**Distinction from other routing variants:**
+- `SingleInstance()`: one item, HTML at `GET /{prefix}`, `list_{type}s` MCP tool suppressed
+- `Standalone()`:     items at `/{slug}`, HTML served
+- `APIOnly()`:        no HTML anywhere; REST + MCP + CLI only, all MCP tools present
+
+**Consequences:**
+- No breaking changes. Additive option.
+- `example_test.go`: `ExampleAPIOnly()` added (compile-verified).
+- `integration_full_test.go`: G36 group (5 sub-tests).
+- `docs/ARCHITECTURE.md` updated.
+
+**Files changed:** `module.go`, `integration_full_test.go`, `example_test.go`,
+`DECISIONS.md`, `decisions/recent.md`, `docs/ARCHITECTURE.md`, `CHANGELOG.md`,
+`README.md`, `AGENTS.md`.
+
+**Forge core → v1.24.0.**
+
+---

@@ -23,6 +23,23 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.24.0] — 2026-05-22
+
+`APIOnly()` module option — REST/MCP/CLI-only with no public HTML surface (Amendment A102).
+
+### Added
+
+- `forge.APIOnly() Option` — marks a module as having no public HTML surface.
+  `GET /{prefix}` and `GET /{prefix}/{slug}` with `Accept: text/html` return 404.
+  JSON routes, MCP tools, and forge-cli are unchanged.
+- `NewModule` panics when `APIOnly()` and `SingleInstance()` are combined (logically
+  incompatible: `SingleInstance` serves HTML; `APIOnly` forbids HTML).
+- `ExampleAPIOnly` compile-verified example in `example_test.go`.
+- Integration test group G36 (`TestFull_G36_APIOnly`): 5 sub-tests covering HTML block,
+  JSON pass-through, and preview token bypass via JSON.
+
+---
+
 ## [1.23.0] — 2026-05-23
 
 `SingleInstance()` and `Standalone()` module routing options (Amendment A100).

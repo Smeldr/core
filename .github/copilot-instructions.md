@@ -370,14 +370,29 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
 - [ ] No `🔲 Coming in Milestone N` badge remains for a milestone that has shipped.
 - [ ] `go test ./...` is green (re-run if any file changed since last verification).
 - [ ] `golangci-lint run ./...` is clean, or golangci-lint is not installed (skip with warning).
-- [ ] If this commit touches module wiring API (`forge.MCP`, `forge.Repo`, `forge.At`, `forge.NewModule`),
-      MCP server wiring (`forgemcp.New`, `mcpSrv.Handler()`, `forgemcp.WithModule`),
-      forge-media registration (`forgemedia.Register`, `forgemedia.NewLocalMediaStore`),
-      token API (`forge.NewTokenStore`, `forge.SignToken`), `forge.Config` fields, or
-      `forge_format`/`forge_description` tag values: verify all code examples in `AGENTS.md`
-      are still accurate before committing.
+- [ ] **AGENTS.md** — update when any of the following change:
+      content type struct rules (tags, validation, field conventions);
+      module option API (new options, changed behaviour);
+      MCP tool behaviour (new tools, suppressed tools, changed tool names);
+      lifecycle rules or role enforcement;
+      token, webhook, or media management tools.
+      AGENTS.md ships with forge and is the primary reference for external AI coding
+      assistants. It must stay in sync with the developer-facing API.
+      Specifically: if this commit touches module wiring API (`forge.MCP`, `forge.Repo`,
+      `forge.At`, `forge.NewModule`), MCP server wiring (`forgemcp.New`, `mcpSrv.Handler()`,
+      `forgemcp.WithModule`), forge-media registration (`forgemedia.Register`,
+      `forgemedia.NewLocalMediaStore`), token API (`forge.NewTokenStore`, `forge.SignToken`),
+      `forge.Config` fields, or `forge_format`/`forge_description` tag values: verify all
+      code examples in `AGENTS.md` are still accurate before committing.
 - [ ] If this commit implements an Amendment: both the DECISIONS.md index row and the body section in `decisions/recent.md` are present. Verify with `Select-String`.
 - [ ] **Stability map**: if a shipped feature moves an area between tiers (e.g. SQLRepo graduates from Dogfooding to Stable, or a new module enters as Experimental), update the stability map in `README.md` in the same commit.
+- [ ] **Devlog draft** — write a draft to
+      `C:\Users\peter\Documents\Code\forge-common\content\drafts\devlog\`
+      and include it in the commit sequence when:
+      new public API (new module options, new MCP tools, new CLI commands);
+      new routing variant or behaviour change that affects developers;
+      bug fix that reveals a non-obvious pattern (a fix that teaches the reader something).
+      Not required for: docs-only commits, patch bumps without behaviour change, internal refactors.
 
 **M-number milestone commits — additionally mandatory:**
 - [ ] Module `README.md` updated to reflect shipped behaviour.

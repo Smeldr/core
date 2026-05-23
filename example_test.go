@@ -269,6 +269,23 @@ func ExamplePageHead() {
 // ExampleContextFunc demonstrates passing per-request sidebar data to a
 // module show template via ContextFunc. The function is called once per
 // render; its return value is available as .Extra in the template.
+func ExampleAPIOnly() {
+	type HomePage struct {
+		Node
+		Title   string `json:"title"   forge:"required"`
+		HeroURL string `json:"hero_url"`
+	}
+
+	_ = NewModule((*HomePage)(nil),
+		At("/home-pages"),
+		Repo(NewMemoryRepo[*HomePage]()),
+		MCP(MCPWrite),
+		APIOnly(),
+	)
+	// GET /home-pages with Accept: text/html → 404
+	// GET /home-pages with Accept: application/json → 200 JSON
+}
+
 func ExampleContextFunc() {
 	type DocPage struct {
 		Node

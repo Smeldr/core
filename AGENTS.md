@@ -38,6 +38,29 @@ Rules:
 - Avoid SQLite reserved keywords as column names (`order`, `group`, etc.)
   — use `db:"sort_order"` instead
 
+**json tags — required on every custom field**
+
+All fields beyond `forge.Node` must have an explicit `json:"snake_case"` tag.
+Without it, Go serialises the field as PascalCase, which breaks MCP read and write
+operations — `update_post` with `"meta_title"` will silently return empty values.
+`forge.Node` fields are exempt (handled internally).
+
+```go
+// Correct
+type Post struct {
+    forge.Node
+    Title string `forge:"required" db:"title" json:"title"`
+    Body  string `forge:"required" db:"body"  json:"body"`
+}
+
+// Wrong — MCP returns empty values for Title and Body
+type Post struct {
+    forge.Node
+    Title string `forge:"required" db:"title"`
+    Body  string `forge:"required" db:"body"`
+}
+```
+
 ### Field format hints
 
 Use `forge_format` and `forge_description` to tell AI consuming agents
@@ -116,6 +139,33 @@ app.Handle("POST /mcp/message", mcpSrv.Handler())
 ```
 
 See `forge-mcp/README.md` for connection setup and token management.
+
+### Module routing variants
+
+Three opt-in routing variants change how a module's URLs behave:
+
+| Option | When to use | HTML surface |
+|--------|-------------|-------------|
+| *(default)* | Public content with list and show pages | Full |
+| `forge.SingleInstance()` | One canonical item (about page, landing page) | `GET /{prefix}` only |
+| `forge.Standalone()` | Items at clean top-level URLs (`/{slug}`) | `/{slug}` and `/{prefix}` list |
+| `forge.APIOnly()` | Admin-only types managed via MCP/CLI, no public web surface | None — `text/html` → 404 |
+
+`APIOnly()` example — admin-only content type:
+
+```go
+forge.NewModule((*HomePage)(nil),
+    forge.At("/home-pages"),
+    forge.Repo(repo),
+    forge.MCP(forge.MCPWrite),
+    forge.APIOnly(),
+)
+// GET /home-pages Accept:application/json → 200 JSON
+// GET /home-pages Accept:text/html        → 404 (not browsable)
+// MCP tools: full set (create_home_page, update_home_page, etc.)
+```
+
+`APIOnly()` and `SingleInstance()` cannot be combined — `NewModule` panics at startup.
 
 ### Adding media support (forge-media)
 

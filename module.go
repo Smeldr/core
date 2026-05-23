@@ -214,6 +214,35 @@ func (standaloneOption) isOption() {}
 // when the module has [AIDoc] enabled.
 func Standalone() Option { return standaloneOption{} }
 
+// apiOnlyOption signals that a module has no public HTML surface.
+// Use [APIOnly] to create one.
+type apiOnlyOption struct{}
+
+func (apiOnlyOption) isOption() {}
+
+// APIOnly returns an [Option] that marks a module as REST/MCP/CLI-only with no
+// public HTML surface. GET requests with Accept: text/html return 404 — the
+// prefix is not a browsable URL.
+//
+// Use APIOnly for content types that are exclusively managed via MCP tools or
+// forge-cli and have no template or public HTML representation:
+//
+//	forge.NewModule((*HomePage)(nil),
+//	    forge.At("/home-pages"),
+//	    forge.Repo(repo),
+//	    forge.MCP(forge.MCPWrite),
+//	    forge.APIOnly(),
+//	)
+//
+// MCP tools are generated in full — the same as a regular module.
+// Mutation routes (POST, PUT, DELETE) and JSON GET routes are unchanged.
+// forge-cli works via the REST JSON API without any changes.
+//
+// Cannot be combined with [SingleInstance] — they are logically incompatible
+// ([SingleInstance] serves HTML at GET /{prefix}; [APIOnly] forbids HTML).
+// [NewModule] panics when both options are supplied.
+func APIOnly() Option { return apiOnlyOption{} }
+
 // — Node field reflection cache ———————————————————————————————————————————
 //
 // Reflection reduction investigation (2026-05-04)
@@ -431,6 +460,7 @@ type Module[T any] struct {
 
 	singleInstance bool // true when SingleInstance() option was given
 	standalone     bool // true when Standalone() option was given
+	apiOnly        bool // true when APIOnly() option was given
 
 	contextFunc func(Context, any) (any, error) // nil when no ContextFunc option given
 
@@ -542,6 +572,8 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 			m.singleInstance = true
 		case standaloneOption:
 			m.standalone = true
+		case apiOnlyOption:
+			m.apiOnly = true
 		}
 		// repoOption[T] requires a concrete type assertion — handled separately.
 		if ro, ok := o.(repoOption[T]); ok {
@@ -579,6 +611,15 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 		panic(fmt.Sprintf(
 			"forge: %s has AIIndex(LLMsTxtFull) but does not implement Markdownable "+
 				"(add a Markdown() string method); /llms-full.txt would be silently empty",
+			typeName,
+		))
+	}
+	// APIOnly() and SingleInstance() are mutually exclusive: SingleInstance serves
+	// HTML at GET /{prefix}; APIOnly forbids HTML entirely.
+	if m.apiOnly && m.singleInstance {
+		panic(fmt.Sprintf(
+			"forge: %s has both APIOnly() and SingleInstance() — they are incompatible: "+
+				"SingleInstance serves HTML at GET /{prefix}, APIOnly forbids HTML",
 			typeName,
 		))
 	}
@@ -1298,6 +1339,14 @@ func (m *Module[T]) listHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// APIOnly: this module has no public HTML surface.
+	if m.apiOnly {
+		if a := r.Header.Get("Accept"); a != "" && a != "*/*" && strings.Contains(a, "text/html") {
+			WriteError(w, r, ErrNotFound)
+			return
+		}
+	}
+
 	// Lifecycle filter: push status constraint into the repository query.
 	// Guests see only Published; Authors and above see all statuses.
 	var statuses []Status
@@ -1324,6 +1373,14 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 
 	if m.serveCached(w, r) {
 		return
+	}
+
+	// APIOnly: this module has no public HTML surface.
+	if m.apiOnly {
+		if a := r.Header.Get("Accept"); a != "" && a != "*/*" && strings.Contains(a, "text/html") {
+			WriteError(w, r, ErrNotFound)
+			return
+		}
 	}
 
 	slug := r.PathValue("slug")
@@ -1383,6 +1440,15 @@ func (m *Module[T]) singleInstanceHandler(w http.ResponseWriter, r *http.Request
 
 	if m.serveCached(w, r) {
 		return
+	}
+
+	// APIOnly: this module has no public HTML surface. Unreachable when the
+	// startup panic for APIOnly+SingleInstance fires, but included for safety.
+	if m.apiOnly {
+		if a := r.Header.Get("Accept"); a != "" && a != "*/*" && strings.Contains(a, "text/html") {
+			WriteError(w, r, ErrNotFound)
+			return
+		}
 	}
 
 	// Preview bypass: load the item first, extract its slug, then validate the token.

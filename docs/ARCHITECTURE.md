@@ -79,6 +79,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-05-16 | A97 (v1.22.0): Built-in opt-in audit trail. `audit.go` (new): `AuditRecord`, `AuditFilter`, `AuditStore` interface, `NewAuditStore(DB)`, `CreateAuditTable(DB)`, `newAuditHandler` (unexported). `forge.go`: `App.Audit(AuditStore) *App`; `App` gains `auditStore AuditStore` and `auditHandlerReg bool` fields; `App.Handler()` lazily mounts `GET /_audit` when `auditStore != nil`. `audit_test.go` (new): 13 unit tests. `integration_full_test.go`: G33 cross-milestone group. `forge-cli` v0.9.0: `forge audit list` subcommand. |
 | 2026-05-19 | A98 (v1.22.1): Fix data race in `notifyAfter`. `module.go`: `snapshotItem(item any) any` (new unexported func) — shallow reflect copy of the pointed-to struct; `notifyAfter` calls `snapshotItem` once and passes the snapshot to both `dispatchAfter` and the `afterHook` goroutine. Eliminates concurrent read/write on `Node` fields (races G26, G30, G32, G33). No exported symbols changed. |
 | 2026-05-19 | A100 (v1.22.2): Go 1.26.3 toolchain bump. `go.mod`: `go 1.26.2` → `go 1.26.3`. Closes GO-2026-4982, GO-2026-4980, GO-2026-4971, GO-2026-4918. No exported symbols changed. |
+| 2026-05-22 | A102 (v1.24.0): `APIOnly()` module option — no public HTML surface. `GET /{prefix}` and `GET /{prefix}/{slug}` with `Accept: text/html` return 404. JSON routes and all MCP tools unchanged. `APIOnly()` + `SingleInstance()` panics at startup. `apiOnly bool` field on `Module[T]`; guard added to `listHandler`, `showHandler`, `singleInstanceHandler`. `integration_full_test.go`: G36. `example_test.go`: `ExampleAPIOnly`. |
 | 2026-05-23 | A101 (v1.23.0): `SingleInstance()` and `Standalone()` module routing options. `mcp.go`: `MCPMeta.SingleInstance bool` field. `module.go`: `singleInstance bool` + `standalone bool` fields on `Module[T]`; `singleInstanceOption`/`standaloneOption` types; `SingleInstance()`/`Standalone()` exported constructors; `singleInstanceHandler`; `standaloneEnabled()`/`findAndServe()`/`findAndServeAIDoc()` dispatch helpers; `Register()` routing branches; URL generation 3-way branch in `regenerateSitemap`/`regenerateFeed`/`regenerateAI`. `forge.go`: `standaloneDispatcher` internal interface; `App.standaloneModules []standaloneDispatcher` + `App.standaloneReg bool`; `App.Content()` detects standalone modules; `App.Handler()` registers `GET /{slug}` + `GET /{slug}/aidoc` dispatch when standalone modules present. `forge-mcp/mcp.go`: `mcpAdminReadToolDefs` suppresses `list_{type}s` when `MCPMeta.SingleInstance` is true. `integration_full_test.go`: G34 (SingleInstance) + G35 (Standalone, two modules). |
 
 ---
@@ -117,13 +118,14 @@ forge-cms.dev/
 │                     RateLimit, TrustedProxy, InMemoryCache, CacheStore, Authenticate, CSRF, Chain
 ├── module.go         Module[T], NewModule, Register, Stop, At, Cache, Auth,
                       Middleware, Repo, On, SitemapConfig, AIIndex, WithoutID,
-                      Feed, DisableFeed, ContextFunc, SingleInstance, Standalone options;
+                      Feed, DisableFeed, ContextFunc, SingleInstance, Standalone,
+                      APIOnly options;
                       setSitemap, regenerateSitemap, setAIRegistry, regenerateAI, aiDocHandler;
                       setFeedStore, regenerateFeed; triggerRebuild();
                       singleInstanceHandler; standaloneEnabled/findAndServe/findAndServeAIDoc
                       (standaloneDispatcher helpers);
                       aiFeatures, llmsStore, withoutID, feedCfg, feedStore,
-                      contextFunc, singleInstance, standalone fields;
+                      contextFunc, singleInstance, standalone, apiOnly fields;
                       stoppable interface, stopCh field (Amendment A39);
                       debounce callback uses NewBackgroundContext (Amendment A41);
                       contextFuncOption, ContextFunc (Amendment A65)
@@ -725,13 +727,22 @@ A single endpoint responds differently based on the `Accept` header:
 
 ```
 Accept: application/json     → JSON response (default for API clients)
-Accept: text/html            → rendered template
+Accept: text/html            → rendered template (or 404 for APIOnly modules)
 Accept: text/markdown        → calls Markdown() if implemented, else 406
 Accept: text/plain           → stripped plaintext version
 ```
 
 The `Accept` header check uses pre-compiled content-type matching per module,
 not string comparison on every request.
+
+### Routing variants
+
+| Option | GET /{prefix} | GET /{prefix}/{slug} | MCP tools |
+|--------|--------------|----------------------|-----------|
+| *(default)* | list (HTML or JSON) | show (HTML or JSON) | full set |
+| `SingleInstance()` | first Published item (HTML or JSON) | not registered (404) | `list_{type}s` suppressed |
+| `Standalone()` | list (HTML or JSON) | not registered; `GET /{slug}` dispatched by App | full set |
+| `APIOnly()` | JSON only; `text/html` → 404 | JSON only; `text/html` → 404 | full set |
 
 ---
 

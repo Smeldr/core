@@ -3,7 +3,7 @@
 A Go framework for content-driven applications. Zero runtime dependencies. AI-native by default.
 
 [![Go Reference](https://pkg.go.dev/badge/forge-cms.dev/forge.svg)](https://pkg.go.dev/forge-cms.dev/forge)
-**v1.23.0 — stable.** Public APIs are intended to be stable within v1. Breaking changes may still occur in Phase 2 where the architecture demands it. See the stability map below. See [CHANGELOG.md](CHANGELOG.md).
+**v1.24.0 — stable.** Public APIs are intended to be stable within v1. Breaking changes may still occur in Phase 2 where the architecture demands it. See the stability map below. See [CHANGELOG.md](CHANGELOG.md).
 
 **Status: Phase 2 — active production dogfooding.**
 Forge powers forge-cms.dev and is under active development. The core architecture is in place; APIs may still evolve as dogfooding reveals better shapes. Use it today if you are comfortable following changes. The stability map below shows which areas are settled and which are still moving.
