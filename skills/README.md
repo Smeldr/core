@@ -17,3 +17,11 @@ Claude.ai project instructions. Guides non-technical users through design
 intent elicitation and produces a `forge-pattern.md` via conversation.
 
 Add to: Custom instructions in a Claude.ai project.
+
+## forge-operator.md
+
+Claude.ai project instructions for non-technical site owners managing content
+via MCP. Covers the full content lifecycle, image uploads, navigation, and
+voice/tone guidelines for operator interactions.
+
+Add to: Custom instructions in a Claude.ai project connected to a Forge site.
