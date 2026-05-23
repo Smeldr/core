@@ -4,6 +4,14 @@ Claude Code skills and Claude.ai project instructions for Forge developers.
 
 Copy the relevant file into your project to enable AI-assisted workflows.
 
+## forge.md
+
+Claude Code skill for Forge developers. Covers the full Forge API: content
+types, module wiring, routing variants, signal bus, MCP tool catalog, upload
+token flow, forge-social, and forge-agent.
+
+Add to: `.claude/skills/forge.md` in your project.
+
 ## forge-design.md
 
 Claude Code skill. Generates `forge-pattern.md` files from Forge Go content

@@ -401,6 +401,7 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       module registry: version updated, stability label reviewed if this release
       changes API surface, adds a module, or materially changes production confidence.
 - [ ] `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` updated: version line, MCP tools, CLI commands, any new sections. Read it with the Read tool.
+- [ ] `skills/forge.md` in forge repo — copy updated `forge-common/agent/skills/forge.md`
 
 "No changes needed" is only valid after explicitly reading each file and confirming it already reflects the shipped code. Never assume.
 
