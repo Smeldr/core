@@ -259,8 +259,62 @@ Rules:
   Author and Editor roles see items at any status.
 - `GET /{prefix}/{slug}` is not registered. Requests to it return 404.
 - Preview tokens work the same as the standard show handler.
+  `forge-mcp` generates the preview URL as `/{prefix}?preview={token}` — no slug
+  in the path (requires forge-mcp ≥ v1.10.2).
 - `MCPMeta().SingleInstance` returns `true`. The `forge-mcp` server suppresses
   the `list_{type}s` admin tool for SingleInstance modules.
+
+#### Pattern: SingleInstance with custom public handler
+
+Use this pattern when the public URL for the content differs from the module
+prefix — for example, a homepage served at `/` while the module is registered
+at `/homepage`.
+
+```go
+// Register the content type as SingleInstance.
+// GET /homepage → serves the published record (admin + MCP access).
+// list_home_pages MCP tool suppressed.
+// create_preview_url generates /homepage?preview=<token> (no slug).
+app.Content(forge.NewModule((*HomePage)(nil),
+    forge.Repo(homePageRepo),
+    forge.At("/homepage"),
+    forge.SingleInstance(),
+    forge.MCP(forge.MCPRead, forge.MCPWrite),
+))
+
+// Serve the public route with a custom handler.
+// Reads the published record; falls back to defaults when none exists.
+app.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    hps, _ := homePageRepo.FindAll(r.Context(), forge.ListOptions{
+        Status: []forge.Status{forge.Published},
+    })
+    hp := homePageDefaults()
+    for _, p := range hps {
+        if p.Slug == "home" {
+            hp = p
+            break
+        }
+    }
+    // render template with hp ...
+}))
+```
+
+The module prefix (`/homepage`) is the admin and MCP surface. The public URL
+(`/`) is fully independent — the custom handler owns it entirely.
+
+#### When to use SingleInstance
+
+- Exactly one record of this type will ever be published
+- No list page is needed
+- Content is managed via MCP or CLI, not browsed by users
+- The public URL may differ from the module prefix
+
+#### When not to use SingleInstance
+
+- Multiple records of the same type — use a regular module
+- The module prefix **is** the public URL and templates handle rendering — use
+  a regular module with `forge.Templates(...)`
+- Items need per-item slug URLs — use a regular module or `Standalone()`
 
 ### Standalone — first-class top-level URLs
 
