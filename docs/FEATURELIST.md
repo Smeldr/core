@@ -2,14 +2,15 @@
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.22.2 (A100) + forge-mcp v1.9.3 + forge-social v0.6.0 + forge-agent v0.3.7 + forge-cli v0.9.0.
+Last updated: v1.25.0 (A103) + forge-mcp v1.11.0 + forge-oauth v0.1.0 + forge-social v0.6.0 + forge-agent v0.3.7 + forge-cli v0.9.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `forge` (core) | v1.22.0 | Stable |
-| `forge-mcp` | v1.9.3 | Stable |
+| `forge` (core) | v1.25.0 | Stable |
+| `forge-mcp` | v1.11.0 | Stable |
+| `forge-oauth` | v0.1.0 | Beta |
 | `forge-pgx` | — | Beta |
 | `forge-media` | v1.2.0 | Beta |
 | `forge-cli` | v0.9.0 | Beta |
@@ -91,6 +92,15 @@ Admin tools (require Admin role):
 - `create_webhook`, `list_webhooks`, `delete_webhook` — manage outbound endpoints
 - `list_webhook_deliveries`, `retry_webhook` — delivery introspection and retry
 - `create_token`, `list_tokens`, `revoke_token` — token management
+
+OAuth 2.1 for remote MCP servers (forge-oauth v0.1.0):
+
+- `forgemcp.WithOAuth(*forgeoauth.Server)` — enables OAuth 2.1 on the MCP server; all HTTP endpoints require Bearer
+- `GET /.well-known/oauth-protected-resource` — RFC 9728 protected resource metadata
+- `GET /.well-known/oauth-authorization-server` — RFC 8414 authorization server metadata (served by forge-oauth)
+- PKCE S256 mandatory, CIMD stateless client validation, `offline_access` scope for refresh tokens
+- Scope mapping: `mcp` → Author role, `mcp:admin` → Admin role
+- SQLite-backed token store (`forgeoauth.NewSQLiteStore`)
 
 MCP resource subscriptions (Beta):
 

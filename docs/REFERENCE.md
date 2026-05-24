@@ -463,6 +463,11 @@ Copy this token immediately. Use it with `forge-cli init` or with the
 when `TokenStore` is configured — `VerifyBearerToken` only accepts tokens
 that exist in the store. Use `TokenStore.Create` or `forge-cli` instead.
 
+`forge.VerifyTokenString(token string, secret []byte, store *TokenStore) (User, bool)` —
+verifies a raw bearer token string directly, without an `*http.Request`. Identical
+verification logic to `VerifyBearerToken`. Use this when calling from a downstream
+library (e.g. the `VerifyBearer` callback in `forgeoauth.Config`). Requires v1.25.0+.
+
 ### Go API
 
 ```go
