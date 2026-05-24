@@ -411,3 +411,53 @@ forge.NewModule((*HomePage)(nil),
 **Forge core → v1.24.0.**
 
 ---
+
+### A103 — `auth.go`: `VerifyTokenString`
+
+**Date:** 2026-05-24
+**Status:** Agreed
+**File:** `auth.go`
+
+**What:**
+`VerifyTokenString(token string, secret []byte, store *TokenStore) (User, bool)` —
+verifies a raw bearer token string without requiring an `*http.Request`. Identical
+logic to `VerifyBearerToken` except the token is provided directly rather than
+extracted from an `Authorization` header. When `store` is non-nil, the DB lookup
+uses `context.Background()`.
+
+**Why:**
+`forge-oauth` is a standalone MIT-licensed library with no dependency on forge core's
+HTTP layer. It needs to validate Forge bearer tokens during the OAuth `/oauth/authorize`
+form submission (user pastes their existing Forge token to approve the authorization).
+`VerifyBearerToken` requires an `*http.Request`; constructing a synthetic request just
+to pass the token through is semantically incorrect and fragile.
+
+`VerifyTokenString` gives downstream callers (forge-oauth, forge-agent, forge-admin)
+a clean, minimal API: supply the raw token string, get back a `User` and a bool. No
+HTTP plumbing required.
+
+**How:**
+- New exported function `VerifyTokenString` in `auth.go`, positioned immediately after
+  `VerifyBearerToken`.
+- Calls the same `decodeToken` internal function. Same SHA-256 fingerprint + DB check
+  path when `store != nil`. No new logic — no duplication risk.
+- `context` package already imported in `auth.go`.
+
+**Rejected alternative:**
+Synthetic `*http.Request` construction in forge-oauth. Rejected: requires importing
+`net/http` into a library whose design goal is minimal dependencies; semantically
+incorrect (an HTTP request object is not the right representation of "a token string").
+
+**Consequences:**
+- No breaking changes. Additive exported function.
+- forge-oauth can validate Forge tokens without importing `forge-cms.dev/forge` at all
+  if using the callback pattern: `func(token string) bool { _, ok := forge.VerifyTokenString(...); return ok }`.
+- No new test file — existing `auth_test.go` infrastructure sufficient; the underlying
+  `decodeToken` and TokenStore paths are already covered. A companion smoke-test is
+  included in the forge-oauth integration test (Lag 2) which exercises the full flow.
+
+**Files changed:** `auth.go`, `DECISIONS.md`, `decisions/recent.md`, `CHANGELOG.md`.
+
+**Forge core → v1.25.0.**
+
+---

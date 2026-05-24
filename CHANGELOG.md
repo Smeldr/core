@@ -23,6 +23,23 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.25.0] — 2026-05-24
+
+`VerifyTokenString` — verify a Forge bearer token without an HTTP request (Amendment A103).
+
+### Added
+
+- `forge.VerifyTokenString(token string, secret []byte, store *TokenStore) (User, bool)` —
+  verifies a raw bearer token string directly, without requiring an `*http.Request`.
+  Identical verification logic to `VerifyBearerToken` (HMAC decode + optional
+  `forge_tokens` fingerprint check). When `store` is non-nil, the DB lookup uses
+  `context.Background()`.
+
+  Intended for downstream libraries (forge-oauth, forge-agent, forge-admin) that hold
+  a token string and need to validate it without constructing a synthetic HTTP request.
+
+---
+
 ## [1.24.0] — 2026-05-22
 
 `APIOnly()` module option — REST/MCP/CLI-only with no public HTML surface (Amendment A102).

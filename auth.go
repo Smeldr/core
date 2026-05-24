@@ -315,6 +315,40 @@ func VerifyBearerToken(r *http.Request, secret []byte, store *TokenStore) (User,
 	return user, true
 }
 
+// VerifyTokenString verifies a raw bearer token string without requiring an
+// [http.Request]. It is otherwise identical to [VerifyBearerToken]: it decodes
+// the HMAC signature, optionally checks the token fingerprint against the
+// forge_tokens table, and returns the authenticated [User] and true on success.
+//
+// Use VerifyTokenString when the caller already holds the raw token value —
+// for example, when a downstream server (forge-oauth) needs to validate a
+// Forge token without constructing a synthetic HTTP request. For regular HTTP
+// middleware, prefer [VerifyBearerToken] which extracts the token from the
+// Authorization header itself.
+//
+// When store is non-nil, the lookup uses [context.Background].
+func VerifyTokenString(token string, secret []byte, store *TokenStore) (User, bool) {
+	user, err := decodeToken(token, string(secret))
+	if err != nil {
+		return GuestUser, false
+	}
+	if store != nil {
+		h := sha256.Sum256([]byte(token))
+		id := hex.EncodeToString(h[:])
+		row := store.db.QueryRowContext(context.Background(),
+			`SELECT revoked_at FROM forge_tokens WHERE id = $1`, id,
+		)
+		var revokedAt *string
+		if err := row.Scan(&revokedAt); err != nil {
+			return GuestUser, false
+		}
+		if revokedAt != nil {
+			return GuestUser, false
+		}
+	}
+	return user, true
+}
+
 // — TokenStore —————————————————————————————————————————————————————————————
 
 // TokenRecord is a named bearer token entry stored in the forge_tokens table.
