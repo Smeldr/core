@@ -513,3 +513,31 @@ The section states:
 - Nav CLI gap is formally acknowledged and tracked.
 
 ---
+
+## Decision D32 — decisions/ file system restructure
+
+**Date:** 2026-05-17
+**Status:** Active
+
+**Context:**
+decisions/phase2.md was the catch-all for all decisions from D25 onwards.
+The name was misleading and the structure did not scale.
+
+**Decision:**
+Restructure to a flat, role-separated system with a rolling working file.
+
+- Flat structure — no subdirectories. Topic files are always leaves.
+- Rolling window is size-based (~20KB), not count-based.
+- Non-Decisions go directly to nondecisions.md, not through recent.md.
+- Structure description lives in DECISIONS.md header — single authoritative source.
+- Archiving is architect-directed, not autonomous.
+- phase2.md renamed to phase2-archive.md (not deleted).
+
+**Files:**
+- decisions/recent.md — new decisions, rolling ~20KB window
+- decisions/nondecisions.md — all Non-Decisions
+- decisions/phase2-archive.md — archived (was phase2.md)
+- decisions/core.md — unchanged
+- decisions/[topic].md — created on architect instruction
+
+---

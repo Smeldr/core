@@ -4163,3 +4163,160 @@ unaffected. The change is invisible to application code.
 
 **Forge core → v1.21.0.**
 
+---
+
+## Amendment A87 — signals.go: AfterSchedule Signal constant
+
+**Date:** 2026-05-06
+**Status:** Agreed
+**Milestone:** 11 / Layer 1
+
+### Problem
+
+The Scheduled status transition fires AfterUpdate but no dedicated signal. Webhook
+consumers and MCP subscription listeners cannot distinguish a scheduling event from
+a plain content edit without inspecting the payload. This makes it impossible to
+subscribe to post.scheduled webhook events or react to scheduling via signal handlers.
+
+### Change
+
+**signals.go** — new constant added to the Signal const block:
+
+```go
+// AfterSchedule fires after a content item transitions to Scheduled status.
+// It fires in addition to AfterUpdate — not instead of it. Runs
+// asynchronously — errors and panics are logged, never returned.
+AfterSchedule Signal = "after_schedule"
+```
+
+AfterSchedule is dispatched in module.go alongside AfterUpdate whenever
+newStatus == Scheduled && prevStatus != Scheduled. It fires from both HTTP
+updateHandler and MCPSchedule.
+
+### Consequences
+
+- New exported Signal constant: additive only; no existing handlers affected.
+- All code that ranges over m.signals is range-based; the new key is ignored
+  unless a handler is registered with forge.On[T](AfterSchedule, fn).
+- ARCHITECTURE.md updated: AfterSchedule added to the signal constants table.
+- No breaking change; no required application updates.
+
+---
+
+## Amendment A97 — Built-in opt-in audit trail (T21)
+
+**Date:** 2026-05-16
+**Status:** Agreed
+**Scope:** `audit.go` (new file), `forge.go` — `App.Audit`, `App.Handler` (Level 3 — new exported API)
+
+**Problem:**
+Applications built on Forge have no standard way to record who changed what and
+when. Each team rolls bespoke audit tables. The signal bus (A94) already captures
+every lifecycle transition with actor identity, content type, slug, and previous
+state — but only for webhook delivery. There is no built-in persistence path.
+
+**Decision:**
+Add `App.Audit(store AuditStore) *App` — a single opt-in call that:
+1. Subscribes to `AfterPublish`, `AfterSchedule`, `AfterArchive`, and `AfterDelete`
+   via the existing signal bus.
+2. On each event, appends an `AuditRecord` to the provided `AuditStore`.
+3. Mounts `GET /_audit` (Editor-or-higher) that returns the stored records as a
+   JSON array, filterable by `from`, `to` (RFC3339), `type`, and `actor`.
+
+`AfterCreate` and `AfterUpdate` are intentionally excluded: they fire on every
+save (including auto-saves / draft cycles) and would produce unbounded noise in
+the audit log. The audit trail records only transitions that change publication
+state.
+
+**Implementation:**
+- `AuditRecord` — immutable struct: `ID`, `Timestamp`, `Signal`, `ContentType`,
+  `Slug`, `ActorID`, `ActorRole`, `PreviousState`.
+- `AuditFilter` — query narrowing: `From`, `To time.Time`, `ContentType`, `ActorID string`.
+- `AuditStore` interface — `Append(ctx, AuditRecord) error` + `List(ctx, AuditFilter) ([]AuditRecord, error)`.
+- `NewAuditStore(db DB) AuditStore` — default SQL implementation; timestamps
+  stored as RFC3339 strings for SQLite compatibility (same pattern as `auth.go`).
+- `CreateAuditTable(db DB) error` — DDL helper; creates `forge_audit_log` table.
+- `GET /_audit` mounted lazily in `App.Handler()` when `auditStore != nil`.
+
+**New exported symbols:**
+- `audit.go`: `AuditRecord`, `AuditFilter`, `AuditStore`, `NewAuditStore`, `CreateAuditTable`
+- `forge.go`: `App.Audit`
+
+**Forge core → v1.22.0.**
+
+---
+
+## Amendment A98 — Fix data race in notifyAfter (module.go)
+
+**Date:** 2026-05-19
+**Status:** Agreed
+
+`snapshotItem(item any) any` added to `module.go`. Before passing `item` to any
+goroutine in `notifyAfter`, a shallow struct copy is taken. Both goroutines receive
+the snapshot; the caller retains the original pointer for subsequent operations.
+
+Root cause: `notifyAfter` passed the original item pointer to two goroutines
+concurrently — `dispatchAfter` (reads via reflection) and `afterHook` (callback).
+A subsequent MCP call on the same slug called `setNodeStatus` on the same pointer
+before those goroutines finished reading. Caught by `-race` gate in CI.
+
+**No exported symbols changed. No interface changes.**
+
+**Forge core → v1.22.1.**
+
+---
+
+## Amendment A99 — Go toolchain upgrade policy
+
+**Date:** 2026-05-19
+**Status:** Agreed
+
+- **Patch releases (1.26.x):** Follow promptly — within one sprint. govulncheck in CI acts as the trigger.
+- **Minor releases (1.27+):** Upgrade within 1–2 months, or before Go drops support for the previous minor.
+- **go.mod `go` directive:** Always tracks the latest patch of the current minor.
+- **`toolchain` directive:** Use when a patch bump is needed for govulncheck but minimum language version should stay stable.
+
+---
+
+## Amendment A100 — Go 1.26.3 toolchain bump
+
+**Date:** 2026-05-19
+**Status:** Agreed
+
+`go.mod` `go` directive bumped from `go 1.26.2` to `go 1.26.3`. Triggered by four
+govulncheck CVEs (GO-2026-4982, GO-2026-4980, GO-2026-4971, GO-2026-4918), all
+fixed in Go 1.26.3. Per A99 policy.
+
+**Forge core → v1.22.2.**
+
+---
+
+## Amendment A101 — `SingleInstance()` and `Standalone()` module routing options
+
+**Date:** 2026-05-23
+**Status:** Agreed
+
+### `SingleInstance() Option`
+Marks a module as single-instance. `Register()` mounts `singleInstanceHandler` at
+`GET /{prefix}` only. `GET /{prefix}/{slug}` is not registered. `MCPMeta().SingleInstance`
+returns `true`; forge-mcp suppresses the `list_{type}s` admin tool.
+
+### `Standalone() Option`
+Marks a module as standalone-routed. Items live at `/{slug}` instead of
+`/{prefix}/{slug}`. `App.Handler()` registers `GET /{slug}` and `GET /{slug}/aidoc`
+dispatch handlers when at least one Standalone module is present.
+
+### URL generation 3-way branch
+```
+singleInstance → baseURL + prefix
+standalone     → baseURL + "/" + slug
+normal         → baseURL + prefix + "/" + slug
+```
+
+No breaking changes. Both options are additive.
+
+**Files changed:** `mcp.go`, `module.go`, `forge.go`, `forge-mcp/mcp.go`,
+`integration_full_test.go` (G34, G35), `CHANGELOG.md`, `docs/ARCHITECTURE.md`.
+
+**Forge core → v1.23.0. forge-mcp → v1.10.0.**
+
