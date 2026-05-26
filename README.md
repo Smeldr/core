@@ -1,12 +1,15 @@
-# Forge
+﻿# Forge
 
 A Go framework for content-driven applications. Zero runtime dependencies. AI-native by default.
 
-[![Go Reference](https://pkg.go.dev/badge/forge-cms.dev/forge.svg)](https://pkg.go.dev/forge-cms.dev/forge)
+[![Go Reference](https://pkg.go.dev/badge/smeldr.dev/core.svg)](https://pkg.go.dev/smeldr.dev/core)
+
+> **Module path changed.** The Go module path has been renamed from `forge-cms.dev/forge` to `smeldr.dev/core` as part of the Smeldr rebrand. The `pkg.go.dev/forge-cms.dev/forge` documentation is no longer updated. Use `go get smeldr.dev/core` for all new and existing projects.
+
 **v1.25.0 — stable.** Public APIs are intended to be stable within v1. Breaking changes may still occur in Phase 2 where the architecture demands it. See the stability map below. See [CHANGELOG.md](CHANGELOG.md).
 
 **Status: Phase 2 — active production dogfooding.**
-Forge powers forge-cms.dev and is under active development. The core architecture is in place; APIs may still evolve as dogfooding reveals better shapes. Use it today if you are comfortable following changes. The stability map below shows which areas are settled and which are still moving.
+Forge powers smeldr.dev and is under active development. The core architecture is in place; APIs may still evolve as dogfooding reveals better shapes. Use it today if you are comfortable following changes. The stability map below shows which areas are settled and which are still moving.
 
 **Stability map**
 
@@ -75,7 +78,7 @@ go run .
 ## Installation
 
 ```bash
-go get forge-cms.dev/forge
+go get smeldr.dev/core
 ```
 
 Requires Go 1.26+. No other dependencies.
@@ -92,7 +95,7 @@ package main
 import (
 	"log"
 
-	"forge-cms.dev/forge"
+	"smeldr.dev/core"
 )
 
 type Post struct {
@@ -166,7 +169,7 @@ Each runs with: `cd example/blog && go run .`
 ## Reference
 
 Full API reference: [REFERENCE.md](docs/REFERENCE.md)  
-Web docs: [forge-cms.dev/docs](https://forge-cms.dev/docs)
+Web docs: [smeldr.dev/docs](https://smeldr.dev/docs)
 
 For full token management reference (create, list, revoke) see [REFERENCE.md — Token management](docs/REFERENCE.md#token-management).  
 For draft preview tokens see [REFERENCE.md — Draft preview](docs/REFERENCE.md#draft-preview).

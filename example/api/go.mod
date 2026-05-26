@@ -2,6 +2,6 @@ module example/api
 
 go 1.26.2
 
-require forge-cms.dev/forge v0.0.0
+require smeldr.dev/core v0.0.0
 
-replace forge-cms.dev/forge => ../..
+replace smeldr.dev/core => ../..

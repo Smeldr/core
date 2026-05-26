@@ -340,7 +340,7 @@ instance from a terminal or CI/CD pipeline. The REST API and MCP endpoints are
 already stable. A thin CLI wrapping those endpoints is the minimal solution.
 
 **Decision:**
-Add a new Go submodule `forge-cms.dev/forge-cli` (package main).
+Add a new Go submodule `smeldr.dev/cli` (package main).
 
 ### Design constraints
 
@@ -360,7 +360,7 @@ Add a new Go submodule `forge-cms.dev/forge-cli` (package main).
 | status.go | status subcommand -- GET /_health |
 | main.go | Entry point + top-level subcommand router |
 | cli_test.go | Unit tests: frontmatter (9), mergeFields (2), loadEnvFile (3) |
-| go.mod | Module forge-cms.dev/forge-cli, Go 1.22, no require block |
+| go.mod | Module smeldr.dev/cli, Go 1.22, no require block |
 | CHANGELOG.md | Submodule changelog |
 | README.md | Installation, configuration, all commands |
 
@@ -855,7 +855,7 @@ Two remaining first-impression gaps identified after A70:
 - **New `## 30-second start` section** inserted immediately after the badges/version
   line, before `## What Forge gives you`:
   ```bash
-  git clone https://forge-cms.dev/forge
+  git clone https://smeldr.dev/core
   cd example/blog
   go run .
   # open http://localhost:8080
@@ -994,7 +994,7 @@ func (a *App) Config() Config { return a.cfg }
 **Date:** 2026-04-18
 
 **Decision:** Introduce `forge-media` as an optional, separately versioned Go submodule
-(`forge-cms.dev/forge-media`) that provides file upload, serving, listing,
+(`smeldr.dev/core-media`) that provides file upload, serving, listing,
 and deletion for Forge applications, together with a full `forge.MCPModule` implementation
 so that AI agents can manage media files through MCP. Add `WithModule` to `forge-mcp` as
 the wiring point for externally-defined `MCPModule` implementations.
@@ -1003,7 +1003,7 @@ the wiring point for externally-defined `MCPModule` implementations.
 
 ```
 forge-media/
-  go.mod          � module forge-cms.dev/forge-media, requires forge v0.0.0
+  go.mod          � module smeldr.dev/core-media, requires forge v0.0.0
   media.go        � MediaStore interface, LocalMediaStore, MediaRecord, DB helpers
   os_helpers.go   � testable wrappers for OS and crypto operations
   server.go       � Server struct, New(), Register(), four HTTP handlers
@@ -1237,11 +1237,11 @@ current values (`1.22`, `1.24`, `1.25`) to `go 1.26.2`.
 
 | Old path | New path |
 |----------|----------|
-| `github.com/forge-cms/forge` | `forge-cms.dev/forge` |
-| `github.com/forge-cms/forge-mcp` | `forge-cms.dev/forge-mcp` |
-| `github.com/forge-cms/forge-media` | `forge-cms.dev/forge-media` |
-| `github.com/forge-cms/forge-cli` | `forge-cms.dev/forge-cli` |
-| `github.com/forge-cms/forge-pgx` | `forge-cms.dev/forge-pgx` |
+| `github.com/forge-cms/forge` | `smeldr.dev/core` |
+| `github.com/forge-cms/forge-mcp` | `smeldr.dev/core-mcp` |
+| `github.com/forge-cms/forge-media` | `smeldr.dev/core-media` |
+| `github.com/forge-cms/forge-cli` | `smeldr.dev/cli` |
+| `github.com/forge-cms/forge-pgx` | `smeldr.dev/core-pgx` |
 
 `forge-pgx` is included even though not listed in the original issue � it shares
 the workspace and its `replace` directive would break immediately if the root
@@ -1254,8 +1254,8 @@ as-is; they are permanent records of past decisions, not forward-facing API docs
 
 The old `forgeVersions()` used `strings.HasPrefix(path, "github.com/forge-cms/forge")`
 because sub-modules shared the root path as a prefix. After the rename the modules
-are independent paths (`forge-cms.dev/forge-mcp` is not a sub-path of
-`forge-cms.dev/forge`). The matching logic is updated to:
+are independent paths (`smeldr.dev/core-mcp` is not a sub-path of
+`smeldr.dev/core`). The matching logic is updated to:
 
 ```go
 const base = "forge-cms.dev/"
@@ -1279,7 +1279,7 @@ Output keys are identical to before (`"forge"`, `"forge_mcp"`, etc.).
 3. `go get` resolution requires Caddy vanity URL config on `forge-cms.dev` to be
    deployed before external users can use the new paths. This is a deploy-day
    task noted in `NEXT.md` and handled separately.
-4. `pkg.go.dev` badge in `README.md` updated to `forge-cms.dev/forge`.
+4. `pkg.go.dev` badge in `README.md` updated to `smeldr.dev/core`.
 5. `ARCHITECTURE.md`, `AGENTS.md`, `README.md`, `REFERENCE.md`, `CHANGELOG.md`
    all updated with the new import paths.
 6. `decisions/` historical files left unchanged.
@@ -1541,7 +1541,7 @@ against a real SQL engine.
 ### Consequences
 
 1. `go.mod` gains `require modernc.org/sqlite vX.Y.Z` and its transitive deps.
-2. `go get forge-cms.dev/forge` users who never run tests are unaffected at
+2. `go get smeldr.dev/core` users who never run tests are unaffected at
    runtime — the SQLite library is not linked into the produced binary.
 3. CI `go test ./...` now requires a network-connected build cache on first run
    (same as any test dependency).
@@ -1718,7 +1718,7 @@ A full audit of `REFERENCE.md` against v1.16.0 found 5 accuracy errors and
 2. **forge-mcp README link** — pointed to `forge-mcp/README.md` (removed subdir);
    corrected to `https://github.com/forge-cms/forge-mcp`.
 
-3. **forge-media README link** — pointed to dead `https://forge-cms.dev/forge/tree/main/forge-media`;
+3. **forge-media README link** — pointed to dead `https://smeldr.dev/core/tree/main/forge-media`;
    corrected to `https://github.com/forge-cms/forge-media`.
 
 4. **Rate Limiting section** — falsely stated "Forge does not include a built-in

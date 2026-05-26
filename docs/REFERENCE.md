@@ -1,8 +1,8 @@
-# Forge — Full API Reference
+﻿# Forge — Full API Reference
 
 Complete API reference for the Forge framework.
 For the short overview and quick-start examples see [README.md](README.md).
-Web version: [forge-cms.dev/docs](https://forge-cms.dev/docs).
+Web version: [smeldr.dev/docs](https://smeldr.dev/docs).
 
 ---
 
@@ -11,7 +11,7 @@ Web version: [forge-cms.dev/docs](https://forge-cms.dev/docs).
 Five minutes from `go get` to a running content API.
 
 ```bash
-go get forge-cms.dev/forge
+go get smeldr.dev/core
 ```
 
 **1. Define a content type**
@@ -990,7 +990,7 @@ a thin adapter that is a separate module from Forge core.
 
 ```go
 import (
-    forgepgx "forge-cms.dev/forge-pgx"
+    forgepgx "smeldr.dev/core-pgx"
     "github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -1618,7 +1618,7 @@ Schema derivation, lifecycle enforcement, and role checks are all automatic —
 no configuration beyond `forge.MCP(...)` on your existing modules.
 
 ```go
-import forgemcp "forge-cms.dev/forge-mcp"
+import forgemcp "smeldr.dev/core-mcp"
 
 func main() {
     app := forge.New(forge.MustConfig(forge.Config{
@@ -1680,7 +1680,7 @@ import (
     "os"
     "time"
 
-    "forge-cms.dev/forge"
+    "smeldr.dev/core"
 )
 
 type Article struct {
@@ -1773,13 +1773,13 @@ Optional submodule for file upload, storage, serving, and AI-agent access via MC
 ### Install
 
 ```
-go get forge-cms.dev/forge-media
+go get smeldr.dev/core-media
 ```
 
 ### Wiring
 
 ```go
-import forgemedia "forge-cms.dev/forge-media"
+import forgemedia "smeldr.dev/core-media"
 
 store := forgemedia.NewLocalMediaStore(app)
 mediaSrv := forgemedia.Register(app, store)
@@ -1839,7 +1839,7 @@ Full reference: [forge-media README](https://github.com/forge-cms/forge-media)
 from the command line. No MCP client required. Install it with:
 
 ```bash
-go install forge-cms.dev/forge-cli@latest
+go install smeldr.dev/cli@latest
 ```
 
 ### Configuration

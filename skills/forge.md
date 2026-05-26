@@ -1,4 +1,4 @@
-# Forge CMS — developer skill
+﻿# Forge CMS — developer skill
 
 Forge is a Go content framework. This skill covers what you need to work
 with forge as a developer or pilot agent.
@@ -241,7 +241,7 @@ Filename gets a hex prefix — prevents overwrite of existing files.
 
 ## forge-social (separate module)
 
-`forge-cms.dev/forge-social` — social post scheduling and agent routing.
+`smeldr.dev/social` — social post scheduling and agent routing.
 
 ```go
 social := forgesocial.New(db, forgesocial.Config{
@@ -348,8 +348,8 @@ Config: `FORGE_URL`, `FORGE_TOKEN`, `FORGE_MCP_URL` (or `.forge-cli.env`)
 
 ## Common gotchas
 
-- **go.mod line 1** must be `module forge-cms.dev/forge-mcp` — not a github.com path
-- **Verify go.mod deps before tagging** — `grep forge-cms.dev go.mod`; run `go mod tidy`
+- **go.mod line 1** must be `module smeldr.dev/core-mcp` — not a github.com path
+- **Verify go.mod deps before tagging** — `grep smeldr.dev go.mod`; run `go mod tidy`
 - **Module proxy caches permanently** — bad tag requires a new patch tag, no fix
 - **forge.Table()** — use when type name pluralises incorrectly (Story → storys)
 - **Windows MIME** — add `mime.AddExtensionType(".webp", "image/webp")` in main()
@@ -377,7 +377,7 @@ media_upload_token_expiry     duration
 
 ## forge-agent (separate module)
 
-`forge-cms.dev/forge-agent` v0.3.0 — minimal Go agent runtime with native MCP support.
+`smeldr.dev/core-agent` v0.3.0 — minimal Go agent runtime with native MCP support.
 MIT license. Three dependencies: `anthropic-sdk-go` + `modelcontextprotocol/go-sdk` + `gocron/v2`.
 
 ```go
@@ -419,11 +419,11 @@ Add `import _ "time/tzdata"` to binaries on Alpine/scratch containers.
 
 ### forge-agent/flow — Forge integration (v0.3.0)
 
-`forge-cms.dev/forge-agent/flow` — AGPL sub-package. Wires `AgentJob` as a Forge
-content type. Requires `forge-cms.dev/forge` as a dependency.
+`smeldr.dev/core-agent/flow` — AGPL sub-package. Wires `AgentJob` as a Forge
+content type. Requires `smeldr.dev/core` as a dependency.
 
 ```go
-import forgeagent "forge-cms.dev/forge-agent/flow"
+import forgeagent "smeldr.dev/core-agent/flow"
 
 forgeagent.CreateTable(db) // run once at startup
 agentMod := forgeagent.New(db, forgeagent.Config{

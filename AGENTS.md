@@ -1,4 +1,4 @@
-# Forge — AI Agent Guide
+﻿# Forge — AI Agent Guide
 
 This document is for AI assistants working with Forge — either building
 applications or consuming a running site via MCP.
@@ -124,7 +124,7 @@ forge.NewModule((*Post)(nil),
 Wire the MCP server and token store in `main.go`:
 
 ```go
-import forgemcp "forge-cms.dev/forge-mcp"
+import forgemcp "smeldr.dev/core-mcp"
 
 app := forge.New(forge.MustConfig(forge.Config{
     BaseURL:    "https://mysite.com",
@@ -174,8 +174,8 @@ serving. It implements `forge.MCPModule` so AI agents can upload files via MCP.
 
 ```go
 import (
-    forgemedia "forge-cms.dev/forge-media"
-    forgemcp   "forge-cms.dev/forge-mcp"
+    forgemedia "smeldr.dev/core-media"
+    forgemcp   "smeldr.dev/core-mcp"
 )
 
 app := forge.New(forge.MustConfig(forge.Config{

@@ -3,8 +3,8 @@ module example/blog
 go 1.26.3
 
 require (
-	forge-cms.dev/forge v1.19.0
-	forge-cms.dev/forge-mcp v1.9.3
+	smeldr.dev/core v0.0.0
+	smeldr.dev/mcp v0.0.0
 	modernc.org/sqlite v1.50.0
 )
 
@@ -20,4 +20,6 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace forge-cms.dev/forge => ../..
+replace smeldr.dev/core => ../..
+
+replace smeldr.dev/mcp => ../../../mcp

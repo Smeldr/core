@@ -8,8 +8,8 @@ import (
 	"os"
 	"testing"
 
-	forge "forge-cms.dev/forge"
 	"github.com/jackc/pgx/v5/pgxpool"
+	forge "smeldr.dev/core"
 )
 
 // TestWrap_integration exercises Wrap against a real PostgreSQL instance.

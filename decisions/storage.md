@@ -1,4 +1,4 @@
-# Forge Decisions — Storage
+﻿# Forge Decisions — Storage
 
 Archived from decisions/recent.md on 2026-05-17.
 Read on demand. See DECISIONS.md for the full index.
@@ -196,7 +196,7 @@ against a real SQL engine.
 ### Consequences
 
 1. `go.mod` gains `require modernc.org/sqlite vX.Y.Z` and its transitive deps.
-2. `go get forge-cms.dev/forge` users who never run tests are unaffected at
+2. `go get smeldr.dev/core` users who never run tests are unaffected at
    runtime — the SQLite library is not linked into the produced binary.
 3. CI `go test ./...` now requires a network-connected build cache on first run
    (same as any test dependency).

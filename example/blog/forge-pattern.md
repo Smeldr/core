@@ -1,8 +1,8 @@
-# forge-pattern: Forge Devlog
+﻿# forge-pattern: Forge Devlog
 
 ## CMS note
 
-Built with Forge (forge-cms.dev) — a Go content framework.
+Built with Forge (smeldr.dev) — a Go content framework.
 Pages are server-side rendered HTML templates.
 Deliver clean, semantic HTML with plain CSS custom properties.
 No JavaScript. No Tailwind. No frontend framework.

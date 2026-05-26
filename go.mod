@@ -1,4 +1,4 @@
-module forge-cms.dev/forge
+module smeldr.dev/core
 
 go 1.26.3
 

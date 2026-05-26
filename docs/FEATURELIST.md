@@ -1,4 +1,4 @@
-# Forge — feature list
+﻿# Forge — feature list
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
@@ -156,7 +156,7 @@ MCP resource subscriptions (Beta):
 
 ## forge-social — Experimental
 
-- `forge-cms.dev/forge-social` — social post scheduling and AI agent routing
+- `smeldr.dev/social` — social post scheduling and AI agent routing
 - Two scheduling models: explicit `scheduled_at` (Model 1) and slot-queue via `PublicationSchedule` (Model 2, v0.4.0+)
 - Platforms: Mastodon, LinkedIn, **X (Twitter)** (v0.5.0+)
 - **DB-driven platform config** (v0.5.0+): OAuth 2.0 app credentials stored AES-256-GCM encrypted in DB; `create_platform_config` MCP tool (Admin role); no environment variables required after initial setup
@@ -170,7 +170,7 @@ MCP resource subscriptions (Beta):
 
 ## forge-agent — Experimental
 
-- `forge-cms.dev/forge-agent` — MIT-licensed agent runtime; `forge-cms.dev/forge-agent/flow` — AGPL-3.0 Forge integration adapter
+- `smeldr.dev/core-agent` — MIT-licensed agent runtime; `smeldr.dev/core-agent/flow` — AGPL-3.0 Forge integration adapter
 - `AgentJob` — Forge content type (embeds `forge.Node`) with full lifecycle management: Draft → Published → Archived; auto-generated MCP tools (`create_agent_job`, `get_agent_job`, `list_agent_jobs`, `update_agent_job`, `publish_agent_job`, `archive_agent_job`, `delete_agent_job`)
 - Signal-triggered jobs — any `forge.Signal` value as `Trigger`; `ContentTypeFilter` restricts to a named content type; full `forge.SignalEvent` serialised as JSON in the agent task string so the agent knows what content item fired it
 - Cron-triggered jobs — 5-field cron expression as `Trigger`; scheduler rebuilds atomically on AgentJob publish/archive

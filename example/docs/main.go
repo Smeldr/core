@@ -28,7 +28,7 @@ import (
 	"net/http"
 	"time"
 
-	"forge-cms.dev/forge"
+	"smeldr.dev/core"
 )
 
 // Doc is the content type for a Forge documentation page.
@@ -170,7 +170,7 @@ func seed(repo forge.Repository[*Doc]) {
 			slug:    "getting-started",
 			title:   "Getting Started",
 			section: "Guides",
-			body: `Install Forge by running go get forge-cms.dev/forge. Forge has zero
+			body: `Install Smeldr by running go get smeldr.dev/core. Smeldr has zero
 third-party dependencies, so nothing beyond the standard module tools is needed.
 
 Create a Config with your site's base URL and a signing secret, then call

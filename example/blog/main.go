@@ -1,4 +1,4 @@
-﻿// Package main is a self-contained Forge devlog — a production-pattern blog
+// Package main is a self-contained Forge devlog — a production-pattern blog
 // application that demonstrates the full v1.22.2 feature set:
 //
 //   - SQLite persistence via forge.SQLRepo (no cgo; uses modernc.org/sqlite)
@@ -36,9 +36,9 @@ import (
 	"os"
 	"time"
 
-	"forge-cms.dev/forge"
-	forgemcp "forge-cms.dev/forge-mcp"
 	_ "modernc.org/sqlite" // register the modernc pure-Go SQLite driver
+	"smeldr.dev/core"
+	forgemcp "smeldr.dev/mcp"
 )
 
 // Post is the content type for a Forge devlog post.

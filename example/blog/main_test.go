@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"forge-cms.dev/forge"
-	forgemcp "forge-cms.dev/forge-mcp"
+	"smeldr.dev/core"
+	forgemcp "smeldr.dev/mcp"
 )
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-# Forge Decisions — Media
+﻿# Forge Decisions — Media
 
 Archived from decisions/recent.md on 2026-05-17.
 Read on demand. See DECISIONS.md for the full index.
@@ -82,7 +82,7 @@ func (a *App) Config() Config { return a.cfg }
 **Date:** 2026-04-18
 
 **Decision:** Introduce `forge-media` as an optional, separately versioned Go submodule
-(`forge-cms.dev/forge-media`) that provides file upload, serving, listing,
+(`smeldr.dev/core-media`) that provides file upload, serving, listing,
 and deletion for Forge applications, together with a full `forge.MCPModule` implementation
 so that AI agents can manage media files through MCP. Add `WithModule` to `forge-mcp` as
 the wiring point for externally-defined `MCPModule` implementations.
@@ -91,7 +91,7 @@ the wiring point for externally-defined `MCPModule` implementations.
 
 ```
 forge-media/
-  go.mod          � module forge-cms.dev/forge-media, requires forge v0.0.0
+  go.mod          � module smeldr.dev/core-media, requires forge v0.0.0
   media.go        � MediaStore interface, LocalMediaStore, MediaRecord, DB helpers
   os_helpers.go   � testable wrappers for OS and crypto operations
   server.go       � Server struct, New(), Register(), four HTTP handlers

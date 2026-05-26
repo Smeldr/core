@@ -1,4 +1,4 @@
-# Forge — Copilot Instructions
+﻿# Forge — Copilot Instructions
 
 This is the Forge CMS project — a Go web framework designed for how you
 actually think. Zero dependencies. AI-first. Production-ready by default.
@@ -429,7 +429,7 @@ Scope: the file name without extension (e.g. `errors`, `roles`, `node`)
 ## Docs and content workflow
 
 Use this workflow for any task that involves updating repo docs (docs/REFERENCE.md,
-README.md, docs/FEATURELIST.md) or creating content for forge-cms.dev/docs.
+README.md, docs/FEATURELIST.md) or creating content for smeldr.dev/docs.
 
 This workflow is separate from the standard step workflow. It applies to
 docs-only tasks and content tasks — not to code implementation.
@@ -487,7 +487,7 @@ After repo doc updates are applied, write a content brief covering:
 - docs/REFERENCE.md section: relevant header
 - Devlog: yes/no + suggested angle (or "covered by Axx")
 - Solved: which story this feature supports, if any
-- Docs: which forge-cms.dev/docs pages need updating
+- Docs: which smeldr.dev/docs pages need updating
 
 Release type guidance:
 
@@ -501,9 +501,9 @@ Release type guidance:
 The content brief is handed to the architect, who converts it into a sitepilot NEXT.md.
 Wait for feedback before proceeding.
 
-**5. Content suggestions (forge-cms.dev/docs)**
+**5. Content suggestions (smeldr.dev/docs)**
 Based on updated docs/REFERENCE.md, suggest doc page title(s) that should be
-created or updated on forge-cms.dev.
+created or updated on smeldr.dev.
 Wait for feedback.
 
 **6. Content outline**
@@ -618,8 +618,8 @@ The detail belongs in the submodule's own file.
    version being tagged
 4. For standalone modules that depend on forge core (forge-mcp, forge-media, forge-cli),
    run this full checklist before tagging — every time, without exception:
-   - `head -1 go.mod` → must be `module forge-cms.dev/<module-name>` (not any github.com path)
-   - `grep forge-cms.dev/forge go.mod` → correct forge version in require block
+   - `head -1 go.mod` → must be `module smeldr.dev/<module-name>` (not any github.com path)
+   - `grep smeldr.dev/core go.mod` → correct forge version in require block
    - `go mod tidy` → no diff
    - `go build ./...` → green
    - `go test ./...` → green

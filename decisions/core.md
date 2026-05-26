@@ -1,4 +1,4 @@
-# Forge � Decisions: Core
+﻿# Forge � Decisions: Core
 
 Decisions 1�22 and all amendments up to A65. For Decision 25 onwards see `decisions/phase2.md`.
 
@@ -1503,7 +1503,7 @@ becomes the moat � not the license. The dual-license model is introduced
 only when a commercial product exists to sell.
 
 **Consequences:**
-- `go.mod` module path: `forge-cms.dev/forge`
+- `go.mod` module path: `smeldr.dev/core`
 - All documentation references `forge-cms` organisation
 - `LICENSE` file is MIT from commit 1
 - A `COMMERCIAL.md` file is added at launch explaining future dual-license intent
@@ -1794,7 +1794,7 @@ app := forge.New(forge.Config{DB: db})
 
 ```go
 import (
-    forgepgx "forge-cms.dev/forge-pgx"
+    forgepgx "smeldr.dev/core-pgx"
     "github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -1826,7 +1826,7 @@ app := forge.New(forge.Config{DB: db})
 | `database/sql` + SQLite | n/a (different use case) | 1 (driver) |
 
 Forge core has zero dependencies. `pgx` is a user dependency � Forge does
-not import it. `forge-pgx` is a separate module (`forge-cms.dev/forge-pgx`)
+not import it. `forge-pgx` is a separate module (`smeldr.dev/core-pgx`)
 that imports both `forge` and `pgx`.
 
 ### Why not bundle pgx in core
@@ -1871,7 +1871,7 @@ Zero-dependency is preserved for the core module.
 **Consequences:**
 - `forge.Config` gets a `DB forge.DB` field
 - `forge.DB` interface is exported (users may implement it for custom backends)
-- `forge-pgx` created as a sibling module at `forge-cms.dev/forge-pgx`
+- `forge-pgx` created as a sibling module at `smeldr.dev/core-pgx`
 - README explains all three tiers clearly with code examples
 - BACKLOG updated: `forge-pgx` added as a parallel deliverable to Milestone 1
 - `forge.Query[T]` and `forge.QueryOne[T]` accept `forge.DB`, not `*sql.DB`
@@ -3386,10 +3386,10 @@ Forge (or its companion modules) was actually running inside a binary.
 **Decision:**
 Add `forgeVersions() map[string]string` to `forge.go`. It calls
 `runtime/debug.ReadBuildInfo()` (available since Go 1.12) to discover the
-versions of all modules whose path begins with `forge-cms.dev/forge`:
+versions of all modules whose path begins with `smeldr.dev/core`:
 
-- `forge-cms.dev/forge` ? key `"forge"`
-- Sub-modules (e.g. `forge-cms.dev/forge-mcp`) ? key derived from
+- `smeldr.dev/core` ? key `"forge"`
+- Sub-modules (e.g. `smeldr.dev/core-mcp`) ? key derived from
   the sub-path with hyphens replaced by underscores (`"forge_mcp"`)
 
 The leading `"v"` is stripped from version strings so the JSON values are clean

@@ -1,9 +1,9 @@
-module forge-cms.dev/forge-pgx
+module smeldr.dev/pgx
 
 go 1.26.3
 
 require (
-	forge-cms.dev/forge v0.0.0
+	smeldr.dev/core v0.0.0
 	github.com/jackc/pgx/v5 v5.8.0
 )
 
@@ -15,4 +15,4 @@ require (
 	golang.org/x/text v0.29.0 // indirect
 )
 
-replace forge-cms.dev/forge => ../
+replace smeldr.dev/core => ../

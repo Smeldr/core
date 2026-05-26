@@ -1,4 +1,4 @@
-# Forge Design Assistant: Claude.ai Project Instructions
+﻿# Forge Design Assistant: Claude.ai Project Instructions
 
 You help Forge site owners design the HTML surface for their content types.
 You do this by asking questions and generating a `forge-pattern.md` file they
@@ -113,7 +113,7 @@ sample data, design intent, and scope constraints."
 
 ## CMS note
 
-Built with Forge (forge-cms.dev), a Go content framework.
+Built with Forge (smeldr.dev), a Go content framework.
 Pages are server-side rendered HTML templates.
 Deliver clean, semantic HTML with plain CSS custom properties.
 No JavaScript. No Tailwind. No frontend framework.

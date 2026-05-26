@@ -1057,14 +1057,14 @@ func (a *App) RedirectManifestAuth(auth AuthFunc) {
 }
 
 // forgeVersions reads the binary's embedded build info and returns a map of
-// short module name → version for all Forge core and companion modules
-// (forge-cms.dev/forge and related modules). Each module path under
-// forge-cms.dev/ maps to a key with hyphens replaced by underscores
-// (e.g. forge-cms.dev/forge-mcp → "forge_mcp", forge-cms.dev/forge → "forge").
+// short module name → version for all Smeldr core and companion modules
+// (smeldr.dev/core and related modules). Each module path under
+// smeldr.dev/ maps to a key equal to the sub-path
+// (e.g. smeldr.dev/mcp → "mcp", smeldr.dev/core → "core").
 // The leading "v" is stripped from version strings ("v1.1.5" → "1.1.5").
-// Returns nil when build info is unavailable or no forge modules are found.
+// Returns nil when build info is unavailable or no smeldr modules are found.
 func forgeVersions() map[string]string {
-	const base = "forge-cms.dev/"
+	const base = "smeldr.dev/"
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return nil
@@ -1092,20 +1092,20 @@ func forgeVersions() map[string]string {
 //
 // The endpoint always returns HTTP 200 with Content-Type application/json.
 // Framework versions are read from the binary's embedded build info and
-// included in the response. The forge core version uses the key "forge";
-// companion modules use a key derived from their sub-path (e.g. "forge_mcp").
+// included in the response. The core module uses the key "core";
+// companion modules use a key derived from their sub-path (e.g. "mcp").
 // When build info is unavailable, only {"status":"ok"} is returned.
 //
 // Call Health before [App.Handler] or [App.Run]:
 //
 //	app.Health()
-//	// GET /_health → {"status":"ok","forge":"1.1.6","forge_mcp":"1.0.5"}
+//	// GET /_health → {"status":"ok","core":"1.25.0","mcp":"1.11.2"}
 func (a *App) Health() {
 	versions := forgeVersions()
 	// Pre-sort companion module keys for deterministic JSON output.
 	var companions []string
 	for k := range versions {
-		if k != "forge" {
+		if k != "core" {
 			companions = append(companions, k)
 		}
 	}
@@ -1116,8 +1116,8 @@ func (a *App) Health() {
 		w.WriteHeader(http.StatusOK)
 		var b strings.Builder
 		b.WriteString(`{"status":"ok"`)
-		if v, ok := versions["forge"]; ok {
-			fmt.Fprintf(&b, `,"forge":%q`, v)
+		if v, ok := versions["core"]; ok {
+			fmt.Fprintf(&b, `,"core":%q`, v)
 		}
 		for _, k := range companions {
 			fmt.Fprintf(&b, `,%q:%q`, k, versions[k])
@@ -1162,12 +1162,12 @@ func (a *App) Run(addr string) error {
 	// Log framework versions at startup.
 	if versions := forgeVersions(); len(versions) > 0 {
 		var parts []string
-		if v, ok := versions["forge"]; ok {
-			parts = append(parts, "forge "+v)
+		if v, ok := versions["core"]; ok {
+			parts = append(parts, "core "+v)
 		}
 		companions := make([]string, 0, len(versions))
 		for k := range versions {
-			if k != "forge" {
+			if k != "core" {
 				companions = append(companions, k)
 			}
 		}
@@ -1175,7 +1175,7 @@ func (a *App) Run(addr string) error {
 		for _, k := range companions {
 			parts = append(parts, k+" "+versions[k])
 		}
-		fmt.Fprintf(os.Stderr, "forge: %s\n", strings.Join(parts, ", "))
+		fmt.Fprintf(os.Stderr, "smeldr: %s\n", strings.Join(parts, ", "))
 	}
 
 	srv := &http.Server{

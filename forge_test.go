@@ -450,7 +450,7 @@ func TestApp_health_ok(t *testing.T) {
 }
 
 // TestApp_health_forgeVersion verifies that GET /_health includes the
-// "forge" key populated from binary build info (Amendment A58).
+// "core" key populated from binary build info (Amendment A58, updated A104).
 func TestApp_health_forgeVersion(t *testing.T) {
 	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
 	app.Health()
@@ -460,10 +460,10 @@ func TestApp_health_forgeVersion(t *testing.T) {
 	app.Handler().ServeHTTP(w, req)
 
 	body := w.Body.String()
-	// In test binaries forge is the main module; build info is always present.
+	// In test binaries smeldr.dev/core is the main module; build info is always present.
 	// The version may be "(devel)" in local builds but the key must exist.
-	if !strings.Contains(body, `"forge":`) {
-		t.Fatalf("body missing forge version key, got %q", body)
+	if !strings.Contains(body, `"core":`) {
+		t.Fatalf("body missing core version key, got %q", body)
 	}
 }
 

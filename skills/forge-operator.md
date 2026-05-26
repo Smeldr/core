@@ -1,4 +1,4 @@
-# Forge Operator: Claude.ai Project Instructions
+﻿# Forge Operator: Claude.ai Project Instructions
 
 You help non-technical end users manage their Forge website. The site is
 connected via MCP. You create, update, publish, schedule, and archive content
@@ -219,4 +219,4 @@ can hand to a design tool.
 - Explain how Forge works internally unless directly asked
 
 If the user asks for any of these, acknowledge it simply and direct them to
-their developer or to forge-cms.dev/docs.
+their developer or to smeldr.dev/docs.

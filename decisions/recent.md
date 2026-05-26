@@ -1,4 +1,4 @@
-# Forge — Recent Decisions
+﻿# Forge — Recent Decisions
 
 Rolling working file. All new decisions are added here first.
 When this file approaches ~20KB, report it at session start — the architect
@@ -89,12 +89,51 @@ incorrect (an HTTP request object is not the right representation of "a token st
 
 **Consequences:**
 - No breaking changes. Additive exported function.
-- forge-oauth can validate Forge tokens without importing `forge-cms.dev/forge` at all
+- forge-oauth can validate Forge tokens without importing `smeldr.dev/core` at all
   if using the callback pattern.
 - No new test file — existing `auth_test.go` infrastructure sufficient.
 
 **Files changed:** `auth.go`, `DECISIONS.md`, `decisions/recent.md`, `CHANGELOG.md`.
 
 **Forge core → v1.25.0.**
+
+---
+
+## A104 — Health endpoint and startup log key rename (T59 Phase 0C)
+
+**Date:** 2026-05-26
+**Status:** Accepted
+**Milestone:** T59 Phase 0C — module path rename
+
+**Context:**
+`forgeVersions()` in `forge.go` derives short keys from module paths by stripping
+the base prefix and replacing hyphens with underscores. With the old paths this
+produced `"forge"` for `forge-cms.dev/forge` and `"forge_mcp"` for
+`forge-cms.dev/forge-mcp`. The `/_health` endpoint and startup log used the
+hardcoded key `"forge"` to identify the core module version.
+
+After renaming to `smeldr.dev/*` paths, `smeldr.dev/core` produces the key
+`"core"` and `smeldr.dev/mcp` produces `"mcp"`.
+
+**Decision:**
+- `const base` updated from `"forge-cms.dev/"` to `"smeldr.dev/"`.
+- `/_health` JSON response key changes: `"forge"` → `"core"`, `"forge_mcp"` → `"mcp"`.
+  Example: `{"status":"ok","core":"1.25.0","mcp":"1.11.2"}`.
+- Startup log prefix changes from `"forge: "` to `"smeldr: "`.
+- All four hardcoded `versions["forge"]` / `k != "forge"` lookups updated to `"core"`.
+- Godoc for `Health()` and `Run()` updated to reflect new keys.
+- `forge_test.go` assertion updated from `"forge":` to `"core":`.
+
+**This is a breaking change** for any health monitor parsing the `/_health` JSON
+keys `"forge"` or `"forge_mcp"`. Clients must update to use `"core"` and `"mcp"`.
+Accepted in Phase 0C — the rename is the right time to accept this change.
+Phase 2 cutover note: update UC2 health-check configuration if it reads these keys.
+
+**Consequences:**
+- `/_health` response format changes (breaking for monitors using old keys).
+- Startup log line changes from `"forge: forge 1.25.0"` to `"smeldr: core 1.25.0"`.
+- No other exported API affected.
+
+**Files changed:** `forge.go`, `forge_test.go`, `DECISIONS.md`, `decisions/recent.md`.
 
 ---

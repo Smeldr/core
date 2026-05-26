@@ -23,9 +23,9 @@ import (
 	"context"
 	"database/sql"
 
-	forge "forge-cms.dev/forge"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+	forge "smeldr.dev/core"
 )
 
 // Compile-time assertion: poolAdapter must satisfy forge.DB.
