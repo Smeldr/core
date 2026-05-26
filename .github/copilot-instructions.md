@@ -9,7 +9,7 @@ Every new chat has no memory of previous sessions. Follow these steps
 at the start of every new chat, before doing anything else.
 
 **Step 1 — Read session context:**
-Read `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md` (local file).
+Read `C:\Users\peter\Documents\Code\Smeldr\architect\context\corepilot.md` (local file).
 This is your state from the previous session: current versions, latest
 amendment, active milestone and step, anything deferred.
 
@@ -18,14 +18,14 @@ Check whether `NEXT.md` exists in the forge repo root (local workspace).
 If it exists:
 1. Read it and form a full implementation plan (including any questions).
 2. Write the plan file locally to:
-   `C:\Users\peter\Documents\Code\forge-architect\plans\core-next-plan.md`
+   `C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md`
    Include the complete plan and any open questions in that file.
 3. Notify the user in chat that the plan is ready for review at
-   `forge-architect/plans/core-next-plan.md`. Do not write any code yet.
+   `smeldr/architect/plans/core-next-plan.md`. Do not write any code yet.
 4. Wait for explicit approval before implementing anything.
 5. At commit time: delete both `NEXT.md` and `plans/core-next-plan.md`
    in the same commit as the implementation.
-6. After the commit: write `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md`
+6. After the commit: write `C:\Users\peter\Documents\Code\Smeldr\architect\context\corepilot.md`
    locally with the amendment number, then commit and push from that repo
    (see "After every commit" for the exact command sequence).
 
@@ -45,12 +45,12 @@ file is the bridge between sessions. Always read it first.
 1. Read `NEXT.md` in the workspace root. If it exists:
    - Read the task description.
    - **Write the full implementation plan (including any questions) to the local file:
-     `C:\Users\peter\Documents\Code\forge-architect\plans\core-next-plan.md`**
+     `C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md`**
    - Notify the user in chat that the plan is ready for review at
-     `forge-architect/plans/core-next-plan.md`. Do not write any code yet.
+     `smeldr/architect/plans/core-next-plan.md`. Do not write any code yet.
    - Wait for explicit approval. Do not implement anything until the user confirms the plan.
    - Stop here — do not proceed with steps 2–7.
-2. Read session context from `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md`
+2. Read session context from `C:\Users\peter\Documents\Code\Smeldr\architect\context\corepilot.md`
    (local file). This is your state from the previous session.
 3. Read `DECISIONS.md` — index table only. Body text lives in `decisions/core.md`
    (D1–D22, A19–A65, A88–A95), `decisions/recent.md` (current rolling window),
@@ -73,12 +73,12 @@ file is the bridge between sessions. Always read it first.
   NEXT.md is written locally by the architect and is never committed to git — it is
   always untracked. Do not use `git rm`; it will fail on an untracked file.
 - If `plans/core-next-plan.md` exists locally, delete it:
-  `Remove-Item "C:\Users\peter\Documents\Code\forge-architect\plans\core-next-plan.md"`
-- Update session context: write `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md`
+  `Remove-Item "C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md"`
+- Update session context: write `C:\Users\peter\Documents\Code\Smeldr\architect\context\corepilot.md`
   locally. Record: current versions, latest amendment shipped,
   current milestone and step, what was deferred or blocked.
-  Then commit and push from the forge-architect repo:
-  `cd C:\Users\peter\Documents\Code\forge-architect ; git add context/corepilot.md ; git commit -m "chore(context): update corepilot after [sprint name]" ; git push`
+  Then commit and push from the smeldr/architect repo:
+  `cd C:\Users\peter\Documents\Code\Smeldr\architect ; git add context/corepilot.md ; git commit -m "chore(context): update corepilot after [sprint name]" ; git push`
   Do NOT use GitHub MCP to update this file.
 
 ## DECISIONS.md file structure (CRITICAL)
@@ -356,7 +356,7 @@ that both exist, then stage.
 
 ### 5. Update the backlog and session context
 - Mark the step `✅ Done` in the `Milestone{N}_BACKLOG.md` Progress table with the completion date.
-- Write `C:\Users\peter\Documents\Code\forge-architect\context\corepilot.md` locally,
+- Write `C:\Users\peter\Documents\Code\Smeldr\architect\context\corepilot.md` locally,
   then commit and push from that repo (see "After every commit" for the command sequence).
 - Never batch updates — update immediately after the step is verified.
 
@@ -387,7 +387,7 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
 - [ ] If this commit implements an Amendment: both the DECISIONS.md index row and the body section in `decisions/recent.md` are present. Verify with `Select-String`.
 - [ ] **Stability map**: if a shipped feature moves an area between tiers (e.g. SQLRepo graduates from Dogfooding to Stable, or a new module enters as Experimental), update the stability map in `README.md` in the same commit.
 - [ ] **Devlog draft** — write a draft to
-      `C:\Users\peter\Documents\Code\forge-common\content\drafts\devlog\`
+      `C:\Users\peter\Documents\Code\Smeldr\common\content\drafts\devlog\`
       and include it in the commit sequence when:
       new public API (new module options, new MCP tools, new CLI commands);
       new routing variant or behaviour change that affects developers;
@@ -400,8 +400,8 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
 - [ ] `Forge/docs/FEATURELIST.md` updated, "Last updated" version line bumped, and
       module registry: version updated, stability label reviewed if this release
       changes API surface, adds a module, or materially changes production confidence.
-- [ ] `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` updated: version line, MCP tools, CLI commands, any new sections. Read it with the Read tool.
-- [ ] `skills/forge.md` in forge repo — copy updated `forge-common/agent/skills/forge.md`
+- [ ] `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\forge.md` updated: version line, MCP tools, CLI commands, any new sections. Read it with the Read tool.
+- [ ] `skills/forge.md` in forge repo — copy updated `smeldr/common/agent/skills/forge.md`
 
 "No changes needed" is only valid after explicitly reading each file and confirming it already reflects the shipped code. Never assume.
 
@@ -436,7 +436,7 @@ docs-only tasks and content tasks — not to code implementation.
 
 **When to use this workflow:** For docs-only tasks and content operations (devlog,
 solved stories, doc page drafts) that follow a code commit. Repo doc updates
-(README, docs/REFERENCE.md, docs/FEATURELIST.md, forge-common skill) are gated in the
+(README, docs/REFERENCE.md, docs/FEATURELIST.md, smeldr/common skill) are gated in the
 standard step workflow (step 6) — complete those before proposing any commit.
 
 The content brief (step 4) is always required for any new M-number milestone.
@@ -450,7 +450,7 @@ current codebase and recent amendments:
 2. `README.md` — is the version line (`**vX.Y.Z — stable.**`) current?
 3. `docs/FEATURELIST.md` — does it list all shipped features? Check "Last updated" version.
    Module registry versions and stability labels current?
-4. `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` — does the version line match current versions?
+4. `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\forge.md` — does the version line match current versions?
    Are all MCP tools and CLI commands listed? Read it with the Read tool.
 
 Present any staleness findings to the user before proceeding. Do not silently
@@ -476,8 +476,8 @@ Also update `.claude/skills/forge.md` when any of the following changed:
 - Config keys (update forge.config section)
 - New failure modes confirmed in this release (update gotchas)
 - Any of the above → bump the version line at the top of the skill file
-- Update `C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md` only
-  (no copies — all pilots read from forge-common directly)
+- Update `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\forge.md` only
+  (no copies — all pilots read from smeldr/common directly)
 Do not commit yet.
 
 **4. Content brief**
@@ -529,8 +529,8 @@ Propose a conventional commit message covering all repo doc changes (steps 2–3
 Wait for explicit approval before committing.
 
 **10. After commit**
-Update `forge-architect/plans/core-next-plan.md` if a plan file was created.
-Update `forge-architect/context/corepilot.md` and push from that repo.
+Update `smeldr/architect/plans/core-next-plan.md` if a plan file was created.
+Update `smeldr/architect/context/corepilot.md` and push from that repo.
 
 ### Never push without explicit permission
 
@@ -541,7 +541,7 @@ Pushes require a **separate** explicit instruction after the commit is made.
 "Commit approved" is not push permission. Always wait for "push it" or equivalent.
 
 Write the plan for any docs task to:
-`C:\Users\peter\Documents\Code\forge-architect\plans\core-next-plan.md`
+`C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md`
 
 ---
 
@@ -679,14 +679,14 @@ Forge uses one tier of planning documentation per active milestone:
 - Updated after every step: tick all checkboxes, mark step ✅ in Progress table
 
 Delivery history lives in `CHANGELOG.md`. Current state and active sprint are
-tracked in `context/corepilot.md` and `plans/core-next-plan.md` in forge-architect
+tracked in `context/corepilot.md` and `plans/core-next-plan.md` in smeldr/architect
 (written locally — never committed to this repo mid-sprint).
 
 ### After completing a step
 
 1. Tick all sub-task checkboxes in `Milestone{N}_BACKLOG.md`
 2. Mark step ✅ Done in the `Milestone{N}_BACKLOG.md` Progress table
-3. Write `context/corepilot.md` and push from forge-architect
+3. Write `context/corepilot.md` and push from smeldr/architect
 
 ### Structure of a milestone backlog file
 
