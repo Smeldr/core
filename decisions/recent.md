@@ -137,3 +137,48 @@ Phase 2 cutover note: update UC2 health-check configuration if it reads these ke
 **Files changed:** `forge.go`, `forge_test.go`, `DECISIONS.md`, `decisions/recent.md`.
 
 ---
+
+## A105 — T59 Phase 2.4: all smeldr.dev/* modules tagged and published
+
+**Date:** 2026-05-27
+**Status:** Agreed
+**Milestone:** T59 Phase 2.4 — first Go-resolvable versions on smeldr.dev/* paths
+
+**What:**
+All 8 Go modules renamed in T59 Phase 0C have been tagged and published on the
+smeldr.dev vanity domain. This is the first moment any module is resolvable via
+`go get smeldr.dev/<module>@latest` from the public Go module proxy.
+
+**Tags published:**
+
+| Module | New tag | Notes |
+|--------|---------|-------|
+| smeldr.dev/core | v1.25.1 | patch bump; module path rename only |
+| smeldr.dev/oauth | v0.1.2 | patch bump; module path rename only |
+| smeldr.dev/mcp | v1.11.3 | patch bump; require blocks updated to real versions |
+| smeldr.dev/media | v1.2.1 | patch bump; require blocks updated |
+| smeldr.dev/social | v0.6.1 | patch bump; require blocks updated |
+| smeldr.dev/agent | v0.4.2 | patch bump; require blocks updated |
+| smeldr.dev/cli | v0.9.1 | patch bump; module path rename only (stdlib-only, no smeldr.dev/* deps) |
+| smeldr.dev/pgx | forge-pgx/v0.1.0 | first tag; replace directive removed; v0.0.0 → v1.25.1 |
+
+**Verification:** `go get smeldr.dev/{core,oauth,mcp,media,social,agent,cli}@latest`
+resolves correctly from the Go module proxy. All 7 modules confirmed via `GONOSUMDB=smeldr.dev GOWORK=off go get` from a clean temp directory.
+
+**Known issue — smeldr.dev/pgx not resolvable via go get:**
+The vanity meta tag maps `smeldr.dev/pgx` → `github.com/smeldr/core`, but the root
+`go.mod` of that repo declares `module smeldr.dev/core`. Go's module resolution
+requires either (a) the root go.mod to match the import path, or (b) the import path
+to be a sub-path of the parent module (e.g. `smeldr.dev/core/pgx`). The `forge-pgx/v0.1.0`
+tag is in place; resolution will work once sitepilot corrects the vanity configuration.
+Architect decision required: change module path to `smeldr.dev/core/forge-pgx` and
+update the vanity redirect, OR create a separate `github.com/smeldr/pgx` repo.
+
+**Also fixed:** 4 stale module paths in `common/agent/skills/forge.md`
+(`smeldr.dev/forge-oauth` → `smeldr.dev/oauth`, `smeldr.dev/forge-social` →
+`smeldr.dev/social`, `smeldr.dev/forge` → `smeldr.dev/core`).
+
+**Files changed:** go.mod + go.sum in mcp, media, social, agent, forge-pgx; all repos
+merged T59-phase-0c → main; `common/agent/skills/forge.md`.
+
+---
