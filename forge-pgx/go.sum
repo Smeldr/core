@@ -44,3 +44,5 @@ modernc.org/memory v1.11.0 h1:o4QC8aMQzmcwCK3t3Ux/ZHmwFPzE6hf2Y5LbkRs+hbI=
 modernc.org/memory v1.11.0/go.mod h1:/JP4VbVC+K5sU2wZi9bHoq2MAkCnrt2r98UGeSK7Mjw=
 modernc.org/sqlite v1.50.0 h1:eMowQSWLK0MeiQTdmz3lqoF5dqclujdlIKeJA11+7oM=
 modernc.org/sqlite v1.50.0/go.mod h1:m0w8xhwYUVY3H6pSDwc3gkJ/irZT/0YEXwBlhaxQEew=
+smeldr.dev/core v1.25.1 h1:SKRjHUYIj6v7II3lYHICLxgr8mEGfWh20FV7dk227WA=
+smeldr.dev/core v1.25.1/go.mod h1:37nzRN/NmG34EXpPdcrZ8N7bKww6AVTmYsdj+BpsDps=

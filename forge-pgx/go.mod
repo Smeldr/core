@@ -3,8 +3,8 @@ module smeldr.dev/pgx
 go 1.26.3
 
 require (
-	smeldr.dev/core v0.0.0
 	github.com/jackc/pgx/v5 v5.8.0
+	smeldr.dev/core v1.25.1
 )
 
 require (
@@ -14,5 +14,3 @@ require (
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 )
-
-replace smeldr.dev/core => ../
