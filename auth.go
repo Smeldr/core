@@ -280,7 +280,7 @@ func (b *bearerAuthFn) authenticate(r *http.Request) (User, bool) {
 // or [GuestUser] and false if the header is absent, malformed, or the signature
 // is invalid. secret must be the same value used to sign the token with [SignToken].
 //
-// When store is non-nil, VerifyBearerToken additionally checks the forge_tokens
+// When store is non-nil, VerifyBearerToken additionally checks the smeldr_tokens
 // table: the token's SHA-256 fingerprint must be present and not revoked.
 // Pass nil to skip database verification and use HMAC-only validation.
 //
@@ -301,7 +301,7 @@ func VerifyBearerToken(r *http.Request, secret []byte, store *TokenStore) (User,
 		h := sha256.Sum256([]byte(token))
 		id := hex.EncodeToString(h[:])
 		row := store.db.QueryRowContext(r.Context(),
-			`SELECT revoked_at FROM forge_tokens WHERE id = $1`, id,
+			`SELECT revoked_at FROM smeldr_tokens WHERE id = $1`, id,
 		)
 		var revokedAt *string
 		if err := row.Scan(&revokedAt); err != nil {
@@ -318,7 +318,7 @@ func VerifyBearerToken(r *http.Request, secret []byte, store *TokenStore) (User,
 // VerifyTokenString verifies a raw bearer token string without requiring an
 // [http.Request]. It is otherwise identical to [VerifyBearerToken]: it decodes
 // the HMAC signature, optionally checks the token fingerprint against the
-// forge_tokens table, and returns the authenticated [User] and true on success.
+// smeldr_tokens table, and returns the authenticated [User] and true on success.
 //
 // Use VerifyTokenString when the caller already holds the raw token value —
 // for example, when a downstream server (forge-oauth) needs to validate a
@@ -336,7 +336,7 @@ func VerifyTokenString(token string, secret []byte, store *TokenStore) (User, bo
 		h := sha256.Sum256([]byte(token))
 		id := hex.EncodeToString(h[:])
 		row := store.db.QueryRowContext(context.Background(),
-			`SELECT revoked_at FROM forge_tokens WHERE id = $1`, id,
+			`SELECT revoked_at FROM smeldr_tokens WHERE id = $1`, id,
 		)
 		var revokedAt *string
 		if err := row.Scan(&revokedAt); err != nil {
@@ -351,7 +351,7 @@ func VerifyTokenString(token string, secret []byte, store *TokenStore) (User, bo
 
 // — TokenStore —————————————————————————————————————————————————————————————
 
-// TokenRecord is a named bearer token entry stored in the forge_tokens table.
+// TokenRecord is a named bearer token entry stored in the smeldr_tokens table.
 // Retrieve records with [TokenStore.List]; revoke with [TokenStore.Revoke].
 type TokenRecord struct {
 	// ID is the SHA-256 hex fingerprint of the raw token. Tokens are never
@@ -375,14 +375,14 @@ type TokenRecord struct {
 	CreatedAt time.Time
 }
 
-// TokenStore manages named, revocable bearer tokens stored in a forge_tokens
+// TokenStore manages named, revocable bearer tokens stored in a smeldr_tokens
 // database table. Use [NewTokenStore] to create one; wire it into
 // [Config.TokenStore] to activate database-backed token verification.
 //
-// The forge_tokens table must exist before the application starts. Forge does
+// The smeldr_tokens table must exist before the application starts. Forge does
 // not create or migrate it automatically. Required DDL:
 //
-//	CREATE TABLE forge_tokens (
+//	CREATE TABLE smeldr_tokens (
 //	    id         TEXT PRIMARY KEY,  -- SHA-256 hex fingerprint of the raw token
 //	    name       TEXT NOT NULL,
 //	    role       TEXT NOT NULL,
@@ -402,21 +402,21 @@ func NewTokenStore(db DB, secret string) *TokenStore {
 	return &TokenStore{db: db, secret: secret}
 }
 
-// probeTable verifies the forge_tokens table is accessible. Called at startup
+// probeTable verifies the smeldr_tokens table is accessible. Called at startup
 // by [App.Handler] when a TokenStore is configured.
 func (ts *TokenStore) probeTable(ctx context.Context) error {
-	row := ts.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM forge_tokens`)
+	row := ts.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_tokens`)
 	var n int
 	return row.Scan(&n)
 }
 
-// ensureBootstrap creates a bootstrap admin token when forge_tokens is empty.
+// ensureBootstrap creates a bootstrap admin token when smeldr_tokens is empty.
 // Called at startup by [App.Handler] after a successful [TokenStore.probeTable].
 // When the table already contains at least one row (any token, revoked or not)
 // this is a no-op. The raw token is emitted via [log/slog] at Warn level and
 // is never persisted — copy it immediately.
 func (ts *TokenStore) ensureBootstrap(ctx context.Context) {
-	row := ts.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM forge_tokens`)
+	row := ts.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_tokens`)
 	var n int
 	if err := row.Scan(&n); err != nil || n > 0 {
 		return
@@ -426,11 +426,11 @@ func (ts *TokenStore) ensureBootstrap(ctx context.Context) {
 		slog.Warn("smeldr: failed to create bootstrap admin token", "err", err)
 		return
 	}
-	slog.Warn("smeldr: forge_tokens is empty — bootstrap admin token created (copy now, shown once):\n\t" + raw)
+	slog.Warn("smeldr: smeldr_tokens is empty — bootstrap admin token created (copy now, shown once):\n\t" + raw)
 }
 
 // Create generates a signed named bearer token with the given role and ttl,
-// stores its SHA-256 fingerprint in forge_tokens, and returns the raw token
+// stores its SHA-256 fingerprint in smeldr_tokens, and returns the raw token
 // string. The raw token is never persisted; it cannot be retrieved after this
 // call — pass it to the client through a secure channel.
 //
@@ -447,7 +447,7 @@ func (ts *TokenStore) Create(ctx context.Context, name, role string, ttl time.Du
 	now := time.Now().UTC()
 	expiresAt := now.Add(ttl)
 	_, err = ts.db.ExecContext(ctx,
-		`INSERT INTO forge_tokens (id, name, role, expires_at, created_at) VALUES ($1, $2, $3, $4, $5)`,
+		`INSERT INTO smeldr_tokens (id, name, role, expires_at, created_at) VALUES ($1, $2, $3, $4, $5)`,
 		id, name, role, expiresAt.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	if err != nil {
@@ -456,12 +456,12 @@ func (ts *TokenStore) Create(ctx context.Context, name, role string, ttl time.Du
 	return raw, nil
 }
 
-// List returns all token records from forge_tokens ordered by created_at
+// List returns all token records from smeldr_tokens ordered by created_at
 // descending (newest first). Revoked and expired tokens are included; inspect
 // [TokenRecord.RevokedAt] to filter client-side.
 func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 	rows, err := ts.db.QueryContext(ctx,
-		`SELECT id, name, role, expires_at, revoked_at, created_at FROM forge_tokens ORDER BY created_at DESC`,
+		`SELECT id, name, role, expires_at, revoked_at, created_at FROM smeldr_tokens ORDER BY created_at DESC`,
 	)
 	if err != nil {
 		return nil, ErrInternal
@@ -489,7 +489,7 @@ func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 }
 
 // Revoke marks the token with the given fingerprint ID as revoked in
-// forge_tokens. Returns [ErrLastAdmin] if the token being revoked is the last
+// smeldr_tokens. Returns [ErrLastAdmin] if the token being revoked is the last
 // active (non-revoked, non-expired) admin token — create a replacement admin
 // token before revoking this one. Subsequent [VerifyBearerToken] calls with a
 // non-nil [TokenStore] reject revoked tokens immediately. Use [TokenStore.List]
@@ -501,7 +501,7 @@ func (ts *TokenStore) Revoke(ctx context.Context, id string) error {
 	// last-admin guard applies.
 	var role string
 	if err := ts.db.QueryRowContext(ctx,
-		`SELECT role FROM forge_tokens WHERE id = $1`, id,
+		`SELECT role FROM smeldr_tokens WHERE id = $1`, id,
 	).Scan(&role); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return ErrInternal
 	}
@@ -510,7 +510,7 @@ func (ts *TokenStore) Revoke(ctx context.Context, id string) error {
 	if role == "admin" {
 		var otherAdmins int
 		if err := ts.db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM forge_tokens WHERE role = 'admin' AND revoked_at IS NULL AND expires_at > $1 AND id != $2`,
+			`SELECT COUNT(*) FROM smeldr_tokens WHERE role = 'admin' AND revoked_at IS NULL AND expires_at > $1 AND id != $2`,
 			now, id,
 		).Scan(&otherAdmins); err != nil {
 			return ErrInternal
@@ -521,7 +521,7 @@ func (ts *TokenStore) Revoke(ctx context.Context, id string) error {
 	}
 
 	_, err := ts.db.ExecContext(ctx,
-		`UPDATE forge_tokens SET revoked_at = $1 WHERE id = $2`,
+		`UPDATE smeldr_tokens SET revoked_at = $1 WHERE id = $2`,
 		now, id,
 	)
 	if err != nil {

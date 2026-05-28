@@ -197,7 +197,7 @@ func (s *RedirectStore) Len() int {
 // DB persistence
 // ---------------------------------------------------------------------------
 
-// dbRedirectRow is the scan target for rows from the forge_redirects table.
+// dbRedirectRow is the scan target for rows from the smeldr_redirects table.
 type dbRedirectRow struct {
 	From     string `db:"from_path"`
 	To       string `db:"to_path"`
@@ -205,12 +205,12 @@ type dbRedirectRow struct {
 	IsPrefix bool   `db:"is_prefix"`
 }
 
-// Load reads all rows from the forge_redirects table and registers them via
+// Load reads all rows from the smeldr_redirects table and registers them via
 // [RedirectStore.Add]. Chain collapse and validation rules are applied during
-// load. The forge_redirects table must exist — see the README for the schema.
+// load. The smeldr_redirects table must exist — see the README for the schema.
 func (s *RedirectStore) Load(ctx context.Context, db DB) error {
 	rows, err := Query[dbRedirectRow](ctx, db,
-		"SELECT from_path, to_path, code, is_prefix FROM forge_redirects")
+		"SELECT from_path, to_path, code, is_prefix FROM smeldr_redirects")
 	if err != nil {
 		return err
 	}
@@ -225,11 +225,11 @@ func (s *RedirectStore) Load(ctx context.Context, db DB) error {
 	return nil
 }
 
-// Save upserts e into the forge_redirects table. The forge_redirects table
+// Save upserts e into the smeldr_redirects table. The smeldr_redirects table
 // must exist — see the README for the schema.
 func (s *RedirectStore) Save(ctx context.Context, db DB, e RedirectEntry) error {
 	_, err := db.ExecContext(ctx,
-		"INSERT INTO forge_redirects (from_path, to_path, code, is_prefix) "+
+		"INSERT INTO smeldr_redirects (from_path, to_path, code, is_prefix) "+
 			"VALUES ($1, $2, $3, $4) "+
 			"ON CONFLICT (from_path) DO UPDATE SET to_path=$2, code=$3, is_prefix=$4",
 		e.From, e.To, int(e.Code), e.IsPrefix,
@@ -237,11 +237,11 @@ func (s *RedirectStore) Save(ctx context.Context, db DB, e RedirectEntry) error 
 	return err
 }
 
-// Remove deletes the entry with the given from path from the forge_redirects
-// table. The forge_redirects table must exist — see the README for the schema.
+// Remove deletes the entry with the given from path from the smeldr_redirects
+// table. The smeldr_redirects table must exist — see the README for the schema.
 func (s *RedirectStore) Remove(ctx context.Context, db DB, from string) error {
 	_, err := db.ExecContext(ctx,
-		"DELETE FROM forge_redirects WHERE from_path = $1", from)
+		"DELETE FROM smeldr_redirects WHERE from_path = $1", from)
 	return err
 }
 

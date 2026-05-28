@@ -483,7 +483,7 @@ func TestVerifyBearerToken(t *testing.T) {
 
 // — TokenStore ——————————————————————————————————————————————————————————————
 
-// stubDB implements smeldr.DB using an in-memory slice for forge_tokens rows.
+// stubDB implements smeldr.DB using an in-memory slice for smeldr_tokens rows.
 // Only ExecContext (INSERT + UPDATE) is needed by TokenStore.Create/Revoke.
 type stubDB struct {
 	rows []stubTokenRow
@@ -496,7 +496,7 @@ type stubTokenRow struct {
 }
 
 func (s *stubDB) ExecContext(_ context.Context, query string, args ...any) (sql.Result, error) {
-	if strings.Contains(query, "INSERT INTO forge_tokens") {
+	if strings.Contains(query, "INSERT INTO smeldr_tokens") {
 		s.rows = append(s.rows, stubTokenRow{
 			id:        args[0].(string),
 			name:      args[1].(string),
@@ -506,7 +506,7 @@ func (s *stubDB) ExecContext(_ context.Context, query string, args ...any) (sql.
 		})
 		return nil, nil
 	}
-	if strings.Contains(query, "UPDATE forge_tokens SET revoked_at") {
+	if strings.Contains(query, "UPDATE smeldr_tokens SET revoked_at") {
 		ts := args[0].(string)
 		id := args[1].(string)
 		for i := range s.rows {
@@ -525,7 +525,7 @@ func (s *stubDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows,
 }
 
 func (s *stubDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	if strings.Contains(query, "SELECT role FROM forge_tokens") {
+	if strings.Contains(query, "SELECT role FROM smeldr_tokens") {
 		id := args[0].(string)
 		for _, r := range s.rows {
 			if r.id == id {
@@ -803,12 +803,12 @@ func TestVerifyBearerTokenWithStore(t *testing.T) {
 // bootstrapDB is a minimal DB stub for ensureBootstrap tests.
 // It returns a configurable COUNT(*) value and tracks INSERT calls.
 type bootstrapDB struct {
-	count       int // rows in forge_tokens (returned by COUNT(*))
-	insertCount int // number of INSERT INTO forge_tokens calls
+	count       int // rows in smeldr_tokens (returned by COUNT(*))
+	insertCount int // number of INSERT INTO smeldr_tokens calls
 }
 
 func (b *bootstrapDB) ExecContext(_ context.Context, query string, _ ...any) (sql.Result, error) {
-	if strings.Contains(query, "INSERT INTO forge_tokens") {
+	if strings.Contains(query, "INSERT INTO smeldr_tokens") {
 		b.insertCount++
 		return nil, nil
 	}

@@ -293,3 +293,45 @@ all core markdown documentation, `common/agent/skills/forge.md`.
 breaking for operators).
 
 ---
+
+## A109 — T66: forge_* → smeldr_* DB table rename, auto-migrate at startup
+
+**Date:** 2026-05-28
+**Status:** Agreed
+**Milestone:** T66
+
+**What:**
+All 7 internal DB tables renamed from `forge_` to `smeldr_` prefix. Auto-migration via
+`migrateLegacyTableNames(ctx, db)` called from `New()` handles existing SQLite databases
+transparently on first startup with v1.28.0. PostgreSQL operators must run the 7
+`ALTER TABLE` renames manually before deploying.
+
+Tables renamed:
+- `forge_audit_log` → `smeldr_audit_log`
+- `forge_delivery_logs` → `smeldr_delivery_logs`
+- `forge_nav` → `smeldr_nav`
+- `forge_outbound_jobs` → `smeldr_outbound_jobs`
+- `forge_redirects` → `smeldr_redirects`
+- `forge_tokens` → `smeldr_tokens`
+- `forge_webhook_endpoints` → `smeldr_webhook_endpoints`
+
+**Migration function (`migrate.go`):** Probes `sqlite_master` to detect SQLite; silently
+skips for other databases. Wraps all renames in a single transaction via `BeginTx` when
+available. Idempotent — checks old table existence before each rename. Logs each rename
+via `slog.Info`.
+
+**Breaking changes (upgrade):**
+- Existing SQLite databases: auto-migrated at first startup with v1.28.0.
+- PostgreSQL operators: must run 7 `ALTER TABLE ... RENAME TO ...` statements manually.
+
+**No exported Go API changes. `migrate.go` is package-internal.**
+
+**Files changed (core):** `migrate.go` (new), `forge.go`, `audit.go`, `auth.go`, `nav.go`,
+`outbound.go`, `redirects.go`, `webhook.go`, `auth_test.go`, `outbound_test.go`,
+`webhook_test.go`, `integration_full_test.go`, `example/blog/main.go`,
+`docs/REFERENCE.md`, `docs/FEATURELIST.md`, `docs/ARCHITECTURE.md`, `README.md`,
+`CHANGELOG.md`, `decisions/recent.md`, `DECISIONS.md`.
+
+**Forge core → v1.28.0** (minor bump — DB schema migration required for upgrade).
+
+---

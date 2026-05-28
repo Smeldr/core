@@ -61,8 +61,8 @@ type Config struct {
 	Auth AuthFunc
 
 	// TokenStore enables database-backed named bearer token management. When
-	// set, [VerifyBearerToken] checks the forge_tokens table to validate that
-	// a token has not been revoked. The forge_tokens table must exist before
+	// set, [VerifyBearerToken] checks the smeldr_tokens table to validate that
+	// a token has not been revoked. The smeldr_tokens table must exist before
 	// the application starts; see [TokenStore] for the required DDL.
 	// Optional — leave nil to use HMAC-only token validation.
 	TokenStore *TokenStore
@@ -100,7 +100,7 @@ type Config struct {
 	PreviewTokenExpiry time.Duration
 
 	// NavMode selects how the application's navigation tree is populated.
-	// Use [NavModeDB] to persist navigation items in the forge_nav database
+	// Use [NavModeDB] to persist navigation items in the smeldr_nav database
 	// table (requires [Config.DB]; panics at startup if DB is nil).
 	// Use [NavModeCode] to supply items directly via [App.Nav].
 	// The zero value disables navigation entirely. Optional.
@@ -312,13 +312,19 @@ func New(cfg Config) *App {
 	if auth == nil {
 		auth = BearerHMAC(string(cfg.Secret))
 	}
-	return &App{
+	app := &App{
 		cfg:           cfg,
 		mux:           http.NewServeMux(),
 		middleware:    []func(http.Handler) http.Handler{Authenticate(auth)},
 		redirectStore: NewRedirectStore(),
 		tokenStore:    cfg.TokenStore,
 	}
+	if cfg.DB != nil {
+		if err := migrateLegacyTableNames(context.Background(), cfg.DB); err != nil {
+			slog.Warn("smeldr: legacy table migration failed — rename forge_* tables manually", "error", err)
+		}
+	}
+	return app
 }
 
 // Use appends one or more global middleware to the App's middleware stack.
@@ -603,7 +609,7 @@ func (a *App) Webhooks(store *WebhookStore) *App {
 // returns a JSON array of [AuditRecord] values. Optional query parameters:
 // from, to (RFC3339), type (content type name), actor (actor ID).
 //
-// The forge_audit_log table must exist before Audit is called.
+// The smeldr_audit_log table must exist before Audit is called.
 // See [NewAuditStore] for the required DDL.
 func (a *App) Audit(store AuditStore) *App {
 	a.auditStore = store
@@ -908,17 +914,17 @@ func (a *App) Handler() http.Handler {
 		}
 		a.mux.Handle("GET /_audit", newAuditHandler(auditAuth, a.auditStore))
 	}
-	// A66: probe forge_tokens table at startup when a TokenStore is configured.
-	// A83: auto-create a bootstrap admin token when forge_tokens is empty.
+	// A66: probe smeldr_tokens table at startup when a TokenStore is configured.
+	// A83: auto-create a bootstrap admin token when smeldr_tokens is empty.
 	if a.tokenStore != nil {
 		if err := a.tokenStore.probeTable(context.Background()); err != nil {
-			fmt.Fprintf(os.Stderr, "WARN  forge: TokenStore is configured but the forge_tokens table is missing or inaccessible — create it using the DDL in the TokenStore documentation\n")
+			fmt.Fprintf(os.Stderr, "WARN  forge: TokenStore is configured but the smeldr_tokens table is missing or inaccessible — create it using the DDL in the TokenStore documentation\n")
 		} else {
 			a.tokenStore.ensureBootstrap(context.Background())
 		}
 	}
 	// D29: initialise the navigation tree when NavMode is set or App.Nav() items
-	// were supplied. NavModeDB migrates and loads from forge_nav; NavModeCode
+	// were supplied. NavModeDB migrates and loads from smeldr_nav; NavModeCode
 	// builds the tree from the items supplied via App.Nav().
 	if a.cfg.NavMode == NavModeDB {
 		if a.cfg.DB == nil {

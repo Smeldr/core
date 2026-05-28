@@ -2511,7 +2511,7 @@ func TestFull_G25_WebhookStoreRoundtrip(t *testing.T) {
 	db := newSQLiteDB(t)
 	ctx := context.Background()
 	_, err := db.ExecContext(ctx, `
-		CREATE TABLE forge_webhook_endpoints (
+		CREATE TABLE smeldr_webhook_endpoints (
 			id TEXT PRIMARY KEY, events TEXT NOT NULL, target_url TEXT NOT NULL,
 			secret_enc TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT 1,
 			created_at DATETIME NOT NULL
@@ -2534,7 +2534,7 @@ func TestFull_G25_WebhookStoreRoundtrip(t *testing.T) {
 		t.Fatalf("encryptSecret: %v", err)
 	}
 	_, err = db.ExecContext(ctx,
-		`INSERT INTO forge_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
+		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
 		 VALUES ($1,$2,$3,$4,1,datetime('now'))`,
 		ep.ID, string(evJSON), ep.TargetURL, enc,
 	)
@@ -2622,7 +2622,7 @@ func TestFull_G26_SignalEnqueue(t *testing.T) {
 	enc, _ := store.encryptSecret([]byte("g26-secret"))
 	evJSON, _ := json.Marshal([]string{"g26post.published"})
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO forge_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
+		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
 		 VALUES ('ep-g26',$1,'https://8.8.8.8/hook',$2,1,datetime('now'))`,
 		string(evJSON), enc,
 	)
@@ -2673,19 +2673,19 @@ func createG26Tables(t *testing.T, db DB) {
 	t.Helper()
 	ctx := context.Background()
 	for _, ddl := range []string{
-		`CREATE TABLE IF NOT EXISTS forge_webhook_endpoints (
+		`CREATE TABLE IF NOT EXISTS smeldr_webhook_endpoints (
 			id TEXT PRIMARY KEY, events TEXT NOT NULL, target_url TEXT NOT NULL,
 			secret_enc TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT 1,
 			created_at DATETIME NOT NULL
 		)`,
-		`CREATE TABLE IF NOT EXISTS forge_outbound_jobs (
+		`CREATE TABLE IF NOT EXISTS smeldr_outbound_jobs (
 			id TEXT PRIMARY KEY, endpoint_id TEXT NOT NULL, target_url TEXT NOT NULL,
 			secret_enc TEXT NOT NULL, payload BLOB NOT NULL, event TEXT NOT NULL,
 			attempts INTEGER NOT NULL DEFAULT 0, next_retry_at DATETIME NOT NULL,
 			created_at DATETIME NOT NULL, expires_at DATETIME NOT NULL,
 			status TEXT NOT NULL DEFAULT 'pending'
 		)`,
-		`CREATE TABLE IF NOT EXISTS forge_delivery_logs (
+		`CREATE TABLE IF NOT EXISTS smeldr_delivery_logs (
 			id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempted_at DATETIME NOT NULL,
 			status_code INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
 			error TEXT NOT NULL DEFAULT ''
@@ -2814,7 +2814,7 @@ func TestFull_G28_DeadLetterAfterMaxAttempts(t *testing.T) {
 		clock.Advance(2 * time.Hour) // skip past exponential backoff
 		time.Sleep(50 * time.Millisecond)
 		rows, _ := pool.db.QueryContext(ctx,
-			`SELECT status FROM forge_outbound_jobs WHERE id = $1`, job.ID)
+			`SELECT status FROM smeldr_outbound_jobs WHERE id = $1`, job.ID)
 		func() {
 			defer rows.Close()
 			if rows.Next() {
@@ -2946,7 +2946,7 @@ func TestFull_G30_MCPScheduleWebhook(t *testing.T) {
 	enc, _ := store.encryptSecret([]byte("g30-secret"))
 	evJSON, _ := json.Marshal([]string{"g30post.scheduled"})
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO forge_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
+		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
 		 VALUES ('ep-g30',$1,'https://8.8.8.8/hook',$2,1,datetime('now'))`,
 		string(evJSON), enc,
 	)
@@ -3189,7 +3189,7 @@ func TestFull_G32_OnSignalAndWebhookCoexist(t *testing.T) {
 	enc, _ := store.encryptSecret([]byte("g32-coexist-secret"))
 	evJSON, _ := json.Marshal([]string{"g32post.published"})
 	if _, err := db.ExecContext(ctx,
-		`INSERT INTO forge_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
+		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
 		 VALUES ('ep-g32','`+string(evJSON)+`','https://8.8.8.8/hook','`+enc+`',1,datetime('now'))`,
 	); err != nil {
 		t.Fatalf("insert endpoint: %v", err)

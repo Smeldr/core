@@ -46,10 +46,10 @@ type sqlAuditStore struct {
 
 // NewAuditStore returns an [AuditStore] backed by db.
 //
-// The forge_audit_log table must exist before [App.Audit] is called.
+// The smeldr_audit_log table must exist before [App.Audit] is called.
 // Create it with [CreateAuditTable], or run the following DDL directly:
 //
-//	CREATE TABLE IF NOT EXISTS forge_audit_log (
+//	CREATE TABLE IF NOT EXISTS smeldr_audit_log (
 //	    id           TEXT PRIMARY KEY,
 //	    timestamp    TIMESTAMPTZ NOT NULL,
 //	    signal       TEXT NOT NULL,
@@ -63,11 +63,11 @@ func NewAuditStore(db DB) AuditStore {
 	return &sqlAuditStore{db: db}
 }
 
-// CreateAuditTable creates the forge_audit_log table if it does not exist.
+// CreateAuditTable creates the smeldr_audit_log table if it does not exist.
 // Call once at application startup before [NewAuditStore].
 func CreateAuditTable(db DB) error {
 	_, err := db.ExecContext(context.Background(), `
-		CREATE TABLE IF NOT EXISTS forge_audit_log (
+		CREATE TABLE IF NOT EXISTS smeldr_audit_log (
 			id           TEXT PRIMARY KEY,
 			timestamp    TIMESTAMPTZ NOT NULL,
 			signal       TEXT NOT NULL,
@@ -80,11 +80,11 @@ func CreateAuditTable(db DB) error {
 	return err
 }
 
-// Append persists r to the forge_audit_log table.
+// Append persists r to the smeldr_audit_log table.
 // Timestamp is stored as an RFC3339 string for SQLite compatibility.
 func (s *sqlAuditStore) Append(ctx context.Context, r AuditRecord) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO forge_audit_log
+		`INSERT INTO smeldr_audit_log
 		 (id, timestamp, signal, content_type, slug, actor_id, actor_role, prev_state)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		r.ID, r.Timestamp.UTC().Format(time.RFC3339), string(r.Signal), r.ContentType, r.Slug,
@@ -96,7 +96,7 @@ func (s *sqlAuditStore) Append(ctx context.Context, r AuditRecord) error {
 // List returns audit records matching f, ordered by timestamp descending.
 func (s *sqlAuditStore) List(ctx context.Context, f AuditFilter) ([]AuditRecord, error) {
 	query := `SELECT id, timestamp, signal, content_type, slug, actor_id, actor_role, prev_state
-	          FROM forge_audit_log WHERE 1=1`
+	          FROM smeldr_audit_log WHERE 1=1`
 	args := []any{}
 	n := 1
 	if !f.From.IsZero() {

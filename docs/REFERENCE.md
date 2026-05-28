@@ -433,10 +433,10 @@ app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 }))
 ```
 
-Create the `forge_tokens` table once before starting:
+Create the `smeldr_tokens` table once before starting:
 
 ```sql
-CREATE TABLE forge_tokens (
+CREATE TABLE smeldr_tokens (
     id         TEXT PRIMARY KEY,
     name       TEXT NOT NULL,
     role       TEXT NOT NULL,
@@ -449,7 +449,7 @@ CREATE TABLE forge_tokens (
 
 ### Bootstrap
 
-On first startup with an empty `forge_tokens` table, Forge auto-creates a
+On first startup with an empty `smeldr_tokens` table, Forge auto-creates a
 bootstrap admin token and emits it via `slog.Warn`:
 
 ```
@@ -915,7 +915,7 @@ app.Nav(
 ```
 
 ```go
-// Database-backed — items persisted in forge_nav table (auto-created)
+// Database-backed — items persisted in smeldr_nav table (auto-created)
 app := smeldr.New(smeldr.MustConfig(smeldr.Config{
     NavMode: smeldr.NavModeDB,
     DB:      db,
@@ -1582,11 +1582,11 @@ app.Redirect("/removed",   "",          smeldr.Gone)       // 410
 
 ### Optional DB persistence
 
-To persist redirects across restarts, create the `forge_redirects` table and
+To persist redirects across restarts, create the `smeldr_redirects` table and
 call `Load` at startup:
 
 ```sql
-CREATE TABLE forge_redirects (
+CREATE TABLE smeldr_redirects (
     from_path TEXT PRIMARY KEY,
     to_path   TEXT NOT NULL DEFAULT '',
     code      INTEGER NOT NULL DEFAULT 301,
@@ -2146,7 +2146,7 @@ loopback IPs). Secrets are encrypted with AES-256-GCM using a key derived from
 Required tables — run once at startup:
 
 ```sql
-CREATE TABLE IF NOT EXISTS forge_webhook_endpoints (
+CREATE TABLE IF NOT EXISTS smeldr_webhook_endpoints (
     id TEXT PRIMARY KEY,
     events TEXT NOT NULL,
     target_url TEXT NOT NULL,
@@ -2322,7 +2322,7 @@ app.Audit(smeldr.NewAuditStore(db))
 DDL (also created by `CreateAuditTable`):
 
 ```sql
-CREATE TABLE IF NOT EXISTS forge_audit_log (
+CREATE TABLE IF NOT EXISTS smeldr_audit_log (
     id           TEXT PRIMARY KEY,
     timestamp    TIMESTAMPTZ NOT NULL,
     signal       TEXT NOT NULL,

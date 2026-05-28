@@ -5,7 +5,7 @@
 //   - Auth and RBAC: Guest read, Author write, bearer-token API auth
 //   - Content lifecycle (Draft, Scheduled, Published, Archived)
 //   - MCP server: AI agents can create, update, publish, and read posts
-//   - Audit trail: every write is recorded in forge_audit_log
+//   - Audit trail: every write is recorded in smeldr_audit_log
 //   - HTML template rendering with smeldr:head
 //   - Open Graph and Twitter Card social metadata
 //   - RSS 2.0 feed at /posts/feed.xml and /feed.xml
@@ -83,8 +83,8 @@ func (p *Post) Markdown() string {
 
 // createSchema ensures all required tables exist in the SQLite database.
 //
-// Forge: smeldr.CreateAuditTable creates forge_audit_log. The posts and
-// forge_tokens tables are defined here so the full schema is visible in one
+// Forge: smeldr.CreateAuditTable creates smeldr_audit_log. The posts and
+// smeldr_tokens tables are defined here so the full schema is visible in one
 // place and the application starts with a known, consistent state on every run.
 func createSchema(db *sql.DB) error {
 	ctx := context.Background()
@@ -101,7 +101,7 @@ func createSchema(db *sql.DB) error {
 	)`); err != nil {
 		return fmt.Errorf("create posts table: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS forge_tokens (
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS smeldr_tokens (
 		id         TEXT PRIMARY KEY,
 		name       TEXT NOT NULL,
 		role       TEXT NOT NULL,
@@ -109,7 +109,7 @@ func createSchema(db *sql.DB) error {
 		revoked_at DATETIME,
 		created_at DATETIME NOT NULL
 	)`); err != nil {
-		return fmt.Errorf("create forge_tokens table: %w", err)
+		return fmt.Errorf("create smeldr_tokens table: %w", err)
 	}
 	if err := smeldr.CreateAuditTable(db); err != nil {
 		return fmt.Errorf("create audit table: %w", err)
@@ -343,7 +343,7 @@ func main() {
 		log.Println("WARN: using default SECRET — set the SECRET env var before deploying")
 	}
 
-	// Forge: TokenStore persists named bearer tokens in forge_tokens. Tokens
+	// Forge: TokenStore persists named bearer tokens in smeldr_tokens. Tokens
 	// are issued via the MCP create_token tool or the forge-cli token command.
 	// smeldr.New wires TokenStore into the authentication middleware automatically
 	// when it is present in Config — no app.Use() call required.
@@ -427,7 +427,7 @@ func main() {
 	app.SEO(&smeldr.RobotsConfig{Sitemaps: true})
 
 	// Forge: Audit records every write operation (create, update, publish,
-	// archive, delete) in forge_audit_log. The /_audit endpoint (Editor+) lets
+	// archive, delete) in smeldr_audit_log. The /_audit endpoint (Editor+) lets
 	// admins query the trail by slug or actor.
 	app.Audit(smeldr.NewAuditStore(db))
 

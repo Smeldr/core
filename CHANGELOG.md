@@ -23,6 +23,32 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.28.0] — 2026-05-28
+
+DB table rename: `forge_*` → `smeldr_*`, auto-migration at startup (Amendment A109).
+
+### Changed (breaking for upgrades)
+
+- **DB tables renamed** — all 7 internal tables renamed from `forge_` to `smeldr_` prefix.
+  Existing SQLite databases are migrated automatically at first startup with v1.28.0
+  via `migrateLegacyTableNames` called from `New()`. PostgreSQL operators must run the
+  7 `ALTER TABLE` renames manually before deploying v1.28.0.
+  `forge_audit_log → smeldr_audit_log`,
+  `forge_delivery_logs → smeldr_delivery_logs`,
+  `forge_nav → smeldr_nav`,
+  `forge_outbound_jobs → smeldr_outbound_jobs`,
+  `forge_redirects → smeldr_redirects`,
+  `forge_tokens → smeldr_tokens`,
+  `forge_webhook_endpoints → smeldr_webhook_endpoints`.
+
+### Added
+
+- `migrateLegacyTableNames` — internal function called from `New()` when `Config.DB` is
+  non-nil and the database is SQLite. Wraps all renames in a transaction; logs each rename
+  via `slog.Info`. Idempotent.
+
+---
+
 ## [1.27.0] — 2026-05-28
 
 Post-T62 cleanup: `smeldr.config`, `SMELDR_CONFIG`, `smeldr:` error prefix, skill file rename (Amendment A108).
