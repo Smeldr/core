@@ -16,7 +16,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-03-01 | Updated to reflect Milestone 1 completion: corrected request lifecycle order, added `CacheStore`, `CSRF`, `TrustedProxy`, updated `SignToken` signature, added `ListOptions.Status`, fixed `Markdownable` location to `module.go`, marked future-milestone files as planned |
 | 2026-03-02 | Milestone renumbering: M2 split into App Bootstrap (M2) and SEO & Head (M3); all subsequent milestones shifted +1 |
 | 2026-03-02 | Milestone 2 Step 1: `forge.go` implemented — `Config`, `MustConfig`, `New`, `App` (`Use`/`Content`/`Handle`/`Run`/`Handler`), `Registrator` interface, graceful shutdown |
-| 2026-03-02 | Milestone 2 Step P1: `forge-pgx` module implemented — `Wrap(pool)` native pgx adapter satisfying `forge.DB` |
+| 2026-03-02 | Milestone 2 Step P1: `forge-pgx` module implemented — `Wrap(pool)` native pgx adapter satisfying `smeldr.DB` |
 | 2026-03-03 | Milestone 3 Step 1: `head.go` implemented — `Head`, `Image`, `Breadcrumb`, `Alternate`, `Headable`, `HeadFunc`, `Excerpt`, `URL`, `Crumbs`; `Module[T].headFunc` field added (Amendment A1) |
 | 2026-03-03 | Milestone 3 Step 2: `schema.go` implemented — `SchemaFor`, 8 JSON-LD rich result types (Article, Product, FAQPage, HowTo, Event, Recipe, Review, Organization), BreadcrumbList, 6 provider interfaces (FAQProvider, HowToProvider, EventProvider, RecipeProvider, ReviewProvider, OrganizationProvider) |
 | 2026-03-03 | Milestone 3 Step 3: `sitemap.go` implemented — `SitemapConfig`, `ChangeFreq`, `SitemapNode`, `SitemapPrioritiser`, `SitemapEntry`, `SitemapStore`, `WriteSitemapFragment`, `SitemapEntries`, `WriteSitemapIndex`; Amendments A2 (node.go getters), A3 (Module sitemap wiring), A4 (App sitemap store + Handler guard) |
@@ -24,16 +24,16 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-03-05 | Milestone 4 Step 1: `templatedata.go` implemented — `TemplateData[T]`, `NewTemplateData` constructor; `SiteName` sourced from `Config.BaseURL` hostname |
 | 2026-03-05 | Milestone 4 Step 2: `templates.go` implemented — `templateParser` interface, `Templates`/`TemplatesOptional` options, `forgeHeadTmpl` const, `parseTemplates()`/`renderListHTML`/`renderShowHTML` on `Module[T]`, `bindErrorTemplates`; Amendments A6 (`module.go` template fields + HTML render path), A7 (`errors.go` `errorTemplateLookup`), A8 (`forge.go` `templateModules` + startup parse wiring) |
 | 2026-03-05 | Milestone 4 Step 3: `templatehelpers.go` implemented — `forgeMeta`, `forgeDate`, `forgeMarkdown` (stdlib-only), `forgeExcerpt`, `forgeCSRFToken`, `forgeLLMSEntries` (stub), `TemplateFuncMap()`; Amendment A9 (`templates.go` `parseOneTemplate` now calls `.Funcs(TemplateFuncMap())`) |
-| 2026-03-05 | Milestone 4 Step 4: `integration_test.go` implemented — 15 cross-component integration tests covering HTML render cycle, forge:head correctness, error pages (custom + fallback), CSRF token round-trip, App-level SEO/sitemap routing, and TemplateData field propagation |
-| 2026-03-05 | Milestone 4 Step 5: `integration_full_test.go` implemented — 19 cross-milestone integration tests (M1–M4): multi-module routing, global middleware order, role-gated access (HasRole + inline middleware), AfterCreate/AfterDelete/cross-module signal isolation, content negotiation across two module types, forge_meta/forge_markdown/BreadcrumbList through render, sitemap URL in robots.txt, error template first-match and fallthrough, TemplateData siteName and request URL |
-| 2026-03-06 | Milestone 5 Step 1: `social.go` implemented — `SocialFeature`, `OpenGraph`, `TwitterCard`, `Social()` option; Amendment A9 (`head.go`: `Tags []string`, `TwitterCardType`, `TwitterMeta`, `SocialOverrides`, `Head.Social` field); Amendment A10 (`templates.go` `forgeHeadTmpl` extended — full OG + Twitter block, `forge_rfc3339` added to `templatehelpers.go` and `TemplateFuncMap()`, Module[T].social field + case in `module.go`) |
+| 2026-03-05 | Milestone 4 Step 4: `integration_test.go` implemented — 15 cross-component integration tests covering HTML render cycle, smeldr:head correctness, error pages (custom + fallback), CSRF token round-trip, App-level SEO/sitemap routing, and TemplateData field propagation |
+| 2026-03-05 | Milestone 4 Step 5: `integration_full_test.go` implemented — 19 cross-milestone integration tests (M1–M4): multi-module routing, global middleware order, role-gated access (HasRole + inline middleware), AfterCreate/AfterDelete/cross-module signal isolation, content negotiation across two module types, smeldr_meta/smeldr_markdown/BreadcrumbList through render, sitemap URL in robots.txt, error template first-match and fallthrough, TemplateData siteName and request URL |
+| 2026-03-06 | Milestone 5 Step 1: `social.go` implemented — `SocialFeature`, `OpenGraph`, `TwitterCard`, `Social()` option; Amendment A9 (`head.go`: `Tags []string`, `TwitterCardType`, `TwitterMeta`, `SocialOverrides`, `Head.Social` field); Amendment A10 (`templates.go` `forgeHeadTmpl` extended — full OG + Twitter block, `smeldr_rfc3339` added to `templatehelpers.go` and `TemplateFuncMap()`, Module[T].social field + case in `module.go`) |
 | 2026-03-06 | Milestone 5 Step 2: `ai.go` implemented — `Markdownable` (A11: migrated from `module.go`), `AIDocSummary`, `AIFeature`, `LLMsTxt`/`LLMsTxtFull`/`AIDoc` constants, `AIIndex()` option, `WithoutID()` option, `LLMsEntry`, `LLMsTemplateData`, `LLMsStore`, `NewLLMsStore`, `extractNode`, `renderAIDoc`; `forgeLLMSEntries(data any)` wired in `templatehelpers.go` (A12); `LLMsStore` wiring in `forge.go` Content+Handler (A13); README one-liner added (A14); AIDoc URL uses `/{prefix}/{slug}/aidoc` — Go’s net/http.ServeMux does not support partial wildcard segments, so `/{slug}.aidoc` is not a valid pattern (A15: DECISIONS.md updated) || 2026-03-06 | Milestone 5 Step 3: `feed.go` implemented — `FeedConfig`, `Feed()` option (opt-in, Amendment A16: Decision 13 updated), `FeedDisabled()` option, `rssItem`/`rssChannel`/`rssRoot` XML structs, `FeedStore`, `NewFeedStore`, `buildRSSItem`, `capitalisePrefixTitle`, `guessMIMEType`, `writeRSSFeed`; `ModuleHandler` serves `/{prefix}/feed.xml`, `IndexHandler` serves `/feed.xml` aggregate (all Published items, reverse-chronological); `feedCfg`/`feedStore`/`regenerateFeed`/`setFeedStore` added to `module.go`; `feedStore`/`feedIndexRegistered` added to `forge.go` |
-| 2026-03-06 | Milestone 5 Step 4: `integration_full_test.go` extended — G9–G12 cross-milestone groups appended: G9 (Social + SitemapConfig M3): OG/Twitter tags in forge:head, Draft → 404; G10 (AIIndex + M4 content negotiation): /llms.txt Published/Draft filter, /posts/{slug}/aidoc 200/404, Accept:text/markdown alongside AIDoc; G11 (Feed + M1 AfterPublish signal): /posts/feed.xml RSS 2.0, Draft excluded, AfterPublish fires within 500ms; G12 (Full M5 stack): Social+AIIndex+Feed+SitemapConfig+HeadFunc+Templates — OG/Twitter, /llms.txt, /aidoc, /feed.xml all verified. README.md: AI indexing and Social sharing badges updated from 🔲 Coming in Milestone 5 → ✅ Available. Milestone 5 complete. |
+| 2026-03-06 | Milestone 5 Step 4: `integration_full_test.go` extended — G9–G12 cross-milestone groups appended: G9 (Social + SitemapConfig M3): OG/Twitter tags in smeldr:head, Draft → 404; G10 (AIIndex + M4 content negotiation): /llms.txt Published/Draft filter, /posts/{slug}/aidoc 200/404, Accept:text/markdown alongside AIDoc; G11 (Feed + M1 AfterPublish signal): /posts/feed.xml RSS 2.0, Draft excluded, AfterPublish fires within 500ms; G12 (Full M5 stack): Social+AIIndex+Feed+SitemapConfig+HeadFunc+Templates — OG/Twitter, /llms.txt, /aidoc, /feed.xml all verified. README.md: AI indexing and Social sharing badges updated from 🔲 Coming in Milestone 5 → ✅ Available. Milestone 5 complete. |
 | 2026-03-06 | Amendment A17: `compressIfAccepted(w, r, body, contentType)` helper added to `ai.go`; gzip applied directly at AI endpoint handlers — `CompactHandler`, `FullHandler`, `renderAIDoc` (now takes `r *http.Request`); 1400-byte threshold; `Vary: Accept-Encoding` always set. Supersedes Decision 13 Amendment A clause 3. Tests: `TestCompressIfAccepted_gzip`, `TestCompressIfAccepted_smallBody`, `TestCompressIfAccepted_noAcceptEncoding`, `TestLLMsTxt_gzip`, `TestAIDoc_gzip`. |
-| 2026-03-07 | Milestone 6 Step 1: `cookies.go` implemented — `CookieCategory` (`Necessary`/`Preferences`/`Analytics`/`Marketing`), `Cookie` struct, `SetCookie`, `SetCookieIfConsented`, `ReadCookie`, `ClearCookie`, `ConsentFor`, `GrantConsent`, `RevokeConsent`; `forge_consent` Necessary cookie stores consent state; Decision 5 enforcement: `SetCookie` panics on non-Necessary, `SetCookieIfConsented` panics on Necessary. |
+| 2026-03-07 | Milestone 6 Step 1: `cookies.go` implemented — `CookieCategory` (`Necessary`/`Preferences`/`Analytics`/`Marketing`), `Cookie` struct, `SetCookie`, `SetCookieIfConsented`, `ReadCookie`, `ClearCookie`, `ConsentFor`, `GrantConsent`, `RevokeConsent`; `smeldr_consent` Necessary cookie stores consent state; Decision 5 enforcement: `SetCookie` panics on non-Necessary, `SetCookieIfConsented` panics on Necessary. |
 | 2026-03-07 | Milestone 6 Step 2: `cookiemanifest.go` implemented — `cookieManifest`/`cookieManifestEntry` JSON types, `buildManifest`, `sameSiteName`, `ManifestAuth` option, `newCookieManifestHandler`; Amendment A18: `App.Cookies()`, `App.CookiesManifestAuth()`, `cookieDecls`/`cookieManifestOpts` fields added to `forge.go`; `GET /.well-known/cookies.json` mounted lazily in `App.Handler()`. |
 | 2026-03-07 | Milestone 6 Step 3: `integration_full_test.go` extended — G13–G15 cross-milestone groups appended: G13 (M6 consent enforcement, Decision 5): SetCookie/ConsentFor/SetCookieIfConsented/GrantConsent/RevokeConsent; G14 (M6 + M2 handler pattern): consent lifecycle wired through an HTTP handler, ClearCookie expiry, Necessary always-true; G15 (M6 + M2 App + M1 BearerHMAC): manifest mounted/sorted/not-mounted-when-empty, authGuard 401/200. README.md: Cookies & Compliance badge updated from 🔲 Coming in Milestone 6 → ✅ Available. Milestone 6 complete. |
-| 2026-03-07 | Milestone 7 Step 1: `storage.go` extended — `SQLRepo[T]` production `Repository[T]` backed by `forge.DB`; `Table()` `SQLRepoOption`; `camelToSnake()` + plural table-name derivation; `FindByID`/`FindBySlug` delegate to `QueryOne`; `FindAll` with status IN, ORDER BY, LIMIT/OFFSET; `Save` upsert (ON CONFLICT); `Delete` returns `ErrNotFound` when RowsAffected==0. 9 new `TestSQLRepo_*` tests + extended fake driver. Amendment A19. |
+| 2026-03-07 | Milestone 7 Step 1: `storage.go` extended — `SQLRepo[T]` production `Repository[T]` backed by `smeldr.DB`; `Table()` `SQLRepoOption`; `camelToSnake()` + plural table-name derivation; `FindByID`/`FindBySlug` delegate to `QueryOne`; `FindAll` with status IN, ORDER BY, LIMIT/OFFSET; `Save` upsert (ON CONFLICT); `Delete` returns `ErrNotFound` when RowsAffected==0. 9 new `TestSQLRepo_*` tests + extended fake driver. Amendment A19. |
 | 2026-03-07 | Milestone 7 Step 2: `redirects.go` implemented — `RedirectCode` (`Permanent`/`Gone`), `RedirectEntry` (+`IsPrefix`), `From` type, `Redirects()` module option, `RedirectStore` (exact map + prefix slice sorted longest-first, chain collapse max depth 10, `Get`/`Add`/`All`/`Len`), DB persistence (`Load`/`Save`/`Remove`), `handler()` fallback; `forge.go` Amendment A20: `redirectStore *RedirectStore`, `redirectFallbackReg`, `New()` init, `Content()` extracts `redirectsOption`, `Handler()` mounts `"/"` fallback, `App.Redirect()`, `App.RedirectStore()`. 13 new `TestRedirectStore_*`/`TestApp_Redirect_*` tests. |
 | 2026-03-07 | Milestone 7 Step 3: `redirectmanifest.go` implemented — `redirectManifestEntry`/`redirectManifest` JSON types, `buildRedirectManifest` (delegates to `store.All()` for sorted entries), `newRedirectManifestHandler` (serialises per-request from live store, reuses `manifestAuthOption`, `Cache-Control: no-store`); `forge.go` Amendment A21: `redirectManifestReg bool`, `GET /.well-known/redirects.json` always mounted in `Handler()`. 8 new `TestRedirectManifest_*` tests. |
 | 2026-03-07 | Milestone 7 Step 4: `integration_full_test.go` extended — G16–G18 cross-milestone groups appended: G16 (M7 Decision 17): 301/410/404 enforcement + forward chain collapse; G17 (M7 + M2): prefix rewrite via `Redirects(From)`, exact-beats-prefix; G18 (M7 + M6 + M1): `SQLRepo[T]` satisfies `Repository[T]` compile check, redirect manifest always mounted, entries reflect `app.Redirect()` calls, `App.RedirectManifestAuth()` (Amendment A22) 401/200. `forge.go` Amendment A22: `redirectManifestOpts []Option` field + `App.RedirectManifestAuth(auth AuthFunc)` method. README: Redirects badge → ✅ Available; SQLRepo production repository section added. Milestone 7 complete. |
@@ -46,10 +46,10 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-03-12 | Hardening sweep (Amendments A37–A41, v1.0.5): A37 — all `http.NotFound`/`http.Error` bypasses replaced with `WriteError(w, r, sentinel)`. A38 — `auth.go` `encodeToken` returns `ErrInternal` instead of raw `fmt.Errorf`. A39 — `Module[T]` goroutine lifecycle: `stopCh` field + `Stop()` method; cache sweep exits on `stopCh`; `debouncer.Stop()` added; `stoppable` interface + `App.stoppableModules`; `App.Run()` calls `Stop()` on all modules after `srv.Shutdown`. A40 — `FeedDisabled()` → `DisableFeed()`; `forgeLLMSEntries` → `forgeLLMsEntries`. A41 — debounce callback used stashed request context (cancelled before 2-second delay fires); replaced with `NewBackgroundContext(m.siteName)` at fire time; `debounceMu`/`debounceCtx` fields removed; `triggerSitemap(ctx)` → `triggerRebuild()`. |
 | 2026-03-12 | Amendment A42 (`forge.go`): `Config.Version string` field added immediately after `Secret []byte`; `App.Health()` method mounts `GET /_health` returning `{"status":"ok"}` or `{"status":"ok","version":"X.Y.Z"}` (200, `application/json`). Explicit opt-in — not auto-mounted. Three tests: `TestApp_health_ok`, `TestApp_health_version`, `TestApp_health_notMounted`. |
 | 2026-03-14 | Amendment A43: `NewSQLRepo` godoc and README updated — explicit pointer-type guidance added; wiring example shows `NewSQLRepo[*Post]` + `NewModule((*Post)(nil), ...)` together. |
-| 2026-03-16 | Milestone 10 Step 1: `smeldr.dev/mcp/mcp.go` + Amendment A49 — `forge.MCPModule` interface added to `mcp.go`; `Module[T]` implements it in `module.go`; `App.MCPModules()` added to `forge.go`; `smeldr.dev/mcp` scaffold (`go.mod`, `Server`, `New`, JSON-RPC types, `handle`, `handleInitialize`, `snakeCase`, `hasMCPOp`, `slugOf`, `mcpToolDefs`, `inputSchema`, `inputSchemaUpdate`). |
+| 2026-03-16 | Milestone 10 Step 1: `smeldr.dev/mcp/mcp.go` + Amendment A49 — `smeldr.MCPModule` interface added to `mcp.go`; `Module[T]` implements it in `module.go`; `App.MCPModules()` added to `forge.go`; `smeldr.dev/mcp` scaffold (`go.mod`, `Server`, `New`, JSON-RPC types, `handle`, `handleInitialize`, `snakeCase`, `hasMCPOp`, `slugOf`, `mcpToolDefs`, `inputSchema`, `inputSchemaUpdate`). |
 | 2026-03-16 | Milestone 10 Step 2: `smeldr.dev/mcp/resource.go` — read path: `handleResourceMethod`, `handleResourcesList`, `handleResourcesTemplatesList`, `handleResourcesRead`, `parseResourceURI`; `mcpResource`/`resourceContent`/`resourceTemplate` wire types; Published-only lifecycle enforcement. `handle` default case delegates to `handleResourceMethod`. |
 | 2026-03-17 | Milestone 10 Step 3: `smeldr.dev/mcp/tool.go` — write path: `handleToolMethod`, `handleToolsList`, `handleToolsCall` dispatcher (create/update/publish/schedule/archive/delete); `toolName`, `parseToolName`, `moduleForType`, `authorise`, `errorFor`, `stringArg` helpers; Author-level role enforcement; Flag H idempotency on publish; Flag F delete response `{"deleted":true,"slug":...}`; godoc NOTE on zero-value limitation (Flag G). `handle` default case now delegates to `handleToolMethod` before `handleResourceMethod`. |
-| 2026-03-16 | Milestone 10 Step 4: `smeldr.dev/mcp/transport.go` + Amendment A50 — `ServeStdio(ctx, in, out)` with goroutine-based scanner and 1 MiB `bufio.Scanner` buffer limit; `Handler()` returning ServeMux with `GET /mcp` (SSE keepalive) and `POST /mcp/message` (HTTP 401 auth boundary + `MaxBytesReader` 1 MiB body limit + JSON-RPC response); A50 additions: `forge.VerifyBearerToken(r, secret)` in `auth.go`; `App.Secret()` accessor in `forge.go`; `forge.NewContextWithUser(user)` production-safe background context constructor in `context.go`; `Server.secret []byte` + `New(app, opts...)` auto-inherit + `WithSecret` option + mismatch `log.Printf` warning in `smeldr.dev/mcp/mcp.go`. 10 transport tests + 3 `TestVerifyBearerToken` sub-tests added. |
+| 2026-03-16 | Milestone 10 Step 4: `smeldr.dev/mcp/transport.go` + Amendment A50 — `ServeStdio(ctx, in, out)` with goroutine-based scanner and 1 MiB `bufio.Scanner` buffer limit; `Handler()` returning ServeMux with `GET /mcp` (SSE keepalive) and `POST /mcp/message` (HTTP 401 auth boundary + `MaxBytesReader` 1 MiB body limit + JSON-RPC response); A50 additions: `smeldr.VerifyBearerToken(r, secret)` in `auth.go`; `App.Secret()` accessor in `forge.go`; `smeldr.NewContextWithUser(user)` production-safe background context constructor in `context.go`; `Server.secret []byte` + `New(app, opts...)` auto-inherit + `WithSecret` option + mismatch `log.Printf` warning in `smeldr.dev/mcp/mcp.go`. 10 transport tests + 3 `TestVerifyBearerToken` sub-tests added. |
 | 2026-03-17 | Amendment A51 (`templates.go`): `forgeHeadTmpl` now emits `twitter:card = summary_large_image` when `Head.Type` is `"Article"` or `"Product"`, regardless of whether `Head.Image.URL` is set; `Head.Social.Twitter.Card` explicit override takes priority. Five new sub-tests in `TestTemplates_twitterCard`. Shipped in v1.1.1. |
 | 2026-03-17 | Amendment A52 (`module.go`): `mcpGoTypeStr` returns `"array"` for `reflect.Slice` kinds; new `coerceSliceFields` helper splits comma-separated string values for `[]string` fields before `MCPCreate`/`MCPUpdate` round-trip. (`smeldr.dev/mcp/mcp.go`): `inputSchema` and `inputSchemaUpdate` emit `{"type":"array","items":{"type":"string"}}` for array fields and suppress `minLength`/`maxLength`/`enum` constraints. Shipped in forge v1.1.2 / smeldr.dev/mcp v1.0.1. |
 | 2026-03-18 | Amendment A53 (`module.go`): `negotiate()` now returns `"text/html"` when `Accept` is absent or `"*/*"` and the module has templates configured; previously returned `"application/json"` unconditionally, causing crawlers to receive JSON and miss structured data in `<head>`. API-only modules (no templates) are unaffected. Shipped in v1.1.3. |
@@ -58,22 +58,22 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-03-20 | Amendment A57 (`storage.go`): `quoteIdent()` helper added; applied to every generated column reference in `SQLRepo.Save`, `FindAll`, `FindByID`, `FindBySlug`, and `Delete`; prevents SQL syntax errors when `db` struct tags use reserved keywords (e.g. `db:"order"`). Shipped in v1.1.5. |
 | 2026-03-20 | Amendment A58 (`forge.go`): `forgeVersions()` reads `runtime/debug.ReadBuildInfo()` at `Health()` mount time and `Run()` startup; `Health()` now includes `"forge"` and companion-module version keys in the JSON response instead of the removed `"version"` key; startup log line emitted to stderr before `ListenAndServe`. `Config.Version` retained for application use only. Shipped in v1.1.6. |
 | 2026-03-20 | Amendment A59 (`forge.go`): `httpsRedirect()` exempts `/_health` from the HTTPS redirect — plain-HTTP requests to `/_health` pass through to `next` immediately, before the TLS / `X-Forwarded-Proto` check; reverse-proxy health checks no longer receive a `301`. Shipped in v1.1.7. |
-| 2026-04-02 | Amendment A62 (`forge.go`, `templates.go`, `module.go`): `App.Partials(dir) *App` stores a partials directory; `loadPartials(dir)` reads `*.html` files alphabetically; `Module[T].setPartials([]string)` stores partial sources; `parseOneTemplate` now accepts `partials []string` and registers each into the template set after `forge:head`; `App.MustParseTemplate(path) *template.Template` loads a single template with FuncMap + forge:head + partials, panics on error. Shipped in v1.2.0. |
+| 2026-04-02 | Amendment A62 (`forge.go`, `templates.go`, `module.go`): `App.Partials(dir) *App` stores a partials directory; `loadPartials(dir)` reads `*.html` files alphabetically; `Module[T].setPartials([]string)` stores partial sources; `parseOneTemplate` now accepts `partials []string` and registers each into the template set after `smeldr:head`; `App.MustParseTemplate(path) *template.Template` loads a single template with FuncMap + smeldr:head + partials, panics on error. Shipped in v1.2.0. |
 | 2026-04-03 | Amendment A63 (`head.go`, `templates.go`, `templatedata.go`, `forge.go`, `module.go`): `HeadAssets`, `HeadLink`, `ScriptTag` new exported types in `head.go`; `HeadAssets` implements `SEOOption` via `applySEO(*seoState)`; `seoState.headAssets` field added to `forge.go`; `App.Handler()` interface assertion updated to 3-arg `setSEODefaults(*OGDefaults, *AppSchema, *HeadAssets)`; `Module[T].headAssets` field added to `module.go`; `TemplateData[T].HeadAssets *HeadAssets` field added to `templatedata.go`; `forgeHeadTmpl` extended with HeadAssets block (preconnect → stylesheets → favicons → scripts); both render paths propagate `headAssets`. Shipped in v1.3.0. |
-| 2026-04-03 | Amendment A64 (`head.go`, `templatedata.go`): `PageHead` new exported struct holding `Head`, `OGDefaults`, `AppSchema`, `HeadAssets`; `TemplateData[T]` refactored to embed `PageHead` anonymously — fields promoted to top level, all template access paths unchanged; `NewTemplateData` body updated to `PageHead: PageHead{Head: head}`; custom handler structs can now embed `forge.PageHead` to gain `{{template "forge:head" .}}` support without using `TemplateData[T]`. Shipped in v1.4.0. |
+| 2026-04-03 | Amendment A64 (`head.go`, `templatedata.go`): `PageHead` new exported struct holding `Head`, `OGDefaults`, `AppSchema`, `HeadAssets`; `TemplateData[T]` refactored to embed `PageHead` anonymously — fields promoted to top level, all template access paths unchanged; `NewTemplateData` body updated to `PageHead: PageHead{Head: head}`; custom handler structs can now embed `smeldr.PageHead` to gain `{{template "smeldr:head" .}}` support without using `TemplateData[T]`. Shipped in v1.4.0. |
 | 2026-04-04 | Amendment A65 (`module.go`, `templatedata.go`, `templates.go`): `ContextFunc(fn)` new module option; `contextFuncOption` unexported type in `module.go`; `contextFunc func(Context, any) (any, error)` field on `Module[T]`; `resolveExtra` unexported method on `Module[T]` in `templates.go`; `TemplateData[T].Extra any` new field; called in `renderListHTML` and `renderShowHTML` after all other data fields are set; errors from `contextFunc` return nil and never abort the render. Shipped in v1.5.0. |
 | 2026-04-05 | Amendment A66 (`auth.go`, `forge.go`, `smeldr.dev/mcp/`): `TokenRecord`, `TokenStore`, `NewTokenStore(db, secret)` added to `auth.go`; `TokenStore.Create`, `List`, `Revoke`, `probeTable` methods; `VerifyBearerToken` signature extended to 3-arg `(r, secret, store *TokenStore)` — nil store preserves stateless HMAC behaviour; `Config.TokenStore *TokenStore` and `App.TokenStore()` accessor in `forge.go`; `Handler()` startup probe warns if `forge_tokens` table absent; `smeldr.dev/mcp/mcp.go` wires `Server.tokenStore`; `smeldr.dev/mcp/transport.go` updated sole call site; `smeldr.dev/mcp/tool.go` adds `authoriseAdmin`, `tokenToolDefs`, `handleTokenTool`, pre-dispatch for token tools in `handleToolsCall`; `tools/list` exposes `create_token`/`list_tokens`/`revoke_token` when store configured (Admin role required). Shipped in v1.6.0 / smeldr.dev/mcp v1.1.0. |
 | 2026-04-05 | Amendment A67 (`templatehelpers.go`): `forgeHTML(s string) template.HTML` added — trusted raw HTML passthrough registered as `forge_html` in `TemplateFuncMap`; `TemplateFuncMap` godoc updated; `TestTemplateFuncMap_keys` expected count updated from 8 to 9; `TestForgeHTML` added (3 sub-tests). Shipped in v1.7.0. |
 | 2026-04-06 | Decision 26 (`auth.go`, `errors.go`, `smeldr.dev/mcp/tool.go`): `ErrLastAdmin` sentinel (409 `last_admin`) added to `errors.go`; `TokenStore.Revoke` gains pre-check — counts other active admin tokens before revoking; returns `ErrLastAdmin` if count is 0 and target is admin; `smeldr.dev/mcp/tool.go` `revoke_token` surfaces actionable message for `ErrLastAdmin`. Shipped in forge v1.8.0, smeldr.dev/mcp v1.2.0. |
-| 2026-04-07 | Decision 27 (`mcp.go`, `module.go`, `smeldr.dev/mcp/mcp.go`): `MCPField.Format string` and `MCPField.Description string` added to `mcp.go`; `mcpStructField` in `module.go` reads `forge_format` and `forge_description` struct tags; `fieldDescription` helper added to `smeldr.dev/mcp/mcp.go`; `inputSchema` and `inputSchemaUpdate` emit `"description"` key in JSON Schema properties with three-case priority logic (both → description + " (" + format + ")"; format-only → "(format)"; neither → omitted). Shipped in forge v1.9.0, smeldr.dev/mcp v1.3.0. |
+| 2026-04-07 | Decision 27 (`mcp.go`, `module.go`, `smeldr.dev/mcp/mcp.go`): `MCPField.Format string` and `MCPField.Description string` added to `mcp.go`; `mcpStructField` in `module.go` reads `smeldr_format` and `smeldr_description` struct tags; `fieldDescription` helper added to `smeldr.dev/mcp/mcp.go`; `inputSchema` and `inputSchemaUpdate` emit `"description"` key in JSON Schema properties with three-case priority logic (both → description + " (" + format + ")"; format-only → "(format)"; neither → omitted). Shipped in forge v1.9.0, smeldr.dev/mcp v1.3.0. |
 | 2026-04-07 | Decision 28 (`smeldr.dev/cli/`): new stdlib-only submodule `smeldr.dev/cli` (`package main`); content CRUD + lifecycle via GET-then-PUT to Forge REST API; token management via MCP JSON-RPC 2.0; YAML-subset frontmatter parser; `Config` from `FORGE_URL`/`FORGE_TOKEN`/`FORGE_MCP_URL` env vars; G23 integration test validates GET→PUT round-trip contract. Tagged `smeldr.dev/cli/v0.1.0`. |
 | 2026-04-10 | Fix (`smeldr.dev/mcp/mcp.go`): `inputSchema` and `inputSchemaUpdate` emit `{"type":"string","format":"date-time"}` for `f.Type == "datetime"` fields (`published_at`, `scheduled_at`). Previously emitted invalid `"type":"datetime"`, blocking tool registration in strict MCP clients (VS Code Copilot). Shipped in smeldr.dev/mcp v1.3.1. |
 | 2026-04-11 | Decision 29 (`nav.go`, `forge.go`, `templatedata.go`, `templates.go`, `module.go`, `smeldr.dev/mcp/`): NavTree first-class navigation abstraction; NavMode, NavItem, NavTree; App.Nav(), App.NavTree(); TemplateData[T].Nav field; smeldr.dev/mcp nav tools (list/create/update/delete). Shipped in forge v1.10.0 / smeldr.dev/mcp v1.4.0. |
 | 2026-04-11 | Decision 30 (`config.go`, `forge.go`): `loadConfigFile`, `mergeFileConfig`; `Config.AppSchema`, `Config.OGDefaults`; `MustConfig` auto-loads `forge.config`. Shipped in forge v1.11.0. |
-| 2026-04-18 | Decision 31 (`forge.go`, `smeldr.dev/media/`, `smeldr.dev/mcp/`, `smeldr.dev/cli/`): `Config.MediaPath string`, `Config.MediaMaxSize int64`, `App.Config() Config` accessor added to `forge.go` (Amendment A73); new optional submodule `smeldr.dev/media/` — `MediaStore` interface, `LocalMediaStore`, `MediaRecord`, `MediaType`, `CreateMediaTable`, HTTP server (`Server`, `New`, `Register`, `HTTPHandler`), forge.MCPModule implementation (`MCPMeta`, `MCPSchema`, `MCPCreate`, `MCPDelete`, `MCPList`, `MCPGet`); `smeldr.dev/mcp`: `WithModule(m forge.MCPModule) ServerOption` added (v1.5.0); `smeldr.dev/cli`: media upload, list, delete commands. Shipped in forge v1.12.0, smeldr.dev/media v1.0.0, smeldr.dev/mcp v1.5.0. |
+| 2026-04-18 | Decision 31 (`forge.go`, `smeldr.dev/media/`, `smeldr.dev/mcp/`, `smeldr.dev/cli/`): `Config.MediaPath string`, `Config.MediaMaxSize int64`, `App.Config() Config` accessor added to `forge.go` (Amendment A73); new optional submodule `smeldr.dev/media/` — `MediaStore` interface, `LocalMediaStore`, `MediaRecord`, `MediaType`, `CreateMediaTable`, HTTP server (`Server`, `New`, `Register`, `HTTPHandler`), smeldr.MCPModule implementation (`MCPMeta`, `MCPSchema`, `MCPCreate`, `MCPDelete`, `MCPList`, `MCPGet`); `smeldr.dev/mcp`: `WithModule(m smeldr.MCPModule) ServerOption` added (v1.5.0); `smeldr.dev/cli`: media upload, list, delete commands. Shipped in forge v1.12.0, smeldr.dev/media v1.0.0, smeldr.dev/mcp v1.5.0. |
 | 2026-05-02 | Amendment A77 (`head.go`, `module.go`, `templates.go`): `listHeadFuncOption[T]` unexported generic type; `ListHeadFunc[T any](fn func(Context, []T) Head) Option` exported option; `listHeadFunc any` field on `Module[T]`; `renderListHTML` resolves list head via type assertion after building TemplateData; `mergeOGDefaults` applied to list head for consistency with show-page behaviour. Fixes empty `<title>` on module list pages. Shipped in v1.14.1. |
 | 2026-05-08 | Milestone 11 (v1.17.0): A87 (`signals.go`): `AfterSchedule Signal = "after_schedule"`. A89 (`module.go`): `afterHook` callback field, `setAfterHook`, `notifyAfter`; `MCPSchedule` dispatches `AfterSchedule`. A88 (`forge.go`): `App.Webhooks(*WebhookStore)`, `App.WebhookPool() WebhookJobQueue`, `App.injectWebhookHooks()`; pool started/stopped with server lifecycle. Step 1 (`webhook.go`): `WebhookEndpoint`, `WebhookStore` (AES-256-GCM secret encryption, SSRF validation), `WebhookJobQueue` interface, `Titled` interface, `OutboundJob`, `DeliveryLog`, payload-building helpers, `buildWebhookPayload`, `signalToEventSuffix`. Step 2 (`outbound.go`): `workerPool` with exponential backoff (4^attempt ±20% jitter, max 1h), per-endpoint circuit breaker (threshold 5, open 5min), dead-letter at 7 attempts, HMAC-SHA256 signing, injectable `deliver` func for testing, `fakeClock` test helper. `smeldr.dev/mcp`: `webhookStore` field, 5 Admin MCP tools (`create_webhook`, `list_webhooks`, `delete_webhook`, `list_webhook_deliveries`, `retry_webhook`), `subscriptionRegistry` (fan-out SSE push), `resources/subscribe` + `resources/unsubscribe` JSON-RPC methods, session-ID-based SSE transport, `capabilities.resources.subscribe=true`. `smeldr.dev/cli` v0.4.0: `forge webhook` subcommands (create, list, delete, deliveries, retry). `integration_full_test.go`: G24–G30 cross-milestone groups. |
-| 2026-05-08 | Milestone 12 (v1.18.0) / A92: `auth.go`: `encodePreviewToken(prefix, slug string, secret []byte, ttl time.Duration) string` + `decodePreviewToken(token string, secret []byte) (prefix, slug string, err error)` (internal; reuse `tokenHMAC`; constant-time comparison). `forge.go`: `Config.PreviewTokenExpiry time.Duration`, `App.GeneratePreviewToken(prefix, slug string) string`, `App.BaseURL() string`. `module.go`: `secret []byte` field + `setSecret([]byte)` (wired by `App.Content`) + preview bypass block in `showHandler` (checks prefix + slug; falls through silently on failure). `smeldr.dev/mcp/preview_tools.go`: `create_preview_url` Admin tool; `Server.app *forge.App` field added to `mcp.go`. `smeldr.dev/cli` v0.5.0: `preview.go` + `smeldr.dev/cli preview <prefix> <slug>`. `integration_full_test.go`: G31 cross-milestone group. |
+| 2026-05-08 | Milestone 12 (v1.18.0) / A92: `auth.go`: `encodePreviewToken(prefix, slug string, secret []byte, ttl time.Duration) string` + `decodePreviewToken(token string, secret []byte) (prefix, slug string, err error)` (internal; reuse `tokenHMAC`; constant-time comparison). `forge.go`: `Config.PreviewTokenExpiry time.Duration`, `App.GeneratePreviewToken(prefix, slug string) string`, `App.BaseURL() string`. `module.go`: `secret []byte` field + `setSecret([]byte)` (wired by `App.Content`) + preview bypass block in `showHandler` (checks prefix + slug; falls through silently on failure). `smeldr.dev/mcp/preview_tools.go`: `create_preview_url` Admin tool; `Server.app *smeldr.App` field added to `mcp.go`. `smeldr.dev/cli` v0.5.0: `preview.go` + `smeldr.dev/cli preview <prefix> <slug>`. `integration_full_test.go`: G31 cross-milestone group. |
 | 2026-05-11 | Milestone 14 (v1.20.0) / A94: Signal bus. `signals.go`: `SignalEvent` exported struct, `afterHookMeta` unexported struct, `buildSignalEvent` unexported func. `forge.go`: `App.OnSignal(sig Signal, h func(context.Context, SignalEvent) error) *App` (exported), `App.dispatchBus` (unexported), `App.wireSignalBus` (unexported, replaces `injectWebhookHooks`); `App` gains `busMu sync.RWMutex` and `busHandlers map[Signal][]func(context.Context, SignalEvent) error`; `App.Webhooks` refactored to register `webhookDispatch` as `OnSignal` handlers. `webhook.go`: `webhookDispatch` unexported func. `outbound.go`: `OutboundDelivery` exported interface `{ Enqueue(ctx, OutboundJob) error }`. `module.go`: `afterHook` field type, `setAfterHook`, `notifyAfter` signatures extended with `afterHookMeta`; all call sites updated with prevState. `integration_full_test.go`: G32 cross-milestone group. |
 | 2026-05-16 | A96 (Non-Decision, docs-only): sitemap ping. REFERENCE.md: "Search engine indexing" section with `App.OnSignal(AfterPublish, ...)` developer pattern. No code changes. |
 | 2026-05-16 | A97 (v1.22.0): Built-in opt-in audit trail. `audit.go` (new): `AuditRecord`, `AuditFilter`, `AuditStore` interface, `NewAuditStore(DB)`, `CreateAuditTable(DB)`, `newAuditHandler` (unexported). `forge.go`: `App.Audit(AuditStore) *App`; `App` gains `auditStore AuditStore` and `auditHandlerReg bool` fields; `App.Handler()` lazily mounts `GET /_audit` when `auditStore != nil`. `audit_test.go` (new): 13 unit tests. `integration_full_test.go`: G33 cross-milestone group. `smeldr.dev/cli` v0.9.0: `forge audit list` subcommand. |
@@ -186,7 +186,7 @@ smeldr.dev/
                       Amendment A6 (Module[T] template fields + HTML render path),
                       Amendment A7 (errorTemplateLookup in errors.go),
                       Amendment A8 (templateModules + startup wiring in forge.go);
-                      forge:head receiver changed to TemplateData, twitter:site and
+                      smeldr:head receiver changed to TemplateData, twitter:site and
                       AppSchema auto-emitted (Amendment A61);
                       loadPartials, setPartials, parseOneTemplate accepts partials slice
                       (Amendment A62);
@@ -196,7 +196,7 @@ smeldr.dev/
 └── templatehelpers.go forgeMeta, forgeDate, forgeRFC3339, forgeMarkdown, forgeHTML, forgeExcerpt, forgeCSRFToken,
                       forgeLLMSEntries(data any), TemplateFuncMap();
                       Amendment A9 (parseOneTemplate uses .Funcs(TemplateFuncMap()));
-                      forge_rfc3339 added (M5 Step 1) for article:published_time in forge:head;
+                      smeldr_rfc3339 added (M5 Step 1) for article:published_time in smeldr:head;
                       forgeLLMSEntries wired to real implementation (Amendment A12);
                       forgeHTML / forge_html passthrough (Amendment A67)
 └── social.go         SocialFeature, OpenGraph, TwitterCard, Social() option;
@@ -211,12 +211,12 @@ smeldr.dev/
                       guessMIMEType, writeRSSFeed;
                       ModuleHandler → /{prefix}/feed.xml;
                       IndexHandler → /feed.xml aggregate (reverse-chronological)
-└── integration_test.go 15 integration tests: HTML render cycle, forge:head, error pages,
+└── integration_test.go 15 integration tests: HTML render cycle, smeldr:head, error pages,
                       CSRF round-trip, App-level SEO/sitemap, TemplateData correctness
 └── integration_full_test.go cross-milestone test groups G1–G35 (M1–M4 + milestones 5–14 + A97 + A101):
                       multi-module routing, global middleware order, role guards,
                       AfterCreate/AfterDelete/isolation, content negotiation,
-                      forge_meta/forge_markdown/BreadcrumbList, sitemap in robots.txt,
+                      smeldr_meta/smeldr_markdown/BreadcrumbList, sitemap in robots.txt,
                       error template first-match + fallthrough, TemplateData siteName + request URL;
                       G33: audit trail lifecycle (AfterCreate excluded, AfterPublish recorded,
                       GET /_audit auth enforcement, content-type filter);
@@ -226,11 +226,11 @@ smeldr.dev/
                       draft not served to guest, list endpoint unaffected)
 
 smeldr.dev/core-pgx/  (separate module: ./forge-pgx/)
-└── pgx.go            Wrap(*pgxpool.Pool) forge.DB — native pgx adapter
+└── pgx.go            Wrap(*pgxpool.Pool) smeldr.DB — native pgx adapter
 
 smeldr.dev/mcp/  (separate repo: github.com/smeldr/mcp)
 ├── mcp.go            Server (secret []byte), New(app, opts...), ServerOption,
-│                     WithSecret, WithModule(m forge.MCPModule) (D31);
+│                     WithSecret, WithModule(m smeldr.MCPModule) (D31);
 │                     handle (JSON-RPC dispatch), handleInitialize,
 │                     JSON-RPC wire types (jsonRPCRequest/Response/Error),
 │                     mcpTool, mcpResource, allResources, mcpToolDefs,
@@ -276,7 +276,7 @@ smeldr.dev/media/  (separate repo: github.com/smeldr/media)
 │                     handleServe (GET /media/{filename} — public),
 │                     handleList (GET /media — Editor+; ?type= filter),
 │                     handleDelete (DELETE /media/{id} — Editor+)
-├── mcp.go            Server implements forge.MCPModule;
+├── mcp.go            Server implements smeldr.MCPModule;
 │                     MCPMeta (TypeName="File", Prefix="/media"),
 │                     MCPSchema (filename/data/description/media_type fields),
 │                     MCPCreate (base64 decode → MIME detect → store → insert),
@@ -289,7 +289,7 @@ smeldr.dev/media/  (separate repo: github.com/smeldr/media)
 ### Shipped (Milestones 7–8)
 
 ```
-├── storage.go (extend) SQLRepo[T] — production Repository[T] backed by forge.DB;
+├── storage.go (extend) SQLRepo[T] — production Repository[T] backed by smeldr.DB;
 │                     Table() SQLRepoOption; auto-derived table names (snake_case plural);
 │                     FindByID/FindBySlug/FindAll/Save/Delete; reuses dbFields cache;
 │                     $N SQL placeholders (Amendment A19)                      ✅ Milestone 7
@@ -326,14 +326,14 @@ HTTP Request
                  │
     ▼
 ┌─────────────────────────────────┐
-│  forge.Context creation         │  ContextFrom(w, r)
+│  smeldr.Context creation         │  ContextFrom(w, r)
 │                                 │  Sets X-Request-ID (UUID v7 if absent)
 │                                 │  Extracts User resolved by auth middleware
 └────────────────┬────────────────┘
                  │
     ▼ GET / read only
 ┌─────────────────────────────────┐
-│  Cache check                    │  forge.Cache(ttl) per-module LRU
+│  Cache check                    │  smeldr.Cache(ttl) per-module LRU
 │                                 │  HIT → write X-Cache: HIT, return immediately
 │                                 │  MISS → continue (X-Cache: MISS set on response)
 └────────────────┬────────────────┘
@@ -412,8 +412,8 @@ and `*http.Request`.
 ```
 err
  ├── errors.As(*ValidationError)  →  422 + fields array
- ├── errors.As(forge.Error) 4xx   →  status from error, public message
- ├── errors.As(forge.Error) 5xx   →  logged + generic 500
+ ├── errors.As(smeldr.Error) 4xx   →  status from error, public message
+ ├── errors.As(smeldr.Error) 5xx   →  logged + generic 500
  └── anything else                →  logged + generic 500
 ```
 
@@ -555,7 +555,7 @@ func CSRF(auth AuthFunc) func(http.Handler) http.Handler
 func RateLimit(n int, d time.Duration, opts ...Option) func(http.Handler) http.Handler
 func TrustedProxy() Option
 
-// CacheStore — exported LRU cache backing forge.Cache() and forge.InMemoryCache()
+// CacheStore — exported LRU cache backing smeldr.Cache() and smeldr.InMemoryCache()
 type CacheStore struct{ /* unexported */ }
 func NewCacheStore(ttl time.Duration, max int) *CacheStore
 func (c *CacheStore) Flush()  // invalidate all entries (called on write operations)
@@ -635,7 +635,7 @@ forge.go        — depends on: all of the above                          ✅ Mi
 templates.go    — depends on: head, context, node                       ✅ Milestone 4
 cookies.go      — depends on: errors (none — stdlib net/http only)      ✅ Milestone 6
 ├── cookiemanifest.go — depends on: cookies, forge.go (Amendment A18)  ✅ Milestone 6
-redirects.go    — depends on: errors, storage (forge.DB), forge.go (A20)       ✅ Milestone 7
+redirects.go    — depends on: errors, storage (smeldr.DB), forge.go (A20)       ✅ Milestone 7
 ├── redirectmanifest.go — depends on: redirects, cookiemanifest (manifestAuthOption), forge.go (A21) ✅ Milestone 7
 sitemap.go      — depends on: node, signals                             ✅ Milestone 3
 rss.go          — depends on: node, signals, head                       ✅ Milestone 5
@@ -652,9 +652,9 @@ true foundation files — everything else can depend on them freely.
 
 ---
 
-## forge.Node embedding
+## smeldr.Node embedding
 
-Every content type embeds `forge.Node`. Embedding (not composition) is required
+Every content type embeds `smeldr.Node`. Embedding (not composition) is required
 because Forge uses reflection to access Node fields directly:
 
 ```go
@@ -767,7 +767,7 @@ This means redirect lookup adds zero overhead to successful requests.
 
 ## Cache
 
-The LRU cache is per-module, not global. Each `forge.Cache(ttl)` call
+The LRU cache is per-module, not global. Each `smeldr.Cache(ttl)` call
 creates an independent cache for that module.
 
 ```
@@ -783,9 +783,9 @@ Invalidation: AfterCreate / AfterUpdate / AfterDelete signals clear the module c
 
 ---
 
-## Storage and the forge.DB interface
+## Storage and the smeldr.DB interface
 
-Forge defines a minimal `forge.DB` interface internally:
+Forge defines a minimal `smeldr.DB` interface internally:
 
 ```go
 type DB interface {
@@ -801,8 +801,8 @@ This interface is satisfied by:
 - `forgepgx.Wrap(pool)` — native pgx pool adapter (~2.5× faster for PostgreSQL)
 - Any custom type that implements the three methods
 
-`forge.Query[T]` and `forge.QueryOne[T]` accept `forge.DB`, not `*sql.DB`.
-This means switching drivers requires changing exactly one value in `forge.Config`.
+`smeldr.Query[T]` and `smeldr.QueryOne[T]` accept `smeldr.DB`, not `*sql.DB`.
+This means switching drivers requires changing exactly one value in `smeldr.Config`.
 
 The `forge-pgx` adapter lives at `smeldr.dev/core-pgx` — a separate
 module. It imports both `forge` and `pgx/v5`. Forge core never imports pgx.
@@ -815,16 +815,16 @@ module. It imports both `forge` and `pgx/v5`. Forge core never imports pgx.
 // show handler
 TemplateData[T] {
     Content  T             // the single content item
-    Head     forge.Head    // from item.Head() merged with module HeadFunc
-    User     forge.User    // current user — zero value if Guest
+    Head     smeldr.Head    // from item.Head() merged with module HeadFunc
+    User     smeldr.User    // current user — zero value if Guest
     Request  *http.Request
 }
 
 // list handler
 TemplateData[[]T] {
     Content  []T           // slice of items
-    Head     forge.Head    // from module HeadFunc
-    User     forge.User
+    Head     smeldr.Head    // from module HeadFunc
+    User     smeldr.User
     Request  *http.Request
 }
 ```
@@ -837,20 +837,20 @@ Every public interface has a test double:
 
 ```go
 // In-memory repository — no database needed
-repo := forge.NewMemoryRepo[*BlogPost]()
+repo := smeldr.NewMemoryRepo[*BlogPost]()
 
 // Test context — no HTTP needed
-ctx := forge.NewTestContext(forge.User{
+ctx := smeldr.NewTestContext(smeldr.User{
     ID:    "test-user",
-    Roles: []forge.Role{forge.Editor},
+    Roles: []smeldr.Role{smeldr.Editor},
 })
 
 // Token for test requests — ttl=0 means no expiry
-tok, _ := forge.SignToken(user, "test-secret", 0)
+tok, _ := smeldr.SignToken(user, "test-secret", 0)
 
 // Module integration test via httptest — no app.Run() required
-repo := forge.NewMemoryRepo[*Post]()
-m := forge.NewModule((*Post)(nil), forge.Repo(repo))
+repo := smeldr.NewMemoryRepo[*Post]()
+m := smeldr.NewModule((*Post)(nil), smeldr.Repo(repo))
 mux := http.NewServeMux()
 m.Register(mux)
 w := httptest.NewRecorder()
@@ -859,8 +859,8 @@ mux.ServeHTTP(w, r)
 ```
 
 Use `net/http/httptest` with `m.Register(mux)` for module integration tests.
-Use `forge.NewTestContext()` with direct signal handler calls for unit tests.
-`forge.App` / `app.Handler()` will be available from Milestone 2.
+Use `smeldr.NewTestContext()` with direct signal handler calls for unit tests.
+`smeldr.App` / `app.Handler()` will be available from Milestone 2.
 
 ---
 
@@ -872,7 +872,7 @@ via the published interfaces documented above.
 | Module | Role |
 |--------|------|
 | `smeldr.dev/mcp` | MCP server — exposes forge content over JSON-RPC 2.0 / SSE |
-| `smeldr.dev/media` | Media storage and serving; implements `forge.MCPModule` |
+| `smeldr.dev/media` | Media storage and serving; implements `smeldr.MCPModule` |
 | `smeldr.dev/cli` | CLI admin tool — content CRUD, tokens, webhooks, audit |
 | `smeldr.dev/social` | Social publishing scheduler (Twitter/X, LinkedIn, Mastodon) |
 | `smeldr.dev/agent` | MIT-licensed agent runtime; `smeldr.dev/agent/flow` (AGPL-3.0) is the Forge integration adapter — subscribes to `App.OnSignal` and dispatches agent jobs in response to content lifecycle signals |

@@ -97,28 +97,28 @@ import (
 )
 
 type Post struct {
-	forge.Node
+	smeldr.Node
 	Title string `forge:"required,min=3" json:"title"`
 	Body  string `forge:"required"       json:"body"`
 }
 
-func (p *Post) Head() forge.Head {
-	return forge.Head{
+func (p *Post) Head() smeldr.Head {
+	return smeldr.Head{
 		Title:       p.Title,
-		Description: forge.Excerpt(p.Body, 160),
+		Description: smeldr.Excerpt(p.Body, 160),
 	}
 }
 
 func (p *Post) Markdown() string { return p.Body }
 
 func main() {
-	repo := forge.NewMemoryRepo[*Post]()
-	m := forge.NewModule((*Post)(nil), // nil pointer — type parameter inferred, no allocation
-		forge.At("/posts"),
-		forge.Repo(repo),
-		forge.Auth(forge.Read(forge.Guest), forge.Write(forge.Author)),
+	repo := smeldr.NewMemoryRepo[*Post]()
+	m := smeldr.NewModule((*Post)(nil), // nil pointer — type parameter inferred, no allocation
+		smeldr.At("/posts"),
+		smeldr.Repo(repo),
+		smeldr.Auth(smeldr.Read(smeldr.Guest), smeldr.Write(smeldr.Author)),
 	)
-	app := forge.New(forge.MustConfig(forge.Config{
+	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 		BaseURL: "http://localhost:8080",
 		Secret:  []byte("change-this-secret-in-production"),
 	}))
@@ -139,16 +139,16 @@ Routes: `GET /posts`, `GET /posts/{slug}`, `POST /posts`, `PUT /posts/{slug}`,
 Same content type. Add options — each line unlocks a production feature.
 
 ```go
-m := forge.NewModule((*Post)(nil),
-	forge.At("/posts"),
-	forge.Repo(forge.NewMemoryRepo[*Post]()),
-	forge.Auth(forge.Read(forge.Guest), forge.Write(forge.Author)),
-	forge.SitemapConfig{ChangeFreq: forge.Weekly, Priority: 0.8}, // /posts/sitemap.xml
-	forge.Social(forge.OpenGraph, forge.TwitterCard),              // og: and twitter: meta tags
-	forge.AIIndex(forge.LLMsTxt, forge.LLMsTxtFull, forge.AIDoc), // /llms.txt + /posts/{slug}/aidoc
-	forge.Feed(forge.FeedConfig{Title: "My Blog"}),               // /posts/feed.xml + /feed.xml
-	forge.Templates("templates/posts"),                           // HTML at Accept: text/html
-	forge.On(forge.AfterPublish, func(_ forge.Context, p *Post) error {
+m := smeldr.NewModule((*Post)(nil),
+	smeldr.At("/posts"),
+	smeldr.Repo(smeldr.NewMemoryRepo[*Post]()),
+	smeldr.Auth(smeldr.Read(smeldr.Guest), smeldr.Write(smeldr.Author)),
+	smeldr.SitemapConfig{ChangeFreq: smeldr.Weekly, Priority: 0.8}, // /posts/sitemap.xml
+	smeldr.Social(smeldr.OpenGraph, smeldr.TwitterCard),              // og: and twitter: meta tags
+	smeldr.AIIndex(smeldr.LLMsTxt, smeldr.LLMsTxtFull, smeldr.AIDoc), // /llms.txt + /posts/{slug}/aidoc
+	smeldr.Feed(smeldr.FeedConfig{Title: "My Blog"}),               // /posts/feed.xml + /feed.xml
+	smeldr.Templates("templates/posts"),                           // HTML at Accept: text/html
+	smeldr.On(smeldr.AfterPublish, func(_ smeldr.Context, p *Post) error {
 		log.Printf("published: %s", p.Slug) // fires on publish and scheduled→Published
 		return nil
 	}),

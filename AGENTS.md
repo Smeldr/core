@@ -24,7 +24,7 @@ rename it. Everything else is additive.
 
 ```go
 type Post struct {
-    forge.Node
+    smeldr.Node
     Title string `forge:"required,min=3" db:"title"`
     Body  string `forge:"required"       db:"body"`
 }
@@ -32,7 +32,7 @@ type Post struct {
 
 Rules:
 
-- Always embed `forge.Node` — never compose it
+- Always embed `smeldr.Node` — never compose it
 - Use `forge:"required"` and `forge:"min=N"` for validation
 - Use `db:"column_name"` for `SQLRepo` column mapping
 - Avoid SQLite reserved keywords as column names (`order`, `group`, etc.)
@@ -40,22 +40,22 @@ Rules:
 
 **json tags — required on every custom field**
 
-All fields beyond `forge.Node` must have an explicit `json:"snake_case"` tag.
+All fields beyond `smeldr.Node` must have an explicit `json:"snake_case"` tag.
 Without it, Go serialises the field as PascalCase, which breaks MCP read and write
 operations — `update_post` with `"meta_title"` will silently return empty values.
-`forge.Node` fields are exempt (handled internally).
+`smeldr.Node` fields are exempt (handled internally).
 
 ```go
 // Correct
 type Post struct {
-    forge.Node
+    smeldr.Node
     Title string `forge:"required" db:"title" json:"title"`
     Body  string `forge:"required" db:"body"  json:"body"`
 }
 
 // Wrong — MCP returns empty values for Title and Body
 type Post struct {
-    forge.Node
+    smeldr.Node
     Title string `forge:"required" db:"title"`
     Body  string `forge:"required" db:"body"`
 }
@@ -63,20 +63,20 @@ type Post struct {
 
 ### Field format hints
 
-Use `forge_format` and `forge_description` to tell AI consuming agents
+Use `smeldr_format` and `smeldr_description` to tell AI consuming agents
 what a field expects. These hints appear in MCP tool descriptions at the
 point of authoring.
 
 ```go
 type DocPage struct {
-    forge.Node
+    smeldr.Node
     Title string `forge:"required,min=3"`
-    Body  string `forge:"required" forge_format:"markdown" forge_description:"Write content in Markdown. Supports headings, lists, and code blocks."`
-    Embed string `forge_format:"html" forge_description:"Raw HTML only. Use for iframes and third-party embeds. Must be trusted content."`
+    Body  string `forge:"required" smeldr_format:"markdown" smeldr_description:"Write content in Markdown. Supports headings, lists, and code blocks."`
+    Embed string `smeldr_format:"html" smeldr_description:"Raw HTML only. Use for iframes and third-party embeds. Must be trusted content."`
 }
 ```
 
-Supported `forge_format` values:
+Supported `smeldr_format` values:
 
 | Value | Meaning |
 |-------|---------|
@@ -90,14 +90,14 @@ These tags are hints only. Forge performs no validation based on them.
 This is the minimal wiring pattern from `example/blog/main.go`:
 
 ```go
-repo := forge.NewMemoryRepo[*Post]()
+repo := smeldr.NewMemoryRepo[*Post]()
 
-m := forge.NewModule((*Post)(nil),
-    forge.At("/posts"),
-    forge.Repo(repo),
+m := smeldr.NewModule((*Post)(nil),
+    smeldr.At("/posts"),
+    smeldr.Repo(repo),
 )
 
-app := forge.New(forge.MustConfig(forge.Config{
+app := smeldr.New(smeldr.MustConfig(smeldr.Config{
     BaseURL: "http://localhost:8080",
     Secret:  []byte("change-this-secret-in-production"),
 }))
@@ -111,13 +111,13 @@ if err := app.Run(":8080"); err != nil {
 
 ### Adding MCP support
 
-Add `forge.MCP(forge.MCPRead, forge.MCPWrite)` to the module options:
+Add `smeldr.MCP(smeldr.MCPRead, smeldr.MCPWrite)` to the module options:
 
 ```go
-forge.NewModule((*Post)(nil),
-    forge.At("/posts"),
-    forge.Repo(repo),
-    forge.MCP(forge.MCPRead, forge.MCPWrite),
+smeldr.NewModule((*Post)(nil),
+    smeldr.At("/posts"),
+    smeldr.Repo(repo),
+    smeldr.MCP(smeldr.MCPRead, smeldr.MCPWrite),
 )
 ```
 
@@ -126,11 +126,11 @@ Wire the MCP server and token store in `main.go`:
 ```go
 import forgemcp "smeldr.dev/mcp"
 
-app := forge.New(forge.MustConfig(forge.Config{
+app := smeldr.New(smeldr.MustConfig(smeldr.Config{
     BaseURL:    "https://mysite.com",
     Secret:     []byte(os.Getenv("SECRET")),
     DB:         db,
-    TokenStore: forge.NewTokenStore(db, os.Getenv("SECRET")),
+    TokenStore: smeldr.NewTokenStore(db, os.Getenv("SECRET")),
 }))
 
 mcpSrv := forgemcp.New(app)
@@ -147,18 +147,18 @@ Three opt-in routing variants change how a module's URLs behave:
 | Option | When to use | HTML surface |
 |--------|-------------|-------------|
 | *(default)* | Public content with list and show pages | Full |
-| `forge.SingleInstance()` | One canonical item (about page, landing page) | `GET /{prefix}` only |
-| `forge.Standalone()` | Items at clean top-level URLs (`/{slug}`) | `/{slug}` and `/{prefix}` list |
-| `forge.APIOnly()` | Admin-only types managed via MCP/CLI, no public web surface | None — `text/html` → 404 |
+| `smeldr.SingleInstance()` | One canonical item (about page, landing page) | `GET /{prefix}` only |
+| `smeldr.Standalone()` | Items at clean top-level URLs (`/{slug}`) | `/{slug}` and `/{prefix}` list |
+| `smeldr.APIOnly()` | Admin-only types managed via MCP/CLI, no public web surface | None — `text/html` → 404 |
 
 `APIOnly()` example — admin-only content type:
 
 ```go
-forge.NewModule((*HomePage)(nil),
-    forge.At("/home-pages"),
-    forge.Repo(repo),
-    forge.MCP(forge.MCPWrite),
-    forge.APIOnly(),
+smeldr.NewModule((*HomePage)(nil),
+    smeldr.At("/home-pages"),
+    smeldr.Repo(repo),
+    smeldr.MCP(smeldr.MCPWrite),
+    smeldr.APIOnly(),
 )
 // GET /home-pages Accept:application/json → 200 JSON
 // GET /home-pages Accept:text/html        → 404 (not browsable)
@@ -170,7 +170,7 @@ forge.NewModule((*HomePage)(nil),
 ### Adding media support (smeldr.dev/media)
 
 `smeldr.dev/media` is an optional module that adds file upload, storage, and
-serving. It implements `forge.MCPModule` so AI agents can upload files via MCP.
+serving. It implements `smeldr.MCPModule` so AI agents can upload files via MCP.
 
 ```go
 import (
@@ -178,7 +178,7 @@ import (
     forgemcp   "smeldr.dev/mcp"
 )
 
-app := forge.New(forge.MustConfig(forge.Config{
+app := smeldr.New(smeldr.MustConfig(smeldr.Config{
     BaseURL: "https://mysite.com",
     Secret:  []byte(os.Getenv("SECRET")),
     DB:      db,
@@ -195,17 +195,17 @@ app.Handle("POST /mcp/message", mcpSrv.Handler())
 ```
 
 `Config.MediaPath` (default `"./media"`) and `Config.MediaMaxSize` (default 5 MB)
-control storage. Both are set in `forge.Config` or via `forge.config` file keys
+control storage. Both are set in `smeldr.Config` or via `forge.config` file keys
 `media_path` and `media_max_size`.
 
 ### Key rules for code generation
 
 - Zero third-party dependencies in the `forge` core package
-- `forge.Context` is an interface, not a struct
-- `forge.DB` is an interface, not `*sql.DB`
-- All errors must implement `forge.Error` — never raw `errors.New`
+- `smeldr.Context` is an interface, not a struct
+- `smeldr.DB` is an interface, not `*sql.DB`
+- All errors must implement `smeldr.Error` — never raw `errors.New`
 - Read `ERROR_HANDLING.md` before writing any error-handling code
-- Never use `forge.SignToken` in `main()` when `TokenStore` is wired —
+- Never use `smeldr.SignToken` in `main()` when `TokenStore` is wired —
   stateless HMAC tokens are rejected by `VerifyBearerToken` when a store is configured
 
 ---
@@ -251,7 +251,7 @@ For each registered content type, these tools are available:
 
 ### Field format hints
 
-When a content type field carries a `forge_format` or `forge_description`
+When a content type field carries a `smeldr_format` or `smeldr_description`
 tag, the tool description tells you exactly what the field expects.
 Follow it precisely — Markdown fields expect Markdown, HTML fields expect
 raw HTML. Do not mix formats.

@@ -52,15 +52,15 @@ Large features should reference or propose an addition to DECISIONS.md.
 - `gofmt` — always
 - `godoc` comments on all exported symbols — always
 - No third-party dependencies in the `forge` core package
-- Error types implement `forge.Error` — not raw `errors.New`
-- Context is always `forge.Context`, not `context.Context`, in user-facing APIs
+- Error types implement `smeldr.Error` — not raw `errors.New`
+- Context is always `smeldr.Context`, not `context.Context`, in user-facing APIs
 
 ---
 
 ## Commit messages
 
 ```
-feat: add forge.RateLimit middleware
+feat: add smeldr.RateLimit middleware
 fix: correct slug collision suffix generation
 docs: update DECISIONS.md with amendment S1
 test: add TestModule_ScheduledPublishing

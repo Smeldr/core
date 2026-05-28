@@ -129,7 +129,7 @@ key is derived from `FORGE_SECRET`. Credentials are never stored in plaintext.
 Before deploying Forge to production:
 
 - [ ] **HTTPS** — terminate TLS at the load balancer or reverse proxy;
-      pass `forge.TrustedProxy()` to `forge.RateLimit(...)` if Forge is behind
+      pass `smeldr.TrustedProxy()` to `smeldr.RateLimit(...)` if Forge is behind
       a reverse proxy so rate limiting uses the real client IP.
 - [ ] **`FORGE_SECRET`** — set via environment variable, not in a config
       file committed to source control. Use a random 32-byte value minimum.
@@ -140,6 +140,6 @@ Before deploying Forge to production:
       changes.
 - [ ] **`os.Root` available** — if using smeldr.dev/media, ensure you are running
       Go 1.24 or later (required for path traversal protection).
-- [ ] **Security headers** — call `forge.SecurityHeaders()` in your middleware
+- [ ] **Security headers** — call `smeldr.SecurityHeaders()` in your middleware
       chain to enable CSP, HSTS, X-Frame-Options, and Referrer-Policy:
-      `app.Use(forge.RequestLogger(), forge.Recoverer(), forge.SecurityHeaders())`
+      `app.Use(smeldr.RequestLogger(), smeldr.Recoverer(), smeldr.SecurityHeaders())`

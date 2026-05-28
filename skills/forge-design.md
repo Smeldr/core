@@ -147,14 +147,14 @@ Given a struct like:
 
 ```go
 type Post struct {
-    forge.Node
+    smeldr.Node
     Title string `json:"title"   forge:"required,min=3,max=120"`
     Body  string `json:"body"    forge:"required,min=10"`
     Tags  []string `json:"tags" db:"-"`
 }
 ```
 
-- `forge.Node` provides: `id`, `slug`, `status`, `published_at`, `scheduled_at`,
+- `smeldr.Node` provides: `id`, `slug`, `status`, `published_at`, `scheduled_at`,
   `created_at`, `updated_at` - all available in JSON output
 - `json:"title"` -> field name in content.json is `title`
 - `forge:"required"` -> mark Required: yes in the fields table

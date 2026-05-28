@@ -149,12 +149,12 @@ When in doubt: Level 2.
 ## Non-negotiable rules
 
 - Zero third-party dependencies in the `forge` core package
-- All errors implement `forge.Error` — never raw `errors.New`
+- All errors implement `smeldr.Error` — never raw `errors.New`
 - **Read `ERROR_HANDLING.md` before writing any code that handles or returns errors,**
   **calls `WriteError`, adds a sentinel, uses `errors.As`/`errors.Is`, or writes**
   **an HTTP response in an error path. The single pipeline rule is non-negotiable.**
-- `forge.Context` is an interface, not a struct (Decision 21)
-- `forge.DB` is an interface, not `*sql.DB` (Decision 22)
+- `smeldr.Context` is an interface, not a struct (Decision 21)
+- `smeldr.DB` is an interface, not `*sql.DB` (Decision 22)
 - Go 1.22 minimum — do not use features introduced after 1.22
 - `gofmt` always — no exceptions
 - godoc comments on every exported symbol
@@ -197,7 +197,7 @@ signature, option name, or syntax pattern, ask:
 - Would a developer scanning unfamiliar code understand it in under
   three seconds?
 
-Prefer `forge.Verb(Noun)` or `forge.Noun` — no abbreviations, no
+Prefer `smeldr.Verb(Noun)` or `smeldr.Noun` — no abbreviations, no
 clever names. A longer but unambiguous name is always better than a
 short opaque one.
 
@@ -378,11 +378,11 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       token, webhook, or media management tools.
       AGENTS.md ships with forge and is the primary reference for external AI coding
       assistants. It must stay in sync with the developer-facing API.
-      Specifically: if this commit touches module wiring API (`forge.MCP`, `forge.Repo`,
-      `forge.At`, `forge.NewModule`), MCP server wiring (`forgemcp.New`, `mcpSrv.Handler()`,
+      Specifically: if this commit touches module wiring API (`smeldr.MCP`, `smeldr.Repo`,
+      `smeldr.At`, `smeldr.NewModule`), MCP server wiring (`forgemcp.New`, `mcpSrv.Handler()`,
       `forgemcp.WithModule`), smeldr.dev/media registration (`forgemedia.Register`,
-      `forgemedia.NewLocalMediaStore`), token API (`forge.NewTokenStore`, `forge.SignToken`),
-      `forge.Config` fields, or `forge_format`/`forge_description` tag values: verify all
+      `forgemedia.NewLocalMediaStore`), token API (`smeldr.NewTokenStore`, `smeldr.SignToken`),
+      `smeldr.Config` fields, or `smeldr_format`/`smeldr_description` tag values: verify all
       code examples in `AGENTS.md` are still accurate before committing.
 - [ ] If this commit implements an Amendment: both the DECISIONS.md index row and the body section in `decisions/recent.md` are present. Verify with `Select-String`.
 - [ ] **Stability map**: if a shipped feature moves an area between tiers (e.g. SQLRepo graduates from Dogfooding to Stable, or a new module enters as Experimental), update the stability map in `README.md` in the same commit.

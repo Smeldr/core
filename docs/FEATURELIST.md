@@ -49,9 +49,9 @@ Labels are reviewed at every module minor or major version bump.
 
 ## Rendering — Stable
 
-- Markdown rendering (`forge_markdown`) — including HTML passthrough for trusted blocks
+- Markdown rendering (`smeldr_markdown`) — including HTML passthrough for trusted blocks
 - Trusted HTML (`forge_html`) — verbatim emission of pre-rendered HTML fields
-- Field semantics in MCP schema — `forge_format` and `forge_description` struct tags; AI agents understand field intent without extra prompting
+- Field semantics in MCP schema — `smeldr_format` and `smeldr_description` struct tags; AI agents understand field intent without extra prompting
 
 ## Lifecycle — Stable
 
@@ -111,7 +111,7 @@ MCP resource subscriptions (Beta):
 ## Template infrastructure — Stable
 
 - Shared partials — `App.Partials` + `MustParseTemplate`
-- HeadAssets — favicons, stylesheets, preconnect, scripts injected via `forge:head` on every page
+- HeadAssets — favicons, stylesheets, preconnect, scripts injected via `smeldr:head` on every page
 - ContextFunc — per-request extra data passed to module templates
 - Static file serving — `App.Static` serves from embedded FS in production (immutable cache headers) and from disk in development
 
@@ -171,12 +171,12 @@ MCP resource subscriptions (Beta):
 ## smeldr.dev/agent — Experimental
 
 - `smeldr.dev/agent` — MIT-licensed agent runtime; `smeldr.dev/agent/flow` — AGPL-3.0 Forge integration adapter
-- `AgentJob` — Forge content type (embeds `forge.Node`) with full lifecycle management: Draft → Published → Archived; auto-generated MCP tools (`create_agent_job`, `get_agent_job`, `list_agent_jobs`, `update_agent_job`, `publish_agent_job`, `archive_agent_job`, `delete_agent_job`)
-- Signal-triggered jobs — any `forge.Signal` value as `Trigger`; `ContentTypeFilter` restricts to a named content type; full `forge.SignalEvent` serialised as JSON in the agent task string so the agent knows what content item fired it
+- `AgentJob` — Forge content type (embeds `smeldr.Node`) with full lifecycle management: Draft → Published → Archived; auto-generated MCP tools (`create_agent_job`, `get_agent_job`, `list_agent_jobs`, `update_agent_job`, `publish_agent_job`, `archive_agent_job`, `delete_agent_job`)
+- Signal-triggered jobs — any `smeldr.Signal` value as `Trigger`; `ContentTypeFilter` restricts to a named content type; full `smeldr.SignalEvent` serialised as JSON in the agent task string so the agent knows what content item fired it
 - Cron-triggered jobs — 5-field cron expression as `Trigger`; scheduler rebuilds atomically on AgentJob publish/archive
 - `WebhookURL` — when set, agent task prompt includes an instruction to POST output via `http_post`
 - Guard: AgentJob lifecycle events never trigger other jobs (prevents self-activation loops)
-- `Module.Register(*forge.App)` — wires MCP tools, subscribes to all 7 after-signals, starts the cron scheduler
+- `Module.Register(*smeldr.App)` — wires MCP tools, subscribes to all 7 after-signals, starts the cron scheduler
 
 ## Audit trail — Stable
 
@@ -208,4 +208,4 @@ MCP resource subscriptions (Beta):
 - Agents operate under the same access rules as humans — no special bypass
 - Content negotiation — agents receive an AI-optimised format, not raw HTML
 - Go codebase designed to be readable and extensible by AI agents
-- `forge.Verb(Noun)` naming throughout — no abbreviations, no clever names
+- `smeldr.Verb(Noun)` naming throughout — no abbreviations, no clever names

@@ -27,23 +27,23 @@ Archived items are permanently invisible — cannot be reverted to Draft.
 
 ```go
 type Story struct {
-    forge.Node
+    smeldr.Node
     Title   string `forge:"required" json:"title"`
     Body    string `forge:"required,min=50" json:"body"`
-    Image   string `forge:"" forge_description:"Hero image path." db:"image" json:"image"`
-    OGImage string `forge:"" forge_description:"OG image URL." db:"og_image" json:"og_image"`
+    Image   string `forge:"" smeldr_description:"Hero image path." db:"image" json:"image"`
+    OGImage string `forge:"" smeldr_description:"OG image URL." db:"og_image" json:"og_image"`
 }
 ```
 
-**json tag is required on every custom field** — all fields beyond `forge.Node`.
+**json tag is required on every custom field** — all fields beyond `smeldr.Node`.
 Without an explicit `json:"snake_case"` tag, Go serialises the field as PascalCase,
 which breaks MCP read and write operations (MCP uses snake_case keys).
-`forge.Node` fields are exempt — they are handled internally.
+`smeldr.Node` fields are exempt — they are handled internally.
 
 Wrong (MCP returns empty/missing values):
 ```go
 type MyPage struct {
-    forge.Node
+    smeldr.Node
     Title string `db:"title"`   // ← missing json tag — MCP cannot map "title" → Title
     Body  string `db:"body"`
 }
@@ -52,7 +52,7 @@ type MyPage struct {
 Correct:
 ```go
 type MyPage struct {
-    forge.Node
+    smeldr.Node
     Title string `db:"title" json:"title"`
     Body  string `db:"body"  json:"body"`
 }
@@ -63,11 +63,11 @@ type MyPage struct {
 ## Wiring a module
 
 ```go
-app.Content(forge.NewModule((*Story)(nil),
-    forge.At("/solved"),
-    forge.Table("stories"),       // override incorrect pluralisation
-    forge.Repo(forge.NewSQLRepo[*Story](db)),
-    forge.MCP(forge.MCPRead, forge.MCPWrite),
+app.Content(smeldr.NewModule((*Story)(nil),
+    smeldr.At("/solved"),
+    smeldr.Table("stories"),       // override incorrect pluralisation
+    smeldr.Repo(smeldr.NewSQLRepo[*Story](db)),
+    smeldr.MCP(smeldr.MCPRead, smeldr.MCPWrite),
 ))
 ```
 
@@ -80,11 +80,11 @@ app.Content(forge.NewModule((*Story)(nil),
 Use when a module holds exactly one canonical item (About, Contact, Terms):
 
 ```go
-forge.NewModule((*AboutPage)(nil),
-    forge.At("/about"),
-    forge.Repo(repo),
-    forge.SingleInstance(),
-    forge.MCP(forge.MCPRead, forge.MCPWrite),
+smeldr.NewModule((*AboutPage)(nil),
+    smeldr.At("/about"),
+    smeldr.Repo(repo),
+    smeldr.SingleInstance(),
+    smeldr.MCP(smeldr.MCPRead, smeldr.MCPWrite),
 )
 // GET /about → serves first Published item
 // GET /about/{slug} → 404 (not registered)
@@ -100,17 +100,17 @@ When the public URL differs from the module prefix (e.g. homepage at `/`, module
 
 ```go
 // Module at /homepage — admin + MCP surface only
-app.Content(forge.NewModule((*HomePage)(nil),
-    forge.Repo(homePageRepo),
-    forge.At("/homepage"),
-    forge.SingleInstance(),
-    forge.MCP(forge.MCPRead, forge.MCPWrite),
+app.Content(smeldr.NewModule((*HomePage)(nil),
+    smeldr.Repo(homePageRepo),
+    smeldr.At("/homepage"),
+    smeldr.SingleInstance(),
+    smeldr.MCP(smeldr.MCPRead, smeldr.MCPWrite),
 ))
 
 // Public route — custom handler reads the published record
 app.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    hps, _ := homePageRepo.FindAll(r.Context(), forge.ListOptions{
-        Status: []forge.Status{forge.Published},
+    hps, _ := homePageRepo.FindAll(r.Context(), smeldr.ListOptions{
+        Status: []smeldr.Status{smeldr.Published},
     })
     hp := homePageDefaults()
     for _, p := range hps {
@@ -128,10 +128,10 @@ When NOT to use: multiple records; module prefix IS the public URL; per-item slu
 Use when items should appear at `/{slug}` rather than `/{prefix}/{slug}`:
 
 ```go
-forge.NewModule((*Post)(nil),
-    forge.At("/posts"),
-    forge.Repo(repo),
-    forge.Standalone(),
+smeldr.NewModule((*Post)(nil),
+    smeldr.At("/posts"),
+    smeldr.Repo(repo),
+    smeldr.Standalone(),
 )
 // GET /my-post     → serves Published Post with slug "my-post"
 // GET /posts       → list of Published posts (unchanged)
@@ -139,18 +139,18 @@ forge.NewModule((*Post)(nil),
 ```
 
 Multiple Standalone modules coexist — slug dispatch is first-match.
-AIDoc served at `GET /{slug}/aidoc` when `forge.AIIndex(forge.AIDoc)` is also set.
+AIDoc served at `GET /{slug}/aidoc` when `smeldr.AIIndex(smeldr.AIDoc)` is also set.
 
 ### APIOnly — no public HTML surface (v1.24.0+)
 
 Use when a content type is managed exclusively via MCP or CLI with no public web presence:
 
 ```go
-forge.NewModule((*HomePage)(nil),
-    forge.At("/home-pages"),
-    forge.Repo(repo),
-    forge.MCP(forge.MCPWrite),
-    forge.APIOnly(),
+smeldr.NewModule((*HomePage)(nil),
+    smeldr.At("/home-pages"),
+    smeldr.Repo(repo),
+    smeldr.MCP(smeldr.MCPWrite),
+    smeldr.APIOnly(),
 )
 // GET /home-pages Accept:application/json → 200 JSON
 // GET /home-pages Accept:text/html        → 404
@@ -168,7 +168,7 @@ enqueue work and return immediately — never block. Errors are logged and never
 propagated to the publish caller.
 
 ```go
-app.OnSignal(forge.AfterPublish, func(ctx context.Context, ev forge.SignalEvent) error {
+app.OnSignal(smeldr.AfterPublish, func(ctx context.Context, ev smeldr.SignalEvent) error {
     // ctx is detached from the request (WithoutCancel) — safe to enqueue async work
     return myQueue.Enqueue(ctx, ev)
 })
@@ -180,7 +180,7 @@ Signal constants: `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete`
 
 `PreviousState` and `ActorRole` are transient — not reconstructable via MCP after the fact.
 
-**Built-in audit trail (v1.22.0+):** `app.Audit(forge.NewAuditStore(db))` subscribes to
+**Built-in audit trail (v1.22.0+):** `app.Audit(smeldr.NewAuditStore(db))` subscribes to
 `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete` and persists each transition.
 `GET /_audit` (Editor+) returns JSON records. `forge-cli audit list` prints a table.
 
@@ -351,7 +351,7 @@ Config: `FORGE_URL`, `FORGE_TOKEN`, `FORGE_MCP_URL` (or `.forge-cli.env`)
 - **go.mod line 1** must be `module smeldr.dev/mcp` — not a github.com path
 - **Verify go.mod deps before tagging** — `grep smeldr.dev go.mod`; run `go mod tidy`
 - **Module proxy caches permanently** — bad tag requires a new patch tag, no fix
-- **forge.Table()** — use when type name pluralises incorrectly (Story → storys)
+- **smeldr.Table()** — use when type name pluralises incorrectly (Story → storys)
 - **Windows MIME** — add `mime.AddExtensionType(".webp", "image/webp")` in main()
 - **Docker volume** — forge_media volume at /app/media; COPY in Dockerfile seeds it on first run
 - **Archived ≠ Draft** — preview tokens bypass Draft/Scheduled only, never Archived

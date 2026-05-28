@@ -36,18 +36,18 @@ This rule exists so that:
 Use a sentinel when the condition is a named, well-understood HTTP failure.
 
 ```go
-WriteError(w, r, forge.ErrNotFound)          // 404
-WriteError(w, r, forge.ErrGone)              // 410
-WriteError(w, r, forge.ErrForbidden)         // 403
-WriteError(w, r, forge.ErrUnauth)            // 401
-WriteError(w, r, forge.ErrConflict)          // 409
-WriteError(w, r, forge.ErrBadRequest)        // 400
-WriteError(w, r, forge.ErrNotAcceptable)     // 406
-WriteError(w, r, forge.ErrTooManyRequests)   // 429
-WriteError(w, r, forge.ErrRequestTooLarge)   // 413
+WriteError(w, r, smeldr.ErrNotFound)          // 404
+WriteError(w, r, smeldr.ErrGone)              // 410
+WriteError(w, r, smeldr.ErrForbidden)         // 403
+WriteError(w, r, smeldr.ErrUnauth)            // 401
+WriteError(w, r, smeldr.ErrConflict)          // 409
+WriteError(w, r, smeldr.ErrBadRequest)        // 400
+WriteError(w, r, smeldr.ErrNotAcceptable)     // 406
+WriteError(w, r, smeldr.ErrTooManyRequests)   // 429
+WriteError(w, r, smeldr.ErrRequestTooLarge)   // 413
 ```
 
-Sentinels are `forge.Error` values. They produce a JSON body with `code`,
+Sentinels are `smeldr.Error` values. They produce a JSON body with `code`,
 `message`, and `request_id`. They produce an HTML page when the request
 carries `Accept: text/html`.
 
@@ -67,12 +67,12 @@ Use a validation error when user-supplied input fails a named constraint.
 
 ```go
 // Single field
-return forge.Err("title", "required")
+return smeldr.Err("title", "required")
 
 // Multiple fields — collect, skip nils, return combined or nil
-return forge.Require(
-    forge.Err("title", "required"),
-    forge.Err("body",  "minimum 50 characters"),
+return smeldr.Require(
+    smeldr.Err("title", "required"),
+    smeldr.Err("body",  "minimum 50 characters"),
 )
 ```
 
@@ -95,7 +95,7 @@ array to the response body:
 
 ### Tier 3 — Internal / unknown errors (500)
 
-Any error that is not a `forge.Error` or `*ValidationError` is treated as
+Any error that is not a `smeldr.Error` or `*ValidationError` is treated as
 an internal error. `WriteError` logs the original message with `slog.Error`
 (including `request_id`) and sends a generic 500 to the client. The original
 message is **never** sent to the client.
@@ -114,7 +114,7 @@ If you need to wrap an internal error with context, preserve the chain:
 return fmt.Errorf("forge: saving post: %w", err)
 ```
 
-`WriteError` unwraps via `errors.As`, so a wrapped `forge.Error` still
+`WriteError` unwraps via `errors.As`, so a wrapped `smeldr.Error` still
 produces the correct 4xx response.
 
 ### Tier 4 — Panic recovery
@@ -135,12 +135,12 @@ When inspecting an error to decide behaviour, always use `errors.As`:
 var ve *ValidationError
 if errors.As(err, &ve) { ... }
 
-var fe forge.Error
+var fe smeldr.Error
 if errors.As(err, &fe) { ... }
 
 // Wrong — breaks wrapping
 if ve, ok := err.(*ValidationError); ok { ... }
-if fe, ok := err.(forge.Error); ok { ... }
+if fe, ok := err.(smeldr.Error); ok { ... }
 ```
 
 The rule applies everywhere in the codebase, including inside `errors.go`.
@@ -192,7 +192,7 @@ Before submitting any handler code, verify:
 - [ ] Internal errors (DB, storage, hook) are passed to `WriteError` unwrapped
       — `WriteError` handles logging; do not log before calling it
 - [ ] `errors.As` is used for all error type checks — no direct type assertions
-- [ ] New named conditions use a `forge.Err*` sentinel, not an ad-hoc `errors.New`
+- [ ] New named conditions use a `smeldr.Err*` sentinel, not an ad-hoc `errors.New`
 - [ ] `WriteError` is never called after `w.WriteHeader` has already been called
       (headers can't be changed after the first write)
 

@@ -28,7 +28,7 @@ All benchmarks live in `*_test.go` files in the root `forge` package.
 | `BenchmarkSchemaFor_Article` | M3 | `schema_test.go` | JSON-LD structured data serialisation for an Article node |
 | `BenchmarkWriteSitemapFragment` | M3 | `sitemap_test.go` | XML sitemap fragment generation for 20 URLs |
 | **`BenchmarkHTMLTemplateRender`** | M4 | `benchmarks_test.go` | **Template render time** — full show-page pipeline: content-type negotiation → repo lookup → `TemplateData[T]` assembly → `html/template` execution |
-| `BenchmarkForgeMarkdown` | M4 | `templatehelpers_test.go` | Markdown→HTML rendering via `forge_markdown` template helper |
+| `BenchmarkForgeMarkdown` | M4 | `templatehelpers_test.go` | Markdown→HTML rendering via `smeldr_markdown` template helper |
 | **`BenchmarkModuleRequest`** | M4 | `module_test.go` | **Request throughput (cached)** — module show-handler with warm LRU cache; measures cache-hit path cost |
 | **`BenchmarkApp_Handler`** | M2/M4 | `forge_test.go` | **Request throughput (full stack)** — end-to-end HTTP through App middleware + mux + module list handler |
 | **`BenchmarkInMemoryCacheHIT`** | M1 | `middleware_test.go` | **Cache hit rate cost** — full middleware cache `ServeHTTP` on a warm entry; baseline for cache-layer overhead |

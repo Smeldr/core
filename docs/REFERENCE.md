@@ -18,16 +18,16 @@ go get smeldr.dev/core
 
 ```go
 type Post struct {
-    forge.Node
+    smeldr.Node
     Title string `forge:"required" json:"title"`
     Body  string `forge:"required,min=50" json:"body"`
 }
 
-func (p *Post) Head() forge.Head {
-    return forge.Head{
+func (p *Post) Head() smeldr.Head {
+    return smeldr.Head{
         Title:       p.Title,
-        Description: forge.Excerpt(p.Body, 160),
-        Canonical:   forge.URL("/posts/", p.Slug),
+        Description: smeldr.Excerpt(p.Body, 160),
+        Canonical:   smeldr.URL("/posts/", p.Slug),
     }
 }
 ```
@@ -35,17 +35,17 @@ func (p *Post) Head() forge.Head {
 **2. Wire it up**
 
 ```go
-app := forge.New(forge.Config{
+app := smeldr.New(smeldr.Config{
     BaseURL: "https://mysite.com",
     Secret:  []byte(os.Getenv("SECRET")),
 })
 
-app.Content(forge.NewModule((*Post)(nil),
-    forge.At("/posts"),
-    forge.Auth(
-        forge.Read(forge.Guest),
-        forge.Write(forge.Author),
-        forge.Delete(forge.Editor),
+app.Content(smeldr.NewModule((*Post)(nil),
+    smeldr.At("/posts"),
+    smeldr.Auth(
+        smeldr.Read(smeldr.Guest),
+        smeldr.Write(smeldr.Author),
+        smeldr.Delete(smeldr.Editor),
     ),
 ))
 
@@ -85,43 +85,43 @@ Everything else is just Go.
 
 ## Content types
 
-Embed `forge.Node`. Implement `Validate()` and `Head()`. That's the contract.
+Embed `smeldr.Node`. Implement `Validate()` and `Head()`. That's the contract.
 
 ```go
 type BlogPost struct {
-    forge.Node                                          // ID, Slug, Status, timestamps
+    smeldr.Node                                          // ID, Slug, Status, timestamps
 
     Title  string      `forge:"required"      json:"title"`
     Body   string      `forge:"required,min=50" json:"body"`
     Author string      `forge:"required"      json:"author"`
     Tags   []string    `                      json:"tags,omitempty"`
-    Cover  forge.Image `                      json:"cover,omitempty"`
+    Cover  smeldr.Image `                      json:"cover,omitempty"`
 }
 
 // Validate runs after struct-tag validation.
 // Use it for rules that tags cannot express.
 func (p *BlogPost) Validate() error {
-    if p.Status == forge.Published && len(p.Tags) == 0 {
-        return forge.Err("tags", "required when publishing")
+    if p.Status == smeldr.Published && len(p.Tags) == 0 {
+        return smeldr.Err("tags", "required when publishing")
     }
     return nil
 }
 
 // Head returns all metadata for this content's page.
 // Forge uses this for SEO, social sharing, and AI indexing.
-func (p *BlogPost) Head() forge.Head {
-    return forge.Head{
+func (p *BlogPost) Head() smeldr.Head {
+    return smeldr.Head{
         Title:       p.Title,
-        Description: forge.Excerpt(p.Body, 160),
+        Description: smeldr.Excerpt(p.Body, 160),
         Author:      p.Author,
         Tags:        p.Tags,
         Image:       p.Cover,
-        Type:        forge.Article,
-        Canonical:   forge.URL("/posts/", p.Slug),
-        Breadcrumbs: forge.Crumbs(
-            forge.Crumb("Home",  "/"),
-            forge.Crumb("Posts", "/posts"),
-            forge.Crumb(p.Title, "/posts/"+p.Slug),
+        Type:        smeldr.Article,
+        Canonical:   smeldr.URL("/posts/", p.Slug),
+        Breadcrumbs: smeldr.Crumbs(
+            smeldr.Crumb("Home",  "/"),
+            smeldr.Crumb("Posts", "/posts"),
+            smeldr.Crumb(p.Title, "/posts/"+p.Slug),
         ),
     }
 }
@@ -131,13 +131,13 @@ func (p *BlogPost) Head() forge.Head {
 func (p *BlogPost) Markdown() string { return p.Body }
 ```
 
-### forge.Node — what you always get
+### smeldr.Node — what you always get
 
 ```go
 type Node struct {
     ID          string        // UUID — internal primary key
     Slug        string        // URL-safe identifier, auto-generated from title
-    Status      forge.Status  // Draft | Published | Scheduled | Archived
+    Status      smeldr.Status  // Draft | Published | Scheduled | Archived
     PublishedAt time.Time     // zero if not Published
     ScheduledAt *time.Time    // non-nil if Scheduled
     CreatedAt   time.Time
@@ -149,7 +149,7 @@ Slug is auto-generated from the first `forge:"required"` string field
 unless you set it explicitly. Renaming a slug is safe — the UUID
 keeps all internal relations intact.
 
-### forge.Image — SEO-aware image type
+### smeldr.Image — SEO-aware image type
 
 ```go
 type Image struct {
@@ -166,10 +166,10 @@ Four struct tags control validation, storage, and AI/MCP behaviour. Use them tog
 
 ```go
 type DocPage struct {
-    forge.Node
+    smeldr.Node
     Title string `forge:"required,min=3" db:"title" json:"title"`
-    Body  string `forge:"required" db:"body" json:"body" forge_format:"markdown" forge_description:"Write in Markdown. Supports headings, lists, and code blocks."`
-    Embed string `db:"embed" json:"embed,omitempty" forge_format:"html" forge_description:"Raw HTML only. Use for iframes and third-party embeds. Must be trusted content."`
+    Body  string `forge:"required" db:"body" json:"body" smeldr_format:"markdown" smeldr_description:"Write in Markdown. Supports headings, lists, and code blocks."`
+    Embed string `db:"embed" json:"embed,omitempty" smeldr_format:"html" smeldr_description:"Raw HTML only. Use for iframes and third-party embeds. Must be trusted content."`
 }
 ```
 
@@ -177,8 +177,8 @@ type DocPage struct {
 |-----|---------|
 | `forge:"required,min=N"` | Validation — enforced identically across HTTP, API, and MCP calls |
 | `db:"column_name"` | SQLRepo column mapping — omit to use lowercased field name |
-| `forge_format:"markdown"` | Machine-readable format hint; currently `"markdown"` and `"html"` are supported |
-| `forge_description:"..."` | Free-text authoring guidance — appears as the field's `description` in the MCP JSON Schema tool definition |
+| `smeldr_format:"markdown"` | Machine-readable format hint; currently `"markdown"` and `"html"` are supported |
+| `smeldr_description:"..."` | Free-text authoring guidance — appears as the field's `description` in the MCP JSON Schema tool definition |
 
 Validation via `forge` tags cannot be bypassed — an AI agent calling a write tool
 faces the same `required` and `min` rules as a direct HTTP POST.
@@ -192,10 +192,10 @@ this is what guarantees draft content never leaks to the public,
 sitemaps, feeds, or AI crawlers.
 
 ```go
-forge.Draft      // visible to Author+ (own) and Editor+
-forge.Published  // publicly visible
-forge.Scheduled  // publishes automatically at ScheduledAt
-forge.Archived   // hidden from public, preserved in storage
+smeldr.Draft      // visible to Author+ (own) and Editor+
+smeldr.Published  // publicly visible
+smeldr.Scheduled  // publishes automatically at ScheduledAt
+smeldr.Archived   // hidden from public, preserved in storage
 ```
 
 ### What Forge enforces automatically
@@ -240,15 +240,15 @@ Two options change this for common patterns.
 
 ### SingleInstance — singleton page modules
 
-Use `forge.SingleInstance()` when a module holds exactly one canonical item
+Use `smeldr.SingleInstance()` when a module holds exactly one canonical item
 (About, Contact, Terms, Privacy). The item is served directly at the module
 prefix with no slug in the URL.
 
 ```go
-forge.NewModule((*AboutPage)(nil),
-    forge.At("/about"),
-    forge.Repo(repo),
-    forge.SingleInstance(),
+smeldr.NewModule((*AboutPage)(nil),
+    smeldr.At("/about"),
+    smeldr.Repo(repo),
+    smeldr.SingleInstance(),
 )
 // GET /about → serves the first Published item as JSON (or HTML if Templates is set)
 // GET /about/{slug} → 404 (route not registered)
@@ -275,18 +275,18 @@ at `/homepage`.
 // GET /homepage → serves the published record (admin + MCP access).
 // list_home_pages MCP tool suppressed.
 // create_preview_url generates /homepage?preview=<token> (no slug).
-app.Content(forge.NewModule((*HomePage)(nil),
-    forge.Repo(homePageRepo),
-    forge.At("/homepage"),
-    forge.SingleInstance(),
-    forge.MCP(forge.MCPRead, forge.MCPWrite),
+app.Content(smeldr.NewModule((*HomePage)(nil),
+    smeldr.Repo(homePageRepo),
+    smeldr.At("/homepage"),
+    smeldr.SingleInstance(),
+    smeldr.MCP(smeldr.MCPRead, smeldr.MCPWrite),
 ))
 
 // Serve the public route with a custom handler.
 // Reads the published record; falls back to defaults when none exists.
 app.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    hps, _ := homePageRepo.FindAll(r.Context(), forge.ListOptions{
-        Status: []forge.Status{forge.Published},
+    hps, _ := homePageRepo.FindAll(r.Context(), smeldr.ListOptions{
+        Status: []smeldr.Status{smeldr.Published},
     })
     hp := homePageDefaults()
     for _, p := range hps {
@@ -313,20 +313,20 @@ The module prefix (`/homepage`) is the admin and MCP surface. The public URL
 
 - Multiple records of the same type — use a regular module
 - The module prefix **is** the public URL and templates handle rendering — use
-  a regular module with `forge.Templates(...)`
+  a regular module with `smeldr.Templates(...)`
 - Items need per-item slug URLs — use a regular module or `Standalone()`
 
 ### Standalone — first-class top-level URLs
 
-Use `forge.Standalone()` when items should appear at `/{slug}` rather than
+Use `smeldr.Standalone()` when items should appear at `/{slug}` rather than
 `/{prefix}/{slug}`. This is useful for landing pages, blog posts as root-level
 pages, or wiki entries.
 
 ```go
-forge.NewModule((*Post)(nil),
-    forge.At("/posts"),
-    forge.Repo(repo),
-    forge.Standalone(),
+smeldr.NewModule((*Post)(nil),
+    smeldr.At("/posts"),
+    smeldr.Repo(repo),
+    smeldr.Standalone(),
 )
 // GET /my-post → serves the Published Post with slug "my-post"
 // GET /posts   → list of all Published posts (unchanged)
@@ -342,7 +342,7 @@ Rules:
 - If no module has the slug, the request falls through to the redirect
   handler (which 404s if no redirect rule matches).
 - Draft items are not served to guests via the top-level `/{slug}` route.
-- If the module also uses `forge.AIIndex(forge.AIDoc)`, AI doc is served
+- If the module also uses `smeldr.AIIndex(smeldr.AIDoc)`, AI doc is served
   at `GET /{slug}/aidoc` rather than `GET /{prefix}/{slug}/aidoc`.
 
 ---
@@ -359,19 +359,19 @@ Guest   →  read Published content only (unauthenticated)
 ```
 
 Higher roles inherit all permissions below them.
-`forge.Write(forge.Author)` means Author, Editor, and Admin.
+`smeldr.Write(smeldr.Author)` means Author, Editor, and Admin.
 
 ### Custom roles
 
 ```go
 // Create custom roles inline with the hierarchy builder
-moderator := forge.NewRole("moderator", forge.RoleBelow(forge.Editor), forge.RoleAbove(forge.Author))
-subscriber := forge.NewRole("subscriber", forge.RoleBelow(forge.Author), forge.RoleAbove(forge.Guest))
+moderator := smeldr.NewRole("moderator", smeldr.RoleBelow(smeldr.Editor), smeldr.RoleAbove(smeldr.Author))
+subscriber := smeldr.NewRole("subscriber", smeldr.RoleBelow(smeldr.Author), smeldr.RoleAbove(smeldr.Guest))
 
 // Use anywhere a Role is accepted
 app.Content(&BlogPost{},
-    forge.At("/posts"),
-    forge.Auth(forge.Read(subscriber), forge.Write(moderator)),
+    smeldr.At("/posts"),
+    smeldr.Auth(smeldr.Read(subscriber), smeldr.Write(moderator)),
 )
 ```
 
@@ -379,35 +379,35 @@ app.Content(&BlogPost{},
 
 ```go
 // Accept bearer tokens (APIs, mobile clients)
-app.Use(forge.Authenticate(forge.BearerHMAC(secret)))
+app.Use(smeldr.Authenticate(smeldr.BearerHMAC(secret)))
 
 // Accept cookie sessions (browser apps)
-app.Use(forge.Authenticate(forge.CookieSession("forge_session", secret)))
+app.Use(smeldr.Authenticate(smeldr.CookieSession("forge_session", secret)))
 
 // Accept both — first match wins
 // Use this for apps that serve both a browser UI and an API
-app.Use(forge.Authenticate(forge.AnyAuth(
-    forge.BearerHMAC(secret),
-    forge.CookieSession("forge_session", secret),
+app.Use(smeldr.Authenticate(smeldr.AnyAuth(
+    smeldr.BearerHMAC(secret),
+    smeldr.CookieSession("forge_session", secret),
 )))
 
 // Generate a signed token
-token := forge.SignToken(forge.User{
+token := smeldr.SignToken(smeldr.User{
     ID:    "42",
     Name:  "Alice",
-    Roles: []forge.Role{forge.Editor},
+    Roles: []smeldr.Role{smeldr.Editor},
 }, secret)
 ```
 
-When multiple auth methods are configured, Forge tries them in order and uses the first that succeeds. A request with a valid Bearer token and no cookie is authenticated as a bearer user. A request with neither is treated as `forge.Guest`.
+When multiple auth methods are configured, Forge tries them in order and uses the first that succeeds. A request with a valid Bearer token and no cookie is authenticated as a bearer user. A request with neither is treated as `smeldr.Guest`.
 
 ### In hooks and handlers
 
 ```go
-forge.On(forge.BeforeCreate, func(ctx forge.Context, p *BlogPost) error {
-    user := ctx.User()              // forge.User{ID, Name, Roles}
-    user.HasRole(forge.Editor)      // true if Editor or above
-    user.Is(forge.Author)           // true if exactly Author
+smeldr.On(smeldr.BeforeCreate, func(ctx smeldr.Context, p *BlogPost) error {
+    user := ctx.User()              // smeldr.User{ID, Name, Roles}
+    user.HasRole(smeldr.Editor)      // true if Editor or above
+    user.Is(smeldr.Author)           // true if exactly Author
     return nil
 })
 ```
@@ -425,11 +425,11 @@ or expired token is rejected immediately, even if the HMAC signature is valid.
 ### Wiring
 
 ```go
-app := forge.New(forge.MustConfig(forge.Config{
+app := smeldr.New(smeldr.MustConfig(smeldr.Config{
     BaseURL:    "https://mysite.com",
     Secret:     []byte(os.Getenv("SECRET")),
     DB:         db,
-    TokenStore: forge.NewTokenStore(db, os.Getenv("SECRET")),
+    TokenStore: smeldr.NewTokenStore(db, os.Getenv("SECRET")),
 }))
 ```
 
@@ -459,11 +459,11 @@ WARN forge: bootstrap admin token created token=<plaintext>
 Copy this token immediately. Use it with `forge-cli init` or with the
 `create_token` MCP tool to issue long-lived named tokens, then discard it.
 
-**Critical:** a token produced by `forge.SignToken` in `main()` is rejected
+**Critical:** a token produced by `smeldr.SignToken` in `main()` is rejected
 when `TokenStore` is configured — `VerifyBearerToken` only accepts tokens
 that exist in the store. Use `TokenStore.Create` or `smeldr.dev/cli` instead.
 
-`forge.VerifyTokenString(token string, secret []byte, store *TokenStore) (User, bool)` —
+`smeldr.VerifyTokenString(token string, secret []byte, store *TokenStore) (User, bool)` —
 verifies a raw bearer token string directly, without an `*http.Request`. Identical
 verification logic to `VerifyBearerToken`. Use this when calling from a downstream
 library (e.g. the `VerifyBearer` callback in `forgeoauth.Config`). Requires v1.25.0+.
@@ -505,47 +505,47 @@ everywhere — HTML head, JSON-LD, sitemap, RSS, and AI endpoints.
 ### Head
 
 ```go
-func (p *BlogPost) Head() forge.Head {
-    return forge.Head{
+func (p *BlogPost) Head() smeldr.Head {
+    return smeldr.Head{
         Title:       p.Title,
-        Description: forge.Excerpt(p.Body, 160),
+        Description: smeldr.Excerpt(p.Body, 160),
         Author:      p.Author,
         Published:   p.PublishedAt,
         Modified:    p.UpdatedAt,
         Image:       p.Cover,
-        Type:        forge.Article,
-        Canonical:   forge.URL("/posts/", p.Slug),
-        Breadcrumbs: forge.Crumbs(
-            forge.Crumb("Home",  "/"),
-            forge.Crumb("Posts", "/posts"),
-            forge.Crumb(p.Title, "/posts/"+p.Slug),
+        Type:        smeldr.Article,
+        Canonical:   smeldr.URL("/posts/", p.Slug),
+        Breadcrumbs: smeldr.Crumbs(
+            smeldr.Crumb("Home",  "/"),
+            smeldr.Crumb("Posts", "/posts"),
+            smeldr.Crumb(p.Title, "/posts/"+p.Slug),
         ),
     }
 }
 ```
 
-`forge.URL(prefix, slug)` builds a root-relative path.
-`forge.AbsURL(base, path)` joins it with the site base URL to produce
+`smeldr.URL(prefix, slug)` builds a root-relative path.
+`smeldr.AbsURL(base, path)` joins it with the site base URL to produce
 an absolute `https://...` URL — use this when `Head.Canonical` or
 `Head.Image.URL` must be absolute:
 
 ```go
-Canonical: forge.AbsURL("https://mysite.com", forge.URL("/posts/", p.Slug)),
+Canonical: smeldr.AbsURL("https://mysite.com", smeldr.URL("/posts/", p.Slug)),
 ```
 
 ### Advanced: context-aware head with HeadFunc
 
 When `Head()` on your content type is not enough — for example, you need request
 context like the site name, a per-request user preference, or a database lookup —
-use `HeadFunc`. It receives the full `forge.Context` alongside the item.
+use `HeadFunc`. It receives the full `smeldr.Context` alongside the item.
 `HeadFunc` takes priority over `Headable` when both are present.
 
 ```go
 // HeadFunc wins over the content type's Head() method when set
 app.Content(&BlogPost{},
-    forge.At("/posts"),
-    forge.HeadFunc(func(ctx forge.Context, p *BlogPost) forge.Head {
-        return forge.Head{
+    smeldr.At("/posts"),
+    smeldr.HeadFunc(func(ctx smeldr.Context, p *BlogPost) smeldr.Head {
+        return smeldr.Head{
             Title: p.Title + " — " + ctx.SiteName(),
         }
     }),
@@ -560,9 +560,9 @@ receives the request context and the full slice of published items.
 
 ```go
 app.Content(&BlogPost{},
-    forge.At("/posts"),
-    forge.ListHeadFunc(func(ctx forge.Context, posts []*BlogPost) forge.Head {
-        return forge.Head{
+    smeldr.At("/posts"),
+    smeldr.ListHeadFunc(func(ctx smeldr.Context, posts []*BlogPost) smeldr.Head {
+        return smeldr.Head{
             Title:       "All posts — " + ctx.SiteName(),
             Description: "Browse all articles published on this site.",
         }
@@ -575,14 +575,14 @@ app.Content(&BlogPost{},
 ### Rich result types
 
 ```go
-forge.Article       // blog posts, news articles
-forge.Product       // e-commerce products
-forge.FAQPage       // FAQ pages
-forge.HowTo         // step-by-step guides
-forge.Event         // events with dates and locations
-forge.Recipe        // recipes with ingredients
-forge.Review        // reviews with ratings
-forge.Organization  // company / about pages
+smeldr.Article       // blog posts, news articles
+smeldr.Product       // e-commerce products
+smeldr.FAQPage       // FAQ pages
+smeldr.HowTo         // step-by-step guides
+smeldr.Event         // events with dates and locations
+smeldr.Recipe        // recipes with ingredients
+smeldr.Review        // reviews with ratings
+smeldr.Organization  // company / about pages
 ```
 
 ### App-level JSON-LD (AppSchema)
@@ -591,7 +591,7 @@ Emit site-wide Organisation or WebSite structured data on every page via
 `app.SEO`:
 
 ```go
-app.SEO(&forge.AppSchema{
+app.SEO(&smeldr.AppSchema{
     Type: "Organization",
     Name: "Acme Corp",
     URL:  "https://acme.com",
@@ -599,15 +599,15 @@ app.SEO(&forge.AppSchema{
 })
 ```
 
-The `<script type="application/ld+json">` block is injected by `forge:head`
+The `<script type="application/ld+json">` block is injected by `smeldr:head`
 automatically on every page. Use it for WebSite, Organization, or any other
 app-level schema type that does not vary per content item.
 
 ### Sitemap
 
 ```go
-app.SEO(forge.SitemapConfig{
-    ChangeFreq: forge.Weekly,
+app.SEO(smeldr.SitemapConfig{
+    ChangeFreq: smeldr.Weekly,
     Priority:   0.8,
 })
 ```
@@ -619,10 +619,10 @@ Sitemaps regenerate on every publish/unpublish — never stale, never on-demand.
 ### Robots
 
 ```go
-app.SEO(forge.RobotsConfig{
+app.SEO(smeldr.RobotsConfig{
     Disallow:  []string{"/admin"},
     Sitemaps:  true,
-    AIScraper: forge.AskFirst,  // respectful AI crawler policy
+    AIScraper: smeldr.AskFirst,  // respectful AI crawler policy
 })
 ```
 
@@ -641,8 +641,8 @@ Only `Published` content appears. Regenerated on every publish.
 
 ```go
 app.Content(&BlogPost{},
-    forge.At("/posts"),
-    forge.AIIndex(forge.LLMsTxt),
+    smeldr.At("/posts"),
+    smeldr.AIIndex(smeldr.LLMsTxt),
 )
 ```
 
@@ -650,8 +650,8 @@ Enable all three AI endpoints in one call:
 
 ```go
 app.Content(&BlogPost{},
-    forge.At("/posts"),
-    forge.AIIndex(forge.LLMsTxt, forge.LLMsTxtFull, forge.AIDoc),
+    smeldr.At("/posts"),
+    smeldr.AIIndex(smeldr.LLMsTxt, smeldr.LLMsTxtFull, smeldr.AIDoc),
 )
 ```
 
@@ -663,7 +663,7 @@ Override with a custom template by creating `templates/llms.txt`:
 > {{.Description}}
 
 ## Posts
-{{forge_llms_entries .}}
+{{smeldr_llms_entries .}}
 ```
 
 ### AIDoc format
@@ -716,12 +716,12 @@ No configuration. Forge handles negotiation automatically.
 
 ## Social sharing
 
-> ✅ **Available** — Open Graph and Twitter Card meta tags are rendered automatically when `forge.Social` is added to a module.
+> ✅ **Available** — Open Graph and Twitter Card meta tags are rendered automatically when `smeldr.Social` is added to a module.
 
 ```go
 app.Content(&BlogPost{},
-    forge.At("/posts"),
-    forge.Social(forge.OpenGraph, forge.TwitterCard),
+    smeldr.At("/posts"),
+    smeldr.Social(smeldr.OpenGraph, smeldr.TwitterCard),
 )
 ```
 
@@ -731,16 +731,16 @@ meta tags in `<head>`. No additional configuration.
 ### What your content type needs
 
 ```go
-func (p *BlogPost) Head() forge.Head {
-    return forge.Head{
+func (p *BlogPost) Head() smeldr.Head {
+    return smeldr.Head{
         Title:       p.Title,
-        Description: forge.Excerpt(p.Body, 160),
+        Description: smeldr.Excerpt(p.Body, 160),
         Image:       p.Cover,  // used for og:image and twitter:image
 
         // Per-platform overrides (optional)
-        Social: forge.SocialOverrides{
-            Twitter: forge.TwitterMeta{
-                Card:    forge.SummaryLargeImage,
+        Social: smeldr.SocialOverrides{
+            Twitter: smeldr.TwitterMeta{
+                Card:    smeldr.SummaryLargeImage,
                 Creator: "@alice",
             },
         },
@@ -750,8 +750,8 @@ func (p *BlogPost) Head() forge.Head {
 
 ```go
 app.Content(&BlogPost{},
-    forge.At("/posts"),
-    forge.Social(forge.OpenGraph, forge.TwitterCard),
+    smeldr.At("/posts"),
+    smeldr.Social(smeldr.OpenGraph, smeldr.TwitterCard),
 )
 ```
 
@@ -779,8 +779,8 @@ Set a fallback OG image and Twitter handles for pages where the content
 type's `Head()` does not provide them:
 
 ```go
-app.SEO(&forge.OGDefaults{
-    Image: forge.Image{
+app.SEO(&smeldr.OGDefaults{
+    Image: smeldr.Image{
         URL:    "https://mysite.com/og-default.png",
         Width:  1200,
         Height: 630,
@@ -808,10 +808,10 @@ It is architecturally impossible to set a non-necessary cookie without consent h
 
 ```go
 var (
-    // Necessary — use forge.SetCookie, no consent needed
-    SessionCookie = forge.Cookie{
+    // Necessary — use smeldr.SetCookie, no consent needed
+    SessionCookie = smeldr.Cookie{
         Name:     "forge_session",
-        Category: forge.Necessary,
+        Category: smeldr.Necessary,
         Duration: 24 * time.Hour,
         HTTPOnly: true,
         Secure:   true,
@@ -819,10 +819,10 @@ var (
         Purpose:  "Authenticates the current user session.",
     }
 
-    // Non-necessary — must use forge.SetCookieIfConsented
-    PreferenceCookie = forge.Cookie{
+    // Non-necessary — must use smeldr.SetCookieIfConsented
+    PreferenceCookie = smeldr.Cookie{
         Name:     "forge_prefs",
-        Category: forge.Preferences,
+        Category: smeldr.Preferences,
         Duration: 365 * 24 * time.Hour,
         Secure:   true,
         SameSite: http.SameSiteLaxMode,
@@ -835,21 +835,21 @@ var (
 
 ```go
 // Necessary — always works
-forge.SetCookie(w, r, SessionCookie, sessionID)
-value, ok := forge.ReadCookie(r, SessionCookie)
-forge.ClearCookie(w, SessionCookie)
+smeldr.SetCookie(w, r, SessionCookie, sessionID)
+value, ok := smeldr.ReadCookie(r, SessionCookie)
+smeldr.ClearCookie(w, SessionCookie)
 
 // Non-necessary — silently skipped if user has not consented
-set := forge.SetCookieIfConsented(w, r, PreferenceCookie, "dark-mode")
+set := smeldr.SetCookieIfConsented(w, r, PreferenceCookie, "dark-mode")
 ```
 
 ### Cookie categories
 
 ```go
-forge.Necessary    // session auth, CSRF — never requires consent
-forge.Preferences  // theme, language — requires consent
-forge.Analytics    // page views, funnels — requires consent
-forge.Marketing    // ad targeting — requires consent
+smeldr.Necessary    // session auth, CSRF — never requires consent
+smeldr.Preferences  // theme, language — requires consent
+smeldr.Analytics    // page views, funnels — requires consent
+smeldr.Marketing    // ad targeting — requires consent
 ```
 
 ### Compliance manifest
@@ -860,7 +860,7 @@ app.Cookies(SessionCookie, PreferenceCookie)
 
 // Restricted — require Editor+ to read the manifest
 app.Cookies(SessionCookie, PreferenceCookie,
-    forge.ManifestAuth(forge.Editor),
+    smeldr.ManifestAuth(smeldr.Editor),
 )
 ```
 
@@ -902,22 +902,22 @@ Forge provides a first-class navigation tree with two modes: database-backed
 
 ```go
 // Code-defined — no database required
-app := forge.New(forge.MustConfig(forge.Config{
-    NavMode: forge.NavModeCode,
+app := smeldr.New(smeldr.MustConfig(smeldr.Config{
+    NavMode: smeldr.NavModeCode,
     // ...
 }))
 
 app.Nav(
-    forge.NavItem{Label: "Home",  Path: "/"},
-    forge.NavItem{Label: "Blog",  Path: "/posts"},
-    forge.NavItem{Label: "Docs",  Path: "/docs"},
+    smeldr.NavItem{Label: "Home",  Path: "/"},
+    smeldr.NavItem{Label: "Blog",  Path: "/posts"},
+    smeldr.NavItem{Label: "Docs",  Path: "/docs"},
 )
 ```
 
 ```go
 // Database-backed — items persisted in forge_nav table (auto-created)
-app := forge.New(forge.MustConfig(forge.Config{
-    NavMode: forge.NavModeDB,
+app := smeldr.New(smeldr.MustConfig(smeldr.Config{
+    NavMode: smeldr.NavModeDB,
     DB:      db,
     // ...
 }))
@@ -962,7 +962,7 @@ Obtain the live tree at any time via `app.NavTree()` after `app.Handler()` or
 
 ## Storage
 
-Forge accepts any database connection that satisfies the `forge.DB` interface —
+Forge accepts any database connection that satisfies the `smeldr.DB` interface —
 which `*sql.DB` and any pgx adapter already implement.
 You write SQL. Forge handles scanning and mapping.
 
@@ -980,7 +980,7 @@ compatible with all standard `*sql.DB` tooling.
 import "github.com/jackc/pgx/v5/stdlib"
 
 db := stdlib.OpenDB(connConfig) // *sql.DB backed by pgx
-app := forge.New(forge.Config{DB: db, ...})
+app := smeldr.New(smeldr.Config{DB: db, ...})
 ```
 
 **Maximum performance — native pgx connection pool (~2.5× faster)**
@@ -995,7 +995,7 @@ import (
 )
 
 pool, _ := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
-app := forge.New(forge.Config{DB: forgepgx.Wrap(pool), ...})
+app := smeldr.New(smeldr.Config{DB: forgepgx.Wrap(pool), ...})
 ```
 
 **Zero dependencies — standard database/sql**
@@ -1012,30 +1012,30 @@ import (
 )
 
 db, _ := sql.Open("sqlite3", "./mysite.db")
-app := forge.New(forge.Config{DB: db, ...})
+app := smeldr.New(smeldr.Config{DB: db, ...})
 ```
 
 Switching between all three approaches requires changing exactly one value
-in `forge.Config`. Nothing else in your codebase changes.
+in `smeldr.Config`. Nothing else in your codebase changes.
 
 ### Querying
 
 ```go
 // Single item — returns typed result, maps columns to struct fields
-post, err := forge.QueryOne[*BlogPost](db,
+post, err := smeldr.QueryOne[*BlogPost](db,
     "SELECT * FROM posts WHERE slug = $1 AND status = $2",
-    slug, forge.Published,
+    slug, smeldr.Published,
 )
-if errors.Is(err, forge.ErrNotFound) {
-    // no row — use forge.ErrNotFound, not sql.ErrNoRows
+if errors.Is(err, smeldr.ErrNotFound) {
+    // no row — use smeldr.ErrNotFound, not sql.ErrNoRows
 }
 
 // List with pagination
-opts := forge.ListOptions{Page: 1, PerPage: 20, OrderBy: "published_at", Desc: true}
+opts := smeldr.ListOptions{Page: 1, PerPage: 20, OrderBy: "published_at", Desc: true}
 
-posts, err := forge.Query[*BlogPost](db,
+posts, err := smeldr.Query[*BlogPost](db,
     "SELECT * FROM posts WHERE status = $1 ORDER BY published_at DESC LIMIT $2 OFFSET $3",
-    forge.Published, opts.PerPage, opts.Offset(),
+    smeldr.Published, opts.PerPage, opts.Offset(),
 )
 ```
 
@@ -1044,7 +1044,7 @@ No ORM. No query builder. SQL is the query language — and AI assistants write 
 
 ```go
 type BlogPost struct {
-    forge.Node
+    smeldr.Node
     Title  string `forge:"required" db:"title"  json:"title"`
     Body   string `forge:"required" db:"body"   json:"body"`
     Author string `forge:"required" db:"author" json:"author"`
@@ -1060,13 +1060,13 @@ For testing, prototyping, and custom backends:
 type Repository[T any] interface {
     FindByID(ctx context.Context, id string) (T, error)
     FindBySlug(ctx context.Context, slug string) (T, error)
-    FindAll(ctx context.Context, opts forge.ListOptions) ([]T, error)
+    FindAll(ctx context.Context, opts smeldr.ListOptions) ([]T, error)
     Save(ctx context.Context, node T) error
     Delete(ctx context.Context, id string) error
 }
 
 // Zero-config in-memory implementation
-repo := forge.NewMemoryRepo[*BlogPost]()
+repo := smeldr.NewMemoryRepo[*BlogPost]()
 ```
 
 ### Streaming with SeqRepository
@@ -1076,8 +1076,8 @@ Both `MemoryRepo[T]` and `SQLRepo[T]` implement the optional
 without loading the full result set into memory at once:
 
 ```go
-if sr, ok := repo.(forge.SeqRepository[*BlogPost]); ok {
-    for post, err := range sr.Seq(ctx, forge.ListOptions{}) {
+if sr, ok := repo.(smeldr.SeqRepository[*BlogPost]); ok {
+    for post, err := range sr.Seq(ctx, smeldr.ListOptions{}) {
         if err != nil {
             break
         }
@@ -1091,23 +1091,23 @@ loading all items at once would be memory-prohibitive.
 
 ### Production SQL repository
 
-> ✅ **Available** — `SQLRepo[T]` is a production-ready `Repository[T]` backed by `forge.DB`, implemented as of Milestone 7.
+> ✅ **Available** — `SQLRepo[T]` is a production-ready `Repository[T]` backed by `smeldr.DB`, implemented as of Milestone 7.
 
 `SQLRepo[T]` derives the table name automatically (`BlogPost` → `blog_posts`) or accepts a `Table()` override:
 
 ```go
 // Auto-derived table name: blog_posts
-repo := forge.NewSQLRepo[*BlogPost](db)
+repo := smeldr.NewSQLRepo[*BlogPost](db)
 
 // Explicit table name
-repo := forge.NewSQLRepo[*BlogPost](db, forge.Table("posts"))
+repo := smeldr.NewSQLRepo[*BlogPost](db, smeldr.Table("posts"))
 
 // T must be a pointer type — NewSQLRepo[*BlogPost] pairs with NewModule((*BlogPost)(nil), ...)
-repo := forge.NewSQLRepo[*BlogPost](db)
+repo := smeldr.NewSQLRepo[*BlogPost](db)
 
-m := forge.NewModule((*BlogPost)(nil),
-    forge.At("/posts"),
-    forge.Repo(repo),
+m := smeldr.NewModule((*BlogPost)(nil),
+    smeldr.At("/posts"),
+    smeldr.Repo(repo),
 )
 
 app.Content(m)
@@ -1123,12 +1123,12 @@ app.Content(m)
 
 ```go
 app.Use(
-    forge.RequestLogger(),              // structured slog output
-    forge.Recoverer(),                  // panic → 500, process never crashes
-    forge.CORS("https://mysite.com"),   // CORS headers
-    forge.MaxBodySize(1 << 20),         // 1 MB request limit
-    forge.RateLimit(100, time.Minute),  // 100 req/min per IP
-    forge.SecurityHeaders(),            // HSTS, CSP, X-Frame-Options, Referrer-Policy
+    smeldr.RequestLogger(),              // structured slog output
+    smeldr.Recoverer(),                  // panic → 500, process never crashes
+    smeldr.CORS("https://mysite.com"),   // CORS headers
+    smeldr.MaxBodySize(1 << 20),         // 1 MB request limit
+    smeldr.RateLimit(100, time.Minute),  // 100 req/min per IP
+    smeldr.SecurityHeaders(),            // HSTS, CSP, X-Frame-Options, Referrer-Policy
 )
 ```
 
@@ -1136,10 +1136,10 @@ app.Use(
 
 ```go
 app.Content(&BlogPost{},
-    forge.At("/posts"),
-    forge.Middleware(
-        forge.InMemoryCache(5*time.Minute),                        // LRU, max 1000 entries
-    // forge.InMemoryCache(5*time.Minute, forge.CacheMaxEntries(500)), // custom limit
+    smeldr.At("/posts"),
+    smeldr.Middleware(
+        smeldr.InMemoryCache(5*time.Minute),                        // LRU, max 1000 entries
+    // smeldr.InMemoryCache(5*time.Minute, smeldr.CacheMaxEntries(500)), // custom limit
         myCustomMiddleware,
     ),
 )
@@ -1152,7 +1152,7 @@ Standard `http.Handler` wrapping — no Forge-specific types required:
 ```go
 func myCustomMiddleware(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        ctx := forge.ContextFrom(w, r)  // access forge.Context if needed
+        ctx := smeldr.ContextFrom(w, r)  // access smeldr.Context if needed
         _ = ctx.User()
         next.ServeHTTP(w, r)
     })
@@ -1170,7 +1170,7 @@ Register templates to enable HTML. Everything else works automatically.
 
 ```
 Accept: application/json  →  JSON (always available)
-Accept: text/html         →  HTML template (requires forge.Templates)
+Accept: text/html         →  HTML template (requires smeldr.Templates)
 Accept: text/markdown     →  raw markdown (requires Markdown() method)
 Accept: text/plain        →  clean text (always available)
 ```
@@ -1179,9 +1179,9 @@ Accept: text/plain        →  clean text (always available)
 
 ```go
 app.Content(&BlogPost{},
-    forge.At("/posts"),
-    forge.Templates("templates/posts"),        // parsed at startup, fails fast if missing
-    // forge.TemplatesOptional("templates/posts"), // no startup failure if missing
+    smeldr.At("/posts"),
+    smeldr.Templates("templates/posts"),        // parsed at startup, fails fast if missing
+    // smeldr.TemplatesOptional("templates/posts"), // no startup failure if missing
     // Forge looks for:
     //   templates/posts/list.html  →  GET /posts
     //   templates/posts/show.html  →  GET /posts/{slug}
@@ -1192,26 +1192,26 @@ app.Content(&BlogPost{},
 
 ```html
 {{/* show.html */}}
-{{template "forge:head" .}}
+{{template "smeldr:head" .}}
 
 <article>
     <h1>{{.Content.Title}}</h1>
-    <p>By {{.Content.Author}} · {{.Content.PublishedAt | forge_date}}</p>
-    {{.Content.Body | forge_markdown}}
+    <p>By {{.Content.Author}} · {{.Content.PublishedAt | smeldr_date}}</p>
+    {{.Content.Body | smeldr_markdown}}
 </article>
 
 {{/* list.html */}}
-{{template "forge:head" .}}
+{{template "smeldr:head" .}}
 
 {{range .Content}}
 <a href="/posts/{{.Slug}}">
     <h2>{{.Title}}</h2>
-    <p>{{.Body | forge_excerpt 120}}</p>
+    <p>{{.Body | smeldr_excerpt 120}}</p>
 </a>
 {{end}}
 ```
 
-The `forge:head` partial renders everything in `<head>` automatically:
+The `smeldr:head` partial renders everything in `<head>` automatically:
 `<title>`, `<meta>`, canonical, Open Graph, Twitter Cards, `twitter:site`,
 app-level JSON-LD, JSON-LD, breadcrumbs,
 and `<meta name="robots">` based on content Status.
@@ -1222,22 +1222,22 @@ All functions are registered in `TemplateFuncMap` and are available in every mod
 
 | Function | Input | Output | Use case |
 |----------|-------|--------|----------|
-| `forge_markdown` | Markdown string | `template.HTML` | Body fields authored in Markdown |
+| `smeldr_markdown` | Markdown string | `template.HTML` | Body fields authored in Markdown |
 | `forge_html` | HTML string | `template.HTML` | Fields that already contain rendered HTML |
-| `forge_date` | `time.Time` | string | Human-readable date (`2 Jan 2006`) |
-| `forge_rfc3339` | `time.Time` | string | Machine-readable datetime for `<time datetime>` |
-| `forge_excerpt` | string, int | string | Truncated plain-text summary |
-| `forge_meta` | string | `template.HTML` | Escaped `<meta>` attribute value |
-| `forge_csrf_token` | — | `template.HTML` | Hidden CSRF input field |
-| `forge_llms_entries` | `.` (template data) | `template.HTML` | Rendered llms.txt entry list |
+| `smeldr_date` | `time.Time` | string | Human-readable date (`2 Jan 2006`) |
+| `smeldr_rfc3339` | `time.Time` | string | Machine-readable datetime for `<time datetime>` |
+| `smeldr_excerpt` | string, int | string | Truncated plain-text summary |
+| `smeldr_meta` | string | `template.HTML` | Escaped `<meta>` attribute value |
+| `smeldr_csrf_token` | — | `template.HTML` | Hidden CSRF input field |
+| `smeldr_llms_entries` | `.` (template data) | `template.HTML` | Rendered llms.txt entry list |
 
-#### forge_markdown
+#### smeldr_markdown
 
-`forge_markdown` converts a Markdown string to safe HTML. All content is HTML-escaped
+`smeldr_markdown` converts a Markdown string to safe HTML. All content is HTML-escaped
 before tag wrapping — no XSS risk from user-authored text.
 
 ```html
-{{.Content.Body | forge_markdown}}
+{{.Content.Body | smeldr_markdown}}
 ```
 
 **HTML passthrough:** lines whose trimmed form starts with `<` are emitted verbatim —
@@ -1269,7 +1269,7 @@ embeds, third-party iframes, or content migrated from another system.
 Never pass unsanitised user input to `forge_html`. The string is emitted verbatim
 with no escaping — the caller is responsible for ensuring the content is safe.
 
-| | `forge_markdown` | `forge_html` |
+| | `smeldr_markdown` | `forge_html` |
 |---|---|---|
 | Input format | Markdown text | Already-rendered HTML |
 | HTML passthrough | Lines starting with `<` only | Entire value verbatim |
@@ -1281,12 +1281,12 @@ with no escaping — the caller is responsible for ensuring the content is safe.
 ```go
 type TemplateData[T Node] struct {
     Content     T                  // T for show, []T for list
-    Head        forge.Head         // from Headable.Head() on T, or HeadFunc if provided (HeadFunc takes priority)
-    User        forge.User         // current user (zero value if Guest)
+    Head        smeldr.Head         // from Headable.Head() on T, or HeadFunc if provided (HeadFunc takes priority)
+    User        smeldr.User         // current user (zero value if Guest)
     Request     *http.Request
-    OGDefaults  *forge.OGDefaults  // app-level OG/Twitter fallbacks (nil if not configured)
+    OGDefaults  *smeldr.OGDefaults  // app-level OG/Twitter fallbacks (nil if not configured)
     AppSchema   template.HTML      // pre-rendered app-level JSON-LD block (empty if not configured)
-    HeadAssets  *forge.HeadAssets  // preconnect/stylesheets/links/scripts (nil if not configured)
+    HeadAssets  *smeldr.HeadAssets  // preconnect/stylesheets/links/scripts (nil if not configured)
 }
 ```
 
@@ -1302,7 +1302,7 @@ app.Partials("templates/partials") // any *.html file in the directory is a part
 ```
 
 Each partial file must use `{{define "name"}}...{{end}}` syntax (same convention
-as `forge:head`). Files are loaded in alphabetical order for determinism.
+as `smeldr:head`). Files are loaded in alphabetical order for determinism.
 
 ```html
 {{/* templates/partials/nav.html */}}
@@ -1321,11 +1321,11 @@ For custom `app.Handle()` routes that also need shared partials, use
 `App.MustParseTemplate`:
 
 ```go
-// parsed once at startup — includes TemplateFuncMap, forge:head, and all partials
+// parsed once at startup — includes TemplateFuncMap, smeldr:head, and all partials
 homeTpl := app.MustParseTemplate("templates/home.html")
 
 app.Handle("GET /", func(w http.ResponseWriter, r *http.Request) {
-    data := forge.NewTemplateData[any](ctx, nil, forge.Head{Title: "Home"}, "My Site")
+    data := smeldr.NewTemplateData[any](ctx, nil, smeldr.Head{Title: "Home"}, "My Site")
     homeTpl.Execute(w, data)
 })
 ```
@@ -1333,16 +1333,16 @@ app.Handle("GET /", func(w http.ResponseWriter, r *http.Request) {
 `MustParseTemplate` panics on error (consistent with `MustConfig`), so
 misconfigured templates fail at startup rather than at first request.
 
-### Custom handler with forge:head
+### Custom handler with smeldr:head
 
 ✅ **Available**
 
-Custom handler data structs can embed `forge.PageHead` to gain
-`{{template "forge:head" .}}` support without using `TemplateData[T]`:
+Custom handler data structs can embed `smeldr.PageHead` to gain
+`{{template "smeldr:head" .}}` support without using `TemplateData[T]`:
 
 ```go
 type homeData struct {
-    forge.PageHead        // promotes Head, OGDefaults, AppSchema, HeadAssets
+    smeldr.PageHead        // promotes Head, OGDefaults, AppSchema, HeadAssets
     Posts      []*Post
     Featured   *Post
 }
@@ -1351,7 +1351,7 @@ homeTpl := app.MustParseTemplate("templates/home.html")
 
 app.Handle("GET /", func(w http.ResponseWriter, r *http.Request) {
     data := homeData{
-        PageHead: forge.PageHead{Head: forge.Head{Title: "Home"}},
+        PageHead: smeldr.PageHead{Head: smeldr.Head{Title: "Home"}},
         Posts:    loadPosts(),
     }
     homeTpl.Execute(w, data)
@@ -1361,7 +1361,7 @@ app.Handle("GET /", func(w http.ResponseWriter, r *http.Request) {
 In `templates/home.html`:
 
 ```html
-<head>{{template "forge:head" .}}</head>
+<head>{{template "smeldr:head" .}}</head>
 <body>
     {{range .Posts}}<h2>{{.Title}}</h2>{{end}}
 </body>
@@ -1380,13 +1380,13 @@ Pass additional data — sidebar items, navigation trees, related posts — into
 a module's list or show template without writing a custom handler:
 
 ```go
-app.Content(forge.NewModule((*DocPage)(nil),
-    forge.At("/docs"),
-    forge.Repo(docRepo),
-    forge.Templates("templates/docs"),
-    forge.ContextFunc(func(ctx forge.Context, _ any) (any, error) {
-        return docRepo.FindAll(ctx, forge.ListOptions{
-            Status: []forge.Status{forge.Published},
+app.Content(smeldr.NewModule((*DocPage)(nil),
+    smeldr.At("/docs"),
+    smeldr.Repo(docRepo),
+    smeldr.Templates("templates/docs"),
+    smeldr.ContextFunc(func(ctx smeldr.Context, _ any) (any, error) {
+        return docRepo.FindAll(ctx, smeldr.ListOptions{
+            Status: []smeldr.Status{smeldr.Published},
         })
     }),
 ))
@@ -1409,21 +1409,21 @@ list. Cast it inside the function if the concrete type is needed. Errors from
 
 ✅ **Available**
 
-Inject preconnect hints, stylesheets, favicon links, and scripts into `forge:head`
+Inject preconnect hints, stylesheets, favicon links, and scripts into `smeldr:head`
 on every page via `app.SEO`:
 
 ```go
-app.SEO(&forge.HeadAssets{
+app.SEO(&smeldr.HeadAssets{
     Preconnect:  []string{"https://fonts.googleapis.com"},
     Stylesheets: []string{
         "https://fonts.googleapis.com/css2?family=Inter&display=swap",
         "/static/app.css",
     },
-    Links: []forge.HeadLink{
+    Links: []smeldr.HeadLink{
         {Rel: "icon", Type: "image/png", Sizes: "32x32", Href: "/favicon-32.png"},
         {Rel: "apple-touch-icon", Href: "/apple-touch-icon.png"},
     },
-    Scripts: []forge.ScriptTag{
+    Scripts: []smeldr.ScriptTag{
         {Src: "/static/app.js", Defer: true},
     },
 })
@@ -1433,7 +1433,7 @@ Assets are emitted in order: preconnect → stylesheets → links → scripts.
 Inline script bodies use `template.JS` to opt in to verbatim emission:
 
 ```go
-forge.ScriptTag{Body: template.JS("console.log('Forge')")} // never pass user input here
+smeldr.ScriptTag{Body: template.JS("console.log('Forge')")} // never pass user input here
 ```
 
 ---
@@ -1447,25 +1447,25 @@ Internal details are logged — never leaked.
 ### Sentinel errors
 
 ```go
-forge.ErrNotFound   // 404 — resource does not exist
-forge.ErrGone       // 410 — resource existed but was intentionally removed
-forge.ErrForbidden  // 403 — authenticated but insufficient role
-forge.ErrUnauth     // 401 — not authenticated
-forge.ErrConflict   // 409 — state conflict (e.g. duplicate slug)
-forge.ErrLastAdmin  // 409 — attempt to revoke the last active admin token
+smeldr.ErrNotFound   // 404 — resource does not exist
+smeldr.ErrGone       // 410 — resource existed but was intentionally removed
+smeldr.ErrForbidden  // 403 — authenticated but insufficient role
+smeldr.ErrUnauth     // 401 — not authenticated
+smeldr.ErrConflict   // 409 — state conflict (e.g. duplicate slug)
+smeldr.ErrLastAdmin  // 409 — attempt to revoke the last active admin token
 ```
 
 ### In hooks and custom handlers
 
 ```go
-forge.On(forge.BeforeCreate, func(ctx forge.Context, p *BlogPost) error {
+smeldr.On(smeldr.BeforeCreate, func(ctx smeldr.Context, p *BlogPost) error {
     if slugExists(p.Slug) {
-        return forge.ErrConflict                   // → 409
+        return smeldr.ErrConflict                   // → 409
     }
-    if !ctx.User().HasRole(forge.Editor) {
-        return forge.ErrForbidden                  // → 403
+    if !ctx.User().HasRole(smeldr.Editor) {
+        return smeldr.ErrForbidden                  // → 403
     }
-    return forge.Err("title", "already taken")     // → 422 with field detail
+    return smeldr.Err("title", "already taken")     // → 422 with field detail
 })
 ```
 
@@ -1507,7 +1507,7 @@ Forge includes a built-in per-IP token bucket rate limiter.
 
 ```go
 app.Use(
-    forge.RateLimit(100, time.Minute),  // 100 requests per IP per minute
+    smeldr.RateLimit(100, time.Minute),  // 100 requests per IP per minute
 )
 ```
 
@@ -1516,21 +1516,21 @@ from the forwarded header rather than the connection address:
 
 ```go
 app.Use(
-    forge.RateLimit(100, time.Minute,
-        forge.TrustedProxy("X-Real-IP"),
+    smeldr.RateLimit(100, time.Minute,
+        smeldr.TrustedProxy("X-Real-IP"),
     ),
 )
 ```
 
 `ErrTooManyRequests` (HTTP 429) is the typed sentinel returned to the client
 when the limit is exceeded. Use it directly in custom middleware when
-`forge.RateLimit` is insufficient for your logic:
+`smeldr.RateLimit` is insufficient for your logic:
 
 ```go
 func myRateLimiter(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         if limited(r) {
-            forge.WriteError(w, r, forge.ErrTooManyRequests)
+            smeldr.WriteError(w, r, smeldr.ErrTooManyRequests)
             return
         }
         next.ServeHTTP(w, r)
@@ -1571,13 +1571,13 @@ For a CMS, this is almost always what you want.
 ```go
 // Bulk redirect when renaming a module prefix
 app.Content(&BlogPost{},
-    forge.At("/articles"),                              // new prefix
-    forge.Redirects(forge.From("/posts"), "/articles"), // 301 all /posts/* → /articles/*
+    smeldr.At("/articles"),                              // new prefix
+    smeldr.Redirects(smeldr.From("/posts"), "/articles"), // 301 all /posts/* → /articles/*
 )
 
 // One-off redirects
-app.Redirect("/old-path",  "/new-path", forge.Permanent) // 301
-app.Redirect("/removed",   "",          forge.Gone)       // 410
+app.Redirect("/old-path",  "/new-path", smeldr.Permanent) // 301
+app.Redirect("/removed",   "",          smeldr.Gone)       // 410
 ```
 
 ### Optional DB persistence
@@ -1612,21 +1612,21 @@ GET /.well-known/redirects.json   (requires Editor+)
 
 ✅ **Available**
 
-`smeldr.dev/mcp` is a separate module that wraps a `forge.App` and exposes its
+`smeldr.dev/mcp` is a separate module that wraps a `smeldr.App` and exposes its
 content modules to AI assistants via the [Model Context Protocol](https://modelcontextprotocol.io).
 Schema derivation, lifecycle enforcement, and role checks are all automatic —
-no configuration beyond `forge.MCP(...)` on your existing modules.
+no configuration beyond `smeldr.MCP(...)` on your existing modules.
 
 ```go
 import forgemcp "smeldr.dev/mcp"
 
 func main() {
-    app := forge.New(forge.MustConfig(forge.Config{
+    app := smeldr.New(smeldr.MustConfig(smeldr.Config{
         BaseURL: "https://mysite.com",
         Secret:  []byte(os.Getenv("SECRET")),
     }))
     app.Content(
-        forge.NewModule((*Post)(nil), forge.At("/posts"), forge.MCP(forge.MCPWrite)),
+        smeldr.NewModule((*Post)(nil), smeldr.At("/posts"), smeldr.MCP(smeldr.MCPWrite)),
     )
     forgemcp.New(app).ServeStdio(context.Background(), os.Stdin, os.Stdout)
 }
@@ -1642,7 +1642,7 @@ the [smeldr.dev/mcp README](https://github.com/smeldr/mcp).
 Forge is the first Go framework explicitly designed to be maintained by AI assistants.
 
 **Intent over mechanics**  
-`forge.SEO(forge.RichArticle)` — not 40 lines of JSON-LD template code.
+`smeldr.SEO(smeldr.RichArticle)` — not 40 lines of JSON-LD template code.
 An AI assistant reads, modifies, and explains your intent without touching internals.
 
 **Declarative over imperative**  
@@ -1666,7 +1666,7 @@ One way to declare cookies. One way to handle SEO. One way to register content.
 AI assistants never guess which pattern you used.
 
 **Consistent naming**  
-Every exported symbol: `forge.Verb(Noun)` or `forge.Noun`.
+Every exported symbol: `smeldr.Verb(Noun)` or `smeldr.Noun`.
 No abbreviations. No clever names. Predictable, searchable, memorable.
 
 ---
@@ -1684,28 +1684,28 @@ import (
 )
 
 type Article struct {
-    forge.Node
+    smeldr.Node
     Title  string      `forge:"required"         json:"title"`
     Body   string      `forge:"required,min=100"  json:"body"`
     Author string      `forge:"required"         json:"author"`
-    Cover  forge.Image `                          json:"cover,omitempty"`
+    Cover  smeldr.Image `                          json:"cover,omitempty"`
 }
 
 func (a *Article) Validate() error {
-    if a.Status == forge.Published && a.Cover.URL == "" {
-        return forge.Err("cover", "required when publishing")
+    if a.Status == smeldr.Published && a.Cover.URL == "" {
+        return smeldr.Err("cover", "required when publishing")
     }
     return nil
 }
 
-func (a *Article) Head() forge.Head {
-    return forge.Head{
+func (a *Article) Head() smeldr.Head {
+    return smeldr.Head{
         Title:       a.Title,
-        Description: forge.Excerpt(a.Body, 160),
+        Description: smeldr.Excerpt(a.Body, 160),
         Author:      a.Author,
         Image:       a.Cover,
-        Type:        forge.Article,
-        Canonical:   forge.URL("/articles/", a.Slug),
+        Type:        smeldr.Article,
+        Canonical:   smeldr.URL("/articles/", a.Slug),
     }
 }
 
@@ -1714,37 +1714,37 @@ func (a *Article) Markdown() string { return a.Body }
 func main() {
     secret := []byte(os.Getenv("SECRET"))
 
-    app := forge.New(forge.Config{
+    app := smeldr.New(smeldr.Config{
         BaseURL: "https://mysite.com",
         Secret:  secret,
     })
 
     app.Use(
-        forge.RequestLogger(),
-        forge.Recoverer(),
-        forge.SecurityHeaders(),
-        forge.MaxBodySize(1 << 20),
-        forge.Authenticate(forge.AnyAuth(
-            forge.BearerHMAC(secret),
-            forge.CookieSession("session", secret),
+        smeldr.RequestLogger(),
+        smeldr.Recoverer(),
+        smeldr.SecurityHeaders(),
+        smeldr.MaxBodySize(1 << 20),
+        smeldr.Authenticate(smeldr.AnyAuth(
+            smeldr.BearerHMAC(secret),
+            smeldr.CookieSession("session", secret),
         )),
     )
 
-    app.SEO(forge.SitemapConfig{ChangeFreq: forge.Weekly, Priority: 0.8})
-    app.SEO(forge.RobotsConfig{AIScraper: forge.AskFirst})
+    app.SEO(smeldr.SitemapConfig{ChangeFreq: smeldr.Weekly, Priority: 0.8})
+    app.SEO(smeldr.RobotsConfig{AIScraper: smeldr.AskFirst})
 
-    app.Content(forge.NewModule((*Article)(nil),
-        forge.At("/articles"),
-        forge.Auth(
-            forge.Read(forge.Guest),
-            forge.Write(forge.Author),
-            forge.Delete(forge.Editor),
+    app.Content(smeldr.NewModule((*Article)(nil),
+        smeldr.At("/articles"),
+        smeldr.Auth(
+            smeldr.Read(smeldr.Guest),
+            smeldr.Write(smeldr.Author),
+            smeldr.Delete(smeldr.Editor),
         ),
-        forge.Cache(10*time.Minute),
-        forge.Social(forge.OpenGraph, forge.TwitterCard),
-        forge.AIIndex(forge.LLMsTxt, forge.AIDoc),
-        forge.Templates("templates/articles"),
-        forge.On(forge.BeforeCreate, func(ctx forge.Context, a *Article) error {
+        smeldr.Cache(10*time.Minute),
+        smeldr.Social(smeldr.OpenGraph, smeldr.TwitterCard),
+        smeldr.AIIndex(smeldr.LLMsTxt, smeldr.AIDoc),
+        smeldr.Templates("templates/articles"),
+        smeldr.On(smeldr.BeforeCreate, func(ctx smeldr.Context, a *Article) error {
             a.Author = ctx.User().Name
             return nil
         }),
@@ -1789,7 +1789,7 @@ mcpSrv := forgemcp.New(app, forgemcp.WithModule(mediaSrv))
 ```
 
 `Register` mounts all four HTTP routes and returns a `*Server` that implements
-`forge.MCPModule`. Pass it to `forgemcp.WithModule` to expose the MCP tools.
+`smeldr.MCPModule`. Pass it to `forgemcp.WithModule` to expose the MCP tools.
 
 A database is required. Call `forgemedia.CreateMediaTable(db)` once to create
 the `forge_media` table, or run the migration manually.
@@ -1820,7 +1820,7 @@ supported — media files have no lifecycle. These tools return `ErrBadRequest`.
 ### Config keys
 
 The two `forge.config` keys below are read automatically by `LocalMediaStore`.
-Set them in your `forge.config` file or override in Go code via `forge.Config`.
+Set them in your `forge.config` file or override in Go code via `smeldr.Config`.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -1904,7 +1904,7 @@ production and from disk in development — no boilerplate required.
 var staticFiles embed.FS
 
 func main() {
-    app := forge.New(forge.MustConfig(forge.Config{
+    app := smeldr.New(smeldr.MustConfig(smeldr.Config{
         BaseURL: "https://mysite.com",
         Secret:  []byte(os.Getenv("SECRET")),
         Dev:     os.Getenv("DEV") == "1",
@@ -2087,7 +2087,7 @@ originating HTTP request (via `context.WithoutCancel`). Handler errors are logge
 at Warn level; subsequent handlers still fire.
 
 ```go
-app.OnSignal(forge.AfterPublish, func(ctx context.Context, ev forge.SignalEvent) error {
+app.OnSignal(smeldr.AfterPublish, func(ctx context.Context, ev smeldr.SignalEvent) error {
     log.Printf("published: %s %s", ev.Type, ev.Slug)
     return nil
 })
@@ -2230,7 +2230,7 @@ const AfterSchedule Signal = "after_schedule"
 ```
 
 Fires after a node transitions to `Scheduled` status via `MCPSchedule`.
-Subscribe with `m.On(forge.AfterSchedule, ...)` or use it as a webhook
+Subscribe with `m.On(smeldr.AfterSchedule, ...)` or use it as a webhook
 event name suffix (`"mytype.scheduled"`).
 
 ### Webhook delivery
@@ -2277,7 +2277,7 @@ Use `App.OnSignal` with `AfterPublish` to call your preferred indexing API.
 `SignalEvent.URL` is the fully-qualified canonical URL of the published item.
 
 ```go
-app.OnSignal(forge.AfterPublish, func(ctx context.Context, ev forge.SignalEvent) error {
+app.OnSignal(smeldr.AfterPublish, func(ctx context.Context, ev smeldr.SignalEvent) error {
     // IndexNow example
     req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
         "https://api.indexnow.org/indexnow?url="+url.QueryEscape(ev.URL)+
@@ -2313,10 +2313,10 @@ to a SQL table. It also mounts `GET /_audit` (Editor role required).
 
 ```go
 // 1. Create the table once at startup
-forge.CreateAuditTable(db)
+smeldr.CreateAuditTable(db)
 
 // 2. Wire the audit store
-app.Audit(forge.NewAuditStore(db))
+app.Audit(smeldr.NewAuditStore(db))
 ```
 
 DDL (also created by `CreateAuditTable`):

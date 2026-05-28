@@ -95,7 +95,7 @@ leaves no room for ambiguity.
 
 ## Why this is achievable with Forge
 
-**Content lifecycle as a first-class concept.** `forge.Node` enforces
+**Content lifecycle as a first-class concept.** `smeldr.Node` enforces
 Draft → Scheduled → Published → Archived for every content type. An AI
 assistant creating content operates within the same lifecycle rules as a
 human editor. There is no special mode, no bypass, no unsafe shortcut.
@@ -105,12 +105,12 @@ defines its own schema via Go struct tags and the `Head()` method. Forge
 derives an MCP resource schema from this automatically — no separate schema
 definition, no drift between code and documentation.
 
-**Role system the AI respects.** `forge.Auth` and the role hierarchy
+**Role system the AI respects.** `smeldr.Auth` and the role hierarchy
 (Guest → Author → Editor → Admin) apply equally to human requests and MCP
 tool calls. An AI assistant operating as an Author cannot delete another
 author's published content. The rules are the same.
 
-**Validation the AI cannot bypass.** `forge.Validate` and `Validate() error`
+**Validation the AI cannot bypass.** `smeldr.Validate` and `Validate() error`
 run on every save, regardless of who or what initiated the save. An AI
 creating a post that violates validation rules gets the same 422 response
 a human would.
@@ -137,10 +137,10 @@ Forge's existing architecture maps cleanly onto MCP primitives:
 
 | Forge concept | MCP concept |
 |---|---|
-| `forge.Node` + struct tags | Resource schema (auto-derived) |
-| `forge.Module` operations | Tools (Create, Update, Publish, Delete) |
-| `forge.Auth` / role system | Authentication (same rules, same roles) |
-| `forge.Validate` | Tool input validation (same constraints) |
+| `smeldr.Node` + struct tags | Resource schema (auto-derived) |
+| `smeldr.Module` operations | Tools (Create, Update, Publish, Delete) |
+| `smeldr.Auth` / role system | Authentication (same rules, same roles) |
+| `smeldr.Validate` | Tool input validation (same constraints) |
 | Content lifecycle | Resource state machine (same states) |
 
 MCP is not a new system sitting beside Forge. It is a thin transport layer
@@ -209,9 +209,9 @@ schema, typed MCP tools, role system and validation applied to all MCP calls.
 
 ### Phase 2 — Production foundation ✅ DONE
 
-forge v1.11.0. forge-pgx, shared partials, forge:head, MustConfig,
+forge v1.11.0. forge-pgx, shared partials, smeldr:head, MustConfig,
 AppSchema, OGDefaults, TokenStore, NavTree (NavModeDB/Code), forge.config,
-smeldr.dev/cli, forge_format and forge_description tags, REFERENCE.md.
+smeldr.dev/cli, smeldr_format and smeldr_description tags, REFERENCE.md.
 
 ### Phase 3 — Forge Cloud private beta (current focus)
 
