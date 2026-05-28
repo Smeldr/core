@@ -204,14 +204,14 @@ handles the content scale of any realistic content site.
 
 ### Phase 1 — MCP core ✅ DONE
 
-forge-mcp v1.4.0. MCP server transport (stdio + SSE), auto-derived resource
+smeldr.dev/mcp v1.4.0. MCP server transport (stdio + SSE), auto-derived resource
 schema, typed MCP tools, role system and validation applied to all MCP calls.
 
 ### Phase 2 — Production foundation ✅ DONE
 
 forge v1.11.0. forge-pgx, shared partials, forge:head, MustConfig,
 AppSchema, OGDefaults, TokenStore, NavTree (NavModeDB/Code), forge.config,
-forge-cli, forge_format and forge_description tags, REFERENCE.md.
+smeldr.dev/cli, forge_format and forge_description tags, REFERENCE.md.
 
 ### Phase 3 — Forge Cloud private beta (current focus)
 
@@ -220,7 +220,7 @@ Invitation-only. forge-admin provisions one Forge instance per customer
 one. Per-site tokens are an internal forge-admin detail — never exposed to
 end users.
 
-forge-media ships as LocalMediaStore with a swappable storage interface
+smeldr.dev/media ships as LocalMediaStore with a swappable storage interface
 designed for S3 in Phase 4. Media files are addressable by URL, not local path.
 
 ### Phase 4 — Forge Cloud GA
@@ -236,7 +236,7 @@ and billing.
 
 ### Current — AGPL v3
 
-`forge` and `forge-mcp` are licensed under the GNU Affero General
+`forge` and `smeldr.dev/mcp` are licensed under the GNU Affero General
 Public License v3 (AGPL).
 
 AGPL means: the source code is open and free to use, modify, and distribute.

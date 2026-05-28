@@ -8,7 +8,7 @@ Copy the relevant file into your project to enable AI-assisted workflows.
 
 Claude Code skill for Forge developers. Covers the full Forge API: content
 types, module wiring, routing variants, signal bus, MCP tool catalog, upload
-token flow, forge-social, and forge-agent.
+token flow, smeldr.dev/social, and smeldr.dev/agent.
 
 Add to: `.claude/skills/forge.md` in your project.
 

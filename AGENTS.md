@@ -124,7 +124,7 @@ forge.NewModule((*Post)(nil),
 Wire the MCP server and token store in `main.go`:
 
 ```go
-import forgemcp "smeldr.dev/core-mcp"
+import forgemcp "smeldr.dev/mcp"
 
 app := forge.New(forge.MustConfig(forge.Config{
     BaseURL:    "https://mysite.com",
@@ -138,7 +138,7 @@ app.Handle("GET /mcp", mcpSrv.Handler())
 app.Handle("POST /mcp/message", mcpSrv.Handler())
 ```
 
-See `forge-mcp/README.md` for connection setup and token management.
+See the smeldr.dev/mcp README for connection setup and token management.
 
 ### Module routing variants
 
@@ -167,15 +167,15 @@ forge.NewModule((*HomePage)(nil),
 
 `APIOnly()` and `SingleInstance()` cannot be combined — `NewModule` panics at startup.
 
-### Adding media support (forge-media)
+### Adding media support (smeldr.dev/media)
 
-`forge-media` is an optional submodule that adds file upload, storage, and
+`smeldr.dev/media` is an optional module that adds file upload, storage, and
 serving. It implements `forge.MCPModule` so AI agents can upload files via MCP.
 
 ```go
 import (
-    forgemedia "smeldr.dev/core-media"
-    forgemcp   "smeldr.dev/core-mcp"
+    forgemedia "smeldr.dev/media"
+    forgemcp   "smeldr.dev/mcp"
 )
 
 app := forge.New(forge.MustConfig(forge.Config{
@@ -315,4 +315,4 @@ These tools are available when the site has `App.Webhooks(store)` configured:
 
 ### Connection setup
 
-See `forge-mcp/README.md` for Claude Desktop, Cursor, and SSE configuration.
+See the smeldr.dev/mcp README for Claude Desktop, Cursor, and SSE configuration.

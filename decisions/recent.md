@@ -182,3 +182,34 @@ update the vanity redirect, OR create a separate `github.com/smeldr/pgx` repo.
 merged T59-phase-0c → main; `common/agent/skills/forge.md`.
 
 ---
+
+## A106 — T59 doc rename: forge-cms.dev → smeldr.dev across all core documentation
+
+**Date:** 2026-05-28
+**Status:** Agreed
+**Milestone:** T59 — documentation rename (docs-only)
+
+**What:**
+Renamed all `forge-cms.dev/*` module path references to `smeldr.dev/*`, all
+`github.com/forge-cms/*` repository references to `github.com/smeldr/*`, and all
+prose module names (`forge-mcp`, `forge-media`, `forge-cli`, `forge-social`,
+`forge-agent`, `forge-oauth`) to their canonical `smeldr.dev/*` forms across 10
+documentation files in the core repo.
+
+Also corrected stale sub-module path references (`smeldr.dev/core-mcp` →
+`smeldr.dev/mcp`, `smeldr.dev/core-media` → `smeldr.dev/media`,
+`smeldr.dev/core-agent` → `smeldr.dev/agent`, `smeldr.dev/core-agent/flow` →
+`smeldr.dev/agent/flow`) left over from Phase 0C.
+
+**Scope:** Docs only. No Go source files changed. Binary command names (`forge-cli`,
+`forge-cli init`, etc.) and config file names (`.forge-cli.env`) are unchanged — they
+refer to the CLI binary, not the Go module path.
+
+**Excluded:** `CHANGELOG.md`, `DECISIONS.md`, `decisions/` — contain historical
+records that must not be altered.
+
+**Files changed:** `README.md`, `AGENTS.md`, `docs/VISION.md`, `docs/SECURITY.md`,
+`docs/FEATURELIST.md`, `.github/copilot-instructions.md`, `docs/ARCHITECTURE.md`,
+`docs/REFERENCE.md`, `skills/forge.md`, `skills/README.md`.
+
+---

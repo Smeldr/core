@@ -3,7 +3,7 @@
 Forge is a Go content framework. This skill covers what you need to work
 with forge as a developer or pilot agent.
 
-Current versions: forge v1.24.0 · forge-mcp v1.10.3 · forge-media v1.2.0 · forge-cli v0.9.0 · forge-social v0.6.0 · forge-agent v0.4.0
+Current versions: forge v1.25.1 · smeldr.dev/mcp v1.11.3 · smeldr.dev/media v1.2.1 · smeldr.dev/cli v0.9.1 · smeldr.dev/social v0.6.1 · smeldr.dev/agent v0.4.2
 
 ---
 
@@ -93,7 +93,7 @@ forge.NewModule((*AboutPage)(nil),
 MCP behaviour:
 - `list_{type}s` tool suppressed (`MCPMeta.SingleInstance = true`)
 - `get_{type}`, `update_{type}`, `publish_{type}`, `archive_{type}`, `delete_{type}` present
-- `create_preview_url` returns `/{prefix}?preview=<token>` — no slug in path (forge-mcp ≥ v1.10.2)
+- `create_preview_url` returns `/{prefix}?preview=<token>` — no slug in path (smeldr.dev/mcp ≥ v1.10.2)
 
 **Pattern: SingleInstance + custom public handler**
 When the public URL differs from the module prefix (e.g. homepage at `/`, module at `/homepage`):
@@ -201,7 +201,7 @@ Tools are named from the type in lower_snake_case.
 | `delete_{type}` | Editor+ | Permanent delete |
 | `list_{type}s` | Editor+ | All items, optional status filter |
 | `get_{type}` | Editor+ | Single item at any status |
-| `create_upload_token` | Author+ | forge-media: generate upload token |
+| `create_upload_token` | Author+ | smeldr.dev/media: generate upload token |
 | `create_preview_url` | Editor+ | Draft preview URL (prefix + slug) |
 | `create_token` | Admin | Mint bearer token |
 | `list_tokens` / `revoke_token` | Admin | Token management |
@@ -210,7 +210,7 @@ Tools are named from the type in lower_snake_case.
 
 ---
 
-## forge-media — upload token flow
+## smeldr.dev/media — upload token flow
 
 **Never use `create_file` (base64) for real images** — 85 KB WebP ≈ 113 KB
 base64 — too many tokens. Use the upload token flow instead.
@@ -239,7 +239,7 @@ Filename gets a hex prefix — prevents overwrite of existing files.
 
 ---
 
-## forge-social (separate module)
+## smeldr.dev/social (separate module)
 
 `smeldr.dev/social` — social post scheduling and agent routing.
 
@@ -290,7 +290,7 @@ MCP tools: `create_platform_config`, `create_scheduled_post`, `list_scheduled_po
 
 ---
 
-## forge-cli key commands
+## smeldr.dev/cli key commands
 
 ```bash
 # Content
@@ -324,7 +324,7 @@ forge-cli audit list --type Post
 forge-cli audit list --from 2026-01-01T00:00:00Z --to 2026-12-31T23:59:59Z
 forge-cli audit list --actor <actor-id>
 
-# Social (forge-cli v0.8.0+)
+# Social (smeldr.dev/cli v0.8.0+)
 forge-cli social credential create --platform mastodon|linkedin|x [--instance-url <url>]
 forge-cli social credential list
 forge-cli social credential get <id>
@@ -348,14 +348,14 @@ Config: `FORGE_URL`, `FORGE_TOKEN`, `FORGE_MCP_URL` (or `.forge-cli.env`)
 
 ## Common gotchas
 
-- **go.mod line 1** must be `module smeldr.dev/core-mcp` — not a github.com path
+- **go.mod line 1** must be `module smeldr.dev/mcp` — not a github.com path
 - **Verify go.mod deps before tagging** — `grep smeldr.dev go.mod`; run `go mod tidy`
 - **Module proxy caches permanently** — bad tag requires a new patch tag, no fix
 - **forge.Table()** — use when type name pluralises incorrectly (Story → storys)
 - **Windows MIME** — add `mime.AddExtensionType(".webp", "image/webp")` in main()
 - **Docker volume** — forge_media volume at /app/media; COPY in Dockerfile seeds it on first run
 - **Archived ≠ Draft** — preview tokens bypass Draft/Scheduled only, never Archived
-- **Timezone database** — `time.LoadLocation` fails on servers without OS tzdata (Alpine, scratch). forge-social embeds `time/tzdata` since v0.4.1 — ensure you are on v0.4.1 or later
+- **Timezone database** — `time.LoadLocation` fails on servers without OS tzdata (Alpine, scratch). smeldr.dev/social embeds `time/tzdata` since v0.4.1 — ensure you are on v0.4.1 or later
 - **X body limit** — X posts are capped at 280 characters. Exceeding the limit returns a terminal `publishError` — the post will never be retried. Truncate before calling `create_scheduled_post` with `platform=x`
 - **X media** — `media_url` is ignored for platform `x` in v0.5.0. Attach images only for Mastodon and LinkedIn
 
@@ -375,9 +375,9 @@ media_upload_token_expiry     duration
 
 ---
 
-## forge-agent (separate module)
+## smeldr.dev/agent (separate module)
 
-`smeldr.dev/core-agent` v0.3.0 — minimal Go agent runtime with native MCP support.
+`smeldr.dev/agent` v0.4.2 — minimal Go agent runtime with native MCP support.
 MIT license. Three dependencies: `anthropic-sdk-go` + `modelcontextprotocol/go-sdk` + `gocron/v2`.
 
 ```go
@@ -387,14 +387,14 @@ cfg := agent.Config{
     SystemPrompt:  "You are a helpful assistant.",
     Model:         "claude-sonnet-4-6", // default
     MaxTurns:      10,                  // default
-    StreamableHTTP: false,              // false = SSE (forge-mcp), true = Streamable HTTP (GitHub MCP)
+    StreamableHTTP: false,              // false = SSE (smeldr.dev/mcp), true = Streamable HTTP (GitHub MCP)
 }
 a := agent.New(cfg)
 result, err := a.Run(ctx, "List all published posts and summarize the site.")
 ```
 
 **Transport selection:**
-- `StreamableHTTP: false` — SSE transport (`/mcp` + `/mcp/message`). Use for forge-mcp.
+- `StreamableHTTP: false` — SSE transport (`/mcp` + `/mcp/message`). Use for smeldr.dev/mcp.
 - `StreamableHTTP: true` — Streamable HTTP (MCP 2025-11-25 spec). Use for GitHub MCP
   (`https://api.githubcopilot.com/mcp/`) and other modern MCP servers.
 
@@ -417,13 +417,13 @@ Add `import _ "time/tzdata"` to binaries on Alpine/scratch containers.
 - `cmd/agent-github` — `GITHUB_MCP_URL` + `GITHUB_TOKEN` + `GITHUB_REPO` (Streamable HTTP)
 - `example/electricity-advisor/` — `ANTHROPIC_API_KEY` + `DISCORD_WEBHOOK_URL` (UC2: electricity prices → Discord)
 
-### forge-agent/flow — Forge integration (v0.3.0)
+### smeldr.dev/agent/flow — Forge integration (v0.4.2)
 
-`smeldr.dev/core-agent/flow` — AGPL sub-package. Wires `AgentJob` as a Forge
+`smeldr.dev/agent/flow` — AGPL sub-package. Wires `AgentJob` as a Forge
 content type. Requires `smeldr.dev/core` as a dependency.
 
 ```go
-import forgeagent "smeldr.dev/core-agent/flow"
+import forgeagent "smeldr.dev/agent/flow"
 
 forgeagent.CreateTable(db) // run once at startup
 agentMod := forgeagent.New(db, forgeagent.Config{

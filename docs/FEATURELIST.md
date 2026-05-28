@@ -2,20 +2,20 @@
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.25.0 (A103) + forge-mcp v1.11.0 + forge-oauth v0.1.0 + forge-social v0.6.0 + forge-agent v0.3.7 + forge-cli v0.9.0.
+Last updated: v1.25.1 (A105) + smeldr.dev/mcp v1.11.3 + smeldr.dev/oauth v0.1.2 + smeldr.dev/social v0.6.1 + smeldr.dev/agent v0.4.2 + smeldr.dev/cli v0.9.1.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `forge` (core) | v1.25.0 | Stable |
-| `forge-mcp` | v1.11.0 | Stable |
-| `forge-oauth` | v0.1.0 | Beta |
-| `forge-pgx` | — | Beta |
-| `forge-media` | v1.2.0 | Beta |
-| `forge-cli` | v0.9.0 | Beta |
-| `forge-social` | v0.6.0 | Experimental |
-| `forge-agent` | v0.3.7 | Experimental |
+| `smeldr.dev/core` | v1.25.1 | Stable |
+| `smeldr.dev/mcp` | v1.11.3 | Stable |
+| `smeldr.dev/oauth` | v0.1.2 | Beta |
+| `smeldr.dev/pgx` | — | Beta |
+| `smeldr.dev/media` | v1.2.1 | Beta |
+| `smeldr.dev/cli` | v0.9.1 | Beta |
+| `smeldr.dev/social` | v0.6.1 | Experimental |
+| `smeldr.dev/agent` | v0.4.2 | Experimental |
 
 **Stable** — API will not break without a deprecation notice.  
 **Beta** — Functional and tested; API may change in minor releases.  
@@ -72,7 +72,7 @@ Labels are reviewed at every module minor or major version bump.
 - NavTree — first-class navigation abstraction (`NavModeDB` / `NavModeCode`)
 - 4 MCP nav tools — `list_nav_items`, `create_nav_item`, `update_nav_item`, `delete_nav_item`
 
-## MCP tools (forge-mcp) — Stable
+## MCP tools (smeldr.dev/mcp) — Stable
 
 Per content type — automatically derived, no manual definition:
 
@@ -93,11 +93,11 @@ Admin tools (require Admin role):
 - `list_webhook_deliveries`, `retry_webhook` — delivery introspection and retry
 - `create_token`, `list_tokens`, `revoke_token` — token management
 
-OAuth 2.1 for remote MCP servers (forge-oauth v0.1.0):
+OAuth 2.1 for remote MCP servers (smeldr.dev/oauth v0.1.2):
 
 - `forgemcp.WithOAuth(*forgeoauth.Server)` — enables OAuth 2.1 on the MCP server; all HTTP endpoints require Bearer
 - `GET /.well-known/oauth-protected-resource` — RFC 9728 protected resource metadata
-- `GET /.well-known/oauth-authorization-server` — RFC 8414 authorization server metadata (served by forge-oauth)
+- `GET /.well-known/oauth-authorization-server` — RFC 8414 authorization server metadata (served by smeldr.dev/oauth)
 - PKCE S256 mandatory, CIMD stateless client validation, `offline_access` scope for refresh tokens
 - Scope mapping: `mcp` → Author role, `mcp:admin` → Admin role
 - SQLite-backed token store (`forgeoauth.NewSQLiteStore`)
@@ -133,7 +133,7 @@ MCP resource subscriptions (Beta):
 - Graceful shutdown — drains in-flight requests on SIGINT/SIGTERM
 - Signal bus — `app.OnSignal(Signal, handler)` registers subscribers for `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete`; `SignalEvent` carries Type, Slug, Title, URL, Timestamp, PreviousState, ActorRole, ActorID; handlers run synchronously in the publish goroutine and must enqueue-and-return
 
-## forge-media — Beta
+## smeldr.dev/media — Beta
 
 - Upload, serve, list, and delete files via HTTP and MCP
 - Alt text enforced on image uploads (WCAG 1.1.1)
@@ -143,7 +143,7 @@ MCP resource subscriptions (Beta):
 - Upload token — `Authorization: UploadToken <token>` accepted on `POST /media`; image-only MIME whitelist for token uploads; Bearer-token uploads unaffected
 - Hex filename prefix — stored as `<32-hex>-<sanitized>` preventing collisions without exposing upload timing
 
-## forge-cli — Beta
+## smeldr.dev/cli — Beta
 
 - `forge-cli init` — bootstrap a new instance from the terminal
 - Content CRUD — create, update, publish, unpublish, archive, delete, list, get
@@ -154,7 +154,7 @@ MCP resource subscriptions (Beta):
 - Social commands (v0.7.0): `social credential create/list`, `social post create/list/get/publish/archive/delete`, `social post queue`, `social schedule create/show/pause/resume/delete`
 - Social commands (v0.8.0): `social credential get/delete`, `social platform configure` (DB-driven OAuth app config for mastodon/linkedin/x); `social credential create` now accepts `--platform x`
 
-## forge-social — Experimental
+## smeldr.dev/social — Experimental
 
 - `smeldr.dev/social` — social post scheduling and AI agent routing
 - Two scheduling models: explicit `scheduled_at` (Model 1) and slot-queue via `PublicationSchedule` (Model 2, v0.4.0+)
@@ -165,12 +165,12 @@ MCP resource subscriptions (Beta):
 - `PublicationSchedule` — recurring weekly slots (weekday, HH:MM, IANA timezone) per credential; FIFO queue; catch-up policy on restart
 - Layer 1 agent routing — `social.AddRoutes(app, forgesocial.OnPublish(...))` fires outbound HTTP on lifecycle signals; HMAC-signed payload; exponential backoff retry
 - 15 MCP tools across PostModule, CredentialModule, ConfigModule, ScheduleModule
-- Full CLI parity in forge-cli v0.8.0
+- Full CLI parity in smeldr.dev/cli v0.8.0
 - **X media upload** (v0.6.0): images in `media_url` are fetched and uploaded to `api.x.com/2/media/upload` before tweeting; `media_ids` attached to tweet payload; requires `media.write` OAuth scope — existing X credentials must be re-authorised
 
-## forge-agent — Experimental
+## smeldr.dev/agent — Experimental
 
-- `smeldr.dev/core-agent` — MIT-licensed agent runtime; `smeldr.dev/core-agent/flow` — AGPL-3.0 Forge integration adapter
+- `smeldr.dev/agent` — MIT-licensed agent runtime; `smeldr.dev/agent/flow` — AGPL-3.0 Forge integration adapter
 - `AgentJob` — Forge content type (embeds `forge.Node`) with full lifecycle management: Draft → Published → Archived; auto-generated MCP tools (`create_agent_job`, `get_agent_job`, `list_agent_jobs`, `update_agent_job`, `publish_agent_job`, `archive_agent_job`, `delete_agent_job`)
 - Signal-triggered jobs — any `forge.Signal` value as `Trigger`; `ContentTypeFilter` restricts to a named content type; full `forge.SignalEvent` serialised as JSON in the agent task string so the agent knows what content item fired it
 - Cron-triggered jobs — 5-field cron expression as `Trigger`; scheduler rebuilds atomically on AgentJob publish/archive
@@ -185,7 +185,7 @@ MCP resource subscriptions (Beta):
 - `NewAuditStore(db DB)` — default SQL implementation; timestamps stored as RFC3339 for SQLite compatibility
 - `CreateAuditTable(db DB)` — DDL helper; creates `forge_audit_log` table
 - `GET /_audit` — Editor-or-higher; returns JSON array; supports `from`, `to` (RFC3339), `type`, and `actor` query filters
-- `forge-cli audit list [--from RFC3339] [--to RFC3339] [--type TYPE] [--actor ACTOR]` — table output, newest first
+- `forge-cli audit list [--from RFC3339] [--to RFC3339] [--type TYPE] [--actor ACTOR]` — table output, newest first (smeldr.dev/cli v0.9.1)
 
 ## Outbound webhooks — Stable
 
@@ -199,7 +199,7 @@ MCP resource subscriptions (Beta):
 - MCP tools for Admin agents: `create_webhook`, `list_webhooks`, `delete_webhook`,
   `list_webhook_deliveries`, `retry_webhook`
 - `AfterPublish`, `AfterUpdate`, `AfterDelete`, `AfterSchedule` signals trigger jobs automatically
-- `forge-cli webhook` subcommands for all operations
+- `forge-cli webhook` subcommands for all operations (smeldr.dev/cli)
 
 ## Developer and AI-agent experience — Stable
 

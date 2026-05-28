@@ -259,9 +259,9 @@ Rules:
   Author and Editor roles see items at any status.
 - `GET /{prefix}/{slug}` is not registered. Requests to it return 404.
 - Preview tokens work the same as the standard show handler.
-  `forge-mcp` generates the preview URL as `/{prefix}?preview={token}` — no slug
-  in the path (requires forge-mcp ≥ v1.10.2).
-- `MCPMeta().SingleInstance` returns `true`. The `forge-mcp` server suppresses
+  `smeldr.dev/mcp` generates the preview URL as `/{prefix}?preview={token}` — no slug
+  in the path (requires smeldr.dev/mcp ≥ v1.10.2).
+- `MCPMeta().SingleInstance` returns `true`. The `smeldr.dev/mcp` server suppresses
   the `list_{type}s` admin tool for SingleInstance modules.
 
 #### Pattern: SingleInstance with custom public handler
@@ -461,7 +461,7 @@ Copy this token immediately. Use it with `forge-cli init` or with the
 
 **Critical:** a token produced by `forge.SignToken` in `main()` is rejected
 when `TokenStore` is configured — `VerifyBearerToken` only accepts tokens
-that exist in the store. Use `TokenStore.Create` or `forge-cli` instead.
+that exist in the store. Use `TokenStore.Create` or `smeldr.dev/cli` instead.
 
 `forge.VerifyTokenString(token string, secret []byte, store *TokenStore) (User, bool)` —
 verifies a raw bearer token string directly, without an `*http.Request`. Identical
@@ -1608,17 +1608,17 @@ GET /.well-known/redirects.json   (requires Editor+)
 
 ---
 
-## MCP integration (forge-mcp)
+## MCP integration (smeldr.dev/mcp)
 
 ✅ **Available**
 
-`forge-mcp` is a separate module that wraps a `forge.App` and exposes its
+`smeldr.dev/mcp` is a separate module that wraps a `forge.App` and exposes its
 content modules to AI assistants via the [Model Context Protocol](https://modelcontextprotocol.io).
 Schema derivation, lifecycle enforcement, and role checks are all automatic —
 no configuration beyond `forge.MCP(...)` on your existing modules.
 
 ```go
-import forgemcp "smeldr.dev/core-mcp"
+import forgemcp "smeldr.dev/mcp"
 
 func main() {
     app := forge.New(forge.MustConfig(forge.Config{
@@ -1633,7 +1633,7 @@ func main() {
 ```
 
 For Claude Desktop, Cursor, and SSE remote transport configuration see
-[forge-mcp README](https://github.com/forge-cms/forge-mcp).
+the [smeldr.dev/mcp README](https://github.com/smeldr/mcp).
 
 ---
 
@@ -1764,22 +1764,22 @@ Scheduled publishing
 
 ---
 
-## forge-media
+## smeldr.dev/media
 
 ✅ **Available**
 
-Optional submodule for file upload, storage, serving, and AI-agent access via MCP.
+Optional module for file upload, storage, serving, and AI-agent access via MCP.
 
 ### Install
 
 ```
-go get smeldr.dev/core-media
+go get smeldr.dev/media
 ```
 
 ### Wiring
 
 ```go
-import forgemedia "smeldr.dev/core-media"
+import forgemedia "smeldr.dev/media"
 
 store := forgemedia.NewLocalMediaStore(app)
 mediaSrv := forgemedia.Register(app, store)
@@ -1827,15 +1827,15 @@ Set them in your `forge.config` file or override in Go code via `forge.Config`.
 | `media_path` | `./media` | Directory where uploaded files are stored on disk. |
 | `media_max_size` | `5242880` (5 MB) | Maximum upload size in bytes. |
 
-Full reference: [forge-media README](https://github.com/forge-cms/forge-media)
+Full reference: [smeldr.dev/media README](https://github.com/smeldr/media)
 
 ---
 
-## forge-cli
+## smeldr.dev/cli
 
 ✅ **Available**
 
-`forge-cli` is a standalone operator tool for managing a running Forge instance
+`smeldr.dev/cli` is a standalone operator tool for managing a running Forge instance
 from the command line. No MCP client required. Install it with:
 
 ```bash
@@ -1844,7 +1844,7 @@ go install smeldr.dev/cli@latest
 
 ### Configuration
 
-`forge-cli` reads connection details from a `.forge-cli.env` file in the
+`smeldr.dev/cli` reads connection details from a `.forge-cli.env` file in the
 current directory:
 
 ```
@@ -1876,7 +1876,7 @@ forge-cli init --url https://mysite.com --bootstrap-token <token-from-startup-lo
 | `token create` | Issue a new named token |
 | `token list` | List all tokens |
 | `token revoke <id>` | Revoke a token by ID |
-| `social <resource> <verb>` | Manage forge-social posts, credentials, schedules, and platform config. Requires forge-social v0.5.0+. See forge-social docs. |
+| `social <resource> <verb>` | Manage smeldr.dev/social posts, credentials, schedules, and platform config. Requires smeldr.dev/social v0.5.0+. See smeldr.dev/social docs. |
 
 Content files use YAML-subset frontmatter (metadata before `---`, body after):
 
@@ -1888,7 +1888,7 @@ author: Alice
 Body content goes here.
 ```
 
-Full reference: [forge-cli README](https://github.com/forge-cms/forge-cli)
+Full reference: [smeldr.dev/cli README](https://github.com/smeldr/cli)
 
 ---
 
@@ -1976,14 +1976,14 @@ environment variable or directly in Go code.
 | `org_type` | string | — | JSON-LD organisation type |
 | `twitter_site` | string | — | Twitter/X site handle, e.g. `@mysite` |
 | `og_image` | string | — | Site-level OG image URL. **Overrides** `OGDefaults.Image` set in Go code — file value wins. Go-code value is the fallback when key is absent. Root-relative paths (e.g. `/media/og.png`) are resolved against `base_url` at startup. |
-| `media_path` | string | `./media` | Upload directory for forge-media |
-| `media_max_size` | integer | `5242880` | Max upload size in bytes (forge-media) |
+| `media_path` | string | `./media` | Upload directory for smeldr.dev/media |
+| `media_max_size` | integer | `5242880` | Max upload size in bytes (smeldr.dev/media) |
 | `dev` | bool | `false` | Enable development mode (serve static files from disk) |
 
 **Operator flow — updating the OG image without a rebuild:**
 
 ```
-# 1. Upload the new image via forge-media or place it in the media directory.
+# 1. Upload the new image via smeldr.dev/media or place it in the media directory.
 # 2. Add or update og_image in forge.config:
 og_image = /media/site-og.png
 
@@ -2013,7 +2013,7 @@ GET /_health
 {"status":"ok","forge":"x.y.z"}
 ```
 
-When companion modules such as `forge-mcp` are linked into the binary, their
+When companion modules such as `smeldr.dev/mcp` are linked into the binary, their
 versions appear alongside:
 
 ```json
@@ -2254,7 +2254,7 @@ Available when `App.Webhooks(store)` is configured:
 | `list_webhook_deliveries` | Delivery log for a job ID |
 | `retry_webhook` | Re-queue a dead job |
 
-### forge-cli webhook commands
+### smeldr.dev/cli webhook commands
 
 ```
 forge webhook create --url https://example.com/hook --events post.published,post.updated
@@ -2371,7 +2371,7 @@ Query parameters:
 | `ActorRole` | `actor_role` | Role at time of action |
 | `PreviousState` | `previous_state` | Status before the transition |
 
-### forge-cli
+### smeldr.dev/cli
 
 ```
 forge-cli audit list [--from RFC3339] [--to RFC3339] [--type TYPE] [--actor ACTOR]
@@ -2394,8 +2394,8 @@ Prints a tab-aligned table to stdout. Requires `FORGE_TOKEN` with Editor role.
 
 ## MCP resource subscriptions
 
-Available in `forge-mcp` when `App.AddSignalListener` is wired (set up
-automatically by `New(app)` in `forge-mcp`).
+Available in `smeldr.dev/mcp` when `App.AddSignalListener` is wired (set up
+automatically by `New(app)` in `smeldr.dev/mcp`).
 
 ### Subscribe to a resource
 
@@ -2482,7 +2482,7 @@ When `?preview=<token>` is present on a `GET /{prefix}/{slug}` request:
 6. If all checks pass: the item is served regardless of Published status.
 7. If any check fails: silent fall-through to the normal visibility check (404 for guests).
 
-### forge-mcp: `create_preview_url`
+### smeldr.dev/mcp: `create_preview_url`
 
 Admin-only MCP tool that generates a preview URL.
 
@@ -2492,7 +2492,7 @@ Parameters:
 
 Returns the full preview URL as a string.
 
-### forge-cli: `forge preview`
+### smeldr.dev/cli: `forge preview`
 
 ```
 forge-cli preview <prefix> <slug>
@@ -2543,7 +2543,7 @@ func (a *App) ValidateUploadToken(token string) error
 ```
 
 Validates an upload token. Returns `ErrUnauth` on any failure (expired, tampered,
-wrong secret). Used by forge-media's upload handler.
+wrong secret). Used by smeldr.dev/media's upload handler.
 
 ### Upload flow
 
@@ -2559,7 +2559,7 @@ curl -X POST https://example.com/media \
 # → 201 { "id": "...", "url": "https://example.com/media/abc123-hero.jpg", ... }
 ```
 
-### forge-mcp: `create_upload_token`
+### smeldr.dev/mcp: `create_upload_token`
 
 Author+ MCP tool that generates an upload token.
 
@@ -2574,7 +2574,7 @@ Returns:
 }
 ```
 
-### forge-cli: `forge media`
+### smeldr.dev/cli: `forge media`
 
 ```
 forge-cli media upload <file> [--description <text>]

@@ -42,11 +42,11 @@ Forge enforces the following security properties automatically:
   to private/loopback addresses. Validation runs at registration and at delivery.
 - **Webhook HMAC signing** — all outbound webhook payloads are signed with
   HMAC-SHA256. The signature is transmitted in the `X-Forge-Signature` header.
-- **AES-256-GCM credential encryption** — forge-social stores OAuth app
+- **AES-256-GCM credential encryption** — smeldr.dev/social stores OAuth app
   credentials encrypted at rest using AES-256-GCM.
-- **Path traversal prevention** — forge-media uses `os.Root` (Go 1.24+) to
+- **Path traversal prevention** — smeldr.dev/media uses `os.Root` (Go 1.24+) to
   confine all file operations to the configured upload directory.
-- **MIME whitelist** — forge-media enforces a strict MIME type allowlist for
+- **MIME whitelist** — smeldr.dev/media enforces a strict MIME type allowlist for
   file uploads; magic-byte detection prevents type confusion.
 
 ### What the developer is responsible for
@@ -107,13 +107,13 @@ if !hmac.Equal([]byte(received), []byte(expected)) {
 Signing secrets are generated at webhook registration and returned once.
 They are stored AES-256-GCM encrypted in the webhook store.
 
-## OAuth credential storage (forge-social)
+## OAuth credential storage (smeldr.dev/social)
 
-forge-social stores OAuth 2.0 application credentials (client ID, client
+smeldr.dev/social stores OAuth 2.0 application credentials (client ID, client
 secret, access tokens) AES-256-GCM encrypted in the database. The encryption
 key is derived from `FORGE_SECRET`. Credentials are never stored in plaintext.
 
-## Media upload safety (forge-media)
+## Media upload safety (smeldr.dev/media)
 
 - **MIME whitelist** — only `image/jpeg`, `image/png`, `image/webp`,
   `image/gif`, and `image/avif` are accepted. MIME type is verified from
@@ -138,7 +138,7 @@ Before deploying Forge to production:
 - [ ] **Secret rotation** — rotate `FORGE_SECRET` by issuing new tokens
       before invalidating the old secret. Rotate OAuth credentials on personnel
       changes.
-- [ ] **`os.Root` available** — if using forge-media, ensure you are running
+- [ ] **`os.Root` available** — if using smeldr.dev/media, ensure you are running
       Go 1.24 or later (required for path traversal protection).
 - [ ] **Security headers** — call `forge.SecurityHeaders()` in your middleware
       chain to enable CSP, HSTS, X-Frame-Options, and Referrer-Policy:

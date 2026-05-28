@@ -380,7 +380,7 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       assistants. It must stay in sync with the developer-facing API.
       Specifically: if this commit touches module wiring API (`forge.MCP`, `forge.Repo`,
       `forge.At`, `forge.NewModule`), MCP server wiring (`forgemcp.New`, `mcpSrv.Handler()`,
-      `forgemcp.WithModule`), forge-media registration (`forgemedia.Register`,
+      `forgemcp.WithModule`), smeldr.dev/media registration (`forgemedia.Register`,
       `forgemedia.NewLocalMediaStore`), token API (`forge.NewTokenStore`, `forge.SignToken`),
       `forge.Config` fields, or `forge_format`/`forge_description` tag values: verify all
       code examples in `AGENTS.md` are still accurate before committing.
@@ -547,13 +547,13 @@ Write the plan for any docs task to:
 
 ## CLI and MCP tool parity
 
-Every admin operation available via MCP tools must also be available via forge-cli.
+Every admin operation available via MCP tools must also be available via smeldr.dev/cli.
 CLI is the human fallback when agents are unavailable.
 
 This rule applies to every milestone that ships new MCP tools: the corresponding
-forge-cli commands ship in the same release — not as a follow-up.
+smeldr.dev/cli commands ship in the same release — not as a follow-up.
 
-**Current known gap:** forge-cli v0.3.0 has no nav commands despite four MCP nav
+**Current known gap:** smeldr.dev/cli v0.3.0 has no nav commands despite four MCP nav
 tools existing (`list_nav_items`, `create_nav_item`, `update_nav_item`,
 `delete_nav_item`). This gap is tracked and will be closed in the nav CLI milestone.
 
@@ -574,7 +574,7 @@ When the architect approves push via a separate NEXT.md, squash the branch to ma
 The squash commit timestamp = push timestamp. This is the only commit that
 appears on GitHub. "Commit approved" means: squash to main now. Push follows
 immediately after — do not wait for a separate push instruction.
-This applies to all three repos (forge core, forge-mcp, forge-cli) when a
+This applies to all three repos (forge core, smeldr.dev/mcp, smeldr.dev/cli) when a
 milestone touches multiple repos. Each repo gets its own squash commit.
 
 ---
@@ -592,23 +592,23 @@ date, a tagger, and a message, and appear as formal releases on GitHub.
 - Amendments alone do not get a tag unless they ship with a milestone
 
 **Sub-module tagging rule (non-negotiable):**
-Any commit that modifies files under `forge-mcp/` (or any other sub-module
+Any commit that modifies files under `smeldr.dev/mcp/` (or any other sub-module
 directory) in a way that affects behaviour **must** also produce a sub-module tag.
-The sub-module tag uses the prefix convention: `forge-mcp/vX.Y.Z`.
-- Update `forge-mcp/CHANGELOG.md` with a `[X.Y.Z]` section before tagging.
+The sub-module tag uses the prefix convention: `smeldr.dev/mcp/vX.Y.Z`.
+- Update `smeldr.dev/mcp/CHANGELOG.md` with a `[X.Y.Z]` section before tagging.
 - The root module version and the sub-module version are bumped **independently**
-  — a patch to `forge-mcp/mcp.go` does not require a root version bump if no
+  — a patch to `smeldr.dev/mcp/mcp.go` does not require a root version bump if no
   root-package files changed behaviourally, and vice versa.
 - At the end of every commit, explicitly state which module tags are required:
-  root (`vX.Y.Z`) and/or sub-module (`forge-mcp/vX.Y.Z`).
+  root (`vX.Y.Z`) and/or sub-module (`smeldr.dev/mcp/vX.Y.Z`).
 
 **CHANGELOG ownership — non-negotiable:**
 Each module owns its own CHANGELOG. Never add submodule release notes as subsections
 in the root `CHANGELOG.md`. The separation is strict:
 - `CHANGELOG.md` — forge core only
-- `forge-mcp/CHANGELOG.md` — forge-mcp only
-- `forge-media/CHANGELOG.md` — forge-media only
-A brief reference line in the root is acceptable: `Submodules: forge-media v1.0.0 released.`
+- `smeldr.dev/mcp/CHANGELOG.md` — smeldr.dev/mcp only
+- `smeldr.dev/media/CHANGELOG.md` — smeldr.dev/media only
+A brief reference line in the root is acceptable: `Submodules: smeldr.dev/media v1.0.0 released.`
 The detail belongs in the submodule's own file.
 
 **Pre-tag checklist — all must be green before tagging:**
@@ -616,7 +616,7 @@ The detail belongs in the submodule's own file.
 2. `go test ./...` is green (root); `go test ./...` inside each changed submodule is green
 3. `CHANGELOG.md` (root) and each changed submodule's `CHANGELOG.md` has an entry for the
    version being tagged
-4. For standalone modules that depend on forge core (forge-mcp, forge-media, forge-cli),
+4. For standalone modules that depend on forge core (smeldr.dev/mcp, smeldr.dev/media, smeldr.dev/cli),
    run this full checklist before tagging — every time, without exception:
    - `head -1 go.mod` → must be `module smeldr.dev/<module-name>` (not any github.com path)
    - `grep smeldr.dev/core go.mod` → correct forge version in require block
@@ -632,21 +632,21 @@ The detail belongs in the submodule's own file.
 git tag -a vX.Y.Z -m "Forge vX.Y.Z — {one line summary}"
 git push origin main
 git push origin vX.Y.Z
-# if forge-mcp also changed:
-git tag -a forge-mcp/vX.Y.Z -m "forge-mcp vX.Y.Z — {one line summary}"
-git push origin forge-mcp/vX.Y.Z
+# if smeldr.dev/mcp also changed:
+git tag -a smeldr.dev/mcp/vX.Y.Z -m "smeldr.dev/mcp vX.Y.Z — {one line summary}"
+git push origin smeldr.dev/mcp/vX.Y.Z
 ```
 
 Push commits and each tag **separately** — never in the same command.
 
 **GitHub Release titles:**
 After pushing, create a GitHub Release for each tag from
-`github.com/forge-cms/forge/releases`. Title each release as follows:
+`github.com/smeldr/core/releases`. Title each release as follows:
 
 | Tag | Release title format |
 |-----|----------------------|
 | `vX.Y.Z` | `Forge vX.Y.Z — {release name}` |
-| `forge-mcp/vX.Y.Z` | `forge-mcp vX.Y.Z — {release name}` |
+| `smeldr.dev/mcp/vX.Y.Z` | `smeldr.dev/mcp vX.Y.Z — {release name}` |
 
 The release name is a short (2-4 word) phrase that captures the primary change —
 identical to the one-line summary in the tag message. Always propose the GitHub
@@ -658,7 +658,7 @@ Release title(s) alongside the commit message. Paste the relevant
 - Tag before `CHANGELOG.md` is updated for the version
 - Use a lightweight tag (`git tag vX.Y.Z` without `-a`) for a release
 - Push the tag in the same command as commits
-- Ship a behavioural change to `forge-mcp/` without a `forge-mcp/vX.Y.Z` tag
+- Ship a behavioural change to `smeldr.dev/mcp/` without a `smeldr.dev/mcp/vX.Y.Z` tag
 
 ---
 
