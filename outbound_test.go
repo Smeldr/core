@@ -42,7 +42,7 @@ func outboundTestDB(t *testing.T) (*workerPool, *WebhookStore) {
 	db := newSQLiteDB(t)
 	ctx := context.Background()
 	_, err := db.ExecContext(ctx, `
-		CREATE TABLE forge_outbound_jobs (
+		CREATE TABLE smeldr_outbound_jobs (
 			id TEXT PRIMARY KEY, endpoint_id TEXT NOT NULL, target_url TEXT NOT NULL,
 			secret_enc TEXT NOT NULL, payload BLOB NOT NULL, event TEXT NOT NULL,
 			attempts INTEGER NOT NULL DEFAULT 0, next_retry_at DATETIME NOT NULL,
@@ -50,16 +50,16 @@ func outboundTestDB(t *testing.T) (*workerPool, *WebhookStore) {
 			status TEXT NOT NULL DEFAULT 'pending'
 		)`)
 	if err != nil {
-		t.Fatalf("create forge_outbound_jobs: %v", err)
+		t.Fatalf("create smeldr_outbound_jobs: %v", err)
 	}
 	_, err = db.ExecContext(ctx, `
-		CREATE TABLE forge_delivery_logs (
+		CREATE TABLE smeldr_delivery_logs (
 			id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempted_at DATETIME NOT NULL,
 			status_code INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
 			error TEXT NOT NULL DEFAULT ''
 		)`)
 	if err != nil {
-		t.Fatalf("create forge_delivery_logs: %v", err)
+		t.Fatalf("create smeldr_delivery_logs: %v", err)
 	}
 	store := NewWebhookStore(db, []byte("app-secret"))
 	pool := newWorkerPool(db, store, realClock{}, 2)
@@ -165,7 +165,7 @@ func TestWorkerPool_EnqueueAndDeliver(t *testing.T) {
 	// After success, job should be marked delivered.
 	// Close rows explicitly before next query to avoid holding the single connection.
 	func() {
-		rows, _ := pool.db.QueryContext(ctx, `SELECT status FROM forge_outbound_jobs WHERE id = $1`, job.ID)
+		rows, _ := pool.db.QueryContext(ctx, `SELECT status FROM smeldr_outbound_jobs WHERE id = $1`, job.ID)
 		defer rows.Close()
 		var status string
 		rows.Next()
@@ -223,7 +223,7 @@ func TestWorkerPool_RetryOnFailure(t *testing.T) {
 	_ = pool.processJob(ctx, job, rng)
 
 	// Job should still be pending (not dead) after first failure.
-	rows, _ := pool.db.QueryContext(ctx, `SELECT status, attempts FROM forge_outbound_jobs WHERE id = $1`, job.ID)
+	rows, _ := pool.db.QueryContext(ctx, `SELECT status, attempts FROM smeldr_outbound_jobs WHERE id = $1`, job.ID)
 	defer rows.Close()
 	var status string
 	var attempts int
@@ -268,7 +268,7 @@ func TestWorkerPool_DeadLetter(t *testing.T) {
 	}
 	_ = pool.processJob(ctx, job, rng)
 
-	rows, _ := pool.db.QueryContext(ctx, `SELECT status FROM forge_outbound_jobs WHERE id = $1`, job.ID)
+	rows, _ := pool.db.QueryContext(ctx, `SELECT status FROM smeldr_outbound_jobs WHERE id = $1`, job.ID)
 	defer rows.Close()
 	var status string
 	rows.Next()
@@ -317,14 +317,14 @@ func TestWorkerPool_RetryDead(t *testing.T) {
 	now := time.Now()
 	jobID := NewID()
 	_, _ = pool.db.ExecContext(ctx,
-		`INSERT INTO forge_outbound_jobs VALUES ($1,'ep','https://x.com',$2,'{}','ev',7,$3,$3,$4,'dead')`,
+		`INSERT INTO smeldr_outbound_jobs VALUES ($1,'ep','https://x.com',$2,'{}','ev',7,$3,$3,$4,'dead')`,
 		jobID, enc, now, now.Add(time.Hour),
 	)
 
 	if err := pool.RetryDead(ctx, jobID); err != nil {
 		t.Fatalf("RetryDead: %v", err)
 	}
-	rows, _ := pool.db.QueryContext(ctx, `SELECT status, attempts FROM forge_outbound_jobs WHERE id = $1`, jobID)
+	rows, _ := pool.db.QueryContext(ctx, `SELECT status, attempts FROM smeldr_outbound_jobs WHERE id = $1`, jobID)
 	defer rows.Close()
 	var status string
 	var attempts int

@@ -48,7 +48,7 @@ type OutboundDelivery interface {
 //
 // Database DDL (must be executed before [App.Webhooks] is called):
 //
-//	CREATE TABLE forge_outbound_jobs (
+//	CREATE TABLE smeldr_outbound_jobs (
 //	    id            TEXT    PRIMARY KEY,
 //	    endpoint_id   TEXT    NOT NULL,
 //	    target_url    TEXT    NOT NULL,
@@ -79,7 +79,7 @@ type OutboundJob struct {
 //
 // Database DDL (must be executed before [App.Webhooks] is called):
 //
-//	CREATE TABLE forge_delivery_logs (
+//	CREATE TABLE smeldr_delivery_logs (
 //	    id           TEXT    PRIMARY KEY,
 //	    job_id       TEXT    NOT NULL,
 //	    attempted_at TIMESTAMPTZ NOT NULL,
@@ -107,7 +107,7 @@ const (
 	circuitOpenDuration  = 5 * time.Minute
 )
 
-// workerPool polls forge_outbound_jobs for due deliveries, signs payloads with
+// workerPool polls smeldr_outbound_jobs for due deliveries, signs payloads with
 // HMAC-SHA256, and POSTs them to webhook endpoints. It enforces per-endpoint
 // circuit breakers and writes delivery logs.
 type workerPool struct {
@@ -163,11 +163,11 @@ func (p *workerPool) Stop() {
 	p.wg.Wait()
 }
 
-// Enqueue persists job into forge_outbound_jobs so the worker pool will pick
+// Enqueue persists job into smeldr_outbound_jobs so the worker pool will pick
 // it up. Callers should set job.ID (via NewID) before calling.
 func (p *workerPool) Enqueue(ctx context.Context, job OutboundJob) error {
 	_, err := p.db.ExecContext(ctx, `
-		INSERT INTO forge_outbound_jobs
+		INSERT INTO smeldr_outbound_jobs
 			(id, endpoint_id, target_url, secret_enc, payload, event, attempts, next_retry_at, created_at, expires_at, status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
 		job.ID, job.EndpointID, job.TargetURL, job.SecretEnc,
@@ -216,7 +216,7 @@ func (p *workerPool) fetchDueJobs(ctx context.Context) ([]OutboundJob, error) {
 	now := p.clock.Now()
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT id, endpoint_id, target_url, secret_enc, payload, event, attempts, next_retry_at, created_at, expires_at, status
-		FROM forge_outbound_jobs
+		FROM smeldr_outbound_jobs
 		WHERE status = 'pending'
 		  AND next_retry_at <= $1
 		  AND expires_at > $1
@@ -309,7 +309,7 @@ func (e *webhookHTTPError) Error() string {
 // logDelivery inserts a DeliveryLog row.
 func (p *workerPool) logDelivery(ctx context.Context, dl DeliveryLog) error {
 	_, err := p.db.ExecContext(ctx, `
-		INSERT INTO forge_delivery_logs (id, job_id, attempted_at, status_code, duration_ms, error)
+		INSERT INTO smeldr_delivery_logs (id, job_id, attempted_at, status_code, duration_ms, error)
 		VALUES ($1,$2,$3,$4,$5,$6)`,
 		dl.ID, dl.JobID, dl.AttemptedAt, dl.StatusCode, dl.DurationMS, dl.Error,
 	)
@@ -324,7 +324,7 @@ func (p *workerPool) updateJobAfterAttempt(ctx context.Context, job OutboundJob,
 	}
 	nextRetry := p.clock.Now().Add(delay)
 	_, err := p.db.ExecContext(ctx, `
-		UPDATE forge_outbound_jobs
+		UPDATE smeldr_outbound_jobs
 		SET attempts = $1, next_retry_at = $2, status = $3
 		WHERE id = $4`,
 		job.Attempts, nextRetry, status, job.ID,
@@ -335,7 +335,7 @@ func (p *workerPool) updateJobAfterAttempt(ctx context.Context, job OutboundJob,
 // moveToDeadLetter marks a job as dead so it is no longer retried.
 func (p *workerPool) moveToDeadLetter(ctx context.Context, jobID string) error {
 	_, err := p.db.ExecContext(ctx,
-		`UPDATE forge_outbound_jobs SET status = 'dead' WHERE id = $1`, jobID,
+		`UPDATE smeldr_outbound_jobs SET status = 'dead' WHERE id = $1`, jobID,
 	)
 	return err
 }
@@ -343,7 +343,7 @@ func (p *workerPool) moveToDeadLetter(ctx context.Context, jobID string) error {
 // RetryDead resets a dead job to pending so the worker pool will retry it.
 func (p *workerPool) RetryDead(ctx context.Context, jobID string) error {
 	_, err := p.db.ExecContext(ctx, `
-		UPDATE forge_outbound_jobs
+		UPDATE smeldr_outbound_jobs
 		SET status = 'pending', attempts = 0, next_retry_at = $1,
 		    expires_at = $2
 		WHERE id = $3`,
@@ -356,7 +356,7 @@ func (p *workerPool) RetryDead(ctx context.Context, jobID string) error {
 func (p *workerPool) ListDeliveryLogs(ctx context.Context, jobID string) ([]DeliveryLog, error) {
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT id, job_id, attempted_at, status_code, duration_ms, error
-		FROM forge_delivery_logs
+		FROM smeldr_delivery_logs
 		WHERE job_id = $1
 		ORDER BY attempted_at DESC`,
 		jobID,
@@ -380,7 +380,7 @@ func (p *workerPool) ListDeliveryLogs(ctx context.Context, jobID string) ([]Deli
 func (p *workerPool) ListJobsForEndpoint(ctx context.Context, endpointID string) ([]OutboundJob, error) {
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT id, endpoint_id, target_url, secret_enc, payload, event, attempts, next_retry_at, created_at, expires_at, status
-		FROM forge_outbound_jobs
+		FROM smeldr_outbound_jobs
 		WHERE endpoint_id = $1
 		ORDER BY created_at DESC`,
 		endpointID,
@@ -415,8 +415,8 @@ func (p *workerPool) DeliveryStats(ctx context.Context, endpointID string) (tota
 			COALESCE(SUM(CASE WHEN dl.status_code >= 200 AND dl.status_code < 300 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN dl.status_code = 0 OR dl.status_code >= 300 THEN 1 ELSE 0 END), 0),
 			MAX(dl.attempted_at)
-		FROM forge_outbound_jobs j
-		LEFT JOIN forge_delivery_logs dl ON dl.job_id = j.id
+		FROM smeldr_outbound_jobs j
+		LEFT JOIN smeldr_delivery_logs dl ON dl.job_id = j.id
 		WHERE j.endpoint_id = $1`,
 		endpointID,
 	)

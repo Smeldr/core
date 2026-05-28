@@ -580,7 +580,7 @@ type AuditStore interface {
     List(ctx context.Context, f AuditFilter) ([]AuditRecord, error)
 }
 // Use NewAuditStore(db DB) for the built-in SQL implementation.
-// Use CreateAuditTable(db DB) to create the forge_audit_log table.
+// Use CreateAuditTable(db DB) to create the smeldr_audit_log table.
 // Wire via App.Audit(store AuditStore) — subscribes to AfterPublish, AfterSchedule,
 // AfterArchive, AfterDelete. Mounts GET /_audit (Editor role required).
 

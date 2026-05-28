@@ -32,7 +32,7 @@ type Titled interface {
 //
 // Database DDL (must be executed before [App.Webhooks] is called):
 //
-//	CREATE TABLE forge_webhook_endpoints (
+//	CREATE TABLE smeldr_webhook_endpoints (
 //	    id         TEXT    PRIMARY KEY,
 //	    events     TEXT    NOT NULL,      -- JSON array of event names
 //	    target_url TEXT    NOT NULL,
@@ -166,7 +166,7 @@ func (s *WebhookStore) Create(ctx context.Context, targetURL string, events []st
 		CreatedAt: time.Now().UTC(),
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO forge_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
 		ep.ID, string(eventsJSON), ep.TargetURL, ep.secretEnc, ep.Active, ep.CreatedAt,
 	)
 	if err != nil {
@@ -180,7 +180,7 @@ func (s *WebhookStore) Create(ctx context.Context, targetURL string, events []st
 // write-only.
 func (s *WebhookStore) List(ctx context.Context) ([]WebhookEndpoint, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, events, target_url, active, created_at FROM forge_webhook_endpoints ORDER BY created_at DESC`,
+		`SELECT id, events, target_url, active, created_at FROM smeldr_webhook_endpoints ORDER BY created_at DESC`,
 	)
 	if err != nil {
 		return nil, err
@@ -202,7 +202,7 @@ func (s *WebhookStore) List(ctx context.Context) ([]WebhookEndpoint, error) {
 // Delete removes the endpoint with the given ID.
 func (s *WebhookStore) Delete(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM forge_webhook_endpoints WHERE id = $1`, id,
+		`DELETE FROM smeldr_webhook_endpoints WHERE id = $1`, id,
 	)
 	return err
 }
@@ -219,7 +219,7 @@ func (s *WebhookStore) Delete(ctx context.Context, id string) error {
 func (s *WebhookStore) EndpointsForEvent(ctx context.Context, event string) ([]WebhookEndpoint, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, events, target_url, secret_enc, active, created_at
-		 FROM forge_webhook_endpoints
+		 FROM smeldr_webhook_endpoints
 		 WHERE active AND events LIKE '%"' || $1 || '"%'`,
 		event,
 	)

@@ -2,13 +2,13 @@
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.27.0 (A108) + smeldr.dev/mcp v1.12.0 + smeldr.dev/oauth v0.1.3 + smeldr.dev/social v0.7.0 + smeldr.dev/agent v0.5.0 + smeldr.dev/cli v0.9.2 + smeldr.dev/media v1.3.0.
+Last updated: v1.28.0 (A109) + smeldr.dev/mcp v1.12.0 + smeldr.dev/oauth v0.1.3 + smeldr.dev/social v0.7.0 + smeldr.dev/agent v0.5.0 + smeldr.dev/cli v0.9.2 + smeldr.dev/media v1.3.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.27.0 | Stable |
+| `smeldr.dev/core` | v1.28.0 | Stable |
 | `smeldr.dev/mcp` | v1.12.0 | Stable |
 | `smeldr.dev/oauth` | v0.1.3 | Beta |
 | `smeldr.dev/pgx` | — | Beta |
@@ -183,7 +183,7 @@ MCP resource subscriptions (Beta):
 - `App.Audit(store AuditStore)` — opt-in; subscribes to `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete` via the signal bus
 - `AuditRecord` — immutable entry: ID, Timestamp, Signal, ContentType, Slug, ActorID, ActorRole, PreviousState
 - `NewAuditStore(db DB)` — default SQL implementation; timestamps stored as RFC3339 for SQLite compatibility
-- `CreateAuditTable(db DB)` — DDL helper; creates `forge_audit_log` table
+- `CreateAuditTable(db DB)` — DDL helper; creates `smeldr_audit_log` table
 - `GET /_audit` — Editor-or-higher; returns JSON array; supports `from`, `to` (RFC3339), `type`, and `actor` query filters
 - `forge-cli audit list [--from RFC3339] [--to RFC3339] [--type TYPE] [--actor ACTOR]` — table output, newest first (smeldr.dev/cli v0.9.1)
 

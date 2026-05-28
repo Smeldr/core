@@ -14,7 +14,7 @@ import (
 type NavMode int
 
 const (
-	// NavModeDB populates the navigation tree from the forge_nav database
+	// NavModeDB populates the navigation tree from the smeldr_nav database
 	// table. Requires [Config.DB] to be non-nil; panics at startup if DB
 	// is nil when this mode is selected.
 	NavModeDB NavMode = iota + 1
@@ -25,7 +25,7 @@ const (
 )
 
 // NavItem represents a single entry in the navigation tree. Items are stored
-// in the forge_nav table ([NavModeDB]) or supplied via [App.Nav] ([NavModeCode]).
+// in the smeldr_nav table ([NavModeDB]) or supplied via [App.Nav] ([NavModeCode]).
 //
 // The Hidden and Ghost flags determine where the item appears:
 //
@@ -90,13 +90,13 @@ func (n *NavTree) HasDB() bool {
 	return n.db != nil
 }
 
-// migrate creates the forge_nav table if it does not already exist, and stores
+// migrate creates the smeldr_nav table if it does not already exist, and stores
 // the db reference for subsequent CRUD operations. Called once at [App.Handler]
 // startup when [Config.NavMode] is [NavModeDB].
 func (n *NavTree) migrate(ctx context.Context, db DB) error {
 	n.db = db
 	_, err := db.ExecContext(ctx, `
-CREATE TABLE IF NOT EXISTS forge_nav (
+CREATE TABLE IF NOT EXISTS smeldr_nav (
 	id         TEXT PRIMARY KEY,
 	label      TEXT NOT NULL DEFAULT '',
 	path       TEXT NOT NULL DEFAULT '',
@@ -107,20 +107,20 @@ CREATE TABLE IF NOT EXISTS forge_nav (
 	sort_order INTEGER NOT NULL DEFAULT 0
 )`)
 	if err != nil {
-		return fmt.Errorf("smeldr: migrate forge_nav: %w", err)
+		return fmt.Errorf("smeldr: migrate smeldr_nav: %w", err)
 	}
 	return nil
 }
 
-// load reads all rows from forge_nav and rebuilds the in-memory tree.
+// load reads all rows from smeldr_nav and rebuilds the in-memory tree.
 // Called once at [App.Handler] startup after [migrate], and after any write.
 func (n *NavTree) load(ctx context.Context, db DB) error {
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, label, path, parent_id, module, hidden, ghost, sort_order
-		 FROM forge_nav
+		 FROM smeldr_nav
 		 ORDER BY sort_order ASC, label ASC`)
 	if err != nil {
-		return fmt.Errorf("smeldr: load forge_nav: %w", err)
+		return fmt.Errorf("smeldr: load smeldr_nav: %w", err)
 	}
 	defer rows.Close()
 	var items []NavItem
@@ -131,14 +131,14 @@ func (n *NavTree) load(ctx context.Context, db DB) error {
 			&item.ID, &item.Label, &item.Path, &item.ParentID,
 			&item.Module, &hidden, &ghost, &item.SortOrder,
 		); err != nil {
-			return fmt.Errorf("smeldr: scan forge_nav row: %w", err)
+			return fmt.Errorf("smeldr: scan smeldr_nav row: %w", err)
 		}
 		item.Hidden = hidden != 0
 		item.Ghost = ghost != 0
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("smeldr: iterate forge_nav: %w", err)
+		return fmt.Errorf("smeldr: iterate smeldr_nav: %w", err)
 	}
 	n.mu.Lock()
 	n.buildTree(items)
@@ -253,7 +253,7 @@ func (n *NavTree) Create(ctx context.Context, item NavItem) (NavItem, error) {
 		item.ID = NewID()
 	}
 	_, err := n.db.ExecContext(ctx,
-		`INSERT INTO forge_nav (id, label, path, parent_id, module, hidden, ghost, sort_order)
+		`INSERT INTO smeldr_nav (id, label, path, parent_id, module, hidden, ghost, sort_order)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		item.ID, item.Label, item.Path, item.ParentID,
 		item.Module, boolToInt(item.Hidden), boolToInt(item.Ghost), item.SortOrder,
@@ -275,7 +275,7 @@ func (n *NavTree) Update(ctx context.Context, item NavItem) (NavItem, error) {
 		return NavItem{}, fmt.Errorf("smeldr: NavTree.Update requires NavModeDB")
 	}
 	res, err := n.db.ExecContext(ctx,
-		`UPDATE forge_nav
+		`UPDATE smeldr_nav
 		 SET label=$1, path=$2, parent_id=$3, module=$4,
 		     hidden=$5, ghost=$6, sort_order=$7
 		 WHERE id=$8`,
@@ -322,7 +322,7 @@ func (n *NavTree) Delete(ctx context.Context, id string) error {
 		args[i] = did
 	}
 	_, err := n.db.ExecContext(ctx,
-		`DELETE FROM forge_nav WHERE id IN (`+strings.Join(placeholders, ",")+`)`,
+		`DELETE FROM smeldr_nav WHERE id IN (`+strings.Join(placeholders, ",")+`)`,
 		args...,
 	)
 	if err != nil {

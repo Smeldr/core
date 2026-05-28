@@ -13,7 +13,7 @@ func TestWebhookStore_CreateAndList(t *testing.T) {
 	db := newSQLiteDB(t)
 	ctx := context.Background()
 	_, err := db.ExecContext(ctx, `
-		CREATE TABLE forge_webhook_endpoints (
+		CREATE TABLE smeldr_webhook_endpoints (
 			id         TEXT    PRIMARY KEY,
 			events     TEXT    NOT NULL,
 			target_url TEXT    NOT NULL,
@@ -62,7 +62,7 @@ func TestWebhookStore_ListNeverLeaksSecret(t *testing.T) {
 	db := newSQLiteDB(t)
 	ctx := context.Background()
 	_, err := db.ExecContext(ctx, `
-		CREATE TABLE forge_webhook_endpoints (
+		CREATE TABLE smeldr_webhook_endpoints (
 			id         TEXT    PRIMARY KEY,
 			events     TEXT    NOT NULL,
 			target_url TEXT    NOT NULL,
@@ -84,7 +84,7 @@ func TestWebhookStore_ListNeverLeaksSecret(t *testing.T) {
 	evJSON, _ := json.Marshal(ep.Events)
 	enc, _ := store.encryptSecret([]byte("plain"))
 	_, err = db.ExecContext(ctx,
-		`INSERT INTO forge_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1,$2,$3,$4,$5,datetime('now'))`,
+		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1,$2,$3,$4,$5,datetime('now'))`,
 		ep.ID, string(evJSON), "https://example.com/hook", enc, 1,
 	)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestWebhookStore_EndpointsForEvent(t *testing.T) {
 	db := newSQLiteDB(t)
 	ctx := context.Background()
 	_, err := db.ExecContext(ctx, `
-		CREATE TABLE forge_webhook_endpoints (
+		CREATE TABLE smeldr_webhook_endpoints (
 			id         TEXT    PRIMARY KEY,
 			events     TEXT    NOT NULL,
 			target_url TEXT    NOT NULL,
@@ -125,7 +125,7 @@ func TestWebhookStore_EndpointsForEvent(t *testing.T) {
 	insertEP := func(id, eventsJSON, enc string, active int) {
 		t.Helper()
 		_, err := db.ExecContext(ctx,
-			`INSERT INTO forge_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1,$2,$3,$4,$5,datetime('now'))`,
+			`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1,$2,$3,$4,$5,datetime('now'))`,
 			id, eventsJSON, "https://example.com/"+id, enc, active,
 		)
 		if err != nil {
@@ -170,14 +170,14 @@ func TestWebhookStore_Delete(t *testing.T) {
 	db := newSQLiteDB(t)
 	ctx := context.Background()
 	_, _ = db.ExecContext(ctx, `
-		CREATE TABLE forge_webhook_endpoints (
+		CREATE TABLE smeldr_webhook_endpoints (
 			id TEXT PRIMARY KEY, events TEXT NOT NULL, target_url TEXT NOT NULL,
 			secret_enc TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT 1, created_at DATETIME NOT NULL
 		)`)
 	store := NewWebhookStore(db, []byte("k"))
 	enc, _ := store.encryptSecret([]byte("s"))
 	_, _ = db.ExecContext(ctx,
-		`INSERT INTO forge_webhook_endpoints VALUES ('del-1','[]','https://x.com','`+enc+`',1,datetime('now'))`)
+		`INSERT INTO smeldr_webhook_endpoints VALUES ('del-1','[]','https://x.com','`+enc+`',1,datetime('now'))`)
 	if err := store.Delete(ctx, "del-1"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
