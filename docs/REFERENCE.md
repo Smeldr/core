@@ -985,12 +985,12 @@ app := smeldr.New(smeldr.Config{DB: db, ...})
 
 **Maximum performance — native pgx connection pool (~2.5× faster)**
 
-For high-throughput production workloads. Uses `forge-pgx`,
-a thin adapter that is a separate module from Forge core.
+For high-throughput production workloads. Uses `pgx`,
+a thin adapter that is a separate module from smeldr core.
 
 ```go
 import (
-    forgepgx "smeldr.dev/core-pgx"
+    forgepgx "smeldr.dev/core/pgx"
     "github.com/jackc/pgx/v5/pgxpool"
 )
 
