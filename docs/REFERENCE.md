@@ -1819,8 +1819,8 @@ supported — media files have no lifecycle. These tools return `ErrBadRequest`.
 
 ### Config keys
 
-The two `forge.config` keys below are read automatically by `LocalMediaStore`.
-Set them in your `forge.config` file or override in Go code via `smeldr.Config`.
+The two `smeldr.config` keys below are read automatically by `LocalMediaStore`.
+Set them in your `smeldr.config` file or override in Go code via `smeldr.Config`.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -1948,17 +1948,17 @@ Two ways to set `Config.Dev`:
 Dev: os.Getenv("DEV") == "1",
 ```
 
-**forge.config file:**
+**smeldr.config file:**
 ```
 dev = true
 ```
 
 ---
 
-## forge.config file
+## smeldr.config file
 
-Forge reads a `forge.config` file from the working directory (or from the path
-in the `FORGE_CONFIG` environment variable) at startup. Fields set in Go code
+Forge reads a `smeldr.config` file from the working directory (or from the path
+in the `SMELDR_CONFIG` environment variable) at startup. Fields set in Go code
 take precedence over file values — with one deliberate exception: `og_image`
 overrides the Go-code `OGDefaults.Image.URL` so operators can update the site
 OG image without a rebuild (see below). The file format is one `key = value`
@@ -1984,7 +1984,7 @@ environment variable or directly in Go code.
 
 ```
 # 1. Upload the new image via smeldr.dev/media or place it in the media directory.
-# 2. Add or update og_image in forge.config:
+# 2. Add or update og_image in smeldr.config:
 og_image = /media/site-og.png
 
 # 3. Restart the container — no rebuild required.
@@ -1993,7 +1993,7 @@ og_image = /media/site-og.png
 Example:
 
 ```
-# forge.config
+# smeldr.config
 base_url = https://mysite.com
 https    = true
 nav_mode = db

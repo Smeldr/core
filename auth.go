@@ -423,10 +423,10 @@ func (ts *TokenStore) ensureBootstrap(ctx context.Context) {
 	}
 	raw, err := ts.Create(ctx, "bootstrap-admin", "admin", 10*365*24*time.Hour)
 	if err != nil {
-		slog.Warn("forge: failed to create bootstrap admin token", "err", err)
+		slog.Warn("smeldr: failed to create bootstrap admin token", "err", err)
 		return
 	}
-	slog.Warn("forge: forge_tokens is empty — bootstrap admin token created (copy now, shown once):\n\t" + raw)
+	slog.Warn("smeldr: forge_tokens is empty — bootstrap admin token created (copy now, shown once):\n\t" + raw)
 }
 
 // Create generates a signed named bearer token with the given role and ttl,

@@ -175,7 +175,7 @@ func loadPartials(dir string) ([]string, error) {
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("forge: partials directory %q: %w", dir, err)
+		return nil, fmt.Errorf("smeldr: partials directory %q: %w", dir, err)
 	}
 	var names []string
 	for _, e := range entries {
@@ -188,7 +188,7 @@ func loadPartials(dir string) ([]string, error) {
 	for _, name := range names {
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
-			return nil, fmt.Errorf("forge: partial %q: %w", name, err)
+			return nil, fmt.Errorf("smeldr: partial %q: %w", name, err)
 		}
 		srcs = append(srcs, string(data))
 	}
@@ -222,12 +222,12 @@ func (m *Module[T]) parseTemplates() error {
 
 	tplList, err := parseOneTemplate(listPath, m.templateRequired, m.partials)
 	if err != nil {
-		return fmt.Errorf("forge: templates for %s: %w", m.prefix, err)
+		return fmt.Errorf("smeldr: templates for %s: %w", m.prefix, err)
 	}
 
 	tplShow, err := parseOneTemplate(showPath, m.templateRequired, m.partials)
 	if err != nil {
-		return fmt.Errorf("forge: templates for %s: %w", m.prefix, err)
+		return fmt.Errorf("smeldr: templates for %s: %w", m.prefix, err)
 	}
 
 	m.tplMu.Lock()
@@ -320,7 +320,7 @@ func (m *Module[T]) renderListHTML(w http.ResponseWriter, r *http.Request, ctx C
 	}
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
-		WriteError(w, r, fmt.Errorf("forge: list template execution: %w", err))
+		WriteError(w, r, fmt.Errorf("smeldr: list template execution: %w", err))
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -353,7 +353,7 @@ func (m *Module[T]) renderShowHTML(w http.ResponseWriter, r *http.Request, ctx C
 	}
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
-		WriteError(w, r, fmt.Errorf("forge: show template execution: %w", err))
+		WriteError(w, r, fmt.Errorf("smeldr: show template execution: %w", err))
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

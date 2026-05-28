@@ -138,7 +138,7 @@ func (s *RedirectStore) Add(e RedirectEntry) {
 		depth++
 		if depth > maxDepth {
 			panic(fmt.Sprintf(
-				"forge: redirect chain collapse exceeded maximum depth %d: %s → ... → %s",
+				"smeldr: redirect chain collapse exceeded maximum depth %d: %s → ... → %s",
 				maxDepth, e.From, current.To,
 			))
 		}

@@ -10,7 +10,7 @@ import (
 // writeConfig writes content to a temp file and returns the path.
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "forge.config")
+	path := filepath.Join(t.TempDir(), "smeldr.config")
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}

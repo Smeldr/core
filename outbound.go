@@ -524,7 +524,7 @@ func httpDeliver(ctx context.Context, job OutboundJob, secret []byte) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, job.TargetURL, bytes.NewReader(job.Payload))
 	if err != nil {
-		return fmt.Errorf("forge: webhook: build request: %w", err)
+		return fmt.Errorf("smeldr: webhook: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Forge-Signature", sig)
@@ -534,7 +534,7 @@ func httpDeliver(ctx context.Context, job OutboundJob, secret []byte) error {
 
 	resp, err := outboundClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("forge: webhook: http: %w", err)
+		return fmt.Errorf("smeldr: webhook: http: %w", err)
 	}
 	defer resp.Body.Close()
 

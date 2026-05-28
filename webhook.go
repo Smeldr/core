@@ -115,7 +115,7 @@ func (s *WebhookStore) encryptSecret(plaintext []byte) (string, error) {
 func (s *WebhookStore) decryptSecret(enc string) ([]byte, error) {
 	data, err := base64.StdEncoding.DecodeString(enc)
 	if err != nil {
-		return nil, fmt.Errorf("forge: webhook secret: base64 decode: %w", err)
+		return nil, fmt.Errorf("smeldr: webhook secret: base64 decode: %w", err)
 	}
 	block, err := aes.NewCipher(s.appKey[:])
 	if err != nil {
@@ -126,7 +126,7 @@ func (s *WebhookStore) decryptSecret(enc string) ([]byte, error) {
 		return nil, err
 	}
 	if len(data) < gcm.NonceSize() {
-		return nil, fmt.Errorf("forge: webhook secret ciphertext too short")
+		return nil, fmt.Errorf("smeldr: webhook secret ciphertext too short")
 	}
 	nonce, ct := data[:gcm.NonceSize()], data[gcm.NonceSize():]
 	return gcm.Open(nil, nonce, ct, nil)
@@ -290,7 +290,7 @@ func buildEventName(typeName string, sig Signal) (string, bool) {
 func buildWebhookPayload(typeName string, item any, sig Signal) ([]byte, error) {
 	eventName, ok := buildEventName(typeName, sig)
 	if !ok {
-		return nil, fmt.Errorf("forge: signal %q is not a webhook delivery event", sig)
+		return nil, fmt.Errorf("smeldr: signal %q is not a webhook delivery event", sig)
 	}
 	n := extractNode(item)
 	data := webhookEventData{
@@ -411,7 +411,7 @@ func init() {
 	} {
 		_, block, err := net.ParseCIDR(cidr)
 		if err != nil {
-			panic("forge: invalid private CIDR: " + cidr)
+			panic("smeldr: invalid private CIDR: " + cidr)
 		}
 		privateRanges = append(privateRanges, block)
 	}

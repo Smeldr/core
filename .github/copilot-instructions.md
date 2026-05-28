@@ -400,8 +400,8 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
 - [ ] `Forge/docs/FEATURELIST.md` updated, "Last updated" version line bumped, and
       module registry: version updated, stability label reviewed if this release
       changes API surface, adds a module, or materially changes production confidence.
-- [ ] `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\forge.md` updated: version line, MCP tools, CLI commands, any new sections. Read it with the Read tool.
-- [ ] `skills/forge.md` in forge repo — copy updated `smeldr/common/agent/skills/forge.md`
+- [ ] `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md` updated: version line, MCP tools, CLI commands, any new sections. Read it with the Read tool.
+- [ ] `skills/smeldr.md` in forge repo — copy updated `smeldr/common/agent/skills/smeldr.md`
 
 "No changes needed" is only valid after explicitly reading each file and confirming it already reflects the shipped code. Never assume.
 
@@ -471,9 +471,9 @@ Wait for feedback before making any changes.
 
 **3. Apply repo doc updates**
 Apply agreed changes to docs/REFERENCE.md, README.md, and/or docs/FEATURELIST.md.
-Also update `.claude/skills/forge.md` when any of the following changed:
+Also update `.claude/skills/smeldr.md` when any of the following changed:
 - MCP tools or CLI commands (update both sections; verify CLI/MCP parity)
-- Config keys (update forge.config section)
+- Config keys (update smeldr.config section)
 - New failure modes confirmed in this release (update gotchas)
 - Any of the above → bump the version line at the top of the skill file
 - Update `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\forge.md` only

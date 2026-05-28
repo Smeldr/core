@@ -195,7 +195,7 @@ app.Handle("POST /mcp/message", mcpSrv.Handler())
 ```
 
 `Config.MediaPath` (default `"./media"`) and `Config.MediaMaxSize` (default 5 MB)
-control storage. Both are set in `smeldr.Config` or via `forge.config` file keys
+control storage. Both are set in `smeldr.Config` or via `smeldr.config` file keys
 `media_path` and `media_max_size`.
 
 ### Key rules for code generation

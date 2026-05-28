@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// loadConfigFile parses a forge.config file at path and returns the values as
+// loadConfigFile parses a smeldr.config file at path and returns the values as
 // a [Config]. Keys not present in the file are left as zero values. If the file
 // does not exist, a zero Config and nil error are returned. Panics immediately
 // if the file contains the key "secret".
@@ -23,7 +23,7 @@ func loadConfigFile(path string) (Config, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return Config{}, nil
 		}
-		return Config{}, fmt.Errorf("forge.config: cannot read %q: %w", path, err)
+		return Config{}, fmt.Errorf("smeldr.config: cannot read %q: %w", path, err)
 	}
 
 	var cfg Config
@@ -46,7 +46,7 @@ func loadConfigFile(path string) (Config, error) {
 
 		switch key {
 		case "secret":
-			panic("forge.config: \"secret\" must not be stored in a config file — use an environment variable or inject it directly in Go code")
+			panic("smeldr.config: \"secret\" must not be stored in a config file — use an environment variable or inject it directly in Go code")
 		case "base_url":
 			cfg.BaseURL = value
 		case "https":
@@ -56,7 +56,7 @@ func loadConfigFile(path string) (Config, error) {
 			case "false":
 				// explicit false: already the zero value, no-op
 			default:
-				return Config{}, fmt.Errorf("forge.config line %d: invalid value %q for key \"https\" — expected \"true\" or \"false\"", lineNum, value)
+				return Config{}, fmt.Errorf("smeldr.config line %d: invalid value %q for key \"https\" — expected \"true\" or \"false\"", lineNum, value)
 			}
 		case "nav_mode":
 			switch value {
@@ -65,7 +65,7 @@ func loadConfigFile(path string) (Config, error) {
 			case "code":
 				cfg.NavMode = NavModeCode
 			default:
-				return Config{}, fmt.Errorf("forge.config line %d: invalid value %q for key \"nav_mode\" — expected \"db\" or \"code\"", lineNum, value)
+				return Config{}, fmt.Errorf("smeldr.config line %d: invalid value %q for key \"nav_mode\" — expected \"db\" or \"code\"", lineNum, value)
 			}
 		case "org_name":
 			schema.Name = value
@@ -84,7 +84,7 @@ func loadConfigFile(path string) (Config, error) {
 		case "media_max_size":
 			n, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
-				return Config{}, fmt.Errorf("forge.config line %d: invalid value %q for key \"media_max_size\" — expected an integer number of bytes", lineNum, value)
+				return Config{}, fmt.Errorf("smeldr.config line %d: invalid value %q for key \"media_max_size\" — expected an integer number of bytes", lineNum, value)
 			}
 			cfg.MediaMaxSize = n
 		case "dev":
@@ -94,7 +94,7 @@ func loadConfigFile(path string) (Config, error) {
 			case "false":
 				// explicit false: zero value, no-op
 			default:
-				return Config{}, fmt.Errorf("forge.config line %d: invalid value %q for key \"dev\" — expected \"true\" or \"false\"", lineNum, value)
+				return Config{}, fmt.Errorf("smeldr.config line %d: invalid value %q for key \"dev\" — expected \"true\" or \"false\"", lineNum, value)
 			}
 			// unknown keys are silently ignored (forward compatibility)
 		}
@@ -133,7 +133,7 @@ func mergeFileConfig(goCfg, fileCfg Config) Config {
 			// No Go-code defaults — use file config wholesale.
 			goCfg.OGDefaults = fileCfg.OGDefaults
 		} else if fileCfg.OGDefaults.Image.URL != "" {
-			// og_image in forge.config overrides the Go-code Image.URL so
+			// og_image in smeldr.config overrides the Go-code Image.URL so
 			// operators can update the site OG image without a rebuild.
 			// All other OGDefaults fields retain their Go-code values.
 			merged := *goCfg.OGDefaults
