@@ -11,7 +11,7 @@ Last updated: v1.28.0 (A109) + smeldr.dev/mcp v1.12.0 + smeldr.dev/oauth v0.1.3 
 | `smeldr.dev/core` | v1.28.0 | Stable |
 | `smeldr.dev/mcp` | v1.12.0 | Stable |
 | `smeldr.dev/oauth` | v0.1.3 | Beta |
-| `smeldr.dev/pgx` | — | Beta |
+| `smeldr.dev/core/pgx` | — | Beta |
 | `smeldr.dev/media` | v1.3.0 | Beta |
 | `smeldr.dev/cli` | v0.9.2 | Beta |
 | `smeldr.dev/social` | v0.7.0 | Experimental |

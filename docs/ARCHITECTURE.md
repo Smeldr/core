@@ -225,7 +225,7 @@ smeldr.dev/
                       G35: Standalone routing (two modules, GET /{slug} dispatched by App,
                       draft not served to guest, list endpoint unaffected)
 
-smeldr.dev/core-pgx/  (separate module: ./forge-pgx/)
+smeldr.dev/core/pgx  (separate module: ./pgx/)
 └── pgx.go            Wrap(*pgxpool.Pool) smeldr.DB — native pgx adapter
 
 smeldr.dev/mcp/  (separate repo: github.com/smeldr/mcp)
@@ -804,8 +804,8 @@ This interface is satisfied by:
 `smeldr.Query[T]` and `smeldr.QueryOne[T]` accept `smeldr.DB`, not `*sql.DB`.
 This means switching drivers requires changing exactly one value in `smeldr.Config`.
 
-The `forge-pgx` adapter lives at `smeldr.dev/core-pgx` — a separate
-module. It imports both `forge` and `pgx/v5`. Forge core never imports pgx.
+The `pgx` adapter lives at `smeldr.dev/core/pgx` — a separate
+module. It imports both `smeldr` and `pgx/v5`. Smeldr core never imports pgx.
 
 ---
 

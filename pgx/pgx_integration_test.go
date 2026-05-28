@@ -16,7 +16,7 @@ import (
 // Run with:
 //
 //	DATABASE_URL=postgres://user:pass@localhost/testdb \
-//	  go test -v -tags integration ./forge-pgx/...
+//	  go test -v -tags integration ./pgx/...
 func TestWrap_integration(t *testing.T) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -78,7 +78,7 @@ func TestWrap_integration(t *testing.T) {
 // Repository parity suite
 //
 // pgxParityItem mirrors parityItem from forge/storage_test.go. It cannot be
-// imported directly because forge-pgx is a separate Go module and internal
+// imported directly because pgx is a separate Go module and internal
 // packages are not accessible across module boundaries (Approach A).
 // ---------------------------------------------------------------------------
 

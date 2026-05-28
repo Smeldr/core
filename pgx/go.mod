@@ -1,4 +1,4 @@
-module smeldr.dev/pgx
+module smeldr.dev/core/pgx
 
 go 1.26.3
 
