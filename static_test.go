@@ -110,7 +110,7 @@ func TestStatic_dev_panicOnMissingDir(t *testing.T) {
 
 func TestConfig_dev_fromConfigFile(t *testing.T) {
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "forge.config")
+	cfgPath := filepath.Join(dir, "smeldr.config")
 	if err := os.WriteFile(cfgPath, []byte("dev = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestConfig_dev_fromConfigFile(t *testing.T) {
 		t.Fatalf("loadConfigFile: %v", err)
 	}
 	if !fc.Dev {
-		t.Error("expected Config.Dev = true from forge.config, got false")
+		t.Error("expected Config.Dev = true from smeldr.config, got false")
 	}
 }
 

@@ -106,7 +106,7 @@ func NewID() string {
 	b[5] = byte(ms)
 
 	if _, err := io.ReadFull(rand.Reader, b[6:]); err != nil {
-		panic("forge: crypto/rand unavailable: " + err.Error())
+		panic("smeldr: crypto/rand unavailable: " + err.Error())
 	}
 
 	// Version 7: high nibble of byte 6.
@@ -212,13 +212,13 @@ func parseConstraints(t reflect.Type) []fieldConstraint {
 			case strings.HasPrefix(part, "min="):
 				n, err := strconv.Atoi(strings.TrimPrefix(part, "min="))
 				if err != nil {
-					panic("forge: invalid min= tag on " + t.Name() + "." + f.Name)
+					panic("smeldr: invalid min= tag on " + t.Name() + "." + f.Name)
 				}
 				fc.checkers = append(fc.checkers, makeMin(f.Name, n))
 			case strings.HasPrefix(part, "max="):
 				n, err := strconv.Atoi(strings.TrimPrefix(part, "max="))
 				if err != nil {
-					panic("forge: invalid max= tag on " + t.Name() + "." + f.Name)
+					panic("smeldr: invalid max= tag on " + t.Name() + "." + f.Name)
 				}
 				fc.checkers = append(fc.checkers, makeMax(f.Name, n))
 			case part == "email":
@@ -231,7 +231,7 @@ func parseConstraints(t reflect.Type) []fieldConstraint {
 				opts := strings.Split(strings.TrimPrefix(part, "oneof="), "|")
 				fc.checkers = append(fc.checkers, makeOneOf(f.Name, opts))
 			default:
-				panic("forge: unrecognised tag constraint " + strconv.Quote(part) +
+				panic("smeldr: unrecognised tag constraint " + strconv.Quote(part) +
 					" on " + t.Name() + "." + f.Name)
 			}
 		}
@@ -372,7 +372,7 @@ func validateStruct(v any) error {
 		rv = rv.Elem()
 	}
 	if rv.Kind() != reflect.Struct {
-		panic("forge: RunValidation requires a struct or pointer to struct")
+		panic("smeldr: RunValidation requires a struct or pointer to struct")
 	}
 	rt := rv.Type()
 

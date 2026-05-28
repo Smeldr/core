@@ -251,3 +251,45 @@ all core markdown documentation, `common/agent/skills/forge.md`.
 **Forge core → v1.26.0** (minor bump — breaking changes for callers).
 
 ---
+
+## A108 — T64+T65: smeldr.config, SMELDR_CONFIG, smeldr: error prefix, skill rename
+
+**Date:** 2026-05-28
+**Status:** Agreed
+**Milestone:** T64 + T65
+
+**What:**
+- `forge.config` → `smeldr.config` — runtime config filename renamed. Operators must rename
+  their config file on disk.
+- `FORGE_CONFIG` → `SMELDR_CONFIG` — env var path override renamed. Operators using this
+  must update.
+- `FORGE_CONFIG`/`forge.config` references updated in `config.go`, `forge.go`,
+  `config_test.go`, `static_test.go`, and all doc files (README.md, AGENTS.md,
+  docs/REFERENCE.md, docs/FEATURELIST.md, docs/ARCHITECTURE.md,
+  .github/copilot-instructions.md).
+- `skills/forge.md` → `skills/smeldr.md` in core repo and
+  `agent/skills/forge.md` → `agent/skills/smeldr.md` in common repo.
+  `.github/copilot-instructions.md` updated to reference new skill file path.
+- Error string prefix `"forge: "` → `"smeldr: "` throughout all Go source files
+  (~48 occurrences in 14 files). DB table names (`forge_tokens`, `forge_nav`,
+  `forge_audit_log`) unchanged — live schema names are out of scope.
+
+**Breaking changes:**
+- `forge.config` → `smeldr.config` (operators must rename file on disk)
+- `FORGE_CONFIG` → `SMELDR_CONFIG` (operators must update env var)
+
+**No exported Go API changes. No DB schema changes.**
+
+**Files changed (core):** `config.go`, `forge.go`, `config_test.go`, `static_test.go`,
+`audit.go`, `auth.go`, `errors.go`, `middleware.go`, `module.go`, `nav.go`, `node.go`,
+`outbound.go`, `redirects.go`, `static.go`, `templates.go`, `webhook.go`,
+`skills/forge.md` (→ `skills/smeldr.md`), `.github/copilot-instructions.md`,
+`AGENTS.md`, `docs/REFERENCE.md`, `docs/ARCHITECTURE.md`, `CHANGELOG.md`,
+`decisions/recent.md`, `DECISIONS.md`.
+
+**Files changed (common):** `agent/skills/forge.md` (→ `agent/skills/smeldr.md`).
+
+**Forge core → v1.27.0** (minor bump — `forge.config` and `FORGE_CONFIG` rename are
+breaking for operators).
+
+---

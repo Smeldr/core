@@ -110,13 +110,13 @@ type Config struct {
 	// every page as a <script type="application/ld+json"> element. When set
 	// here, it is applied automatically at startup; an explicit [App.SEO] call
 	// with an [AppSchema] takes precedence. This field is also populated when
-	// a forge.config file contains the org_name or org_type keys. Optional.
+	// a smeldr.config file contains the org_name or org_type keys. Optional.
 	AppSchema *AppSchema
 
 	// OGDefaults sets the app-level Open Graph and Twitter Card fallback values
 	// applied to every page. When set here, it is applied automatically at
 	// startup; an explicit [App.SEO] call with an [OGDefaults] takes
-	// precedence. Also populated from forge.config og_image and twitter_site
+	// precedence. Also populated from smeldr.config og_image and twitter_site
 	// keys. Optional.
 	OGDefaults *OGDefaults
 
@@ -137,7 +137,7 @@ type Config struct {
 
 	// Dev enables development mode. When true, [App.Static] serves files from
 	// disk (devDir) instead of the embedded FS, so changes are visible without
-	// rebuilding. Set from os.Getenv("DEV") == "1" or via the forge.config key
+	// rebuilding. Set from os.Getenv("DEV") == "1" or via the smeldr.config key
 	// "dev = true". Optional.
 	Dev bool
 
@@ -153,12 +153,12 @@ type Config struct {
 //   - Config.BaseURL is empty or not a valid absolute URL
 //   - Config.Secret is fewer than 16 bytes
 //
-// MustConfig also loads a forge.config file from the working directory (or the
-// path set in the FORGE_CONFIG environment variable) and merges its key/value
+// MustConfig also loads a smeldr.config file from the working directory (or the
+// path set in the SMELDR_CONFIG environment variable) and merges its key/value
 // pairs into cfg. Go-code field values always take precedence over file values.
-// Supported forge.config keys: base_url, https, nav_mode, org_name, org_type,
+// Supported smeldr.config keys: base_url, https, nav_mode, org_name, org_type,
 // twitter_site, og_image, media_path, media_max_size, dev.
-// The key "secret" is explicitly forbidden in forge.config and causes a panic.
+// The key "secret" is explicitly forbidden in smeldr.config and causes a panic.
 //
 // Typical usage:
 //
@@ -167,27 +167,27 @@ type Config struct {
 //	    Secret:  []byte(os.Getenv("SECRET")),
 //	}))
 func MustConfig(cfg Config) Config {
-	// D30: load forge.config (or the path in FORGE_CONFIG) and merge file
+	// D30: load smeldr.config (or the path in SMELDR_CONFIG) and merge file
 	// values into cfg. Go-code fields always take precedence.
-	if path := os.Getenv("FORGE_CONFIG"); path != "" {
+	if path := os.Getenv("SMELDR_CONFIG"); path != "" {
 		fc, err := loadConfigFile(path)
 		if err != nil {
-			panic("forge: " + err.Error())
+			panic("smeldr: " + err.Error())
 		}
 		cfg = mergeFileConfig(cfg, fc)
 	} else {
-		fc, _ := loadConfigFile("forge.config") // missing file is not an error
+		fc, _ := loadConfigFile("smeldr.config") // missing file is not an error
 		cfg = mergeFileConfig(cfg, fc)
 	}
 	if cfg.BaseURL == "" {
-		panic(`forge: Config.BaseURL is required (e.g. "https://example.com")`)
+		panic(`smeldr: Config.BaseURL is required (e.g. "https://example.com")`)
 	}
 	u, err := url.ParseRequestURI(cfg.BaseURL)
 	if err != nil || !u.IsAbs() {
-		panic(fmt.Sprintf("forge: Config.BaseURL %q is not a valid absolute URL: %v", cfg.BaseURL, err))
+		panic(fmt.Sprintf("smeldr: Config.BaseURL %q is not a valid absolute URL: %v", cfg.BaseURL, err))
 	}
 	if len(cfg.Secret) < 16 {
-		panic("forge: Config.Secret must be at least 16 bytes")
+		panic("smeldr: Config.Secret must be at least 16 bytes")
 	}
 	return cfg
 }
@@ -379,11 +379,11 @@ func (a *App) Partials(dir string) *App {
 func (a *App) MustParseTemplate(path string) *template.Template {
 	partials, err := loadPartials(a.partialsDir)
 	if err != nil {
-		panic(fmt.Sprintf("forge: MustParseTemplate: %v", err))
+		panic(fmt.Sprintf("smeldr: MustParseTemplate: %v", err))
 	}
 	tpl, err := parseOneTemplate(path, true, partials)
 	if err != nil {
-		panic(fmt.Sprintf("forge: MustParseTemplate %q: %v", path, err))
+		panic(fmt.Sprintf("smeldr: MustParseTemplate %q: %v", path, err))
 	}
 	return tpl
 }
@@ -621,7 +621,7 @@ func (a *App) Audit(store AuditStore) *App {
 				PreviousState: ev.PreviousState,
 			}
 			if err := store.Append(ctx, r); err != nil {
-				slog.WarnContext(ctx, "forge: audit append failed",
+				slog.WarnContext(ctx, "smeldr: audit append failed",
 					"error", err, "signal", s, "type", ev.Type, "slug", ev.Slug)
 			}
 			return nil
@@ -867,7 +867,7 @@ func (a *App) Handler() http.Handler {
 		a.mux.Handle("/", a.redirectStore.handler())
 	}
 	// D30: auto-apply Config.AppSchema and Config.OGDefaults loaded from
-	// forge.config. App.SEO() calls take precedence (applied only when nil).
+	// smeldr.config. App.SEO() calls take precedence (applied only when nil).
 	if a.cfg.AppSchema != nil && a.seo.appSchema == nil {
 		a.seo.appSchema = a.cfg.AppSchema
 	}
@@ -922,7 +922,7 @@ func (a *App) Handler() http.Handler {
 	// builds the tree from the items supplied via App.Nav().
 	if a.cfg.NavMode == NavModeDB {
 		if a.cfg.DB == nil {
-			panic("forge: Config.NavMode is NavModeDB but Config.DB is nil — set Config.DB or use NavModeCode")
+			panic("smeldr: Config.NavMode is NavModeDB but Config.DB is nil — set Config.DB or use NavModeCode")
 		}
 		u, _ := url.Parse(a.cfg.BaseURL)
 		navCtx := NewBackgroundContext(u.Hostname())

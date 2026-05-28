@@ -53,7 +53,7 @@ func RequestLogger() func(http.Handler) http.Handler {
 			if status == 0 {
 				status = http.StatusOK
 			}
-			slog.InfoContext(r.Context(), "forge: request",
+			slog.InfoContext(r.Context(), "smeldr: request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", status,
@@ -76,7 +76,7 @@ func Recoverer() func(http.Handler) http.Handler {
 				if rec := recover(); rec != nil {
 					buf := make([]byte, 32*1024)
 					n := runtime.Stack(buf, false)
-					slog.ErrorContext(r.Context(), "forge: panic recovered",
+					slog.ErrorContext(r.Context(), "smeldr: panic recovered",
 						"panic", fmt.Sprintf("%v", rec),
 						"stack", string(buf[:n]),
 					)

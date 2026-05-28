@@ -305,7 +305,7 @@ func getNodeFields(t reflect.Type) nodeFields {
 	slugF, slugOK := t.FieldByName("Slug")
 	statusF, statusOK := t.FieldByName("Status")
 	if !idOK || !slugOK || !statusOK {
-		panic("forge: content type must embed smeldr.Node (missing ID, Slug, or Status field)")
+		panic("smeldr: content type must embed smeldr.Node (missing ID, Slug, or Status field)")
 	}
 	f := nodeFields{id: idF.Index, slug: slugF.Index, status: statusF.Index}
 	nodeFieldCache.Store(t, f)
@@ -591,7 +591,7 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 	}
 
 	if !repoFound {
-		panic("forge: Module[T] requires a Repository; use smeldr.Repo(...) or App.Content")
+		panic("smeldr: Module[T] requires a Repository; use smeldr.Repo(...) or App.Content")
 	}
 
 	// A36: detect capability mismatches at startup — programmer errors caught
@@ -600,7 +600,7 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 	if m.sitemapCfg != nil {
 		if _, ok := any(proto).(SitemapNode); !ok {
 			panic(fmt.Sprintf(
-				"forge: %s has SitemapConfig but does not implement SitemapNode "+
+				"smeldr: %s has SitemapConfig but does not implement SitemapNode "+
 					"(add a Head() smeldr.Head method); sitemap would be silently empty",
 				typeName,
 			))
@@ -609,7 +609,7 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 	// AIIndex(LLMsTxtFull) requires T to implement Markdownable (Markdown() string).
 	if hasAIFeature(m.aiFeatures, LLMsTxtFull) && !m.neg.md {
 		panic(fmt.Sprintf(
-			"forge: %s has AIIndex(LLMsTxtFull) but does not implement Markdownable "+
+			"smeldr: %s has AIIndex(LLMsTxtFull) but does not implement Markdownable "+
 				"(add a Markdown() string method); /llms-full.txt would be silently empty",
 			typeName,
 		))
@@ -618,7 +618,7 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 	// HTML at GET /{prefix}; APIOnly forbids HTML entirely.
 	if m.apiOnly && m.singleInstance {
 		panic(fmt.Sprintf(
-			"forge: %s has both APIOnly() and SingleInstance() — they are incompatible: "+
+			"smeldr: %s has both APIOnly() and SingleInstance() — they are incompatible: "+
 				"SingleInstance serves HTML at GET /{prefix}, APIOnly forbids HTML",
 			typeName,
 		))

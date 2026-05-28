@@ -180,7 +180,7 @@ func newAuditHandler(auth AuthFunc, store AuditStore) http.Handler {
 
 		records, err := store.List(r.Context(), f)
 		if err != nil {
-			slog.ErrorContext(r.Context(), "forge: audit list failed", "error", err)
+			slog.ErrorContext(r.Context(), "smeldr: audit list failed", "error", err)
 			WriteError(w, r, ErrInternal)
 			return
 		}

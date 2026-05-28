@@ -15,7 +15,7 @@ Module    — one content type, fully wired (routes, repo, MCP, signals)
 Signal    — hook that fires on lifecycle changes (AfterPublish, AfterArchive, ...)
 Head      — all page metadata (SEO, OG, JSON-LD, canonical)
 Role      — Guest < Author < Editor < Admin
-Config    — forge.config file + Go struct; Go-code values win
+Config    — smeldr.config file + Go struct; Go-code values win
 ```
 
 Content lifecycle: `Draft → Published/Scheduled → Archived`
@@ -361,7 +361,7 @@ Config: `FORGE_URL`, `FORGE_TOKEN`, `FORGE_MCP_URL` (or `.forge-cli.env`)
 
 ---
 
-## forge.config keys
+## smeldr.config keys
 
 ```
 base_url                      string

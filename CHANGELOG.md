@@ -23,6 +23,29 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.27.0] — 2026-05-28
+
+Post-T62 cleanup: `smeldr.config`, `SMELDR_CONFIG`, `smeldr:` error prefix, skill file rename (Amendment A108).
+
+### Changed (breaking)
+
+- **`forge.config` renamed to `smeldr.config`** — operators must rename their runtime config file on
+  disk from `forge.config` to `smeldr.config`.
+- **`FORGE_CONFIG` env var renamed to `SMELDR_CONFIG`** — operators using the environment variable
+  path override must update from `FORGE_CONFIG` to `SMELDR_CONFIG`.
+
+### Changed (internal)
+
+- Error string prefix `"forge: "` renamed to `"smeldr: "` throughout all Go source files (~48
+  occurrences in 14 files: `audit.go`, `auth.go`, `config.go`, `errors.go`, `forge.go`,
+  `middleware.go`, `module.go`, `nav.go`, `node.go`, `outbound.go`, `redirects.go`, `static.go`,
+  `templates.go`, `webhook.go`). DB table names (`forge_tokens`, `forge_nav`, `forge_audit_log`)
+  are unchanged.
+- Skill file renamed `skills/forge.md` → `skills/smeldr.md` in core repo and
+  `agent/skills/forge.md` → `agent/skills/smeldr.md` in common repo.
+
+---
+
 ## [1.26.0] — 2026-05-28
 
 Package rename: `package forge` → `package smeldr` (Amendment A107).

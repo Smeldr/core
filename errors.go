@@ -184,7 +184,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 
 	case errors.As(err, &fe):
 		if fe.HTTPStatus() >= 500 {
-			slog.Error("forge: internal error",
+			slog.Error("smeldr: internal error",
 				"error", err.Error(),
 				"request_id", requestID,
 			)
@@ -195,7 +195,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 		}
 
 	default:
-		slog.Error("forge: unhandled error",
+		slog.Error("smeldr: unhandled error",
 			"error", err.Error(),
 			"request_id", requestID,
 		)

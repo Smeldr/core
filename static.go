@@ -33,7 +33,7 @@ func (a *App) Static(prefix string, prod fs.FS, devDir string) {
 	var h http.Handler
 	if a.cfg.Dev {
 		if _, err := os.Stat(devDir); err != nil {
-			panic("forge: Static: devDir " + devDir + " does not exist: " + err.Error())
+			panic("smeldr: Static: devDir " + devDir + " does not exist: " + err.Error())
 		}
 		slog.Info("static: serving from disk", "dir", devDir)
 		h = http.StripPrefix(prefix, http.FileServer(http.Dir(devDir)))

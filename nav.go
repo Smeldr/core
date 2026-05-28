@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS forge_nav (
 	sort_order INTEGER NOT NULL DEFAULT 0
 )`)
 	if err != nil {
-		return fmt.Errorf("forge: migrate forge_nav: %w", err)
+		return fmt.Errorf("smeldr: migrate forge_nav: %w", err)
 	}
 	return nil
 }
@@ -120,7 +120,7 @@ func (n *NavTree) load(ctx context.Context, db DB) error {
 		 FROM forge_nav
 		 ORDER BY sort_order ASC, label ASC`)
 	if err != nil {
-		return fmt.Errorf("forge: load forge_nav: %w", err)
+		return fmt.Errorf("smeldr: load forge_nav: %w", err)
 	}
 	defer rows.Close()
 	var items []NavItem
@@ -131,14 +131,14 @@ func (n *NavTree) load(ctx context.Context, db DB) error {
 			&item.ID, &item.Label, &item.Path, &item.ParentID,
 			&item.Module, &hidden, &ghost, &item.SortOrder,
 		); err != nil {
-			return fmt.Errorf("forge: scan forge_nav row: %w", err)
+			return fmt.Errorf("smeldr: scan forge_nav row: %w", err)
 		}
 		item.Hidden = hidden != 0
 		item.Ghost = ghost != 0
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("forge: iterate forge_nav: %w", err)
+		return fmt.Errorf("smeldr: iterate forge_nav: %w", err)
 	}
 	n.mu.Lock()
 	n.buildTree(items)
@@ -247,7 +247,7 @@ func (n *NavTree) Get(id string) (NavItem, bool) {
 // Returns an error when the NavTree is in code mode ([NavModeCode]).
 func (n *NavTree) Create(ctx context.Context, item NavItem) (NavItem, error) {
 	if n.db == nil {
-		return NavItem{}, fmt.Errorf("forge: NavTree.Create requires NavModeDB")
+		return NavItem{}, fmt.Errorf("smeldr: NavTree.Create requires NavModeDB")
 	}
 	if item.ID == "" {
 		item.ID = NewID()
@@ -259,7 +259,7 @@ func (n *NavTree) Create(ctx context.Context, item NavItem) (NavItem, error) {
 		item.Module, boolToInt(item.Hidden), boolToInt(item.Ghost), item.SortOrder,
 	)
 	if err != nil {
-		return NavItem{}, fmt.Errorf("forge: NavTree.Create: %w", err)
+		return NavItem{}, fmt.Errorf("smeldr: NavTree.Create: %w", err)
 	}
 	if err := n.load(ctx, n.db); err != nil {
 		return NavItem{}, err
@@ -272,7 +272,7 @@ func (n *NavTree) Create(ctx context.Context, item NavItem) (NavItem, error) {
 // Returns an error when the NavTree is in code mode ([NavModeCode]).
 func (n *NavTree) Update(ctx context.Context, item NavItem) (NavItem, error) {
 	if n.db == nil {
-		return NavItem{}, fmt.Errorf("forge: NavTree.Update requires NavModeDB")
+		return NavItem{}, fmt.Errorf("smeldr: NavTree.Update requires NavModeDB")
 	}
 	res, err := n.db.ExecContext(ctx,
 		`UPDATE forge_nav
@@ -284,7 +284,7 @@ func (n *NavTree) Update(ctx context.Context, item NavItem) (NavItem, error) {
 		item.ID,
 	)
 	if err != nil {
-		return NavItem{}, fmt.Errorf("forge: NavTree.Update: %w", err)
+		return NavItem{}, fmt.Errorf("smeldr: NavTree.Update: %w", err)
 	}
 	affected, _ := res.RowsAffected()
 	if affected == 0 {
@@ -302,7 +302,7 @@ func (n *NavTree) Update(ctx context.Context, item NavItem) (NavItem, error) {
 // Returns an error when the NavTree is in code mode ([NavModeCode]).
 func (n *NavTree) Delete(ctx context.Context, id string) error {
 	if n.db == nil {
-		return fmt.Errorf("forge: NavTree.Delete requires NavModeDB")
+		return fmt.Errorf("smeldr: NavTree.Delete requires NavModeDB")
 	}
 
 	// Collect all IDs to delete (item + all descendants) from the in-memory
@@ -326,7 +326,7 @@ func (n *NavTree) Delete(ctx context.Context, id string) error {
 		args...,
 	)
 	if err != nil {
-		return fmt.Errorf("forge: NavTree.Delete: %w", err)
+		return fmt.Errorf("smeldr: NavTree.Delete: %w", err)
 	}
 	return n.load(ctx, n.db)
 }
