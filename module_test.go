@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"bytes"
@@ -708,7 +708,7 @@ func BenchmarkModuleRequest(b *testing.B) {
 
 // TestNewModule_sitemapConfig_panicsWithoutSitemapNode verifies that NewModule
 // panics at startup when SitemapConfig is given but T does not implement
-// SitemapNode (missing Head() forge.Head method). (Amendment A36)
+// SitemapNode (missing Head() smeldr.Head method). (Amendment A36)
 func TestNewModule_sitemapConfig_panicsWithoutSitemapNode(t *testing.T) {
 	defer func() {
 		r := recover()

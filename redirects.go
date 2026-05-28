@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"cmp"
@@ -59,7 +59,7 @@ type RedirectEntry struct {
 // From is the old URL prefix supplied to the [Redirects] module option.
 // Wrapping in a named type makes call sites self-documenting:
 //
-//	forge.Redirects(forge.From("/posts"), "/articles")
+//	smeldr.Redirects(smeldr.From("/posts"), "/articles")
 type From string
 
 // redirectsOption carries a bulk prefix redirect registered via [Redirects].
@@ -76,8 +76,8 @@ func (redirectsOption) isOption() {}
 // links are preserved automatically:
 //
 //	app.Content(&BlogPost{},
-//	    forge.At("/articles"),
-//	    forge.Redirects(forge.From("/posts"), "/articles"),
+//	    smeldr.At("/articles"),
+//	    smeldr.Redirects(smeldr.From("/posts"), "/articles"),
 //	)
 func Redirects(from From, to string) Option {
 	return redirectsOption{from: from, to: to}

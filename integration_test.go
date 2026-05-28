@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"context"
@@ -157,10 +157,10 @@ func TestIntegration_htmlFallback_noTemplates(t *testing.T) {
 	}
 }
 
-// — 4.2 forge:head correctness ————————————————————————————————————————————
+// — 4.2 smeldr:head correctness ————————————————————————————————————————————
 
-// headTpl is a minimal show template that includes the forge:head partial.
-const headTpl = `<!DOCTYPE html><html><head>{{template "forge:head" .}}</head><body>{{.Content.Title}}</body></html>`
+// headTpl is a minimal show template that includes the smeldr:head partial.
+const headTpl = `<!DOCTYPE html><html><head>{{template "smeldr:head" .}}</head><body>{{.Content.Title}}</body></html>`
 
 func TestIntegration_forgeHead_noIndex(t *testing.T) {
 	dir := intTmpDir(t, `<p>list</p>`, headTpl)
@@ -213,7 +213,7 @@ func TestIntegration_forgeHead_canonical(t *testing.T) {
 }
 
 func TestIntegration_forgeHead_jsonLD(t *testing.T) {
-	const jsonLDTpl = `<!DOCTYPE html><html><head>{{template "forge:head" .}}{{forge_meta .Head .Content}}</head><body></body></html>`
+	const jsonLDTpl = `<!DOCTYPE html><html><head>{{template "smeldr:head" .}}{{smeldr_meta .Head .Content}}</head><body></body></html>`
 	dir := intTmpDir(t, `<p>list</p>`, jsonLDTpl)
 	_, handler, repo := intSetup(t,
 		Templates(dir),
@@ -298,7 +298,7 @@ func TestIntegration_errorPage_fallback(t *testing.T) {
 // — 4.4 CSRF ——————————————————————————————————————————————————————————————
 
 func TestIntegration_csrf_tokenInForm(t *testing.T) {
-	const csrfTpl = `{{forge_csrf_token .Request}}`
+	const csrfTpl = `{{smeldr_csrf_token .Request}}`
 	dir := intTmpDir(t, `<p>list</p>`, csrfTpl)
 	app, _, repo := intSetup(t, Templates(dir))
 

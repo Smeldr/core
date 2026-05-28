@@ -8,23 +8,23 @@
 // Embed [Node] in a content type, wire a repository and a module, then call [App.Run]:
 //
 //	type Post struct {
-//	    forge.Node
+//	    smeldr.Node
 //	    Title string `forge:"required,min=3" db:"title"`
 //	    Body  string `forge:"required"       db:"body"`
 //	}
 //
-//	repo := forge.NewMemoryRepo[*Post]()
+//	repo := smeldr.NewMemoryRepo[*Post]()
 //
-//	m := forge.NewModule(&Post{},
-//	    forge.At("/posts"),
-//	    forge.Repo(repo),
-//	    forge.Auth(
-//	        forge.Read(forge.Guest),
-//	        forge.Write(forge.Author),
+//	m := smeldr.NewModule(&Post{},
+//	    smeldr.At("/posts"),
+//	    smeldr.Repo(repo),
+//	    smeldr.Auth(
+//	        smeldr.Read(smeldr.Guest),
+//	        smeldr.Write(smeldr.Author),
 //	    ),
 //	)
 //
-//	app := forge.New(forge.MustConfig(forge.Config{
+//	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 //	    BaseURL: "http://localhost:8080",
 //	    Secret:  []byte("at-least-16-bytes-secret"),
 //	}))
@@ -48,7 +48,7 @@
 //
 // Pass functional options to [NewModule] to configure module behaviour:
 //
-//   - [At] — sets the URL prefix (required; e.g. forge.At("/posts")).
+//   - [At] — sets the URL prefix (required; e.g. smeldr.At("/posts")).
 //   - [Auth] — configures role-based access. Nest [Read], [Write], and [Delete] calls
 //     with role constants [Guest], [Author], [Editor], or [Admin].
 //   - [Repo] — wires the persistence layer; required for any module that stores content.
@@ -82,18 +82,18 @@
 //
 // Module-level typed handlers receive the full typed content item:
 //
-//	forge.On[*Post](forge.AfterPublish, func(ctx forge.Context, p *Post) error {
+//	smeldr.On[*Post](smeldr.AfterPublish, func(ctx smeldr.Context, p *Post) error {
 //	    log.Printf("published: %s", p.Slug)
 //	    return nil
 //	})
 //
 // App-level bus handlers receive a [SignalEvent] and fire for all content types:
 //
-//	app.OnSignal(forge.AfterPublish, func(ctx context.Context, ev forge.SignalEvent) error {
+//	app.OnSignal(smeldr.AfterPublish, func(ctx context.Context, ev smeldr.SignalEvent) error {
 //	    log.Printf("published %s/%s", ev.ContentType, ev.Slug)
 //	    return nil
 //	})
 //
 // Available signal constants: [AfterCreate], [AfterUpdate], [AfterPublish],
 // [AfterUnpublish], [AfterSchedule], [AfterArchive], [AfterDelete].
-package forge
+package smeldr

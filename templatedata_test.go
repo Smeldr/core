@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"html/template"
@@ -125,7 +125,7 @@ func TestTemplateData_headFields(t *testing.T) {
 }
 
 // TestTemplateData_PageHead_embedding confirms that a custom data struct
-// embedding PageHead can be passed to forge:head and that Go's html/template
+// embedding PageHead can be passed to smeldr:head and that Go's html/template
 // engine promotes the embedded fields to the top level, making .Head,
 // .OGDefaults, .AppSchema, and .HeadAssets accessible without qualification.
 func TestTemplateData_PageHead_embedding(t *testing.T) {
@@ -144,10 +144,10 @@ func TestTemplateData_PageHead_embedding(t *testing.T) {
 		Extra: "ignored",
 	}
 
-	tmpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(forgeHeadTmpl))
+	tmpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(smeldrHeadTmpl))
 
 	var buf strings.Builder
-	if err := tmpl.ExecuteTemplate(&buf, "forge:head", data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "smeldr:head", data); err != nil {
 		t.Fatalf("ExecuteTemplate: %v", err)
 	}
 

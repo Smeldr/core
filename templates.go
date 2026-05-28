@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"bytes"
@@ -53,21 +53,21 @@ func TemplatesOptional(dir string) Option { return templatesOption{dir: dir, req
 // TemplatesWatch is deferred to Milestone 5. It will provide hot-reload of
 // template files during development without restarting the server.
 
-// — forge:head template ———————————————————————————————————————————————————
+// — smeldr:head template ———————————————————————————————————————————————————
 
-// forgeHeadTmpl is the named template injected into every parsed template set
-// as "forge:head". Developers invoke it inside their own <head> element:
+// smeldrHeadTmpl is the named template injected into every parsed template set
+// as "smeldr:head". Developers invoke it inside their own <head> element:
 //
-//	{{template "forge:head" .}}
+//	{{template "smeldr:head" .}}
 //
 // The template receives the full [TemplateData] value and renders: title,
 // description meta, canonical link, Open Graph tags, Twitter Card tags
 // (including the app-level twitter:site from [OGDefaults]), app-level
 // JSON-LD from [AppSchema], and a robots noindex tag when [Head.NoIndex]
 // is true. JSON-LD for individual content items is not emitted here —
-// place {{forge_meta .Head .Content}} in the template body to control
+// place {{smeldr_meta .Head .Content}} in the template body to control
 // JSON-LD placement and schema type.
-const forgeHeadTmpl = `{{define "forge:head"}}<title>{{.Head.Title}}</title>
+const smeldrHeadTmpl = `{{define "smeldr:head"}}<title>{{.Head.Title}}</title>
 {{- if .Head.Description}}
 <meta name="description" content="{{.Head.Description}}">
 {{- end}}
@@ -92,7 +92,7 @@ const forgeHeadTmpl = `{{define "forge:head"}}<title>{{.Head.Title}}</title>
 <meta property="og:type" content="{{if .Head.Type}}{{.Head.Type}}{{else}}website{{end}}">
 {{- if eq .Head.Type "Article"}}
 {{- if gt .Head.Published.Year 1}}
-<meta property="article:published_time" content="{{forge_rfc3339 .Head.Published}}">
+<meta property="article:published_time" content="{{smeldr_rfc3339 .Head.Published}}">
 {{- end}}
 {{- if .Head.Author}}
 <meta property="article:author" content="{{.Head.Author}}">
@@ -205,7 +205,7 @@ func (m *Module[T]) setSEODefaults(d *OGDefaults, a *AppSchema, ha *HeadAssets) 
 }
 
 // parseTemplates loads list.html and show.html from the module's template
-// directory, registers the forge:head named partial and any shared partials
+// directory, registers the smeldr:head named partial and any shared partials
 // (set via [setPartials]) in both template sets, and stores them
 // thread-safely under tplMu.
 //
@@ -242,7 +242,7 @@ func (m *Module[T]) parseTemplates() error {
 }
 
 // parseOneTemplate parses a single HTML template file, registers the
-// forge:head sub-template, and then registers each shared partial in the
+// smeldr:head sub-template, and then registers each shared partial in the
 // returned template set. When partials is nil, no shared partials are added.
 //
 // When required is false and the file does not exist, (nil, nil) is returned.
@@ -260,10 +260,10 @@ func parseOneTemplate(path string, required bool, partials []string) (*template.
 		return nil, fmt.Errorf("parse %s: %w", filepath.Base(path), err)
 	}
 
-	// Register the forge:head partial into this template set so every
-	// developer template can call {{template "forge:head" .}}.
-	if _, err := tpl.Parse(forgeHeadTmpl); err != nil {
-		return nil, fmt.Errorf("register forge:head in %s: %w", filepath.Base(path), err)
+	// Register the smeldr:head partial into this template set so every
+	// developer template can call {{template "smeldr:head" .}}.
+	if _, err := tpl.Parse(smeldrHeadTmpl); err != nil {
+		return nil, fmt.Errorf("register smeldr:head in %s: %w", filepath.Base(path), err)
 	}
 
 	// Register each shared partial (loaded from the app-level partials

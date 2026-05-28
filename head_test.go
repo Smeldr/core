@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"html/template"
@@ -233,14 +233,14 @@ func TestHeadFunc_storedOnModule(t *testing.T) {
 
 // ——— HeadAssets ———————————————————————————————————————————————————————————
 
-// renderHeadAssets is a test helper that executes forgeHeadTmpl with a
+// renderHeadAssets is a test helper that executes smeldrHeadTmpl with a
 // TemplateData carrying the given HeadAssets and returns the output string.
 func renderHeadAssets(t *testing.T, ha *HeadAssets) string {
 	t.Helper()
-	tpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(forgeHeadTmpl))
+	tpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(smeldrHeadTmpl))
 	data := TemplateData[string]{PageHead: PageHead{HeadAssets: ha}}
 	var buf strings.Builder
-	if err := tpl.ExecuteTemplate(&buf, "forge:head", data); err != nil {
+	if err := tpl.ExecuteTemplate(&buf, "smeldr:head", data); err != nil {
 		t.Fatalf("template execution: %v", err)
 	}
 	return buf.String()

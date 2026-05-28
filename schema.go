@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 
 // schema.go provides Go types for Google-supported JSON-LD rich results.
 // Use SchemaFor to generate a <script type="application/ld+json"> block
-// from a forge.Head and an optional content value.
+// from a smeldr.Head and an optional content value.
 
 // — Provider interfaces ———————————————————————————————————————————————————
 
@@ -425,7 +425,7 @@ func SchemaFor(head Head, content any) string {
 //
 // Apply via [App.SEO]:
 //
-//	app.SEO(&forge.AppSchema{
+//	app.SEO(&smeldr.AppSchema{
 //	    Type: "Organization",
 //	    Name: "Acme Corp",
 //	    URL:  "https://acme.com",

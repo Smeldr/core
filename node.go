@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"crypto/rand"
@@ -40,7 +40,7 @@ const (
 // Content types must embed Node as a value (not a pointer):
 //
 //	type BlogPost struct {
-//	    forge.Node
+//	    smeldr.Node
 //	    Title string `forge:"required"`
 //	    Body  string `forge:"required,min=50"`
 //	}
@@ -406,8 +406,8 @@ func validateStruct(v any) error {
 // validation passes — if tags fail, Validate() is not called.
 //
 //	func (p *BlogPost) Validate() error {
-//	    if p.Status == forge.Published && len(p.Tags) == 0 {
-//	        return forge.Err("tags", "required when publishing")
+//	    if p.Status == smeldr.Published && len(p.Tags) == 0 {
+//	        return smeldr.Err("tags", "required when publishing")
 //	    }
 //	    return nil
 //	}

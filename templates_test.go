@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"bytes"
@@ -95,32 +95,32 @@ func TestTemplates_forgeHeadRegistered(t *testing.T) {
 	if tplList == nil {
 		t.Fatal("tplList is nil after parseTemplates")
 	}
-	if tplList.Lookup("forge:head") == nil {
-		t.Error("forge:head not registered in list template set")
+	if tplList.Lookup("smeldr:head") == nil {
+		t.Error("smeldr:head not registered in list template set")
 	}
 	if tplShow == nil {
 		t.Fatal("tplShow is nil after parseTemplates")
 	}
-	if tplShow.Lookup("forge:head") == nil {
-		t.Error("forge:head not registered in show template set")
+	if tplShow.Lookup("smeldr:head") == nil {
+		t.Error("smeldr:head not registered in show template set")
 	}
 }
 
 func TestTemplates_noIndexMeta(t *testing.T) {
-	// Execute forgeHeadTmpl directly — no module needed. FuncMap required
-	// because forge:head uses forge_rfc3339 for article:published_time.
-	tpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(forgeHeadTmpl))
+	// Execute smeldrHeadTmpl directly — no module needed. FuncMap required
+	// because smeldr:head uses forge_rfc3339 for article:published_time.
+	tpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(smeldrHeadTmpl))
 	var buf bytes.Buffer
 	h := Head{Title: "Test Page", NoIndex: true}
-	if err := tpl.ExecuteTemplate(&buf, "forge:head", TemplateData[any]{PageHead: PageHead{Head: h}}); err != nil {
+	if err := tpl.ExecuteTemplate(&buf, "smeldr:head", TemplateData[any]{PageHead: PageHead{Head: h}}); err != nil {
 		t.Fatalf("ExecuteTemplate: %v", err)
 	}
 	got := buf.String()
 	if !strings.Contains(got, "noindex") {
-		t.Errorf("expected noindex in forge:head output, got:\n%s", got)
+		t.Errorf("expected noindex in smeldr:head output, got:\n%s", got)
 	}
 	if !strings.Contains(got, "Test Page") {
-		t.Errorf("expected title in forge:head output, got:\n%s", got)
+		t.Errorf("expected title in smeldr:head output, got:\n%s", got)
 	}
 }
 
@@ -161,7 +161,7 @@ func TestTemplates_errorPage_custom(t *testing.T) {
 }
 
 func TestTemplates_twitterCard(t *testing.T) {
-	tpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(forgeHeadTmpl))
+	tpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(smeldrHeadTmpl))
 
 	cases := []struct {
 		name string
@@ -198,7 +198,7 @@ func TestTemplates_twitterCard(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			if err := tpl.ExecuteTemplate(&buf, "forge:head", TemplateData[any]{PageHead: PageHead{Head: tc.head}}); err != nil {
+			if err := tpl.ExecuteTemplate(&buf, "smeldr:head", TemplateData[any]{PageHead: PageHead{Head: tc.head}}); err != nil {
 				t.Fatalf("ExecuteTemplate: %v", err)
 			}
 			want := `content="` + string(tc.want) + `"`
@@ -504,7 +504,7 @@ func TestContextFunc_error(t *testing.T) {
 	}
 }
 
-// testContextFuncErr satisfies the forge.Error interface for tests.
+// testContextFuncErr satisfies the smeldr.Error interface for tests.
 type testContextFuncErr struct{}
 
 func (e *testContextFuncErr) Error() string   { return "context func error" }
@@ -515,7 +515,7 @@ func (e *testContextFuncErr) HTTPStatus() int { return 500 }
 
 func TestListHeadFunc_titlePopulated(t *testing.T) {
 	dir := t.TempDir()
-	writeTplFile(t, dir, "list.html", `{{template "forge:head" .}}`)
+	writeTplFile(t, dir, "list.html", `{{template "smeldr:head" .}}`)
 	writeTplFile(t, dir, "show.html", ``)
 
 	m := newTplModule(t,
@@ -542,7 +542,7 @@ func TestListHeadFunc_titlePopulated(t *testing.T) {
 
 func TestListHeadFunc_absent_emptyTitle(t *testing.T) {
 	dir := t.TempDir()
-	writeTplFile(t, dir, "list.html", `{{template "forge:head" .}}`)
+	writeTplFile(t, dir, "list.html", `{{template "smeldr:head" .}}`)
 	writeTplFile(t, dir, "show.html", ``)
 
 	// No ListHeadFunc — Head is zero; title element should be empty.
@@ -565,7 +565,7 @@ func TestListHeadFunc_absent_emptyTitle(t *testing.T) {
 func TestHeadFunc_showUnaffectedByListHeadFunc(t *testing.T) {
 	dir := t.TempDir()
 	writeTplFile(t, dir, "list.html", ``)
-	writeTplFile(t, dir, "show.html", `{{template "forge:head" .}}`)
+	writeTplFile(t, dir, "show.html", `{{template "smeldr:head" .}}`)
 
 	post := &tdPost{}
 	post.Slug = "hello"

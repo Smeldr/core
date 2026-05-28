@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"context"
@@ -66,7 +66,7 @@ func TestDispatchBeforeAbortsOnError(t *testing.T) {
 
 // TestDispatchBeforePanicReturnsError verifies that a panicking handler does
 // not crash the process and causes dispatchBefore to return a 500-class
-// forge.Error.
+// smeldr.Error.
 func TestDispatchBeforePanicReturnsError(t *testing.T) {
 	ctx := NewTestContext(GuestUser)
 	handlers := []signalHandler{
@@ -79,7 +79,7 @@ func TestDispatchBeforePanicReturnsError(t *testing.T) {
 	}
 	var fe Error
 	if !errors.As(err, &fe) {
-		t.Fatalf("expected forge.Error, got %T", err)
+		t.Fatalf("expected smeldr.Error, got %T", err)
 	}
 	if fe.HTTPStatus() != 500 {
 		t.Errorf("expected HTTP 500, got %d", fe.HTTPStatus())

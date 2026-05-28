@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 // — OGDefaults ————————————————————————————————————————————————————————————
 
@@ -14,8 +14,8 @@ package forge
 //
 // Example:
 //
-//	app.SEO(&forge.OGDefaults{
-//	    Image:          forge.Image{URL: "https://example.com/og.png", Width: 1200, Height: 630},
+//	app.SEO(&smeldr.OGDefaults{
+//	    Image:          smeldr.Image{URL: "https://example.com/og.png", Width: 1200, Height: 630},
 //	    TwitterSite:    "@mycompany",
 //	    TwitterCreator: "@editor",
 //	})
@@ -82,19 +82,19 @@ func (socialOption) isOption() {}
 // that makes intent explicit at the call site.
 //
 //	app.Content(&BlogPost{},
-//	    forge.At("/posts"),
-//	    forge.Social(forge.OpenGraph, forge.TwitterCard),
+//	    smeldr.At("/posts"),
+//	    smeldr.Social(smeldr.OpenGraph, smeldr.TwitterCard),
 //	)
 //
 // To customise per-item Twitter output, set [Head.Social] on the content type's
 // Head() method:
 //
-//	func (p *BlogPost) Head() forge.Head {
-//	    return forge.Head{
+//	func (p *BlogPost) Head() smeldr.Head {
+//	    return smeldr.Head{
 //	        // ...
-//	        Social: forge.SocialOverrides{
-//	            Twitter: forge.TwitterMeta{
-//	                Card:    forge.SummaryLargeImage,
+//	        Social: smeldr.SocialOverrides{
+//	            Twitter: smeldr.TwitterMeta{
+//	                Card:    smeldr.SummaryLargeImage,
 //	                Creator: "@alice",
 //	            },
 //	        },

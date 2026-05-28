@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"net/http/httptest"
@@ -115,11 +115,11 @@ func TestNewTestContextGuest(t *testing.T) {
 	}
 }
 
-// TestContextImplementsContextContext verifies that forge.Context is usable
+// TestContextImplementsContextContext verifies that smeldr.Context is usable
 // anywhere context.Context is accepted (compile-time interface satisfaction).
 func TestContextImplementsContextContext(t *testing.T) {
 	ctx := NewTestContext(GuestUser)
-	// If this compiles, forge.Context embeds context.Context correctly.
+	// If this compiles, smeldr.Context embeds context.Context correctly.
 	_ = context_deadline_helper(ctx)
 }
 

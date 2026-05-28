@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"context"
@@ -50,13 +50,13 @@ type Config struct {
 	//
 	// Example — cookie sessions instead of bearer tokens:
 	//
-	//	Auth: forge.CookieSession("session", secret)
+	//	Auth: smeldr.CookieSession("session", secret)
 	//
 	// Example — both bearer tokens and cookie sessions:
 	//
-	//	Auth: forge.AnyAuth(
-	//	    forge.BearerHMAC(secret),
-	//	    forge.CookieSession("session", secret),
+	//	Auth: smeldr.AnyAuth(
+	//	    smeldr.BearerHMAC(secret),
+	//	    smeldr.CookieSession("session", secret),
 	//	)
 	Auth AuthFunc
 
@@ -162,7 +162,7 @@ type Config struct {
 //
 // Typical usage:
 //
-//	app := forge.New(forge.MustConfig(forge.Config{
+//	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 //	    BaseURL: os.Getenv("BASE_URL"),
 //	    Secret:  []byte(os.Getenv("SECRET")),
 //	}))
@@ -197,7 +197,7 @@ func MustConfig(cfg Config) Config {
 //
 // Pass a pre-built [*Module] to [App.Content] to register it:
 //
-//	posts := forge.NewModule[*Post](&Post{}, forge.Repo(repo))
+//	posts := smeldr.NewModule[*Post](&Post{}, smeldr.Repo(repo))
 //	app.Content(posts)
 type Registrator interface {
 	Register(mux *http.ServeMux)
@@ -206,7 +206,7 @@ type Registrator interface {
 // SEOOption is implemented by any value that modifies the app-level SEO
 // configuration. Pass SEOOption values to [App.SEO]:
 //
-//	app.SEO(&forge.RobotsConfig{AIScraper: forge.AskFirst, Sitemaps: true})
+//	app.SEO(&smeldr.RobotsConfig{AIScraper: smeldr.AskFirst, Sitemaps: true})
 type SEOOption interface {
 	applySEO(*seoState)
 }
@@ -265,7 +265,7 @@ type App struct {
 	schedulerModules       []schedulableModule                 // modules that implement scheduled publishing
 	rebuilderModules       []rebuilder                         // modules with derived content (sitemap, feed, AI)
 	stoppableModules       []stoppable                         // modules with background goroutines to stop at shutdown
-	mcpModules             []MCPModule                         // modules registered with forge.MCP(...)
+	mcpModules             []MCPModule                         // modules registered with smeldr.MCP(...)
 	standaloneModules      []standaloneDispatcher              // Standalone() modules; for top-level /{slug} dispatch
 	standaloneReg          bool                                // true once GET /{slug} and GET /{slug}/aidoc are registered
 	rebuildDone            bool                                // true once startup rebuildAll goroutine is launched
@@ -327,7 +327,7 @@ func New(cfg Config) *App {
 // the outermost layer. Use may be called multiple times; all calls are
 // additive.
 //
-//	app.Use(forge.RequestLogger(), forge.Recoverer(), forge.SecurityHeaders())
+//	app.Use(smeldr.RequestLogger(), smeldr.Recoverer(), smeldr.SecurityHeaders())
 func (a *App) Use(mws ...func(http.Handler) http.Handler) {
 	a.middleware = append(a.middleware, mws...)
 }
@@ -393,11 +393,11 @@ func (a *App) MustParseTemplate(path string) *template.Template {
 // If v implements [Registrator] (which [*Module] does), its Register method is
 // called directly and opts are ignored. This is the idiomatic path:
 //
-//	posts := forge.NewModule[*Post](&Post{}, forge.Repo(repo), forge.At("/posts"))
+//	posts := smeldr.NewModule[*Post](&Post{}, smeldr.Repo(repo), smeldr.At("/posts"))
 //	app.Content(posts)
 //
 // If v does not implement [Registrator], Content calls [NewModule][any](v,
-// opts...) and registers the result. In this case forge.Repo must be supplied
+// opts...) and registers the result. In this case smeldr.Repo must be supplied
 // as a repoOption[any] — type safety is lost. Prefer the [Registrator] path
 // for all production code.
 func (a *App) Content(v any, opts ...Option) {
@@ -555,7 +555,7 @@ func (a *App) TokenStore() *TokenStore { return a.tokenStore }
 // Call this after [App.Content] has registered all modules and before
 // [App.Run]:
 //
-//	store := forge.NewWebhookStore(db, secret)
+//	store := smeldr.NewWebhookStore(db, secret)
 //	app.Webhooks(store)
 //
 // At [App.Run] time, Forge injects the signal bus into every registered
@@ -681,7 +681,7 @@ func (a *App) AddSignalListener(fn func(Signal, string, any)) {
 // Use OnSignal to build custom delivery pipelines that react to content
 // lifecycle events:
 //
-//	app.OnSignal(forge.AfterPublish, func(ctx context.Context, ev forge.SignalEvent) error {
+//	app.OnSignal(smeldr.AfterPublish, func(ctx context.Context, ev smeldr.SignalEvent) error {
 //	    return myQueue.Enqueue(ctx, ev)
 //	})
 func (a *App) OnSignal(sig Signal, h func(context.Context, SignalEvent) error) *App {
@@ -976,9 +976,9 @@ func (a *App) Handler() http.Handler {
 // override earlier values for the same option type.
 //
 //	app.SEO(
-//		&forge.RobotsConfig{AIScraper: forge.AskFirst, Sitemaps: true},
-//		&forge.OGDefaults{Image: "https://example.com/og.png", TwitterSite: "@example"},
-//		&forge.AppSchema{OrgName: "Example Inc", OrgType: "Organization"},
+//		&smeldr.RobotsConfig{AIScraper: smeldr.AskFirst, Sitemaps: true},
+//		&smeldr.OGDefaults{Image: "https://example.com/og.png", TwitterSite: "@example"},
+//		&smeldr.AppSchema{OrgName: "Example Inc", OrgType: "Organization"},
 //	)
 func (a *App) SEO(opts ...SEOOption) {
 	for _, opt := range opts {
@@ -997,8 +997,8 @@ func (a *App) SEO(opts ...SEOOption) {
 // authenticated requests:
 //
 //	app.Cookies(
-//	    forge.Cookie{Name: "session", Category: forge.Necessary, ...},
-//	    forge.Cookie{Name: "prefs",   Category: forge.Preferences, ...},
+//	    smeldr.Cookie{Name: "session", Category: smeldr.Necessary, ...},
+//	    smeldr.Cookie{Name: "prefs",   Category: smeldr.Preferences, ...},
 //	)
 func (a *App) Cookies(decls ...Cookie) {
 	seen := make(map[string]struct{}, len(a.cookieDecls))
@@ -1016,7 +1016,7 @@ func (a *App) Cookies(decls ...Cookie) {
 // CookiesManifestAuth sets the [AuthFunc] that guards /.well-known/cookies.json.
 // Call before [App.Handler] or [App.Run].
 //
-//	app.CookiesManifestAuth(forge.BearerHMAC(secret, forge.Editor))
+//	app.CookiesManifestAuth(smeldr.BearerHMAC(secret, smeldr.Editor))
 func (a *App) CookiesManifestAuth(auth AuthFunc) {
 	a.cookieManifestOpts = append(a.cookieManifestOpts, ManifestAuth(auth))
 }
@@ -1028,11 +1028,11 @@ func (a *App) CookiesManifestAuth(auth AuthFunc) {
 //
 // To issue a 301 Moved Permanently:
 //
-//	app.Redirect("/old-path", "/new-path", forge.Permanent)
+//	app.Redirect("/old-path", "/new-path", smeldr.Permanent)
 //
 // To issue a 410 Gone (pass an empty destination):
 //
-//	app.Redirect("/removed", "", forge.Gone)
+//	app.Redirect("/removed", "", smeldr.Gone)
 func (a *App) Redirect(from, to string, code RedirectCode) {
 	a.redirectStore.Add(RedirectEntry{From: from, To: to, Code: code})
 }
@@ -1051,7 +1051,7 @@ func (a *App) RedirectStore() *RedirectStore {
 // RedirectManifestAuth sets the [AuthFunc] that guards /.well-known/redirects.json.
 // Call before [App.Handler] or [App.Run].
 //
-//	app.RedirectManifestAuth(forge.BearerHMAC(secret, forge.Editor))
+//	app.RedirectManifestAuth(smeldr.BearerHMAC(secret, smeldr.Editor))
 func (a *App) RedirectManifestAuth(auth AuthFunc) {
 	a.redirectManifestOpts = append(a.redirectManifestOpts, ManifestAuth(auth))
 }

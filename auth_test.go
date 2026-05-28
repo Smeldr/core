@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"bytes"
@@ -65,7 +65,7 @@ func TestUserIs(t *testing.T) {
 
 // — SignToken / decodeToken —————————————————————————————————————————————
 
-// compile-time: signToken's error return must satisfy forge.Error
+// compile-time: signToken's error return must satisfy smeldr.Error
 var _ Error = ErrInternal
 
 func TestSignTokenRoundTrip(t *testing.T) {
@@ -418,8 +418,8 @@ func TestAnyAuthCSRFAware(t *testing.T) {
 }
 
 func TestCSRFCookieName(t *testing.T) {
-	if CSRFCookieName != "forge_csrf" {
-		t.Errorf("CSRFCookieName: got %q want %q", CSRFCookieName, "forge_csrf")
+	if CSRFCookieName != "smeldr_csrf" {
+		t.Errorf("CSRFCookieName: got %q want %q", CSRFCookieName, "smeldr_csrf")
 	}
 }
 
@@ -483,7 +483,7 @@ func TestVerifyBearerToken(t *testing.T) {
 
 // — TokenStore ——————————————————————————————————————————————————————————————
 
-// stubDB implements forge.DB using an in-memory slice for forge_tokens rows.
+// stubDB implements smeldr.DB using an in-memory slice for forge_tokens rows.
 // Only ExecContext (INSERT + UPDATE) is needed by TokenStore.Create/Revoke.
 type stubDB struct {
 	rows []stubTokenRow
@@ -613,7 +613,7 @@ func TestTokenStoreRevoke(t *testing.T) {
 
 // — VerifyBearerToken with store ——————————————————————————————————————————
 
-// rowDB implements forge.DB with a QueryRowContext that returns a pre-built
+// rowDB implements smeldr.DB with a QueryRowContext that returns a pre-built
 // *sql.Row via sql.OpenDB + a custom driver.Connector. Avoids sql.Register.
 type rowDB struct {
 	revokedAt *string // nil → active; non-nil pointer → revoked; use errNoRow sentinel

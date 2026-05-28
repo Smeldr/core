@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"context"
@@ -558,11 +558,11 @@ func Chain(h http.Handler, middlewares ...func(http.Handler) http.Handler) http.
 // Apply it globally before any module that enforces role checks via
 // [Auth], [Read], or [Write]:
 //
-//	app.Use(forge.Authenticate(forge.BearerHMAC(secret)))
+//	app.Use(smeldr.Authenticate(smeldr.BearerHMAC(secret)))
 //
 // Unauthenticated requests — where auth returns false — pass through unchanged.
 // [ContextFrom] then falls back to [GuestUser], which is the correct behaviour
-// for public read endpoints protected by forge.Read(forge.Guest).
+// for public read endpoints protected by smeldr.Read(smeldr.Guest).
 func Authenticate(auth AuthFunc) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -577,16 +577,16 @@ func Authenticate(auth AuthFunc) func(http.Handler) http.Handler {
 // — CSRF ——————————————————————————————————————————————————————————————————
 
 // CSRF returns middleware that validates the X-CSRF-Token request header against
-// the forge_csrf cookie on non-safe HTTP methods (POST, PUT, PATCH, DELETE).
+// the smeldr_csrf cookie on non-safe HTTP methods (POST, PUT, PATCH, DELETE).
 // It only activates when auth implements [csrfAware] and CSRF is enabled (i.e.
 // [CookieSession] without [WithoutCSRF]).
 //
-// The middleware also issues a new forge_csrf cookie when none is present,
+// The middleware also issues a new smeldr_csrf cookie when none is present,
 // allowing JavaScript clients to read it and send it as X-CSRF-Token.
 //
 // Apply CSRF after your auth middleware in the global chain or per-module:
 //
-//	app.Use(forge.CSRF(myAuth))
+//	app.Use(smeldr.CSRF(myAuth))
 func CSRF(auth AuthFunc) func(http.Handler) http.Handler {
 	ca, ok := auth.(csrfAware)
 	if !ok || !ca.csrfEnabled() {

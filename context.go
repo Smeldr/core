@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"context"
@@ -33,7 +33,7 @@ var GuestUser = User{}
 // It embeds [context.Context] for full compatibility with stdlib and third-party
 // libraries, while exposing Forge-specific accessors without key-based lookups.
 //
-// forge.Context is always non-nil — Forge guarantees this before any user code
+// smeldr.Context is always non-nil — Forge guarantees this before any user code
 // is called. The internal implementation is [contextImpl] (unexported).
 // Use [ContextFrom] in production and [NewTestContext] in tests.
 type Context interface {

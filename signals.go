@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"log/slog"
@@ -83,7 +83,7 @@ func (signalOption) isOption() {}
 //
 // Example:
 //
-//	forge.On(forge.BeforeCreate, func(ctx forge.Context, p *Post) error {
+//	smeldr.On(smeldr.BeforeCreate, func(ctx smeldr.Context, p *Post) error {
 //	    p.Author = ctx.User().Name
 //	    return nil
 //	})
@@ -102,7 +102,7 @@ var errSignalPanic = newSentinel(500, "signal_panic", "Internal server error")
 // dispatchBefore runs handlers synchronously in registration order.
 // The first non-nil error aborts iteration and is returned to the caller.
 // A panicking handler is recovered, logged, and causes a 500-class
-// [forge.Error] to be returned — it does not crash the process.
+// [smeldr.Error] to be returned — it does not crash the process.
 func dispatchBefore(ctx Context, handlers []signalHandler, payload any) error {
 	for _, h := range handlers {
 		if err := safeCall(ctx, h, payload); err != nil {

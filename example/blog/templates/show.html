@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Content.Title}} — Forge Devlog</title>
-  {{/* forge:head emits Open Graph, Twitter Card, JSON-LD Article, and canonical
+  {{/* smeldr:head emits Open Graph, Twitter Card, JSON-LD Article, and canonical
        tags derived from the Post's Head() method. Social(OpenGraph, TwitterCard)
        must be set on the module for og:/twitter: tags to appear. */}}
-  {{template "forge:head" .}}
+  {{template "smeldr:head" .}}
   <style>
     body { font-family: system-ui, sans-serif; max-width: 740px; margin: 2rem auto; padding: 0 1rem; line-height: 1.7; color: #1a1a1a; }
     header { border-bottom: 1px solid #e5e5e5; margin-bottom: 2rem; padding-bottom: 1rem; }
@@ -30,13 +30,13 @@
   <main>
     <article>
       <h1>{{.Content.Title}}</h1>
-      {{with .Content.PublishedAt | forge_date}}<time>{{.}}</time>{{end}}
+      {{with .Content.PublishedAt | smeldr_date}}<time>{{.}}</time>{{end}}
       {{if .Content.Tags}}
       <ul class="tags">{{range .Content.Tags}}<li>{{.}}</li>{{end}}</ul>
       {{end}}
-      {{/* forge_markdown converts the body's markdown to safe HTML.
+      {{/* smeldr_markdown converts the body's markdown to safe HTML.
            Supported: headings, bold, italic, code, links, lists, paragraphs. */}}
-      <div class="body">{{forge_markdown .Content.Body}}</div>
+      <div class="body">{{smeldr_markdown .Content.Body}}</div>
     </article>
     <nav>
       <a href="/posts">← All posts</a>

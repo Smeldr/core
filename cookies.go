@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"fmt"
@@ -105,7 +105,7 @@ func (c Cookie) httpCookie(value string) *http.Cookie {
 func SetCookie(w http.ResponseWriter, c Cookie, value string) {
 	if c.Category != Necessary {
 		panic(fmt.Sprintf(
-			"forge.SetCookie: cookie %q has category %q — only Necessary cookies "+
+			"smeldr.SetCookie: cookie %q has category %q — only Necessary cookies "+
 				"may use SetCookie; use SetCookieIfConsented for %q",
 			c.Name, c.Category, c.Category,
 		))
@@ -124,7 +124,7 @@ func SetCookie(w http.ResponseWriter, c Cookie, value string) {
 func SetCookieIfConsented(w http.ResponseWriter, r *http.Request, c Cookie, value string) bool {
 	if c.Category == Necessary {
 		panic(fmt.Sprintf(
-			"forge.SetCookieIfConsented: cookie %q has category Necessary — "+
+			"smeldr.SetCookieIfConsented: cookie %q has category Necessary — "+
 				"use SetCookie for Necessary cookies",
 			c.Name,
 		))
@@ -175,7 +175,7 @@ func ClearCookie(w http.ResponseWriter, c Cookie) {
 // — Consent storage ————————————————————————————————————————————————————————
 
 // consentCookieName is the Necessary cookie that stores the user's consent choices.
-const consentCookieName = "forge_consent"
+const consentCookieName = "smeldr_consent"
 
 // consentCookie is the declaration used to write and clear the consent state.
 var consentCookie = Cookie{
@@ -206,7 +206,7 @@ func ConsentFor(r *http.Request, cat CookieCategory) bool {
 	return false
 }
 
-// GrantConsent writes the forge_consent cookie to w with the given categories.
+// GrantConsent writes the smeldr_consent cookie to w with the given categories.
 // [Necessary] is always implicitly consented and is not stored in the cookie
 // value. Subsequent calls overwrite the previous consent state.
 func GrantConsent(w http.ResponseWriter, cats ...CookieCategory) {
@@ -220,7 +220,7 @@ func GrantConsent(w http.ResponseWriter, cats ...CookieCategory) {
 	http.SetCookie(w, consentCookie.httpCookie(strings.Join(parts, ",")))
 }
 
-// RevokeConsent clears the forge_consent cookie, withdrawing all non-Necessary
+// RevokeConsent clears the smeldr_consent cookie, withdrawing all non-Necessary
 // consent. Subsequent calls to [ConsentFor] for non-Necessary categories
 // return false until [GrantConsent] is called again.
 func RevokeConsent(w http.ResponseWriter) {

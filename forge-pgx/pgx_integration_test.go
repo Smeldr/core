@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	forge "smeldr.dev/core"
+	"smeldr.dev/core"
 )
 
 // TestWrap_integration exercises Wrap against a real PostgreSQL instance.
@@ -57,20 +57,20 @@ func TestWrap_integration(t *testing.T) {
 		t.Fatalf("QueryRowContext: got %q, want %q", name, "hello")
 	}
 
-	// QueryContext via forge.Query[T] — confirms the full stack works end-to-end.
+	// QueryContext via smeldr.Query[T] — confirms the full stack works end-to-end.
 	type testRow struct {
 		ID   string
 		Name string
 	}
-	rows, err := forge.Query[testRow](ctx, db, `SELECT id, name FROM forgepgx_test`)
+	rows, err := smeldr.Query[testRow](ctx, db, `SELECT id, name FROM forgepgx_test`)
 	if err != nil {
-		t.Fatalf("forge.Query: %v", err)
+		t.Fatalf("smeldr.Query: %v", err)
 	}
 	if len(rows) != 1 {
-		t.Fatalf("forge.Query: got %d rows, want 1", len(rows))
+		t.Fatalf("smeldr.Query: got %d rows, want 1", len(rows))
 	}
 	if rows[0].Name != "hello" {
-		t.Fatalf("forge.Query result: got %q, want %q", rows[0].Name, "hello")
+		t.Fatalf("smeldr.Query result: got %q, want %q", rows[0].Name, "hello")
 	}
 }
 
@@ -93,7 +93,7 @@ type pgxParityItem struct {
 // runForgePgxRepoParity defines the behavioural contract for Repository[T]
 // and runs it against the provided repo. Mirrors runRepoParity in
 // forge/storage_test.go — both must stay in sync with the parity contract.
-func runForgePgxRepoParity(t *testing.T, repo forge.Repository[pgxParityItem]) {
+func runForgePgxRepoParity(t *testing.T, repo smeldr.Repository[pgxParityItem]) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -112,7 +112,7 @@ func runForgePgxRepoParity(t *testing.T, repo forge.Repository[pgxParityItem]) {
 	})
 
 	t.Run("FindAll_empty", func(t *testing.T) {
-		items, err := repo.FindAll(ctx, forge.ListOptions{})
+		items, err := repo.FindAll(ctx, smeldr.ListOptions{})
 		if err != nil {
 			t.Fatalf("FindAll empty: %v", err)
 		}
@@ -152,7 +152,7 @@ func runForgePgxRepoParity(t *testing.T, repo forge.Repository[pgxParityItem]) {
 	})
 
 	t.Run("FindAll_all", func(t *testing.T) {
-		items, err := repo.FindAll(ctx, forge.ListOptions{})
+		items, err := repo.FindAll(ctx, smeldr.ListOptions{})
 		if err != nil {
 			t.Fatalf("FindAll: %v", err)
 		}
@@ -162,7 +162,7 @@ func runForgePgxRepoParity(t *testing.T, repo forge.Repository[pgxParityItem]) {
 	})
 
 	t.Run("FindAll_statusFilter", func(t *testing.T) {
-		items, err := repo.FindAll(ctx, forge.ListOptions{Status: []forge.Status{forge.Published}})
+		items, err := repo.FindAll(ctx, smeldr.ListOptions{Status: []smeldr.Status{smeldr.Published}})
 		if err != nil {
 			t.Fatalf("FindAll status: %v", err)
 		}
@@ -170,7 +170,7 @@ func runForgePgxRepoParity(t *testing.T, repo forge.Repository[pgxParityItem]) {
 			t.Fatalf("FindAll status: got %d items, want 2", len(items))
 		}
 		for _, it := range items {
-			if it.Status != string(forge.Published) {
+			if it.Status != string(smeldr.Published) {
 				t.Errorf("unexpected status %q", it.Status)
 			}
 		}
@@ -208,7 +208,7 @@ func runForgePgxRepoParity(t *testing.T, repo forge.Repository[pgxParityItem]) {
 	})
 
 	t.Run("FindAll_pagination", func(t *testing.T) {
-		items, err := repo.FindAll(ctx, forge.ListOptions{PerPage: 1, Page: 1})
+		items, err := repo.FindAll(ctx, smeldr.ListOptions{PerPage: 1, Page: 1})
 		if err != nil {
 			t.Fatalf("FindAll page 1: %v", err)
 		}
@@ -218,16 +218,16 @@ func runForgePgxRepoParity(t *testing.T, repo forge.Repository[pgxParityItem]) {
 	})
 }
 
-// isErrNotFound reports whether err is (or wraps) forge.ErrNotFound.
+// isErrNotFound reports whether err is (or wraps) smeldr.ErrNotFound.
 func isErrNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
-	var fe forge.Error
+	var fe smeldr.Error
 	if errors.As(err, &fe) {
-		return fe.Code() == forge.ErrNotFound.Code()
+		return fe.Code() == smeldr.ErrNotFound.Code()
 	}
-	return errors.Is(err, forge.ErrNotFound)
+	return errors.Is(err, smeldr.ErrNotFound)
 }
 
 // TestRepoParity_pgx runs the full Repository parity suite against a real
@@ -262,6 +262,6 @@ func TestRepoParity_pgx(t *testing.T) {
 		_, _ = db.ExecContext(context.Background(), `DROP TABLE parity_items`)
 	})
 
-	repo := forge.NewSQLRepo[pgxParityItem](db, forge.Table("parity_items"))
+	repo := smeldr.NewSQLRepo[pgxParityItem](db, smeldr.Table("parity_items"))
 	runForgePgxRepoParity(t, repo)
 }

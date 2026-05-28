@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import "sync"
 
@@ -85,7 +85,7 @@ type roleBuilder struct {
 // or [roleBuilder.Below] to position it, then [roleBuilder.Register] to
 // commit it to the role registry.
 //
-//	r, err := forge.NewRole("publisher").Above(forge.Author).Below(forge.Editor).Register()
+//	r, err := smeldr.NewRole("publisher").Above(smeldr.Author).Below(smeldr.Editor).Register()
 func NewRole(name string) roleBuilder {
 	return roleBuilder{name: name}
 }
@@ -129,7 +129,7 @@ func (rb roleBuilder) Register() (Role, error) {
 
 // Option configures a [Module] or App at registration time. Option values are
 // created by functions such as [Read], [Write], [Delete], [At], [Cache], and
-// [forge.On]. They are consumed during module or app setup and have no effect
+// [smeldr.On]. They are consumed during module or app setup and have no effect
 // after [App.Run] is called.
 type Option interface{ isOption() }
 

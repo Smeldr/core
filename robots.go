@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"fmt"
@@ -29,8 +29,8 @@ const (
 // RobotsConfig configures the auto-generated robots.txt. Pass a pointer to
 // [App.SEO] to register the /robots.txt endpoint:
 //
-//	app.SEO(&forge.RobotsConfig{
-//	    AIScraper: forge.AskFirst,
+//	app.SEO(&smeldr.RobotsConfig{
+//	    AIScraper: smeldr.AskFirst,
 //	    Sitemaps:  true,
 //	})
 type RobotsConfig struct {

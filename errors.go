@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"encoding/json"
@@ -91,7 +91,7 @@ type fieldError struct {
 }
 
 // ValidationError is returned when one or more fields fail validation.
-// It implements forge.Error with HTTP status 422.
+// It implements smeldr.Error with HTTP status 422.
 //
 // Create with [Err] for a single field, or [Require] to collect several.
 type ValidationError struct {
@@ -115,9 +115,9 @@ func (e *ValidationError) Error() string {
 }
 
 // Err returns a [ValidationError] for a single field. The returned error
-// implements forge.Error and will produce a 422 response with field details.
+// implements smeldr.Error and will produce a 422 response with field details.
 //
-//	return forge.Err("title", "required")
+//	return smeldr.Err("title", "required")
 func Err(field, message string) *ValidationError {
 	return &ValidationError{fields: []fieldError{{field: field, message: message}}}
 }
@@ -126,9 +126,9 @@ func Err(field, message string) *ValidationError {
 // ValidationError. Nil values are silently skipped. Returns nil if every
 // input is nil. Returns the first non-nil non-ValidationError error unchanged.
 //
-//	return forge.Require(
-//	    forge.Err("title", "required"),
-//	    forge.Err("body",  "minimum 50 characters"),
+//	return smeldr.Require(
+//	    smeldr.Err("title", "required"),
+//	    smeldr.Err("body",  "minimum 50 characters"),
 //	)
 func Require(errs ...error) error {
 	var collected []fieldError
@@ -155,8 +155,8 @@ func Require(errs ...error) error {
 //
 // Behaviour by error type:
 //   - [*ValidationError]    → 422 with a JSON fields array
-//   - [forge.Error] 4xx     → the error's own status, code, and public message
-//   - [forge.Error] 5xx     → logged internally; generic 500 sent to client
+//   - [smeldr.Error] 4xx     → the error's own status, code, and public message
+//   - [smeldr.Error] 5xx     → logged internally; generic 500 sent to client
 //   - any other error       → logged internally; generic 500 sent to client
 //
 // The X-Request-ID header is echoed from the response (if already set by

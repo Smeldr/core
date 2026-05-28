@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"encoding/xml"
@@ -41,8 +41,8 @@ func (feedOption) isOption() {}
 // Feed-enabled module, sorted by publish date descending.
 //
 //	app.Content(&Post{},
-//	    forge.At("/posts"),
-//	    forge.Feed(forge.FeedConfig{Title: "Blog", Description: "Latest posts"}),
+//	    smeldr.At("/posts"),
+//	    smeldr.Feed(smeldr.FeedConfig{Title: "Blog", Description: "Latest posts"}),
 //	)
 func Feed(cfg FeedConfig) Option { return feedOption{cfg: cfg} }
 

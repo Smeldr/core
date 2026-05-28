@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"bytes"
@@ -8,18 +8,18 @@ import (
 	"time"
 )
 
-// execForgeHead parses and executes the forge:head partial with h as data.
-// The TemplateFuncMap is registered so forge_rfc3339 and other helpers resolve.
+// execForgeHead parses and executes the smeldr:head partial with h as data.
+// The TemplateFuncMap is registered so smeldr_rfc3339 and other helpers resolve.
 func execForgeHead(t *testing.T, h Head) string {
 	t.Helper()
-	tmpl, err := template.New("").Funcs(TemplateFuncMap()).Parse(forgeHeadTmpl)
+	tmpl, err := template.New("").Funcs(TemplateFuncMap()).Parse(smeldrHeadTmpl)
 	if err != nil {
-		t.Fatalf("parse forgeHeadTmpl: %v", err)
+		t.Fatalf("parse smeldrHeadTmpl: %v", err)
 	}
 	data := TemplateData[any]{PageHead: PageHead{Head: h}}
 	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "forge:head", data); err != nil {
-		t.Fatalf("execute forge:head: %v", err)
+	if err := tmpl.ExecuteTemplate(&buf, "smeldr:head", data); err != nil {
+		t.Fatalf("execute smeldr:head: %v", err)
 	}
 	return buf.String()
 }
@@ -74,7 +74,7 @@ func TestForgeHeadOGRendering(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.label, func(t *testing.T) {
 			if !strings.Contains(out, c.want) {
-				t.Errorf("forge:head output missing %s\ngot:\n%s", c.want, out)
+				t.Errorf("smeldr:head output missing %s\ngot:\n%s", c.want, out)
 			}
 		})
 	}
@@ -102,7 +102,7 @@ func TestForgeHeadTwitterRendering(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.label, func(t *testing.T) {
 			if !strings.Contains(out, c.want) {
-				t.Errorf("forge:head output missing %s\ngot:\n%s", c.want, out)
+				t.Errorf("smeldr:head output missing %s\ngot:\n%s", c.want, out)
 			}
 		})
 	}
@@ -140,7 +140,7 @@ func TestForgeHeadArticleMeta(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.label, func(t *testing.T) {
 			if !strings.Contains(out, c.want) {
-				t.Errorf("forge:head output missing %s\ngot:\n%s", c.want, out)
+				t.Errorf("smeldr:head output missing %s\ngot:\n%s", c.want, out)
 			}
 		})
 	}
@@ -157,7 +157,7 @@ func TestForgeHeadNoOGWithoutTitle(t *testing.T) {
 	}
 	for _, f := range forbidden {
 		if strings.Contains(out, f) {
-			t.Errorf("forge:head should not emit %q when Title is empty\ngot:\n%s", f, out)
+			t.Errorf("smeldr:head should not emit %q when Title is empty\ngot:\n%s", f, out)
 		}
 	}
 }

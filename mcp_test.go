@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"testing"
@@ -183,14 +183,14 @@ func TestMCPSchemaWithConstraints(t *testing.T) {
 	}
 }
 
-// TestMCPSchema_formatTags verifies that forge_format and forge_description
+// TestMCPSchema_formatTags verifies that smeldr_format and smeldr_description
 // struct tags are reflected in MCPField.Format and MCPField.Description
 // (Decision 27).
 func TestMCPSchema_formatTags(t *testing.T) {
 	type richPost struct {
 		Node
-		Body  string `forge:"required" forge_format:"markdown" forge_description:"Write content in Markdown."`
-		Embed string `forge_format:"html"`
+		Body  string `forge:"required" smeldr_format:"markdown" smeldr_description:"Write content in Markdown."`
+		Embed string `smeldr_format:"html"`
 		Plain string
 	}
 	repo := NewMemoryRepo[*richPost]()

@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"bytes"
@@ -38,7 +38,7 @@ type stoppable interface {
 // module. Built once at [NewModule] time; never mutated after construction.
 type contentNegotiator struct {
 	md   bool // true if the prototype T implements Markdownable
-	html bool // true if forge.Templates option is set (Milestone 3)
+	html bool // true if smeldr.Templates option is set (Milestone 3)
 }
 
 // negotiate returns the canonical content-type string to serve for r.
@@ -46,7 +46,7 @@ type contentNegotiator struct {
 // request on the hot path — allocation-free.
 //
 // Content-type branches are gated on the module's capability flags (A35):
-// text/html is only selected when forge.Templates is registered (n.html),
+// text/html is only selected when smeldr.Templates is registered (n.html),
 // text/markdown only when the content type implements Markdownable (n.md).
 // When an Accept header requests a format the module cannot produce, the
 // negotiator falls through to the next candidate rather than returning a
@@ -89,7 +89,7 @@ func (atOption) isOption() {}
 
 // At returns an [Option] that sets the URL prefix for a module.
 // The prefix must start with "/" and must not end with "/".
-// Example: forge.At("/posts")
+// Example: smeldr.At("/posts")
 func At(prefix string) Option { return atOption{prefix: prefix} }
 
 // moduleCacheOption carries the TTL for a module-level [CacheStore].
@@ -125,10 +125,10 @@ func (authOption) isOption() {}
 // Auth returns an [Option] that sets the minimum role for each HTTP operation on
 // this module. Accepts [Read], [Write], and [Delete] role options.
 //
-//	forge.Auth(
-//	    forge.Read(forge.Guest),
-//	    forge.Write(forge.Author),
-//	    forge.Delete(forge.Editor),
+//	smeldr.Auth(
+//	    smeldr.Read(smeldr.Guest),
+//	    smeldr.Write(smeldr.Author),
+//	    smeldr.Delete(smeldr.Editor),
 //	)
 func Auth(opts ...Option) Option { return authOption{opts: opts} }
 
@@ -136,7 +136,7 @@ func Auth(opts ...Option) Option { return authOption{opts: opts} }
 // Application code never calls [Repo] directly — [App.Content] supplies it.
 // In unit tests, supply it explicitly:
 //
-//	m := forge.NewModule(&Post{}, forge.Repo(forge.NewMemoryRepo[*Post]()))
+//	m := smeldr.NewModule(&Post{}, smeldr.Repo(smeldr.NewMemoryRepo[*Post]()))
 type repoOption[T any] struct{ repo Repository[T] }
 
 func (repoOption[T]) isOption() {}
@@ -144,7 +144,7 @@ func (repoOption[T]) isOption() {}
 // Repo returns an [Option] that provides the [Repository] for a [Module].
 // This is called internally by App.Content. In unit tests pass a [MemoryRepo]:
 //
-//	forge.Repo(forge.NewMemoryRepo[*Post]())
+//	smeldr.Repo(smeldr.NewMemoryRepo[*Post]())
 func Repo[T any](r Repository[T]) Option { return repoOption[T]{repo: r} }
 
 // contextFuncOption carries the per-request extra-data function. Use [ContextFunc] to create one.
@@ -161,9 +161,9 @@ func (contextFuncOption) isOption() {}
 // Use ContextFunc to supply sidebar data, navigation trees, related items, or
 // any per-request data that the content item itself does not carry:
 //
-//	forge.ContextFunc(func(ctx forge.Context, _ any) (any, error) {
-//	    return docRepo.FindAll(ctx, forge.ListOptions{
-//	        Status: []forge.Status{forge.Published},
+//	smeldr.ContextFunc(func(ctx smeldr.Context, _ any) (any, error) {
+//	    return docRepo.FindAll(ctx, smeldr.ListOptions{
+//	        Status: []smeldr.Status{smeldr.Published},
 //	    })
 //	})
 //
@@ -227,11 +227,11 @@ func (apiOnlyOption) isOption() {}
 // Use APIOnly for content types that are exclusively managed via MCP tools or
 // forge-cli and have no template or public HTML representation:
 //
-//	forge.NewModule((*HomePage)(nil),
-//	    forge.At("/home-pages"),
-//	    forge.Repo(repo),
-//	    forge.MCP(forge.MCPWrite),
-//	    forge.APIOnly(),
+//	smeldr.NewModule((*HomePage)(nil),
+//	    smeldr.At("/home-pages"),
+//	    smeldr.Repo(repo),
+//	    smeldr.MCP(smeldr.MCPWrite),
+//	    smeldr.APIOnly(),
 //	)
 //
 // MCP tools are generated in full — the same as a regular module.
@@ -263,7 +263,7 @@ func APIOnly() Option { return apiOnlyOption{} }
 //
 //   func (p *Post) GetNode() *Node { return &p.Node }
 //
-// Embedding forge.Node does not satisfy this automatically. Every existing
+// Embedding smeldr.Node does not satisfy this automatically. Every existing
 // content type would need the method added — a breaking change for all users.
 //
 // Is there a non-breaking path?
@@ -281,7 +281,7 @@ func APIOnly() Option { return apiOnlyOption{} }
 // tradeoff for Go 1.26.2 given the zero-breaking-change requirement.
 //
 // If a future major version permits breaking changes, adding GetNode() to the
-// forge.Node embed (or as a generated method) would be the clean path.
+// smeldr.Node embed (or as a generated method) would be the clean path.
 // That decision belongs to Phase 3 or 4. Do not implement it here.
 
 // nodeFields holds the struct field index paths for the three required Node fields.
@@ -305,7 +305,7 @@ func getNodeFields(t reflect.Type) nodeFields {
 	slugF, slugOK := t.FieldByName("Slug")
 	statusF, statusOK := t.FieldByName("Status")
 	if !idOK || !slugOK || !statusOK {
-		panic("forge: content type must embed forge.Node (missing ID, Slug, or Status field)")
+		panic("forge: content type must embed smeldr.Node (missing ID, Slug, or Status field)")
 	}
 	f := nodeFields{id: idF.Index, slug: slugF.Index, status: statusF.Index}
 	nodeFieldCache.Store(t, f)
@@ -484,7 +484,7 @@ type Module[T any] struct {
 // Optional options:
 //   - [At]: override URL prefix (default: "/"+lowercase(TypeName)+"s").
 //     Use when the default pluralisation is wrong: Story → "/storys".
-//     Example: forge.At("/solved") or forge.At("/stories").
+//     Example: smeldr.At("/solved") or smeldr.At("/stories").
 //   - [Auth]: set per-operation role requirements
 //   - [Cache]: enable per-module LRU response cache
 //   - [Middleware]: wrap all routes with the given middleware
@@ -591,17 +591,17 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 	}
 
 	if !repoFound {
-		panic("forge: Module[T] requires a Repository; use forge.Repo(...) or App.Content")
+		panic("forge: Module[T] requires a Repository; use smeldr.Repo(...) or App.Content")
 	}
 
 	// A36: detect capability mismatches at startup — programmer errors caught
 	// before any request is served (consistent with getNodeFields and repoFound).
-	// SitemapConfig requires T to implement SitemapNode (needs Head() forge.Head).
+	// SitemapConfig requires T to implement SitemapNode (needs Head() smeldr.Head).
 	if m.sitemapCfg != nil {
 		if _, ok := any(proto).(SitemapNode); !ok {
 			panic(fmt.Sprintf(
 				"forge: %s has SitemapConfig but does not implement SitemapNode "+
-					"(add a Head() forge.Head method); sitemap would be silently empty",
+					"(add a Head() smeldr.Head method); sitemap would be silently empty",
 				typeName,
 			))
 		}
@@ -1795,8 +1795,8 @@ func mcpStructField(sf reflect.StructField) MCPField {
 		Name:        sf.Name,
 		JSONName:    mcpJSONName(sf),
 		Type:        mcpGoTypeStr(sf.Type),
-		Format:      sf.Tag.Get("forge_format"),
-		Description: sf.Tag.Get("forge_description"),
+		Format:      sf.Tag.Get("smeldr_format"),
+		Description: sf.Tag.Get("smeldr_description"),
 	}
 	if tag := sf.Tag.Get("forge"); tag != "" {
 		f.Required, f.MinLength, f.MaxLength, f.Enum = mcpParseForgeTag(tag)
@@ -1819,7 +1819,7 @@ func (m *Module[T]) MCPMeta() MCPMeta {
 }
 
 // MCPSchema derives the field schema for this module's content type from Go
-// struct fields and forge: struct tags. The embedded forge.Node fields Slug,
+// struct fields and forge: struct tags. The embedded smeldr.Node fields Slug,
 // Status, PublishedAt, and ScheduledAt are included; ID, CreatedAt, and
 // UpdatedAt are omitted because they are managed by the framework.
 func (m *Module[T]) MCPSchema() []MCPField {

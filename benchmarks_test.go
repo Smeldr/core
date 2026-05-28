@@ -10,7 +10,7 @@
 // Run all benchmarks with:
 //
 //	go test -run "^$" -bench "^Benchmark" -benchtime=3s ./...
-package forge
+package smeldr
 
 import (
 	"context"
@@ -68,7 +68,7 @@ func BenchmarkBearerHMAC_verify(b *testing.B) {
 // — Cookie consent (M6) ————————————————————————————————————————————————————
 
 // BenchmarkConsentFor_granted measures the cost of checking consent on a
-// request that carries a forge_consent cookie granting Analytics access.
+// request that carries a smeldr_consent cookie granting Analytics access.
 // This runs on every non-Necessary SetCookieIfConsented call.
 func BenchmarkConsentFor_granted(b *testing.B) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

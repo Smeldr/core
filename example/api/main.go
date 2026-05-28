@@ -38,17 +38,17 @@ import (
 	"smeldr.dev/core"
 )
 
-// secret is the HMAC signing key shared between forge.BearerHMAC (which
-// validates incoming tokens) and forge.SignToken (which issued them).
+// secret is the HMAC signing key shared between smeldr.BearerHMAC (which
+// validates incoming tokens) and smeldr.SignToken (which issued them).
 // In production read this from an environment variable or secrets store —
 // never hard-code it.
 const secret = "forge-api-example-secret-32bytes!"
 
 // NOTE: tokens are hardcoded for demonstration only.
-// In production use forge.SignToken to issue signed HMAC tokens.
+// In production use smeldr.SignToken to issue signed HMAC tokens.
 var (
-	editorToken string // forge.Editor role — can create and update
-	authorToken string // forge.Author role — read-only (below Editor threshold)
+	editorToken string // smeldr.Editor role — can create and update
+	authorToken string // smeldr.Author role — read-only (below Editor threshold)
 )
 
 func init() {
@@ -56,16 +56,16 @@ func init() {
 
 	// Forge: SignToken signs a User into a bearer token verified by BearerHMAC.
 	// ttl=0 means the token never expires — set a finite duration in production.
-	editorToken, err = forge.SignToken(
-		forge.User{ID: "editor-1", Name: "Alice", Roles: []forge.Role{forge.Editor}},
+	editorToken, err = smeldr.SignToken(
+		smeldr.User{ID: "editor-1", Name: "Alice", Roles: []smeldr.Role{smeldr.Editor}},
 		secret, 0,
 	)
 	if err != nil {
 		log.Fatalf("sign editor token: %v", err)
 	}
 
-	authorToken, err = forge.SignToken(
-		forge.User{ID: "author-1", Name: "Bob", Roles: []forge.Role{forge.Author}},
+	authorToken, err = smeldr.SignToken(
+		smeldr.User{ID: "author-1", Name: "Bob", Roles: []smeldr.Role{smeldr.Author}},
 		secret, 0,
 	)
 	if err != nil {
@@ -74,9 +74,9 @@ func init() {
 }
 
 // Resource is the content type for a curated Go community resource.
-// Embedding forge.Node provides ID, Slug, Status, and timestamp fields.
+// Embedding smeldr.Node provides ID, Slug, Status, and timestamp fields.
 type Resource struct {
-	forge.Node
+	smeldr.Node
 
 	Title       string `forge:"required,min=3,max=200"`
 	URL         string `forge:"required"`
@@ -84,18 +84,18 @@ type Resource struct {
 	Tags        []string
 }
 
-// Head implements [forge.Headable] so Resource satisfies [forge.SitemapNode].
+// Head implements [smeldr.Headable] so Resource satisfies [smeldr.SitemapNode].
 // Forge calls Head() when building the sitemap fragment at /resources/sitemap.xml.
 // In HTML mode the Description field populates the <meta name="description"> tag.
-func (r *Resource) Head() forge.Head {
-	return forge.Head{
+func (r *Resource) Head() smeldr.Head {
+	return smeldr.Head{
 		Title:       r.Title,
 		Description: r.Description,
 	}
 }
 
 // Markdown returns a plain-text summary of the resource suitable for AI index.
-// Implementing this method makes Resource satisfy [forge.Markdownable], which
+// Implementing this method makes Resource satisfy [smeldr.Markdownable], which
 // enables the /llms-full.txt corpus endpoint via AIIndex(LLMsTxtFull).
 func (r *Resource) Markdown() string {
 	return "# " + r.Title + "\n\n" + r.Description + "\n\nURL: " + r.URL
@@ -114,64 +114,64 @@ func main() {
 }
 
 // runServer starts the API on :8082.
-// When withHTML is true, forge.Templates is added to the module so every
+// When withHTML is true, smeldr.Templates is added to the module so every
 // resource is rendered as a browsable HTML page at /resources/{slug}.
 // Without it the server runs as a headless JSON API (the default).
 func runServer(withHTML bool) {
-	repo := forge.NewMemoryRepo[*Resource]()
+	repo := smeldr.NewMemoryRepo[*Resource]()
 	seed(repo)
 
 	// Forge: BearerHMAC validates Authorization: Bearer <token> on every request.
-	// It returns an AuthFunc — pair it with forge.Authenticate to populate
-	// Context.User() so module role checks (forge.Auth) evaluate correctly.
-	auth := forge.BearerHMAC(secret)
+	// It returns an AuthFunc — pair it with smeldr.Authenticate to populate
+	// Context.User() so module role checks (smeldr.Auth) evaluate correctly.
+	auth := smeldr.BearerHMAC(secret)
 
-	// Build module options. forge.Templates is appended when running in HTML mode,
+	// Build module options. smeldr.Templates is appended when running in HTML mode,
 	// turning the JSON API into a rendered website with no other code change.
-	opts := []forge.Option{
-		forge.At("/resources"),
-		forge.Repo(repo),
+	opts := []smeldr.Option{
+		smeldr.At("/resources"),
+		smeldr.Repo(repo),
 
 		// Forge: Auth(Read(Guest), Write(Editor)) sets the minimum role for each
 		// operation class. Guest means no token required to read. Editor means
 		// a valid Editor-or-higher token is required to create or update.
-		forge.Auth(
-			forge.Read(forge.Guest),   // GET /resources and GET /resources/{slug} — public
-			forge.Write(forge.Editor), // POST /resources and PUT /resources/{slug} — Editor+
+		smeldr.Auth(
+			smeldr.Read(smeldr.Guest),   // GET /resources and GET /resources/{slug} — public
+			smeldr.Write(smeldr.Editor), // POST /resources and PUT /resources/{slug} — Editor+
 		),
 
 		// Forge: BeforeCreate fires synchronously before the item is saved.
 		// Returning a non-nil error aborts the create and sends a 422 response.
-		// forge.Err creates a forge.ValidationError carrying a field-level message.
-		forge.On(forge.BeforeCreate, func(_ forge.Context, r *Resource) error {
+		// smeldr.Err creates a smeldr.ValidationError carrying a field-level message.
+		smeldr.On(smeldr.BeforeCreate, func(_ smeldr.Context, r *Resource) error {
 			if !strings.HasPrefix(r.URL, "http://") && !strings.HasPrefix(r.URL, "https://") {
-				return forge.Err("url", "must start with http:// or https://")
+				return smeldr.Err("url", "must start with http:// or https://")
 			}
 			return nil
 		}),
 
 		// Forge: SitemapConfig{} registers a sitemap fragment at /resources/sitemap.xml.
 		// The app-level sitemap index at /sitemap.xml aggregates all module fragments.
-		forge.SitemapConfig{},
+		smeldr.SitemapConfig{},
 
 		// Forge: Feed(FeedConfig{}) registers an RSS 2.0 feed at /resources/feed.xml.
-		forge.Feed(forge.FeedConfig{Title: "Forge API — Resources", Description: "Curated Go community resources"}),
+		smeldr.Feed(smeldr.FeedConfig{Title: "Forge API — Resources", Description: "Curated Go community resources"}),
 
 		// Forge: AIIndex registers AI discovery endpoints.
 		//   /llms.txt          — compact content index (llmstxt.org format)
 		//   /llms-full.txt     — full markdown corpus (requires Markdownable)
-		forge.AIIndex(forge.LLMsTxt, forge.LLMsTxtFull),
+		smeldr.AIIndex(smeldr.LLMsTxt, smeldr.LLMsTxtFull),
 	}
 	if withHTML {
 		// Forge: Templates("templates") enables HTML rendering. Forge parses
 		// templates/list.html (GET /resources) and templates/show.html
 		// (GET /resources/{slug}) at startup. The JSON API routes continue to
 		// work — clients sending Accept: application/json still get JSON.
-		opts = append(opts, forge.Templates("templates"))
+		opts = append(opts, smeldr.Templates("templates"))
 	}
-	m := forge.NewModule((*Resource)(nil), opts...)
+	m := smeldr.NewModule((*Resource)(nil), opts...)
 
-	app := forge.New(forge.MustConfig(forge.Config{
+	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 		BaseURL: "http://localhost:8082",
 		Secret:  []byte(secret),
 	}))
@@ -179,18 +179,18 @@ func runServer(withHTML bool) {
 	// Forge: Authenticate(auth) runs BearerHMAC on every inbound request and
 	// stores the User in the request context so Context.User() returns it.
 	// Without this middleware, ctx.User() always returns GuestUser and the
-	// write-role check in forge.Auth would never pass.
+	// write-role check in smeldr.Auth would never pass.
 	//
 	// SecurityHeaders() adds HSTS, X-Frame-Options, X-Content-Type-Options,
 	// Referrer-Policy, and Content-Security-Policy to every response.
 	//
 	// RateLimit(100, time.Second) caps each IP at 100 requests per second.
-	// Pass forge.TrustedProxy() as a third argument when running behind nginx
+	// Pass smeldr.TrustedProxy() as a third argument when running behind nginx
 	// or Caddy so the real client IP is read from X-Forwarded-For.
 	app.Use(
-		forge.Authenticate(auth),
-		forge.SecurityHeaders(),
-		forge.RateLimit(100, time.Second),
+		smeldr.Authenticate(auth),
+		smeldr.SecurityHeaders(),
+		smeldr.RateLimit(100, time.Second),
 	)
 
 	// Forge: Redirects(From("/resources/go-spec"), "/resources/go-language-spec")
@@ -198,8 +198,8 @@ func runServer(withHTML bool) {
 	// at /.well-known/redirects.json. The explicit Handle below registers the same
 	// redirect as a fixed mux route so it takes priority over GET /resources/{slug}.
 	app.Content(m,
-		forge.Redirects(
-			forge.From("/resources/go-spec"),
+		smeldr.Redirects(
+			smeldr.From("/resources/go-spec"),
 			"/resources/go-language-spec",
 		),
 	)
@@ -210,7 +210,7 @@ func runServer(withHTML bool) {
 
 	// Forge: SEO(&RobotsConfig{Sitemaps: true}) registers GET /robots.txt and
 	// appends the sitemap index URL to its Sitemap: directives.
-	app.SEO(&forge.RobotsConfig{Sitemaps: true})
+	app.SEO(&smeldr.RobotsConfig{Sitemaps: true})
 
 	// Welcome page — real links for all GET endpoints; CLI commands for write ops.
 	app.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -293,8 +293,8 @@ footer a{color:#2563eb}
 }
 
 // seed inserts 8 Published resources, 1 Draft, and 1 Scheduled into repo.
-// In production these come from a SQL database via forge.SQLRepo[T].
-func seed(repo forge.Repository[*Resource]) {
+// In production these come from a SQL database via smeldr.SQLRepo[T].
+func seed(repo smeldr.Repository[*Resource]) {
 	now := time.Now().UTC()
 	ctx := context.Background()
 
@@ -304,7 +304,7 @@ func seed(repo forge.Repository[*Resource]) {
 		url    string
 		desc   string
 		tags   []string
-		status forge.Status
+		status smeldr.Status
 		days   int        // days ago (for PublishedAt)
 		sched  *time.Time // non-nil for Scheduled
 	}
@@ -318,7 +318,7 @@ func seed(repo forge.Repository[*Resource]) {
 			url:    "https://go.dev/ref/spec",
 			desc:   "The official specification for the Go programming language. The authoritative reference for parsers, compilers, and anyone building Go tooling.",
 			tags:   []string{"spec", "language", "reference"},
-			status: forge.Published,
+			status: smeldr.Published,
 			days:   90,
 		},
 		{
@@ -327,7 +327,7 @@ func seed(repo forge.Repository[*Resource]) {
 			url:    "https://go.dev/doc/effective_go",
 			desc:   "A guide to writing clear, idiomatic Go code. Covers formatting, names, control flow, data structures, methods, interfaces, and concurrency.",
 			tags:   []string{"guide", "style", "idioms"},
-			status: forge.Published,
+			status: smeldr.Published,
 			days:   85,
 		},
 		{
@@ -336,7 +336,7 @@ func seed(repo forge.Repository[*Resource]) {
 			url:    "https://go.dev/blog",
 			desc:   "Official blog from the Go team at Google. Covers language features, toolchain releases, community news, and deep technical articles.",
 			tags:   []string{"blog", "official", "news"},
-			status: forge.Published,
+			status: smeldr.Published,
 			days:   80,
 		},
 		{
@@ -345,7 +345,7 @@ func seed(repo forge.Repository[*Resource]) {
 			url:    "https://pkg.go.dev",
 			desc:   "The official Go package index and documentation host. Search for any public Go module, browse docs, and explore the import graph.",
 			tags:   []string{"packages", "docs", "modules"},
-			status: forge.Published,
+			status: smeldr.Published,
 			days:   75,
 		},
 		{
@@ -354,7 +354,7 @@ func seed(repo forge.Repository[*Resource]) {
 			url:    "https://pkg.go.dev/golang.org/x/tools/gopls",
 			desc:   "The official language server for Go, consumed by VS Code, Neovim, Emacs, and other editors. Provides completion, diagnostics, and refactoring.",
 			tags:   []string{"tooling", "lsp", "editor"},
-			status: forge.Published,
+			status: smeldr.Published,
 			days:   70,
 		},
 		{
@@ -363,7 +363,7 @@ func seed(repo forge.Repository[*Resource]) {
 			url:    "https://go.dev/play",
 			desc:   "Run and share Go code snippets in the browser with no installation required. Useful for reproducing bugs, sharing examples, and learning.",
 			tags:   []string{"playground", "tools", "learning"},
-			status: forge.Published,
+			status: smeldr.Published,
 			days:   65,
 		},
 		{
@@ -372,7 +372,7 @@ func seed(repo forge.Repository[*Resource]) {
 			url:    "https://go.dev/talks/2012/waza.slide",
 			desc:   "Rob Pike's landmark 2012 talk distinguishing concurrency (structuring programs) from parallelism (executing computations simultaneously). Essential Go philosophy.",
 			tags:   []string{"concurrency", "talk", "rob-pike"},
-			status: forge.Published,
+			status: smeldr.Published,
 			days:   60,
 		},
 		{
@@ -381,7 +381,7 @@ func seed(repo forge.Repository[*Resource]) {
 			url:    "https://go.dev/ref/mem",
 			desc:   "Specifies the conditions under which reads of a variable in one goroutine can be guaranteed to observe values written by a different goroutine.",
 			tags:   []string{"concurrency", "memory", "reference"},
-			status: forge.Published,
+			status: smeldr.Published,
 			days:   55,
 		},
 		{
@@ -391,7 +391,7 @@ func seed(repo forge.Repository[*Resource]) {
 			url:    "https://go.dev/tour",
 			desc:   "An interactive introduction to Go in your browser. Covers the basics of the language with hands-on exercises — the recommended starting point for beginners.",
 			tags:   []string{"learning", "interactive", "beginner"},
-			status: forge.Draft,
+			status: smeldr.Draft,
 			days:   0,
 		},
 		{
@@ -401,7 +401,7 @@ func seed(repo forge.Repository[*Resource]) {
 			url:    "https://go-proverbs.github.io",
 			desc:   "Rob Pike's collection of Go proverbs from GopherFest 2015. Pithy design principles that capture the philosophy of idiomatic Go.",
 			tags:   []string{"proverbs", "philosophy", "rob-pike"},
-			status: forge.Scheduled,
+			status: smeldr.Scheduled,
 			days:   0,
 			sched:  &schedTime,
 		},
@@ -412,8 +412,8 @@ func seed(repo forge.Repository[*Resource]) {
 		if r.days > 0 {
 			pub = now.Add(-time.Duration(r.days) * 24 * time.Hour)
 		}
-		node := forge.Node{
-			ID:          forge.NewID(),
+		node := smeldr.Node{
+			ID:          smeldr.NewID(),
 			Slug:        r.slug,
 			Status:      r.status,
 			PublishedAt: pub,

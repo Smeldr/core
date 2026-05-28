@@ -24,7 +24,7 @@ import (
 // buildTestApp constructs a complete in-memory test server using httptest.
 // It returns the app, a running test server, and pre-issued author/editor tokens.
 // Use this for all tests except scheduler and audit (which need app.Run()).
-func buildTestApp(t *testing.T) (*forge.App, *httptest.Server, string, string) {
+func buildTestApp(t *testing.T) (*smeldr.App, *httptest.Server, string, string) {
 	t.Helper()
 
 	dbPath := filepath.Join(t.TempDir(), "test-blog.db")
@@ -39,21 +39,21 @@ func buildTestApp(t *testing.T) (*forge.App, *httptest.Server, string, string) {
 	}
 
 	const testSecret = "test-secret-for-blog-tests"
-	tokenStore := forge.NewTokenStore(db, testSecret)
-	repo := forge.NewSQLRepo[*Post](db)
+	tokenStore := smeldr.NewTokenStore(db, testSecret)
+	repo := smeldr.NewSQLRepo[*Post](db)
 
-	m := forge.NewModule((*Post)(nil),
-		forge.At("/posts"),
-		forge.Repo(repo),
-		forge.Auth(forge.Read(forge.Guest), forge.Write(forge.Author)),
-		forge.MCP(forge.MCPRead, forge.MCPWrite),
-		forge.SitemapConfig{},
-		forge.Social(forge.OpenGraph, forge.TwitterCard),
-		forge.Feed(forge.FeedConfig{Title: "Test Blog"}),
-		forge.AIIndex(forge.LLMsTxt, forge.LLMsTxtFull, forge.AIDoc),
+	m := smeldr.NewModule((*Post)(nil),
+		smeldr.At("/posts"),
+		smeldr.Repo(repo),
+		smeldr.Auth(smeldr.Read(smeldr.Guest), smeldr.Write(smeldr.Author)),
+		smeldr.MCP(smeldr.MCPRead, smeldr.MCPWrite),
+		smeldr.SitemapConfig{},
+		smeldr.Social(smeldr.OpenGraph, smeldr.TwitterCard),
+		smeldr.Feed(smeldr.FeedConfig{Title: "Test Blog"}),
+		smeldr.AIIndex(smeldr.LLMsTxt, smeldr.LLMsTxtFull, smeldr.AIDoc),
 	)
 
-	app := forge.New(forge.MustConfig(forge.Config{
+	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 		BaseURL:    "http://localhost",
 		Secret:     []byte(testSecret),
 		DB:         db,
@@ -103,8 +103,8 @@ func buildFullTestServer(t *testing.T) (baseURL, authorToken, editorToken, sched
 	}
 
 	const testSecret = "full-server-test-secret"
-	tokenStore := forge.NewTokenStore(db, testSecret)
-	repo := forge.NewSQLRepo[*Post](db)
+	tokenStore := smeldr.NewTokenStore(db, testSecret)
+	repo := smeldr.NewSQLRepo[*Post](db)
 
 	// Pre-seed a scheduled post into the DB before the server starts.
 	// The scheduler's initial tick (inside app.Run, before ListenAndServe)
@@ -112,10 +112,10 @@ func buildFullTestServer(t *testing.T) (baseURL, authorToken, editorToken, sched
 	// is already Published and verifiable via HTTP.
 	past := time.Now().UTC().Add(-5 * time.Second)
 	seeded := &Post{
-		Node: forge.Node{
-			ID:          forge.NewID(),
+		Node: smeldr.Node{
+			ID:          smeldr.NewID(),
 			Slug:        "pre-scheduled-test",
-			Status:      forge.Scheduled,
+			Status:      smeldr.Scheduled,
 			ScheduledAt: &past,
 		},
 		Title: "Scheduler Test Post",
@@ -126,24 +126,24 @@ func buildFullTestServer(t *testing.T) (baseURL, authorToken, editorToken, sched
 	}
 	scheduledSlug = seeded.Slug
 
-	m := forge.NewModule((*Post)(nil),
-		forge.At("/posts"),
-		forge.Repo(repo),
-		forge.Auth(forge.Read(forge.Guest), forge.Write(forge.Author)),
-		forge.MCP(forge.MCPRead, forge.MCPWrite),
-		forge.SitemapConfig{},
-		forge.Feed(forge.FeedConfig{Title: "Full Test Blog"}),
-		forge.AIIndex(forge.LLMsTxt, forge.LLMsTxtFull, forge.AIDoc),
+	m := smeldr.NewModule((*Post)(nil),
+		smeldr.At("/posts"),
+		smeldr.Repo(repo),
+		smeldr.Auth(smeldr.Read(smeldr.Guest), smeldr.Write(smeldr.Author)),
+		smeldr.MCP(smeldr.MCPRead, smeldr.MCPWrite),
+		smeldr.SitemapConfig{},
+		smeldr.Feed(smeldr.FeedConfig{Title: "Full Test Blog"}),
+		smeldr.AIIndex(smeldr.LLMsTxt, smeldr.LLMsTxtFull, smeldr.AIDoc),
 	)
 
-	app := forge.New(forge.MustConfig(forge.Config{
+	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 		BaseURL:    "http://localhost:19991",
 		Secret:     []byte(testSecret),
 		DB:         db,
 		TokenStore: tokenStore,
 	}))
 	app.Content(m)
-	app.Audit(forge.NewAuditStore(db))
+	app.Audit(smeldr.NewAuditStore(db))
 	app.Health()
 
 	ctx := context.Background()
@@ -460,22 +460,22 @@ func TestBlogSignal(t *testing.T) {
 	}
 
 	const testSecret = "signal-test-secret"
-	tokenStore := forge.NewTokenStore(db, testSecret)
-	repo := forge.NewSQLRepo[*Post](db)
+	tokenStore := smeldr.NewTokenStore(db, testSecret)
+	repo := smeldr.NewSQLRepo[*Post](db)
 
 	published := make(chan string, 1) // receives slug when AfterPublish fires
 
-	m := forge.NewModule((*Post)(nil),
-		forge.At("/posts"),
-		forge.Repo(repo),
-		forge.Auth(forge.Read(forge.Guest), forge.Write(forge.Author)),
-		forge.On(forge.AfterPublish, func(_ forge.Context, p *Post) error {
+	m := smeldr.NewModule((*Post)(nil),
+		smeldr.At("/posts"),
+		smeldr.Repo(repo),
+		smeldr.Auth(smeldr.Read(smeldr.Guest), smeldr.Write(smeldr.Author)),
+		smeldr.On(smeldr.AfterPublish, func(_ smeldr.Context, p *Post) error {
 			published <- p.Slug
 			return nil
 		}),
 	)
 
-	app := forge.New(forge.MustConfig(forge.Config{
+	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 		BaseURL:    "http://localhost",
 		Secret:     []byte(testSecret),
 		DB:         db,

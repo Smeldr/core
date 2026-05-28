@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ import (
 
 // Markdownable is implemented by content types that render directly to Markdown.
 // When T implements Markdownable, [Module] serves text/markdown responses without
-// requiring forge.Templates to be configured. The Markdown body is also used in
+// requiring smeldr.Templates to be configured. The Markdown body is also used in
 // AIDoc output and /llms-full.txt corpus entries.
 type Markdownable interface{ Markdown() string }
 
@@ -62,8 +62,8 @@ func (aiIndexOption) isOption() {}
 // Pass one or more [AIFeature] constants to select which endpoints are registered.
 //
 //	app.Content(&BlogPost{},
-//	    forge.At("/posts"),
-//	    forge.AIIndex(forge.LLMsTxt, forge.LLMsTxtFull, forge.AIDoc),
+//	    smeldr.At("/posts"),
+//	    smeldr.AIIndex(smeldr.LLMsTxt, smeldr.LLMsTxtFull, smeldr.AIDoc),
 //	)
 func AIIndex(features ...AIFeature) Option { return aiIndexOption{features: features} }
 
@@ -79,9 +79,9 @@ func (withoutIDOption) isOption() {}
 // Apply alongside [AIIndex] when content UUIDs must not be exposed to AI consumers.
 //
 //	app.Content(&BlogPost{},
-//	    forge.At("/posts"),
-//	    forge.AIIndex(forge.AIDoc),
-//	    forge.WithoutID(),
+//	    smeldr.At("/posts"),
+//	    smeldr.AIIndex(smeldr.AIDoc),
+//	    smeldr.WithoutID(),
 //	)
 func WithoutID() Option { return withoutIDOption{} }
 
@@ -275,7 +275,7 @@ func (s *LLMsStore) FullHandler() http.Handler {
 // — extractNode ———————————————————————————————————————————————————————————
 
 // extractNode extracts the embedded [Node] from any content item.
-// Returns a zero Node when the item does not embed forge.Node.
+// Returns a zero Node when the item does not embed smeldr.Node.
 func extractNode(item any) Node {
 	rv := elemValue(item)
 	nf := rv.FieldByName("Node")

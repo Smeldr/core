@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Content.Title}} — Forge Docs</title>
-  {{/* forge:head emits <title>, <meta description>, Open Graph, canonical,
+  {{/* smeldr:head emits <title>, <meta description>, Open Graph, canonical,
        and JSON-LD BreadcrumbList tags from Doc.Head(). The BreadcrumbList
        schema renders Docs → Section → Title and is consumed by search engines
        to display breadcrumbs in result snippets. */}}
-  {{template "forge:head" .}}
+  {{template "smeldr:head" .}}
   <style>
     body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; line-height: 1.7; color: #1a1a1a; }
     header { border-bottom: 2px solid #0070f3; margin-bottom: 2rem; padding-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
@@ -36,7 +36,7 @@
 <body>
   <header>
     {{/* Breadcrumb navigation matches the JSON-LD BreadcrumbList emitted
-         by {{template "forge:head" .}} via Doc.Head(). Both the visible
+         by {{template "smeldr:head" .}} via Doc.Head(). Both the visible
          navigation and the structured data are derived from forge.Crumbs(). */}}
     <a href="/docs">Forge Docs</a>
     <span>›</span>
@@ -48,11 +48,11 @@
     <span class="section-tag">{{.Content.Section}}</span>
     <h1>{{.Content.Title}}</h1>
 
-    {{/* forge_markdown converts markdown to safe HTML.
+    {{/* smeldr_markdown converts markdown to safe HTML.
          Supported: headings, bold, italic, inline code, fenced code blocks,
          links, ordered and unordered lists, paragraphs.
          Content is HTML-escaped before markdown processing — no XSS risk. */}}
-    <div class="body">{{forge_markdown .Content.Body}}</div>
+    <div class="body">{{smeldr_markdown .Content.Body}}</div>
 
     <nav class="page-nav">
       <a href="/docs">← All documentation</a>

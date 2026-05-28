@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 // example_test.go — compile-verified README examples.
 //
@@ -138,7 +138,7 @@ func ExampleSocial() {
 
 // ExampleOn demonstrates registering a typed signal handler on a content
 // module. The handler fires after a post is published and receives the
-// full forge.Context and the typed item.
+// full smeldr.Context and the typed item.
 func ExampleOn() {
 	repo := NewMemoryRepo[*examplePost]()
 	m := NewModule(&examplePost{},
@@ -175,7 +175,7 @@ func ExampleRobotsConfig() {
 }
 
 // ExampleOGDefaults demonstrates setting app-level Open Graph and Twitter Card
-// fallback values. These are merged into every page's Head by forge:head when
+// fallback values. These are merged into every page's Head by smeldr:head when
 // the content item does not supply its own image or Twitter creator handle.
 func ExampleOGDefaults() {
 	app := New(Config{
@@ -191,7 +191,7 @@ func ExampleOGDefaults() {
 }
 
 // ExampleAppSchema demonstrates registering app-level JSON-LD structured data.
-// The block is emitted automatically by forge:head on every page.
+// The block is emitted automatically by smeldr:head on every page.
 func ExampleAppSchema() {
 	app := New(Config{
 		BaseURL: "https://example.com",
@@ -223,7 +223,7 @@ func ExampleApp_Partials() {
 }
 
 // ExampleHeadAssets demonstrates injecting site-wide static assets —
-// preconnect hints, stylesheets, favicons, and scripts — into forge:head
+// preconnect hints, stylesheets, favicons, and scripts — into smeldr:head
 // on every page via app.SEO.
 func ExampleHeadAssets() {
 	app := New(Config{
@@ -245,7 +245,7 @@ func ExampleHeadAssets() {
 }
 
 // ExamplePageHead demonstrates embedding PageHead in a custom handler data
-// struct to enable {{template "forge:head" .}} without using TemplateData.
+// struct to enable {{template "smeldr:head" .}} without using TemplateData.
 func ExamplePageHead() {
 	type homeData struct {
 		PageHead
@@ -261,7 +261,7 @@ func ExamplePageHead() {
 
 	// data.Head, data.OGDefaults, data.AppSchema, and data.HeadAssets are all
 	// accessible at the top level of homeData because PageHead is embedded
-	// anonymously. forge:head reads them identically to TemplateData[T].
+	// anonymously. smeldr:head reads them identically to TemplateData[T].
 	_ = data.Head.Title // "Home — My Site"
 	_ = data.Featured   // "Welcome post"
 }

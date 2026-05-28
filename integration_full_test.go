@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 // integration_full_test.go â€” cross-milestone integration suite (M1â€“M5).
 //
@@ -11,7 +11,7 @@ package forge
 //   G2  â€” Role-based access via inline middleware (M1 + M2)
 //   G3  â€” Signal fire-through across modules (M1 + M2)
 //   G4  â€” Content negotiation: two modules, mixed template configuration (M2 + M4)
-//   G5  â€” forge:head + schema helpers through real render (M3 + M4)
+//   G5  â€” smeldr:head + schema helpers through real render (M3 + M4)
 //   G6  â€” SEO wiring: robots.txt + sitemap registration (M2 + M3)
 //   G7  â€” Error template fallback across two modules (M2 + M4)
 //   G8  â€” TemplateData end-to-end (M3 + M4)
@@ -559,12 +559,12 @@ func TestFull_htmlModule_templateFallback(t *testing.T) {
 	})
 }
 
-// â€” G5: forge:head + schema through real render (M3 + M4) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
+// â€” G5: smeldr:head + schema through real render (M3 + M4) â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”
 
-// TestFull_schemaForThroughTemplate verifies that forge_meta in a real
+// TestFull_schemaForThroughTemplate verifies that smeldr_meta in a real
 // template render produces a JSON-LD <script> block for Article content.
 func TestFull_schemaForThroughTemplate(t *testing.T) {
-	const tpl = `<!DOCTYPE html><html><head>{{forge_meta .Head .Content}}</head><body></body></html>`
+	const tpl = `<!DOCTYPE html><html><head>{{smeldr_meta .Head .Content}}</head><body></body></html>`
 	dir := intTmpDir(t, `<p>list</p>`, tpl)
 	_, handler, repo := intSetup(t,
 		Templates(dir),
@@ -591,10 +591,10 @@ func TestFull_schemaForThroughTemplate(t *testing.T) {
 	}
 }
 
-// TestFull_forgeMarkdownInTemplate verifies that forge_markdown converts
+// TestFull_smeldrMarkdownInTemplate verifies that smeldr_markdown converts
 // Markdown syntax to HTML inside a rendered template.
-func TestFull_forgeMarkdownInTemplate(t *testing.T) {
-	const tpl = `{{.Content.Body | forge_markdown}}`
+func TestFull_smeldrMarkdownInTemplate(t *testing.T) {
+	const tpl = `{{.Content.Body | smeldr_markdown}}`
 	pageDir := intTmpDir(t, `<p>list</p>`, tpl)
 
 	pageRepo := NewMemoryRepo[*testMDPost]()
@@ -636,9 +636,9 @@ func TestFull_forgeMarkdownInTemplate(t *testing.T) {
 }
 
 // TestFull_breadcrumbs verifies that a non-empty Head.Breadcrumbs causes
-// forge_meta to append a BreadcrumbList JSON-LD block after the primary schema.
+// smeldr_meta to append a BreadcrumbList JSON-LD block after the primary schema.
 func TestFull_breadcrumbs(t *testing.T) {
-	const tpl = `{{forge_meta .Head .Content}}`
+	const tpl = `{{smeldr_meta .Head .Content}}`
 	dir := intTmpDir(t, `<p>list</p>`, tpl)
 	_, handler, repo := intSetup(t,
 		Templates(dir),
@@ -819,9 +819,9 @@ func TestFull_templateData_requestURL(t *testing.T) {
 
 // TestFull_social_ogTagsInHTML verifies that a module configured with
 // Social(OpenGraph, TwitterCard) and SitemapConfig{} (M3) renders og:title and
-// twitter:card meta tags inside forge:head when HeadFunc returns a non-empty Title.
+// twitter:card meta tags inside smeldr:head when HeadFunc returns a non-empty Title.
 func TestFull_social_ogTagsInHTML(t *testing.T) {
-	const show = `<!DOCTYPE html><html><head>{{template "forge:head" .}}</head></html>`
+	const show = `<!DOCTYPE html><html><head>{{template "smeldr:head" .}}</head></html>`
 	dir := intTmpDir(t, `<p>list</p>`, show)
 	_, handler, repo := intSetup(t,
 		Social(OpenGraph, TwitterCard),
@@ -1134,9 +1134,9 @@ func TestFull_feed_afterPublishSignalFires(t *testing.T) {
 
 // TestFull_fullM5_htmlHasOGTags verifies that a module with all M5 options
 // (Social, AIIndex, Feed, SitemapConfig) plus M3/M4 (HeadFunc, Templates)
-// still renders og:title and twitter:card correctly in forge:head.
+// still renders og:title and twitter:card correctly in smeldr:head.
 func TestFull_fullM5_htmlHasOGTags(t *testing.T) {
-	const show = `<!DOCTYPE html><html><head>{{template "forge:head" .}}</head></html>`
+	const show = `<!DOCTYPE html><html><head>{{template "smeldr:head" .}}</head></html>`
 	dir := intTmpDir(t, `<p>list</p>`, show)
 
 	aiStore := NewLLMsStore("example.com")
@@ -1301,7 +1301,7 @@ func TestFull_fullM5_feed(t *testing.T) {
 
 // TestFull_consent_setNecessarySetsHeader verifies that SetCookie writes a
 // Set-Cookie header for a Necessary cookie, and that ConsentFor(Necessary)
-// is always true without any forge_consent cookie in the request.
+// is always true without any smeldr_consent cookie in the request.
 func TestFull_consent_setNecessarySetsHeader(t *testing.T) {
 	c := Cookie{
 		Name:     "session",
@@ -1321,7 +1321,7 @@ func TestFull_consent_setNecessarySetsHeader(t *testing.T) {
 		t.Errorf("cookie = %+v; want name=session value=abc123", cookies[0])
 	}
 
-	// ConsentFor(Necessary) must be true without any forge_consent cookie.
+	// ConsentFor(Necessary) must be true without any smeldr_consent cookie.
 	r := httptest.NewRequest("GET", "/", nil)
 	if !ConsentFor(r, Necessary) {
 		t.Error("ConsentFor(Necessary) = false; want always true")
@@ -1329,7 +1329,7 @@ func TestFull_consent_setNecessarySetsHeader(t *testing.T) {
 }
 
 // TestFull_consent_noConsentSkips verifies that SetCookieIfConsented returns
-// false and writes no Set-Cookie header when forge_consent is absent.
+// false and writes no Set-Cookie header when smeldr_consent is absent.
 func TestFull_consent_noConsentSkips(t *testing.T) {
 	c := Cookie{Name: "theme", Category: Preferences}
 	r := httptest.NewRequest("GET", "/", nil)
@@ -1343,7 +1343,7 @@ func TestFull_consent_noConsentSkips(t *testing.T) {
 		t.Errorf("expected no Set-Cookie header; got %v", got)
 	}
 	if ConsentFor(r, Preferences) {
-		t.Error("ConsentFor(Preferences) = true without forge_consent; want false")
+		t.Error("ConsentFor(Preferences) = true without smeldr_consent; want false")
 	}
 }
 
@@ -1380,7 +1380,7 @@ func TestFull_consent_grantAllowsSet(t *testing.T) {
 }
 
 // TestFull_consent_revokeConsentFalse verifies that RevokeConsent writes an
-// expired Set-Cookie for forge_consent, and that ConsentFor returns false for
+// expired Set-Cookie for smeldr_consent, and that ConsentFor returns false for
 // non-Necessary categories on a request carrying the revoked cookie.
 func TestFull_consent_revokeConsentFalse(t *testing.T) {
 	revW := httptest.NewRecorder()
@@ -1396,7 +1396,7 @@ func TestFull_consent_revokeConsentFalse(t *testing.T) {
 
 	// A request with the revoked (empty value) cookie loses all non-Necessary consent.
 	r := httptest.NewRequest("GET", "/", nil)
-	r.AddCookie(&http.Cookie{Name: "forge_consent", Value: ""})
+	r.AddCookie(&http.Cookie{Name: "smeldr_consent", Value: ""})
 	if ConsentFor(r, Preferences) {
 		t.Error("ConsentFor(Preferences) = true after RevokeConsent; want false")
 	}
@@ -1450,7 +1450,7 @@ func TestFull_consent_moduleHandlerSetsPreferences(t *testing.T) {
 
 // TestFull_consent_clearCookieExpiresHeader verifies that ClearCookie writes a
 // Set-Cookie header with MaxAge -1, and that ConsentFor(Necessary) remains true
-// even when forge_consent contains garbage data.
+// even when smeldr_consent contains garbage data.
 func TestFull_consent_clearCookieExpiresHeader(t *testing.T) {
 	c := Cookie{Name: "prefs", Category: Preferences}
 	w := httptest.NewRecorder()
@@ -1467,9 +1467,9 @@ func TestFull_consent_clearCookieExpiresHeader(t *testing.T) {
 		t.Errorf("Expires = %v is in the future; want past", cookies[0].Expires)
 	}
 
-	// ConsentFor(Necessary) is always true â€” even with corrupted forge_consent.
+	// ConsentFor(Necessary) is always true â€” even with corrupted smeldr_consent.
 	r := httptest.NewRequest("GET", "/", nil)
-	r.AddCookie(&http.Cookie{Name: "forge_consent", Value: "garbage-data,,,"})
+	r.AddCookie(&http.Cookie{Name: "smeldr_consent", Value: "garbage-data,,,"})
 	if !ConsentFor(r, Necessary) {
 		t.Error("ConsentFor(Necessary) = false; want always true")
 	}

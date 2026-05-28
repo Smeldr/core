@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"net/http"
@@ -17,14 +17,14 @@ import (
 // embed [PageHead] directly in your own data struct:
 //
 //	type homeData struct {
-//	    forge.PageHead
+//	    smeldr.PageHead
 //	    Posts []*Post
 //	}
 //
 // Show handler:
 //
 //	TemplateData[*BlogPost]{
-//	    PageHead: forge.PageHead{Head: post.Head()},
+//	    PageHead: smeldr.PageHead{Head: post.Head()},
 //	    Content:  post,
 //	    User:     ctx.User(),
 //	    Request:  r,
@@ -52,7 +52,7 @@ type TemplateData[T any] struct {
 
 	// Request is the live *http.Request for this response. Use it in
 	// templates for URL introspection, query parameters, or helpers that
-	// require the request (e.g. [forge_csrf_token]).
+	// require the request (e.g. [smeldr_csrf_token]).
 	Request *http.Request
 
 	// SiteName is the hostname extracted from [Config.BaseURL] at module

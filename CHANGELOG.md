@@ -23,6 +23,26 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.26.0] — 2026-05-28
+
+Package rename: `package forge` → `package smeldr` (Amendment A107).
+
+### Changed (breaking)
+
+- **Package name:** `package forge` renamed to `package smeldr` in all 75 root-package Go files.
+  Callers must update the usage prefix: `forge.App` → `smeldr.App` etc.
+- **Template functions** (9 renamed): `forge:head` → `smeldr:head`, `forge_markdown` → `smeldr_markdown`,
+  `forge_date` → `smeldr_date`, `forge_meta` → `smeldr_meta`, `forge_html` → `smeldr_html`,
+  `forge_excerpt` → `smeldr_excerpt`, `forge_csrf_token` → `smeldr_csrf_token`,
+  `forge_rfc3339` → `smeldr_rfc3339`, `forge_llms_entries` → `smeldr_llms_entries`.
+  Templates using the old names must be updated.
+- **Struct tag keys**: `forge_format:"..."` → `smeldr_format:"..."`,
+  `forge_description:"..."` → `smeldr_description:"..."`.
+- **Cookie names**: `forge_csrf` → `smeldr_csrf`, `forge_consent` → `smeldr_consent`.
+  Existing sessions are invalidated on upgrade.
+
+---
+
 ## [1.25.0] — 2026-05-24
 
 `VerifyTokenString` — verify a Forge bearer token without an HTTP request (Amendment A103).

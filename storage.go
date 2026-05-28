@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"cmp"
@@ -38,7 +38,7 @@ var dbFieldCache sync.Map
 
 // dbFields returns the cached column→field mapping for struct type t.
 // On cache miss, collectDBFields recurses into anonymous (embedded) struct
-// fields so that promoted fields such as forge.Node are flattened into the
+// fields so that promoted fields such as smeldr.Node are flattened into the
 // result.
 func dbFields(t reflect.Type) []dbField {
 	if v, ok := dbFieldCache.Load(t); ok {
@@ -246,7 +246,7 @@ type Repository[T any] interface {
 //
 // Callers type-assert their [Repository] to [SeqRepository] to use it:
 //
-//	if sr, ok := repo.(forge.SeqRepository[*Post]); ok {
+//	if sr, ok := repo.(smeldr.SeqRepository[*Post]); ok {
 //		for item, err := range sr.Seq(ctx, opts) {
 //			if err != nil { ... }
 //		}
@@ -464,7 +464,7 @@ func sortItems[T any](items []T, field string, desc bool) {
 }
 
 // ---------------------------------------------------------------------------
-// SQLRepo[T] — production Repository[T] backed by forge.DB
+// SQLRepo[T] — production Repository[T] backed by smeldr.DB
 // ---------------------------------------------------------------------------
 
 // quoteIdent wraps a SQL identifier in double quotes, making it safe to use
@@ -485,8 +485,8 @@ func (tableOption) isSQLRepoOption() {}
 // derivation does not produce the correct name — for example, types whose
 // plural is not formed by appending "s" (Story → "storys", not "stories").
 //
-//	repo := forge.NewSQLRepo[*Story](db, forge.Table("stories"))
-//	repo := forge.NewSQLRepo[*BlogPost](db, forge.Table("posts"))
+//	repo := smeldr.NewSQLRepo[*Story](db, smeldr.Table("stories"))
+//	repo := smeldr.NewSQLRepo[*BlogPost](db, smeldr.Table("posts"))
 func Table(name string) SQLRepoOption { return tableOption{name: name} }
 
 // camelToSnake converts a CamelCase identifier to snake_case.
@@ -519,8 +519,8 @@ func tableName[T any](opts []SQLRepoOption) string {
 	return camelToSnake(t.Name()) + "s"
 }
 
-// SQLRepo is a production [Repository][T] backed by [forge.DB].
-// T must embed [forge.Node] — its fields are mapped to SQL columns via `db`
+// SQLRepo is a production [Repository][T] backed by [smeldr.DB].
+// T must embed [smeldr.Node] — its fields are mapped to SQL columns via `db`
 // struct tags, falling back to lowercase field names (the same rules as
 // [Query] and [QueryOne]).
 //
@@ -538,8 +538,8 @@ type SQLRepo[T any] struct {
 //
 // T must be a pointer type and must match the proto passed to [NewModule]:
 //
-//	repo := forge.NewSQLRepo[*Post](db)
-//	m := forge.NewModule((*Post)(nil), forge.Repo(repo))
+//	repo := smeldr.NewSQLRepo[*Post](db)
+//	m := smeldr.NewModule((*Post)(nil), smeldr.Repo(repo))
 //
 // Using a value type (NewSQLRepo[Post]) will compile but will not satisfy
 // Repository[*Post] — the type parameters must match throughout.

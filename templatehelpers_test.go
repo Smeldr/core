@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"net/http/httptest"
@@ -9,47 +9,47 @@ import (
 
 func TestForgeDate_formatted(t *testing.T) {
 	ts := time.Date(2026, 3, 5, 0, 0, 0, 0, time.UTC)
-	got := forgeDate(ts)
+	got := smeldrDate(ts)
 	want := "5 March 2026"
 	if got != want {
-		t.Errorf("forgeDate = %q, want %q", got, want)
+		t.Errorf("smeldrDate = %q, want %q", got, want)
 	}
 }
 
 func TestForgeDate_zero(t *testing.T) {
-	got := forgeDate(time.Time{})
+	got := smeldrDate(time.Time{})
 	if got != "" {
-		t.Errorf("forgeDate(zero) = %q, want empty string", got)
+		t.Errorf("smeldrDate(zero) = %q, want empty string", got)
 	}
 }
 
 func TestForgeMeta_withSchema(t *testing.T) {
 	h := Head{Title: "Test Article", Type: Article}
-	got := string(forgeMeta(h, nil))
+	got := string(smeldrMeta(h, nil))
 	if !strings.Contains(got, `<script type="application/ld+json">`) {
-		t.Errorf("forgeMeta(Article) should contain JSON-LD script tag, got: %s", got)
+		t.Errorf("smeldrMeta(Article) should contain JSON-LD script tag, got: %s", got)
 	}
 	if !strings.Contains(got, "Article") {
-		t.Errorf("forgeMeta(Article) should contain schema type, got: %s", got)
+		t.Errorf("smeldrMeta(Article) should contain schema type, got: %s", got)
 	}
 }
 
 func TestForgeMeta_noSchema(t *testing.T) {
-	got := string(forgeMeta(Head{}, nil))
+	got := string(smeldrMeta(Head{}, nil))
 	if got != "" {
-		t.Errorf("forgeMeta(empty Head) = %q, want empty string", got)
+		t.Errorf("smeldrMeta(empty Head) = %q, want empty string", got)
 	}
 }
 
 func TestForgeMarkdown_heading(t *testing.T) {
-	got := string(forgeMarkdown("# Title"))
+	got := string(smeldrMarkdown("# Title"))
 	if got != "<h1>Title</h1>" {
 		t.Errorf("heading: got %q, want %q", got, "<h1>Title</h1>")
 	}
 }
 
 func TestForgeMarkdown_bold(t *testing.T) {
-	got := string(forgeMarkdown("**important**"))
+	got := string(smeldrMarkdown("**important**"))
 	want := "<p><strong>important</strong></p>"
 	if got != want {
 		t.Errorf("bold: got %q, want %q", got, want)
@@ -58,7 +58,7 @@ func TestForgeMarkdown_bold(t *testing.T) {
 
 func TestForgeMarkdown_link(t *testing.T) {
 	// renderMarkdown now supports [text](url) inline links.
-	got := string(forgeMarkdown("[click here](https://example.com)"))
+	got := string(smeldrMarkdown("[click here](https://example.com)"))
 	want := `<p><a href="https://example.com">click here</a></p>`
 	if got != want {
 		t.Errorf("link: got %q, want %q", got, want)
@@ -66,7 +66,7 @@ func TestForgeMarkdown_link(t *testing.T) {
 }
 
 func TestForgeMarkdown_list(t *testing.T) {
-	got := string(forgeMarkdown("- alpha\n- beta"))
+	got := string(smeldrMarkdown("- alpha\n- beta"))
 	want := "<ul>\n<li>alpha</li>\n<li>beta</li>\n</ul>"
 	if got != want {
 		t.Errorf("list: got %q, want %q", got, want)
@@ -75,7 +75,7 @@ func TestForgeMarkdown_list(t *testing.T) {
 
 func TestForgeMarkdown_paragraph(t *testing.T) {
 	input := "first paragraph\n\nsecond paragraph"
-	got := string(forgeMarkdown(input))
+	got := string(smeldrMarkdown(input))
 	if !strings.Contains(got, "<p>first paragraph</p>") {
 		t.Errorf("paragraph: missing first <p>, got: %s", got)
 	}
@@ -86,7 +86,7 @@ func TestForgeMarkdown_paragraph(t *testing.T) {
 
 func TestForgeMarkdown_fencedCode(t *testing.T) {
 	input := "intro\n\n```go\nfmt.Println(\"hello\")\n```\n\noutro"
-	got := string(forgeMarkdown(input))
+	got := string(smeldrMarkdown(input))
 	if !strings.Contains(got, "<pre><code") {
 		t.Errorf("fencedCode: missing <pre><code, got: %s", got)
 	}
@@ -106,7 +106,7 @@ func TestForgeMarkdown_fencedCode(t *testing.T) {
 
 func TestForgeMarkdown_fencedCodeHTMLEscape(t *testing.T) {
 	input := "```\n<script>alert(1)</script>\n```"
-	got := string(forgeMarkdown(input))
+	got := string(smeldrMarkdown(input))
 	if strings.Contains(got, "<script>") {
 		t.Errorf("fencedCode: raw <script> not escaped, got: %s", got)
 	}
@@ -118,22 +118,22 @@ func TestForgeMarkdown_fencedCodeHTMLEscape(t *testing.T) {
 func TestForgeHTML(t *testing.T) {
 	t.Run("passthrough", func(t *testing.T) {
 		input := "<strong>bold</strong>"
-		got := forgeHTML(input)
+		got := smeldrHTML(input)
 		if string(got) != input {
 			t.Errorf("got %q, want %q", got, input)
 		}
 	})
 	t.Run("empty", func(t *testing.T) {
-		got := forgeHTML("")
+		got := smeldrHTML("")
 		if got != "" {
 			t.Errorf("got %q, want empty string", got)
 		}
 	})
 	t.Run("not_escaped", func(t *testing.T) {
-		// forge_html is a trusted passthrough — the caller is responsible
+		// smeldr_html is a trusted passthrough — the caller is responsible
 		// for ensuring the string is safe. Verify no escaping occurs.
 		input := "<script>alert(1)</script>"
-		got := forgeHTML(input)
+		got := smeldrHTML(input)
 		if string(got) != input {
 			t.Errorf("got %q, want %q (should not be escaped)", got, input)
 		}
@@ -142,7 +142,7 @@ func TestForgeHTML(t *testing.T) {
 
 func TestForgeExcerpt_pipeline(t *testing.T) {
 	body := "The quick brown fox jumps over the lazy dog and then some more words follow here"
-	got := string(forgeExcerpt(20, body))
+	got := string(smeldrExcerpt(20, body))
 	if len([]rune(got)) > 25 { // 20 + "…" + some tolerance
 		t.Errorf("excerpt too long: %q", got)
 	}
@@ -155,7 +155,7 @@ func TestForgeCSRFToken_present(t *testing.T) {
 	r2 := httptest.NewRequest("GET", "/", nil)
 	r2.Header.Set("Cookie", CSRFCookieName+"=test-token-abc")
 
-	got := string(forgeCSRFToken(r2))
+	got := string(smeldrCSRFToken(r2))
 	if !strings.Contains(got, `<input type="hidden"`) {
 		t.Errorf("expected hidden input, got: %s", got)
 	}
@@ -169,7 +169,7 @@ func TestForgeCSRFToken_present(t *testing.T) {
 
 func TestForgeCSRFToken_absent(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
-	got := forgeCSRFToken(r)
+	got := smeldrCSRFToken(r)
 	if got != "" {
 		t.Errorf("absent cookie: expected empty string, got: %q", got)
 	}
@@ -178,14 +178,14 @@ func TestForgeCSRFToken_absent(t *testing.T) {
 func TestTemplateFuncMap_keys(t *testing.T) {
 	fm := TemplateFuncMap()
 	required := []string{
-		"forge_meta",
-		"forge_date",
-		"forge_rfc3339",
-		"forge_markdown",
-		"forge_html",
-		"forge_excerpt",
-		"forge_csrf_token",
-		"forge_llms_entries",
+		"smeldr_meta",
+		"smeldr_date",
+		"smeldr_rfc3339",
+		"smeldr_markdown",
+		"smeldr_html",
+		"smeldr_excerpt",
+		"smeldr_csrf_token",
+		"smeldr_llms_entries",
 		"markdown",
 	}
 	for _, key := range required {
@@ -198,9 +198,9 @@ func TestTemplateFuncMap_keys(t *testing.T) {
 	}
 }
 
-// TestForgeLLMSEntries verifies that the forge_llms_entries template function
+// TestForgeLLMSEntries verifies that the smeldr_llms_entries template function
 // renders LLMsTemplateData into a markdown link list and returns empty for
-// unknown or nil inputs (exercises the forgeLLMsEntries helper directly).
+// unknown or nil inputs (exercises the smeldrLLMsEntries helper directly).
 func TestForgeLLMSEntries(t *testing.T) {
 	td := LLMsTemplateData{
 		Entries: []LLMsEntry{
@@ -208,7 +208,7 @@ func TestForgeLLMSEntries(t *testing.T) {
 			{Title: "Post Two", URL: "/posts/two"}, // no summary
 		},
 	}
-	got := forgeLLMsEntries(td)
+	got := smeldrLLMsEntries(td)
 	if !strings.Contains(string(got), "Post One") {
 		t.Errorf("output missing 'Post One': %q", got)
 	}
@@ -222,16 +222,16 @@ func TestForgeLLMSEntries(t *testing.T) {
 		t.Errorf("output missing 'Post Two' (no-summary entry): %q", got)
 	}
 	// Pointer form should also work.
-	gotPtr := forgeLLMsEntries(&td)
+	gotPtr := smeldrLLMsEntries(&td)
 	if got != gotPtr {
 		t.Errorf("pointer form produced different output: %q vs %q", got, gotPtr)
 	}
 	// Unknown type returns empty.
-	if got2 := forgeLLMsEntries("not-a-td"); got2 != "" {
+	if got2 := smeldrLLMsEntries("not-a-td"); got2 != "" {
 		t.Errorf("unknown type: got %q; want empty string", got2)
 	}
 	// Nil pointer returns empty.
-	if got3 := forgeLLMsEntries((*LLMsTemplateData)(nil)); got3 != "" {
+	if got3 := smeldrLLMsEntries((*LLMsTemplateData)(nil)); got3 != "" {
 		t.Errorf("nil pointer: got %q; want empty string", got3)
 	}
 }
@@ -245,6 +245,6 @@ var benchMarkdownBody = strings.Repeat(
 func BenchmarkForgeMarkdown(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = forgeMarkdown(benchMarkdownBody)
+		_ = smeldrMarkdown(benchMarkdownBody)
 	}
 }

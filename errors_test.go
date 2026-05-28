@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"encoding/json"
@@ -44,7 +44,7 @@ func TestSentinels(t *testing.T) {
 	}
 }
 
-// TestErr verifies that forge.Err produces a ValidationError with the correct
+// TestErr verifies that smeldr.Err produces a ValidationError with the correct
 // field, message, status, code, and Error() string.
 func TestErr(t *testing.T) {
 	ve := Err("title", "required")

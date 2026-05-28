@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"context"
@@ -48,7 +48,7 @@ type csrfAware interface {
 // CSRFCookieName is the name of the CSRF cookie set by [CookieSession].
 // Client-side AJAX code should read this cookie and send its value as the
 // X-CSRF-Token request header on all non-safe methods (POST, PUT, PATCH, DELETE).
-const CSRFCookieName = "forge_csrf"
+const CSRFCookieName = "smeldr_csrf"
 
 // WithoutCSRF is an [Option] passed to [CookieSession] to disable automatic
 // CSRF protection. This is strongly discouraged for production use.
@@ -60,14 +60,14 @@ type withoutCSRFOption struct{}
 func (withoutCSRFOption) isOption() {}
 
 // HasRole reports whether the user holds at least the given role level.
-// This is hierarchical: an Admin satisfies HasRole(forge.Editor).
+// This is hierarchical: an Admin satisfies HasRole(smeldr.Editor).
 // Delegates to the free function [HasRole] in roles.go.
 func (u User) HasRole(role Role) bool {
 	return HasRole(u.Roles, role)
 }
 
 // Is reports whether the user holds exactly the given role (exact match only).
-// An Admin does not satisfy Is(forge.Editor).
+// An Admin does not satisfy Is(smeldr.Editor).
 // Delegates to the free function [IsRole] in roles.go.
 func (u User) Is(role Role) bool {
 	return IsRole(u.Roles, role)
@@ -98,7 +98,7 @@ func encodeToken(user User, secret string, ttl time.Duration) (string, error) {
 	raw, err := json.Marshal(tokenPayload{ID: user.ID, Name: user.Name, Roles: roles, Exp: exp})
 	if err != nil {
 		// json.Marshal on tokenPayload (string/[]string/int64 fields) is
-		// unreachable in practice; return a forge.Error per Decision 16.
+		// unreachable in practice; return a smeldr.Error per Decision 16.
 		return "", ErrInternal
 	}
 
@@ -574,7 +574,7 @@ func (c *cookieAuthFn) csrfEnabled() bool {
 
 const basicAuthWarn = `WARN  forge: BasicAuth is enabled in a non-development environment.
       BasicAuth sends credentials on every request and has no session management.
-      Consider forge.BearerHMAC or forge.CookieSession for production use.`
+      Consider smeldr.BearerHMAC or smeldr.CookieSession for production use.`
 
 // basicAuthFn implements [AuthFunc] and [productionWarner] for HTTP Basic Auth.
 type basicAuthFn struct {

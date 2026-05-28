@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"html/template"
@@ -40,10 +40,10 @@ type Breadcrumb struct {
 // Crumb returns a single Breadcrumb entry.
 // Use with Crumbs to build Head.Breadcrumbs:
 //
-//	forge.Crumbs(
-//	    forge.Crumb("Home",  "/"),
-//	    forge.Crumb("Posts", "/posts"),
-//	    forge.Crumb(p.Title, "/posts/"+p.Slug),
+//	smeldr.Crumbs(
+//	    smeldr.Crumb("Home",  "/"),
+//	    smeldr.Crumb("Posts", "/posts"),
+//	    smeldr.Crumb(p.Title, "/posts/"+p.Slug),
 //	)
 func Crumb(label, url string) Breadcrumb { return Breadcrumb{Label: label, URL: url} }
 
@@ -153,14 +153,14 @@ type ScriptTag struct {
 //
 // Apply it via [App.SEO]:
 //
-//	app.SEO(&forge.HeadAssets{
+//	app.SEO(&smeldr.HeadAssets{
 //	    Preconnect:  []string{"https://fonts.googleapis.com"},
 //	    Stylesheets: []string{"https://fonts.googleapis.com/css2?family=Inter&display=swap"},
-//	    Links: []forge.HeadLink{
+//	    Links: []smeldr.HeadLink{
 //	        {Rel: "icon", Type: "image/png", Sizes: "32x32", Href: "/favicon-32.png"},
 //	        {Rel: "me", Href: "https://mastodon.social/@you"},
 //	    },
-//	    Scripts: []forge.ScriptTag{
+//	    Scripts: []smeldr.ScriptTag{
 //	        {Src: "/static/app.js", Defer: true},
 //	    },
 //	})
@@ -184,15 +184,15 @@ func (h *HeadAssets) applySEO(s *seoState) { s.headAssets = h }
 // Example:
 //
 //	type homeData struct {
-//	    forge.PageHead
+//	    smeldr.PageHead
 //	    Posts []*Post
 //	}
 //
-//	func homeHandler(app *forge.App) http.HandlerFunc {
+//	func homeHandler(app *smeldr.App) http.HandlerFunc {
 //	    tmpl := app.MustParseTemplate("templates/home.html")
 //	    return func(w http.ResponseWriter, r *http.Request) {
 //	        data := homeData{
-//	            PageHead: forge.PageHead{Head: forge.Head{Title: "Home"}},
+//	            PageHead: smeldr.PageHead{Head: smeldr.Head{Title: "Home"}},
 //	            Posts:    loadPosts(),
 //	        }
 //	        tmpl.ExecuteTemplate(w, "home.html", data)
@@ -227,9 +227,9 @@ func (headFuncOption[T]) isOption() {}
 // Head() implementation.
 //
 //	app.Content(&BlogPost{},
-//	    forge.At("/posts"),
-//	    forge.HeadFunc(func(ctx forge.Context, p *BlogPost) forge.Head {
-//	        return forge.Head{Title: p.Title + " — " + ctx.SiteName()}
+//	    smeldr.At("/posts"),
+//	    smeldr.HeadFunc(func(ctx smeldr.Context, p *BlogPost) smeldr.Head {
+//	        return smeldr.Head{Title: p.Title + " — " + ctx.SiteName()}
 //	    }),
 //	)
 func HeadFunc[T any](fn func(Context, T) Head) Option { return headFuncOption[T]{fn: fn} }
@@ -246,9 +246,9 @@ func (listHeadFuncOption[T]) isOption() {}
 // the slice of published items returned by the repository.
 //
 //	app.Content(&BlogPost{},
-//	    forge.At("/posts"),
-//	    forge.ListHeadFunc(func(ctx forge.Context, posts []*BlogPost) forge.Head {
-//	        return forge.Head{Title: "All posts — " + ctx.SiteName()}
+//	    smeldr.At("/posts"),
+//	    smeldr.ListHeadFunc(func(ctx smeldr.Context, posts []*BlogPost) smeldr.Head {
+//	        return smeldr.Head{Title: "All posts — " + ctx.SiteName()}
 //	    }),
 //	)
 func ListHeadFunc[T any](fn func(Context, []T) Head) Option {
@@ -261,7 +261,7 @@ func ListHeadFunc[T any](fn func(Context, []T) Head) Option {
 // within maxLen characters. A Unicode ellipsis ("…") is appended when the
 // text is truncated. Use it to populate Head.Description.
 //
-//	forge.Excerpt(p.Body, 160)
+//	smeldr.Excerpt(p.Body, 160)
 func Excerpt(text string, maxLen int) string {
 	text = strings.TrimSpace(text)
 	if utf8.RuneCountInString(text) <= maxLen {
@@ -289,7 +289,7 @@ func Excerpt(text string, maxLen int) string {
 // slashes, ensures a leading slash, and trims any trailing slash (the root "/"
 // is preserved).
 //
-//	forge.URL("/posts/", p.Slug)  →  "/posts/my-slug"
+//	smeldr.URL("/posts/", p.Slug)  →  "/posts/my-slug"
 func URL(parts ...string) string {
 	joined := strings.Join(parts, "/")
 	// Collapse consecutive slashes.
@@ -310,17 +310,17 @@ func URL(parts ...string) string {
 // It trims any trailing slash from base before joining, so both of the
 // following produce the same result:
 //
-//	forge.AbsURL("https://example.com",  "/posts/my-slug")  →  "https://example.com/posts/my-slug"
-//	forge.AbsURL("https://example.com/", "/posts/my-slug")  →  "https://example.com/posts/my-slug"
+//	smeldr.AbsURL("https://example.com",  "/posts/my-slug")  →  "https://example.com/posts/my-slug"
+//	smeldr.AbsURL("https://example.com/", "/posts/my-slug")  →  "https://example.com/posts/my-slug"
 //
 // The path argument is passed through [URL] first, so duplicate slashes are
 // collapsed and a leading slash is guaranteed.
 // Use AbsURL in Head() implementations when setting Head.Canonical, Head.Image.URL,
 // or any other field that requires an absolute URL.
 //
-//	func (p *Post) Head() forge.Head {
-//	    return forge.Head{
-//	        Canonical: forge.AbsURL(siteBaseURL, forge.URL("/posts", p.Slug)),
+//	func (p *Post) Head() smeldr.Head {
+//	    return smeldr.Head{
+//	        Canonical: smeldr.AbsURL(siteBaseURL, smeldr.URL("/posts", p.Slug)),
 //	    }
 //	}
 func AbsURL(base, path string) string {

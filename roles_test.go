@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import (
 	"errors"
@@ -150,7 +150,7 @@ func TestRegisterIdempotent(t *testing.T) {
 }
 
 // TestRegisterConflict verifies that registering the same name with a different
-// level returns a forge.Error (ValidationError).
+// level returns a smeldr.Error (ValidationError).
 func TestRegisterConflict(t *testing.T) {
 	const name = "conflict_test_role"
 	_, err := NewRole(name).Above(Guest).Register()

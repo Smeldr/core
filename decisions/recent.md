@@ -213,3 +213,41 @@ records that must not be altered.
 `docs/REFERENCE.md`, `skills/forge.md`, `skills/README.md`.
 
 ---
+
+## A107 — T62: package forge → smeldr rename
+
+**Date:** 2026-05-28
+**Status:** Agreed
+**Milestone:** T62 — package rename
+
+**What:**
+- `package forge` → `package smeldr` in all 75 root-package Go files
+- 9 template function string literals renamed: `forge:head` → `smeldr:head`,
+  `forge_markdown` → `smeldr_markdown`, `forge_date` → `smeldr_date`,
+  `forge_meta` → `smeldr_meta`, `forge_html` → `smeldr_html`,
+  `forge_excerpt` → `smeldr_excerpt`, `forge_csrf_token` → `smeldr_csrf_token`,
+  `forge_rfc3339` → `smeldr_rfc3339`, `forge_llms_entries` → `smeldr_llms_entries`
+- 2 struct tag keys: `forge_format` → `smeldr_format`, `forge_description` → `smeldr_description`
+- 2 cookie names: `forge_csrf` → `smeldr_csrf`, `forge_consent` → `smeldr_consent`
+- Internal identifiers renamed: `forgeHeadTmpl` → `smeldrHeadTmpl`, `forgeDate` → `smeldrDate` etc.
+- `forge-pgx` updated: `forge.X` → `smeldr.X`, import alias removed
+- All standalone modules updated: `forge.` → `smeldr.` throughout (smeldr.dev/mcp, media, social, agent, oauth, cli)
+- All code examples in core documentation updated
+
+**Breaking changes:**
+- Any template using `{{template "forge:head" .}}` must update to `{{template "smeldr:head" .}}`
+- Any template using `{{forge_date .}}`, `{{forge_markdown .}}` etc. must update to `smeldr_*`
+- Any code using `forge_format`/`forge_description` struct tags must update to `smeldr_*`
+- Sessions using `forge_csrf`/`forge_consent` cookies are invalidated on upgrade
+- Callers using the `forge.` package prefix must use `smeldr.`
+
+**Files changed:** All 75 root-package `.go` files, `templatehelpers.go`, `templates.go`,
+`module.go`, `mcp.go`, `auth.go`, `cookies.go`, `middleware.go`, `templatedata.go`,
+`forge-pgx/pgx.go`, `forge-pgx/pgx_integration_test.go`, `forge-pgx/pgx_test.go`,
+`example/` (Go + HTML), all test files referencing renamed string literals,
+all standalone modules (mcp, media, social, agent, oauth, cli),
+all core markdown documentation, `common/agent/skills/forge.md`.
+
+**Forge core → v1.26.0** (minor bump — breaking changes for callers).
+
+---

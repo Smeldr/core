@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 // sitemap.go provides event-driven XML sitemap generation for Forge modules.
 // Each module with a [SitemapConfig] option owns a fragment sitemap
@@ -50,7 +50,7 @@ const (
 // SitemapConfig configures the per-module sitemap fragment. Pass it to
 // App.Content as an option alongside [At], [Cache], and similar options.
 //
-//	app.Content(posts, forge.SitemapConfig{ChangeFreq: forge.Weekly, Priority: 0.8})
+//	app.Content(posts, smeldr.SitemapConfig{ChangeFreq: smeldr.Weekly, Priority: 0.8})
 //
 // ChangeFreq defaults to [Weekly] when zero. Priority defaults to 0.5 when
 // zero or negative.

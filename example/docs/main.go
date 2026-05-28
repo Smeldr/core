@@ -5,7 +5,7 @@
 //   - /llms.txt compact content index for AI assistants
 //   - /llms-full.txt full markdown corpus (opt-in, via Markdownable)
 //   - AISummary() short description used in llms.txt and AIDoc summary: field
-//   - Breadcrumb navigation (forge.Crumbs) for JSON-LD BreadcrumbList
+//   - Breadcrumb navigation (smeldr.Crumbs) for JSON-LD BreadcrumbList
 //   - AI-crawler policy: AskFirst (ask before training on content)
 //
 // Run with:
@@ -32,36 +32,36 @@ import (
 )
 
 // Doc is the content type for a Forge documentation page.
-// Embedding forge.Node provides ID, Slug, Status, and timestamp fields.
+// Embedding smeldr.Node provides ID, Slug, Status, and timestamp fields.
 type Doc struct {
-	forge.Node
+	smeldr.Node
 
 	Title   string `forge:"required,min=3,max=120"`
 	Body    string `forge:"required,min=10"`
 	Section string `forge:"required"`
 }
 
-// Head implements forge.Headable.
+// Head implements smeldr.Headable.
 //
 // Forge: breadcrumbs are emitted as a JSON-LD BreadcrumbList in the page
 // <head>, helping search engines understand the documentation hierarchy.
 // They also render as navigation links in the HTML template.
-func (d *Doc) Head() forge.Head {
-	return forge.Head{
+func (d *Doc) Head() smeldr.Head {
+	return smeldr.Head{
 		Title:       d.Title + " — Forge Docs",
 		Description: d.AISummary(),
 		Author:      "The Forge Team",
 		Published:   d.PublishedAt,
 		Type:        "Article",
-		Breadcrumbs: forge.Crumbs(
-			forge.Crumb("Forge Docs", "/docs"),
-			forge.Crumb(d.Section, "/docs"),
-			forge.Crumb(d.Title, "/docs/"+d.Slug),
+		Breadcrumbs: smeldr.Crumbs(
+			smeldr.Crumb("Forge Docs", "/docs"),
+			smeldr.Crumb(d.Section, "/docs"),
+			smeldr.Crumb(d.Title, "/docs/"+d.Slug),
 		),
 	}
 }
 
-// Markdown implements forge.Markdownable.
+// Markdown implements smeldr.Markdownable.
 //
 // Forge: when AIIndex(LLMsTxtFull) is set, Forge concatenates every
 // Published item's Markdown() output into /llms-full.txt. This lets AI
@@ -71,7 +71,7 @@ func (d *Doc) Markdown() string {
 	return fmt.Sprintf("# %s\n\n> Section: %s\n\n%s\n", d.Title, d.Section, d.Body)
 }
 
-// AISummary implements forge.AIDocSummary.
+// AISummary implements smeldr.AIDocSummary.
 //
 // Forge: the summary: field in AIDoc output comes from AISummary() when the
 // content type implements this interface. It also populates the description
@@ -79,34 +79,34 @@ func (d *Doc) Markdown() string {
 //
 //   - [Getting Started](https://example.com/docs/getting-started): Summary here
 func (d *Doc) AISummary() string {
-	return forge.Excerpt(d.Body, 160)
+	return smeldr.Excerpt(d.Body, 160)
 }
 
 func main() {
-	repo := forge.NewMemoryRepo[*Doc]()
+	repo := smeldr.NewMemoryRepo[*Doc]()
 	seed(repo)
 
-	m := forge.NewModule((*Doc)(nil),
-		forge.At("/docs"),
-		forge.Repo(repo),
+	m := smeldr.NewModule((*Doc)(nil),
+		smeldr.At("/docs"),
+		smeldr.Repo(repo),
 
 		// Forge: AIIndex(LLMsTxt, LLMsTxtFull, AIDoc) enables three AI endpoints:
 		//   /llms.txt          — compact content index (llmstxt.org format)
 		//   /llms-full.txt     — full markdown corpus (requires Markdownable)
 		//   /docs/{slug}/aidoc — per-item token-efficient text (requires Markdownable)
 		// Each endpoint is served automatically; no route registration needed.
-		forge.AIIndex(forge.LLMsTxt, forge.LLMsTxtFull, forge.AIDoc),
+		smeldr.AIIndex(smeldr.LLMsTxt, smeldr.LLMsTxtFull, smeldr.AIDoc),
 
 		// Forge: SitemapConfig{} opts this module into /docs/sitemap.xml and
 		// contributes an entry to the /sitemap.xml aggregate index.
-		forge.SitemapConfig{},
+		smeldr.SitemapConfig{},
 
 		// Forge: Templates("templates") parses templates/list.html and
 		// templates/show.html at startup. Run() fails fast if either is missing.
-		forge.Templates("templates"),
+		smeldr.Templates("templates"),
 	)
 
-	app := forge.New(forge.MustConfig(forge.Config{
+	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 		BaseURL: "http://localhost:8081",
 		// Forge: Secret is required for HMAC signing even when no auth is used,
 		// because CookieSession middleware (if added later) depends on it.
@@ -126,8 +126,8 @@ func main() {
 	// ...for all known AI training crawlers. AskFirst signals that the content
 	// owner wants to be consulted before their content is used for training,
 	// while still allowing AI assistants to *read* via /llms.txt and /llms-full.txt.
-	app.SEO(&forge.RobotsConfig{
-		AIScraper: forge.AskFirst,
+	app.SEO(&smeldr.RobotsConfig{
+		AIScraper: smeldr.AskFirst,
 		Sitemaps:  true,
 	})
 
@@ -136,7 +136,7 @@ func main() {
 	app.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := indexTpl.ExecuteTemplate(w, "index.html", nil); err != nil {
-			forge.WriteError(w, r, forge.ErrInternal)
+			smeldr.WriteError(w, r, smeldr.ErrInternal)
 		}
 	}))
 
@@ -153,8 +153,8 @@ func main() {
 }
 
 // seed inserts 6 Published documentation pages into repo across 2 sections.
-// In a production app these would come from a SQL database via forge.SQLRepo[T].
-func seed(repo forge.Repository[*Doc]) {
+// In a production app these would come from a SQL database via smeldr.SQLRepo[T].
+func seed(repo smeldr.Repository[*Doc]) {
 	now := time.Now().UTC()
 
 	type docSpec struct {
@@ -174,13 +174,13 @@ func seed(repo forge.Repository[*Doc]) {
 third-party dependencies, so nothing beyond the standard module tools is needed.
 
 Create a Config with your site's base URL and a signing secret, then call
-forge.New to obtain an App. Register content modules with app.Content, add
+smeldr.New to obtain an App. Register content modules with app.Content, add
 global middleware with app.Use, and start the server with app.Run.
 
 **Minimal example:**
 
 ` + "```" + `go
-app := forge.New(forge.MustConfig(forge.Config{
+app := smeldr.New(smeldr.MustConfig(smeldr.Config{
     BaseURL: "https://example.com",
     Secret:  []byte("...32 random bytes..."),
 }))
@@ -204,7 +204,7 @@ your server and run it behind a reverse proxy such as Caddy or nginx.
 
 ` + "```" + `go
 pool, _ := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
-cfg := forge.Config{DB: forgepgx.Wrap(pool), ...}
+cfg := smeldr.Config{DB: forgepgx.Wrap(pool), ...}
 ` + "```" + `
 
 **HTTPS redirect:** set Config.HTTPS to true and Forge will automatically
@@ -222,22 +222,22 @@ handling code required in your application.`,
 			title:   "Modules and Content Types",
 			section: "Reference",
 			body: `A Module connects a Go struct to a set of HTTP routes, a repository, and a
-collection of optional features. Define your content type, embed forge.Node,
-add struct tags for validation, then call forge.NewModule to wire everything
+collection of optional features. Define your content type, embed smeldr.Node,
+add struct tags for validation, then call smeldr.NewModule to wire everything
 together.
 
 **Minimal module:**
 
 ` + "```" + `go
 type Post struct {
-    forge.Node
+    smeldr.Node
     Title string ` + "`forge:\"required,min=3\"`" + `
     Body  string ` + "`forge:\"required\"`" + `
 }
 
-m := forge.NewModule[*Post](&Post{},
-    forge.At("/posts"),
-    forge.Repo(forge.NewMemoryRepo[*Post]()),
+m := smeldr.NewModule[*Post](&Post{},
+    smeldr.At("/posts"),
+    smeldr.Repo(smeldr.NewMemoryRepo[*Post]()),
 )
 ` + "```" + `
 
@@ -256,7 +256,7 @@ markdown (requires Markdownable).`,
 			title:   "Content Lifecycle",
 			section: "Reference",
 			body: `Every Forge content item moves through four lifecycle states encoded in
-forge.Status: Draft, Scheduled, Published, Archived. The state is stored in
+smeldr.Status: Draft, Scheduled, Published, Archived. The state is stored in
 the Node.Status field and enforced by Forge on every public endpoint.
 
 **Draft:** stored but invisible. GET /posts/{slug} returns 404. Excluded from
@@ -293,10 +293,10 @@ per-module fragment at /{prefix}/sitemap.xml and an aggregate index at
 append the sitemap URL automatically. Set AIScraper to AskFirst or Disallow to
 control AI training crawler access.
 
-**HTML meta tags:** implement forge.Headable on your content type and return a
-forge.Head struct. Forge renders <title>, <meta name="description">,
+**HTML meta tags:** implement smeldr.Headable on your content type and return a
+smeldr.Head struct. Forge renders <title>, <meta name="description">,
 canonical, Open Graph, Twitter Card, and JSON-LD tags via the
-{{template "forge:head" .Head}} partial. BreadcrumbList JSON-LD is generated
+{{template "smeldr:head" .Head}} partial. BreadcrumbList JSON-LD is generated
 automatically when Breadcrumbs is non-empty.`,
 			pubDays: 70,
 		},
@@ -333,10 +333,10 @@ via the above endpoints.`,
 	now = now.UTC()
 	for _, spec := range docs {
 		pub := now.Add(-time.Duration(spec.pubDays) * 24 * time.Hour)
-		node := forge.Node{
-			ID:          forge.NewID(),
+		node := smeldr.Node{
+			ID:          smeldr.NewID(),
 			Slug:        spec.slug,
-			Status:      forge.Published,
+			Status:      smeldr.Published,
 			PublishedAt: pub,
 		}
 		doc := &Doc{Node: node, Title: spec.title, Body: spec.body, Section: spec.section}

@@ -1,4 +1,4 @@
-package forge
+package smeldr
 
 import "time"
 
@@ -31,8 +31,8 @@ func (mcpOption) isOption() {}
 // Example:
 //
 //	app.Content(&BlogPost{},
-//	    forge.At("/posts"),
-//	    forge.MCP(forge.MCPRead, forge.MCPWrite),
+//	    smeldr.At("/posts"),
+//	    smeldr.MCP(smeldr.MCPRead, smeldr.MCPWrite),
 //	)
 func MCP(ops ...MCPOperation) Option {
 	return mcpOption{ops: ops}
@@ -52,15 +52,15 @@ type MCPMeta struct {
 // Returned by [MCPModule.MCPSchema].
 //
 // The optional [MCPField.Format] and [MCPField.Description] fields are
-// populated from the forge_format and forge_description struct tags
+// populated from the smeldr_format and smeldr_description struct tags
 // respectively (Decision 27). Both are hints only — Forge performs no
 // validation based on either value.
 type MCPField struct {
 	Name        string // Go field name
 	JSONName    string // lowercase snake_case name used in MCP messages
 	Type        string // "string" | "number" | "boolean" | "datetime"
-	Format      string // "" when no forge_format tag present; e.g. "markdown", "html"
-	Description string // "" when no forge_description tag present; free-text authoring guidance
+	Format      string // "" when no smeldr_format tag present; e.g. "markdown", "html"
+	Description string // "" when no smeldr_description tag present; free-text authoring guidance
 	Required    bool
 	MinLength   int      // 0 = no constraint
 	MaxLength   int      // 0 = no constraint
