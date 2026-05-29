@@ -460,3 +460,32 @@ success.
 
 ---
 
+## A115 — T58: forgemcp.Server.Register(app)
+
+**Date:** 2026-05-29
+
+**What:** New `Register(app *smeldr.App)` method on `forgemcp.Server`.
+Calls `s.Handler()` once to get the forgemcp mux, then registers each route
+pattern on the forge app's mux via `app.Handle()`.
+
+Routes registered unconditionally: `GET /mcp`, `POST /mcp`, `POST /mcp/message`,
+`GET /.well-known/oauth-protected-resource`.
+
+Routes registered when `WithOAuth` is configured: `GET/.well-known/oauth-authorization-server`,
+`GET /oauth/authorize`, `POST /oauth/authorize`, `POST /oauth/token`,
+`POST /oauth/revoke`.
+
+**Why:** Operators currently call `app.Handle(...)` five times for each OAuth
+endpoint. `Register` reduces this to one call and removes the risk of missing
+a route. `Handler()` is unchanged for non-forge embeddings.
+
+**Also:** `mcp_test.go` struct tags updated `forge:"required"` → `smeldr:"required"`
+(T67 follow-up). `go.mod` bumped: `smeldr.dev/core v1.26.0` → `v1.30.0`,
+`smeldr.dev/oauth v0.1.2` → `v0.1.4`.
+
+**Files changed (mcp):** `transport.go`, `mcp_test.go`, `go.mod`, `go.sum`.
+
+**smeldr.dev/mcp → v1.13.0** (minor — new exported method).
+
+---
+

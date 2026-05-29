@@ -1644,6 +1644,34 @@ func main() {
 For Claude Desktop, Cursor, and SSE remote transport configuration see
 the [smeldr.dev/mcp README](https://github.com/smeldr/mcp).
 
+### Server.Register — mount all MCP+OAuth routes in one call (v1.13.0+)
+
+`Register(app *smeldr.App)` replaces the pattern of calling `app.Handle` for
+each MCP/OAuth endpoint individually:
+
+```go
+mcpSrv := forgemcp.New(app, forgemcp.WithOAuth(oauthSrv))
+mcpSrv.Register(app) // mounts GET/POST /mcp, POST /mcp/message,
+                     // /.well-known/oauth-protected-resource,
+                     // and all OAuth routes when WithOAuth is configured
+```
+
+Routes registered:
+
+| Route | Always | WithOAuth only |
+|-------|--------|---------------|
+| `GET /mcp` | ✓ | |
+| `POST /mcp` | ✓ | |
+| `POST /mcp/message` | ✓ | |
+| `GET /.well-known/oauth-protected-resource` | ✓ | |
+| `GET /.well-known/oauth-authorization-server` | | ✓ |
+| `GET /oauth/authorize` | | ✓ |
+| `POST /oauth/authorize` | | ✓ |
+| `POST /oauth/token` | | ✓ |
+| `POST /oauth/revoke` | | ✓ |
+
+The existing `Handler()` method is unchanged for non-forge embeddings.
+
 ---
 
 ## The AI-first design philosophy

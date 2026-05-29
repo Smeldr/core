@@ -204,6 +204,7 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 | A112 | T71: `xAuthBase` changed `"https://twitter.com"` → `"https://x.com"` in social/twitter.go — fixes X OAuth login loop caused by session cookie domain mismatch. social v0.7.4. | Agreed | 2026-05-29 |
 | A113 | T57 oauth: `POST /oauth/revoke` per RFC 7009 — `revokeHandler` added; always 200 OK; revokes refresh tokens via `DeleteRefreshToken`; access tokens expire naturally. oauth v0.1.4. | Agreed | 2026-05-29 |
 | A114 | T57 cli: `smeldr-cli oauth revoke <token>` — POSTs to `FORGE_URL/oauth/revoke`; CLI parity with A113. cli v0.9.3. | Agreed | 2026-05-29 |
+| A115 | T58: `forgemcp.Server.Register(app *smeldr.App)` — mounts all MCP+OAuth routes on forge App in one call; delegates to `s.Handler()` mux. `Handler()` unchanged. go.mod: core v1.30.0, oauth v0.1.4. mcp v1.13.0. | Agreed | 2026-05-29 |
 | D32 | decisions/ file system restructure — flat role-separated system with rolling working file (`recent.md`), Non-Decisions file (`nondecisions.md`), phase2.md archived as `phase2-archive.md`. Archiving is architect-directed at ~20KB. | Active | 2026-05-17 |
 
 ### Non-Decisions — [decisions/nondecisions.md](decisions/nondecisions.md)
@@ -214,4 +215,4 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 ---
 
-> **Body text:** D1–D22, A19–A65, A88–A95 → [`decisions/core.md`](decisions/core.md) · D25, A66, D26, A83 → [`decisions/auth.md`](decisions/auth.md) · D27, A67, A74, A75, A77 → [`decisions/content-api.md`](decisions/content-api.md) · D28, A69–A72, A76, A84–A86 → [`decisions/docs.md`](decisions/docs.md) · A73, D31, A79 → [`decisions/media.md`](decisions/media.md) · D29, D30, A82 → [`decisions/nav.md`](decisions/nav.md) · A68, A78, A80, A81 → [`decisions/storage.md`](decisions/storage.md) · A87, A97–A114, D32 → [`decisions/recent.md`](decisions/recent.md) · A96 → [`decisions/nondecisions.md`](decisions/nondecisions.md) · phase2-archive.md — superseded; use topic files above
+> **Body text:** D1–D22, A19–A65, A88–A95 → [`decisions/core.md`](decisions/core.md) · D25, A66, D26, A83 → [`decisions/auth.md`](decisions/auth.md) · D27, A67, A74, A75, A77 → [`decisions/content-api.md`](decisions/content-api.md) · D28, A69–A72, A76, A84–A86 → [`decisions/docs.md`](decisions/docs.md) · A73, D31, A79 → [`decisions/media.md`](decisions/media.md) · D29, D30, A82 → [`decisions/nav.md`](decisions/nav.md) · A68, A78, A80, A81 → [`decisions/storage.md`](decisions/storage.md) · A87, A97–A115, D32 → [`decisions/recent.md`](decisions/recent.md) · A96 → [`decisions/nondecisions.md`](decisions/nondecisions.md) · phase2-archive.md — superseded; use topic files above
