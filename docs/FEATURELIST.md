@@ -63,7 +63,7 @@ Labels are reviewed at every module minor or major version bump.
 ## Access control — Stable
 
 - Role-based access — Guest → Author → Editor → Admin enforced per module per operation
-- Struct-tag validation — `forge:"required,min=3"` enforced identically for HTTP, API, and MCP calls
+- Struct-tag validation — `smeldr:"required,min=3"` enforced identically for HTTP, API, and MCP calls
 - Token management — named revocable tokens with role scoping; `ensureBootstrap` auto-creates the first admin token on first start
 - ErrLastAdmin guard — cannot revoke the last admin token
 
