@@ -403,3 +403,19 @@ visible remnant of the old brand in the core API.
 
 ---
 
+## A112 — T71: X OAuth base URL twitter.com → x.com
+
+**Date:** 2026-05-29
+
+**What:** `xAuthBase` in `social/twitter.go` changed from `"https://twitter.com"`
+to `"https://x.com"`.
+
+**Why:** X's OAuth authorization endpoint moved to x.com. Using twitter.com causes
+a login loop due to session cookie domain mismatch between twitter.com and x.com.
+
+**Files changed (social):** `twitter.go`.
+
+**smeldr.dev/social → v0.7.4** (patch).
+
+---
+
