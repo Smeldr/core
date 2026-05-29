@@ -42,7 +42,7 @@ jobs:
         run: govulncheck ./...
 
   integration:
-    name: Test (forge-pgx integration)
+    name: Test (pgx integration)
     runs-on: ubuntu-latest
 
     services:
@@ -67,8 +67,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run forge-pgx integration tests
-        working-directory: forge-pgx
+      - name: Run pgx integration tests
+        working-directory: pgx
         env:
           DATABASE_URL: postgres://forge:forge@localhost:5432/forgetest
         run: go test -v -tags integration ./...
