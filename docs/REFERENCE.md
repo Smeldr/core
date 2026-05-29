@@ -2039,6 +2039,66 @@ app.Health()
 
 ---
 
+## SiteConfig
+
+`SiteConfig` is a built-in singleton content type for site-wide defaults that need
+to be configurable via MCP — without code changes or redeployment.
+
+### Fields
+
+| Field | `db` column | Description |
+|-------|-------------|-------------|
+| `SiteName` | `site_name` | Appended to all page titles. Empty = no suffix. |
+| `TitleSeparator` | `title_separator` | Separator between page title and site name, e.g. `" | "`. Default `" | "` at render time if empty. |
+| `OGImage` | `og_image` | Relative URL of the global fallback OG image, e.g. `/media/og.png`. |
+| `XHandle` | `x_handle` | X (formerly Twitter) site handle, e.g. `@smeldr`. Emitted as `twitter:site` meta tag. |
+| `HeadScript` | `head_script` | Raw snippet injected verbatim into `<head>`. For analytics (Google Analytics, GoatCounter, Plausible, etc.) or custom head content. |
+
+### Registration
+
+```go
+// 1. Create the table once at startup
+if err := smeldr.CreateSiteConfigTable(db); err != nil {
+    log.Fatal(err)
+}
+
+// 2. Register the module
+app.Content(smeldr.NewSiteConfigModule(db))
+```
+
+After registration, the MCP tools `create_site_config`, `update_site_config`, and
+`get_site_config` are available to Admin-role agents. Configure via MCP:
+
+```json
+{
+  "site_name":       "Acme Blog",
+  "title_separator": " | ",
+  "og_image":        "/media/og-default.png",
+  "x_handle":        "@acmeblog",
+  "head_script":     "<script>/* analytics */</script>"
+}
+```
+
+### DB schema
+
+```sql
+CREATE TABLE IF NOT EXISTS smeldr_site_configs (
+    id               TEXT NOT NULL PRIMARY KEY,
+    slug             TEXT NOT NULL DEFAULT 'site-config',
+    status           TEXT NOT NULL DEFAULT 'draft',
+    created_at       DATETIME NOT NULL,
+    updated_at       DATETIME NOT NULL,
+    published_at     DATETIME,
+    site_name        TEXT NOT NULL DEFAULT '',
+    title_separator  TEXT NOT NULL DEFAULT '',
+    og_image         TEXT NOT NULL DEFAULT '',
+    x_handle         TEXT NOT NULL DEFAULT '',
+    head_script      TEXT NOT NULL DEFAULT ''
+);
+```
+
+---
+
 ## Known issues
 
 **Windows: CSS files served as `text/plain`**
