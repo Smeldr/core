@@ -324,6 +324,31 @@ via `slog.Info`.
 - Existing SQLite databases: auto-migrated at first startup with v1.28.0.
 - PostgreSQL operators: must run 7 `ALTER TABLE ... RENAME TO ...` statements manually.
 
+## A110 — T63: SiteConfig singleton — global site configuration via MCP
+
+**Date:** 2026-05-28
+**Status:** Agreed
+**Milestone:** T63
+
+**What:**
+`SiteConfig` struct added to core — a built-in singleton content type for site-wide
+defaults configurable via MCP after first deploy. Replaces hardcoded values in `main.go`
+for operators who provision via agent.
+
+Fields: `site_name`, `title_separator`, `og_image`, `x_handle`, `head_script`.
+
+Factory: `NewSiteConfigModule(db DB) *Module[SiteConfig]` — returns a fully configured
+`SingleInstance` module backed by `NewSQLRepo` on `smeldr_site_configs`.
+
+DDL helper: `CreateSiteConfigTable(db DB) error` — creates the `smeldr_site_configs`
+table if it does not exist. Follows the `CreateAuditTable` pattern.
+
+**Why:** Cloud provisioning requires MCP-only setup after first deploy. Hardcoded
+`main.go` config requires a rebuild for every site-name or analytics script change.
+
+**No breaking changes** — purely additive. Existing applications are unaffected.
+v1.29.0.
+
 **No exported Go API changes. `migrate.go` is package-internal.**
 
 **Files changed (core):** `migrate.go` (new), `forge.go`, `audit.go`, `auth.go`, `nav.go`,

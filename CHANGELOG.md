@@ -23,6 +23,15 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.29.0] — 2026-05-28
+
+### Added
+- `SiteConfig` struct — singleton content type for site-wide defaults configurable via MCP (Amendment A110).
+- `NewSiteConfigModule(db DB) *Module[SiteConfig]` — factory; returns a `SingleInstance` module pre-wired with `NewSQLRepo` on `smeldr_site_configs`.
+- `CreateSiteConfigTable(db DB) error` — DDL helper; creates `smeldr_site_configs` if it does not exist.
+
+---
+
 ## [1.28.0] — 2026-05-28
 
 DB table rename: `forge_*` → `smeldr_*`, auto-migration at startup (Amendment A109).
