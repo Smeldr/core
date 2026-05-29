@@ -419,3 +419,44 @@ a login loop due to session cookie domain mismatch between twitter.com and x.com
 
 ---
 
+## A113 — T57 oauth: POST /oauth/revoke per RFC 7009
+
+**Date:** 2026-05-29
+
+**What:** `revokeHandler` added to `forgeoauth.Server`. `POST /oauth/revoke`
+registered in `Handler()`. New file `revoke.go`.
+
+**Behaviour:** Always responds `200 OK` regardless of whether the token is found
+or already revoked (RFC 7009 §2.2 requirement). Only refresh tokens are handled —
+`DeleteRefreshToken` is called on the store. Access tokens expire naturally via
+`ExpiresAt`. `token_type_hint` is accepted but not enforced.
+
+**Why:** RFC 7009 compliance. Clients (Claude Desktop, custom apps) need a
+standard way to invalidate refresh tokens on logout or credential rotation.
+
+**Files changed (oauth):** `revoke.go` (new), `server.go`.
+
+**smeldr.dev/oauth → v0.1.4** (patch).
+
+---
+
+## A114 — T57 cli: smeldr-cli oauth revoke subcommand
+
+**Date:** 2026-05-29
+
+**What:** New `oauth.go` in forge-cli with `runOAuthCommand` / `runOAuthRevoke`.
+`main.go` switch gets `"oauth"` case; `printUsage` updated with OAuth subcommands.
+
+**Usage:** `smeldr-cli oauth revoke <token>` — POSTs
+`application/x-www-form-urlencoded` to `FORGE_URL/oauth/revoke` via
+`http.PostForm`. Server always responds 200; CLI prints "Token revoked." on
+success.
+
+**Why:** CLI parity with the new `/oauth/revoke` endpoint (A113).
+
+**Files changed (cli):** `oauth.go` (new), `main.go`.
+
+**smeldr.dev/cli → v0.9.3** (patch).
+
+---
+
