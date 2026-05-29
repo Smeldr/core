@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/jackc/pgx/v5 v5.8.0
-	smeldr.dev/core v1.25.1
+	smeldr.dev/core v1.29.0
 )
 
 require (
