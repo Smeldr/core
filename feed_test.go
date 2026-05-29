@@ -1,4 +1,4 @@
-package smeldr
+﻿package smeldr
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 // testFeedPost is a content type used exclusively in feed tests.
 type testFeedPost struct {
 	Node
-	Title       string `forge:"required"`
+	Title       string `smeldr:"required"`
 	Description string
 	Author      string
 	ImageURL    string

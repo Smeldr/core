@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.30.0] — 2026-05-29
+
+### Added
+- `HeadAssets.RawHead template.HTML` — verbatim HTML injected into `<head>` after all other `HeadAssets` output (preconnect, stylesheets, links, scripts). Zero value is a no-op; fully backward compatible (Amendment A111, T74).
+
+### Changed (breaking)
+- Validation and auto-slug struct tag key renamed from `forge:"required"` to `smeldr:"required"` (Amendment A111, T67). Any content type using `forge:"required"` must update the tag; fields without the updated tag will no longer trigger validation or auto-slug derivation.
+
+---
+
 ## [1.29.0] — 2026-05-28
 
 ### Added

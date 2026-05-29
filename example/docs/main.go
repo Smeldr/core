@@ -1,4 +1,4 @@
-// Package main is a self-contained Forge documentation site — an example
+﻿// Package main is a self-contained Forge documentation site — an example
 // application demonstrating Forge's AI-first content features:
 //
 //   - AIDoc per-item endpoints: /docs/{slug}/aidoc (token-efficient format)
@@ -36,9 +36,9 @@ import (
 type Doc struct {
 	smeldr.Node
 
-	Title   string `forge:"required,min=3,max=120"`
-	Body    string `forge:"required,min=10"`
-	Section string `forge:"required"`
+	Title   string `smeldr:"required,min=3,max=120"`
+	Body    string `smeldr:"required,min=10"`
+	Section string `smeldr:"required"`
 }
 
 // Head implements smeldr.Headable.

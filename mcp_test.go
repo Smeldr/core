@@ -1,4 +1,4 @@
-package smeldr
+﻿package smeldr
 
 import (
 	"testing"
@@ -94,7 +94,7 @@ func TestSnakeCase(t *testing.T) {
 // TestMCPSchema verifies that MCPSchema derives the correct fields from a
 // content type's struct definition and forge: tags.
 func TestMCPSchema(t *testing.T) {
-	// testPost has: Node (embedded), Title forge:"required", Body (no tag).
+	// testPost has: Node (embedded), Title smeldr:"required", Body (no tag).
 	repo := NewMemoryRepo[*testPost]()
 	m := newTestModule(repo)
 	fields := m.MCPSchema()
@@ -157,8 +157,8 @@ func TestMCPSchema(t *testing.T) {
 func TestMCPSchemaWithConstraints(t *testing.T) {
 	type constrainedPost struct {
 		Node
-		Title    string `forge:"required,min=3,max=100"`
-		Category string `forge:"oneof=news|blog|tutorial"`
+		Title    string `smeldr:"required,min=3,max=100"`
+		Category string `smeldr:"oneof=news|blog|tutorial"`
 	}
 	repo := NewMemoryRepo[*constrainedPost]()
 	m := NewModule((*constrainedPost)(nil), Repo(repo), At("/cposts"))
@@ -189,7 +189,7 @@ func TestMCPSchemaWithConstraints(t *testing.T) {
 func TestMCPSchema_formatTags(t *testing.T) {
 	type richPost struct {
 		Node
-		Body  string `forge:"required" smeldr_format:"markdown" smeldr_description:"Write content in Markdown."`
+		Body  string `smeldr:"required" smeldr_format:"markdown" smeldr_description:"Write content in Markdown."`
 		Embed string `smeldr_format:"html"`
 		Plain string
 	}

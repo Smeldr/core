@@ -1,4 +1,4 @@
-// Package main is a self-contained Forge devlog — a production-pattern blog
+﻿// Package main is a self-contained Forge devlog — a production-pattern blog
 // application that demonstrates the full v1.22.2 feature set:
 //
 //   - SQLite persistence via smeldr.SQLRepo (no cgo; uses modernc.org/sqlite)
@@ -49,8 +49,8 @@ import (
 type Post struct {
 	smeldr.Node
 
-	Title string   `forge:"required,min=3,max=120" db:"title"`
-	Body  string   `forge:"required,min=10"        db:"body"`
+	Title string   `smeldr:"required,min=3,max=120" db:"title"`
+	Body  string   `smeldr:"required,min=10"        db:"body"`
 	Tags  []string `db:"-"` // join table in production; excluded from SQL scan
 }
 

@@ -1,4 +1,4 @@
-// Package main is a self-contained Forge JSON API — a Go resource curator —
+﻿// Package main is a self-contained Forge JSON API — a Go resource curator —
 // demonstrating authentication, role-based authorisation, validation hooks,
 // and legacy URL redirects with no HTML templates.
 //
@@ -78,9 +78,9 @@ func init() {
 type Resource struct {
 	smeldr.Node
 
-	Title       string `forge:"required,min=3,max=200"`
-	URL         string `forge:"required"`
-	Description string `forge:"required,min=10"`
+	Title       string `smeldr:"required,min=3,max=200"`
+	URL         string `smeldr:"required"`
+	Description string `smeldr:"required,min=10"`
 	Tags        []string
 }
 

@@ -137,6 +137,8 @@ const smeldrHeadTmpl = `{{define "smeldr:head"}}<title>{{.Head.Title}}</title>
 {{- if .Src}}<script src="{{.Src}}"{{if .Async}} async{{end}}{{if .Defer}} defer{{end}}></script>
 {{- else}}<script>{{.Body}}</script>{{end}}
 {{- end}}
+{{- if .HeadAssets.RawHead}}{{.HeadAssets.RawHead}}
+{{- end}}
 {{- end}}
 {{- if .Head.NoIndex}}
 <meta name="robots" content="noindex, nofollow">

@@ -1,4 +1,4 @@
-package smeldr
+﻿package smeldr
 
 // example_test.go — compile-verified README examples.
 //
@@ -17,7 +17,7 @@ import "time"
 // Markdownable (for LLMsTxtFull text/markdown content negotiation).
 type examplePost struct {
 	Node
-	Title string `forge:"required" json:"title"`
+	Title string `smeldr:"required" json:"title"`
 	Body  string `json:"body"`
 }
 
@@ -272,7 +272,7 @@ func ExamplePageHead() {
 func ExampleAPIOnly() {
 	type HomePage struct {
 		Node
-		Title   string `json:"title"   forge:"required"`
+		Title   string `json:"title"   smeldr:"required"`
 		HeroURL string `json:"hero_url"`
 	}
 
@@ -289,7 +289,7 @@ func ExampleAPIOnly() {
 func ExampleContextFunc() {
 	type DocPage struct {
 		Node
-		Title string `forge:"required"`
+		Title string `smeldr:"required"`
 		Body  string
 	}
 

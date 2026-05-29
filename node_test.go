@@ -1,4 +1,4 @@
-package smeldr
+﻿package smeldr
 
 import (
 	"strings"
@@ -113,7 +113,7 @@ func TestUniqueSlug(t *testing.T) {
 // TestRunValidationRequired verifies the required constraint.
 func TestRunValidationRequired(t *testing.T) {
 	type S struct {
-		Title string `forge:"required"`
+		Title string `smeldr:"required"`
 	}
 	if err := RunValidation(&S{Title: "hello"}); err != nil {
 		t.Errorf("expected nil for non-empty, got %v", err)
@@ -134,7 +134,7 @@ func TestRunValidationRequired(t *testing.T) {
 // TestRunValidationMin verifies the min= constraint on strings and ints.
 func TestRunValidationMin(t *testing.T) {
 	type S struct {
-		Body string `forge:"min=10"`
+		Body string `smeldr:"min=10"`
 	}
 	if err := RunValidation(&S{Body: "hello world"}); err != nil {
 		t.Errorf("expected nil for long body, got %v", err)
@@ -151,7 +151,7 @@ func TestRunValidationMin(t *testing.T) {
 // TestRunValidationMax verifies the max= constraint on strings.
 func TestRunValidationMax(t *testing.T) {
 	type S struct {
-		Name string `forge:"max=5"`
+		Name string `smeldr:"max=5"`
 	}
 	if err := RunValidation(&S{Name: "hi"}); err != nil {
 		t.Errorf("expected nil for short name, got %v", err)
@@ -164,7 +164,7 @@ func TestRunValidationMax(t *testing.T) {
 // TestRunValidationEmail verifies the email constraint.
 func TestRunValidationEmail(t *testing.T) {
 	type S struct {
-		Email string `forge:"email"`
+		Email string `smeldr:"email"`
 	}
 	tests := []struct {
 		value   string
@@ -191,7 +191,7 @@ func TestRunValidationEmail(t *testing.T) {
 // TestRunValidationURL verifies the url constraint.
 func TestRunValidationURL(t *testing.T) {
 	type S struct {
-		Link string `forge:"url"`
+		Link string `smeldr:"url"`
 	}
 	tests := []struct {
 		value   string
@@ -217,7 +217,7 @@ func TestRunValidationURL(t *testing.T) {
 // TestRunValidationSlug verifies the slug constraint.
 func TestRunValidationSlug(t *testing.T) {
 	type S struct {
-		Slug string `forge:"slug"`
+		Slug string `smeldr:"slug"`
 	}
 	if err := RunValidation(&S{Slug: "valid-slug-123"}); err != nil {
 		t.Errorf("expected nil, got %v", err)
@@ -235,7 +235,7 @@ func TestRunValidationSlug(t *testing.T) {
 // TestRunValidationOneOf verifies the oneof= constraint using | separator.
 func TestRunValidationOneOf(t *testing.T) {
 	type S struct {
-		Status string `forge:"oneof=draft|published|archived"`
+		Status string `smeldr:"oneof=draft|published|archived"`
 	}
 	for _, good := range []string{"draft", "published", "archived"} {
 		if err := RunValidation(&S{Status: good}); err != nil {
@@ -251,8 +251,8 @@ func TestRunValidationOneOf(t *testing.T) {
 // and multiple errors collected without short-circuit.
 func TestRunValidationMultiConstraint(t *testing.T) {
 	type S struct {
-		Title string `forge:"required,min=3,max=50"`
-		Body  string `forge:"required,min=10"`
+		Title string `smeldr:"required,min=3,max=50"`
+		Body  string `smeldr:"required,min=10"`
 	}
 	// Both fields empty — expect two errors.
 	err := RunValidation(&S{})
@@ -269,7 +269,7 @@ func TestRunValidationMultiConstraint(t *testing.T) {
 // key causes a panic on first use — fail-fast at startup.
 func TestRunValidationUnknownTagPanics(t *testing.T) {
 	type Bad struct {
-		X string `forge:"doesnotexist"`
+		X string `smeldr:"doesnotexist"`
 	}
 	defer func() {
 		if r := recover(); r == nil {
@@ -283,7 +283,7 @@ func TestRunValidationUnknownTagPanics(t *testing.T) {
 
 // validateSpy is a Validatable that records whether Validate() was called.
 type validateSpy struct {
-	Title     string `forge:"required"`
+	Title     string `smeldr:"required"`
 	called    bool
 	returnErr error
 }
@@ -345,10 +345,10 @@ func isValidationError(err error, target **ValidationError) bool {
 // ── Benchmarks ────────────────────────────────────────────────────────────────
 
 type benchStruct struct {
-	Title string `forge:"required,min=3,max=100"`
-	Body  string `forge:"required,min=50"`
-	Email string `forge:"email"`
-	Slug  string `forge:"slug"`
+	Title string `smeldr:"required,min=3,max=100"`
+	Body  string `smeldr:"required,min=50"`
+	Email string `smeldr:"email"`
+	Slug  string `smeldr:"slug"`
 }
 
 // BenchmarkValidateStructCached measures the cached reflection path (all runs

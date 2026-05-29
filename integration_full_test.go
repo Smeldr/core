@@ -1,4 +1,4 @@
-package smeldr
+﻿package smeldr
 
 // integration_full_test.go â€” cross-milestone integration suite (M1â€“M5).
 //
@@ -2138,8 +2138,8 @@ func TestFull_G21_V1FullStack(t *testing.T) {
 // MCPSchema field derivation.
 type testMCPPost struct {
 	Node
-	Title  string `forge:"required,min=3"`
-	Body   string `forge:"required,min=10"`
+	Title  string `smeldr:"required,min=3"`
+	Body   string `smeldr:"required,min=10"`
 	Rating int
 	Tags   string `json:"tags"`
 }
@@ -2149,7 +2149,7 @@ type testMCPPost struct {
 // GETâ†’PUT round-trip without conversion errors.
 type cliRoundTripPost struct {
 	Node
-	Title string `forge:"required"`
+	Title string `smeldr:"required"`
 	Body  string
 	Tags  []string
 }
@@ -2587,8 +2587,8 @@ func TestFull_G25_WebhookStoreRoundtrip(t *testing.T) {
 // TypeName "g26Post" â†’ event suffix = "g26post.published".
 type g26Post struct {
 	Node
-	Title string `forge:"required,min=3"`
-	Body  string `forge:"required"`
+	Title string `smeldr:"required,min=3"`
+	Body  string `smeldr:"required"`
 }
 
 // TestFull_G26_SignalEnqueue verifies that publishing a post via the MCP
@@ -2912,8 +2912,8 @@ func TestFull_G29_CircuitBreakerOpens(t *testing.T) {
 // TypeName "g30Post" â†’ event name "g30post.scheduled".
 type g30Post struct {
 	Node
-	Title string `forge:"required,min=3"`
-	Body  string `forge:"required"`
+	Title string `smeldr:"required,min=3"`
+	Body  string `smeldr:"required"`
 }
 
 // TestFull_G30_MCPScheduleWebhook verifies the cross-milestone path:
@@ -3105,8 +3105,8 @@ func TestFull_G31_PreviewToken(t *testing.T) {
 // g32Post is the content type for G32 signal bus cross-milestone tests.
 type g32Post struct {
 	Node
-	Title string `forge:"required,min=3"`
-	Body  string `forge:"required"`
+	Title string `smeldr:"required,min=3"`
+	Body  string `smeldr:"required"`
 }
 
 // TestFull_G32_OnSignalCalledOnMCPCreate verifies the cross-milestone path:
@@ -3243,7 +3243,7 @@ func TestFull_G32_OnSignalAndWebhookCoexist(t *testing.T) {
 
 type g33Post struct {
 	Node
-	Title string `json:"title" forge:"required"`
+	Title string `json:"title" smeldr:"required"`
 }
 
 // chanAuditStore wraps fakeAuditStore and signals a channel on each Append.
@@ -3422,7 +3422,7 @@ func TestFull_G33_AuditTrailLifecycle(t *testing.T) {
 // g34Page is the content type for the G34 SingleInstance group.
 type g34Page struct {
 	Node
-	Title string `forge:"required" db:"title"`
+	Title string `smeldr:"required" db:"title"`
 }
 
 // TestFull_G34_SingleInstanceRouting verifies that a SingleInstance() module:
@@ -3517,13 +3517,13 @@ func TestFull_G34_SingleInstanceRouting(t *testing.T) {
 // g35Post is the content type for the G35 Standalone group.
 type g35Post struct {
 	Node
-	Title string `forge:"required" db:"title"`
+	Title string `smeldr:"required" db:"title"`
 }
 
 // g35Article is a second Standalone content type for multi-module dispatch.
 type g35Article struct {
 	Node
-	Title string `forge:"required" db:"title"`
+	Title string `smeldr:"required" db:"title"`
 }
 
 // TestFull_G35_StandaloneRouting verifies that a Standalone() module:
@@ -3653,7 +3653,7 @@ func TestFull_G35_StandaloneRouting(t *testing.T) {
 // g36HomePage is an admin-only content type with no public HTML surface.
 type g36HomePage struct {
 	Node
-	Title   string `json:"title"    forge:"required" db:"title"`
+	Title   string `json:"title"    smeldr:"required" db:"title"`
 	HeroURL string `json:"hero_url" db:"hero_url"`
 }
 

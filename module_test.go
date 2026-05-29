@@ -1,4 +1,4 @@
-package smeldr
+﻿package smeldr
 
 import (
 	"bytes"
@@ -20,7 +20,7 @@ import (
 // with SitemapConfig options in integration tests.
 type testPost struct {
 	Node
-	Title string `forge:"required"`
+	Title string `smeldr:"required"`
 	Body  string
 }
 
@@ -30,13 +30,13 @@ func (p *testPost) Head() Head { return Head{Title: p.Title} }
 // implement [Headable] or [SitemapNode]. Used only in A36 startup panic tests.
 type testNoHeadPost struct {
 	Node
-	Title string `forge:"required"`
+	Title string `smeldr:"required"`
 }
 
 // testMDPost is a testPost that also implements [Markdownable].
 type testMDPost struct {
 	Node
-	Title string `forge:"required"`
+	Title string `smeldr:"required"`
 	Body  string
 }
 
@@ -783,7 +783,7 @@ func TestModule_Stop_haltsCacheSweep(t *testing.T) {
 // testSlicePost is a content type with a []string field for Amendment A52 tests.
 type testSlicePost struct {
 	Node
-	Title string   `forge:"required"`
+	Title string   `smeldr:"required"`
 	Tags  []string `json:"tags"`
 }
 

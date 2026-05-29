@@ -1,4 +1,4 @@
-package smeldr
+﻿package smeldr
 
 import (
 	"context"
@@ -208,7 +208,7 @@ func TestDebouncerStop(t *testing.T) {
 // sbPost is the content type used by signal bus unit tests.
 type sbPost struct {
 	Node
-	Title string `forge:"required,min=1" db:"title"`
+	Title string `smeldr:"required,min=1" db:"title"`
 }
 
 func (p *sbPost) ContentTitle() string { return p.Title }
