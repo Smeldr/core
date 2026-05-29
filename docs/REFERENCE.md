@@ -19,8 +19,8 @@ go get smeldr.dev/core
 ```go
 type Post struct {
     smeldr.Node
-    Title string `forge:"required" json:"title"`
-    Body  string `forge:"required,min=50" json:"body"`
+    Title string `smeldr:"required" json:"title"`
+    Body  string `smeldr:"required,min=50" json:"body"`
 }
 
 func (p *Post) Head() smeldr.Head {
@@ -91,9 +91,9 @@ Embed `smeldr.Node`. Implement `Validate()` and `Head()`. That's the contract.
 type BlogPost struct {
     smeldr.Node                                          // ID, Slug, Status, timestamps
 
-    Title  string      `forge:"required"      json:"title"`
-    Body   string      `forge:"required,min=50" json:"body"`
-    Author string      `forge:"required"      json:"author"`
+    Title  string      `smeldr:"required"      json:"title"`
+    Body   string      `smeldr:"required,min=50" json:"body"`
+    Author string      `smeldr:"required"      json:"author"`
     Tags   []string    `                      json:"tags,omitempty"`
     Cover  smeldr.Image `                      json:"cover,omitempty"`
 }
@@ -145,7 +145,7 @@ type Node struct {
 }
 ```
 
-Slug is auto-generated from the first `forge:"required"` string field
+Slug is auto-generated from the first `smeldr:"required"` string field
 unless you set it explicitly. Renaming a slug is safe — the UUID
 keeps all internal relations intact.
 
@@ -167,21 +167,25 @@ Four struct tags control validation, storage, and AI/MCP behaviour. Use them tog
 ```go
 type DocPage struct {
     smeldr.Node
-    Title string `forge:"required,min=3" db:"title" json:"title"`
-    Body  string `forge:"required" db:"body" json:"body" smeldr_format:"markdown" smeldr_description:"Write in Markdown. Supports headings, lists, and code blocks."`
+    Title string `smeldr:"required,min=3" db:"title" json:"title"`
+    Body  string `smeldr:"required" db:"body" json:"body" smeldr_format:"markdown" smeldr_description:"Write in Markdown. Supports headings, lists, and code blocks."`
     Embed string `db:"embed" json:"embed,omitempty" smeldr_format:"html" smeldr_description:"Raw HTML only. Use for iframes and third-party embeds. Must be trusted content."`
 }
 ```
 
 | Tag | Purpose |
 |-----|---------|
-| `forge:"required,min=N"` | Validation — enforced identically across HTTP, API, and MCP calls |
+| `smeldr:"required,min=N"` | Validation — enforced identically across HTTP, API, and MCP calls |
 | `db:"column_name"` | SQLRepo column mapping — omit to use lowercased field name |
 | `smeldr_format:"markdown"` | Machine-readable format hint; currently `"markdown"` and `"html"` are supported |
 | `smeldr_description:"..."` | Free-text authoring guidance — appears as the field's `description` in the MCP JSON Schema tool definition |
 
-Validation via `forge` tags cannot be bypassed — an AI agent calling a write tool
+Validation via `smeldr` tags cannot be bypassed — an AI agent calling a write tool
 faces the same `required` and `min` rules as a direct HTTP POST.
+
+> **Breaking change in v1.30.0:** the tag key was renamed from `forge:"required"`
+> to `smeldr:"required"`. Any content type still using `forge:"required"` will no
+> longer have those fields validated until the tag is updated.
 
 ---
 
@@ -1045,9 +1049,9 @@ No ORM. No query builder. SQL is the query language — and AI assistants write 
 ```go
 type BlogPost struct {
     smeldr.Node
-    Title  string `forge:"required" db:"title"  json:"title"`
-    Body   string `forge:"required" db:"body"   json:"body"`
-    Author string `forge:"required" db:"author" json:"author"`
+    Title  string `smeldr:"required" db:"title"  json:"title"`
+    Body   string `smeldr:"required" db:"body"   json:"body"`
+    Author string `smeldr:"required" db:"author" json:"author"`
 }
 // db tag controls column mapping — omit it and Forge uses the field name lowercased
 ```
@@ -1426,15 +1430,20 @@ app.SEO(&smeldr.HeadAssets{
     Scripts: []smeldr.ScriptTag{
         {Src: "/static/app.js", Defer: true},
     },
+    RawHead: template.HTML(`<link rel="preload" href="/fonts/inter.woff2" as="font" crossorigin>`),
 })
 ```
 
-Assets are emitted in order: preconnect → stylesheets → links → scripts.
+Assets are emitted in order: preconnect → stylesheets → links → scripts → `RawHead`.
 Inline script bodies use `template.JS` to opt in to verbatim emission:
 
 ```go
 smeldr.ScriptTag{Body: template.JS("console.log('Forge')")} // never pass user input here
 ```
+
+`RawHead` accepts any raw HTML as `template.HTML` — use it for analytics snippets,
+preload hints, or anything that does not fit the structured fields. The caller is
+responsible for safety. Zero value is a no-op.
 
 ---
 
@@ -1685,9 +1694,9 @@ import (
 
 type Article struct {
     smeldr.Node
-    Title  string      `forge:"required"         json:"title"`
-    Body   string      `forge:"required,min=100"  json:"body"`
-    Author string      `forge:"required"         json:"author"`
+    Title  string      `smeldr:"required"         json:"title"`
+    Body   string      `smeldr:"required,min=100"  json:"body"`
+    Author string      `smeldr:"required"         json:"author"`
     Cover  smeldr.Image `                          json:"cover,omitempty"`
 }
 

@@ -341,7 +341,7 @@ var autoSlugCache sync.Map
 
 // autoSlugFieldPath returns the cached reflect index path of the best field to
 // derive a slug from for struct type t. Checks Title, Name, Headline in order,
-// then falls back to the first top-level string field tagged forge:"required".
+// then falls back to the first top-level string field tagged smeldr:"required".
 // Returns nil when no suitable field is found. Result is immutable once stored.
 func autoSlugFieldPath(t reflect.Type) []int {
 	for t.Kind() == reflect.Ptr {
@@ -358,7 +358,7 @@ func autoSlugFieldPath(t reflect.Type) []int {
 	}
 	for i := 0; i < t.NumField(); i++ {
 		fi := t.Field(i)
-		if fi.Type.Kind() == reflect.String && strings.Contains(fi.Tag.Get("forge"), "required") {
+		if fi.Type.Kind() == reflect.String && strings.Contains(fi.Tag.Get("smeldr"), "required") {
 			path := []int{i}
 			autoSlugCache.Store(t, path)
 			return path
@@ -1798,7 +1798,7 @@ func mcpStructField(sf reflect.StructField) MCPField {
 		Format:      sf.Tag.Get("smeldr_format"),
 		Description: sf.Tag.Get("smeldr_description"),
 	}
-	if tag := sf.Tag.Get("forge"); tag != "" {
+	if tag := sf.Tag.Get("smeldr"); tag != "" {
 		f.Required, f.MinLength, f.MaxLength, f.Enum = mcpParseForgeTag(tag)
 	}
 	return f

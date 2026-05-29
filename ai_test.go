@@ -1,4 +1,4 @@
-package smeldr
+﻿package smeldr
 
 import (
 	"compress/gzip"
@@ -15,7 +15,7 @@ import (
 // testAIPost is a content type for AI tests that implements Markdownable and SitemapNode.
 type testAIPost struct {
 	Node
-	Title   string `forge:"required"`
+	Title   string `smeldr:"required"`
 	Summary string
 	Body    string
 }

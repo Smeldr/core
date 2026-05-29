@@ -360,3 +360,46 @@ v1.29.0.
 **Forge core → v1.28.0** (minor bump — DB schema migration required for upgrade).
 
 ---
+
+## A111 — T74+T67: HeadAssets.RawHead + smeldr:"required" tag rename
+
+**Date:** 2026-05-29
+
+**What (T74):**
+`HeadAssets.RawHead template.HTML` field added to the `HeadAssets` struct.
+The `smeldr:head` template partial injects it verbatim into `<head>` after all
+other HeadAssets output (preconnect → stylesheets → links → scripts → RawHead).
+Zero value is a no-op — fully backward compatible.
+
+Use case: analytics snippets (GoatCounter, Plausible), preload hints, or any
+custom `<head>` HTML that does not fit the structured fields.
+
+**What (T67):**
+Validation and auto-slug struct tag key renamed from `forge:"required"` to
+`smeldr:"required"` throughout core. Three call sites changed:
+`autoSlugFieldPath` (module.go), MCP field builder (module.go), and
+`parseConstraints` (node.go). All test files, example files, and doc comments
+in core updated.
+
+**Breaking change (T67):** any content type still using `forge:"required"` will
+no longer have those fields validated until the tag is updated to `smeldr:"required"`.
+Operators with custom content types must update struct tags. Repos with known
+`forge:"required"` usage (site-dev, site, agent) have separate follow-up tasks.
+
+**Why (T74):** HeadAssets covers most common static-asset injection patterns but
+could not accept arbitrary head HTML. RawHead closes the gap without adding a
+one-off escape hatch for every new use case.
+
+**Why (T67):** Completes the smeldr brand rename. The `forge` tag key was the last
+visible remnant of the old brand in the core API.
+
+**Files changed (core):** `head.go`, `templates.go`, `module.go`, `node.go`,
+`ai_test.go`, `doc.go`, `example_test.go`, `node_test.go`, `module_test.go`,
+`feed_test.go`, `mcp_test.go`, `integration_full_test.go`,
+`example/docs/main.go`, `example/api/main.go`, `CHANGELOG.md`, `docs/REFERENCE.md`,
+`docs/FEATURELIST.md`, `README.md`, `DECISIONS.md`, `decisions/recent.md`.
+
+**Forge core → v1.30.0** (minor bump — breaking tag rename + additive RawHead field).
+
+---
+

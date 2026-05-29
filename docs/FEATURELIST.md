@@ -2,13 +2,13 @@
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.29.0 (A110) + smeldr.dev/mcp v1.12.0 + smeldr.dev/oauth v0.1.3 + smeldr.dev/social v0.7.3 + smeldr.dev/agent v0.5.0 + smeldr.dev/cli v0.9.2 + smeldr.dev/media v1.3.0.
+Last updated: v1.30.0 (A111) + smeldr.dev/mcp v1.12.0 + smeldr.dev/oauth v0.1.3 + smeldr.dev/social v0.7.3 + smeldr.dev/agent v0.5.0 + smeldr.dev/cli v0.9.2 + smeldr.dev/media v1.3.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.29.0 | Stable |
+| `smeldr.dev/core` | v1.30.0 | Stable |
 | `smeldr.dev/mcp` | v1.12.0 | Stable |
 | `smeldr.dev/oauth` | v0.1.3 | Beta |
 | `smeldr.dev/core/pgx` | — | Beta |

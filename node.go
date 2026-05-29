@@ -1,4 +1,4 @@
-package smeldr
+﻿package smeldr
 
 import (
 	"crypto/rand"
@@ -41,8 +41,8 @@ const (
 //
 //	type BlogPost struct {
 //	    smeldr.Node
-//	    Title string `forge:"required"`
-//	    Body  string `forge:"required,min=50"`
+//	    Title string `smeldr:"required"`
+//	    Body  string `smeldr:"required,min=50"`
 //	}
 //
 // Never store a Node by pointer inside your content type — the storage and
@@ -189,14 +189,14 @@ type fieldConstraint struct {
 // Populated on first call to validateStruct for each type.
 var typeCache sync.Map
 
-// parseConstraints inspects all fields of t for `forge:"..."` tags and returns
+// parseConstraints inspects all fields of t for `smeldr:"..."` tags and returns
 // the compiled constraint slice. Panics on unrecognised tag keys so that
 // misconfigured types are caught at startup, not at runtime.
 func parseConstraints(t reflect.Type) []fieldConstraint {
 	var out []fieldConstraint
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
-		tag := f.Tag.Get("forge")
+		tag := f.Tag.Get("smeldr")
 		if tag == "" {
 			continue
 		}
