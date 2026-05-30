@@ -1,18 +1,18 @@
-﻿# Forge — AI Agent Guide
+﻿# Smeldr — AI Agent Guide
 
-This document is for AI assistants working with Forge — either building
+This document is for AI assistants working with Smeldr — either building
 applications or consuming a running site via MCP.
 
 Two roles, two sections:
 
-- [AI coding agents](#for-ai-coding-agents) — you are helping a developer build a Forge application
-- [AI consuming agents](#for-ai-consuming-agents) — you are connected to a running Forge site via MCP
+- [AI coding agents](#for-ai-coding-agents) — you are helping a developer build a Smeldr application
+- [AI consuming agents](#for-ai-consuming-agents) — you are connected to a running Smeldr site via MCP
 
 ---
 
 ## For AI coding agents
 
-You are helping a developer build a Forge application.
+You are helping a developer build a Smeldr application.
 
 ### Start here
 
@@ -25,15 +25,15 @@ rename it. Everything else is additive.
 ```go
 type Post struct {
     smeldr.Node
-    Title string `forge:"required,min=3" db:"title"`
-    Body  string `forge:"required"       db:"body"`
+    Title string `smeldr:"required,min=3" db:"title"`
+    Body  string `smeldr:"required"       db:"body"`
 }
 ```
 
 Rules:
 
 - Always embed `smeldr.Node` — never compose it
-- Use `forge:"required"` and `forge:"min=N"` for validation
+- Use `smeldr:"required"` and `smeldr:"min=N"` for validation
 - Use `db:"column_name"` for `SQLRepo` column mapping
 - Avoid SQLite reserved keywords as column names (`order`, `group`, etc.)
   — use `db:"sort_order"` instead
@@ -49,15 +49,15 @@ operations — `update_post` with `"meta_title"` will silently return empty valu
 // Correct
 type Post struct {
     smeldr.Node
-    Title string `forge:"required" db:"title" json:"title"`
-    Body  string `forge:"required" db:"body"  json:"body"`
+    Title string `smeldr:"required" db:"title" json:"title"`
+    Body  string `smeldr:"required" db:"body"  json:"body"`
 }
 
 // Wrong — MCP returns empty values for Title and Body
 type Post struct {
     smeldr.Node
-    Title string `forge:"required" db:"title"`
-    Body  string `forge:"required" db:"body"`
+    Title string `smeldr:"required" db:"title"`
+    Body  string `smeldr:"required" db:"body"`
 }
 ```
 
@@ -70,8 +70,8 @@ point of authoring.
 ```go
 type DocPage struct {
     smeldr.Node
-    Title string `forge:"required,min=3"`
-    Body  string `forge:"required" smeldr_format:"markdown" smeldr_description:"Write content in Markdown. Supports headings, lists, and code blocks."`
+    Title string `smeldr:"required,min=3"`
+    Body  string `smeldr:"required" smeldr_format:"markdown" smeldr_description:"Write content in Markdown. Supports headings, lists, and code blocks."`
     Embed string `smeldr_format:"html" smeldr_description:"Raw HTML only. Use for iframes and third-party embeds. Must be trusted content."`
 }
 ```
@@ -200,7 +200,7 @@ control storage. Both are set in `smeldr.Config` or via `smeldr.config` file key
 
 ### Key rules for code generation
 
-- Zero third-party dependencies in the `forge` core package
+- Zero third-party dependencies in the `smeldr` core package
 - `smeldr.Context` is an interface, not a struct
 - `smeldr.DB` is an interface, not `*sql.DB`
 - All errors must implement `smeldr.Error` — never raw `errors.New`
@@ -212,7 +212,7 @@ control storage. Both are set in `smeldr.Config` or via `smeldr.config` file key
 
 ## For AI consuming agents
 
-You are connected to a running Forge site via MCP. This guide applies
+You are connected to a running Smeldr site via MCP. This guide applies
 regardless of which MCP-compatible agent you are — Claude, Cursor, or any
 other tool that supports the Model Context Protocol.
 

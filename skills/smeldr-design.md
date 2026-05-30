@@ -1,11 +1,11 @@
-﻿# forge-design: Technical Skill (Claude Code)
+﻿# smeldr-design: Technical Skill (Claude Code)
 
 ## Purpose
 
-This skill enables Claude Code to generate `forge-pattern.md` files from Forge content
+This skill enables Claude Code to generate `smeldr-pattern.md` files from Smeldr content
 types, and to guide the AI-assisted design workflow from Go struct to rendered HTML.
 
-Use this skill when a Forge developer wants to design the public HTML surface for a
+Use this skill when a Smeldr developer wants to design the public HTML surface for a
 content type — without writing HTML or CSS by hand.
 
 ---
@@ -13,12 +13,12 @@ content type — without writing HTML or CSS by hand.
 ## Workflow
 
 ```
-Go struct -> forge-pattern.md -> design agent -> HTML + CSS -> html/template
+Go struct -> smeldr-pattern.md -> design agent -> HTML + CSS -> html/template
 ```
 
 1. Read the Go struct for the content type
-2. Generate a forge-pattern.md (format below)
-3. Give forge-pattern.md to a design agent (Claude Design, Stitch, etc.)
+2. Generate a smeldr-pattern.md (format below)
+3. Give smeldr-pattern.md to a design agent (Claude Design, Stitch, etc.)
 4. Review the output against the design intent
 5. Translate static HTML to Go html/template syntax
 
@@ -67,14 +67,14 @@ For standard content types (list + show routes), always describe both pages unde
 
 ---
 
-## forge-pattern.md format
+## smeldr-pattern.md format
 
 ```markdown
-# forge-pattern: [Site / Project name]
+# smeldr-pattern: [Site / Project name]
 
 ## CMS note
 
-Built with Forge (smeldr.dev) - a Go content framework.
+Built with Smeldr (smeldr.dev) - a Go content framework.
 Pages are server-side rendered HTML templates.
 Deliver clean, semantic HTML with plain CSS custom properties.
 No JavaScript. No Tailwind. No frontend framework.
@@ -141,15 +141,15 @@ Description of what appears on this page and what data it shows.
 
 ---
 
-## How to read a Forge Go struct
+## How to read a Smeldr Go struct
 
 Given a struct like:
 
 ```go
 type Post struct {
     smeldr.Node
-    Title string `json:"title"   forge:"required,min=3,max=120"`
-    Body  string `json:"body"    forge:"required,min=10"`
+    Title string `json:"title"   smeldr:"required,min=3,max=120"`
+    Body  string `json:"body"    smeldr:"required,min=10"`
     Tags  []string `json:"tags" db:"-"`
 }
 ```
@@ -157,8 +157,8 @@ type Post struct {
 - `smeldr.Node` provides: `id`, `slug`, `status`, `published_at`, `scheduled_at`,
   `created_at`, `updated_at` - all available in JSON output
 - `json:"title"` -> field name in content.json is `title`
-- `forge:"required"` -> mark Required: yes in the fields table
+- `smeldr:"required"` -> mark Required: yes in the fields table
 - `db:"-"` -> excluded from database, still available in JSON if present
 
-Do not infer field types from the Go type alone - check the forge tag for `markdown`
+Do not infer field types from the Go type alone - check the smeldr tag for `markdown`
 to determine if a string field renders as markdown.
