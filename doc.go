@@ -1,4 +1,4 @@
-﻿// Package forge is a Go web framework for content-first applications: structured
+// Package forge is a Go web framework for content-first applications: structured
 // content types with lifecycle management (draft → scheduled → published → archived),
 // AI indexing, RSS feeds, sitemaps, MCP tool support, and zero third-party runtime
 // dependencies.

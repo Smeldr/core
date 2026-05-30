@@ -1,4 +1,4 @@
-﻿// Package main is a self-contained Forge JSON API — a Go resource curator —
+// Package main is a self-contained Forge JSON API — a Go resource curator —
 // demonstrating authentication, role-based authorisation, validation hooks,
 // and legacy URL redirects with no HTML templates.
 //

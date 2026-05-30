@@ -1,4 +1,4 @@
-﻿package smeldr
+package smeldr
 
 // example_test.go — compile-verified README examples.
 //

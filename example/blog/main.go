@@ -1,4 +1,4 @@
-﻿// Package main is a self-contained Forge devlog — a production-pattern blog
+// Package main is a self-contained Forge devlog — a production-pattern blog
 // application that demonstrates the full v1.22.2 feature set:
 //
 //   - SQLite persistence via smeldr.SQLRepo (no cgo; uses modernc.org/sqlite)

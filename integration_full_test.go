@@ -1,4 +1,4 @@
-﻿package smeldr
+package smeldr
 
 // integration_full_test.go â€” cross-milestone integration suite (M1â€“M5).
 //
