@@ -1,8 +1,8 @@
-﻿# forge-pattern: Forge Devlog
+# smeldr-pattern: Smeldr Devlog
 
 ## CMS note
 
-Built with Forge (smeldr.dev) — a Go content framework.
+Built with Smeldr (smeldr.dev) — a Go content framework.
 Pages are server-side rendered HTML templates.
 Deliver clean, semantic HTML with plain CSS custom properties.
 No JavaScript. No Tailwind. No frontend framework.
@@ -13,32 +13,32 @@ No JavaScript. No Tailwind. No frontend framework.
 
 | Field        | Type     | Required | Example                               |
 |--------------|----------|----------|---------------------------------------|
-| title        | string   | yes      | "Why Forge Has Zero Dependencies"     |
+| title        | string   | yes      | "Why Smeldr Has Zero Dependencies"    |
 | body         | markdown | yes      | Full article (paragraphs, headings, code blocks) |
 | published_at | datetime | yes      | "2026-02-28T10:00:00Z"                |
-| slug         | string   | yes      | "why-forge-has-zero-dependencies"     |
+| slug         | string   | yes      | "why-smeldr-has-zero-dependencies"    |
 
 ### content.json
 
 ```json
 [
   {
-    "slug": "why-forge-has-zero-dependencies",
-    "title": "Why Forge Has Zero Dependencies",
+    "slug": "why-smeldr-has-zero-dependencies",
+    "title": "Why Smeldr Has Zero Dependencies",
     "published_at": "2026-02-28T10:00:00Z",
-    "body": "When we started building Forge, the first architectural decision we locked was simple: zero third-party dependencies in the core package.\n\nGo's standard library is remarkably complete. net/http gives you a production-ready HTTP server. html/template handles safe rendering. database/sql abstracts every relational database.\n\nThe constraint paid dividends immediately. Forge builds in under two seconds."
+    "body": "When we started building Smeldr, the first architectural decision we locked was simple: zero third-party dependencies in the core package.\n\nGo's standard library is remarkably complete. net/http gives you a production-ready HTTP server. html/template handles safe rendering. database/sql abstracts every relational database.\n\nThe constraint paid dividends immediately. Smeldr builds in under two seconds."
   },
   {
     "slug": "scheduled-publishing-without-a-job-queue",
     "title": "How We Handle Scheduled Publishing Without a Job Queue",
     "published_at": "2026-03-14T10:00:00Z",
-    "body": "Most CMS platforms solve scheduled publishing with a cron job or a dedicated job queue. These work, but they introduce infrastructure you have to operate and keep in sync with your application state.\n\nForge uses an adaptive in-process ticker. When the scheduler starts it looks at the nearest ScheduledAt timestamp and sets its tick interval to half the remaining time, down to a minimum of one second."
+    "body": "Most CMS platforms solve scheduled publishing with a cron job or a dedicated job queue. These work, but they introduce infrastructure you have to operate and keep in sync with your application state.\n\nSmeldr uses an adaptive in-process ticker. When the scheduler starts it looks at the nearest ScheduledAt timestamp and sets its tick interval to half the remaining time, down to a minimum of one second."
   },
   {
-    "slug": "content-lifecycle-in-forge",
-    "title": "Content Lifecycle in Forge: Draft, Scheduled, Published, Archived",
+    "slug": "content-lifecycle-in-smeldr",
+    "title": "Content Lifecycle in Smeldr: Draft, Scheduled, Published, Archived",
     "published_at": "2026-04-10T10:00:00Z",
-    "body": "Every piece of content in Forge moves through a defined lifecycle: Draft to Scheduled to Published to Archived. Forge enforces this at the framework level, not the application level.\n\nThis matters because lifecycle enforcement is the kind of logic that is trivial to implement once, catastrophic to forget."
+    "body": "Every piece of content in Smeldr moves through a defined lifecycle: Draft to Scheduled to Published to Archived. Smeldr enforces this at the framework level, not the application level.\n\nThis matters because lifecycle enforcement is the kind of logic that is trivial to implement once, catastrophic to forget."
   }
 ]
 ```
