@@ -26,6 +26,14 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
+      - name: Check for UTF-8 BOM in Go source files
+        run: |
+          if grep -rl $'\xef\xbb\xbf' --include="*.go" .; then
+            echo "BOM found in .go files — remove the BOM before merging"
+            exit 1
+          fi
+          echo "No BOM found"
+
       - name: Run tests with race detector
         run: go test -race ./...
 

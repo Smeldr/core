@@ -18,3 +18,8 @@
 - [ ] `gofmt -w .` applied
 - [ ] All new exported symbols have godoc comments
 - [ ] No new third-party dependencies added to core package
+- [ ] `docs/REFERENCE.md` updated (if API surface changed)
+- [ ] `docs/FEATURELIST.md` updated (if features added or changed)
+- [ ] `skills/smeldr.md` updated in core AND `common/agent/skills/smeldr.md`
+- [ ] `AGENTS.md` updated (if new patterns, struct tags, tools, or wiring changed)
+- [ ] Amendment number assigned from DECISIONS.md (only if DECISIONS.md was updated)
