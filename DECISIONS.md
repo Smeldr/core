@@ -20,6 +20,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | `decisions/nondecisions.md` | Non-Decisions only | Yes — Non-Decisions directly |
 | `decisions/core.md` | Archive: D1–D22, A19–A65, A88–A95 | No |
 | `decisions/phase2-archive.md` | Superseded archive (was phase2.md; content now in topic files) | No |
+| `decisions/phase3-archive.md` | Archive: A102–A115 | No |
 | `decisions/auth.md` | Archive: D25, A66, D26, A83 | No |
 | `decisions/content-api.md` | Archive: D27, A67, A74, A75, A77 | No |
 | `decisions/docs.md` | Archive: D28, A69–A72, A76, A84–A86 | No |
@@ -181,16 +182,10 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 | A80 | `storage.go`: `SeqRepository[T]` optional interface + `Seq` methods on `MemoryRepo[T]` and `SQLRepo[T]` — lazy `iter.Seq2[T, error]` streaming without full result-set load. Additive; `Repository[T]` unchanged. | Agreed | 2026-05-04 |
 | A81 | `go.mod`: `modernc.org/sqlite` added as test-only dependency; enables `TestRepoParity_SQLRepo` against real in-memory SQLite. Exception to zero-dep rule: CGO-free, test-only, single file, documented precedent. | Agreed | 2026-05-04 |
 
-### Recent — [decisions/recent.md](decisions/recent.md)
+### Phase 3 Archive — [decisions/phase3-archive.md](decisions/phase3-archive.md)
 
 | # | Title | Status | Date |
 |---|-------|--------|------|
-| A87 | `signals.go`: `AfterSchedule Signal = "after_schedule"` — fires after Scheduled transition, alongside AfterUpdate. Enables `post.scheduled` webhook events and per-signal MCP subscription routing. | Agreed | 2026-05-06 |
-| A97 | Audit trail (T21) — `App.Audit(AuditStore)` subscribes to `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete` via signal bus; persists `AuditRecord` to SQL. `NewAuditStore(DB)`, `CreateAuditTable(DB)`. GET `/_audit` (Editor+). `forge audit list` CLI. New exported types: `AuditRecord`, `AuditFilter`, `AuditStore`. v1.22.0. | Agreed | 2026-05-16 |
-| A98 | Fix data race in `notifyAfter` (`module.go`) — `snapshotItem` takes a shallow reflect copy of `item` before goroutines are spawned; both `dispatchAfter` and `afterHook` goroutine receive the snapshot. Resolves races on G26, G30, G32, G33 detected by `-race`. No exported symbols changed. v1.22.1. | Agreed | 2026-05-19 |
-| A99 | Go toolchain upgrade policy — patch: follow within one sprint (govulncheck trigger); minor: within 1–2 months or before Go drops support; go.mod `go` directive tracks latest patch; `toolchain` directive used when patch bump needed but min version stays stable. | Agreed | 2026-05-19 |
-| A100 | Go 1.26.3 toolchain bump — `go.mod` `go` directive `go 1.26.2` → `go 1.26.3`. Closes GO-2026-4982, GO-2026-4980, GO-2026-4971, GO-2026-4918. CI auto-picks version via `go-version-file: go.mod`. v1.22.2. | Agreed | 2026-05-19 |
-| A101 | `SingleInstance()` and `Standalone()` module routing options. `SingleInstance`: serves first Published item at `GET /{prefix}`; slug URLs not registered. `Standalone`: App dispatches `GET /{slug}` top-level across all Standalone modules; `GET /{prefix}/{slug}` not registered; list at `GET /{prefix}` retained. `MCPMeta.SingleInstance bool` added; `forge-mcp` suppresses `list_{type}s` for SingleInstance modules. v1.23.0. | Agreed | 2026-05-23 |
 | A102 | `module.go`: `APIOnly()` module option — marks a module as REST/MCP/CLI-only with no public HTML surface. `GET /{prefix}` and `GET /{prefix}/{slug}` with `Accept: text/html` return 404. JSON routes and all MCP tools unchanged. `APIOnly()` + `SingleInstance()` panics at startup. v1.24.0. | Agreed | 2026-05-22 |
 | A103 | `auth.go`: `VerifyTokenString(token string, secret []byte, store *TokenStore) (User, bool)` — verifies a raw bearer token without `*http.Request`. Identical to `VerifyBearerToken` but takes the token string directly; DB lookup uses `context.Background()`. Enables forge-oauth (and other downstream libraries) to validate Forge tokens without importing the HTTP layer. v1.25.0. | Agreed | 2026-05-24 |
 | A104 | `forge.go`: `/_health` JSON key and startup log rename. `"forge"` → `"core"`, `"forge_mcp"` → `"mcp"` in `/_health` response; startup log prefix `"forge: "` → `"smeldr: "`. Follows module path rename (T59 Phase 0C). Breaking change for health monitors. | Agreed | 2026-05-26 |
@@ -205,6 +200,17 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 | A113 | T57 oauth: `POST /oauth/revoke` per RFC 7009 — `revokeHandler` added; always 200 OK; revokes refresh tokens via `DeleteRefreshToken`; access tokens expire naturally. oauth v0.1.4. | Agreed | 2026-05-29 |
 | A114 | T57 cli: `smeldr-cli oauth revoke <token>` — POSTs to `FORGE_URL/oauth/revoke`; CLI parity with A113. cli v0.9.3. | Agreed | 2026-05-29 |
 | A115 | T58: `forgemcp.Server.Register(app *smeldr.App)` — mounts all MCP+OAuth routes on forge App in one call; delegates to `s.Handler()` mux. `Handler()` unchanged. go.mod: core v1.30.0, oauth v0.1.4. mcp v1.13.0. | Agreed | 2026-05-29 |
+
+### Recent — [decisions/recent.md](decisions/recent.md)
+
+| # | Title | Status | Date |
+|---|-------|--------|------|
+| A87 | `signals.go`: `AfterSchedule Signal = "after_schedule"` — fires after Scheduled transition, alongside AfterUpdate. Enables `post.scheduled` webhook events and per-signal MCP subscription routing. | Agreed | 2026-05-06 |
+| A97 | Audit trail (T21) — `App.Audit(AuditStore)` subscribes to `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete` via signal bus; persists `AuditRecord` to SQL. `NewAuditStore(DB)`, `CreateAuditTable(DB)`. GET `/_audit` (Editor+). `forge audit list` CLI. New exported types: `AuditRecord`, `AuditFilter`, `AuditStore`. v1.22.0. | Agreed | 2026-05-16 |
+| A98 | Fix data race in `notifyAfter` (`module.go`) — `snapshotItem` takes a shallow reflect copy of `item` before goroutines are spawned; both `dispatchAfter` and `afterHook` goroutine receive the snapshot. Resolves races on G26, G30, G32, G33 detected by `-race`. No exported symbols changed. v1.22.1. | Agreed | 2026-05-19 |
+| A99 | Go toolchain upgrade policy — patch: follow within one sprint (govulncheck trigger); minor: within 1–2 months or before Go drops support; go.mod `go` directive tracks latest patch; `toolchain` directive used when patch bump needed but min version stays stable. | Agreed | 2026-05-19 |
+| A100 | Go 1.26.3 toolchain bump — `go.mod` `go` directive `go 1.26.2` → `go 1.26.3`. Closes GO-2026-4982, GO-2026-4980, GO-2026-4971, GO-2026-4918. CI auto-picks version via `go-version-file: go.mod`. v1.22.2. | Agreed | 2026-05-19 |
+| A101 | `SingleInstance()` and `Standalone()` module routing options. `SingleInstance`: serves first Published item at `GET /{prefix}`; slug URLs not registered. `Standalone`: App dispatches `GET /{slug}` top-level across all Standalone modules; `GET /{prefix}/{slug}` not registered; list at `GET /{prefix}` retained. `MCPMeta.SingleInstance bool` added; `forge-mcp` suppresses `list_{type}s` for SingleInstance modules. v1.23.0. | Agreed | 2026-05-23 |
 | D32 | decisions/ file system restructure — flat role-separated system with rolling working file (`recent.md`), Non-Decisions file (`nondecisions.md`), phase2.md archived as `phase2-archive.md`. Archiving is architect-directed at ~20KB. | Active | 2026-05-17 |
 
 ### Non-Decisions — [decisions/nondecisions.md](decisions/nondecisions.md)
@@ -215,4 +221,4 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 ---
 
-> **Body text:** D1–D22, A19–A65, A88–A95 → [`decisions/core.md`](decisions/core.md) · D25, A66, D26, A83 → [`decisions/auth.md`](decisions/auth.md) · D27, A67, A74, A75, A77 → [`decisions/content-api.md`](decisions/content-api.md) · D28, A69–A72, A76, A84–A86 → [`decisions/docs.md`](decisions/docs.md) · A73, D31, A79 → [`decisions/media.md`](decisions/media.md) · D29, D30, A82 → [`decisions/nav.md`](decisions/nav.md) · A68, A78, A80, A81 → [`decisions/storage.md`](decisions/storage.md) · A87, A97–A115, D32 → [`decisions/recent.md`](decisions/recent.md) · A96 → [`decisions/nondecisions.md`](decisions/nondecisions.md) · phase2-archive.md — superseded; use topic files above
+> **Body text:** D1–D22, A19–A65, A88–A95 → [`decisions/core.md`](decisions/core.md) · D25, A66, D26, A83 → [`decisions/auth.md`](decisions/auth.md) · D27, A67, A74, A75, A77 → [`decisions/content-api.md`](decisions/content-api.md) · D28, A69–A72, A76, A84–A86 → [`decisions/docs.md`](decisions/docs.md) · A73, D31, A79 → [`decisions/media.md`](decisions/media.md) · D29, D30, A82 → [`decisions/nav.md`](decisions/nav.md) · A68, A78, A80, A81 → [`decisions/storage.md`](decisions/storage.md) · A102–A115 → [`decisions/phase3-archive.md`](decisions/phase3-archive.md) · A87, A97–A101, D32 → [`decisions/recent.md`](decisions/recent.md) · A96 → [`decisions/nondecisions.md`](decisions/nondecisions.md) · phase2-archive.md — superseded; use topic files above
