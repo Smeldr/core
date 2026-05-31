@@ -1,4 +1,4 @@
-﻿// Package main is a self-contained Forge documentation site — an example
+// Package main is a self-contained Forge documentation site — an example
 // application demonstrating Forge's AI-first content features:
 //
 //   - AIDoc per-item endpoints: /docs/{slug}/aidoc (token-efficient format)

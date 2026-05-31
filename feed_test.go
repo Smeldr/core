@@ -1,4 +1,4 @@
-﻿package smeldr
+package smeldr
 
 import (
 	"context"
