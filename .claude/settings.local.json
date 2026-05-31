@@ -21,7 +21,14 @@
       "Bash(git commit -m 'docs\\(changelog,reference,featurelist,roadmap\\): Milestone 13 — upload token \\(v1.19.0\\) *)",
       "Bash(git commit *)",
       "Bash(git tag *)",
-      "Bash(gh release *)"
+      "Bash(gh release *)",
+      "Bash(git checkout *)",
+      "Bash(git mv *)",
+      "Bash(ls \"C:\\\\Users\\\\peter\\\\Documents\\\\Code\\\\Smeldr\\\\common\")",
+      "Bash(git check-ignore *)",
+      "Bash(gh pr create --title 'chore: add CI BOM check, update PR template, fix AGENTS.md, rename skills' --body ' *)",
+      "Bash(gh pr *)",
+      "Bash(git fetch *)"
     ]
   }
 }
