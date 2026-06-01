@@ -1672,6 +1672,44 @@ Routes registered:
 
 The existing `Handler()` method is unchanged for non-forge embeddings.
 
+### Block system tools — `WithBlocks` (T32)
+
+`forgemcp.New(app, forgemcp.WithBlocks())` exposes the block-system MCP tools.
+They operate on the `smeldr_dynamic_content` and `smeldr_content_edges` tables
+(create them with `smeldr.CreateBlockTables(db)`). `WithBlocks` reads the App's
+`Config.DB`; with no DB the tools are not exposed. Blocks are addressed by **ID**
+and are not browsable resources — the read surface is `get_node` / `list_nodes`.
+
+```go
+smeldr.CreateBlockTables(db)
+mcpSrv := forgemcp.New(app, forgemcp.WithBlocks())
+```
+
+Generic node lifecycle (Author role):
+
+| Tool | Description |
+|------|-------------|
+| `create_node` | Create a Draft block. Args: `type_name` (req), `fields` (object). Returns `{id, type_name, status, slug}`. |
+| `update_node` | Merge `fields` onto a block by `id` (absent keys preserved; `type_name` immutable). |
+| `get_node` | Fetch a block by `id` at any status. |
+| `list_nodes` | List blocks; optional `type_name` and `status` filters. |
+| `publish_node` | Publish a block by `id` (idempotent). |
+| `archive_node` | Archive a block by `id`. |
+
+Composition (Editor role) — assemble blocks into pages and collections:
+
+| Tool | Description |
+|------|-------------|
+| `add_section` | Append `child_id` as the last section of `parent_id`. |
+| `reorder_sections` | Set a page's section order to `ordered_child_ids`. |
+| `remove_section` | Remove a section edge (`parent_id`, `child_id`). |
+| `add_item` | Append `child_id` as the last item of a collection `parent_id`. |
+| `reorder_items` | Set a collection's item order to `ordered_child_ids`. |
+| `remove_item` | Remove an item edge (`parent_id`, `child_id`). |
+
+`add_section` / `add_item` derive `parent_type` / `child_type` from the stored
+blocks — pass only the IDs.
+
 ---
 
 ## The AI-first design philosophy
@@ -1914,6 +1952,11 @@ forge-cli init --url https://mysite.com --bootstrap-token <token-from-startup-lo
 | `token list` | List all tokens |
 | `token revoke <id>` | Revoke a token by ID |
 | `social <resource> <verb>` | Manage smeldr.dev/social posts, credentials, schedules, and platform config. Requires smeldr.dev/social v0.5.0+. See smeldr.dev/social docs. |
+| `block node <verb>` | Manage blocks: `create`/`update`/`get`/`list`/`publish`/`archive` (Author). `list` prints a table; `--json` for raw. Full CLI/MCP parity with the block tools (v0.10.0+, T32). |
+| `block section <verb>` / `block item <verb>` | Compose pages/collections: `add`/`reorder`/`remove` (Editor). |
+
+Block `Fields` keys are case-sensitive PascalCase — `block node create/update` take
+`--field K=V` (case preserved) and/or `--fields '<json>'`.
 
 Content files use YAML-subset frontmatter (metadata before `---`, body after):
 
@@ -2689,3 +2732,144 @@ forge-cli media upload hero.jpg --description "Hero image"
 forge-cli media list --type image
 forge-cli media delete <id>
 ```
+
+## Block data foundation
+
+The block system stores all block types as rows in one generic table and records
+composition (which parent contains which child, in what order) in one edge table.
+This is the data layer only — MCP tools, rendering, and schema seeding build on
+top of it.
+
+### `CreateBlockTables`
+
+```go
+smeldr.CreateBlockTables(db)
+```
+
+Creates `smeldr_dynamic_content` and `smeldr_content_edges` (plus the
+`(parent_id, sort_order)` index) if they do not exist. Idempotent — safe to call
+on every boot. This is the single grouped creation function for the block schema;
+there is no per-table creator and no versioned migration runner.
+
+```sql
+CREATE TABLE IF NOT EXISTS smeldr_dynamic_content (
+    id           TEXT NOT NULL PRIMARY KEY,
+    slug         TEXT NOT NULL DEFAULT '',
+    type_name    TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'draft',
+    fields       TEXT NOT NULL DEFAULT '{}',
+    created_at   DATETIME NOT NULL,
+    updated_at   DATETIME NOT NULL,
+    scheduled_at DATETIME,
+    published_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS smeldr_content_edges (
+    id          TEXT NOT NULL PRIMARY KEY,
+    parent_id   TEXT NOT NULL,
+    parent_type TEXT NOT NULL,
+    child_id    TEXT NOT NULL,
+    child_type  TEXT NOT NULL,
+    sort_order  INTEGER NOT NULL,
+    is_shared   INTEGER NOT NULL DEFAULT 0,
+    edge_role   TEXT NOT NULL DEFAULT 'section'
+);
+```
+
+### `DynamicNode`
+
+One Go type serves every block type. `TypeName` is the discriminator
+(`"content_block"`, `"hero"`, …); `Fields` holds the type-specific data as raw
+JSON. `DynamicNode` embeds `Node`, so it carries the standard lifecycle. Blocks
+are addressed by ID — `Slug` may be empty.
+
+```go
+type DynamicNode struct {
+    smeldr.Node
+    TypeName string          `db:"type_name" json:"type_name"`
+    Fields   json.RawMessage `db:"fields"     json:"fields"`
+}
+
+repo := smeldr.NewDynamicContentRepo(db) // *SQLRepo[*DynamicNode]
+node := &smeldr.DynamicNode{
+    Node:     smeldr.Node{ID: smeldr.NewID(), Status: smeldr.Draft},
+    TypeName: "content_block",
+    Fields:   json.RawMessage(`{"title":"Hello","body":"World"}`),
+}
+repo.Save(ctx, node)
+```
+
+`NewDynamicContentRepo(db)` returns a `SQLRepo` bound to `smeldr_dynamic_content`
+(the table name cannot be derived from the type), with the full
+`FindByID` / `FindBySlug` / `FindAll` / `Save` / `Delete` / `Seq` surface.
+
+### `ContentEdge` and `ContentEdgeStore`
+
+A `ContentEdge` records that one parent contains one child at one position. The
+same table and store serve both page→block (`edge_role` `"section"`) and
+collection→item (`"item"`) composition.
+
+```go
+type ContentEdge struct {
+    ID         string
+    ParentID   string
+    ParentType string
+    ChildID    string
+    ChildType  string
+    SortOrder  int
+    IsShared   bool
+    EdgeRole   string // defaults to "section"
+}
+
+edges := smeldr.NewContentEdgeStore(db)
+```
+
+| Method | Effect |
+|--------|--------|
+| `AddChild(ctx, ContentEdge) (ContentEdge, error)` | Appends the child as the parent's last entry. Assigns `ID` and `SortOrder`; defaults `EdgeRole` to `"section"`. |
+| `Children(ctx, parentID) ([]ContentEdge, error)` | The parent's child list, ordered by `SortOrder`, in one query. Empty parent → empty slice. |
+| `ChildrenOf(ctx, parentIDs) ([]ContentEdge, error)` | Children of many parents in one batched `IN()` query — the render engine's level-load path (no N+1). |
+| `RemoveChild(ctx, parentID, childID) error` | Deletes the edge. `ErrNotFound` if absent. |
+| `Reorder(ctx, parentID, orderedChildIDs) error` | Sets `SortOrder` to match the given order in one atomic statement. `ErrBadRequest` if empty. |
+
+### `App.ServeBlocks` — block rendering engine
+
+```go
+r, err := app.ServeBlocks("templates/blocks")
+html, err := r.Render(ctx, "page", pageID)
+```
+
+`ServeBlocks(dir)` ensures the block tables, parses one
+`templates/blocks/<type_name>.html` per block type, and returns a `*BlockRenderer`.
+`Render(ctx, pageType, pageID)` assembles the page's ordered, **Published** section
+blocks (and each collection's items) into HTML.
+
+- **Batched, no N+1** — one `IN()` query for each depth level's blocks plus one
+  `ChildrenOf` for their item edges; the tree is assembled in memory.
+- **Cycle-safe** — a visited-set on the render path plus a `maxDepth` of 16.
+- **Graceful** — an unpublished, missing, dangling, or malformed block, a missing
+  `<type_name>.html`, or a template execution error is skipped (and logged), never
+  failing the whole page. `Render` returns an error only on a database fault.
+
+Each block template receives a `map[string]any`: `.ID` / `.Slug` / `.Status`, the
+block's `Fields` promoted to top level (**PascalCase keys** — `.Title`, `.Body`,
+`.Headline`), `.AnchorID`, and for collections `.Layout` + `.Items` (each item
+pre-rendered). Markdown fields arrive already rendered to safe HTML; output them
+directly (`{{ .Body }}`) — do not call a markdown helper in the template.
+
+Block `Fields` **must use PascalCase keys** (matching the block-system type tables)
+or the template accessors will not bind. ContentList (the dynamic cross-module
+query block) is not yet supported by the engine.
+
+**Reference fields.** A field named `{Name}ID` is resolved to a `.{Name}`
+sub-object holding the referenced block's full template data. The built-in mapping
+is `ImageID` → `.Image` on `content_block`, `contact_card`, and `hero`. `.Image`
+carries `.MediaURL`, `.AltText`, `.Title`, `.Caption` (Caption markdown-rendered):
+
+```html
+{{ with .Image }}<img src="{{ .MediaURL }}" alt="{{ .AltText }}">{{ end }}
+```
+
+Resolution is **Published-only** and **`{{ with }}`-guarded**: an absent,
+unpublished, or dangling reference produces no `.Image` key, so the guard renders
+nothing — no error. Referenced blocks are batch-loaded in one query (no N+1).

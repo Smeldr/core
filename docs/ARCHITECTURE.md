@@ -81,6 +81,9 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-05-19 | A100 (v1.22.2): Go 1.26.3 toolchain bump. `go.mod`: `go 1.26.2` → `go 1.26.3`. Closes GO-2026-4982, GO-2026-4980, GO-2026-4971, GO-2026-4918. No exported symbols changed. |
 | 2026-05-22 | A102 (v1.24.0): `APIOnly()` module option — no public HTML surface. `GET /{prefix}` and `GET /{prefix}/{slug}` with `Accept: text/html` return 404. JSON routes and all MCP tools unchanged. `APIOnly()` + `SingleInstance()` panics at startup. `apiOnly bool` field on `Module[T]`; guard added to `listHandler`, `showHandler`, `singleInstanceHandler`. `integration_full_test.go`: G36. `example_test.go`: `ExampleAPIOnly`. |
 | 2026-05-23 | A101 (v1.23.0): `SingleInstance()` and `Standalone()` module routing options. `mcp.go`: `MCPMeta.SingleInstance bool` field. `module.go`: `singleInstance bool` + `standalone bool` fields on `Module[T]`; `singleInstanceOption`/`standaloneOption` types; `SingleInstance()`/`Standalone()` exported constructors; `singleInstanceHandler`; `standaloneEnabled()`/`findAndServe()`/`findAndServeAIDoc()` dispatch helpers; `Register()` routing branches; URL generation 3-way branch in `regenerateSitemap`/`regenerateFeed`/`regenerateAI`. `forge.go`: `standaloneDispatcher` internal interface; `App.standaloneModules []standaloneDispatcher` + `App.standaloneReg bool`; `App.Content()` detects standalone modules; `App.Handler()` registers `GET /{slug}` + `GET /{slug}/aidoc` dispatch when standalone modules present. `smeldr.dev/mcp/mcp.go`: `mcpAdminReadToolDefs` suppresses `list_{type}s` when `MCPMeta.SingleInstance` is true. `integration_full_test.go`: G34 (SingleInstance) + G35 (Standalone, two modules). |
+| 2026-05-31 | A120 (v1.31.0, T82): `serveblocks.go` reference-field resolution. `blockFieldFormats.refs []string`; `refs:["ImageID"]` on content_block/contact_card/hero; `refIDsOf`; a single batched `IN()` ref-load pass appended to `loadTree` (Published-only); resolve loop in `renderBlock` setting `data[".{Name}"]` = referenced block's `buildData` (`ImageID` → `.Image`). `{{ with }}`-guarded, Published-only, one level, no N+1. Extends A118. 8 tests in `serveblocks_test.go`. |
+| 2026-05-31 | A118 (v1.31.0, T32 component 4): `serveblocks.go` (new) — `App.ServeBlocks(dir) (*BlockRenderer, error)` + `BlockRenderer.Render(ctx, pageType, pageID) (template.HTML, error)`. Convention-template rendering engine (`templates/blocks/<type_name>.html`): batched per-level load via `ContentEdgeStore.ChildrenOf` + `Query[*DynamicNode]` IN() (no N+1); cycle protection (visited-set + `maxDepth` 16); graceful degradation (skip+`slog.Warn` for unpublished/missing/dangling/malformed/missing-template/exec-error). Built-in `blockFieldRegistry` (markdown/raw-HTML fields per type_name; interim until c7). Reuses `renderMarkdown`, `TemplateFuncMap`. PascalCase block-`Fields` key convention (AGENTS.md). ContentList deferred (c4b). `serveblocks_test.go`: 24 tests. Held core v1.31.0. |
+| 2026-05-31 | A116 (v1.31.0, T32 components 1+2): Block-system data foundation. `blocks.go` (new): `DynamicNode` (embeds `Node`; `TypeName`, `Fields json.RawMessage`) + `Head()`; `NewDynamicContentRepo(db) *SQLRepo[*DynamicNode]` (binds `smeldr_dynamic_content`); `CreateBlockTables(db)` — one idempotent grouped creator for `smeldr_dynamic_content` + `smeldr_content_edges` + `(parent_id, sort_order)` index (T55 Decision 1; `scheduled_at` added so `SQLRepo` reuse works). `edges.go` (new): `ContentEdge`, `ContentEdgeStore`, `NewContentEdgeStore(db)`; `AddChild`/`Children`/`ChildrenOf` (batch `IN()`)/`RemoveChild`/`Reorder` (atomic `CASE`); `is_shared` INTEGER↔bool scan; one edge table for page→block and collection→item (T55 Decision 2). `blocks_test.go` + `edges_test.go` (new): 12 tests against in-memory SQLite. Data layer only — MCP, rendering, seeding are later components. |
 
 ---
 
@@ -110,6 +113,19 @@ smeldr.dev/
 ├── storage.go        DB interface, Query[T], QueryOne[T], Repository[T], MemoryRepo[T], ListOptions
 ├── audit.go          AuditRecord, AuditFilter, AuditStore interface, NewAuditStore(DB), CreateAuditTable(DB),
 │                     newAuditHandler (unexported); GET /_audit mounted by App.Handler() (Amendment A97)
+├── blocks.go          DynamicNode (embeds Node; TypeName, Fields json.RawMessage) + Head(),
+│                     NewDynamicContentRepo(db) *SQLRepo[*DynamicNode] (binds smeldr_dynamic_content),
+│                     CreateBlockTables(db) — grouped idempotent creator: smeldr_dynamic_content +
+│                     smeldr_content_edges + (parent_id, sort_order) index (Amendment A116, T32)
+├── edges.go           ContentEdge, ContentEdgeStore, NewContentEdgeStore(db); AddChild/Children/
+│                     ChildrenOf (batch IN())/RemoveChild/Reorder (atomic CASE); scanEdges, edgeColumns;
+│                     one composition-edge table for page→block + collection→item (Amendment A116, T32)
+├── serveblocks.go     App.ServeBlocks(dir) (*BlockRenderer, error), BlockRenderer + Render; batched
+│                     loadTree/loadBlocks, recursive renderBlock (visited-set + maxDepth), buildData
+│                     (contract: Node fields + promoted Fields + markdown/raw-HTML), blockFieldRegistry
+│                     (interim until c7); graceful degradation throughout (Amendment A118, T32 c4);
+│                     reference-field resolution — refs registry + refIDsOf + batched ref-load,
+│                     {Name}ID → .{Name} = referenced block buildData (Amendment A120, T82)
 ├── auth.go           AuthFunc interface, BearerHMAC, CookieSession, BasicAuth, AnyAuth, SignToken,
 │                     VerifyBearerToken(r, secret, store *TokenStore);
 │                     TokenRecord, TokenStore, NewTokenStore (Amendment A66);

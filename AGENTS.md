@@ -198,6 +198,43 @@ app.Handle("POST /mcp/message", mcpSrv.Handler())
 control storage. Both are set in `smeldr.Config` or via `smeldr.config` file keys
 `media_path` and `media_max_size`.
 
+### Block system rendering (ServeBlocks)
+
+`app.ServeBlocks(dir)` renders pages composed of blocks (generic content nodes)
+and composition edges, using one convention template per block type at
+`templates/blocks/<type_name>.html`:
+
+```go
+r, err := app.ServeBlocks("templates/blocks")
+html, err := r.Render(ctx, "page", pageID) // ordered, Published section blocks → HTML
+```
+
+`ServeBlocks` ensures the block tables (`smeldr.CreateBlockTables`). Rendering
+batch-loads (no N+1), is cycle-safe, and degrades gracefully — a bad or
+unpublished block is skipped, never failing the page. Each template receives the
+block's `Fields` promoted to top level plus `.ID` / `.Slug` / `.Status` /
+`.AnchorID`; collections also get `.Layout` and `.Items` (pre-rendered).
+
+**Block `Fields` keys are PascalCase — this is a hard rule.** Templates access
+`.Title`, `.Body`, `.Headline`, so blocks must be stored with PascalCase field
+keys (`{"Title": "...", "Body": "..."}`), matching the block-system type tables.
+A block created with snake_case keys (e.g. `{"title": ...}`) will render blank —
+the template accessor `.Title` cannot find key `title`. When creating blocks via
+the `create_node` MCP tool, use PascalCase field names.
+
+**Reference fields** (`ImageID` → `.Image`): a block field named `{Name}ID` that
+holds another block's ID is resolved by ServeBlocks into a `.{Name}` sub-object
+carrying that block's data. `content_block`, `contact_card`, and `hero` carry
+`ImageID` referencing a published Image block; templates render it guarded:
+
+```html
+{{ with .Image }}<img src="{{ .MediaURL }}" alt="{{ .AltText }}">{{ end }}
+```
+
+Resolution is Published-only and guarded — an absent/unpublished/dangling reference
+simply renders nothing. To make a block show an image: create the Image block, then
+set the parent's `ImageID` to the Image block's ID.
+
 ### Key rules for code generation
 
 - Zero third-party dependencies in the `smeldr` core package
@@ -248,6 +285,30 @@ For each registered content type, these tools are available:
 - `schedule_{type}` — schedules for future publication (RFC3339 datetime)
 - `archive_{type}` — transitions to Archived
 - `delete_{type}` — permanent deletion
+
+### Block tools (when the server is started with `WithBlocks`)
+
+The block system stores all block types as generic nodes and composes them into
+pages and collections. Blocks are addressed by **ID** — they have no slug and are
+not browsable resources (use `get_node` / `list_nodes`, not `resources/read`).
+
+Generic node lifecycle (Author role):
+
+- `create_node(type_name, fields)` — creates a Draft block. `type_name` is the
+  block type (e.g. `"content_block"`, `"hero"`, `"faq_item"`); `fields` is a JSON
+  object of type-specific data. Returns the new block's `id`.
+- `update_node(id, fields)` — merges `fields` onto the stored block (absent keys
+  preserved; `type_name` cannot change).
+- `get_node(id)`, `list_nodes(type_name?, status?)` — read blocks at any status.
+- `publish_node(id)` (idempotent), `archive_node(id)`.
+
+Composition (Editor role) — assemble blocks into pages and collections:
+
+- `add_section(parent_id, child_id)` / `reorder_sections(parent_id, ordered_child_ids)` / `remove_section(parent_id, child_id)` — page sections.
+- `add_item(parent_id, child_id)` / `reorder_items(parent_id, ordered_child_ids)` / `remove_item(parent_id, child_id)` — collection items.
+
+`add_section` / `add_item` derive the parent and child types automatically — pass
+only the IDs. Create a block with `create_node` before composing it.
 
 ### Field format hints
 

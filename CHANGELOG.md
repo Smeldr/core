@@ -23,6 +23,21 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.31.0] — 2026-05-31
+
+### Added
+- Block-system data foundation (Amendment A116, T32 components 1+2). Data layer only — MCP tools, rendering, and schema seeding are later components.
+  - `DynamicNode` — one generic content type for all block types; type-specific fields stored as JSON in `Fields json.RawMessage`, discriminated by `TypeName`. Embeds `Node` for the standard lifecycle.
+  - `NewDynamicContentRepo(db DB) *SQLRepo[*DynamicNode]` — repository bound to the `smeldr_dynamic_content` table.
+  - `ContentEdge`, `ContentEdgeStore`, `NewContentEdgeStore(db DB)` — composition edges (`smeldr_content_edges`); one table for page→block and collection→item. `AddChild`, `Children`, `ChildrenOf` (batched), `RemoveChild`, `Reorder`.
+  - `CreateBlockTables(db DB) error` — single idempotent grouped creator for the block tables and the `(parent_id, sort_order)` index.
+- Block rendering engine (Amendment A118, T32 component 4).
+  - `App.ServeBlocks(dir string) (*BlockRenderer, error)` — parses convention templates under `dir` (one `<type_name>.html` per block type); returns a renderer bound to the App's DB.
+  - `BlockRenderer.Render(ctx Context, pageType, pageID string) (template.HTML, error)` — loads and renders the full block tree for one page or collection; batched per-level load (no N+1); cycle protection via visited-set and `maxDepth 16`; graceful degradation — unpublished, missing, dangling, malformed blocks, missing template, or exec error all skip and log rather than 500.
+- Reference-field resolution in ServeBlocks (Amendment A120, T32/T82). For built-in block types (`content_block`, `contact_card`, `hero`): `ImageID` fields are batch-loaded via a single `IN()` query (Published-only, no N+1) and injected as `.Image` sub-objects carrying `.MediaURL`, `.AltText`, and `.Caption`. `{{ with .Image }}` guards are honoured. Raw `ImageID` value is preserved alongside `.Image`.
+
+---
+
 ## [1.30.0] — 2026-05-29
 
 ### Added

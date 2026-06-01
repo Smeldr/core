@@ -2,20 +2,20 @@
 
 Complete list of what Forge generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.30.0 (A111) + smeldr.dev/mcp v1.12.0 + smeldr.dev/oauth v0.1.3 + smeldr.dev/social v0.7.3 + smeldr.dev/agent v0.5.0 + smeldr.dev/cli v0.9.2 + smeldr.dev/media v1.3.0.
+Last updated: v1.31.0 (A116–A120) + smeldr.dev/mcp v1.14.0 + smeldr.dev/oauth v0.1.5 + smeldr.dev/social v0.7.4 + smeldr.dev/agent v0.5.1 + smeldr.dev/cli v0.10.0 + smeldr.dev/media v1.3.0 + smeldr.dev/core/pgx v0.1.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.30.0 | Stable |
-| `smeldr.dev/mcp` | v1.12.0 | Stable |
-| `smeldr.dev/oauth` | v0.1.3 | Beta |
-| `smeldr.dev/core/pgx` | — | Beta |
+| `smeldr.dev/core` | v1.31.0 | Stable |
+| `smeldr.dev/mcp` | v1.14.0 | Stable |
+| `smeldr.dev/oauth` | v0.1.5 | Beta |
+| `smeldr.dev/core/pgx` | v0.1.0 | Beta |
 | `smeldr.dev/media` | v1.3.0 | Beta |
-| `smeldr.dev/cli` | v0.9.2 | Beta |
-| `smeldr.dev/social` | v0.7.0 | Experimental |
-| `smeldr.dev/agent` | v0.5.0 | Experimental |
+| `smeldr.dev/cli` | v0.10.0 | Beta |
+| `smeldr.dev/social` | v0.7.4 | Experimental |
+| `smeldr.dev/agent` | v0.5.1 | Experimental |
 
 **Stable** — API will not break without a deprecation notice.  
 **Beta** — Functional and tested; API may change in minor releases.  
@@ -46,6 +46,17 @@ Labels are reviewed at every module minor or major version bump.
 - Database table derived from struct — works with PostgreSQL, SQLite, and MySQL
 - SQLRepo — production SQL repository with automatic table naming and upserts
 - SeqRepository (Beta) — lazy streaming interface for large datasets (`iter.Seq2[T, error]`)
+
+## Block data foundation — Experimental
+
+- DynamicNode — one generic content type for all block types, type-specific fields stored as JSON, discriminated by `type_name`; embeds `Node` for the standard lifecycle
+- `NewDynamicContentRepo(db)` — `SQLRepo` bound to `smeldr_dynamic_content`
+- ContentEdgeStore — composition edges (`smeldr_content_edges`); one table for page→block and collection→item, ordered by `sort_order`, batch-loaded via `ChildrenOf` (no N+1)
+- `CreateBlockTables(db)` — single idempotent grouped table creator for the block schema
+- `App.ServeBlocks(dir)` + `BlockRenderer.Render` — convention-template rendering engine (`templates/blocks/<type_name>.html`); batched load (no N+1), cycle protection, graceful degradation; renders only Published blocks
+- Reference-field resolution — `{Name}ID` → `.{Name}` sub-object (`ImageID` → `.Image` on content_block/contact_card/hero); Published-only, `{{ with }}`-guarded, batched
+- Block `Fields` use PascalCase keys (canonical convention; matches the block-system type tables)
+- Still building on top: schema seeding (c5), CLI (c6), content_type_schemas table (c7), ContentList dynamic block (c4b)
 
 ## Rendering — Stable
 
@@ -84,6 +95,12 @@ Per content type — automatically derived, no manual definition:
 - `delete_[type]` — Editor+
 - `list_[type]s` — Editor+
 - `get_[type]` — Editor+
+
+Block system tools (Experimental, T32 — enabled with `forgemcp.WithBlocks()`):
+
+- `create_node`, `update_node`, `get_node`, `list_nodes`, `publish_node`, `archive_node` — Author+; generic block lifecycle, addressed by ID
+- `add_section`, `reorder_sections`, `remove_section` — Editor+; compose page sections
+- `add_item`, `reorder_items`, `remove_item` — Editor+; compose collection items
 
 Admin tools (require Admin role):
 
@@ -153,6 +170,7 @@ MCP resource subscriptions (Beta):
 - Draft preview — `forge preview <prefix> <slug>` prints a signed preview URL (Admin role required)
 - Social commands (v0.7.0): `social credential create/list`, `social post create/list/get/publish/archive/delete`, `social post queue`, `social schedule create/show/pause/resume/delete`
 - Social commands (v0.8.0): `social credential get/delete`, `social platform configure` (DB-driven OAuth app config for mastodon/linkedin/x); `social credential create` now accepts `--platform x`
+- Block commands (v0.10.0, T32): `block node create/update/get/list/publish/archive`, `block section`/`block item` `add/reorder/remove` — full CLI/MCP parity with the block tools; `node list` table output (`--json` escape); PascalCase `--field`
 
 ## smeldr.dev/social — Experimental
 
