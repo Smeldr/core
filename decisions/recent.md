@@ -375,3 +375,48 @@ in doc prose. This sweep makes the docs consistent with the published brand.
 The direct trigger was the "Forge v1.31.0" tag name during the T32 release dance.
 
 ---
+
+## A122 — T88+T89: fix stale `forge:` struct tag examples + core/skills sync
+
+**Date:** 2026-06-02  
+**Status:** Agreed  
+**Level:** 1 (docs-only, no version bump)
+
+### What
+
+Two classes of correctness bugs closed in one commit:
+
+**T88 — stale `forge:"required"` in live code examples.**
+`A111` (v1.30.0) renamed the struct tag key from `forge:"required"` to
+`smeldr:"required"`. Any developer or AI assistant copying the README minimal
+example would produce a non-functional content type (validation and auto-slug
+silently do nothing with the old key). One file, two lines:
+- `README.md` lines 101–102: `forge:"required"` → `smeldr:"required"`
+
+**T89 — `core/skills/` public mirror synced from `common/agent/skills/`.**
+`core/skills/` is the deliberate public distribution copy of the canonical
+pilot skills in `common/agent/skills/` (private repo). It had drifted to
+`forge v1.25.1` (missing SiteConfig, RawHead, block MCP catalog, oauth
+section, and stale struct tags). Root cause: the doc-gate reminder was
+passive ("copy updated...") — easy to forget. This amendment:
+
+1. Fixed the canonical (`common/agent/skills/smeldr.md`): stale footer path
+   `forge-common/agent/skills/forge.md` → `Smeldr/common/agent/skills/smeldr.md`.
+2. Fixed `common/agent/skills/smeldr-design.md`: stale Destination footer.
+3. Synced `core/skills/smeldr.md` and `core/skills/smeldr-design.md` from
+   common via `Copy-Item *.md -Force`. Sync brings correct struct tags,
+   current sections (SiteConfig, RawHead, block tools, oauth), and correct
+   footer paths.
+4. Replaced the passive doc-gate reminder with an **unconditional Copy-Item
+   command** in copilot-instructions M-number pre-commit gate.
+   `smeldr-design-assistant.md` and `smeldr-operator.md` are core-only
+   (Claude.ai project instructions; no common canonical) and are not
+   overwritten by the Copy-Item *.md command.
+
+### Preserve
+
+Historical `forge:"required"` references in `CHANGELOG.md:47` (migration
+note), `DECISIONS.md:198` (archive row), `docs/REFERENCE.md:186–187`
+(breaking-change migration guidance), and `decisions/*.md` archives.
+
+---

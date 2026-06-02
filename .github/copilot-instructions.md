@@ -401,7 +401,11 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       module registry: version updated, stability label reviewed if this release
       changes API surface, adds a module, or materially changes production confidence.
 - [ ] `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md` updated: version line, MCP tools, CLI commands, any new sections. Read it with the Read tool.
-- [ ] `skills/smeldr.md` in core repo — copy updated `smeldr/common/agent/skills/smeldr.md`
+- [ ] `core/skills/` synced from common — run unconditionally before any M-number commit:
+      `Copy-Item "C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\*.md" "skills\" -Force`
+      then `git status --short skills/` — if any `M` lines appear, stage + commit them
+      before the main commit. (`smeldr-design-assistant.md` / `smeldr-operator.md` are
+      core-only and are NOT overwritten by this command.)
 
 "No changes needed" is only valid after explicitly reading each file and confirming it already reflects the shipped code. Never assume.
 

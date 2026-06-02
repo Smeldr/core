@@ -98,8 +98,8 @@ import (
 
 type Post struct {
 	smeldr.Node
-	Title string `forge:"required,min=3" json:"title"`
-	Body  string `forge:"required"       json:"body"`
+	Title string `smeldr:"required,min=3" json:"title"`
+	Body  string `smeldr:"required"       json:"body"`
 }
 
 func (p *Post) Head() smeldr.Head {

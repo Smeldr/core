@@ -28,10 +28,10 @@ Archived items are permanently invisible — cannot be reverted to Draft.
 ```go
 type Story struct {
     smeldr.Node
-    Title   string `forge:"required" json:"title"`
-    Body    string `forge:"required,min=50" json:"body"`
-    Image   string `forge:"" smeldr_description:"Hero image path." db:"image" json:"image"`
-    OGImage string `forge:"" smeldr_description:"OG image URL." db:"og_image" json:"og_image"`
+    Title   string `smeldr:"required" json:"title"`
+    Body    string `smeldr:"required,min=50" json:"body"`
+    Image   string `smeldr:"" smeldr_description:"Hero image path." db:"image" json:"image"`
+    OGImage string `smeldr:"" smeldr_description:"OG image URL." db:"og_image" json:"og_image"`
 }
 ```
 
@@ -93,7 +93,7 @@ smeldr.NewModule((*AboutPage)(nil),
 MCP behaviour:
 - `list_{type}s` tool suppressed (`MCPMeta.SingleInstance = true`)
 - `get_{type}`, `update_{type}`, `publish_{type}`, `archive_{type}`, `delete_{type}` present
-- `create_preview_url` returns `/{prefix}?preview=<token>` — no slug in path (smeldr.dev/mcp ≥ v1.10.2)
+- `create_preview_url` returns `/{prefix}?preview=<token>` — no slug in path (forge-mcp ≥ v1.10.2)
 
 **Pattern: SingleInstance + custom public handler**
 When the public URL differs from the module prefix (e.g. homepage at `/`, module at `/homepage`):
@@ -159,6 +159,33 @@ smeldr.NewModule((*HomePage)(nil),
 
 `APIOnly()` + `SingleInstance()` panics at startup — incompatible combination.
 
+### SiteConfig — built-in singleton (v1.29.0+)
+
+`SiteConfig` is a built-in singleton content type for site-wide defaults configurable
+via MCP after first deploy. Fields: `site_name`, `title_separator`, `og_image`,
+`x_handle`, `head_script`. Registration:
+
+```go
+smeldr.CreateSiteConfigTable(db)          // once at startup
+app.Content(smeldr.NewSiteConfigModule(db)) // registers MCP tools
+```
+
+Configure via `create_site_config` MCP tool (Admin role). No code redeployment needed.
+
+### HeadAssets.RawHead — verbatim head HTML (v1.30.0+)
+
+`HeadAssets` accepts a `RawHead template.HTML` field injected verbatim into `<head>`
+after all other HeadAssets output (preconnect → stylesheets → links → scripts → RawHead).
+Use for analytics snippets, preload hints, or custom head HTML that does not fit the
+structured fields. Zero value is a no-op.
+
+```go
+app.SEO(&smeldr.HeadAssets{
+    Scripts: []smeldr.ScriptTag{{Src: "/static/app.js", Defer: true}},
+    RawHead: template.HTML(`<link rel="preload" href="/fonts/inter.woff2" as="font" crossorigin>`),
+})
+```
+
 ---
 
 ## Signal bus (v1.20.0+)
@@ -201,16 +228,69 @@ Tools are named from the type in lower_snake_case.
 | `delete_{type}` | Editor+ | Permanent delete |
 | `list_{type}s` | Editor+ | All items, optional status filter |
 | `get_{type}` | Editor+ | Single item at any status |
-| `create_upload_token` | Author+ | smeldr.dev/media: generate upload token |
+| `create_upload_token` | Author+ | forge-media: generate upload token |
 | `create_preview_url` | Editor+ | Draft preview URL (prefix + slug) |
 | `create_token` | Admin | Mint bearer token |
 | `list_tokens` / `revoke_token` | Admin | Token management |
 | `create_webhook` / `list_webhooks` / `delete_webhook` | Admin | Webhook endpoints |
 | `list_webhook_deliveries` / `retry_webhook` | Admin | Delivery introspection and retry |
 
+Block system (T32, enabled with `forgemcp.WithBlocks()`; blocks addressed by ID, not slug):
+
+| Tool | Role | Description |
+|------|------|-------------|
+| `create_node` | Author+ | Create a Draft block. Args `type_name`, `fields` (JSON object) |
+| `update_node` | Author+ | Merge `fields` onto a block by `id` (absent keys preserved) |
+| `get_node` / `list_nodes` | Author+ | Read block(s); `list_nodes` filters by `type_name` / `status` |
+| `publish_node` / `archive_node` | Author+ | Lifecycle by `id` (publish idempotent) |
+| `add_section` / `reorder_sections` / `remove_section` | Editor+ | Compose page sections |
+| `add_item` / `reorder_items` / `remove_item` | Editor+ | Compose collection items |
+
+`add_section` / `add_item` take only `parent_id` + `child_id` (types derived).
+Reorder tools take `parent_id` + `ordered_child_ids`.
+
+**Block rendering (developer API):** `app.ServeBlocks("templates/blocks")` returns a
+`*BlockRenderer`; `Render(ctx, "page", pageID)` assembles a page's Published blocks
+into HTML via one `templates/blocks/<type_name>.html` per type (batched, cycle-safe,
+degrades gracefully). **Block `Fields` keys are PascalCase** (`{"Title":...,"Body":...}`,
+matching the block-system type tables) — templates access `.Title`/`.Body`, so
+snake_case keys render blank. Use PascalCase when creating blocks via `create_node`.
+**Reference fields:** a `{Name}ID` field resolves to a `.{Name}` sub-object — `ImageID`
+→ `.Image` (`.Image.MediaURL`/`.AltText`/`.Caption`) on content_block/contact_card/hero;
+templates guard with `{{ with .Image }}…{{ .MediaURL }}…{{ end }}`. Published-only.
+
 ---
 
-## smeldr.dev/media — upload token flow
+## forge-oauth — OAuth 2.1 for remote MCP (v0.1.0+)
+
+ChatGPT Plus and Claude.ai require OAuth 2.1 to connect to remote MCP servers.
+`forge-oauth` is a standalone MIT library (`smeldr.dev/oauth`).
+
+```go
+import forgeoauth "smeldr.dev/oauth"
+
+store, _ := forgeoauth.NewSQLiteStore("./oauth.db")
+oauthSrv := forgeoauth.New(forgeoauth.Config{
+    Issuer: "https://cms.example.com",
+    VerifyBearer: func(token string) bool {
+        _, ok := smeldr.VerifyTokenString(token, app.Secret(), app.TokenStore())
+        return ok
+    },
+}, store)
+mcpSrv := forgemcp.New(app, forgemcp.WithOAuth(oauthSrv))
+```
+
+- `smeldr.VerifyTokenString(token, secret, store)` — validates a raw bearer token without `*http.Request` (v1.25.0+)
+- `forgemcp.WithOAuth(*forgeoauth.Server)` — enables OAuth; all HTTP endpoints require Bearer (v1.11.0+)
+- `forgemcp.WithForgeFallback()` — accepts forge bearer tokens as fallback when OAuth enabled; use alongside `WithOAuth` to keep Claude Desktop/forge-cli working (v1.11.1+). `ErrTokenNotFound` → try forge bearer · `ErrTokenExpired` → always 401
+- `GET /.well-known/oauth-protected-resource` — RFC 9728; triggers OAuth flow in AI clients on 401
+- Scope mapping: `mcp` → Author role · `mcp:admin` → Admin role
+- `offline_access` scope → refresh token issued (required for ChatGPT)
+- CIMD: stateless client validation — no client registration database
+
+---
+
+## forge-media — upload token flow
 
 **Never use `create_file` (base64) for real images** — 85 KB WebP ≈ 113 KB
 base64 — too many tokens. Use the upload token flow instead.
@@ -239,7 +319,7 @@ Filename gets a hex prefix — prevents overwrite of existing files.
 
 ---
 
-## smeldr.dev/social (separate module)
+## forge-social (separate module)
 
 `smeldr.dev/social` — social post scheduling and agent routing.
 
@@ -278,7 +358,7 @@ mcpSrv := forgemcp.New(app,
 ```
 weekday: 0=Sunday, 1=Monday … 6=Saturday. Empty timezone silently defaults to UTC.
 
-**Platform config (v0.5.0+):** call `create_platform_config` (Admin) with `platform`, `client_id`, `client_secret`, `redirect_url`, and (for Mastodon) `instance_url`. Credentials are stored AES-256-GCM encrypted in the DB. X requires a registered app in the Twitter developer portal with OAuth 2.0 enabled.
+**Platform config (v0.5.0+):** call `create_platform_config` (Admin) with `platform`, `client_id`, `client_secret`, `redirect_url`, and (for Mastodon) `instance_url`. Optional: `scope` (space-separated OAuth 2.0 scopes; Mastodon default: `"write:statuses write:media"`; only applies to Mastodon). Credentials are stored AES-256-GCM encrypted in the DB. X requires a registered app in the Twitter developer portal with OAuth 2.0 enabled.
 
 **X OAuth 2.0 + PKCE:** call `create_social_credential` with `platform=x` → returns a `redirect_url` containing the PKCE challenge. The code verifier is stored server-side — agents never see it. Operator completes the flow in a browser; callback saves the token automatically.
 
@@ -290,7 +370,7 @@ MCP tools: `create_platform_config`, `create_scheduled_post`, `list_scheduled_po
 
 ---
 
-## smeldr.dev/cli key commands
+## forge-cli key commands
 
 ```bash
 # Content
@@ -324,7 +404,15 @@ forge-cli audit list --type Post
 forge-cli audit list --from 2026-01-01T00:00:00Z --to 2026-12-31T23:59:59Z
 forge-cli audit list --actor <actor-id>
 
-# Social (smeldr.dev/cli v0.8.0+)
+# Block system (T32, forge-cli v0.10.0+) — Fields keys are case-sensitive PascalCase
+forge-cli block node create --type hero --field Headline="Welcome"   # Author
+forge-cli block node list --type hero --status published             # aligned table; --json for raw
+forge-cli block node publish <id>
+forge-cli block section add <page_id> <block_id>                     # Editor
+forge-cli block section reorder <page_id> <id1,id2,id3>
+forge-cli block item add <collection_id> <block_id>
+
+# Social (forge-cli v0.8.0+)
 forge-cli social credential create --platform mastodon|linkedin|x [--instance-url <url>]
 forge-cli social credential list
 forge-cli social credential get <id>
@@ -355,7 +443,7 @@ Config: `FORGE_URL`, `FORGE_TOKEN`, `FORGE_MCP_URL` (or `.forge-cli.env`)
 - **Windows MIME** — add `mime.AddExtensionType(".webp", "image/webp")` in main()
 - **Docker volume** — forge_media volume at /app/media; COPY in Dockerfile seeds it on first run
 - **Archived ≠ Draft** — preview tokens bypass Draft/Scheduled only, never Archived
-- **Timezone database** — `time.LoadLocation` fails on servers without OS tzdata (Alpine, scratch). smeldr.dev/social embeds `time/tzdata` since v0.4.1 — ensure you are on v0.4.1 or later
+- **Timezone database** — `time.LoadLocation` fails on servers without OS tzdata (Alpine, scratch). forge-social embeds `time/tzdata` since v0.4.1 — ensure you are on v0.4.1 or later
 - **X body limit** — X posts are capped at 280 characters. Exceeding the limit returns a terminal `publishError` — the post will never be retried. Truncate before calling `create_scheduled_post` with `platform=x`
 - **X media** — `media_url` is ignored for platform `x` in v0.5.0. Attach images only for Mastodon and LinkedIn
 
@@ -375,9 +463,9 @@ media_upload_token_expiry     duration
 
 ---
 
-## smeldr.dev/agent (separate module)
+## forge-agent (separate module)
 
-`smeldr.dev/agent` v0.4.2 — minimal Go agent runtime with native MCP support.
+`smeldr.dev/agent` v0.3.0 — minimal Go agent runtime with native MCP support.
 MIT license. Three dependencies: `anthropic-sdk-go` + `modelcontextprotocol/go-sdk` + `gocron/v2`.
 
 ```go
@@ -387,14 +475,14 @@ cfg := agent.Config{
     SystemPrompt:  "You are a helpful assistant.",
     Model:         "claude-sonnet-4-6", // default
     MaxTurns:      10,                  // default
-    StreamableHTTP: false,              // false = SSE (smeldr.dev/mcp), true = Streamable HTTP (GitHub MCP)
+    StreamableHTTP: false,              // false = SSE (forge-mcp), true = Streamable HTTP (GitHub MCP)
 }
 a := agent.New(cfg)
 result, err := a.Run(ctx, "List all published posts and summarize the site.")
 ```
 
 **Transport selection:**
-- `StreamableHTTP: false` — SSE transport (`/mcp` + `/mcp/message`). Use for smeldr.dev/mcp.
+- `StreamableHTTP: false` — SSE transport (`/mcp` + `/mcp/message`). Use for forge-mcp.
 - `StreamableHTTP: true` — Streamable HTTP (MCP 2025-11-25 spec). Use for GitHub MCP
   (`https://api.githubcopilot.com/mcp/`) and other modern MCP servers.
 
@@ -417,9 +505,9 @@ Add `import _ "time/tzdata"` to binaries on Alpine/scratch containers.
 - `cmd/agent-github` — `GITHUB_MCP_URL` + `GITHUB_TOKEN` + `GITHUB_REPO` (Streamable HTTP)
 - `example/electricity-advisor/` — `ANTHROPIC_API_KEY` + `DISCORD_WEBHOOK_URL` (UC2: electricity prices → Discord)
 
-### smeldr.dev/agent/flow — Smeldr integration (v0.5.1)
+### forge-agent/flow — Forge integration (v0.3.0)
 
-`smeldr.dev/agent/flow` — AGPL sub-package. Wires `AgentJob` as a Smeldr
+`smeldr.dev/agent/flow` — AGPL sub-package. Wires `AgentJob` as a Forge
 content type. Requires `smeldr.dev/core` as a dependency.
 
 ```go
@@ -439,7 +527,7 @@ defer agentMod.Stop()
 | Field | Description |
 |-------|-------------|
 | `Name` | Human-readable identifier. Slug source. Required. |
-| `Trigger` | Cron expression (`"45 13 * * *"`) or Smeldr signal (`"after_publish"`). Required. |
+| `Trigger` | Cron expression (`"45 13 * * *"`) or forge signal (`"after_publish"`). Required. |
 | `ContentTypeFilter` | Restrict signal trigger to content type (e.g. `"Post"`). Empty = all. |
 | `SystemPrompt` | System instruction for every run. Required. |
 | `Model` | Anthropic model ID. Defaults to `"claude-sonnet-4-6"`. |
@@ -452,7 +540,7 @@ defer agentMod.Stop()
 `create_agent_job`, `get_agent_job`, `list_agent_jobs`, `update_agent_job`,
 `publish_agent_job`, `archive_agent_job`, `delete_agent_job`
 
-**Signal triggers:** set `Trigger` to any Smeldr signal string value:
+**Signal triggers:** set `Trigger` to any forge signal string value:
 `after_publish`, `after_create`, `after_update`, `after_unpublish`,
 `after_archive`, `after_schedule`, `after_delete`.
 
@@ -463,7 +551,8 @@ defer agentMod.Stop()
 ## Skill update process
 
 The canonical source for this file is:
-`C:\Users\peter\Documents\Code\forge-common\agent\skills\forge.md`
+`C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md`
 
-When updating: edit here first, then update the version line and notify pilots.
+When updating: edit here first, then sync to `core/skills/smeldr.md` via the
+doc-gate Copy-Item step before any M-number commit.
 Pilots read this file directly — no copies to distribute.

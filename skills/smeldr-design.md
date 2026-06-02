@@ -1,4 +1,4 @@
-﻿# smeldr-design: Technical Skill (Claude Code)
+# smeldr-design — Technical Skill (Claude Code)
 
 ## Purpose
 
@@ -13,7 +13,7 @@ content type — without writing HTML or CSS by hand.
 ## Workflow
 
 ```
-Go struct -> smeldr-pattern.md -> design agent -> HTML + CSS -> html/template
+Go struct → smeldr-pattern.md → design agent → HTML + CSS → html/template
 ```
 
 1. Read the Go struct for the content type
@@ -26,42 +26,42 @@ Go struct -> smeldr-pattern.md -> design agent -> HTML + CSS -> html/template
 
 ## Rules
 
-### R1 - Data sourcing
+### R1 — Data sourcing
 All field values in `content.json` come from the struct's exported fields and their
 `json` tags. Do not hardcode values (author names, categories, etc.) unless explicitly
 stated. The CMS note may contain non-field values (e.g. site name or wordmark text).
 
-### R2 - Scope constraints are mandatory
-Always include a "Scope - what must NOT be included" section. Design agents fill every
+### R2 — Scope constraints are mandatory
+Always include a "Scope — what must NOT be included" section. Design agents fill every
 unspecified decision with their own choice. Name everything that should be absent:
 navigation bar, footer, sidebar, hero image, JavaScript, CSS frameworks, dark mode, etc.
 
-### R3 - Font field is required
+### R3 — Font field is required
 Typography must include an explicit `Font:` line. Options: system font stack, Google
 Fonts, self-hosted woff2. The choice is the developer's. If unspecified, the design
 agent will choose and may add external dependencies the developer did not intend.
 
-### R4 - Reference images sharpen output
-Include 1-2 reference images (existing sites or blogs with a similar aesthetic) when
+### R4 — Reference images sharpen output
+Include 1–2 reference images (existing sites or blogs with a similar aesthetic) when
 available. Typography, spacing, and visual weight are described far more precisely by
 an image than by words. If no images are available, describe the aesthetic target more
 precisely in the Mood section.
 
-### R5 - Output is static HTML
-Design agents produce static HTML files and a CSS file, not Go templates. Translation
+### R5 — Output is static HTML
+Design agents produce static HTML files and a CSS file — not Go templates. Translation
 to html/template syntax ({{ .Field }}, {{ range .Items }}) is a separate step done
 after the design is approved. Do not ask the design agent to write Go templates.
 
-### R6 - Request CSS custom properties
+### R6 — Request CSS custom properties
 In the CMS note, specify: "Deliver CSS with plain CSS custom properties." This makes
 the implementation step cleaner and the stylesheet maintainable by the developer.
 
-### R7 - Field-to-design mapping is mandatory
+### R7 — Field-to-design mapping is mandatory
 Always include a field-to-design mapping table. It removes ambiguity about which
 struct field appears where and in what visual role. Cover every page type in the table
 (list page, show page, single-instance page, etc.).
 
-### R8 - Include both list and show pages
+### R8 — Include both list and show pages
 For standard content types (list + show routes), always describe both pages under
 "Pages to design". The mapping table must cover both page types.
 
@@ -74,7 +74,7 @@ For standard content types (list + show routes), always describe both pages unde
 
 ## CMS note
 
-Built with Smeldr (smeldr.dev) - a Go content framework.
+Built with Smeldr (smeldr.dev) — a Go content framework.
 Pages are server-side rendered HTML templates.
 Deliver clean, semantic HTML with plain CSS custom properties.
 No JavaScript. No Tailwind. No frontend framework.
@@ -102,7 +102,7 @@ No JavaScript. No Tailwind. No frontend framework.
 
 ## Pages to design
 
-**[Page name]** - `/route`
+**[Page name]** — `/route`
 Description of what appears on this page and what data it shows.
 
 ---
@@ -110,7 +110,7 @@ Description of what appears on this page and what data it shows.
 ## Design intent
 
 ### Mood
-[1-2 sentences describing the target aesthetic and who the audience is.]
+[1–2 sentences describing the target aesthetic and who the audience is.]
 
 ### Color
 - Background: [name] ([hex])
@@ -121,11 +121,11 @@ Description of what appears on this page and what data it shows.
 - Code block background: [name] ([hex]), text: [name] ([hex])
 
 ### Typography
-- Font: [system stack / Google Fonts family / self-hosted - specify explicitly]
-- [Other typographic rules - all sans-serif, display size, etc.]
+- Font: [system stack / Google Fonts family / self-hosted — specify explicitly]
+- [Other typographic rules — all sans-serif, display size, etc.]
 - Body: [line-height], max reading width [width]
 
-### Scope - what must NOT be included
+### Scope — what must NOT be included
 - No [element 1]
 - No [element 2]
 - [Add every absent element explicitly]
@@ -155,10 +155,16 @@ type Post struct {
 ```
 
 - `smeldr.Node` provides: `id`, `slug`, `status`, `published_at`, `scheduled_at`,
-  `created_at`, `updated_at` - all available in JSON output
-- `json:"title"` -> field name in content.json is `title`
-- `smeldr:"required"` -> mark Required: yes in the fields table
-- `db:"-"` -> excluded from database, still available in JSON if present
+  `created_at`, `updated_at` — all available in JSON output
+- `json:"title"` → field name in content.json is `title`
+- `smeldr:"required"` → mark Required: yes in the fields table
+- `db:"-"` → excluded from database, still available in JSON if present
 
-Do not infer field types from the Go type alone - check the smeldr tag for `markdown`
+Do not infer field types from the Go type alone — check the smeldr tag for `markdown`
 to determine if a string field renders as markdown.
+
+---
+
+## Destination
+
+When finalized: `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr-design.md`
