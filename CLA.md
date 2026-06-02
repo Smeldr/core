@@ -1,4 +1,4 @@
-# Forge CMS — Contributor License Agreement
+# Smeldr — Contributor License Agreement
 
 By signing this CLA, you confirm that:
 
@@ -6,7 +6,7 @@ By signing this CLA, you confirm that:
    original work, or you have permission from the copyright holder to
    contribute it under these terms.
 
-2. You grant forge-cms a perpetual, irrevocable, worldwide, royalty-free
+2. You grant smeldr a perpetual, irrevocable, worldwide, royalty-free
    license to use, reproduce, modify, sublicense, and distribute your
    contributions under any license, including commercial licenses.
 

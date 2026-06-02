@@ -1,6 +1,6 @@
-﻿# Forge — Architecture
+﻿# Smeldr — Architecture
 
-This document describes the internal structure of Forge: how the packages
+This document describes the internal structure of Smeldr: how the packages
 are organised, how a request flows through the system, which interfaces
 are stable API contracts, and the dependency rules between packages.
 
@@ -87,7 +87,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 
 ---
 
-All files are in a single package: `forge`. There are no sub-packages.
+All files are in a single package: `smeldr`. There are no sub-packages.
 This is intentional — it eliminates circular import issues and keeps
 the API surface in one place. The file names are the organisation.
 
@@ -323,7 +323,7 @@ smeldr.dev/media/  (separate repo: github.com/smeldr/media)
 
 ## Request lifecycle
 
-A request arriving at a Forge app passes through these layers in order.
+A request arriving at a Smeldr app passes through these layers in order.
 **Read (GET) and write (POST/PUT/DELETE) paths diverge after context creation.**
 
 ```
@@ -469,7 +469,7 @@ variable. Reads in `respond()` are safe with no additional locking.
 
 ## Stable interfaces (public API contracts)
 
-These interfaces are the extension points for users of Forge.
+These interfaces are the extension points for users of Smeldr.
 They must not change in v1.x without a deprecation cycle.
 
 ### Implemented (Milestone 1)
@@ -487,7 +487,7 @@ type Validatable interface {
 }
 
 // AuthFunc — implement to provide a custom authentication scheme.
-// Forge provides BearerHMAC, CookieSession, BasicAuth, and AnyAuth.
+// Smeldr provides BearerHMAC, CookieSession, BasicAuth, and AnyAuth.
 type AuthFunc interface {
     authenticate(*http.Request) (User, bool)
 }
@@ -513,7 +513,7 @@ type Context interface {
     Response() http.ResponseWriter
 }
 
-// Error — all Forge errors implement this
+// Error — all Smeldr errors implement this
 type Error interface {
     error
     HTTPStatus() int
@@ -671,10 +671,10 @@ true foundation files — everything else can depend on them freely.
 ## smeldr.Node embedding
 
 Every content type embeds `smeldr.Node`. Embedding (not composition) is required
-because Forge uses reflection to access Node fields directly:
+because Smeldr uses reflection to access Node fields directly:
 
 ```go
-// forge reads these fields by name via reflection — do not rename them
+// smeldr reads these fields by name via reflection — do not rename them
 type Node struct {
     ID          string
     Slug        string
@@ -801,7 +801,7 @@ Invalidation: AfterCreate / AfterUpdate / AfterDelete signals clear the module c
 
 ## Storage and the smeldr.DB interface
 
-Forge defines a minimal `smeldr.DB` interface internally:
+Smeldr defines a minimal `smeldr.DB` interface internally:
 
 ```go
 type DB interface {
@@ -882,16 +882,16 @@ Use `smeldr.NewTestContext()` with direct signal handler calls for unit tests.
 
 ## External modules
 
-These modules are maintained separately and consume the forge core API
+These modules are maintained separately and consume the Smeldr core API
 via the published interfaces documented above.
 
 | Module | Role |
 |--------|------|
-| `smeldr.dev/mcp` | MCP server — exposes forge content over JSON-RPC 2.0 / SSE |
+| `smeldr.dev/mcp` | MCP server — exposes Smeldr content over JSON-RPC 2.0 / SSE |
 | `smeldr.dev/media` | Media storage and serving; implements `smeldr.MCPModule` |
 | `smeldr.dev/cli` | CLI admin tool — content CRUD, tokens, webhooks, audit |
 | `smeldr.dev/social` | Social publishing scheduler (Twitter/X, LinkedIn, Mastodon) |
-| `smeldr.dev/agent` | MIT-licensed agent runtime; `smeldr.dev/agent/flow` (AGPL-3.0) is the Forge integration adapter — subscribes to `App.OnSignal` and dispatches agent jobs in response to content lifecycle signals |
+| `smeldr.dev/agent` | MIT-licensed agent runtime; `smeldr.dev/agent/flow` (AGPL-3.0) is the Smeldr integration adapter — subscribes to `App.OnSignal` and dispatches agent jobs in response to content lifecycle signals |
 
-None of these modules are imported by forge core. All integration is outbound:
-forge core defines the interfaces; external modules implement or consume them.
+None of these modules are imported by Smeldr core. All integration is outbound:
+Smeldr core defines the interfaces; external modules implement or consume them.

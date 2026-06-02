@@ -1,6 +1,6 @@
-﻿# Forge — Full API Reference
+﻿# Smeldr — Full API Reference
 
-Complete API reference for the Forge framework.
+Complete API reference for the Smeldr framework.
 For the short overview and quick-start examples see [README.md](README.md).
 Web version: [smeldr.dev/docs](https://smeldr.dev/docs).
 
@@ -68,7 +68,7 @@ No boilerplate. No route registration. No sitemap library.
 
 ## Core concepts
 
-Forge has six concepts. Learn them once, apply them everywhere.
+Smeldr has six concepts. Learn them once, apply them everywhere.
 
 ```
 Node      →  the base every content type embeds
@@ -108,7 +108,7 @@ func (p *BlogPost) Validate() error {
 }
 
 // Head returns all metadata for this content's page.
-// Forge uses this for SEO, social sharing, and AI indexing.
+// Smeldr uses this for SEO, social sharing, and AI indexing.
 func (p *BlogPost) Head() smeldr.Head {
     return smeldr.Head{
         Title:       p.Title,
@@ -202,7 +202,7 @@ smeldr.Scheduled  // publishes automatically at ScheduledAt
 smeldr.Archived   // hidden from public, preserved in storage
 ```
 
-### What Forge enforces automatically
+### What Smeldr enforces automatically
 
 | | Draft | Scheduled | Archived | Published |
 |---|---|---|---|---|
@@ -218,7 +218,7 @@ smeldr.Archived   // hidden from public, preserved in storage
 
 > ✅ **Available** — the adaptive ticker and automatic `Scheduled → Published` transition are implemented as of Milestone 8.
 
-Forge runs an internal ticker. No external cron needed.
+Smeldr runs an internal ticker. No external cron needed.
 
 ```go
 // Schedule via the API
@@ -229,7 +229,7 @@ PUT /posts/my-draft
 }
 ```
 
-At `scheduled_at`, Forge automatically transitions to `Published`,
+At `scheduled_at`, Smeldr automatically transitions to `Published`,
 sets `PublishedAt`, fires `AfterPublish` signals,
 regenerates the sitemap, and adds the item to the RSS feed.
 
@@ -239,7 +239,7 @@ regenerates the sitemap, and adds the item to the RSS feed.
 
 ✅ **Available**
 
-Forge modules expose a list endpoint and a per-item show endpoint by default.
+Smeldr modules expose a list endpoint and a per-item show endpoint by default.
 Two options change this for common patterns.
 
 ### SingleInstance — singleton page modules
@@ -403,7 +403,7 @@ token := smeldr.SignToken(smeldr.User{
 }, secret)
 ```
 
-When multiple auth methods are configured, Forge tries them in order and uses the first that succeeds. A request with a valid Bearer token and no cookie is authenticated as a bearer user. A request with neither is treated as `smeldr.Guest`.
+When multiple auth methods are configured, Smeldr tries them in order and uses the first that succeeds. A request with a valid Bearer token and no cookie is authenticated as a bearer user. A request with neither is treated as `smeldr.Guest`.
 
 ### In hooks and handlers
 
@@ -453,11 +453,11 @@ CREATE TABLE smeldr_tokens (
 
 ### Bootstrap
 
-On first startup with an empty `smeldr_tokens` table, Forge auto-creates a
+On first startup with an empty `smeldr_tokens` table, Smeldr auto-creates a
 bootstrap admin token and emits it via `slog.Warn`:
 
 ```
-WARN forge: bootstrap admin token created token=<plaintext>
+WARN smeldr: bootstrap admin token created token=<plaintext>
 ```
 
 Copy this token immediately. Use it with `forge-cli init` or with the
@@ -503,7 +503,7 @@ it cannot be retrieved again. See [AGENTS.md](AGENTS.md) for full details.
 
 ## SEO & structured data
 
-Define metadata once on your content type. Forge renders it correctly
+Define metadata once on your content type. Smeldr renders it correctly
 everywhere — HTML head, JSON-LD, sitemap, RSS, and AI endpoints.
 
 ### Head
@@ -617,7 +617,7 @@ app.SEO(smeldr.SitemapConfig{
 ```
 
 Each module owns its fragment (e.g. `/posts/sitemap.xml`).
-Forge merges all fragments into `/sitemap.xml` automatically.
+Smeldr merges all fragments into `/sitemap.xml` automatically.
 Sitemaps regenerate on every publish/unpublish — never stale, never on-demand.
 
 ### Robots
@@ -636,11 +636,11 @@ app.SEO(smeldr.RobotsConfig{
 
 > ✅ **Available** — `/llms.txt`, AIDoc endpoints, and content negotiation for AI agents.
 
-Forge is the first Go framework to treat AI indexing as a first-class feature.
+Smeldr is the first Go framework to treat AI indexing as a first-class feature.
 
 ### llms.txt
 
-Forge generates `/llms.txt` automatically from all registered modules.
+Smeldr generates `/llms.txt` automatically from all registered modules.
 Only `Published` content appears. Regenerated on every publish.
 
 ```go
@@ -714,7 +714,7 @@ curl /posts/hello-world -H "Accept: text/markdown"
 curl /posts/hello-world -H "Accept: text/plain"
 ```
 
-No configuration. Forge handles negotiation automatically.
+No configuration. Smeldr handles negotiation automatically.
 
 ---
 
@@ -729,7 +729,7 @@ app.Content(&BlogPost{},
 )
 ```
 
-Forge reads your content type's `Head()` method and renders the correct
+Smeldr reads your content type's `Head()` method and renders the correct
 meta tags in `<head>`. No additional configuration.
 
 ### What your content type needs
@@ -759,7 +759,7 @@ app.Content(&BlogPost{},
 )
 ```
 
-Forge renders in `<head>`:
+Smeldr renders in `<head>`:
 
 ```html
 <meta property="og:title"               content="Hello World" />
@@ -804,7 +804,7 @@ when the content item's own creator is not set.
 
 > ✅ **Available** — typed cookie declarations, consent enforcement, and `/.well-known/cookies.json` are implemented as of Milestone 6.
 
-Forge treats cookies as typed, declared, compliance-aware values.
+Smeldr treats cookies as typed, declared, compliance-aware values.
 The category determines which API you can use — enforced at compile time.
 It is architecturally impossible to set a non-necessary cookie without consent handling.
 
@@ -868,7 +868,7 @@ app.Cookies(SessionCookie, PreferenceCookie,
 )
 ```
 
-Forge serves a live manifest at `GET /.well-known/cookies.json`.
+Smeldr serves a live manifest at `GET /.well-known/cookies.json`.
 Any developer or AI agent can audit your cookie compliance with a single request.
 
 ```json
@@ -899,7 +899,7 @@ Any developer or AI agent can audit your cookie compliance with a single request
 
 > ✅ **Available**
 
-Forge provides a first-class navigation tree with two modes: database-backed
+Smeldr provides a first-class navigation tree with two modes: database-backed
 (`NavModeDB`) and code-defined (`NavModeCode`).
 
 ### Wiring
@@ -934,7 +934,7 @@ app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 | `Label` | string | Display text in nav and breadcrumbs |
 | `Path` | string | URL prefix, e.g. `/posts`. Empty path = ghost item |
 | `ParentID` | string | ID of parent item; empty for top-level |
-| `Module` | string | Forge module table name, e.g. `posts` |
+| `Module` | string | Smeldr module table name, e.g. `posts` |
 | `Hidden` | bool | Excluded from rendered nav; still accessible in breadcrumbs |
 | `Ghost` | bool | Non-clickable; appears in nav unless also Hidden |
 | `SortOrder` | int | Display order within parent; lower = first |
@@ -966,11 +966,11 @@ Obtain the live tree at any time via `app.NavTree()` after `app.Handler()` or
 
 ## Storage
 
-Forge accepts any database connection that satisfies the `smeldr.DB` interface —
+Smeldr accepts any database connection that satisfies the `smeldr.DB` interface —
 which `*sql.DB` and any pgx adapter already implement.
-You write SQL. Forge handles scanning and mapping.
+You write SQL. Smeldr handles scanning and mapping.
 
-Forge core has zero dependencies. The driver is always your choice.
+Smeldr core has zero dependencies. The driver is always your choice.
 Performance is the default recommendation — zero-dependency is the alternative.
 
 ### Choosing a driver
@@ -1005,7 +1005,7 @@ app := smeldr.New(smeldr.Config{DB: forgepgx.Wrap(pool), ...})
 **Zero dependencies — standard database/sql**
 
 For SQLite, MySQL, or teams that cannot add any dependency.
-Swap the driver without changing any other Forge code.
+Swap the driver without changing any other Smeldr code.
 
 ```go
 import (
@@ -1043,7 +1043,7 @@ posts, err := smeldr.Query[*BlogPost](db,
 )
 ```
 
-Forge maps columns to struct fields by `db` tag first, then by field name.
+Smeldr maps columns to struct fields by `db` tag first, then by field name.
 No ORM. No query builder. SQL is the query language — and AI assistants write it extremely well.
 
 ```go
@@ -1053,7 +1053,7 @@ type BlogPost struct {
     Body   string `smeldr:"required" db:"body"   json:"body"`
     Author string `smeldr:"required" db:"author" json:"author"`
 }
-// db tag controls column mapping — omit it and Forge uses the field name lowercased
+// db tag controls column mapping — omit it and Smeldr uses the field name lowercased
 ```
 
 ### Repository interface
@@ -1151,7 +1151,7 @@ app.Content(&BlogPost{},
 
 ### Writing middleware
 
-Standard `http.Handler` wrapping — no Forge-specific types required:
+Standard `http.Handler` wrapping — no Smeldr-specific types required:
 
 ```go
 func myCustomMiddleware(next http.Handler) http.Handler {
@@ -1169,7 +1169,7 @@ func myCustomMiddleware(next http.Handler) http.Handler {
 
 ### Content negotiation
 
-Forge selects the response format from the `Accept` header.
+Smeldr selects the response format from the `Accept` header.
 Register templates to enable HTML. Everything else works automatically.
 
 ```
@@ -1186,7 +1186,7 @@ app.Content(&BlogPost{},
     smeldr.At("/posts"),
     smeldr.Templates("templates/posts"),        // parsed at startup, fails fast if missing
     // smeldr.TemplatesOptional("templates/posts"), // no startup failure if missing
-    // Forge looks for:
+    // Smeldr looks for:
     //   templates/posts/list.html  →  GET /posts
     //   templates/posts/show.html  →  GET /posts/{slug}
 )
@@ -1257,7 +1257,7 @@ This is regular **Markdown**.
 More regular Markdown here.
 ```
 
-Security model: Forge is self-hosted; content authors are trusted (same role system
+Security model: Smeldr is self-hosted; content authors are trusted (same role system
 that governs MCP write operations). No sanitisation is applied to verbatim HTML lines.
 
 #### forge_html
@@ -1438,7 +1438,7 @@ Assets are emitted in order: preconnect → stylesheets → links → scripts �
 Inline script bodies use `template.JS` to opt in to verbatim emission:
 
 ```go
-smeldr.ScriptTag{Body: template.JS("console.log('Forge')")} // never pass user input here
+smeldr.ScriptTag{Body: template.JS("console.log('Smeldr')")} // never pass user input here
 ```
 
 `RawHead` accepts any raw HTML as `template.HTML` — use it for analytics snippets,
@@ -1449,7 +1449,7 @@ responsible for safety. Zero value is a no-op.
 
 ## Error handling
 
-Forge uses a typed error hierarchy. Every error knows its HTTP status,
+Smeldr uses a typed error hierarchy. Every error knows its HTTP status,
 its machine-readable code, and what is safe to show the client.
 Internal details are logged — never leaked.
 
@@ -1512,7 +1512,7 @@ id := ctx.RequestID()
 
 ## Rate limiting
 
-Forge includes a built-in per-IP token bucket rate limiter.
+Smeldr includes a built-in per-IP token bucket rate limiter.
 
 ```go
 app.Use(
@@ -1555,7 +1555,7 @@ app.Use(myRateLimiter)
 
 > ✅ **Available** — manual redirects (`app.Redirect`), prefix rewrites (`Redirects(From(...))`), 410 Gone, chain collapse, and `/.well-known/redirects.json` are implemented as of Milestone 7.
 
-Forge automatically tracks every URL a piece of content has ever had.
+Smeldr automatically tracks every URL a piece of content has ever had.
 Rename a slug, change a prefix, archive a post — inbound links and SEO
 rankings are preserved without any developer effort.
 
@@ -1670,7 +1670,7 @@ Routes registered:
 | `POST /oauth/token` | | ✓ |
 | `POST /oauth/revoke` | | ✓ |
 
-The existing `Handler()` method is unchanged for non-forge embeddings.
+The existing `Handler()` method is unchanged for non-Smeldr embeddings.
 
 ### Block system tools — `WithBlocks` (T32)
 
@@ -1714,7 +1714,7 @@ blocks — pass only the IDs.
 
 ## The AI-first design philosophy
 
-Forge is the first Go framework explicitly designed to be maintained by AI assistants.
+Smeldr is the first Go framework explicitly designed to be maintained by AI assistants.
 
 **Intent over mechanics**  
 `smeldr.SEO(smeldr.RichArticle)` — not 40 lines of JSON-LD template code.
@@ -1910,7 +1910,7 @@ Full reference: [smeldr.dev/media README](https://github.com/smeldr/media)
 
 ✅ **Available**
 
-`smeldr.dev/cli` is a standalone operator tool for managing a running Forge instance
+`smeldr.dev/cli` is a standalone operator tool for managing a running Smeldr instance
 from the command line. No MCP client required. Install it with:
 
 ```bash
@@ -2037,7 +2037,7 @@ dev = true
 
 ## smeldr.config file
 
-Forge reads a `smeldr.config` file from the working directory (or from the path
+Smeldr reads a `smeldr.config` file from the working directory (or from the path
 in the `SMELDR_CONFIG` environment variable) at startup. Fields set in Go code
 take precedence over file values — with one deliberate exception: `og_image`
 overrides the Go-code `OGDefaults.Image.URL` so operators can update the site
@@ -2408,7 +2408,7 @@ forge webhook retry <job-id>
 
 ## Search engine indexing
 
-Forge does not provide built-in sitemap ping. Google deprecated their ping
+Smeldr does not provide built-in sitemap ping. Google deprecated their ping
 endpoint in June 2023, and IndexNow (Bing, Yandex) requires an API key and a
 verification file hosted on your site — application-level setup, not framework
 responsibility.
@@ -2563,7 +2563,7 @@ The `initialize` response includes:
 
 ## Draft preview
 
-Forge enforces Published-only visibility by default — drafts return 404 to guests.
+Smeldr enforces Published-only visibility by default — drafts return 404 to guests.
 Draft preview provides a stateless way to share draft content with reviewers
 before publishing, without requiring a login.
 

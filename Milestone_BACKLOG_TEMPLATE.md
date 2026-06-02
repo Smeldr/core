@@ -1,4 +1,4 @@
-# Forge — Milestone {N} Backlog (v{semver})
+# Smeldr — Milestone {N} Backlog (v{semver})
 
 One-line description of the milestone goal.
 

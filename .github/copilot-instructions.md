@@ -1,6 +1,6 @@
-﻿# Forge — Copilot Instructions
+﻿# Smeldr — Copilot Instructions
 
-This is the Forge CMS project — a Go web framework designed for how you
+This is the Smeldr project — a Go web framework designed for how you
 actually think. Zero dependencies. AI-first. Production-ready by default.
 
 ## New chat session — start here
@@ -14,7 +14,7 @@ This is your state from the previous session: current versions, latest
 amendment, active milestone and step, anything deferred.
 
 **Step 2 — Check for a pending task:**
-Check whether `NEXT.md` exists in the forge repo root (local workspace).
+Check whether `NEXT.md` exists in the core repo root (local workspace).
 If it exists:
 1. Read it and form a full implementation plan (including any questions).
 2. Write the plan file locally to:
@@ -148,7 +148,7 @@ When in doubt: Level 2.
 
 ## Non-negotiable rules
 
-- Zero third-party dependencies in the `forge` core package
+- Zero third-party dependencies in the `smeldr` core package
 - All errors implement `smeldr.Error` — never raw `errors.New`
 - **Read `ERROR_HANDLING.md` before writing any code that handles or returns errors,**
   **calls `WriteError`, adds a sentinel, uses `errors.As`/`errors.Is`, or writes**
@@ -208,7 +208,7 @@ evaluate its impact on:
 2. **README and documentation** — does any documented example break or
    become misleading?
 3. **AI generation accuracy** — will AI assistants be able to produce
-   correct Forge code without consulting docs?
+   correct Smeldr code without consulting docs?
 4. **Consistency** — does this pattern align with all existing exported
    symbols, or does it introduce a special case?
 
@@ -217,7 +217,7 @@ If an amendment breaks a README example, fix the README in the same step.
 
 ## Code style
 
-- Single package: `forge` — no sub-packages
+- Single package: `smeldr` — no sub-packages
 - File names are the organisation — keep logic in the correct file
 - Prefer interfaces over concrete types in function signatures
 - Table-driven tests with `t.Run`
@@ -304,7 +304,7 @@ milestone — it becomes a lie the moment the code merges.
 
 
 **README compile test rule:**
-Forge maintains `example_test.go` in the root package. Every Example function
+Smeldr maintains `example_test.go` in the root package. Every Example function
 in that file is a compile-verified extract of a README code example.
 
 This rule applies at three points:
@@ -376,7 +376,7 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       MCP tool behaviour (new tools, suppressed tools, changed tool names);
       lifecycle rules or role enforcement;
       token, webhook, or media management tools.
-      AGENTS.md ships with forge and is the primary reference for external AI coding
+      AGENTS.md ships with Smeldr and is the primary reference for external AI coding
       assistants. It must stay in sync with the developer-facing API.
       Specifically: if this commit touches module wiring API (`smeldr.MCP`, `smeldr.Repo`,
       `smeldr.At`, `smeldr.NewModule`), MCP server wiring (`forgemcp.New`, `mcpSrv.Handler()`,
@@ -396,12 +396,12 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
 
 **M-number milestone commits — additionally mandatory:**
 - [ ] Module `README.md` updated to reflect shipped behaviour.
-- [ ] `Forge/docs/REFERENCE.md` updated (new commands, tools, config keys, changed signatures).
-- [ ] `Forge/docs/FEATURELIST.md` updated, "Last updated" version line bumped, and
+- [ ] `docs/REFERENCE.md` updated (new commands, tools, config keys, changed signatures).
+- [ ] `docs/FEATURELIST.md` updated, "Last updated" version line bumped, and
       module registry: version updated, stability label reviewed if this release
       changes API surface, adds a module, or materially changes production confidence.
 - [ ] `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md` updated: version line, MCP tools, CLI commands, any new sections. Read it with the Read tool.
-- [ ] `skills/smeldr.md` in forge repo — copy updated `smeldr/common/agent/skills/smeldr.md`
+- [ ] `skills/smeldr.md` in core repo — copy updated `smeldr/common/agent/skills/smeldr.md`
 
 "No changes needed" is only valid after explicitly reading each file and confirming it already reflects the shipped code. Never assume.
 
@@ -450,7 +450,7 @@ current codebase and recent amendments:
 2. `README.md` — is the version line (`**vX.Y.Z — stable.**`) current?
 3. `docs/FEATURELIST.md` — does it list all shipped features? Check "Last updated" version.
    Module registry versions and stability labels current?
-4. `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\forge.md` — does the version line match current versions?
+4. `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md` — does the version line match current versions?
    Are all MCP tools and CLI commands listed? Read it with the Read tool.
 
 Present any staleness findings to the user before proceeding. Do not silently
@@ -476,7 +476,7 @@ Also update `.claude/skills/smeldr.md` when any of the following changed:
 - Config keys (update smeldr.config section)
 - New failure modes confirmed in this release (update gotchas)
 - Any of the above → bump the version line at the top of the skill file
-- Update `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\forge.md` only
+- Update `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md` only
   (no copies — all pilots read from smeldr/common directly)
 Do not commit yet.
 
@@ -522,7 +522,7 @@ File naming: `YYYYMMDD-HHMMSS-<slug>.md`
 
 Example: `20260505-143022-token-management.md`
 
-These files are for sitepilot to pick up — do not commit them to the forge repo.
+These files are for sitepilot to pick up — do not commit them to the core repo.
 
 **9. Propose commit message**
 Propose a conventional commit message covering all repo doc changes (steps 2–3).
@@ -574,14 +574,14 @@ When the architect approves push via a separate NEXT.md, squash the branch to ma
 The squash commit timestamp = push timestamp. This is the only commit that
 appears on GitHub. "Commit approved" means: squash to main now. Push follows
 immediately after — do not wait for a separate push instruction.
-This applies to all three repos (forge core, smeldr.dev/mcp, smeldr.dev/cli) when a
+This applies to all three repos (smeldr/core, smeldr.dev/mcp, smeldr.dev/cli) when a
 milestone touches multiple repos. Each repo gets its own squash commit.
 
 ---
 
 ## Release tagging
 
-Forge uses **annotated tags only** — never lightweight tags. Annotated tags carry a
+Smeldr uses **annotated tags only** — never lightweight tags. Annotated tags carry a
 date, a tagger, and a message, and appear as formal releases on GitHub.
 
 **Tag format:** `vMAJOR.MINOR.PATCH` — must match the version in `CHANGELOG.md`
@@ -605,7 +605,7 @@ The sub-module tag uses the prefix convention: `smeldr.dev/mcp/vX.Y.Z`.
 **CHANGELOG ownership — non-negotiable:**
 Each module owns its own CHANGELOG. Never add submodule release notes as subsections
 in the root `CHANGELOG.md`. The separation is strict:
-- `CHANGELOG.md` — forge core only
+- `CHANGELOG.md` — smeldr/core only
 - `smeldr.dev/mcp/CHANGELOG.md` — smeldr.dev/mcp only
 - `smeldr.dev/media/CHANGELOG.md` — smeldr.dev/media only
 A brief reference line in the root is acceptable: `Submodules: smeldr.dev/media v1.0.0 released.`
@@ -616,10 +616,10 @@ The detail belongs in the submodule's own file.
 2. `go test ./...` is green (root); `go test ./...` inside each changed submodule is green
 3. `CHANGELOG.md` (root) and each changed submodule's `CHANGELOG.md` has an entry for the
    version being tagged
-4. For standalone modules that depend on forge core (smeldr.dev/mcp, smeldr.dev/media, smeldr.dev/cli),
+4. For standalone modules that depend on smeldr.dev/core (smeldr.dev/mcp, smeldr.dev/media, smeldr.dev/cli),
    run this full checklist before tagging — every time, without exception:
    - `head -1 go.mod` → must be `module smeldr.dev/<module-name>` (not any github.com path)
-   - `grep smeldr.dev/core go.mod` → correct forge version in require block
+   - `grep smeldr.dev/core go.mod` → correct core version in require block
    - `go mod tidy` → no diff
    - `go build ./...` → green
    - `go test ./...` → green
@@ -629,7 +629,7 @@ The detail belongs in the submodule's own file.
 
 **Tag and push sequence:**
 ```
-git tag -a vX.Y.Z -m "Forge vX.Y.Z — {one line summary}"
+git tag -a vX.Y.Z -m "Smeldr vX.Y.Z — {one line summary}"
 git push origin main
 git push origin vX.Y.Z
 # if smeldr.dev/mcp also changed:
@@ -645,7 +645,7 @@ After pushing, create a GitHub Release for each tag from
 
 | Tag | Release title format |
 |-----|----------------------|
-| `vX.Y.Z` | `Forge vX.Y.Z — {release name}` |
+| `vX.Y.Z` | `Smeldr vX.Y.Z — {release name}` |
 | `smeldr.dev/mcp/vX.Y.Z` | `smeldr.dev/mcp vX.Y.Z — {release name}` |
 
 The release name is a short (2-4 word) phrase that captures the primary change —
@@ -669,7 +669,7 @@ agreed upon. This file is the single source of truth for that milestone's detail
 
 ### Planning documentation
 
-Forge uses one tier of planning documentation per active milestone:
+Smeldr uses one tier of planning documentation per active milestone:
 
 **`Milestone{N}_BACKLOG.md` (repo root)**
 - Full implementation plan for one milestone only
@@ -704,7 +704,7 @@ git rm Milestone{N}_TEST_STRATEGY.md   # if one exists
 ```
 
 These files are preserved in git history. Removing them keeps the repo
-root clean for developers who clone forge to use it, not to study its
+root clean for developers who clone Smeldr to use it, not to study its
 internal planning history. `Milestone_BACKLOG_TEMPLATE.md` is never removed.
 
 ### Rules for steps

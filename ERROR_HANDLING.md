@@ -1,7 +1,7 @@
-# Forge — Error Handling Strategy
+# Smeldr — Error Handling Strategy
 
 This document is the authoritative reference for how errors are produced,
-propagated, and rendered in Forge. It supplements Decision 16 in `DECISIONS.md`.
+propagated, and rendered in Smeldr. It supplements Decision 16 in `DECISIONS.md`.
 
 Read this document before writing any code that: handles or returns errors,
 calls `WriteError`, adds a new sentinel, uses `errors.As`/`errors.Is`,
@@ -11,7 +11,7 @@ or writes an HTTP response in an error path.
 
 ## The single pipeline rule
 
-Every error-to-HTTP translation in Forge goes through one function:
+Every error-to-HTTP translation in Smeldr goes through one function:
 
 ```go
 WriteError(w http.ResponseWriter, r *http.Request, err error)

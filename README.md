@@ -7,7 +7,7 @@ A Go framework for content-driven applications. Zero runtime dependencies. AI-na
 **v1.31.0 — stable.** Public APIs are intended to be stable within v1. Breaking changes may still occur in Phase 2 where the architecture demands it. See the stability map below. See [CHANGELOG.md](CHANGELOG.md).
 
 **Status: Phase 2 — active production dogfooding.**
-Forge powers smeldr.dev and is under active development. The core architecture is in place; APIs may still evolve as dogfooding reveals better shapes. Use it today if you are comfortable following changes. The stability map below shows which areas are settled and which are still moving.
+Smeldr powers smeldr.dev and is under active development. The core architecture is in place; APIs may still evolve as dogfooding reveals better shapes. Use it today if you are comfortable following changes. The stability map below shows which areas are settled and which are still moving.
 
 **Stability map**
 
@@ -28,13 +28,13 @@ go run .
 # open http://localhost:8080
 ```
 
-## What Forge gives you
+## What Smeldr gives you
 
 **Content**
 - **Full CRUD** — create, update, publish, archive, and delete through a single `Module[T]`
 - **Draft-safe lifecycle** — drafts return 404 to guests; only Published content is visible
 - **Draft preview** — share a signed `?preview=<token>` URL to let reviewers see a draft without logging in
-- **Scheduled publishing** — set a future `ScheduledAt`; Forge transitions to Published automatically
+- **Scheduled publishing** — set a future `ScheduledAt`; Smeldr transitions to Published automatically
 - **Content negotiation** — one endpoint serves JSON, HTML, or Markdown based on `Accept`
 
 **Auth & security**
@@ -58,7 +58,7 @@ go run .
 
 ---
 
-| | Forge | Echo | Gin | Chi |
+| | Smeldr | Echo | Gin | Chi |
 |---|---|---|---|---|
 | Zero runtime dependencies¹ | ✓ | ✗ | ✗ | ~ |
 | Content lifecycle built-in | ✓ | ✗ | ✗ | ✗ |
@@ -178,4 +178,4 @@ For draft preview tokens see [REFERENCE.md — Draft preview](docs/REFERENCE.md#
 
 [AGPL v3](LICENSE) — free for individuals, open source projects, and companies
 building their own sites. A commercial license will be available for organisations
-running Forge as a hosted service. See [COMMERCIAL.md](COMMERCIAL.md).
+running Smeldr as a hosted service. See [COMMERCIAL.md](COMMERCIAL.md).

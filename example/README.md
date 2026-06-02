@@ -1,6 +1,6 @@
-# Forge Examples
+# Smeldr Examples
 
-Three self-contained applications demonstrating different Forge feature sets.
+Three self-contained applications demonstrating different Smeldr feature sets.
 
 | Example | What it demonstrates | Command |
 |---------|---------------------|---------|
@@ -13,7 +13,7 @@ Start with `blog` — it is the canonical production pattern.
 
 ## blog
 
-The blog example is a complete, production-ready Forge application that you can
+The blog example is a complete, production-ready Smeldr application that you can
 use as a starting point for any content-driven site.
 
 **Features:**
@@ -40,7 +40,7 @@ The server starts on `:8080`. An admin bootstrap token is printed on first run.
 
 ## api
 
-Demonstrates Forge's auth and validation features in isolation:
+Demonstrates Smeldr's auth and validation features in isolation:
 RBAC roles, per-field validation hooks, HTTP redirects, and security headers.
 
 **Run:**
@@ -52,7 +52,7 @@ go run .
 
 ## docs
 
-Demonstrates Forge's AI indexing features: `llms.txt`, `llms-full.txt`,
+Demonstrates Smeldr's AI indexing features: `llms.txt`, `llms-full.txt`,
 `aidoc` content type, `AISummary` helper, and breadcrumb navigation.
 
 **Run:**

@@ -1,9 +1,9 @@
-﻿# Forge CMS — developer skill
+﻿# Smeldr — developer skill
 
-Forge is a Go content framework. This skill covers what you need to work
-with forge as a developer or pilot agent.
+Smeldr is a Go content framework. This skill covers what you need to work
+with Smeldr as a developer or pilot agent.
 
-Current versions: forge v1.25.1 · smeldr.dev/mcp v1.11.3 · smeldr.dev/media v1.2.1 · smeldr.dev/cli v0.9.1 · smeldr.dev/social v0.6.1 · smeldr.dev/agent v0.4.2
+Current versions: smeldr.dev/core v1.31.0 · smeldr.dev/mcp v1.14.0 · smeldr.dev/oauth v0.1.5 · smeldr.dev/media v1.3.0 · smeldr.dev/cli v0.10.0 · smeldr.dev/social v0.7.4 · smeldr.dev/agent v0.5.1 · smeldr.dev/core/pgx v0.1.0
 
 ---
 
@@ -417,9 +417,9 @@ Add `import _ "time/tzdata"` to binaries on Alpine/scratch containers.
 - `cmd/agent-github` — `GITHUB_MCP_URL` + `GITHUB_TOKEN` + `GITHUB_REPO` (Streamable HTTP)
 - `example/electricity-advisor/` — `ANTHROPIC_API_KEY` + `DISCORD_WEBHOOK_URL` (UC2: electricity prices → Discord)
 
-### smeldr.dev/agent/flow — Forge integration (v0.4.2)
+### smeldr.dev/agent/flow — Smeldr integration (v0.5.1)
 
-`smeldr.dev/agent/flow` — AGPL sub-package. Wires `AgentJob` as a Forge
+`smeldr.dev/agent/flow` — AGPL sub-package. Wires `AgentJob` as a Smeldr
 content type. Requires `smeldr.dev/core` as a dependency.
 
 ```go
@@ -439,7 +439,7 @@ defer agentMod.Stop()
 | Field | Description |
 |-------|-------------|
 | `Name` | Human-readable identifier. Slug source. Required. |
-| `Trigger` | Cron expression (`"45 13 * * *"`) or forge signal (`"after_publish"`). Required. |
+| `Trigger` | Cron expression (`"45 13 * * *"`) or Smeldr signal (`"after_publish"`). Required. |
 | `ContentTypeFilter` | Restrict signal trigger to content type (e.g. `"Post"`). Empty = all. |
 | `SystemPrompt` | System instruction for every run. Required. |
 | `Model` | Anthropic model ID. Defaults to `"claude-sonnet-4-6"`. |
@@ -452,7 +452,7 @@ defer agentMod.Stop()
 `create_agent_job`, `get_agent_job`, `list_agent_jobs`, `update_agent_job`,
 `publish_agent_job`, `archive_agent_job`, `delete_agent_job`
 
-**Signal triggers:** set `Trigger` to any forge signal string value:
+**Signal triggers:** set `Trigger` to any Smeldr signal string value:
 `after_publish`, `after_create`, `after_update`, `after_unpublish`,
 `after_archive`, `after_schedule`, `after_delete`.
 

@@ -1,6 +1,6 @@
-# Forge — Benchmark Results
+# Smeldr — Benchmark Results
 
-This file is the authoritative record of Forge's hot-path performance.
+This file is the authoritative record of Smeldr's hot-path performance.
 
 **Maintenance rule:** Run the full benchmark suite and append a new changelog
 entry every time a milestone ships or a performance-relevant change is made.
@@ -16,7 +16,7 @@ go test -run "^$" -bench "^Benchmark" -benchtime=3s -benchmem . 2>&1
 
 ## Benchmark catalogue
 
-All benchmarks live in `*_test.go` files in the root `forge` package.
+All benchmarks live in `*_test.go` files in the root `smeldr` package.
 
 | Benchmark | Milestone | File | What it measures |
 |-----------|-----------|------|-----------------|

@@ -13,7 +13,7 @@ and tagged immediately.
 
 ## Reporting a vulnerability
 
-Email **xwink@proton.me** with the subject line `[forge] Security vulnerability`.
+Email **xwink@proton.me** with the subject line `[smeldr] Security vulnerability`.
 
 Please include:
 - A clear description of the issue
@@ -27,9 +27,9 @@ not open a public GitHub issue for vulnerabilities until a fix is available.
 
 ## Threat model
 
-### What Forge is responsible for
+### What Smeldr is responsible for
 
-Forge enforces the following security properties automatically:
+Smeldr enforces the following security properties automatically:
 
 - **Content lifecycle enforcement** — Draft and Archived items return 404 to
   all unauthenticated requests; only Published items are publicly visible.
@@ -51,11 +51,11 @@ Forge enforces the following security properties automatically:
 
 ### What the developer is responsible for
 
-Forge cannot protect against:
+Smeldr cannot protect against:
 
 - **Insecure handler code** — your own HTTP handlers, template logic, and
-  business rules are outside Forge's security boundary.
-- **Template injection** — Forge uses Go's `html/template` for HTML rendering,
+  business rules are outside Smeldr's security boundary.
+- **Template injection** — Smeldr uses Go's `html/template` for HTML rendering,
   which auto-escapes template variables. However, `forge_html` fields emit
   verbatim HTML — the developer is responsible for sanitising that content
   before storage.
@@ -71,12 +71,12 @@ Forge cannot protect against:
   also stored and can be revoked.
 - **Role hierarchy** — `Guest < Author < Editor < Admin`. Each operation
   declares a minimum required role.
-- **`ensureBootstrap`** — on first start, if no admin token exists, Forge
+- **`ensureBootstrap`** — on first start, if no admin token exists, Smeldr
   automatically creates one and prints it to stdout. Copy it immediately —
   it cannot be retrieved again.
 - **Token revocation** — `TokenStore.Revoke(id)` is effective immediately.
   Revocation is permanent; a revoked token cannot be restored.
-- **ErrLastAdmin guard** — Forge refuses to revoke the last active admin token.
+- **ErrLastAdmin guard** — Smeldr refuses to revoke the last active admin token.
   Create a replacement before revoking.
 
 ## Webhook signing
@@ -126,10 +126,10 @@ key is derived from `FORGE_SECRET`. Credentials are never stored in plaintext.
 
 ## Production security checklist
 
-Before deploying Forge to production:
+Before deploying Smeldr to production:
 
 - [ ] **HTTPS** — terminate TLS at the load balancer or reverse proxy;
-      pass `smeldr.TrustedProxy()` to `smeldr.RateLimit(...)` if Forge is behind
+      pass `smeldr.TrustedProxy()` to `smeldr.RateLimit(...)` if Smeldr is behind
       a reverse proxy so rate limiting uses the real client IP.
 - [ ] **`FORGE_SECRET`** — set via environment variable, not in a config
       file committed to source control. Use a random 32-byte value minimum.

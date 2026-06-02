@@ -1,6 +1,6 @@
-﻿# Forge — feature list
+﻿# Smeldr — feature list
 
-Complete list of what Forge generates and includes automatically.
+Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
 Last updated: v1.31.0 (A116–A120) + smeldr.dev/mcp v1.14.0 + smeldr.dev/oauth v0.1.5 + smeldr.dev/social v0.7.4 + smeldr.dev/agent v0.5.1 + smeldr.dev/cli v0.10.0 + smeldr.dev/media v1.3.0 + smeldr.dev/core/pgx v0.1.0.
 
@@ -188,8 +188,8 @@ MCP resource subscriptions (Beta):
 
 ## smeldr.dev/agent — Experimental
 
-- `smeldr.dev/agent` — MIT-licensed agent runtime; `smeldr.dev/agent/flow` — AGPL-3.0 Forge integration adapter
-- `AgentJob` — Forge content type (embeds `smeldr.Node`) with full lifecycle management: Draft → Published → Archived; auto-generated MCP tools (`create_agent_job`, `get_agent_job`, `list_agent_jobs`, `update_agent_job`, `publish_agent_job`, `archive_agent_job`, `delete_agent_job`)
+- `smeldr.dev/agent` — MIT-licensed agent runtime; `smeldr.dev/agent/flow` — AGPL-3.0 Smeldr integration adapter
+- `AgentJob` — Smeldr content type (embeds `smeldr.Node`) with full lifecycle management: Draft → Published → Archived; auto-generated MCP tools (`create_agent_job`, `get_agent_job`, `list_agent_jobs`, `update_agent_job`, `publish_agent_job`, `archive_agent_job`, `delete_agent_job`)
 - Signal-triggered jobs — any `smeldr.Signal` value as `Trigger`; `ContentTypeFilter` restricts to a named content type; full `smeldr.SignalEvent` serialised as JSON in the agent task string so the agent knows what content item fired it
 - Cron-triggered jobs — 5-field cron expression as `Trigger`; scheduler rebuilds atomically on AgentJob publish/archive
 - `WebhookURL` — when set, agent task prompt includes an instruction to POST output via `http_post`

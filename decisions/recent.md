@@ -1,4 +1,4 @@
-# Forge — Recent Decisions
+# Smeldr — Recent Decisions
 
 Rolling working file. All new decisions are added here first.
 When this file approaches ~20KB, report it at session start — the architect
@@ -325,5 +325,53 @@ resolution — Image has no refs). Raw `ImageID` is left in the data (harmless).
 (guarded, no img), unpublished (Draft image skipped), dangling (no crash), shared
 image across two parents, `.Image.Caption` markdown (proves full buildData), hero +
 contact_card coverage, and batched query-count (8 refs within a bounded count).
+
+---
+
+## A121 — T85: core-repo brand sweep ("Forge" → "Smeldr" in doc prose + headers)
+
+**Date:** 2026-06-01  
+**Status:** Agreed  
+**Branch:** `docs/T85-brand-sweep`
+
+### What
+
+Pure doc-only brand sweep across 17 files in the core repo. Every instance of
+"Forge" as the framework brand name in living doc prose and headers is renamed to
+"Smeldr". No code changes, no wire-level identifiers, no version bump.
+
+### Scope
+
+Files touched: `README.md`, `.github/copilot-instructions.md`, `CHANGELOG.md`
+(header + `decisions/recent.md` header), `DECISIONS.md` (header + intro),
+`docs/ARCHITECTURE.md`, `docs/REFERENCE.md`, `docs/FEATURELIST.md`,
+`docs/VISION.md`, `docs/SECURITY.md`, `skills/smeldr.md`, `BENCHMARKS.md`,
+`CLA.md`, `Milestone_BACKLOG_TEMPLATE.md`, `NOTES.md`, `ERROR_HANDLING.md`,
+`example/README.md`, `example/api/README.md`.
+
+Additional: `docs/VISION.md` — `forge-admin` → `smeldr-admin` and
+`Forge Cloud` → `Smeldr Cloud` throughout.
+
+`skills/smeldr.md` — version line resynced to current versions alongside the
+header brand fix (file was stale at v1.25.1 from before the housekeeping sprint).
+
+Two stale filesystem paths in `copilot-instructions.md` corrected:
+`common/agent/skills/forge.md` → `smeldr.md` (file was renamed in the
+housekeeping sprint but the instructions were not updated).
+
+### Preserve (not touched)
+
+`X-Forge-*` webhook headers, `forge://` MCP resource URI scheme, `FORGE_*`
+env vars, `forge-cli` binary name, historical CHANGELOG entry bodies,
+`decisions/*.md` archive files, DECISIONS.md dated index rows, `migrate.go`
+`forge_*` rename sources, `BenchmarkForgeMarkdown` Go identifier,
+`FORGE_SECRET` env var references, test-local identifiers.
+
+### Why
+
+Every prior renaming task (T59/T62/T64/T65/T66/A106) renamed the code, module
+paths, config files, and error prefixes — but never the framework *brand name*
+in doc prose. This sweep makes the docs consistent with the published brand.
+The direct trigger was the "Forge v1.31.0" tag name during the T32 release dance.
 
 ---

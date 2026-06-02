@@ -1,6 +1,6 @@
-# Forge API Example
+# Smeldr API Example
 
-A headless JSON API built with Forge. Demonstrates authentication, role-based
+A headless JSON API built with Smeldr. Demonstrates authentication, role-based
 authorisation, validation hooks, and legacy URL redirects — no database required.
 
 ## Run
