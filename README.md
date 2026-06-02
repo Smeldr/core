@@ -1,4 +1,4 @@
-﻿# Forge
+﻿# Smeldr
 
 A Go framework for content-driven applications. Zero runtime dependencies. AI-native by default.
 
