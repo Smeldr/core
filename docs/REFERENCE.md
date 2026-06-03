@@ -1919,13 +1919,15 @@ go install smeldr.dev/cli@latest
 
 ### Configuration
 
-`smeldr.dev/cli` reads connection details from a `.forge-cli.env` file in the
-current directory:
+`smeldr.dev/cli` reads connection details from `.smeldr-cli.env` in the
+current directory (legacy: `.forge-cli.env` is still read if present):
 
 ```
-FORGE_URL=https://mysite.com
-FORGE_TOKEN=<bearer-token>
+SMELDR_URL=https://mysite.com
+SMELDR_TOKEN=<bearer-token>
 ```
+
+Legacy `FORGE_URL` / `FORGE_TOKEN` / `FORGE_MCP_URL` are still accepted as fallbacks.
 
 Use `forge-cli init` to bootstrap a new instance in one step:
 
@@ -2375,9 +2377,10 @@ event name suffix (`"mytype.scheduled"`).
 
 ### Webhook delivery
 
-- **Signing:** HMAC-SHA256 of `"<unix_ts>.<body>"`. Response header:
-  `X-Forge-Signature: sha256=<hex>`.
-- **Headers:** `X-Forge-Event`, `X-Forge-Delivery` (UUIDv4), `X-Forge-Timestamp`.
+- **Signing:** HMAC-SHA256 of `"<unix_ts>.<body>"`. Preferred header:
+  `X-Smeldr-Signature: sha256=<hex>` (legacy `X-Forge-Signature` also emitted — T87 removes it).
+- **Headers (preferred):** `X-Smeldr-Event`, `X-Smeldr-Delivery` (UUIDv4), `X-Smeldr-Timestamp`.
+  Legacy `X-Forge-*` equivalents are emitted alongside during the deprecation window.
 - **Backoff:** `4^attempt` seconds ± 20% jitter, capped at 1 hour.
 - **Circuit breaker:** endpoint skipped after 5 consecutive failures for 5 minutes.
 - **Dead-letter:** job marked `"dead"` after 7 attempts.
@@ -2517,7 +2520,7 @@ Query parameters:
 forge-cli audit list [--from RFC3339] [--to RFC3339] [--type TYPE] [--actor ACTOR]
 ```
 
-Prints a tab-aligned table to stdout. Requires `FORGE_TOKEN` with Editor role.
+Prints a tab-aligned table to stdout. Requires `SMELDR_TOKEN` (or legacy `FORGE_TOKEN`) with Editor role.
 
 ### Which signals are recorded
 
@@ -2539,7 +2542,7 @@ automatically by `New(app)` in `smeldr.dev/mcp`).
 
 ### Subscribe to a resource
 
-Send `resources/subscribe` with `{"uri": "forge:///posts/my-slug"}` to receive
+Send `resources/subscribe` with `{"uri": "smeldr://posts/my-slug"}` to receive
 `notifications/resources/updated` events over the SSE connection when that
 resource changes.
 

@@ -23,6 +23,19 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.32.0] — 2026-06-03
+
+### Changed (additive, non-breaking)
+
+- **Webhook headers dual-emit (Amendment A123, T86):** `httpDeliver` now sets both
+  the new `X-Smeldr-Signature`, `X-Smeldr-Timestamp`, `X-Smeldr-Event`,
+  `X-Smeldr-Delivery` headers (preferred) and the legacy `X-Forge-*` equivalents
+  (same values) on every delivery. Existing receivers verifying `X-Forge-Signature`
+  continue to work unchanged. The legacy `X-Forge-*` set will be removed in T87
+  after a deprecation window.
+
+---
+
 ## [1.31.0] — 2026-05-31
 
 ### Added

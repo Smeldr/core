@@ -495,7 +495,8 @@ func backoffDelay(attempt int, rng *rand.Rand) time.Duration {
 
 // signPayload computes the HMAC-SHA256 signature for a webhook payload.
 // The signed string is "<timestamp>.<body>" where timestamp is Unix seconds.
-// Returns "sha256=<hex>" — the value of the X-Forge-Signature header.
+// Returns "sha256=<hex>" — used as the value of both X-Smeldr-Signature and
+// X-Forge-Signature (identical value, dual-emitted during the T86 deprecation window).
 func signPayload(secret []byte, timestamp int64, body []byte) string {
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(strconv.FormatInt(timestamp, 10)))
@@ -515,9 +516,10 @@ var outboundClient = &http.Client{
 	},
 }
 
-// httpDeliver performs a single HTTP POST delivery for job. It sets all
-// required X-Forge-* headers, signs the payload, and returns a
-// *webhookHTTPError for non-2xx responses.
+// httpDeliver performs a single HTTP POST delivery for job. It sets both the
+// new X-Smeldr-* headers (preferred, T86) and the legacy X-Forge-* headers
+// (retained during the deprecation window; T87 removes the Forge set), signs
+// the payload, and returns a *webhookHTTPError for non-2xx responses.
 func httpDeliver(ctx context.Context, job OutboundJob, secret []byte) error {
 	ts := time.Now().Unix()
 	sig := signPayload(secret, ts, job.Payload)
@@ -527,6 +529,12 @@ func httpDeliver(ctx context.Context, job OutboundJob, secret []byte) error {
 		return fmt.Errorf("smeldr: webhook: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// New smeldr.dev headers (preferred — T86).
+	req.Header.Set("X-Smeldr-Signature", sig)
+	req.Header.Set("X-Smeldr-Timestamp", strconv.FormatInt(ts, 10))
+	req.Header.Set("X-Smeldr-Event", job.Event)
+	req.Header.Set("X-Smeldr-Delivery", job.ID)
+	// Legacy Forge headers retained during deprecation window (T87 removes these).
 	req.Header.Set("X-Forge-Signature", sig)
 	req.Header.Set("X-Forge-Timestamp", strconv.FormatInt(ts, 10))
 	req.Header.Set("X-Forge-Event", job.Event)

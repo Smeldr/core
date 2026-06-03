@@ -420,3 +420,51 @@ note), `DECISIONS.md:198` (archive row), `docs/REFERENCE.md:186–187`
 (breaking-change migration guidance), and `decisions/*.md` archives.
 
 ---
+
+## A123 — T86: wire-level dual-compat sweep (forge → smeldr, non-breaking)
+
+**Date:** 2026-06-03  
+**Status:** Agreed  
+**Versions:** core v1.32.0, mcp v1.15.0, cli v0.11.0
+
+### Design rule
+
+New identifier is generated and preferred. Legacy identifier is still accepted
+(on parse) or still emitted (on output) alongside the new one. Nothing breaks.
+T87 (removal of legacy side) is deferred — after a deprecation window.
+
+### Three surfaces
+
+**1. mcp — resource URI scheme (`forge://` → `smeldr://`)**
+
+`resources/list`, `resources/templates/list`, and subscription notifications
+now emit `smeldr://` URIs. `resources/read` and `resources/subscribe` accept
+both `smeldr://` (new, preferred) and `forge://` (legacy). If a caller sends
+a `forge://` URI, the response echoes it back unchanged — the round-trip is
+preserved. `serverInfo.name` in the `initialize` response updated to
+`"smeldr-mcp"` (informational metadata, no client keys on the exact string).
+
+**2. core — dual-emit `X-Smeldr-*` + `X-Forge-*` webhook headers**
+
+`httpDeliver` now sets both `X-Smeldr-Signature`, `X-Smeldr-Timestamp`,
+`X-Smeldr-Event`, `X-Smeldr-Delivery` (preferred) and the legacy
+`X-Forge-*` equivalents on every delivery. Values are identical. Existing
+receivers verifying `X-Forge-Signature` continue to work unchanged.
+
+**3. cli — `SMELDR_*` env vars preferred, `FORGE_*` fallback (closes T78)**
+
+`loadConfig` now reads `SMELDR_URL`, `SMELDR_TOKEN`, `SMELDR_MCP_URL` first,
+falling back to the `FORGE_*` equivalents when unset. Both `.smeldr-cli.env`
+and `.forge-cli.env` are loaded (`.smeldr-cli.env` first). `forge-cli init`
+writes `.smeldr-cli.env` with `SMELDR_*` variable names. The `forge-cli`
+binary name is deliberately unchanged.
+
+### Deferred (T87)
+
+- Remove `forge://` accept path from `parseResourceURI`
+- Remove `X-Forge-*` header emission from `httpDeliver`
+- Remove `.forge-cli.env` read from `loadConfig`
+
+T87 is a breaking change requiring a deprecation notice. It is not scheduled.
+
+---
