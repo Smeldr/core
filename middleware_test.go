@@ -405,6 +405,62 @@ func TestTrustedProxy_xRealIP(t *testing.T) {
 	}
 }
 
+// — Ticker stop (NewRateLimiter / NewInMemoryCache) ————————————————————————
+
+// TestNewRateLimiterStop verifies that the stop function terminates the
+// background goroutine, is idempotent, and does not panic.
+func TestNewRateLimiterStop(t *testing.T) {
+	_, stop := NewRateLimiter(10, 50*time.Millisecond)
+	// stop() blocks until the goroutine closes its done channel — deterministic.
+	stop()
+	// Second call must be a no-op (sync.OnceFunc).
+	stop()
+}
+
+// TestNewRateLimiterStopMiddlewareStillWorks verifies that the middleware
+// functions correctly before stop is called.
+func TestNewRateLimiterStopMiddlewareStillWorks(t *testing.T) {
+	mw, stop := NewRateLimiter(1, time.Minute)
+	t.Cleanup(stop)
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := mw(inner)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("code = %d, want 200", w.Code)
+	}
+}
+
+// TestNewInMemoryCacheStop verifies that the stop function terminates the
+// background goroutine, is idempotent, and does not panic.
+func TestNewInMemoryCacheStop(t *testing.T) {
+	_, stop := NewInMemoryCache(time.Minute)
+	stop()
+	stop() // idempotent
+}
+
+// TestNewInMemoryCacheStopMiddlewareStillWorks verifies that the middleware
+// functions correctly before stop is called.
+func TestNewInMemoryCacheStopMiddlewareStillWorks(t *testing.T) {
+	mw, stop := NewInMemoryCache(time.Minute)
+	t.Cleanup(stop)
+	handler := mw(okHandler("cached"))
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Header().Get("X-Cache") != "MISS" {
+		t.Errorf("X-Cache = %q, want MISS", w.Header().Get("X-Cache"))
+	}
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, httptest.NewRequest(http.MethodGet, "/x", nil))
+	if w2.Header().Get("X-Cache") != "HIT" {
+		t.Errorf("X-Cache = %q, want HIT", w2.Header().Get("X-Cache"))
+	}
+}
+
 // — Benchmarks ————————————————————————————————————————————————————————————
 
 func BenchmarkInMemoryCacheHIT(b *testing.B) {

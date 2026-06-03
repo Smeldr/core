@@ -468,3 +468,35 @@ binary name is deliberately unchanged.
 T87 is a breaking change requiring a deprecation notice. It is not scheduled.
 
 ---
+
+## A124 — T53: NewRateLimiter / NewInMemoryCache stoppable ticker constructors
+
+**Date:** 2026-06-03  
+**Status:** Agreed  
+**Version:** core v1.33.0 (minor — new exported symbols)
+
+### Problem
+
+`RateLimit` and `InMemoryCache` each start a background sweep goroutine that runs
+`for range ticker.C` indefinitely. Neither can be stopped. In tests this leaks one
+goroutine per middleware construction, masking real leaks and tripping goroutine-leak
+detectors.
+
+### Solution
+
+Add two new exported constructors that return the middleware alongside a stop function:
+
+- `NewRateLimiter(n int, d time.Duration, opts ...Option) (Middleware, func())`
+- `NewInMemoryCache(ttl time.Duration, opts ...Option) (func(http.Handler) http.Handler, func())`
+
+The goroutines now use `select` on a `stop` channel alongside `ticker.C`. The stop
+function closes `stop` and blocks on a `done` channel until the goroutine confirms exit.
+`sync.OnceFunc` makes the stop function idempotent (safe to call multiple times).
+
+The existing `RateLimit` and `InMemoryCache` delegate to the new constructors and discard
+the stop function — no API breakage, no change to call sites.
+
+Tests use `t.Cleanup(stop)` or call `stop()` directly to confirm goroutine exit. The
+stop function is deterministic: it returns only after the goroutine has exited.
+
+---

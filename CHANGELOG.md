@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.33.0] — 2026-06-03
+
+### Added
+
+- `NewRateLimiter(n int, d time.Duration, opts ...Option) (Middleware, func())` — same
+  as `RateLimit` but also returns a stop function that terminates the background sweep
+  goroutine. The stop function is idempotent. Use it in tests via `t.Cleanup(stop)` to
+  prevent goroutine leaks (Amendment A124, T53).
+- `NewInMemoryCache(ttl time.Duration, opts ...Option) (func(http.Handler) http.Handler, func())` —
+  same as `InMemoryCache` but returns a stop function for the background sweep goroutine
+  (Amendment A124, T53).
+
+---
+
 ## [1.32.0] — 2026-06-03
 
 ### Changed (additive, non-breaking)

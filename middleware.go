@@ -242,15 +242,13 @@ func realClientIP(r *http.Request) string {
 	return ip
 }
 
-// RateLimit returns middleware that enforces a per-IP token bucket rate limit
-// of n requests per duration d. Requests exceeding the limit receive a 429
-// Too Many Requests response with a Retry-After header.
+// NewRateLimiter returns a per-IP token bucket rate-limit middleware and a stop
+// function. The stop function terminates the background sweep goroutine; call it
+// in tests via defer or t.Cleanup to avoid goroutine leaks. stop is idempotent —
+// calling it more than once is safe.
 //
-// Pass [TrustedProxy] when the application runs behind a reverse proxy so that
-// the real client IP is read from X-Real-IP / X-Forwarded-For.
-//
-// A background goroutine sweeps stale IP buckets every d to bound memory usage.
-func RateLimit(n int, d time.Duration, opts ...Option) func(http.Handler) http.Handler {
+// Callers that do not need explicit cleanup should use [RateLimit] instead.
+func NewRateLimiter(n int, d time.Duration, opts ...Option) (func(http.Handler) http.Handler, func()) {
 	trusted := false
 	for _, o := range opts {
 		if _, ok := o.(trustedProxyOption); ok {
@@ -262,16 +260,28 @@ func RateLimit(n int, d time.Duration, opts ...Option) func(http.Handler) http.H
 		rate:    float64(n) / d.Seconds(),
 		max:     float64(n),
 	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
 	// Background sweep: remove buckets idle for more than 2×d.
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(d)
 		defer ticker.Stop()
-		for range ticker.C {
-			rl.sweep(2 * d)
+		for {
+			select {
+			case <-ticker.C:
+				rl.sweep(2 * d)
+			case <-stop:
+				return
+			}
 		}
 	}()
+	stopFn := sync.OnceFunc(func() {
+		close(stop)
+		<-done // wait for goroutine to confirm exit
+	})
 
-	return func(next http.Handler) http.Handler {
+	mw := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var ip string
 			if trusted {
@@ -292,6 +302,21 @@ func RateLimit(n int, d time.Duration, opts ...Option) func(http.Handler) http.H
 			next.ServeHTTP(w, r)
 		})
 	}
+	return mw, stopFn
+}
+
+// RateLimit returns middleware that enforces a per-IP token bucket rate limit
+// of n requests per duration d. Requests exceeding the limit receive a 429
+// Too Many Requests response with a Retry-After header.
+//
+// Pass [TrustedProxy] when the application runs behind a reverse proxy so that
+// the real client IP is read from X-Real-IP / X-Forwarded-For.
+//
+// A background sweep goroutine runs for the lifetime of the process.
+// Use [NewRateLimiter] when an explicit stop is needed (e.g. in tests).
+func RateLimit(n int, d time.Duration, opts ...Option) func(http.Handler) http.Handler {
+	mw, _ := NewRateLimiter(n, d, opts...)
+	return mw
 }
 
 // — InMemoryCache (LRU) ———————————————————————————————————————————————————
@@ -463,14 +488,12 @@ func (cr *cacheRecorder) Write(b []byte) (int, error) {
 	return cr.ResponseWriter.Write(b)
 }
 
-// InMemoryCache returns middleware that caches successful GET responses in an
-// LRU cache. Responses are keyed by method + full URL (including query
-// parameters) + Accept header. Every response receives an X-Cache header
-// (HIT or MISS).
+// NewInMemoryCache returns a GET-response caching middleware and a stop function.
+// The stop function terminates the background sweep goroutine; call it in tests
+// via defer or t.Cleanup to avoid goroutine leaks. stop is idempotent.
 //
-// Default capacity is 1000 entries. Use [CacheMaxEntries] to override.
-// A background goroutine sweeps expired entries every 60 seconds.
-func InMemoryCache(ttl time.Duration, opts ...Option) func(http.Handler) http.Handler {
+// Callers that do not need explicit cleanup should use [InMemoryCache] instead.
+func NewInMemoryCache(ttl time.Duration, opts ...Option) (func(http.Handler) http.Handler, func()) {
 	max := 1000
 	for _, o := range opts {
 		if m, ok := o.(cacheMaxEntriesOption); ok {
@@ -478,16 +501,27 @@ func InMemoryCache(ttl time.Duration, opts ...Option) func(http.Handler) http.Ha
 		}
 	}
 	cache := NewCacheStore(ttl, max)
-
+	stop := make(chan struct{})
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			cache.Sweep()
+		for {
+			select {
+			case <-ticker.C:
+				cache.Sweep()
+			case <-stop:
+				return
+			}
 		}
 	}()
+	stopFn := sync.OnceFunc(func() {
+		close(stop)
+		<-done
+	})
 
-	return func(next http.Handler) http.Handler {
+	mw := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet {
 				next.ServeHTTP(w, r)
@@ -535,6 +569,20 @@ func InMemoryCache(ttl time.Duration, opts ...Option) func(http.Handler) http.Ha
 			}
 		})
 	}
+	return mw, stopFn
+}
+
+// InMemoryCache returns middleware that caches successful GET responses in an
+// LRU cache. Responses are keyed by method + full URL (including query
+// parameters) + Accept header. Every response receives an X-Cache header
+// (HIT or MISS).
+//
+// Default capacity is 1000 entries. Use [CacheMaxEntries] to override.
+// The background sweep goroutine runs for the lifetime of the process.
+// Use [NewInMemoryCache] when an explicit stop is needed (e.g. in tests).
+func InMemoryCache(ttl time.Duration, opts ...Option) func(http.Handler) http.Handler {
+	mw, _ := NewInMemoryCache(ttl, opts...)
+	return mw
 }
 
 // — Chain —————————————————————————————————————————————————————————————————
