@@ -566,10 +566,6 @@ CLI is the human fallback when agents are unavailable.
 This rule applies to every milestone that ships new MCP tools: the corresponding
 smeldr.dev/cli commands ship in the same release — not as a follow-up.
 
-**Current known gap:** smeldr.dev/cli v0.12.1 has no nav commands despite four MCP nav
-tools existing (`list_nav_items`, `create_nav_item`, `update_nav_item`,
-`delete_nav_item`). This gap is tracked and is the next scheduled task.
-
 ---
 
 ## Branching and commit timestamps

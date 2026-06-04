@@ -321,3 +321,32 @@ CI uses `go-version-file: go.mod` — bump takes effect immediately on push.
 `GET /_stats` Admin 200 / Editor 403 / no-token 401.
 
 ---
+
+## A127 — smeldr.dev/cli: nav command group (T18)
+
+**Status:** Agreed — 2026-06-04
+**File:** `cli/nav.go` (new) + `cli/main.go`
+**Principle:** N10 — CLI/MCP parity
+
+### Decision
+
+Add a `nav` command group to smeldr-cli (`nav.go`) that reaches full parity with
+the four nav MCP tools that ship in smeldr.dev/mcp:
+
+- `nav list [--json]` — calls `list_nav_items`, renders table (ID, LABEL, PATH, PARENT, HIDDEN, GHOST, SORT) or raw JSON.
+- `nav create --label <label> [--path] [--parent-id] [--module] [--hidden] [--ghost] [--sort-order]` — calls `create_nav_item`.
+- `nav update <id> [same optional flags]` — calls `update_nav_item`; absent fields preserved.
+- `nav delete <id>` — calls `delete_nav_item`; cascades to descendants on the server.
+
+All four verbs require Editor role (enforced by the MCP server). `list` works in
+any nav mode; create/update/delete require DB nav mode — the server surfaces a clear
+error when attempted against a non-DB instance.
+
+### Consequences
+
+- CLI/MCP parity gap (tracked since nav shipped in mcp v1.4.0) is closed.
+- "Current known gap" block removed from `.github/copilot-instructions.md`.
+- smeldr.dev/cli bumped to v0.13.0 (new commands = minor version).
+- No core or mcp changes.
+
+---

@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or pilot agent.
 
-Current versions: smeldr.dev/core v1.35.0 · smeldr.dev/mcp v1.16.1 · smeldr.dev/oauth v0.1.5 · smeldr.dev/media v1.3.0 · smeldr.dev/cli v0.12.1 · smeldr.dev/social v0.7.4 · smeldr.dev/agent v0.5.1 · smeldr.dev/core/pgx v0.1.0
+Current versions: smeldr.dev/core v1.35.0 · smeldr.dev/mcp v1.16.1 · smeldr.dev/oauth v0.1.5 · smeldr.dev/media v1.3.0 · smeldr.dev/cli v0.13.0 · smeldr.dev/social v0.7.4 · smeldr.dev/agent v0.5.1 · smeldr.dev/core/pgx v0.1.0
 
 ---
 
@@ -406,6 +406,14 @@ forge-cli redirect create --from /old --to /new             # 301
 forge-cli redirect create --from /gone --code 410           # 410 Gone
 forge-cli redirect create --from /posts --to /articles --prefix  # prefix rewrite
 forge-cli redirect delete /old-path
+
+# Navigation tree (Editor role, v0.13.0+) — requires app.Nav(...) with DB mode
+forge-cli nav list                                          # aligned table (ID, LABEL, PATH, PARENT, HIDDEN, GHOST, SORT)
+forge-cli nav list --json                                   # raw JSON
+forge-cli nav create --label "Learn" --path /learn          # create top-level item
+forge-cli nav create --label "Intro" --path /learn/intro --parent-id <id>  # nested
+forge-cli nav update <id> --label "New Label" --sort-order 2
+forge-cli nav delete <id>                                   # cascades to descendants
 
 # Audit trail (Editor role, v1.22.0+)
 forge-cli audit list
