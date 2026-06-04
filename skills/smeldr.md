@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or pilot agent.
 
-Current versions: smeldr.dev/core v1.33.0 · smeldr.dev/mcp v1.15.0 · smeldr.dev/oauth v0.1.5 · smeldr.dev/media v1.3.0 · smeldr.dev/cli v0.11.0 · smeldr.dev/social v0.7.4 · smeldr.dev/agent v0.5.1 · smeldr.dev/core/pgx v0.1.0
+Current versions: smeldr.dev/core v1.34.0 · smeldr.dev/mcp v1.16.0 · smeldr.dev/oauth v0.1.5 · smeldr.dev/media v1.3.0 · smeldr.dev/cli v0.12.0 · smeldr.dev/social v0.7.4 · smeldr.dev/agent v0.5.1 · smeldr.dev/core/pgx v0.1.0
 
 ---
 
@@ -234,6 +234,7 @@ Tools are named from the type in lower_snake_case.
 | `list_tokens` / `revoke_token` | Admin | Token management |
 | `create_webhook` / `list_webhooks` / `delete_webhook` | Admin | Webhook endpoints |
 | `list_webhook_deliveries` / `retry_webhook` | Admin | Delivery introspection and retry |
+| `create_redirect` / `list_redirects` / `delete_redirect` | Editor+ | Redirect rule management (requires `app.Redirects(db)`) |
 
 Block system (T32, enabled with `forgemcp.WithBlocks()`; blocks addressed by ID, not slug):
 
@@ -397,6 +398,14 @@ forge-cli token revoke <id>
 forge-cli webhook create --url https://example.com/hook --events post.published
 forge-cli webhook list
 forge-cli webhook delete <endpoint-id>
+
+# Redirect management (Editor role, v1.34.0+) — requires app.Redirects(db)
+forge-cli redirect list                                      # aligned table
+forge-cli redirect list --json                              # raw JSON
+forge-cli redirect create --from /old --to /new             # 301
+forge-cli redirect create --from /gone --code 410           # 410 Gone
+forge-cli redirect create --from /posts --to /articles --prefix  # prefix rewrite
+forge-cli redirect delete /old-path
 
 # Audit trail (Editor role, v1.22.0+)
 forge-cli audit list

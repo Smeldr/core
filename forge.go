@@ -259,6 +259,7 @@ type App struct {
 	cookieManifestOpts     []Option                            // options for the manifest handler (e.g. ManifestAuth)
 	cookieManifestReg      bool                                // true once GET /.well-known/cookies.json is registered
 	redirectStore          *RedirectStore                      // runtime redirect table; always non-nil after New()
+	redirectDB             DB                                  // non-nil when App.Redirects(db) was called; enables MCP tools
 	redirectFallbackReg    bool                                // true once "/" fallback handler is registered
 	redirectManifestReg    bool                                // true once GET /.well-known/redirects.json is registered
 	redirectManifestOpts   []Option                            // options for the redirect manifest handler (e.g. ManifestAuth)
@@ -1053,6 +1054,32 @@ func (a *App) Redirect(from, to string, code RedirectCode) {
 func (a *App) RedirectStore() *RedirectStore {
 	return a.redirectStore
 }
+
+// Redirects activates database-backed redirect management. It creates the
+// smeldr_redirects table if it does not exist, loads any saved entries into
+// the in-memory store so they are immediately active, and stores db so that
+// runtime MCP and CLI operations can persist changes without a restart.
+//
+// Call once at application startup before [App.Handler] or [App.Run]:
+//
+//	if err := app.Redirects(db); err != nil {
+//	    log.Fatal(err)
+//	}
+//
+// MCP redirect tools (create_redirect, list_redirects, delete_redirect) are
+// only registered when Redirects has been called.
+func (a *App) Redirects(db DB) error {
+	if err := CreateRedirectsTable(db); err != nil {
+		return err
+	}
+	a.redirectDB = db
+	return a.redirectStore.Load(context.Background(), db)
+}
+
+// RedirectDB returns the DB passed to [App.Redirects], or nil if
+// database-backed redirect management has not been activated. Used by
+// smeldr.dev/mcp to gate and service the redirect management tools.
+func (a *App) RedirectDB() DB { return a.redirectDB }
 
 // RedirectManifestAuth sets the [AuthFunc] that guards /.well-known/redirects.json.
 // Call before [App.Handler] or [App.Run].

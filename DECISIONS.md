@@ -20,7 +20,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | `decisions/nondecisions.md` | Non-Decisions only | Yes — Non-Decisions directly |
 | `decisions/core.md` | Archive: D1–D22, A19–A65, A88–A95 | No |
 | `decisions/phase2-archive.md` | Superseded archive (was phase2.md; content now in topic files) | No |
-| `decisions/phase3-archive.md` | Archive: A102–A115 | No |
+| `decisions/phase3-archive.md` | Archive: A102–A120 | No |
 | `decisions/auth.md` | Archive: D25, A66, D26, A83 | No |
 | `decisions/content-api.md` | Archive: D27, A67, A74, A75, A77 | No |
 | `decisions/docs.md` | Archive: D28, A69–A72, A76, A84–A86 | No |
@@ -206,6 +206,7 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 | # | Title | Status | Date |
 |---|-------|--------|------|
 | A87 | `signals.go`: `AfterSchedule Signal = "after_schedule"` — fires after Scheduled transition, alongside AfterUpdate. Enables `post.scheduled` webhook events and per-signal MCP subscription routing. | Agreed | 2026-05-06 |
+| A125 | T30: `CreateRedirectsTable`, `App.Redirects(db)`, `App.RedirectDB()`, `RedirectStore.Delete` + MCP `create_redirect`/`list_redirects`/`delete_redirect` (Editor+) + CLI `redirect list/create/delete`. Auto-ensure table, no DDL; changes live immediately. core v1.34.0 · mcp v1.16.0 · cli v0.12.0. | Agreed | 2026-06-04 |
 | A124 | T53: `NewRateLimiter` + `NewInMemoryCache` — additive constructors returning `(middleware, stopFn)`. Stop function closes an internal channel and blocks until the goroutine confirms exit (`sync.OnceFunc`, idempotent). Existing `RateLimit`/`InMemoryCache` delegate and discard stop — no API breakage. Fixes goroutine leak in tests. core v1.33.0 (minor — new exported symbols). | Agreed | 2026-06-03 |
 | A123 | T86 wire-level dual-compat sweep. mcp v1.15.0: resource URIs generated as `smeldr://`; both `smeldr://` and legacy `forge://` accepted on read/subscribe. core v1.32.0: `httpDeliver` dual-emits `X-Smeldr-*` + `X-Forge-*` webhook headers (same values). cli v0.11.0: `SMELDR_URL/TOKEN/MCP_URL` preferred with `FORGE_*` fallback; `init` writes `.smeldr-cli.env`. All changes additive/non-breaking. Legacy `forge://` accept and `X-Forge-*` emit deferred to T87. | Agreed | 2026-06-03 |
 | A122 | T88+T89 doc accuracy follow-up: `forge:"required"` → `smeldr:"required"` in live code examples. `README.md` minimal example (2 lines). `core/skills/` full-sync from `common/agent/skills/` — fixes stale struct tags, footer paths, and adds missing sections (SiteConfig, RawHead, block MCP tools, oauth). Enforcement: copilot-instructions M-number doc-gate updated to unconditional `Copy-Item` sync command. Level 1, docs-only, no version bump. | Agreed | 2026-06-02 |
@@ -230,4 +231,4 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 ---
 
-> **Body text:** D1–D22, A19–A65, A88–A95 → [`decisions/core.md`](decisions/core.md) · D25, A66, D26, A83 → [`decisions/auth.md`](decisions/auth.md) · D27, A67, A74, A75, A77 → [`decisions/content-api.md`](decisions/content-api.md) · D28, A69–A72, A76, A84–A86 → [`decisions/docs.md`](decisions/docs.md) · A73, D31, A79 → [`decisions/media.md`](decisions/media.md) · D29, D30, A82 → [`decisions/nav.md`](decisions/nav.md) · A68, A78, A80, A81 → [`decisions/storage.md`](decisions/storage.md) · A102–A115 → [`decisions/phase3-archive.md`](decisions/phase3-archive.md) · A87, A97–A101, D32 → [`decisions/recent.md`](decisions/recent.md) · A96 → [`decisions/nondecisions.md`](decisions/nondecisions.md) · phase2-archive.md — superseded; use topic files above
+> **Body text:** D1–D22, A19–A65, A88–A95 → [`decisions/core.md`](decisions/core.md) · D25, A66, D26, A83 → [`decisions/auth.md`](decisions/auth.md) · D27, A67, A74, A75, A77 → [`decisions/content-api.md`](decisions/content-api.md) · D28, A69–A72, A76, A84–A86 → [`decisions/docs.md`](decisions/docs.md) · A73, D31, A79 → [`decisions/media.md`](decisions/media.md) · D29, D30, A82 → [`decisions/nav.md`](decisions/nav.md) · A68, A78, A80, A81 → [`decisions/storage.md`](decisions/storage.md) · A102–A120 → [`decisions/phase3-archive.md`](decisions/phase3-archive.md) · A87, A97–A101, D32 → [`decisions/recent.md`](decisions/recent.md) · A96 → [`decisions/nondecisions.md`](decisions/nondecisions.md) · phase2-archive.md — superseded; use topic files above

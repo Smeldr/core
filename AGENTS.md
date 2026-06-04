@@ -374,6 +374,22 @@ These tools are available when the site has `App.Webhooks(store)` configured:
 - `list_webhooks` never returns secrets
 - Use `list_webhooks` before `delete_webhook` to confirm the ID
 
+### Redirect management tools (Editor role required)
+
+These tools are available when the site has `App.Redirects(db)` called at startup:
+
+| Tool | Description |
+|------|-------------|
+| `create_redirect` | Creates or updates a redirect rule. `from` (must start with `/`), `to`, `code` (301/302/410, default 301), `is_prefix` (bool). Changes take effect immediately. |
+| `list_redirects` | Lists all registered redirect rules (code-registered and database-saved). |
+| `delete_redirect` | Deletes a redirect rule by `from` path. Changes take effect immediately. |
+
+**Redirect rules:**
+- `from` must start with `/`
+- `code` 410 (Gone) requires `to` to be empty
+- `is_prefix: true` makes `from` a path prefix — the unmatched suffix is appended to `to` at request time
+- Changes are in-memory-immediate: no server restart required
+
 ### Connection setup
 
 See the smeldr.dev/mcp README for Claude Desktop, Cursor, and SSE configuration.

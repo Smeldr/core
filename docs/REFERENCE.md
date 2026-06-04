@@ -1553,7 +1553,7 @@ app.Use(myRateLimiter)
 
 ## Redirects & content mobility
 
-> ✅ **Available** — manual redirects (`app.Redirect`), prefix rewrites (`Redirects(From(...))`), 410 Gone, chain collapse, and `/.well-known/redirects.json` are implemented as of Milestone 7.
+> ✅ **Available** — manual redirects (`app.Redirect`), prefix rewrites (`Redirects(From(...))`), 410 Gone, chain collapse, `/.well-known/redirects.json`, and runtime MCP/CLI management are implemented.
 
 Smeldr automatically tracks every URL a piece of content has ever had.
 Rename a slug, change a prefix, archive a post — inbound links and SEO
@@ -1575,7 +1575,7 @@ rankings are preserved without any developer effort.
 Google de-indexes `410` pages significantly faster than `404` pages.
 For a CMS, this is almost always what you want.
 
-### Manual redirects
+### Manual redirects (code-only)
 
 ```go
 // Bulk redirect when renaming a module prefix
@@ -1589,24 +1589,47 @@ app.Redirect("/old-path",  "/new-path", smeldr.Permanent) // 301
 app.Redirect("/removed",   "",          smeldr.Gone)       // 410
 ```
 
-### Optional DB persistence
+### DB-backed redirect management
 
-To persist redirects across restarts, create the `smeldr_redirects` table and
-call `Load` at startup:
-
-```sql
-CREATE TABLE smeldr_redirects (
-    from_path TEXT PRIMARY KEY,
-    to_path   TEXT NOT NULL DEFAULT '',
-    code      INTEGER NOT NULL DEFAULT 301,
-    is_prefix BOOLEAN NOT NULL DEFAULT FALSE
-);
-```
+Call `App.Redirects(db)` once at startup to activate database-backed
+management. It creates the `smeldr_redirects` table if it does not exist,
+loads any saved entries into the in-memory store, and enables the MCP
+and CLI tools:
 
 ```go
-if err := app.RedirectStore().Load(ctx, db); err != nil {
+if err := app.Redirects(db); err != nil {
     log.Fatal(err)
 }
+```
+
+`CreateRedirectsTable(db DB) error` is also exported for migration tools and
+tests that need the table without calling `App.Redirects`.
+
+**`RedirectStore.Delete(from string)`** removes an entry from the in-memory
+store. Pair with `RedirectStore.Remove(ctx, db, from)` to also delete from
+the database (this is what `delete_redirect` does internally).
+
+### MCP redirect tools (Editor role)
+
+Available when `App.Redirects(db)` has been called (see smeldr.dev/mcp):
+
+| Tool | Description |
+|------|-------------|
+| `create_redirect` | Create or upsert a redirect rule. `from` (required, must start with `/`), `to`, `code` (301/302/410, default 301), `is_prefix` (bool). |
+| `list_redirects` | List all registered redirect rules (code-registered and DB-saved). |
+| `delete_redirect` | Delete a redirect rule by `from` path. |
+
+Changes take effect immediately without a server restart.
+
+### CLI redirect commands (Editor role)
+
+```
+forge-cli redirect list                                  # aligned table output
+forge-cli redirect list --json                          # raw JSON
+forge-cli redirect create --from /old --to /new         # 301
+forge-cli redirect create --from /gone --code 410       # 410 Gone
+forge-cli redirect create --from /posts --to /articles --prefix  # prefix rewrite
+forge-cli redirect delete /old-path
 ```
 
 ### Inspect the redirect table

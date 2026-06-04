@@ -205,9 +205,36 @@ type dbRedirectRow struct {
 	IsPrefix bool   `db:"is_prefix"`
 }
 
+// CreateRedirectsTable creates the smeldr_redirects table if it does not exist.
+// Called automatically by [App.Redirects]; also available for migration tools
+// and tests.
+func CreateRedirectsTable(db DB) error {
+	_, err := db.ExecContext(context.Background(), `
+CREATE TABLE IF NOT EXISTS smeldr_redirects (
+    from_path TEXT NOT NULL PRIMARY KEY,
+    to_path   TEXT NOT NULL DEFAULT '',
+    code      INTEGER NOT NULL DEFAULT 301,
+    is_prefix INTEGER NOT NULL DEFAULT 0
+)`)
+	return err
+}
+
+// Delete removes the entry with the given from path from the in-memory store.
+// It does not modify the database — call [RedirectStore.Remove] to persist
+// the deletion.
+func (s *RedirectStore) Delete(from string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.exact, from)
+	s.prefix = slices.DeleteFunc(s.prefix, func(e RedirectEntry) bool {
+		return e.From == from
+	})
+}
+
 // Load reads all rows from the smeldr_redirects table and registers them via
 // [RedirectStore.Add]. Chain collapse and validation rules are applied during
-// load. The smeldr_redirects table must exist — see the README for the schema.
+// load. Call [App.Redirects] to activate database-backed management; it creates
+// the table automatically.
 func (s *RedirectStore) Load(ctx context.Context, db DB) error {
 	rows, err := Query[dbRedirectRow](ctx, db,
 		"SELECT from_path, to_path, code, is_prefix FROM smeldr_redirects")
@@ -225,8 +252,8 @@ func (s *RedirectStore) Load(ctx context.Context, db DB) error {
 	return nil
 }
 
-// Save upserts e into the smeldr_redirects table. The smeldr_redirects table
-// must exist — see the README for the schema.
+// Save upserts e into the smeldr_redirects table and must be paired with
+// [RedirectStore.Add] to keep the in-memory store in sync.
 func (s *RedirectStore) Save(ctx context.Context, db DB, e RedirectEntry) error {
 	_, err := db.ExecContext(ctx,
 		"INSERT INTO smeldr_redirects (from_path, to_path, code, is_prefix) "+
@@ -238,7 +265,7 @@ func (s *RedirectStore) Save(ctx context.Context, db DB, e RedirectEntry) error 
 }
 
 // Remove deletes the entry with the given from path from the smeldr_redirects
-// table. The smeldr_redirects table must exist — see the README for the schema.
+// table. Pair with [RedirectStore.Delete] to keep the in-memory store in sync.
 func (s *RedirectStore) Remove(ctx context.Context, db DB, from string) error {
 	_, err := db.ExecContext(ctx,
 		"DELETE FROM smeldr_redirects WHERE from_path = $1", from)

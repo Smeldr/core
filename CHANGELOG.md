@@ -23,6 +23,26 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.34.0] — 2026-06-04
+
+### Added
+
+- `CreateRedirectsTable(db DB) error` — idempotent DDL helper; creates the
+  `smeldr_redirects` table if it does not exist. Called automatically by
+  `App.Redirects`; also exported for migration tools and tests (Amendment A125, T30).
+- `App.Redirects(db DB) error` — activates database-backed redirect management:
+  creates the table, loads saved entries into the in-memory store, and enables
+  the MCP and CLI redirect tools. No manual DDL or `Load` call required
+  (Amendment A125, T30).
+- `App.RedirectDB() DB` — returns the DB passed to `App.Redirects`, or nil if not
+  activated. Used internally by `smeldr.dev/mcp` to gate and service redirect tools
+  (Amendment A125, T30).
+- `RedirectStore.Delete(from string)` — removes an entry from the in-memory store.
+  Pair with `RedirectStore.Remove(ctx, db, from)` for full DB + in-memory deletion
+  (Amendment A125, T30).
+
+---
+
 ## [1.33.0] — 2026-06-03
 
 ### Added

@@ -1,8 +1,10 @@
 package smeldr
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -218,5 +220,174 @@ func TestRedirectStore_Len(t *testing.T) {
 	s.Add(RedirectEntry{From: "/old/", To: "/new/", Code: Permanent, IsPrefix: true})
 	if n := s.Len(); n != 3 {
 		t.Errorf("Len = %d; want 3", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RedirectStore.Delete — unit tests
+// ---------------------------------------------------------------------------
+
+func TestRedirectStore_Delete_exact(t *testing.T) {
+	s := NewRedirectStore()
+	s.Add(RedirectEntry{From: "/a", To: "/b", Code: Permanent})
+	s.Delete("/a")
+
+	if _, ok := s.Get("/a"); ok {
+		t.Error("expected entry to be removed, still present")
+	}
+	if n := s.Len(); n != 0 {
+		t.Errorf("Len = %d after delete; want 0", n)
+	}
+}
+
+func TestRedirectStore_Delete_prefix(t *testing.T) {
+	s := NewRedirectStore()
+	s.Add(RedirectEntry{From: "/posts", To: "/articles", Code: Permanent, IsPrefix: true})
+	s.Delete("/posts")
+
+	if _, ok := s.Get("/posts/hello"); ok {
+		t.Error("expected prefix entry to be removed, still matches")
+	}
+	if n := s.Len(); n != 0 {
+		t.Errorf("Len = %d after delete; want 0", n)
+	}
+}
+
+func TestRedirectStore_Delete_noop(t *testing.T) {
+	s := NewRedirectStore()
+	s.Add(RedirectEntry{From: "/a", To: "/b", Code: Permanent})
+	s.Delete("/nonexistent") // must not panic or affect other entries
+	if n := s.Len(); n != 1 {
+		t.Errorf("Len = %d; want 1 (delete of missing entry must be no-op)", n)
+	}
+}
+
+func TestRedirectStore_Delete_concurrent(t *testing.T) {
+	s := NewRedirectStore()
+	for i := 0; i < 10; i++ {
+		s.Add(RedirectEntry{From: "/a", To: "/b", Code: Permanent})
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); s.Add(RedirectEntry{From: "/x", To: "/y", Code: Permanent}) }()
+		go func() { defer wg.Done(); s.Delete("/x") }()
+	}
+	wg.Wait() // no race: verified with -race
+}
+
+// ---------------------------------------------------------------------------
+// CreateRedirectsTable + App.Redirects + App.RedirectDB — DB integration tests
+// ---------------------------------------------------------------------------
+
+func TestCreateRedirectsTable_idempotent(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateRedirectsTable(db); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := CreateRedirectsTable(db); err != nil {
+		t.Fatalf("second call (idempotency): %v", err)
+	}
+}
+
+func TestApp_Redirects_wires_db(t *testing.T) {
+	db := newSQLiteDB(t)
+	app := newTestApp()
+	if err := app.Redirects(db); err != nil {
+		t.Fatalf("Redirects: %v", err)
+	}
+	if app.RedirectDB() == nil {
+		t.Error("RedirectDB() returned nil after Redirects(db)")
+	}
+}
+
+func TestApp_Redirects_loads_existing(t *testing.T) {
+	db := newSQLiteDB(t)
+	// Seed the DB directly before wiring.
+	if err := CreateRedirectsTable(db); err != nil {
+		t.Fatalf("CreateRedirectsTable: %v", err)
+	}
+	store := NewRedirectStore()
+	entry := RedirectEntry{From: "/old", To: "/new", Code: Permanent}
+	if err := store.Save(context.Background(), db, entry); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	app := newTestApp()
+	if err := app.Redirects(db); err != nil {
+		t.Fatalf("Redirects: %v", err)
+	}
+	e, ok := app.RedirectStore().Get("/old")
+	if !ok {
+		t.Fatal("expected /old to be loaded, not found")
+	}
+	if e.To != "/new" {
+		t.Errorf("To = %q; want /new", e.To)
+	}
+}
+
+func TestRedirectStore_Save_Delete_roundtrip(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateRedirectsTable(db); err != nil {
+		t.Fatalf("CreateRedirectsTable: %v", err)
+	}
+	s := NewRedirectStore()
+	ctx := context.Background()
+
+	entry := RedirectEntry{From: "/old", To: "/new", Code: Permanent}
+	if err := s.Save(ctx, db, entry); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	s.Add(entry)
+
+	// Verify in-memory.
+	if _, ok := s.Get("/old"); !ok {
+		t.Fatal("expected /old in store after Add")
+	}
+
+	// Delete from DB and in-memory.
+	if err := s.Remove(ctx, db, "/old"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	s.Delete("/old")
+
+	// In-memory should be gone.
+	if _, ok := s.Get("/old"); ok {
+		t.Error("/old still present in store after Delete")
+	}
+
+	// DB should be gone: fresh Load should not bring it back.
+	s2 := NewRedirectStore()
+	if err := s2.Load(ctx, db); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, ok := s2.Get("/old"); ok {
+		t.Error("/old still in DB after Remove")
+	}
+}
+
+func TestRedirectStore_Save_IsPrefix_bool_roundtrip(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateRedirectsTable(db); err != nil {
+		t.Fatalf("CreateRedirectsTable: %v", err)
+	}
+	s := NewRedirectStore()
+	ctx := context.Background()
+
+	entry := RedirectEntry{From: "/posts", To: "/articles", Code: Permanent, IsPrefix: true}
+	if err := s.Save(ctx, db, entry); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	s2 := NewRedirectStore()
+	if err := s2.Load(ctx, db); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	e, ok := s2.Get("/posts/hello")
+	if !ok {
+		t.Fatal("expected prefix match after Load, got none")
+	}
+	if !e.IsPrefix {
+		t.Error("IsPrefix should be true after DB round-trip")
 	}
 }

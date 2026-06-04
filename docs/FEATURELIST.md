@@ -2,18 +2,18 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.31.0 (A116–A120) + smeldr.dev/mcp v1.14.0 + smeldr.dev/oauth v0.1.5 + smeldr.dev/social v0.7.4 + smeldr.dev/agent v0.5.1 + smeldr.dev/cli v0.10.0 + smeldr.dev/media v1.3.0 + smeldr.dev/core/pgx v0.1.0.
+Last updated: v1.34.0 (A125) + smeldr.dev/mcp v1.16.0 + smeldr.dev/cli v0.12.0 + smeldr.dev/oauth v0.1.5 + smeldr.dev/social v0.7.4 + smeldr.dev/agent v0.5.1 + smeldr.dev/media v1.3.0 + smeldr.dev/core/pgx v0.1.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.31.0 | Stable |
-| `smeldr.dev/mcp` | v1.14.0 | Stable |
+| `smeldr.dev/core` | v1.34.0 | Stable |
+| `smeldr.dev/mcp` | v1.16.0 | Stable |
 | `smeldr.dev/oauth` | v0.1.5 | Beta |
 | `smeldr.dev/core/pgx` | v0.1.0 | Beta |
 | `smeldr.dev/media` | v1.3.0 | Beta |
-| `smeldr.dev/cli` | v0.10.0 | Beta |
+| `smeldr.dev/cli` | v0.12.0 | Beta |
 | `smeldr.dev/social` | v0.7.4 | Experimental |
 | `smeldr.dev/agent` | v0.5.1 | Experimental |
 
@@ -146,6 +146,7 @@ MCP resource subscriptions (Beta):
 - Zero runtime dependencies in core — pure stdlib; driver is always your choice (test suite uses `modernc.org/sqlite` for in-process SQL integration tests)
 - Cookie compliance — `/.well-known/cookies.json` declares all cookies with category and consent requirements
 - Redirect tracking — `App.Redirect` / `RedirectStore` registers 301 Permanent and 410 Gone entries; `/.well-known/redirects.json` serves the full redirect table for audit and CDN sync
+- DB-backed redirect management — `App.Redirects(db)` activates `CreateRedirectsTable` (auto-ensure), loads saved entries, and enables runtime management via MCP tools (`create_redirect`, `list_redirects`, `delete_redirect`, Editor role) and CLI (`forge-cli redirect list/create/delete`); changes take effect immediately without restart
 - Security headers — CSP, HSTS, X-Frame-Options, Referrer-Policy in one middleware call
 - Graceful shutdown — drains in-flight requests on SIGINT/SIGTERM
 - Signal bus — `app.OnSignal(Signal, handler)` registers subscribers for `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete`; `SignalEvent` carries Type, Slug, Title, URL, Timestamp, PreviousState, ActorRole, ActorID; handlers run synchronously in the publish goroutine and must enqueue-and-return
