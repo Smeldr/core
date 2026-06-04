@@ -652,8 +652,12 @@ Push commits and each tag **separately** — never in the same command.
 After pushing each tag, create a GitHub Release using the `gh` CLI in the
 relevant repo. Run this in the repo that owns the tag:
 
+**⚠ PowerShell warning:** Never pass CHANGELOG markdown inline via `--notes` in
+PowerShell — backticks are escape sequences and will corrupt the release notes.
+Always write the section to a file and use `--notes-file`.
+
 ```powershell
-gh release create <tag> --title "<title>" --notes "<CHANGELOG section>"
+gh release create <tag> --title "<title>" --notes-file release-notes.tmp
 ```
 
 | Tag | Repo | Release title format |
@@ -664,8 +668,17 @@ gh release create <tag> --title "<title>" --notes "<CHANGELOG section>"
 
 The release name is a short (2-4 word) phrase that captures the primary change —
 identical to the one-line summary in the tag message. Always propose the `gh`
-command(s) alongside the commit message. Paste the relevant `CHANGELOG.md`
-section as `--notes`.
+command(s) alongside the commit message. Extract the relevant `CHANGELOG.md`
+section verbatim into a temp file before calling `gh`:
+
+```powershell
+$cl = Get-Content CHANGELOG.md -Raw
+$start = $cl.IndexOf('## [X.Y.Z]')
+$end = $cl.IndexOf('## [', $start + 1)
+$cl.Substring($start, $end - $start).TrimEnd() | Set-Content -Encoding utf8 release-notes.tmp
+gh release create <tag> --title "<title>" --notes-file release-notes.tmp
+Remove-Item release-notes.tmp
+```
 
 **Never:**
 - Tag before `go test ./...` is green
