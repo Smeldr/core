@@ -406,6 +406,21 @@ func (r *MemoryRepo[T]) Delete(_ context.Context, id string) error {
 	return nil
 }
 
+// countByStatus implements [statusCounter] for [MemoryRepo]. It iterates the
+// in-memory items and counts them by Status field value.
+func (r *MemoryRepo[T]) countByStatus(_ context.Context) (map[Status]int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	counts := make(map[Status]int)
+	for _, id := range r.order {
+		item := r.items[id]
+		if s := stringField(item, "Status"); s != "" {
+			counts[Status(s)]++
+		}
+	}
+	return counts, nil
+}
+
 // stringField returns the string value of the named exported field in v.
 // Traverses one pointer indirection and handles embedded struct fields.
 // Returns "" if the field does not exist, is not a string, or v is nil.
@@ -740,4 +755,26 @@ func (r *SQLRepo[T]) Seq(ctx context.Context, opts ListOptions) iter.Seq2[T, err
 			yield(zero, err)
 		}
 	}
+}
+
+// countByStatus implements [statusCounter] for [SQLRepo]. It executes a single
+// GROUP BY query to count items by their status column.
+func (r *SQLRepo[T]) countByStatus(ctx context.Context) (map[Status]int, error) {
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT "+quoteIdent("status")+", COUNT(*) FROM "+r.table+
+			" GROUP BY "+quoteIdent("status"))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := make(map[Status]int)
+	for rows.Next() {
+		var s string
+		var n int
+		if err := rows.Scan(&s, &n); err != nil {
+			return nil, err
+		}
+		counts[Status(s)] = n
+	}
+	return counts, rows.Err()
 }

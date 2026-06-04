@@ -2142,6 +2142,69 @@ automatically:
 app.Health()
 ```
 
+### Stats endpoint
+
+`GET /_stats` returns HTTP 200 with a JSON body containing per-type item counts
+across all registered content modules. **Admin role required** (bearer token).
+
+```go
+app.StatsHandler()
+// GET /_stats (Authorization: Bearer <admin-token>) → 200 application/json
+```
+
+**Response shape:**
+
+```json
+{
+  "content": [
+    {
+      "type": "Post",
+      "prefix": "/posts",
+      "counts": { "draft": 3, "published": 12, "scheduled": 1, "archived": 5 }
+    }
+  ],
+  "generated_at": "2026-06-04T12:00:00Z"
+}
+```
+
+When external stats providers are registered (see below), an `external` key is
+added:
+
+```json
+{
+  "content": [...],
+  "external": {
+    "media": { "total_files": 42, "total_size_bytes": 8388608 }
+  },
+  "generated_at": "..."
+}
+```
+
+**`App.Stats(ctx context.Context) (SiteStats, error)`** — the underlying
+aggregation method. Iterates `statsCollectors` (all registered modules) and all
+external providers. Provider errors are logged at Warn and never cause the whole
+call to fail.
+
+**`App.RegisterStatsProvider(p StatsExtProvider)`** — registers an external
+stats contributor. The `StatsExtProvider` interface:
+
+```go
+type StatsExtProvider interface {
+    StatsKey() string                                        // key in SiteStats.External
+    ProvideStats(ctx context.Context) (map[string]any, error)
+}
+```
+
+Use this to contribute media statistics from `smeldr.dev/media` (or any external
+module) without creating an import cycle:
+
+```go
+// In main.go — after registering the media module:
+app.RegisterStatsProvider(mediaSrv.StatsProvider())
+```
+
+`smeldr.dev/media` will implement `StatsProvider()` in a forthcoming minor release.
+
 ---
 
 ## SiteConfig

@@ -260,6 +260,8 @@ type App struct {
 	cookieManifestReg      bool                                // true once GET /.well-known/cookies.json is registered
 	redirectStore          *RedirectStore                      // runtime redirect table; always non-nil after New()
 	redirectDB             DB                                  // non-nil when App.Redirects(db) was called; enables MCP tools
+	statsCollectors        []statsCollector                    // modules that implement statsCollector; populated by Content()
+	statsExtProviders      []StatsExtProvider                  // external providers registered via RegisterStatsProvider
 	redirectFallbackReg    bool                                // true once "/" fallback handler is registered
 	redirectManifestReg    bool                                // true once GET /.well-known/redirects.json is registered
 	redirectManifestOpts   []Option                            // options for the redirect manifest handler (e.g. ManifestAuth)
@@ -456,6 +458,9 @@ func (a *App) Content(v any, opts ...Option) {
 		}
 		if sp, ok := r.(stoppable); ok {
 			a.stoppableModules = append(a.stoppableModules, sp)
+		}
+		if sc, ok := r.(statsCollector); ok {
+			a.statsCollectors = append(a.statsCollectors, sc)
 		}
 		if mm, ok := r.(MCPModule); ok && len(mm.MCPMeta().Operations) > 0 {
 			a.mcpModules = append(a.mcpModules, mm)

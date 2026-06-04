@@ -268,3 +268,56 @@ depends on.
   8 new CLI tests (`redirect_test.go`).
 
 ---
+
+## A126 — T04: `/_stats` endpoint (content + media statistics)
+
+**Date:** 2026-06-04  
+**Status:** Agreed  
+**Version:** core v1.35.0
+
+### Decision
+
+Add `GET /_stats` — an Admin-only JSON endpoint that returns per-type item counts
+across all registered content modules, plus an extensible external-provider slot
+for media and other companion modules. Paired with Go 1.26.4 toolchain bump.
+
+### New exported surface (`stats.go`)
+
+- **`ContentTypeStats`** — `{type, prefix, counts: {status: int}}` per module.
+- **`SiteStats`** — `{content: [], external?: {}, generated_at: RFC3339}`.
+- **`StatsExtProvider`** interface — `StatsKey() string` + `ProvideStats(ctx) (map[string]any, error)`.
+  External modules implement and register with `App.RegisterStatsProvider(p)`.
+  A non-nil error is logged at Warn and omits that provider — never fails the whole call.
+- **`App.Stats(ctx context.Context) (SiteStats, error)`** — aggregates across all
+  `statsCollectors` (collected via type assertion in `App.Content()`) and external providers.
+- **`App.StatsHandler()`** — mounts `GET /_stats`. Auth: Admin bearer token.
+  Reuses `BearerHMAC` default auth; same pattern as `/_audit`.
+- **`App.RegisterStatsProvider(p StatsExtProvider)`** — additive registration.
+
+### Private additions (`storage.go`, `module.go`)
+
+- **`statusCounter`** (private) — `countByStatus(ctx) (map[Status]int, error)`.
+  Implemented by `MemoryRepo[T]` (in-memory count) and `SQLRepo[T]` (single `GROUP BY`).
+  Custom repos that don't implement it degrade gracefully (empty counts).
+- **`statsCollector`** (private) — `collectStats(ctx) ContentTypeStats`.
+  Implemented by `Module[T]`; collected via type assertion in `App.Content()`.
+
+### Access gate: Admin
+
+`/_health` is public (reverse-proxy). `/_stats` exposes internal metadata
+(content volumes; potentially media disk usage via external providers). Editor
+would be too broad. Admin matches the tier of token/webhook management.
+
+### Go 1.26.4 toolchain bump
+
+`go.mod` `go` directive bumped across core, mcp, and cli.
+Closes GO-2026-5039 (net/textproto) and GO-2026-5037 (crypto/x509).
+CI uses `go-version-file: go.mod` — bump takes effect immediately on push.
+
+### Tests
+
+11 new tests in `stats_test.go`: JSON serialisation, `MemoryRepo.countByStatus`,
+`SQLRepo.countByStatus`, `App.Stats` empty/module/external/error-degrades,
+`GET /_stats` Admin 200 / Editor 403 / no-token 401.
+
+---

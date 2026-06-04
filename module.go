@@ -2,6 +2,7 @@ package smeldr
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -684,6 +685,28 @@ func (m *Module[T]) setAfterHook(fn func(Context, Signal, afterHookMeta, any)) {
 // Called by [App.Content] for every registered module.
 func (m *Module[T]) setSecret(secret []byte) {
 	m.secret = secret
+}
+
+// collectStats implements [statsCollector]. It returns item counts per status
+// for this module. If the underlying repository supports [statusCounter] it
+// executes a single efficient query; otherwise it returns an empty Counts map
+// (graceful degradation — custom repositories not required to implement it).
+func (m *Module[T]) collectStats(ctx context.Context) ContentTypeStats {
+	s := ContentTypeStats{
+		TypeName: m.contentTypeName,
+		Prefix:   m.prefix,
+		Counts:   make(map[Status]int),
+	}
+	if sc, ok := m.repo.(statusCounter); ok {
+		counts, err := sc.countByStatus(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "smeldr: collectStats failed",
+				"type", m.contentTypeName, "error", err)
+			return s
+		}
+		s.Counts = counts
+	}
+	return s
 }
 
 // snapshotItem returns a shallow copy of the struct pointed to by item so

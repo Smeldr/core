@@ -23,6 +23,30 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.35.0] — 2026-06-04
+
+### Added
+
+- `ContentTypeStats`, `SiteStats` — exported types for the `/_stats` endpoint
+  and `App.Stats` (Amendment A126, T04).
+- `StatsExtProvider` interface — external modules (e.g. smeldr.dev/media) implement
+  this to contribute additional statistics without creating an import cycle. Register
+  with `App.RegisterStatsProvider` (Amendment A126, T04).
+- `App.Stats(ctx context.Context) (SiteStats, error)` — aggregates item counts per
+  status across all registered content modules plus any external providers (Amendment
+  A126, T04).
+- `App.StatsHandler()` — mounts `GET /_stats` (Admin role required). Returns JSON with
+  content counts and external stats; `generated_at` is RFC3339 UTC (Amendment A126, T04).
+- `App.RegisterStatsProvider(p StatsExtProvider)` — registers an external stats
+  contributor (Amendment A126, T04).
+
+### Changed
+
+- `go.mod` toolchain bumped `go 1.26.3` → `go 1.26.4` to close
+  GO-2026-5039 (net/textproto) and GO-2026-5037 (crypto/x509) (Amendment A126).
+
+---
+
 ## [1.34.0] — 2026-06-04
 
 ### Added
