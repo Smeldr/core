@@ -13,8 +13,15 @@ Read `C:\Users\peter\Documents\Code\Smeldr\architect\context\corepilot.md` (loca
 This is your state from the previous session: current versions, latest
 amendment, active milestone and step, anything deferred.
 
-**Step 2 — Check for a pending task:**
-Check whether `NEXT.md` exists in the core repo root (local workspace).
+**Step 2 — Read the developer skill:**
+Read `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md`
+(local file). This gives you the current versions for all modules, the full
+list of MCP tools and CLI commands, and any known gotchas. Load it before
+checking for NEXT.md — not only at the doc-freshness checkpoint.
+
+**Step 3 — Check for a pending task:**
+Check whether `NEXT.md` exists in THIS repo's root (`smeldr/core`, local workspace).
+NEXT.md is never located in the architect repo — that is read-only context only.
 If it exists:
 1. Read it and form a full implementation plan (including any questions).
 2. Write the plan file locally to:
@@ -29,7 +36,7 @@ If it exists:
    locally with the amendment number, then commit and push from that repo
    (see "After every commit" for the exact command sequence).
 
-**Step 3 — If no NEXT.md:**
+**Step 4 — If no NEXT.md:**
 Report what you found in `context/corepilot.md` and ask the user what
 to work on. Do not proceed autonomously.
 
@@ -519,8 +526,10 @@ Write full draft(s) based on approved outlines.
 Wait for feedback and approval.
 
 **8. Save approved drafts**
-Save each approved draft as an individual file in:
-`C:\Users\peter\Documents\Code\Forge-site-working\content\`
+Save each approved draft as an individual file in the correct subfolder:
+
+- Devlog drafts: `C:\Users\peter\Documents\Code\Smeldr\common\content\drafts\devlog\`
+- Doc page drafts: `C:\Users\peter\Documents\Code\Smeldr\common\content\drafts\docs\`
 
 File naming: `YYYYMMDD-HHMMSS-<slug>.md`
 
@@ -557,9 +566,9 @@ CLI is the human fallback when agents are unavailable.
 This rule applies to every milestone that ships new MCP tools: the corresponding
 smeldr.dev/cli commands ship in the same release — not as a follow-up.
 
-**Current known gap:** smeldr.dev/cli v0.3.0 has no nav commands despite four MCP nav
+**Current known gap:** smeldr.dev/cli v0.12.1 has no nav commands despite four MCP nav
 tools existing (`list_nav_items`, `create_nav_item`, `update_nav_item`,
-`delete_nav_item`). This gap is tracked and will be closed in the nav CLI milestone.
+`delete_nav_item`). This gap is tracked and is the next scheduled task.
 
 ---
 
