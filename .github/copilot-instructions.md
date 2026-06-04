@@ -649,18 +649,23 @@ git push origin smeldr.dev/mcp/vX.Y.Z
 Push commits and each tag **separately** — never in the same command.
 
 **GitHub Release titles:**
-After pushing, create a GitHub Release for each tag from
-`github.com/smeldr/core/releases`. Title each release as follows:
+After pushing each tag, create a GitHub Release using the `gh` CLI in the
+relevant repo. Run this in the repo that owns the tag:
 
-| Tag | Release title format |
-|-----|----------------------|
-| `vX.Y.Z` | `Smeldr vX.Y.Z — {release name}` |
-| `smeldr.dev/mcp/vX.Y.Z` | `smeldr.dev/mcp vX.Y.Z — {release name}` |
+```powershell
+gh release create <tag> --title "<title>" --notes "<CHANGELOG section>"
+```
+
+| Tag | Repo | Release title format |
+|-----|------|----------------------|
+| `vX.Y.Z` | core | `Smeldr vX.Y.Z — {release name}` |
+| `smeldr.dev/mcp/vX.Y.Z` | mcp | `smeldr.dev/mcp vX.Y.Z — {release name}` |
+| CLI/media/social/oauth/agent tags | that module's repo | `smeldr.dev/<module> vX.Y.Z — {release name}` |
 
 The release name is a short (2-4 word) phrase that captures the primary change —
-identical to the one-line summary in the tag message. Always propose the GitHub
-Release title(s) alongside the commit message. Paste the relevant
-`CHANGELOG.md` section as release notes.
+identical to the one-line summary in the tag message. Always propose the `gh`
+command(s) alongside the commit message. Paste the relevant `CHANGELOG.md`
+section as `--notes`.
 
 **Never:**
 - Tag before `go test ./...` is green
