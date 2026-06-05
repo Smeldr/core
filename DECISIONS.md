@@ -18,9 +18,10 @@ Revisions to existing decisions require a new entry that supersedes the original
 | `DECISIONS.md` | Index only — this file | No |
 | `decisions/recent.md` | Rolling working file (~20KB limit) | Yes — new decisions |
 | `decisions/nondecisions.md` | Non-Decisions only | Yes — Non-Decisions directly |
-| `decisions/core.md` | Archive: D1–D22, A19–A65, A88–A95 | No |
+| `decisions/core.md` | Archive: D1–D22, A19–A65, A87, A88–A95, A97–A101 | No |
 | `decisions/phase2-archive.md` | Superseded archive (was phase2.md; content now in topic files) | No |
 | `decisions/phase3-archive.md` | Archive: A102–A120 | No |
+| `decisions/phase4-archive.md` | Archive: A121–A125 | No |
 | `decisions/auth.md` | Archive: D25, A66, D26, A83 | No |
 | `decisions/content-api.md` | Archive: D27, A67, A74, A75, A77 | No |
 | `decisions/docs.md` | Archive: D28, A69–A72, A76, A84–A86 | No |
@@ -234,4 +235,4 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 ---
 
-> **Body text:** D1–D22, A19–A65, A88–A95 → [`decisions/core.md`](decisions/core.md) · D25, A66, D26, A83 → [`decisions/auth.md`](decisions/auth.md) · D27, A67, A74, A75, A77 → [`decisions/content-api.md`](decisions/content-api.md) · D28, A69–A72, A76, A84–A86 → [`decisions/docs.md`](decisions/docs.md) · A73, D31, A79 → [`decisions/media.md`](decisions/media.md) · D29, D30, A82 → [`decisions/nav.md`](decisions/nav.md) · A68, A78, A80, A81 → [`decisions/storage.md`](decisions/storage.md) · A102–A120 → [`decisions/phase3-archive.md`](decisions/phase3-archive.md) · A87, A97–A101, D32 → [`decisions/recent.md`](decisions/recent.md) · A96 → [`decisions/nondecisions.md`](decisions/nondecisions.md) · phase2-archive.md — superseded; use topic files above
+> **Body text:** D1–D22, A19–A65, A87, A88–A95, A97–A101 → [`decisions/core.md`](decisions/core.md) · D25, A66, D26, A83 → [`decisions/auth.md`](decisions/auth.md) · D27, A67, A74, A75, A77 → [`decisions/content-api.md`](decisions/content-api.md) · D28, D32, A69–A72, A76, A84–A86 → [`decisions/docs.md`](decisions/docs.md) · A73, D31, A79 → [`decisions/media.md`](decisions/media.md) · D29, D30, A82 → [`decisions/nav.md`](decisions/nav.md) · A68, A78, A80, A81 → [`decisions/storage.md`](decisions/storage.md) · A102–A120 → [`decisions/phase3-archive.md`](decisions/phase3-archive.md) · A121–A125 → [`decisions/phase4-archive.md`](decisions/phase4-archive.md) · A126–A128 → [`decisions/recent.md`](decisions/recent.md) · A96 → [`decisions/nondecisions.md`](decisions/nondecisions.md) · phase2-archive.md — superseded; use topic files above
