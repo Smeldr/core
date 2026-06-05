@@ -2,13 +2,13 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.35.0 (A126) + smeldr.dev/mcp v1.16.0 + smeldr.dev/cli v0.12.0 + smeldr.dev/oauth v0.1.5 + smeldr.dev/social v0.7.4 + smeldr.dev/agent v0.5.1 + smeldr.dev/media v1.3.0 + smeldr.dev/core/pgx v0.1.0.
+Last updated: v1.36.0 (A128) + smeldr.dev/mcp v1.16.1 + smeldr.dev/cli v0.13.0 + smeldr.dev/oauth v0.1.5 + smeldr.dev/social v0.7.4 + smeldr.dev/agent v0.5.1 + smeldr.dev/media v1.3.0 + smeldr.dev/core/pgx v0.1.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.35.0 | Stable |
+| `smeldr.dev/core` | v1.36.0 | Stable |
 | `smeldr.dev/mcp` | v1.16.0 | Stable |
 | `smeldr.dev/oauth` | v0.1.5 | Beta |
 | `smeldr.dev/core/pgx` | v0.1.0 | Beta |
@@ -148,6 +148,7 @@ MCP resource subscriptions (Beta):
 - Redirect tracking — `App.Redirect` / `RedirectStore` registers 301 Permanent and 410 Gone entries; `/.well-known/redirects.json` serves the full redirect table for audit and CDN sync
 - DB-backed redirect management — `App.Redirects(db)` activates `CreateRedirectsTable` (auto-ensure), loads saved entries, and enables runtime management via MCP tools (`create_redirect`, `list_redirects`, `delete_redirect`, Editor role) and CLI (`forge-cli redirect list/create/delete`); changes take effect immediately without restart
 - Content statistics endpoint — `App.StatsHandler()` mounts `GET /_stats` (Admin role); returns per-content-type item counts per status (`draft`/`published`/`scheduled`/`archived`). External modules contribute via `StatsExtProvider` interface registered with `App.RegisterStatsProvider`
+- Log capture endpoint — `App.CaptureLogs(opts...)` installs a teeing `slog.Handler` (preserves stderr) into a bounded in-memory ring; `GET /_logs` (Admin) serves recent records over plain HTTP — works when MCP is down. Options `WithLogCapacity` (default 500), `WithLogLevel` (default WARN); envelope `{capacity,count,dropped,entries}` newest-first; query `level`/`limit`/`since`; route absent → 404 when not enabled. Live-debugging only (in-memory, lost on restart)
 - Security headers — CSP, HSTS, X-Frame-Options, Referrer-Policy in one middleware call
 - Graceful shutdown — drains in-flight requests on SIGINT/SIGTERM
 - Signal bus — `app.OnSignal(Signal, handler)` registers subscribers for `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete`; `SignalEvent` carries Type, Slug, Title, URL, Timestamp, PreviousState, ActorRole, ActorID; handlers run synchronously in the publish goroutine and must enqueue-and-return

@@ -23,6 +23,34 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.36.0] — 2026-06-05
+
+### Added
+
+- `App.CaptureLogs(opts ...LogCaptureOption) *App` — opt-in, in-memory log capture.
+  Installs a teeing `slog.Handler`: records still reach the existing handler
+  (stderr) and records at/above the capture level are stored in a bounded ring
+  (Amendment A128, T79).
+- `LogEntry` — exported type for a captured record (`Time`, `Level`, `Msg`,
+  `Attrs`, `Seq`); JSON wire shape for `/_logs` (Amendment A128, T79).
+- `WithLogCapacity(n int)` (default 500) and `WithLogLevel(level slog.Level)`
+  (default WARN) — `LogCaptureOption` configurers (Amendment A128, T79).
+- `GET /_logs` — Admin role, plain HTTP + bearer (works when MCP is down). Mounted
+  only when `CaptureLogs` was called (route absent → 404 otherwise). Envelope
+  `{capacity, count, dropped, entries}` newest-first; query params `level`, `limit`,
+  `since` (Amendment A128, T79).
+
+### Notes
+
+- Live-debugging facility only — in-memory, lost on restart; stderr stays the
+  durable path. HTTP/CLI-only by design (no MCP tool): the feature must not depend
+  on the subsystem it helps debug.
+- When no custom handler is configured, `CaptureLogs` forwards to a text handler on
+  stderr instead of wrapping slog's built-in handler, avoiding a fatal slog/log
+  re-entrancy loop. Call `CaptureLogs` after any app-side `slog.SetDefault`.
+
+---
+
 ## [1.35.0] — 2026-06-04
 
 ### Added

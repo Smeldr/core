@@ -235,6 +235,26 @@ Resolution is Published-only and guarded — an absent/unpublished/dangling refe
 simply renders nothing. To make a block show an image: create the Image block, then
 set the parent's `ImageID` to the Image block's ID.
 
+### Log capture (CaptureLogs + /_logs)
+
+Opt-in, in-memory capture of recent log records for live debugging. Records still
+reach the existing handler (stderr) AND, at/above the capture level, are stored in a
+bounded ring served at `GET /_logs` (Admin, plain HTTP + bearer — works when MCP is
+down). Not log storage: in-memory only, lost on restart.
+
+```go
+import "log/slog"
+
+// Call AFTER any app-side slog.SetDefault of your own.
+app.CaptureLogs() // ring of 500, WARN and above (defaults)
+// or: app.CaptureLogs(smeldr.WithLogCapacity(1000), smeldr.WithLogLevel(slog.LevelInfo))
+```
+
+`GET /_logs` (Admin) returns `{capacity, count, dropped, entries}` (entries
+newest-first). Query params: `level` (min, inclusive), `limit` (most recent N),
+`since` (RFC3339). Route is absent (404) unless `CaptureLogs` was called. There is no
+MCP tool for logs by design — the path must not depend on MCP. Use `smeldr-cli logs`.
+
 ### Key rules for code generation
 
 - Zero third-party dependencies in the `smeldr` core package

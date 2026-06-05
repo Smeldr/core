@@ -32,12 +32,14 @@ package smeldr
 //   G23 â€” CLI round-trip: GETâ†’PUT lifecycle and field preservation (Decision 28)
 //   G34 â€” SingleInstance routing: GET /{prefix} serves item; MCPMeta.SingleInstance = true (T50)
 //   G35 â€” Standalone routing: GET /{slug} dispatched by App; two standalone modules (T50)
+//   G37 â€” Log capture endpoint: GET /_logs + auth/roles, query filters, 404 when disabled (T79)
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -3769,4 +3771,159 @@ func TestFull_G36_APIOnly(t *testing.T) {
 			t.Errorf("title = %v; want 'Home Page Draft'", out["title"])
 		}
 	})
+}
+
+// — G37: log capture endpoint — GET /_logs + M1 auth/roles (T79) ———————————————
+//
+// TestFull_G37_LogCaptureEndpoint verifies the cross-feature path:
+//   - App.CaptureLogs installs the ring; slog.Warn/Error populate it
+//   - GET /_logs: no token → 401; Editor → 403; Admin → 200 envelope
+//   - query params level / limit / since filter; malformed params → 400
+//   - an App WITHOUT CaptureLogs has no /_logs route → 404
+//
+// Global slog is saved and restored (restoreDefaultLogging) so the installed tee
+// does not leak into other tests. A text handler is set first so CaptureLogs wraps
+// it (not the built-in handler) and cleanup leaves logging pristine.
+func TestFull_G37_LogCaptureEndpoint(t *testing.T) {
+	prev := slog.Default()
+	t.Cleanup(func() { restoreDefaultLogging(prev) })
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	secret := []byte("g37-log-capture-integration-test")
+	app := New(MustConfig(Config{BaseURL: "https://example.com", Secret: secret}))
+	app.CaptureLogs(WithLogLevel(slog.LevelWarn))
+
+	// Populate the ring (WARN then ERROR).
+	slog.Warn("g37 warn line", "n", 1)
+	slog.Error("g37 boom", "code", 500)
+
+	h := app.Handler()
+
+	adminTok, _ := SignToken(User{ID: "admin-1", Roles: []Role{Admin}}, string(secret), 0)
+	editorTok, _ := SignToken(User{ID: "editor-1", Roles: []Role{Editor}}, string(secret), 0)
+
+	// GET /_logs as Admin with an optional query.
+	getAdmin := func(query string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		rq := httptest.NewRequest(http.MethodGet, "/_logs"+query, nil)
+		rq.Header.Set("Authorization", "Bearer "+adminTok)
+		h.ServeHTTP(rr, rq)
+		return rr
+	}
+	findEntry := func(entries []LogEntry, msg string) (LogEntry, bool) {
+		for _, e := range entries {
+			if e.Msg == msg {
+				return e, true
+			}
+		}
+		return LogEntry{}, false
+	}
+
+	// no token → 401.
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/_logs", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("no token: status = %d, want 401", w.Code)
+	}
+
+	// Editor → 403 (Admin-only).
+	w = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/_logs", nil)
+	req.Header.Set("Authorization", "Bearer "+editorTok)
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Editor: status = %d, want 403", w.Code)
+	}
+
+	// Admin → 200 envelope; both lines captured.
+	w = getAdmin("")
+	if w.Code != http.StatusOK {
+		t.Fatalf("Admin: status = %d, want 200", w.Code)
+	}
+	var resp logsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Capacity != defaultLogCapacity {
+		t.Errorf("capacity = %d, want %d", resp.Capacity, defaultLogCapacity)
+	}
+	boom, ok := findEntry(resp.Entries, "g37 boom")
+	if !ok {
+		t.Fatalf("envelope missing 'g37 boom' entry; got %d entries", resp.Count)
+	}
+	if boom.Level != "ERROR" {
+		t.Errorf("'g37 boom' level = %q, want ERROR", boom.Level)
+	}
+	// JSON numbers decode into any as float64.
+	if boom.Attrs["code"] != float64(500) {
+		t.Errorf("'g37 boom' attr code = %v (%T), want 500", boom.Attrs["code"], boom.Attrs["code"])
+	}
+	if _, ok := findEntry(resp.Entries, "g37 warn line"); !ok {
+		t.Error("envelope missing 'g37 warn line' entry")
+	}
+
+	// level=error → every entry is ERROR and the boom line is present.
+	w = getAdmin("?level=error")
+	if w.Code != http.StatusOK {
+		t.Fatalf("level=error: status = %d, want 200", w.Code)
+	}
+	resp = logsResponse{}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode level=error: %v", err)
+	}
+	if resp.Count == 0 {
+		t.Error("level=error returned no entries")
+	}
+	for _, e := range resp.Entries {
+		if e.Level != "ERROR" {
+			t.Errorf("level=error returned a %s entry", e.Level)
+		}
+	}
+	if _, ok := findEntry(resp.Entries, "g37 boom"); !ok {
+		t.Error("level=error missing 'g37 boom'")
+	}
+
+	// limit=1 → exactly one entry returned.
+	w = getAdmin("?limit=1")
+	resp = logsResponse{}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode limit=1: %v", err)
+	}
+	if resp.Count != 1 || len(resp.Entries) != 1 {
+		t.Errorf("limit=1: count = %d, len = %d, want 1/1", resp.Count, len(resp.Entries))
+	}
+
+	// since=future → empty result, entries is [] not null.
+	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	w = getAdmin("?since=" + future)
+	body := strings.TrimSpace(w.Body.String())
+	resp = logsResponse{}
+	if err := json.NewDecoder(strings.NewReader(body)).Decode(&resp); err != nil {
+		t.Fatalf("decode since=future: %v", err)
+	}
+	if resp.Count != 0 {
+		t.Errorf("since=future: count = %d, want 0", resp.Count)
+	}
+	if !strings.Contains(body, `"entries":[]`) {
+		t.Errorf("since=future: entries not an empty array: %s", body)
+	}
+
+	// Malformed query params → 400.
+	for _, q := range []string{"?limit=abc", "?limit=-1", "?level=bogus", "?since=notatime"} {
+		if rr := getAdmin(q); rr.Code != http.StatusBadRequest {
+			t.Errorf("GET /_logs%s: status = %d, want 400", q, rr.Code)
+		}
+	}
+
+	// An App that never called CaptureLogs has no /_logs route → 404.
+	app2 := New(MustConfig(Config{BaseURL: "https://example.com", Secret: secret}))
+	h2 := app2.Handler()
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/_logs", nil)
+	req.Header.Set("Authorization", "Bearer "+adminTok)
+	h2.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("no-capture app: /_logs status = %d, want 404", w.Code)
+	}
 }

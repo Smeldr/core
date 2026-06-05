@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or pilot agent.
 
-Current versions: smeldr.dev/core v1.35.0 · smeldr.dev/mcp v1.16.1 · smeldr.dev/oauth v0.1.5 · smeldr.dev/media v1.3.0 · smeldr.dev/cli v0.13.0 · smeldr.dev/social v0.7.4 · smeldr.dev/agent v0.5.1 · smeldr.dev/core/pgx v0.1.0
+Current versions: smeldr.dev/core v1.36.0 · smeldr.dev/mcp v1.16.1 · smeldr.dev/oauth v0.1.5 · smeldr.dev/media v1.3.0 · smeldr.dev/cli v0.13.0 · smeldr.dev/social v0.7.4 · smeldr.dev/agent v0.5.1 · smeldr.dev/core/pgx v0.1.0
 
 ---
 
@@ -210,6 +210,30 @@ Signal constants: `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete`
 **Built-in audit trail (v1.22.0+):** `app.Audit(smeldr.NewAuditStore(db))` subscribes to
 `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete` and persists each transition.
 `GET /_audit` (Editor+) returns JSON records. `forge-cli audit list` prints a table.
+
+---
+
+## Log capture (v1.36.0+)
+
+Opt-in, in-memory capture of recent log records for live debugging — works over
+plain HTTP even when MCP is down. `app.CaptureLogs(...)` installs a teeing
+`slog.Handler`: records still reach the existing handler (stderr) AND records
+at/above the capture level are stored in a bounded ring.
+
+```go
+app.CaptureLogs() // ring of 500, WARN+ (defaults)
+// app.CaptureLogs(smeldr.WithLogCapacity(1000), smeldr.WithLogLevel(slog.LevelInfo))
+```
+
+`GET /_logs` (Admin, bearer) returns `{capacity, count, dropped, entries}` with
+entries newest-first. Query params: `level` (min level, inclusive), `limit` (most
+recent N), `since` (RFC3339). Route is absent (404) unless `CaptureLogs` was called.
+
+- **Not log storage** — in-memory, lost on restart; stderr stays the durable path.
+- **Ordering** — call `CaptureLogs` AFTER any app-side `slog.SetDefault`.
+- **Zero-config** — when no custom handler is set, capture forwards to a stderr text
+  handler (wrapping slog's built-in handler would deadlock via the log package).
+- **No MCP tool** by design — use `smeldr-cli logs` (calls `/_logs` over HTTP).
 
 ---
 

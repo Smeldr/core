@@ -281,6 +281,9 @@ type App struct {
 	auditStore      AuditStore // non-nil when App.Audit() was called
 	auditHandlerReg bool       // true once GET /_audit is registered
 
+	logRing        *logRing // non-nil when App.CaptureLogs() was called; backs GET /_logs
+	logsHandlerReg bool     // true once GET /_logs is registered
+
 	webhookStore    *WebhookStore               // non-nil when App.Webhooks() was called
 	webhookPool     *workerPool                 // non-nil when App.Webhooks() was called
 	signalListeners []func(Signal, string, any) // registered via AddSignalListener
@@ -919,6 +922,14 @@ func (a *App) Handler() http.Handler {
 			auditAuth = BearerHMAC(string(a.cfg.Secret))
 		}
 		a.mux.Handle("GET /_audit", newAuditHandler(auditAuth, a.auditStore))
+	}
+	if a.logRing != nil && !a.logsHandlerReg {
+		a.logsHandlerReg = true
+		logsAuth := a.cfg.Auth
+		if logsAuth == nil {
+			logsAuth = BearerHMAC(string(a.cfg.Secret))
+		}
+		a.mux.Handle("GET /_logs", newLogsHandler(logsAuth, a.logRing))
 	}
 	// A66: probe smeldr_tokens table at startup when a TokenStore is configured.
 	// A83: auto-create a bootstrap admin token when smeldr_tokens is empty.

@@ -350,3 +350,89 @@ error when attempted against a non-DB instance.
 - No core or mcp changes.
 
 ---
+
+## A128 — T79: in-memory log capture + `GET /_logs` (live error debugging)
+
+**Status:** Agreed — 2026-06-05 · core v1.36.0
+
+### Context
+
+`smeldr-cli` had no way to surface a running instance's error logs. The driving
+use case is debugging "when AI is unavailable" — so the path must NOT depend on
+MCP (MCP may be the thing that is down). Core used the default `slog` handler to
+stderr: no capture, no buffer, no queryable endpoint. This needs core
+infrastructure plus an endpoint, wired the same opt-in way as `/_stats`
+(`RegisterStatsProvider`/`StatsHandler`) and `/_audit` (`App.Audit`).
+
+Shipped across two steps on one feature branch (Step A `logcapture.go` + tests;
+Step B wiring + endpoint + integration + docs), squashed to main together.
+
+### Decision
+
+**Capture (Step A) — `logcapture.go`:**
+- `App.CaptureLogs(opts ...LogCaptureOption) *App` installs a **teeing**
+  `slog.Handler` and calls `slog.SetDefault`: every record still reaches the
+  existing handler (stderr) AND records at/above the ring level are captured into
+  a bounded in-memory ring. Additive — without the call nothing changes.
+- `LogEntry{Time, Level, Msg, Attrs, Seq}` (JSON wire shape).
+- `WithLogCapacity(n)` (default **500**) and `WithLogLevel(level)` (default
+  **WARN**).
+- Tee contract: `Enabled = inner.Enabled || level>=ringMin` — the OR guarantees
+  the inner (stderr) threshold is never narrowed. `WithAttrs`/`WithGroup` carry
+  attrs and groups to both the inner handler and the captured entry (nested groups
+  → nested maps).
+- Ring: fixed-capacity circular buffer, `sync.Mutex`-guarded, overwrite-oldest
+  eviction, monotonic `seq`, `dropped` counter; `snapshot()` returns newest-first.
+
+**slog/log re-entrancy guard (the load-bearing fix):** `slog.SetDefault` also
+repoints the standard `log` package through the new handler. slog's built-in
+zero-config handler (`*slog.defaultHandler`) itself writes *via* the log package,
+so wrapping it and reinstalling creates an infinite re-entrant loop
+(`log → tee → defaultHandler → log → …`) that deadlocks on the log mutex — it
+would freeze any zero-config app on its first WARN. `CaptureLogs` therefore
+substitutes a direct `os.Stderr` text handler as the forwarding target **only**
+when the current default is the built-in handler (detected by the stable type
+name `*slog.defaultHandler`). Apps that configure their own handler (the
+recommended path) are wrapped unchanged.
+
+**Endpoint (Step B) — `forge.go` + `logcapture.go`:**
+- `CaptureLogs` stores the ring on `App`; `GET /_logs` is registered at
+  `Handler()`/`Run()` time, mirroring the `/_audit` block. Route absent → **404**
+  when `CaptureLogs` was not called.
+- `GET /_logs` requires the **Admin** role; auth resolves as `cfg.Auth` else
+  `BearerHMAC(secret)` — plain HTTP + bearer, so it works when MCP is down.
+  401 (no/invalid token), 403 (authenticated, wrong role).
+- Response envelope `{capacity, count, dropped, entries}` (entries newest-first;
+  `entries` is always `[]`, never null). Query params: `level` (min level,
+  inclusive `>=`), `limit` (most recent N), `since` (RFC3339, strictly after).
+  Malformed param → 400.
+
+### Stance
+
+- **Ephemeral live-debugging facility, NOT log storage.** In-memory, bounded, lost
+  on restart. stderr stays the durable path (the tee preserves it untouched);
+  durability/rotation/aggregation is a non-goal.
+- **HTTP + CLI only — no MCP tool.** The feature must not depend on the subsystem
+  it helps debug. N10 governs MCP-tool→CLI parity, not endpoint→MCP; `/_stats`,
+  `/_audit`, `/_health` set the precedent (plain HTTP admin endpoints, no MCP tool).
+- **No redaction in v1.** Admin-only + in-memory; "do not log secrets" is the
+  documented stance. A `WithLogRedactor` hook is noted as a possible future option.
+- **Ordering constraint:** `CaptureLogs` wraps `slog.Default().Handler()` at call
+  time, so it must be called AFTER any app-side `slog.SetDefault`.
+
+### Consequences
+
+- New exported core API: `CaptureLogs`, `LogEntry`, `LogCaptureOption`,
+  `WithLogCapacity`, `WithLogLevel`; new endpoint `GET /_logs`. Minor bump
+  **core v1.36.0**.
+- Zero-config apps that opt in see stderr lines reformatted to text-handler format
+  (still stderr, still tee'd, INFO+ preserved) — an accepted, documented trade-off
+  of the re-entrancy guard.
+- Internal-type detection (`*slog.defaultHandler`) is covered by a test that fails
+  cleanly (prints the new type name) if a future Go release renames it, rather than
+  regressing into the deadlock.
+- `smeldr-cli logs` (calls `GET /_logs` directly, not MCP) ships as a separate
+  follow-up step in the cli repo; core ships first so the endpoint exists.
+- Integration group **G37** exercises `/_logs` with M1 auth/roles.
+
+---

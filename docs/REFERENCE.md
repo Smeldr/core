@@ -2205,6 +2205,70 @@ app.RegisterStatsProvider(mediaSrv.StatsProvider())
 
 `smeldr.dev/media` will implement `StatsProvider()` in a forthcoming minor release.
 
+### Log capture endpoint
+
+`App.CaptureLogs` installs an opt-in, in-memory ring buffer that captures recent
+log records, and mounts `GET /_logs` (**Admin role required**, bearer token) to
+read them. It is a **live-debugging facility for a running instance** — designed to
+work over plain HTTP even when MCP is unavailable. It is **not** log storage:
+entries are in-memory only and lost on restart; stderr remains the durable path.
+
+```go
+app.CaptureLogs()                              // ring of 500, WARN and above
+app.CaptureLogs(
+    smeldr.WithLogCapacity(1000),              // retain the most recent 1000 records
+    smeldr.WithLogLevel(slog.LevelInfo),       // capture INFO and above
+)
+// GET /_logs (Authorization: Bearer <admin-token>) → 200 application/json
+```
+
+`CaptureLogs` tees: every record still reaches the existing handler (typically
+stderr) **and** records at or above the capture level are stored in the ring. It
+never narrows what stderr receives.
+
+**Ordering constraint:** `CaptureLogs` wraps `slog.Default().Handler()` at the
+moment it is called and then calls `slog.SetDefault`. Call it **after** any
+application-side `slog.SetDefault` of your own.
+
+**Zero-config behaviour:** when no custom handler has been configured, `CaptureLogs`
+forwards to a text handler on `os.Stderr` rather than wrapping slog's built-in
+handler. Wrapping the built-in handler would route the standard `log` package back
+into itself (an infinite re-entrant loop), because `slog.SetDefault` also repoints
+the `log` package. Apps that configure their own handler are wrapped unchanged.
+
+**Options:**
+- `WithLogCapacity(n int)` — max entries retained (default **500**; `n <= 0` keeps the default).
+- `WithLogLevel(level slog.Level)` — minimum level captured (default **`slog.LevelWarn`**).
+
+**Response shape** (entries newest-first; `entries` is always an array, never null):
+
+```json
+{
+  "capacity": 500,
+  "count": 2,
+  "dropped": 0,
+  "entries": [
+    {"time": "2026-06-05T12:00:01Z", "level": "ERROR", "msg": "db query failed", "attrs": {"code": 500}, "seq": 42},
+    {"time": "2026-06-05T12:00:00Z", "level": "WARN",  "msg": "slow request",    "seq": 41}
+  ]
+}
+```
+
+`capacity` is the ring size; `dropped` counts entries evicted by overwrite since
+start (non-zero means older entries are gone); `count` is the number returned.
+
+**Query parameters:**
+- `level` — minimum level to return (`debug`|`info`|`warn`|`error`), inclusive.
+- `limit` — return at most the N most recent matching entries.
+- `since` — RFC3339 timestamp; return only entries strictly after it.
+
+A malformed query parameter returns **400**; a missing/invalid token **401**; an
+authenticated non-Admin **403**. When `CaptureLogs` has not been called, the route
+is not registered and returns **404**.
+
+`smeldr-cli logs` calls `GET /_logs` directly over HTTP (not via MCP) so it works
+when MCP is down; it ships in `smeldr.dev/cli`.
+
 ---
 
 ## SiteConfig
