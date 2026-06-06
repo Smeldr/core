@@ -211,3 +211,40 @@ so a `/v2` module path is overkill). This tag gates T100 Step 2 (mcp v1.17.0),
 which imports `smeldr.dev/oauth`.
 
 ---
+
+## A130 - T100 Step 2: mcp package rename + oauth v0.2.0 adoption (smeldr.dev/mcp v1.17.0)
+
+**Date:** 2026-06-06
+**Status:** Implemented
+
+Renamed the Go package declaration in `smeldr.dev/mcp` from `forgemcp` to `mcp`
+across all 16 production + internal test files, and adopted the renamed oauth
+package. T100 Step 2 (gated on oauth v0.2.0 from A129, now satisfied).
+
+Scope of the rename (this module's own forge-named residue + oauth adoption):
+- package declaration in all 16 `.go` files (test files are internal
+  `package forgemcp` → `package mcp`, not `_test`)
+- godoc selector examples `forgemcp.X` → `mcp.X`; package-doc "Forge" → "Smeldr"
+- oauth adoption: dropped the `forgeoauth` import alias, `forgeoauth.X` → `oauth.X`
+  selectors, bumped `smeldr.dev/oauth` dep v0.1.5 → v0.2.0 + `go mod tidy`. Values
+  unchanged - `errors.Is(err, oauth.ErrTokenNotFound)` still matches.
+- `WithOAuth` parameter renamed `oauth` → `srv` to avoid shadowing the now-bare
+  `oauth` package name (parameter names are not part of the call signature)
+- stale godoc fixed: `forge_format`/`forge_description` → `smeldr_format`/
+  `smeldr_description` (the struct-tag keys were renamed to `smeldr_*` in T62/A107;
+  the comments described non-existent tags and were misleading)
+- `forge-media` prose → `media`; `forge-operator` → `operator`
+- README (drop alias, `mcp.X` selectors, migration note) + CHANGELOG header + v1.17.0
+
+Preserved (out of T100 scope): `WithForgeFallback` API + `forgeFallback` field
+(T86/T87 legacy forge-bearer compat); `forge://` resource-URI parse-compat
+(A123/T86); `forge-cli` (current binary name until Step 5) and `forgemedia.Register`
+godoc (media still `package forgemedia` until Step 3); standalone "Forge"/"forge"
+brand words in comments (`forge App`, `forge core`, `forgeCtx` var, etc. - tracked
+as a separate brand-prose pass by the architect).
+
+Exported mcp API unchanged (`New`, `WithBlocks`, `WithModule`, `WithOAuth`,
+`WithForgeFallback`, `WithSecret`). No behaviour change. Breaking-MINOR **v1.17.0**.
+mcp adds no further gate - Steps 3/4/5 (media, social, cli) are independent.
+
+---
