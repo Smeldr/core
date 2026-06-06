@@ -180,3 +180,34 @@ recommended path) are wrapped unchanged.
 - Integration group **G37** exercises `/_logs` with M1 auth/roles.
 
 ---
+
+## A129 - T100 Step 1: oauth package rename (smeldr.dev/oauth v0.2.0)
+
+**Date:** 2026-06-06
+**Status:** Implemented
+
+Renamed the Go package declaration in `smeldr.dev/oauth` from `forgeoauth` to
+`oauth`, and the external test package from `forgeoauth_test` to `oauth_test`.
+This is T100 Step 1 of the coordinated standalone-module forge-naming cleanup
+(the package declarations were never renamed when the framework became Smeldr).
+
+Scope of the rename (this module's own forge-named residue only):
+- package declaration in all 9 production files + both `_test` files
+- godoc package comment and selector examples (`forgeoauth.X` -> `oauth.X`)
+- error-string prefixes in sentinels, panics, and `fmt.Errorf` (`forgeoauth:` -> `oauth:`)
+- slog log-message prefixes in authorize.go (7) and token.go (4) (`forge-oauth:` -> `oauth:`)
+- README v0.2.0 badge + migration note + stale `forge-cms.dev` -> `smeldr.dev` paths
+- CHANGELOG header + v0.2.0 breaking-minor section
+
+Preserved (out of T100 scope): `forge_oauth_*` SQLite table names (DB-migration
+scope, would break existing oauth.db), `forgemcp`/`forge-mcp` references (the mcp
+module, renamed in Step 2), and `valid-forge-token`/`forge-test.invalid` test
+fixtures.
+
+No exported-symbol change, no behaviour change (`errors.Is` matches by value, not
+string). Released as **v0.2.0** (breaking-minor per project precedent - the
+package qualifier change breaks importers' selectors, but ~0 external importers,
+so a `/v2` module path is overkill). This tag gates T100 Step 2 (mcp v1.17.0),
+which imports `smeldr.dev/oauth`.
+
+---
