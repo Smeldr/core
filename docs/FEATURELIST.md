@@ -96,7 +96,7 @@ Per content type — automatically derived, no manual definition:
 - `list_[type]s` — Editor+
 - `get_[type]` — Editor+
 
-Block system tools (Experimental, T32 — enabled with `forgemcp.WithBlocks()`):
+Block system tools (Experimental, T32 — enabled with `mcp.WithBlocks()`):
 
 - `create_node`, `update_node`, `get_node`, `list_nodes`, `publish_node`, `archive_node` — Author+; generic block lifecycle, addressed by ID
 - `add_section`, `reorder_sections`, `remove_section` — Editor+; compose page sections
@@ -112,12 +112,12 @@ Admin tools (require Admin role):
 
 OAuth 2.1 for remote MCP servers (smeldr.dev/oauth v0.1.2):
 
-- `forgemcp.WithOAuth(*forgeoauth.Server)` — enables OAuth 2.1 on the MCP server; all HTTP endpoints require Bearer
+- `mcp.WithOAuth(*oauth.Server)` — enables OAuth 2.1 on the MCP server; all HTTP endpoints require Bearer
 - `GET /.well-known/oauth-protected-resource` — RFC 9728 protected resource metadata
 - `GET /.well-known/oauth-authorization-server` — RFC 8414 authorization server metadata (served by smeldr.dev/oauth)
 - PKCE S256 mandatory, CIMD stateless client validation, `offline_access` scope for refresh tokens
 - Scope mapping: `mcp` → Author role, `mcp:admin` → Admin role
-- SQLite-backed token store (`forgeoauth.NewSQLiteStore`)
+- SQLite-backed token store (`oauth.NewSQLiteStore`)
 
 MCP resource subscriptions (Beta):
 
@@ -146,7 +146,7 @@ MCP resource subscriptions (Beta):
 - Zero runtime dependencies in core — pure stdlib; driver is always your choice (test suite uses `modernc.org/sqlite` for in-process SQL integration tests)
 - Cookie compliance — `/.well-known/cookies.json` declares all cookies with category and consent requirements
 - Redirect tracking — `App.Redirect` / `RedirectStore` registers 301 Permanent and 410 Gone entries; `/.well-known/redirects.json` serves the full redirect table for audit and CDN sync
-- DB-backed redirect management — `App.Redirects(db)` activates `CreateRedirectsTable` (auto-ensure), loads saved entries, and enables runtime management via MCP tools (`create_redirect`, `list_redirects`, `delete_redirect`, Editor role) and CLI (`forge-cli redirect list/create/delete`); changes take effect immediately without restart
+- DB-backed redirect management — `App.Redirects(db)` activates `CreateRedirectsTable` (auto-ensure), loads saved entries, and enables runtime management via MCP tools (`create_redirect`, `list_redirects`, `delete_redirect`, Editor role) and CLI (`smeldr-cli redirect list/create/delete`); changes take effect immediately without restart
 - Content statistics endpoint — `App.StatsHandler()` mounts `GET /_stats` (Admin role); returns per-content-type item counts per status (`draft`/`published`/`scheduled`/`archived`). External modules contribute via `StatsExtProvider` interface registered with `App.RegisterStatsProvider`
 - Log capture endpoint — `App.CaptureLogs(opts...)` installs a teeing `slog.Handler` (preserves stderr) into a bounded in-memory ring; `GET /_logs` (Admin) serves recent records over plain HTTP — works when MCP is down. Options `WithLogCapacity` (default 500), `WithLogLevel` (default WARN); envelope `{capacity,count,dropped,entries}` newest-first; query `level`/`limit`/`since`; route absent → 404 when not enabled. Live-debugging only (in-memory, lost on restart)
 - Security headers — CSP, HSTS, X-Frame-Options, Referrer-Policy in one middleware call
@@ -165,7 +165,7 @@ MCP resource subscriptions (Beta):
 
 ## smeldr.dev/cli — Beta
 
-- `forge-cli init` — bootstrap a new instance from the terminal
+- `smeldr-cli init` — bootstrap a new instance from the terminal
 - Content CRUD — create, update, publish, unpublish, archive, delete, list, get
 - Token management — create, list, revoke (Admin role required)
 - Media operations — upload, list, delete
@@ -184,7 +184,7 @@ MCP resource subscriptions (Beta):
 - **X OAuth 2.0 + PKCE** (v0.5.0+): `S256` code challenge; server-side verifier storage; 280-char body limit (terminal error, never truncated)
 - OAuth credentials encrypted at rest (AES-256-GCM)
 - `PublicationSchedule` — recurring weekly slots (weekday, HH:MM, IANA timezone) per credential; FIFO queue; catch-up policy on restart
-- Layer 1 agent routing — `social.AddRoutes(app, forgesocial.OnPublish(...))` fires outbound HTTP on lifecycle signals; HMAC-signed payload; exponential backoff retry
+- Layer 1 agent routing — `social.AddRoutes(app, social.OnPublish(...))` fires outbound HTTP on lifecycle signals; HMAC-signed payload; exponential backoff retry
 - 15 MCP tools across PostModule, CredentialModule, ConfigModule, ScheduleModule
 - Full CLI parity in smeldr.dev/cli v0.8.0
 - **X media upload** (v0.6.0): images in `media_url` are fetched and uploaded to `api.x.com/2/media/upload` before tweeting; `media_ids` attached to tweet payload; requires `media.write` OAuth scope — existing X credentials must be re-authorised
@@ -206,7 +206,7 @@ MCP resource subscriptions (Beta):
 - `NewAuditStore(db DB)` — default SQL implementation; timestamps stored as RFC3339 for SQLite compatibility
 - `CreateAuditTable(db DB)` — DDL helper; creates `smeldr_audit_log` table
 - `GET /_audit` — Editor-or-higher; returns JSON array; supports `from`, `to` (RFC3339), `type`, and `actor` query filters
-- `forge-cli audit list [--from RFC3339] [--to RFC3339] [--type TYPE] [--actor ACTOR]` — table output, newest first (smeldr.dev/cli v0.9.1)
+- `smeldr-cli audit list [--from RFC3339] [--to RFC3339] [--type TYPE] [--actor ACTOR]` — table output, newest first (smeldr.dev/cli v0.9.1)
 
 ## Outbound webhooks — Stable
 
@@ -220,7 +220,7 @@ MCP resource subscriptions (Beta):
 - MCP tools for Admin agents: `create_webhook`, `list_webhooks`, `delete_webhook`,
   `list_webhook_deliveries`, `retry_webhook`
 - `AfterPublish`, `AfterUpdate`, `AfterDelete`, `AfterSchedule` signals trigger jobs automatically
-- `forge-cli webhook` subcommands for all operations (smeldr.dev/cli)
+- `smeldr-cli webhook` subcommands for all operations (smeldr.dev/cli)
 
 ## Developer and AI-agent experience — Stable
 

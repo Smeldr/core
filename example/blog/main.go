@@ -38,7 +38,7 @@ import (
 
 	_ "modernc.org/sqlite" // register the modernc pure-Go SQLite driver
 	"smeldr.dev/core"
-	forgemcp "smeldr.dev/mcp"
+	mcp "smeldr.dev/mcp"
 )
 
 // Post is the content type for a Forge devlog post.
@@ -344,7 +344,7 @@ func main() {
 	}
 
 	// Forge: TokenStore persists named bearer tokens in smeldr_tokens. Tokens
-	// are issued via the MCP create_token tool or the forge-cli token command.
+	// are issued via the MCP create_token tool or the smeldr-cli token command.
 	// smeldr.New wires TokenStore into the authentication middleware automatically
 	// when it is present in Config — no app.Use() call required.
 	tokenStore := smeldr.NewTokenStore(db, secret)
@@ -431,11 +431,11 @@ func main() {
 	// admins query the trail by slug or actor.
 	app.Audit(smeldr.NewAuditStore(db))
 
-	// Forge: forgemcp.New(app) creates the MCP server. Wire it on two routes:
+	// Forge: mcp.New(app) creates the MCP server. Wire it on two routes:
 	// GET /mcp for SSE (streaming) connections and POST /mcp/message for
 	// stateless HTTP connections. Both paths serve the same handler — the MCP
 	// transport layer picks the right mode automatically.
-	mcpSrv := forgemcp.New(app)
+	mcpSrv := mcp.New(app)
 	app.Handle("GET /mcp", mcpSrv.Handler())
 	app.Handle("POST /mcp/message", mcpSrv.Handler())
 

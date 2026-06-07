@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"smeldr.dev/core"
-	forgemcp "smeldr.dev/mcp"
+	mcp "smeldr.dev/mcp"
 )
 
 // ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ func buildTestApp(t *testing.T) (*smeldr.App, *httptest.Server, string, string) 
 	}))
 	app.Content(m)
 
-	mcpSrv := forgemcp.New(app)
+	mcpSrv := mcp.New(app)
 	app.Handle("GET /mcp", mcpSrv.Handler())
 	app.Handle("POST /mcp/message", mcpSrv.Handler())
 

@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or pilot agent.
 
-Current versions: smeldr.dev/core v1.36.0 · smeldr.dev/mcp v1.16.1 · smeldr.dev/oauth v0.1.5 · smeldr.dev/media v1.3.0 · smeldr.dev/cli v0.13.0 · smeldr.dev/social v0.7.4 · smeldr.dev/agent v0.5.1 · smeldr.dev/core/pgx v0.1.0
+Current versions: smeldr.dev/core v1.36.0 · smeldr.dev/mcp v1.17.0 · smeldr.dev/oauth v0.2.0 · smeldr.dev/media v1.4.0 · smeldr.dev/cli v0.14.0 · smeldr.dev/social v0.8.0 · smeldr.dev/agent v0.5.1 · smeldr.dev/core/pgx v0.1.0
 
 ---
 
@@ -209,7 +209,7 @@ Signal constants: `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete`
 
 **Built-in audit trail (v1.22.0+):** `app.Audit(smeldr.NewAuditStore(db))` subscribes to
 `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete` and persists each transition.
-`GET /_audit` (Editor+) returns JSON records. `forge-cli audit list` prints a table.
+`GET /_audit` (Editor+) returns JSON records. `smeldr-cli audit list` prints a table.
 
 ---
 
@@ -260,7 +260,7 @@ Tools are named from the type in lower_snake_case.
 | `list_webhook_deliveries` / `retry_webhook` | Admin | Delivery introspection and retry |
 | `create_redirect` / `list_redirects` / `delete_redirect` | Editor+ | Redirect rule management (requires `app.Redirects(db)`) |
 
-Block system (T32, enabled with `forgemcp.WithBlocks()`; blocks addressed by ID, not slug):
+Block system (T32, enabled with `mcp.WithBlocks()`; blocks addressed by ID, not slug):
 
 | Tool | Role | Description |
 |------|------|-------------|
@@ -292,22 +292,22 @@ ChatGPT Plus and Claude.ai require OAuth 2.1 to connect to remote MCP servers.
 `forge-oauth` is a standalone MIT library (`smeldr.dev/oauth`).
 
 ```go
-import forgeoauth "smeldr.dev/oauth"
+import oauth "smeldr.dev/oauth"
 
-store, _ := forgeoauth.NewSQLiteStore("./oauth.db")
-oauthSrv := forgeoauth.New(forgeoauth.Config{
+store, _ := oauth.NewSQLiteStore("./oauth.db")
+oauthSrv := oauth.New(oauth.Config{
     Issuer: "https://cms.example.com",
     VerifyBearer: func(token string) bool {
         _, ok := smeldr.VerifyTokenString(token, app.Secret(), app.TokenStore())
         return ok
     },
 }, store)
-mcpSrv := forgemcp.New(app, forgemcp.WithOAuth(oauthSrv))
+mcpSrv := mcp.New(app, mcp.WithOAuth(oauthSrv))
 ```
 
 - `smeldr.VerifyTokenString(token, secret, store)` — validates a raw bearer token without `*http.Request` (v1.25.0+)
-- `forgemcp.WithOAuth(*forgeoauth.Server)` — enables OAuth; all HTTP endpoints require Bearer (v1.11.0+)
-- `forgemcp.WithForgeFallback()` — accepts forge bearer tokens as fallback when OAuth enabled; use alongside `WithOAuth` to keep Claude Desktop/forge-cli working (v1.11.1+). `ErrTokenNotFound` → try forge bearer · `ErrTokenExpired` → always 401
+- `mcp.WithOAuth(*oauth.Server)` — enables OAuth; all HTTP endpoints require Bearer (v1.11.0+)
+- `mcp.WithForgeFallback()` — accepts forge bearer tokens as fallback when OAuth enabled; use alongside `WithOAuth` to keep Claude Desktop/smeldr-cli working (v1.11.1+). `ErrTokenNotFound` → try forge bearer · `ErrTokenExpired` → always 401
 - `GET /.well-known/oauth-protected-resource` — RFC 9728; triggers OAuth flow in AI clients on 401
 - Scope mapping: `mcp` → Author role · `mcp:admin` → Admin role
 - `offline_access` scope → refresh token issued (required for ChatGPT)
@@ -349,20 +349,20 @@ Filename gets a hex prefix — prevents overwrite of existing files.
 `smeldr.dev/social` — social post scheduling and agent routing.
 
 ```go
-social := forgesocial.New(db, forgesocial.Config{
+socialSrv := social.New(db, social.Config{
     Secret: cfg.Secret,
     // Mastodon/LinkedIn env-var config still accepted but deprecated.
     // Preferred: use create_platform_config MCP tool (Admin) to store
     // credentials in the DB; no env vars required.
 })
-social.Register(app)
-defer social.Stop()
+socialSrv.Register(app)
+defer socialSrv.Stop()
 
-mcpSrv := forgemcp.New(app,
-    forgemcp.WithModule(social.PostModule()),
-    forgemcp.WithModule(social.CredentialModule()),
-    forgemcp.WithModule(social.ConfigModule()),     // create_platform_config
-    forgemcp.WithModule(social.ScheduleModule()),   // slot-queue
+mcpSrv := mcp.New(app,
+    mcp.WithModule(socialSrv.PostModule()),
+    mcp.WithModule(socialSrv.CredentialModule()),
+    mcp.WithModule(socialSrv.ConfigModule()),     // create_platform_config
+    mcp.WithModule(socialSrv.ScheduleModule()),   // slot-queue
 )
 ```
 
@@ -395,83 +395,83 @@ MCP tools: `create_platform_config`, `create_scheduled_post`, `list_scheduled_po
 
 ---
 
-## forge-cli key commands
+## smeldr-cli key commands
 
 ```bash
 # Content
-forge-cli posts create --from post.md
-forge-cli posts update my-slug --from updated.md
-forge-cli posts publish my-slug
-forge-cli posts archive my-slug
-forge-cli posts list --status draft
+smeldr-cli posts create --from post.md
+smeldr-cli posts update my-slug --from updated.md
+smeldr-cli posts publish my-slug
+smeldr-cli posts archive my-slug
+smeldr-cli posts list --status draft
 
 # Preview (Admin)
-forge-cli preview /posts my-draft-slug
+smeldr-cli preview /posts my-draft-slug
 
 # Media
-forge-cli media upload hero.jpg --description "Hero image"
-forge-cli media list --type image
-forge-cli media delete <id>
+smeldr-cli media upload hero.jpg --description "Hero image"
+smeldr-cli media list --type image
+smeldr-cli media delete <id>
 
 # Tokens (Admin)
-forge-cli token create ci-deploy author 30
-forge-cli token list
-forge-cli token revoke <id>
+smeldr-cli token create ci-deploy author 30
+smeldr-cli token list
+smeldr-cli token revoke <id>
 
 # Webhooks
-forge-cli webhook create --url https://example.com/hook --events post.published
-forge-cli webhook list
-forge-cli webhook delete <endpoint-id>
+smeldr-cli webhook create --url https://example.com/hook --events post.published
+smeldr-cli webhook list
+smeldr-cli webhook delete <endpoint-id>
 
 # Redirect management (Editor role, v1.34.0+) — requires app.Redirects(db)
-forge-cli redirect list                                      # aligned table
-forge-cli redirect list --json                              # raw JSON
-forge-cli redirect create --from /old --to /new             # 301
-forge-cli redirect create --from /gone --code 410           # 410 Gone
-forge-cli redirect create --from /posts --to /articles --prefix  # prefix rewrite
-forge-cli redirect delete /old-path
+smeldr-cli redirect list                                      # aligned table
+smeldr-cli redirect list --json                              # raw JSON
+smeldr-cli redirect create --from /old --to /new             # 301
+smeldr-cli redirect create --from /gone --code 410           # 410 Gone
+smeldr-cli redirect create --from /posts --to /articles --prefix  # prefix rewrite
+smeldr-cli redirect delete /old-path
 
 # Navigation tree (Editor role, v0.13.0+) — requires app.Nav(...) with DB mode
-forge-cli nav list                                          # aligned table (ID, LABEL, PATH, PARENT, HIDDEN, GHOST, SORT)
-forge-cli nav list --json                                   # raw JSON
-forge-cli nav create --label "Learn" --path /learn          # create top-level item
-forge-cli nav create --label "Intro" --path /learn/intro --parent-id <id>  # nested
-forge-cli nav update <id> --label "New Label" --sort-order 2
-forge-cli nav delete <id>                                   # cascades to descendants
+smeldr-cli nav list                                          # aligned table (ID, LABEL, PATH, PARENT, HIDDEN, GHOST, SORT)
+smeldr-cli nav list --json                                   # raw JSON
+smeldr-cli nav create --label "Learn" --path /learn          # create top-level item
+smeldr-cli nav create --label "Intro" --path /learn/intro --parent-id <id>  # nested
+smeldr-cli nav update <id> --label "New Label" --sort-order 2
+smeldr-cli nav delete <id>                                   # cascades to descendants
 
 # Audit trail (Editor role, v1.22.0+)
-forge-cli audit list
-forge-cli audit list --type Post
-forge-cli audit list --from 2026-01-01T00:00:00Z --to 2026-12-31T23:59:59Z
-forge-cli audit list --actor <actor-id>
+smeldr-cli audit list
+smeldr-cli audit list --type Post
+smeldr-cli audit list --from 2026-01-01T00:00:00Z --to 2026-12-31T23:59:59Z
+smeldr-cli audit list --actor <actor-id>
 
-# Block system (T32, forge-cli v0.10.0+) — Fields keys are case-sensitive PascalCase
-forge-cli block node create --type hero --field Headline="Welcome"   # Author
-forge-cli block node list --type hero --status published             # aligned table; --json for raw
-forge-cli block node publish <id>
-forge-cli block section add <page_id> <block_id>                     # Editor
-forge-cli block section reorder <page_id> <id1,id2,id3>
-forge-cli block item add <collection_id> <block_id>
+# Block system (T32, smeldr-cli v0.10.0+) — Fields keys are case-sensitive PascalCase
+smeldr-cli block node create --type hero --field Headline="Welcome"   # Author
+smeldr-cli block node list --type hero --status published             # aligned table; --json for raw
+smeldr-cli block node publish <id>
+smeldr-cli block section add <page_id> <block_id>                     # Editor
+smeldr-cli block section reorder <page_id> <id1,id2,id3>
+smeldr-cli block item add <collection_id> <block_id>
 
-# Social (forge-cli v0.8.0+)
-forge-cli social credential create --platform mastodon|linkedin|x [--instance-url <url>]
-forge-cli social credential list
-forge-cli social credential get <id>
-forge-cli social credential delete <id>
-forge-cli social post create --platform mastodon|linkedin|x --credential <id> --body "..."
-forge-cli social post queue --credential <id> --body "..."
-forge-cli social post list --status queued
-forge-cli social post publish <slug>
-forge-cli social post archive <slug>
-forge-cli social platform configure --platform mastodon|linkedin|x --client-id <id> --client-secret <secret> --redirect-url <url> [--instance-url <url>] [--success-url <url>]
-forge-cli social schedule create --credential <id> --slot "monday 09:00 Europe/Copenhagen"
-forge-cli social schedule show --credential <id>
-forge-cli social schedule pause --credential <id>
-forge-cli social schedule resume --credential <id>
-forge-cli social schedule delete --credential <id>
+# Social (smeldr-cli v0.8.0+)
+smeldr-cli social credential create --platform mastodon|linkedin|x [--instance-url <url>]
+smeldr-cli social credential list
+smeldr-cli social credential get <id>
+smeldr-cli social credential delete <id>
+smeldr-cli social post create --platform mastodon|linkedin|x --credential <id> --body "..."
+smeldr-cli social post queue --credential <id> --body "..."
+smeldr-cli social post list --status queued
+smeldr-cli social post publish <slug>
+smeldr-cli social post archive <slug>
+smeldr-cli social platform configure --platform mastodon|linkedin|x --client-id <id> --client-secret <secret> --redirect-url <url> [--instance-url <url>] [--success-url <url>]
+smeldr-cli social schedule create --credential <id> --slot "monday 09:00 Europe/Copenhagen"
+smeldr-cli social schedule show --credential <id>
+smeldr-cli social schedule pause --credential <id>
+smeldr-cli social schedule resume --credential <id>
+smeldr-cli social schedule delete --credential <id>
 ```
 
-Config: `FORGE_URL`, `FORGE_TOKEN`, `FORGE_MCP_URL` (or `.forge-cli.env`)
+Config: `SMELDR_URL`, `SMELDR_TOKEN`, `SMELDR_MCP_URL` (or `.smeldr-cli.env`; legacy `FORGE_*` env vars still read as fallbacks — T86/T87)
 
 ---
 
@@ -552,10 +552,10 @@ Add `import _ "time/tzdata"` to binaries on Alpine/scratch containers.
 content type. Requires `smeldr.dev/core` as a dependency.
 
 ```go
-import forgeagent "smeldr.dev/agent/flow"
+import agentflow "smeldr.dev/agent/flow"
 
-forgeagent.CreateTable(db) // run once at startup
-agentMod := forgeagent.New(db, forgeagent.Config{
+agentflow.CreateTable(db) // run once at startup
+agentMod := agentflow.New(db, agentflow.Config{
     MCPURL:   "http://localhost:8080/mcp",
     MCPToken: os.Getenv("FORGE_TOKEN"),
 })

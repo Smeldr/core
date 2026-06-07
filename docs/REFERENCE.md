@@ -460,7 +460,7 @@ bootstrap admin token and emits it via `slog.Warn`:
 WARN smeldr: bootstrap admin token created token=<plaintext>
 ```
 
-Copy this token immediately. Use it with `forge-cli init` or with the
+Copy this token immediately. Use it with `smeldr-cli init` or with the
 `create_token` MCP tool to issue long-lived named tokens, then discard it.
 
 **Critical:** a token produced by `smeldr.SignToken` in `main()` is rejected
@@ -470,7 +470,7 @@ that exist in the store. Use `TokenStore.Create` or `smeldr.dev/cli` instead.
 `smeldr.VerifyTokenString(token string, secret []byte, store *TokenStore) (User, bool)` —
 verifies a raw bearer token string directly, without an `*http.Request`. Identical
 verification logic to `VerifyBearerToken`. Use this when calling from a downstream
-library (e.g. the `VerifyBearer` callback in `forgeoauth.Config`). Requires v1.25.0+.
+library (e.g. the `VerifyBearer` callback in `oauth.Config`). Requires v1.25.0+.
 
 ### Go API
 
@@ -1624,12 +1624,12 @@ Changes take effect immediately without a server restart.
 ### CLI redirect commands (Editor role)
 
 ```
-forge-cli redirect list                                  # aligned table output
-forge-cli redirect list --json                          # raw JSON
-forge-cli redirect create --from /old --to /new         # 301
-forge-cli redirect create --from /gone --code 410       # 410 Gone
-forge-cli redirect create --from /posts --to /articles --prefix  # prefix rewrite
-forge-cli redirect delete /old-path
+smeldr-cli redirect list                                  # aligned table output
+smeldr-cli redirect list --json                          # raw JSON
+smeldr-cli redirect create --from /old --to /new         # 301
+smeldr-cli redirect create --from /gone --code 410       # 410 Gone
+smeldr-cli redirect create --from /posts --to /articles --prefix  # prefix rewrite
+smeldr-cli redirect delete /old-path
 ```
 
 ### Inspect the redirect table
@@ -1650,7 +1650,7 @@ Schema derivation, lifecycle enforcement, and role checks are all automatic —
 no configuration beyond `smeldr.MCP(...)` on your existing modules.
 
 ```go
-import forgemcp "smeldr.dev/mcp"
+import mcp "smeldr.dev/mcp"
 
 func main() {
     app := smeldr.New(smeldr.MustConfig(smeldr.Config{
@@ -1660,7 +1660,7 @@ func main() {
     app.Content(
         smeldr.NewModule((*Post)(nil), smeldr.At("/posts"), smeldr.MCP(smeldr.MCPWrite)),
     )
-    forgemcp.New(app).ServeStdio(context.Background(), os.Stdin, os.Stdout)
+    mcp.New(app).ServeStdio(context.Background(), os.Stdin, os.Stdout)
 }
 ```
 
@@ -1673,7 +1673,7 @@ the [smeldr.dev/mcp README](https://github.com/smeldr/mcp).
 each MCP/OAuth endpoint individually:
 
 ```go
-mcpSrv := forgemcp.New(app, forgemcp.WithOAuth(oauthSrv))
+mcpSrv := mcp.New(app, mcp.WithOAuth(oauthSrv))
 mcpSrv.Register(app) // mounts GET/POST /mcp, POST /mcp/message,
                      // /.well-known/oauth-protected-resource,
                      // and all OAuth routes when WithOAuth is configured
@@ -1697,7 +1697,7 @@ The existing `Handler()` method is unchanged for non-Smeldr embeddings.
 
 ### Block system tools — `WithBlocks` (T32)
 
-`forgemcp.New(app, forgemcp.WithBlocks())` exposes the block-system MCP tools.
+`mcp.New(app, mcp.WithBlocks())` exposes the block-system MCP tools.
 They operate on the `smeldr_dynamic_content` and `smeldr_content_edges` tables
 (create them with `smeldr.CreateBlockTables(db)`). `WithBlocks` reads the App's
 `Config.DB`; with no DB the tools are not exposed. Blocks are addressed by **ID**
@@ -1705,7 +1705,7 @@ and are not browsable resources — the read surface is `get_node` / `list_nodes
 
 ```go
 smeldr.CreateBlockTables(db)
-mcpSrv := forgemcp.New(app, forgemcp.WithBlocks())
+mcpSrv := mcp.New(app, mcp.WithBlocks())
 ```
 
 Generic node lifecycle (Author role):
@@ -1877,19 +1877,19 @@ go get smeldr.dev/media
 ### Wiring
 
 ```go
-import forgemedia "smeldr.dev/media"
+import media "smeldr.dev/media"
 
-store := forgemedia.NewLocalMediaStore(app)
-mediaSrv := forgemedia.Register(app, store)
+store := media.NewLocalMediaStore(app)
+mediaSrv := media.Register(app, store)
 
 // Wire into the MCP server so AI agents can upload files.
-mcpSrv := forgemcp.New(app, forgemcp.WithModule(mediaSrv))
+mcpSrv := mcp.New(app, mcp.WithModule(mediaSrv))
 ```
 
 `Register` mounts all four HTTP routes and returns a `*Server` that implements
-`smeldr.MCPModule`. Pass it to `forgemcp.WithModule` to expose the MCP tools.
+`smeldr.MCPModule`. Pass it to `mcp.WithModule` to expose the MCP tools.
 
-A database is required. Call `forgemedia.CreateMediaTable(db)` once to create
+A database is required. Call `media.CreateMediaTable(db)` once to create
 the `forge_media` table, or run the migration manually.
 
 ### HTTP endpoints
@@ -1903,7 +1903,7 @@ the `forge_media` table, or run the migration manually.
 
 ### MCP tools
 
-Exposed when `forgemcp.WithModule(mediaSrv)` is wired. TypeName is `"File"`.
+Exposed when `mcp.WithModule(mediaSrv)` is wired. TypeName is `"File"`.
 
 | Tool | Role | Description |
 |------|------|-------------|
@@ -1937,7 +1937,7 @@ Full reference: [smeldr.dev/media README](https://github.com/smeldr/media)
 from the command line. No MCP client required. Install it with:
 
 ```bash
-go install smeldr.dev/cli@latest
+go install smeldr.dev/cli/cmd/smeldr-cli@latest
 ```
 
 ### Configuration
@@ -1952,14 +1952,14 @@ SMELDR_TOKEN=<bearer-token>
 
 Legacy `FORGE_URL` / `FORGE_TOKEN` / `FORGE_MCP_URL` are still accepted as fallbacks.
 
-Use `forge-cli init` to bootstrap a new instance in one step:
+Use `smeldr-cli init` to bootstrap a new instance in one step:
 
 ```bash
-forge-cli init --url https://mysite.com --bootstrap-token <token-from-startup-log>
+smeldr-cli init --url https://mysite.com --bootstrap-token <token-from-startup-log>
 ```
 
 `init` calls `/_health`, issues a long-lived admin token via MCP, and writes
-`.forge-cli.env`. Use `--force` to overwrite an existing env file.
+`.smeldr-cli.env`. Use `--force` to overwrite an existing env file.
 
 ### Commands
 
@@ -2667,7 +2667,7 @@ Query parameters:
 ### smeldr.dev/cli
 
 ```
-forge-cli audit list [--from RFC3339] [--to RFC3339] [--type TYPE] [--actor ACTOR]
+smeldr-cli audit list [--from RFC3339] [--to RFC3339] [--type TYPE] [--actor ACTOR]
 ```
 
 Prints a tab-aligned table to stdout. Requires `SMELDR_TOKEN` (or legacy `FORGE_TOKEN`) with Editor role.
@@ -2788,14 +2788,14 @@ Returns the full preview URL as a string.
 ### smeldr.dev/cli: `forge preview`
 
 ```
-forge-cli preview <prefix> <slug>
+smeldr-cli preview <prefix> <slug>
 ```
 
 Calls `create_preview_url` via MCP and prints the full preview URL to stdout.
 Requires Admin role.
 
 ```bash
-forge-cli preview /posts my-draft-post
+smeldr-cli preview /posts my-draft-post
 # → https://example.com/posts/my-draft-post?preview=<token>
 ```
 
@@ -2870,20 +2870,20 @@ Returns:
 ### smeldr.dev/cli: `forge media`
 
 ```
-forge-cli media upload <file> [--description <text>]
-forge-cli media list [--type image|document|video|audio|other]
-forge-cli media delete <id>
+smeldr-cli media upload <file> [--description <text>]
+smeldr-cli media list [--type image|document|video|audio|other]
+smeldr-cli media delete <id>
 ```
 
 `upload` POSTs to `/media` with the configured bearer token. `--description` is
 required for image files (WCAG 1.1.1).
 
 ```bash
-forge-cli media upload hero.jpg --description "Hero image"
+smeldr-cli media upload hero.jpg --description "Hero image"
 # → https://example.com/media/abc123-hero.jpg
 
-forge-cli media list --type image
-forge-cli media delete <id>
+smeldr-cli media list --type image
+smeldr-cli media delete <id>
 ```
 
 ## Block data foundation

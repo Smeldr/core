@@ -124,7 +124,7 @@ smeldr.NewModule((*Post)(nil),
 Wire the MCP server and token store in `main.go`:
 
 ```go
-import forgemcp "smeldr.dev/mcp"
+import mcp "smeldr.dev/mcp"
 
 app := smeldr.New(smeldr.MustConfig(smeldr.Config{
     BaseURL:    "https://mysite.com",
@@ -133,7 +133,7 @@ app := smeldr.New(smeldr.MustConfig(smeldr.Config{
     TokenStore: smeldr.NewTokenStore(db, os.Getenv("SECRET")),
 }))
 
-mcpSrv := forgemcp.New(app)
+mcpSrv := mcp.New(app)
 app.Handle("GET /mcp", mcpSrv.Handler())
 app.Handle("POST /mcp/message", mcpSrv.Handler())
 ```
@@ -174,8 +174,8 @@ serving. It implements `smeldr.MCPModule` so AI agents can upload files via MCP.
 
 ```go
 import (
-    forgemedia "smeldr.dev/media"
-    forgemcp   "smeldr.dev/mcp"
+    media "smeldr.dev/media"
+    mcp   "smeldr.dev/mcp"
 )
 
 app := smeldr.New(smeldr.MustConfig(smeldr.Config{
@@ -185,11 +185,11 @@ app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 }))
 
 // Register HTTP routes: POST /media, GET /media/{filename}, etc.
-store := forgemedia.NewLocalMediaStore(app)
-mediaSrv := forgemedia.Register(app, store)
+store := media.NewLocalMediaStore(app)
+mediaSrv := media.Register(app, store)
 
 // Wire into MCP so agents can upload via create_file tool.
-mcpSrv := forgemcp.New(app, forgemcp.WithModule(mediaSrv))
+mcpSrv := mcp.New(app, mcp.WithModule(mediaSrv))
 app.Handle("GET /mcp", mcpSrv.Handler())
 app.Handle("POST /mcp/message", mcpSrv.Handler())
 ```
