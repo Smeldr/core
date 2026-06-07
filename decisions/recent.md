@@ -331,3 +331,76 @@ mcp (already v1.17.0) but adds no further gate for remaining Steps 5+.
 Final grep gate (`forgesocial|forge-social|forgemcp|forge-mcp` in `*.go`) = ZERO.
 
 ---
+
+## A133 — T100 Step 5: cli binary rename + `logs` command (smeldr.dev/cli v0.14.0)
+
+**Date:** 2026-06-07
+**Status:** Implemented
+
+### Binary rename: `forge-cli` → `smeldr-cli`
+
+All user-facing `"forge-cli"` strings renamed in 21 source files. All `.go` files
+moved from the module root to `cmd/smeldr-cli/` so that `go install` produces a
+binary named `smeldr-cli` instead of `cli`.
+
+New install path: `go install smeldr.dev/cli/cmd/smeldr-cli@latest`
+
+**Preserved (T86/T87 — gate = 6 hits, all intentional):**
+- `loadEnvFile(".forge-cli.env")` in `client.go` (legacy env file fallback)
+- Comment `.smeldr-cli.env first, then .forge-cli.env (legacy).` in `client.go`
+- Package-doc comment mentioning `(legacy: .forge-cli.env)` in `main.go`
+- `(legacy: .forge-cli.env is still read if present)` in `printUsage`
+- `"forge-cli-env-*"` temp-file names in `cli_test.go` (2×, arbitrary test label)
+
+### New: `smeldr-cli logs` (T79 CLI half)
+
+`GET /_logs` called directly over HTTP (not MCP) so it works when MCP is the
+failing component. Requires Admin role. Server must call `app.CaptureLogs()`
+(core v1.36.0+, A128).
+
+Response decoding uses:
+
+```go
+type logsEnvelope struct {
+    Capacity int        `json:"capacity"`
+    Count    int        `json:"count"`
+    Dropped  uint64     `json:"dropped"`
+    Entries  []logEntry `json:"entries"`
+}
+type logEntry struct {
+    Time  time.Time      `json:"time"`
+    Level string         `json:"level"`
+    Msg   string         `json:"msg"`
+    Attrs map[string]any `json:"attrs"`
+    Seq   uint64         `json:"seq"`
+}
+```
+
+Flags: `--level LEVEL` (forwarded as query param), `--limit N`, `--since RFC3339`
+(validated before sending), `--json` (raw envelope).
+
+Default output: tabwriter table with columns TIMESTAMP / LEVEL (uppercased) /
+SEQ / MESSAGE, entries newest-first. Footer `(N entries dropped — ring buffer
+overflowed)` when `Dropped > 0`. Error messages: 401 → "Admin token required",
+403 → "forbidden — Admin role required", 404 → "/_logs not available — call
+app.CaptureLogs() on the server (core v1.36.0+)".
+
+Five tests in `logs_test.go`: table output (uppercased levels), `--json`,
+empty entries, dropped footer, query-param forwarding.
+
+### Docs
+
+`README.md` fully rewritten: title, install path, migration-from-v0.13.x section
+(breaking rename note + preserved fallbacks), `logs` command section, `SMELDR_*`
+config, social reference → `smeldr.dev/social`.
+
+`CHANGELOG.md` header → `smeldr-cli`; `[0.14.0]` section prepended with Breaking
++ Added entries.
+
+### Closes
+
+- **T79 CLI half** — `smeldr-cli logs` implements the CLI side of the `/_logs`
+  operator workflow (server side: A128, core v1.36.0).
+- **N57** — `forge-cli` binary name reversal; binary is now `smeldr-cli`.
+
+---
