@@ -404,3 +404,45 @@ config, social reference → `smeldr.dev/social`.
 - **N57** — `forge-cli` binary name reversal; binary is now `smeldr-cli`.
 
 ---
+
+## A134 — T100 Step 7: core + common docs selector sweep
+
+**Date:** 2026-06-07
+**Status:** Agreed
+**Level:** 1 (docs-only, no version bump)
+
+### Decision
+
+Sweep stale `forge*.` selectors and `forge-cli` binary name from the common skill
+and core docs. All module renames (Steps 1–5) and site-dev integration (Step 6)
+were done and tagged before this step ran. Closes T100.
+
+### Files changed
+
+- **`common/agent/skills/smeldr.md`** — version line bumped (mcp v1.17.0, oauth v0.2.0,
+  media v1.4.0, cli v0.14.0, social v0.8.0); `forgeoauth.`→`oauth.`,
+  `forgemcp.`→`mcp.`, `forgesocial.`→`social.`, `forgeagent`→`agentflow` alias
+  (consistent with site-dev S176); `forge-cli`→`smeldr-cli` throughout CLI section;
+  `socialSrv` collision fix (local var `social` would shadow package `social`);
+  config note updated to `SMELDR_*` primary with `FORGE_*` fallback note.
+- **`core/docs/REFERENCE.md`** — same selector + `smeldr-cli` sweep; install path
+  updated to `go install smeldr.dev/cli/cmd/smeldr-cli@latest`.
+- **`core/docs/FEATURELIST.md`** — `mcp.`/`oauth.`/`social.` selectors; `smeldr-cli`.
+- **`core/AGENTS.md`** — `mcp.`/`media.` selectors in code blocks.
+- **`core/example/blog/main.go` + `main_test.go`** — `forgemcp` alias → `mcp`;
+  `go build ./...` green.
+- **`core/skills/smeldr.md`** — synced from `common/agent/skills/smeldr.md`.
+- **`common` commit:** `f914d82` · **`core` squash commit:** `79e3bbb`
+
+### Preserved
+
+- `.forge-cli.env` legacy note in REFERENCE.md (T86/T87)
+- `FORGE_*` env var fallback mentions in skill (T86/T87)
+- `## forge-oauth` / `## forge-social` / `## forge-agent` section headers in skill (T101)
+- `mcp.WithForgeFallback()` — exported function name unchanged
+
+### Gate
+
+`forge(mcp|oauth|media|social|agent).|forge-cli` across all 7 files: **ZERO hits**.
+
+---
