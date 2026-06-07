@@ -248,3 +248,40 @@ Exported mcp API unchanged (`New`, `WithBlocks`, `WithModule`, `WithOAuth`,
 mcp adds no further gate - Steps 3/4/5 (media, social, cli) are independent.
 
 ---
+
+## A131 - T100 Step 3: media package rename (smeldr.dev/media v1.4.0)
+
+**Date:** 2026-06-06
+**Status:** Implemented
+
+Renamed the Go package declaration in `smeldr.dev/media` from `forgemedia` to
+`media` across all 8 production + test files. T100 Step 3 (independent - no module
+imports media at the go.mod level; the site passes it to mcp via `WithModule`).
+
+Scope:
+- package declaration in 7 internal files; external test package
+  `forgemedia_test` → `media_test` (example_test.go)
+- error-/panic-string prefixes `forgemedia:` / `forgemedia.New:` → `media:` /
+  `media.New:` (16 occurrences across media.go + server.go)
+- godoc import example: dropped `forgemedia` alias, `forgemedia.X` → `media.X`
+- package-doc framework word "Forge" → "Smeldr" (Q1 precedent)
+- stale cross-module refs `forge-mcp` / `forgemcp.X` → `mcp` (mcp was renamed in
+  Step 2 / A130 / mcp v1.17.0)
+- canary path-traversal test fixture `canary-forge-media-test.txt` →
+  `canary-media-test.txt` (arbitrary filename, not a semantic-forge fixture -
+  renamed so the T100 grep gate is literally zero)
+- CHANGELOG header `forge-media` → `smeldr.dev/media` + v1.4.0 section
+
+Version: media was at v1.3.0 (T95 StatsProvider NOT shipped), so this rename takes
+**v1.4.0**; T95 later becomes v1.5.0.
+
+Preserved (out of T100 scope): `forge_media` SQLite table name (10 refs - DB-migration
+scope, underscore form does not match the hyphenated grep gate, would break the
+production smeldr.dev DB); standalone "Forge"/"forge" brand words in comments
+(`media.go` "Forge HTTP handler", `server.go` "for a Forge" - T101 brand-prose pass).
+
+No exported-symbol change, no behaviour change. Breaking-MINOR. media is independent
+- adds and consumes no gate. Final grep gate (`forgemedia|forge-media|forgemcp|
+forge-mcp` in `*.go`) = literally zero.
+
+---
