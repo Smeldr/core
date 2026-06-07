@@ -285,3 +285,49 @@ No exported-symbol change, no behaviour change. Breaking-MINOR. media is indepen
 forge-mcp` in `*.go`) = literally zero.
 
 ---
+
+## A132 - T100 Step 4: social package rename (smeldr.dev/social v0.8.0)
+
+**Date:** 2026-06-07
+**Status:** Implemented
+
+Renamed the Go package declaration in `smeldr.dev/social` from `forgesocial` to
+`social` across all 25 production + test files. T100 Step 4 (independent of media;
+social imports mcp via go.mod but mcp v1.17.0 already shipped in A130).
+
+Scope of the rename (this module's own forge-named residue):
+- package declaration in 21 internal files; 4 external test packages
+  `forgesocial_test` → `social_test` (social_test.go, router_test.go,
+  route_test.go, route_worker_test.go)
+- ~120 error/panic/log-string prefixes `forgesocial:` → `social:` across
+  social.go, twitter.go, mastodon.go, linkedin.go, route.go, router.go,
+  credential.go, oauth.go, schedule.go, schema.go, scheduler.go,
+  platform_config.go, route_worker.go
+- import alias dropped; `forgesocial.X` → `social.X` across all test files
+- package-doc "forge" → "smeldr" in social.go
+- stale cross-module refs `forge-mcp` / `forgemcp.X` → `mcp` (mcp was renamed
+  in Step 2 / A130 / mcp v1.17.0)
+- `social_test.go`: local var `social` → `svc` (package-name collision fix —
+  `social.ScheduledPost` type-ref failed vet when local var shadowed package name)
+- `router_test.go`: local var `social` → `svc` in two test functions (consistency —
+  no type-ref failure there, but matches social_test.go decision and mcp `srv` precedent)
+- README: `smeldr.dev` install/import paths, `social.X` selectors, v0.8.0 badge,
+  "Migrating from v0.7.x" section
+- CHANGELOG: header `forge-social` → `smeldr.dev/social` + [0.8.0] section prepended;
+  historical entries preserved verbatim (forgemcp/forgesocial refs are historical narrative)
+
+Version: social was at v0.7.x; this rename takes **v0.8.0** (breaking-MINOR).
+
+Preserved (out of T100 scope): `forge_social_*` DB table names (65 refs, 8 tables:
+`forge_social_posts`, `forge_social_credentials`, `forge_social_oauth_states`,
+`forge_social_routes`, `forge_social_route_jobs`, `forge_social_route_log`,
+`forge_social_publication_schedules`, `forge_social_platform_config` — DB-migration
+scope tracked as T102); `X-Forge-Signature` header name (T86/T87 cross-agent
+signature contract — any rename requires coordinated update of all agent verifiers);
+standalone "Forge"/"forge" brand words in comments and prose (T101 brand-prose pass).
+
+No exported-symbol change, no behaviour change. Breaking-MINOR. social imports
+mcp (already v1.17.0) but adds no further gate for remaining Steps 5+.
+Final grep gate (`forgesocial|forge-social|forgemcp|forge-mcp` in `*.go`) = ZERO.
+
+---
