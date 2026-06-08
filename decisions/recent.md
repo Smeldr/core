@@ -279,3 +279,62 @@ oauth unchanged — all remaining hits are test fixtures.
 ### Closes T101.
 
 ---
+
+## A136 — `list_storys` → `list_stories`: consonant-y pluralization in MCP list tool names
+
+**Date:** 2026-06-08
+**Status:** Agreed
+**Level:** 2 (patch; no exported-symbol change, no behaviour change for existing tool names)
+
+### Decision
+
+MCP list tool names for content types whose snake_case name ends in consonant+y
+(e.g. `Story` → `story`) were generated as `list_storys`, which is grammatically
+wrong. Fix: new `pluralSnake()` helper applies the standard English consonant-y →
+ies rule when forming the list tool name.
+
+### Changes
+
+**`mcp/mcp.go`** — line 343:
+`"list_" + typeSnake + "s"` → `"list_" + pluralSnake(typeSnake)`
+
+New helpers added after `snakeCase`:
+
+```go
+func pluralSnake(s string) string {
+    if len(s) >= 2 && s[len(s)-1] == 'y' && !isVowel(s[len(s)-2]) {
+        return s[:len(s)-1] + "ies"
+    }
+    return s + "s"
+}
+func isVowel(b byte) bool {
+    return b == 'a' || b == 'e' || b == 'i' || b == 'o' || b == 'u'
+}
+```
+
+**`mcp/tool.go`** — `moduleForAdminList()` reverse lookup updated to resolve
+the "ies" suffix back to the base type (stories→story) in addition to the
+existing plain-s suffix stripping (posts→post).
+
+**`mcp/mcp_test.go`** — three new tests:
+- `TestPluralSnake`: story→stories, category→categories, post→posts, key→keys,
+  essay→essays, day→days
+- `TestMCPConsonantYPlural_toolName`: registers `testStory` module, asserts
+  `defs[0].Name == "list_test_stories"`
+- `TestMCPConsonantYPlural_dispatch`: asserts `list_test_stories` dispatches
+  correctly (returns `items` field)
+
+`go test ./...` → ok `smeldr.dev/mcp` 0.195s.
+
+**`mcp/CHANGELOG.md`** — [1.17.2] section prepended.
+
+**`common/agent/skills/smeldr.md`** and **`core/skills/smeldr.md`** — version
+line updated: `mcp v1.17.1 → v1.17.2`.
+
+### Version
+
+mcp v1.17.2 (patch; `list_stories` now generated where previously `list_storys`
+was generated — operators using consonant-y types must update their MCP client
+tool references).
+
+---
