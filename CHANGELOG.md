@@ -23,6 +23,17 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.36.2] — 2026-06-09
+
+### Fixed
+
+- `migrateLegacyTableNames`: idempotency fix — a partial migration that leaves
+  both source (`forge_*`) and destination (`smeldr_*`) tables in place no longer
+  fails with "table already exists". A second `sqlite_master` check per pair skips
+  the rename when the destination already exists (A139).
+
+---
+
 ## [1.36.1] — 2026-06-08
 
 ### Fixed
