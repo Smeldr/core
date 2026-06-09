@@ -382,3 +382,55 @@ core v1.36.1 (patch; no exported-symbol or interface change).
 Branch: `claude/scheduled-posts-conflict-m6s3kn` merged to main via `--no-ff`.
 
 ---
+
+## A138 — X post body length: t.co URL weighting
+
+**Date:** 2026-06-08
+**Status:** Agreed
+**Level:** 2 (bug fix; behaviour change in X post validation path)
+
+### Decision
+
+`publish()` in `social/twitter.go` counted URL characters at face value when
+validating against the 280-character X limit. The X API wraps every URL with
+t.co and counts it as exactly 23 characters regardless of actual length — a
+long UTM-tagged URL occupies one t.co slot, not 80+ characters. Our guard was
+rejecting posts the X API would accept.
+
+Fix: new `xWeightedBodyLen(body string) int` helper that replaces each URL's
+rune count with `xTcoURLLen` (23). Both uses of `len([]rune(p.Body))` in
+`publish()` are replaced with `xWeightedBodyLen(p.Body)`.
+
+### Files changed
+
+**`social/twitter.go`**:
+- New constant `xTcoURLLen = 23` alongside `xMaxBodyLength`
+- New package-level var `xURLRegexp = regexp.MustCompile("https?://\\S+")`
+- New helper `xWeightedBodyLen(body string) int`:
+  ```go
+  func xWeightedBodyLen(body string) int {
+      total := len([]rune(body))
+      for _, m := range xURLRegexp.FindAllString(body, -1) {
+          total += xTcoURLLen - len([]rune(m))
+      }
+      return total
+  }
+  ```
+- `publish()`: both `len([]rune(p.Body))` → `xWeightedBodyLen(p.Body)`
+- New import: `"regexp"`
+
+**`social/twitter_test.go`**:
+- `TestXWeightedBodyLen`: 5 table-driven cases (no URL, short URL expands,
+  long URL shrinks, two URLs, body at exactly 280 weighted)
+- `TestPublishBodyLen_tcoWeighting`: verifies a 310-raw / 273-weighted body is
+  accepted by `publish()`; verifies a 319-raw / 282-weighted body is rejected
+- `xAPIRedirectTransport`: test helper redirecting `xAPIBase` requests to a
+  local httptest.Server
+
+**`social/CHANGELOG.md`**: [0.8.2] section prepended.
+
+### Version
+
+social v0.8.2 (patch; no exported-symbol or interface change).
+
+---
