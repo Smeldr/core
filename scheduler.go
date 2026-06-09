@@ -2,6 +2,7 @@ package smeldr
 
 import (
 	"context"
+	"log/slog"
 	"time"
 )
 
@@ -56,9 +57,10 @@ func (s *Scheduler) tick() *time.Time {
 	now := time.Now().UTC()
 	var next *time.Time
 	for _, m := range s.modules {
-		_, n, _ := m.processScheduled(s.bgCtx, now)
-		// Transient storage errors are logged by processScheduled's caller
-		// (the module); the scheduler continues running.
+		_, n, err := m.processScheduled(s.bgCtx, now)
+		if err != nil {
+			slog.Warn("smeldr: scheduler tick error", "err", err)
+		}
 		if n != nil && (next == nil || n.Before(*next)) {
 			next = n
 		}
