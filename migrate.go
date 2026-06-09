@@ -14,7 +14,11 @@ import (
 // The function only operates on SQLite databases (identified by the presence
 // of sqlite_master). For other databases, the caller must migrate manually.
 // All renames are wrapped in a single transaction when the DB supports BeginTx.
-// The function is idempotent — re-running after a partial migration is safe.
+//
+// Idempotency: if both the source (forge_*) and destination (smeldr_*) tables
+// already exist — indicating a partial migration from a previous run — that pair
+// is skipped with a warning and the remaining pairs are still processed.
+// Re-running after a full or partial migration is safe.
 func migrateLegacyTableNames(ctx context.Context, db DB) error {
 	pairs := [][2]string{
 		{"forge_audit_log", "smeldr_audit_log"},
@@ -35,12 +39,23 @@ func migrateLegacyTableNames(ctx context.Context, db DB) error {
 	// Determine which legacy tables still exist and need renaming.
 	var toRename [][2]string
 	for _, pair := range pairs {
-		var n int
+		var srcN int
 		if err := db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$1`, pair[0],
-		).Scan(&n); err == nil && n > 0 {
-			toRename = append(toRename, pair)
+		).Scan(&srcN); err != nil || srcN == 0 {
+			continue // source doesn't exist — nothing to rename
 		}
+		var dstN int
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$1`, pair[1],
+		).Scan(&dstN); err == nil && dstN > 0 {
+			// Destination already exists — partial migration from a previous run.
+			// Skip this pair rather than failing the rename.
+			slog.Warn("smeldr: legacy table migration skipped — destination already exists",
+				"src", pair[0], "dst", pair[1])
+			continue
+		}
+		toRename = append(toRename, pair)
 	}
 	if len(toRename) == 0 {
 		return nil
