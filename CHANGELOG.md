@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.36.1] — 2026-06-08
+
+### Fixed
+
+- `processScheduled`: a `Save` failure for one scheduled item no longer halts
+  processing of all remaining items in the same scheduler tick. The failing item
+  is skipped with a `slog.Warn` log and the loop continues (Amendment A137).
+- `scheduler.go`: errors returned from `processScheduled` are now captured and
+  logged; previously they were silently discarded (Amendment A137).
+
+---
+
 ## [1.36.0] — 2026-06-05
 
 ### Added

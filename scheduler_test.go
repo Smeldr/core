@@ -2,6 +2,7 @@ package smeldr
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -236,6 +237,57 @@ func TestProcessScheduled_mixedItems(t *testing.T) {
 	if !next.Equal(sooner) {
 		t.Errorf("next = %v, want soonest future = %v", *next, sooner)
 	}
+}
+
+// TestProcessScheduled_continuesAfterSaveError verifies that a Save failure for
+// one scheduled item does not prevent the remaining items from being published.
+// This covers the case where multiple posts are scheduled at the same time and
+// one fails to persist — the others must still go out.
+func TestProcessScheduled_continuesAfterSaveError(t *testing.T) {
+	inner := NewMemoryRepo[*testPost]()
+	repo := &failOnSaveRepo[*testPost]{Repository: inner, failID: ""}
+	ctx := NewBackgroundContext("example.com")
+
+	past := time.Now().UTC().Add(-1 * time.Minute)
+	var failTarget string
+	for i := range 3 {
+		p := &testPost{Node: Node{
+			ID:          NewID(),
+			Slug:        "item-" + string(rune('a'+i)),
+			Status:      Scheduled,
+			ScheduledAt: &past,
+		}}
+		if err := inner.Save(context.Background(), p); err != nil {
+			t.Fatalf("seed Save %d: %v", i, err)
+		}
+		if i == 1 {
+			failTarget = p.ID
+		}
+	}
+	repo.failID = failTarget
+
+	m := NewModule((*testPost)(nil), Repo[*testPost](repo), At("/posts"))
+	published, _, err := m.processScheduled(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("processScheduled returned error: %v", err)
+	}
+	if published != 2 {
+		t.Errorf("published = %d, want 2 (3 items minus 1 save failure)", published)
+	}
+}
+
+// failOnSaveRepo wraps a Repository and returns an error when Save is called
+// for the item whose ID matches failID.
+type failOnSaveRepo[T any] struct {
+	Repository[T]
+	failID string
+}
+
+func (r *failOnSaveRepo[T]) Save(ctx context.Context, item T) error {
+	if nodeIDOf(item) == r.failID {
+		return errors.New("injected save failure")
+	}
+	return r.Repository.Save(ctx, item)
 }
 
 // — Scheduler lifecycle ———————————————————————————————————————————————————

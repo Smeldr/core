@@ -338,3 +338,47 @@ was generated — operators using consonant-y types must update their MCP client
 tool references).
 
 ---
+
+## A137 — Scheduler save-error resilience: continue publishing remaining items
+
+**Date:** 2026-06-08
+**Status:** Agreed
+**Level:** 2 (bug fix; behaviour change in error path of `processScheduled`)
+
+### Decision
+
+When `processScheduled` called `repo.Save` on a scheduled item and the save
+failed, the function returned immediately with the error. This stopped all
+remaining scheduled items in the same tick from being published. The fix
+replaces the `return` with `slog.Warn + continue` so the failing item is
+skipped and the loop proceeds to the next item.
+
+Also fixed: `scheduler.tick()` was discarding the error return from
+`processScheduled` (comment said "logged by caller" — untrue). The error is
+now captured and logged.
+
+### Files changed
+
+- **`module.go`**: `processScheduled` — `return published, next, err` on
+  `repo.Save` failure replaced with:
+  ```go
+  slog.Warn("smeldr: scheduler failed to publish item; skipping",
+      "id", nodeIDOf(item), "err", err)
+  continue
+  ```
+- **`scheduler.go`**: `tick()` — `_, n, _ := m.processScheduled(...)` →
+  captures `err` and calls `slog.Warn("smeldr: scheduler tick error", "err", err)`
+  when non-nil. Import `"log/slog"` added.
+- **`scheduler_test.go`**: `TestProcessScheduled_continuesAfterSaveError` — seeds
+  3 scheduled items, wraps repo with `failOnSaveRepo` that injects an error for
+  item #2, asserts `published == 2` and no error returned.
+  New helper: `failOnSaveRepo[T any]` wraps `Repository[T]` and returns
+  `errors.New("injected save failure")` when `Save` is called for a specific ID.
+
+### Version
+
+core v1.36.1 (patch; no exported-symbol or interface change).
+
+Branch: `claude/scheduled-posts-conflict-m6s3kn` merged to main via `--no-ff`.
+
+---

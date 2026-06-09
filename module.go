@@ -1315,7 +1315,9 @@ func (m *Module[T]) processScheduled(ctx Context, now time.Time) (int, *time.Tim
 		setNodeTimePtr(item, "ScheduledAt", nil)
 
 		if err := m.repo.Save(ctx.Request().Context(), item); err != nil {
-			return published, next, err
+			slog.Warn("smeldr: scheduler failed to publish item; skipping",
+				"id", nodeIDOf(item), "err", err)
+			continue
 		}
 		m.notifyAfter(ctx, AfterPublish, "scheduled", item)
 		published++
