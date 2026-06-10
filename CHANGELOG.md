@@ -23,6 +23,44 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.38.0] — 2026-06-10
+
+### Added
+
+- `SchemaField`, `ContentTypeSchema` — field-descriptor and schema types for
+  the block-type schema system (T32 Phase B, A146).
+- `SchemaStore` with `FindByTypeName` and `All` — reads from
+  `smeldr_content_type_schemas`.
+- `CreateSchemaTable(db)` — creates `smeldr_content_type_schemas` (idempotent).
+- `SeedBlockTypeSchemas(db)` — seeds all 16 canonical block type schemas using
+  `INSERT OR IGNORE` (idempotent, preserves operator customisation).
+- `ValidateBlockFields(schema, fields)` — rejects unknown fields and missing
+  required fields; unschematised types are not validated (backwards compatible).
+
+---
+
+## [1.37.0] — 2026-06-10
+
+### Added
+
+- `ContentParentProvider` interface and `BlockHost()` module option (T94/A145):
+  content-type instances (Post, Story, Essay, or any developer-defined type) can
+  now host block sections and items. Pass `smeldr.BlockHost()` to `App.Content`
+  to opt a module into the block-parent registry. The MCP tools `add_section` and
+  `add_item` resolve the parent via the registry when the `parent_id` is not a
+  `DynamicNode`. `ServeBlocks` / `BlockRenderer.Render` are unchanged — the edge
+  table already accepts any parent ID. Body and sections coexist on the same
+  instance (independent data paths).
+- `App.RegisterBlockParent(p ContentParentProvider)` and `App.BlockParents()` for
+  manual registration of external providers (e.g. from companion packages).
+
+### Fixed
+
+- `integration_full_test.go`: mojibake em-dashes in G-index legend and
+  section-header comments replaced with plain hyphens (T98).
+
+---
+
 ## [1.36.2] — 2026-06-09
 
 ### Fixed

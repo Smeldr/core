@@ -73,6 +73,19 @@ func (a *App) RegisterStatsProvider(p StatsExtProvider) {
 	a.statsExtProviders = append(a.statsExtProviders, p)
 }
 
+// RegisterBlockParent registers an external [ContentParentProvider] with the
+// App. Prefer passing [BlockHost] to [App.Content] — it auto-registers the
+// module. Use this method only for external providers that are not registered
+// via [App.Content] (e.g. modules from companion packages).
+// Call before [App.Handler] or [App.Run].
+func (a *App) RegisterBlockParent(p ContentParentProvider) {
+	a.blockParents = append(a.blockParents, p)
+}
+
+// BlockParents returns the registered block-parent providers. Called by the
+// MCP server's [WithBlocks] option to populate its resolver chain.
+func (a *App) BlockParents() []ContentParentProvider { return a.blockParents }
+
 // Stats aggregates content counts across all registered modules and any external
 // providers. Each content module reports its item counts per [Status]; external
 // providers contribute their own JSON-serialisable values via [StatsExtProvider].

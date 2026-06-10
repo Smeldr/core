@@ -215,6 +215,18 @@ func (standaloneOption) isOption() {}
 // when the module has [AIDoc] enabled.
 func Standalone() Option { return standaloneOption{} }
 
+// blockHostOption marks a module as a valid parent for block sections and items.
+// Use [BlockHost] to create one.
+type blockHostOption struct{}
+
+func (blockHostOption) isOption() {}
+
+// BlockHost returns an [Option] that registers this module as a valid
+// content-instance parent in the block system (T94). When set, the MCP tools
+// add_section and add_item accept an instance ID of this content type as
+// parent_id, resolved via the module's repository.
+func BlockHost() Option { return blockHostOption{} }
+
 // apiOnlyOption signals that a module has no public HTML surface.
 // Use [APIOnly] to create one.
 type apiOnlyOption struct{}
@@ -462,6 +474,7 @@ type Module[T any] struct {
 	singleInstance bool // true when SingleInstance() option was given
 	standalone     bool // true when Standalone() option was given
 	apiOnly        bool // true when APIOnly() option was given
+	blockHost      bool // true when BlockHost() option was given
 
 	contextFunc func(Context, any) (any, error) // nil when no ContextFunc option given
 
@@ -575,6 +588,8 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 			m.standalone = true
 		case apiOnlyOption:
 			m.apiOnly = true
+		case blockHostOption:
+			m.blockHost = true
 		}
 		// repoOption[T] requires a concrete type assertion — handled separately.
 		if ro, ok := o.(repoOption[T]); ok {
@@ -707,6 +722,24 @@ func (m *Module[T]) collectStats(ctx context.Context) ContentTypeStats {
 		s.Counts = counts
 	}
 	return s
+}
+
+// blockHostEnabled implements [blockHostProvider]. Reports whether this module
+// opted into block hosting via [BlockHost].
+func (m *Module[T]) blockHostEnabled() bool { return m.blockHost }
+
+// BlockParentTypeName implements [ContentParentProvider]. Returns the lower-case
+// Go type name stored as parent_type in the content-edge table.
+func (m *Module[T]) BlockParentTypeName() string { return strings.ToLower(m.contentTypeName) }
+
+// HasBlockParent implements [ContentParentProvider]. Reports whether id exists
+// in this module's repository. Returns false (no error) when the ID is not found.
+func (m *Module[T]) HasBlockParent(ctx context.Context, id string) (bool, error) {
+	_, err := m.repo.FindByID(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // snapshotItem returns a shallow copy of the struct pointed to by item so

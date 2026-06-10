@@ -262,6 +262,7 @@ type App struct {
 	redirectDB             DB                                  // non-nil when App.Redirects(db) was called; enables MCP tools
 	statsCollectors        []statsCollector                    // modules that implement statsCollector; populated by Content()
 	statsExtProviders      []StatsExtProvider                  // external providers registered via RegisterStatsProvider
+	blockParents           []ContentParentProvider             // modules that opted into block hosting via BlockHost(); populated by Content()
 	redirectFallbackReg    bool                                // true once "/" fallback handler is registered
 	redirectManifestReg    bool                                // true once GET /.well-known/redirects.json is registered
 	redirectManifestOpts   []Option                            // options for the redirect manifest handler (e.g. ManifestAuth)
@@ -470,6 +471,9 @@ func (a *App) Content(v any, opts ...Option) {
 		}
 		if sd, ok := r.(standaloneDispatcher); ok && sd.standaloneEnabled() {
 			a.standaloneModules = append(a.standaloneModules, sd)
+		}
+		if bh, ok := r.(blockHostProvider); ok && bh.blockHostEnabled() {
+			a.blockParents = append(a.blockParents, bh)
 		}
 		if nt, ok := r.(interface{ setNavTree(*NavTree) }); ok {
 			a.navTreeModules = append(a.navTreeModules, nt)

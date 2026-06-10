@@ -12,161 +12,7 @@ Archived 2026-06-04: A116–A120 → phase3-archive.md
 Archived 2026-06-05: A121–A125 → phase4-archive.md
 Archived 2026-06-07: A126–A130 → phase5-archive.md
 Archived 2026-06-09: A131–A135 → phase6-archive.md
-
----
-
-## A136 — `list_storys` → `list_stories`: consonant-y pluralization in MCP list tool names
-
-**Date:** 2026-06-08
-**Status:** Agreed
-**Level:** 2 (patch; no exported-symbol change, no behaviour change for existing tool names)
-
-### Decision
-
-MCP list tool names for content types whose snake_case name ends in consonant+y
-(e.g. `Story` → `story`) were generated as `list_storys`, which is grammatically
-wrong. Fix: new `pluralSnake()` helper applies the standard English consonant-y →
-ies rule when forming the list tool name.
-
-### Changes
-
-**`mcp/mcp.go`** — line 343:
-`"list_" + typeSnake + "s"` → `"list_" + pluralSnake(typeSnake)`
-
-New helpers added after `snakeCase`:
-
-```go
-func pluralSnake(s string) string {
-    if len(s) >= 2 && s[len(s)-1] == 'y' && !isVowel(s[len(s)-2]) {
-        return s[:len(s)-1] + "ies"
-    }
-    return s + "s"
-}
-func isVowel(b byte) bool {
-    return b == 'a' || b == 'e' || b == 'i' || b == 'o' || b == 'u'
-}
-```
-
-**`mcp/tool.go`** — `moduleForAdminList()` reverse lookup updated to resolve
-the "ies" suffix back to the base type (stories→story) in addition to the
-existing plain-s suffix stripping (posts→post).
-
-**`mcp/mcp_test.go`** — three new tests:
-- `TestPluralSnake`: story→stories, category→categories, post→posts, key→keys,
-  essay→essays, day→days
-- `TestMCPConsonantYPlural_toolName`: registers `testStory` module, asserts
-  `defs[0].Name == "list_test_stories"`
-- `TestMCPConsonantYPlural_dispatch`: asserts `list_test_stories` dispatches
-  correctly (returns `items` field)
-
-`go test ./...` → ok `smeldr.dev/mcp` 0.195s.
-
-**`mcp/CHANGELOG.md`** — [1.17.2] section prepended.
-
-**`common/agent/skills/smeldr.md`** and **`core/skills/smeldr.md`** — version
-line updated: `mcp v1.17.1 → v1.17.2`.
-
-### Version
-
-mcp v1.17.2 (patch; `list_stories` now generated where previously `list_storys`
-was generated — operators using consonant-y types must update their MCP client
-tool references).
-
----
-
-## A137 — Scheduler save-error resilience: continue publishing remaining items
-
-**Date:** 2026-06-08
-**Status:** Agreed
-**Level:** 2 (bug fix; behaviour change in error path of `processScheduled`)
-
-### Decision
-
-When `processScheduled` called `repo.Save` on a scheduled item and the save
-failed, the function returned immediately with the error. This stopped all
-remaining scheduled items in the same tick from being published. The fix
-replaces the `return` with `slog.Warn + continue` so the failing item is
-skipped and the loop proceeds to the next item.
-
-Also fixed: `scheduler.tick()` was discarding the error return from
-`processScheduled` (comment said "logged by caller" — untrue). The error is
-now captured and logged.
-
-### Files changed
-
-- **`module.go`**: `processScheduled` — `return published, next, err` on
-  `repo.Save` failure replaced with:
-  ```go
-  slog.Warn("smeldr: scheduler failed to publish item; skipping",
-      "id", nodeIDOf(item), "err", err)
-  continue
-  ```
-- **`scheduler.go`**: `tick()` — `_, n, _ := m.processScheduled(...)` →
-  captures `err` and calls `slog.Warn("smeldr: scheduler tick error", "err", err)`
-  when non-nil. Import `"log/slog"` added.
-- **`scheduler_test.go`**: `TestProcessScheduled_continuesAfterSaveError` — seeds
-  3 scheduled items, wraps repo with `failOnSaveRepo` that injects an error for
-  item #2, asserts `published == 2` and no error returned.
-  New helper: `failOnSaveRepo[T any]` wraps `Repository[T]` and returns
-  `errors.New("injected save failure")` when `Save` is called for a specific ID.
-
-### Version
-
-core v1.36.1 (patch; no exported-symbol or interface change).
-
-Branch: `claude/scheduled-posts-conflict-m6s3kn` merged to main via `--no-ff`.
-
----
-
-## A138 — X post body length: t.co URL weighting
-
-**Date:** 2026-06-08
-**Status:** Agreed
-**Level:** 2 (bug fix; behaviour change in X post validation path)
-
-### Decision
-
-`publish()` in `social/twitter.go` counted URL characters at face value when
-validating against the 280-character X limit. The X API wraps every URL with
-t.co and counts it as exactly 23 characters regardless of actual length — a
-long UTM-tagged URL occupies one t.co slot, not 80+ characters. Our guard was
-rejecting posts the X API would accept.
-
-Fix: new `xWeightedBodyLen(body string) int` helper that replaces each URL's
-rune count with `xTcoURLLen` (23). Both uses of `len([]rune(p.Body))` in
-`publish()` are replaced with `xWeightedBodyLen(p.Body)`.
-
-### Files changed
-
-**`social/twitter.go`**:
-- New constant `xTcoURLLen = 23` alongside `xMaxBodyLength`
-- New package-level var `xURLRegexp = regexp.MustCompile("https?://\\S+")`
-- New helper `xWeightedBodyLen(body string) int`:
-  ```go
-  func xWeightedBodyLen(body string) int {
-      total := len([]rune(body))
-      for _, m := range xURLRegexp.FindAllString(body, -1) {
-          total += xTcoURLLen - len([]rune(m))
-      }
-      return total
-  }
-  ```
-- `publish()`: both `len([]rune(p.Body))` → `xWeightedBodyLen(p.Body)`
-- New import: `"regexp"`
-
-**`social/twitter_test.go`**:
-- `TestXWeightedBodyLen`: 5 table-driven cases (no URL, short URL expands,
-  long URL shrinks, two URLs, body at exactly 280 weighted)
-- `TestPublishBodyLen_tcoWeighting`: verifies a 310-raw / 273-weighted body is
-  accepted by `publish()`; verifies a 319-raw / 282-weighted body is rejected
-- `xAPIRedirectTransport`: test helper redirecting `xAPIBase` requests to a
-  local httptest.Server
-
-**`social/CHANGELOG.md`**: [0.8.2] section prepended.
-
-### Version
-
-social v0.8.2 (patch; no exported-symbol or interface change).
+Archived 2026-06-10: A136–A138 → phase7-archive.md
 
 ---
 
@@ -285,3 +131,165 @@ No signature or exported-symbol change.
 social v0.8.4 (patch; no exported-symbol or interface change).
 
 ---
+
+## A142 — X OAuth scope configurable (social v0.8.5)
+
+**Date:** 2026-06-10
+**Status:** Agreed
+**Level:** 1 (isolated change in social package; no exported-symbol change)
+
+### Decision
+
+`xConfig` had no `Scopes` field — the OAuth 2.0 scope string was hardcoded in `authURL()` omitting `media.write`. This caused 403 on every INIT request to the X v2 media upload endpoint. `PlatformConfig.Scopes` already existed and was persisted, but was never threaded into `xConfig`.
+
+Fix: add `Scopes []string` to `xConfig`; add `effectiveScope()` method returning default (with `media.write`) when empty or joined custom scopes; update `authURL()` to call `effectiveScope()`; thread `cfg.Scopes` in both `xConfig` construction sites; update `scope` field description in `config_mcp.go`.
+
+### Files changed
+
+- **`social/twitter.go`**: `Scopes []string` on `xConfig`; `effectiveScope()` method; `authURL()` uses it; `"strings"` import.
+- **`social/social.go`**: `Scopes: dbCfg.Scopes` in `New()` and `reloadPlatformClient()`.
+- **`social/config_mcp.go`**: `scope` description updated to cover both X and Mastodon defaults.
+- **`social/twitter_test.go`**: `TestEffectiveScope` (2 cases).
+
+### Version
+
+social v0.8.5 (patch; no exported-symbol or interface change).
+
+---
+
+## A143 — Streamable HTTP SSE response mode (mcp v1.18.0)
+
+**Date:** 2026-06-10
+**Status:** Agreed
+**Level:** 1 (isolated change in mcp/transport.go; no exported-symbol change)
+
+### Decision
+
+`messageHandler` always responded with `Content-Type: application/json`, ignoring `Accept`. MCP 2025-11-25 streamable HTTP spec requires that when a client sends `Accept: text/event-stream` on `POST /mcp`, the server responds with `Content-Type: text/event-stream` and streams the JSON-RPC response as a single SSE event. Claude.ai web requires this for OAuth-authenticated MCP connections.
+
+Fix: after dispatching via `s.handle()`, branch on `strings.Contains(r.Header.Get("Accept"), "text/event-stream")`. SSE path: `text/event-stream` header + `data: <json>\n\n` + flush. JSON path (default): unchanged.
+
+### Files changed
+
+- **`mcp/transport.go`**: last three lines of `messageHandler` replaced with Accept-based branch.
+- **`mcp/mcp_test.go`**: `TestMessageHandler_AcceptSSE_ReturnsEventStream` + `TestMessageHandler_NoAccept_ReturnsJSON`.
+
+### Version
+
+mcp v1.18.0 (minor; new observable behaviour).
+
+---
+
+## A144 — media StatsExtProvider (media v1.5.0)
+
+**Date:** 2026-06-10
+**Status:** Agreed
+**Level:** 2 (new exported-interface implementation; new file)
+
+### Decision
+
+`smeldr.dev/media` deferred implementing `StatsExtProvider` when the interface was introduced in core v1.35.0 (A126). The `forge_media` table has `mime_type` and `size_bytes` columns — everything needed.
+
+Fix: add `stats.go` to media package implementing `StatsKey() string` (returns `"media"`) and `ProvideStats(ctx) (map[string]any, error)` on `*Server`. Two queries: `COUNT(*) + COALESCE(SUM(size_bytes), 0)` for `file_count`/`total_bytes`; `GROUP BY mime_type` for `by_type` breakdown.
+
+### Files changed
+
+- **`media/stats.go`**: NEW — `StatsExtProvider` implementation on `*Server`.
+- **`media/stats_test.go`**: NEW — `TestProvideStats` + `TestProvideStats_empty`.
+
+### Version
+
+media v1.5.0 (minor; new exported interface implementation).
+
+---
+
+## A145 — T94: content-type instances as block-section parents (core v1.37.0 · mcp v1.19.0)
+
+**Date:** 2026-06-10
+**Status:** Agreed
+**Level:** 2 (new exported interface + option; no breaking changes)
+
+### Decision
+
+The block system (T32) only accepted `DynamicNode` IDs as `parent_id` in `add_section`/`add_item`. Content-type instances (Post, Essay, custom types) could not host block sections without being stored as DynamicNodes — defeating the purpose of the native content type.
+
+Fix: introduce `ContentParentProvider` interface and `BlockHost()` option. Modules opt in via `app.Content(m, smeldr.BlockHost())`. The MCP `resolveParentType()` helper tries the DynamicNode repo first; if not found, iterates registered `ContentParentProvider` instances; returns -32602 if no provider claims the ID. Body and sections coexist as independent data paths (body in the module's own table; sections in `smeldr_content_edges`).
+
+Ride-along T98: mojibake em-dashes in `integration_full_test.go` G-index legend and section headers replaced with plain hyphens.
+
+### Files changed (core)
+
+- **`block_host.go`**: NEW — `ContentParentProvider` + `blockHostProvider` interfaces.
+- **`block_host_test.go`**: NEW — 6 unit tests.
+- **`forge.go`**: `blockParents []ContentParentProvider` on App; `blockHostProvider` check in `Content()`.
+- **`module.go`**: `BlockHost() Option` + `blockHost bool` field + `blockHostEnabled()`/`BlockParentTypeName()`/`HasBlockParent()` methods on `Module[T]`.
+- **`stats.go`**: `RegisterBlockParent()` + `BlockParents()` on App.
+- **`integration_full_test.go`**: T98 mojibake fix.
+- **`CHANGELOG.md`**: `[1.37.0]` entry.
+- **`DECISIONS.md`**: A145 index row.
+
+### Files changed (mcp)
+
+- **`edge_tools.go`**: `resolveParentType()` helper + updated `addEdge()` + updated tool description.
+- **`edge_tools_test.go`**: 3 new tests (ContentInstance parent, unknown parent, DynamicNode unaffected).
+- **`mcp.go`**: `blockParents []smeldr.ContentParentProvider` on Server; `WithBlocks()` populates from `app.BlockParents()`.
+- **`CHANGELOG.md`**: `[1.19.0]` entry.
+
+### Version
+
+core v1.37.0 (minor; new exported symbols: `ContentParentProvider`, `BlockHost`, `RegisterBlockParent`, `BlockParents`) · mcp v1.19.0 (minor; `add_section`/`add_item` accept content-instance parents).
+
+---
+
+## A146 — T97: Schema-defined block types (core v1.38.0 · mcp v1.20.0)
+
+**Date:** 2026-06-10
+**Status:** Agreed
+**Level:** 1 (new exported symbols, new MCP tools; additive — no breaking changes)
+
+### Decision
+
+Block types in the T32 system lacked a machine-readable field specification. Content authors using `create_node` had no way to discover what fields a type expected, and the MCP layer could not validate calls or generate typed shorthand tools. T97 introduces a schema layer addressing both gaps without breaking any existing callers.
+
+### Core: `schemas.go` (new)
+
+**Types**: `SchemaField` (`Name`, `Type`, `Required`, `Format`, `Description` — JSON Schema type names); `ContentTypeSchema` (`ID`, `TypeName`, `Label`, `Fields json.RawMessage`, `CreatedAt`, `UpdatedAt`).
+
+**`SchemaStore`** — `FindByTypeName(ctx, typeName)` (returns `ErrNotFound` when absent) and `All(ctx)` (all schemas ordered by `type_name`).
+
+**`CreateSchemaTable(db)`** — `CREATE TABLE IF NOT EXISTS smeldr_content_type_schemas`. Idempotent. Called separately from `CreateBlockTables` by the operator at startup.
+
+**`SeedBlockTypeSchemas(db)`** — `INSERT OR IGNORE` seeds 16 canonical block types: `content_block`, `image`, `link_item`, `html_block`, `quote`, `contact_card`, `faq_item`, `content_grid`, `gallery`, `link_collection`, `html_grid`, `faq`, `team`, `hero`, `footer`, `content_list`. Idempotent. Fields column stored as BLOB (`json.RawMessage`, not `string`) for SQLite driver scan compatibility.
+
+**`ValidateBlockFields(schema, fields)`** — rejects unknown fields (`"unknown field %q for type %q"`) and missing required fields (`"required field %q missing for type %q"`). `ErrNotFound` on schema lookup → pass-through (backwards compat). Nil/empty fields treated as `{}`.
+
+### MCP: `schema_tools.go` (new)
+
+**`get_content_type_schema(type_name)`** — returns `{type_name, label, fields: []SchemaField}` for one type; -32602 when not found.
+**`list_content_type_schemas()`** — returns `{items: [{type_name, label}]}` for all 16 types. Both tools require Author role.
+
+### MCP: `typed_tools.go` (new)
+
+**`generateTypedTools(schemas)`** — generates one `create_<type_name>` tool per schema at startup. Named, typed parameters derived from field definitions; required fields mapped to JSON Schema `"required"` array.
+
+**`handleTypedTool(ctx, name, args)`** — `args` IS the fields dict (not nested under `"fields"`); marshals, validates against schema, saves `DynamicNode`. `typeName = strings.TrimPrefix(name, "create_")`. Intercepted before `parseToolName + moduleForType` to prevent "unknown tool" fallthrough.
+
+### MCP: `mcp.go` + `node_tools.go` + `tool.go`
+
+`Server` gains `schemaStore`, `typedTools`, `typedToolSet`. `WithBlocks()` extended to construct `SchemaStore` and generate typed tools at startup; schema table missing → graceful degradation (typed tools nil, no error).
+
+`create_node` and `update_node` validate fields against schema when `schemaStore != nil`; `ErrNotFound` → pass-through (backwards compat for unregistered types).
+
+### Tests
+
+`schemas_test.go` (core, 10 tests): idempotency, 16-type seed verification, `FindByTypeName`/`NotFound`, `ValidateBlockFields` accept/reject/empty. `schema_tools_test.go` (mcp, 9 tests): schema discovery tools, typed tool presence at startup, create via typed tool, missing-required rejection, `create_node` schema validation pass/fail/passthrough.
+
+### Design decisions
+
+**Supplement, not replace**: `create_node` unchanged and never removed. Schema validation is additive — previously-valid calls continue to work. Typed tools are the preferred path but not the only one.
+
+**Seed-only for T97**: No MCP tool to write/modify schemas in this release. Schema writability is T55/T49 territory.
+
+### Version
+
+core v1.38.0 (minor — new exported symbols: `SchemaField`, `ContentTypeSchema`, `SchemaStore`, `NewSchemaStore`, `CreateSchemaTable`, `SeedBlockTypeSchemas`, `ValidateBlockFields`) · mcp v1.20.0 (minor — new tools: `get_content_type_schema`, `list_content_type_schemas`, `create_<type_name>` × 16).
