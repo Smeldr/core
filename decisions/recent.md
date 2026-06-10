@@ -241,3 +241,47 @@ Fix: targeted logging in `uploadXMedia` and `publish`:
 social v0.8.3 (patch; no exported-symbol or interface change).
 
 ---
+
+## A141 — X media upload: INIT/APPEND/FINALIZE chunked protocol
+
+**Date:** 2026-06-10
+**Status:** Agreed
+**Level:** 1 (isolated fix in social package; no exported-symbol change)
+
+### Decision
+
+`uploadXMedia` in `social/twitter.go` sent a single multipart POST to the X v2
+`/2/media/upload` endpoint without a `command` field. X's gateway rejects any
+request missing `command` with a generic `{"title":"Forbidden","type":"about:blank"}`
+403 and no `X-Request-Id` header — the request never reaches X's API handler,
+making the failure undebuggable. This explains why all X media posts failed with
+403 despite valid user tokens.
+
+Fix: rewrite `uploadXMedia` to perform the three mandatory steps in sequence:
+1. **INIT** — `command=INIT`, `media_type`, `total_bytes`, `media_category=tweet_image`
+   → returns `media_id` in `{"data":{"id":"..."}}`.
+2. **APPEND** — `command=APPEND`, `media_id`, `segment_index=0`, binary image bytes
+   as `media` part → expects any 2xx (typically 204 No Content).
+3. **FINALIZE** — `command=FINALIZE`, `media_id` → confirms upload; returns same
+   response structure as INIT.
+
+For `tweet_image`, processing is synchronous — no `processing_info` polling needed
+after FINALIZE. Existing `slog.Debug`/`slog.Warn` calls (A140) applied to each of
+the three HTTP calls. `strconv` import added for `strconv.Itoa(len(imgBytes))`.
+No signature or exported-symbol change.
+
+### Files changed
+
+- **`social/twitter.go`**: `uploadXMedia` rewritten with three-step protocol.
+  `strconv` import added. Comment updated to describe chunked protocol.
+- **`social/twitter_test.go`**: `TestUploadXMedia` happy-path handler updated to
+  serve three distinct commands (INIT→201, APPEND→204, FINALIZE→200) using an
+  `atomic.Int32` call counter; asserts all INIT/APPEND/FINALIZE field values.
+  Two new error sub-cases added: "APPEND 403 returns terminal publishError" and
+  "FINALIZE 403 returns terminal publishError".
+
+### Version
+
+social v0.8.4 (patch; no exported-symbol or interface change).
+
+---
