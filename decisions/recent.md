@@ -293,3 +293,52 @@ Block types in the T32 system lacked a machine-readable field specification. Con
 ### Version
 
 core v1.38.0 (minor — new exported symbols: `SchemaField`, `ContentTypeSchema`, `SchemaStore`, `NewSchemaStore`, `CreateSchemaTable`, `SeedBlockTypeSchemas`, `ValidateBlockFields`) · mcp v1.20.0 (minor — new tools: `get_content_type_schema`, `list_content_type_schemas`, `create_<type_name>` × 16).
+
+---
+
+## A147 — T102: DB table rename forge_* → smeldr_* in standalone modules (oauth v0.3.0 · media v1.6.0 · social v0.9.0)
+
+**Date:** 2026-06-11
+**Status:** Agreed
+**Level:** 2 (behaviour change at startup; no API changes; existing data preserved)
+
+### Decision
+
+Three standalone modules (oauth, media, social) retained their original `forge_*` table names after the T100 package-rename wave. T102 completes the storage-layer rename by adding an idempotent startup migration to each module, matching the pattern established in core A109.
+
+### Pattern (identical to core `migrate.go`)
+
+Each module gains a `migrate.go` with `migrateLegacyTableNames(ctx, db)`:
+
+1. **SQLite probe** — `SELECT COUNT(*) FROM sqlite_master`. Returns nil silently for non-SQLite databases.
+2. **Per-pair source check** — skip if source (`forge_*`) is absent (fresh install or already migrated).
+3. **Per-pair destination check** — if destination (`smeldr_*`) already exists, log `slog.Warn` and skip rather than fail (partial-migration recovery).
+4. **Single transaction** — all renames execute in `BeginTx` when the driver supports it; rollback on any error.
+5. **`slog.Info` per rename** — operator-visible record of each table rename.
+
+Migration runs as the first statement in the module's setup function, before any `CREATE TABLE IF NOT EXISTS`.
+
+### Table map
+
+| Module | Tables renamed |
+|--------|----------------|
+| oauth | `forge_oauth_codes`, `forge_oauth_tokens`, `forge_oauth_refresh_tokens` → `smeldr_oauth_*` |
+| media | `forge_media` → `smeldr_media` |
+| social | `forge_social_credentials`, `forge_social_posts`, `forge_social_oauth_states`, `forge_social_delivery_log`, `forge_social_route_jobs`, `forge_social_route_log`, `forge_social_publication_schedules`, `forge_social_platform_config` → `smeldr_social_*` |
+
+### social: existing column migrations updated
+
+Two pre-existing `ALTER TABLE` column migrations in `social/schema.go` referenced `forge_social_credentials` and `forge_social_oauth_states`. These are updated to `smeldr_social_*` — they now run after the rename, so the tables already carry the new names.
+
+### Tests
+
+Three scenarios per module (9 tests total):
+- **Fresh DB**: tables created directly as `smeldr_*`; no `forge_*` ever present.
+- **Existing forge_* DB**: all legacy tables present at startup; verified renamed after `CreateTables`/`NewSQLiteStore`.
+- **Idempotent re-run**: migration called twice on already-renamed DB; must not error.
+
+Existing `TestMigration_ActorIDColumn` in social updated: it creates `forge_social_credentials` (old schema, no `actor_id`) to simulate a v0.1.0 database; after `CreateTables` the table is renamed then column-migrated; the INSERT assertion updated to reference `smeldr_social_credentials`.
+
+### Version
+
+oauth v0.3.0 (minor) · media v1.6.0 (minor) · social v0.9.0 (minor).
