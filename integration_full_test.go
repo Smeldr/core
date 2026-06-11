@@ -1,4 +1,4 @@
-kage smeldr
+package smeldr
 
 // integration_full_test.go - cross-milestone integration suite (M1-M5).
 //
