@@ -168,10 +168,10 @@ type ScriptTag struct {
 //
 // Assets are emitted in order: preconnect → stylesheets → links → scripts → RawHead.
 type HeadAssets struct {
-	Preconnect  []string       // <link rel="preconnect" href="…">
-	Stylesheets []string       // <link rel="stylesheet" href="…">
-	Links       []HeadLink     // any <link> element — icons, rel="me", rel="manifest", etc.
-	Scripts     []ScriptTag    // <script …>
+	Preconnect  []string    // <link rel="preconnect" href="…">
+	Stylesheets []string    // <link rel="stylesheet" href="…">
+	Links       []HeadLink  // any <link> element — icons, rel="me", rel="manifest", etc.
+	Scripts     []ScriptTag // <script …>
 	// RawHead is injected verbatim into <head> after all other HeadAssets output.
 	// Use for analytics snippets, preload hints, or any custom head HTML that does
 	// not fit the structured fields above. Typed as [html/template.HTML] — the

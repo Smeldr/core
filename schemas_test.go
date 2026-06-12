@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	smeldr "smeldr.dev/core"
 	_ "modernc.org/sqlite"
+	smeldr "smeldr.dev/core"
 )
 
 func newSchemaDB(t *testing.T) *sql.DB {

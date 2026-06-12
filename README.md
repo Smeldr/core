@@ -3,6 +3,8 @@
 A Go framework for content-driven applications. Zero runtime dependencies. AI-native by default.
 
 [![Go Reference](https://pkg.go.dev/badge/smeldr.dev/core.svg)](https://pkg.go.dev/smeldr.dev/core)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Smeldr/core)](https://goreportcard.com/report/github.com/Smeldr/core)
+[![codecov](https://codecov.io/gh/Smeldr/core/graph/badge.svg)](https://codecov.io/gh/Smeldr/core)
 
 **v1.38.0 — stable.** Public APIs are stable within v1.
 See [CHANGELOG.md](CHANGELOG.md).

@@ -173,6 +173,6 @@ func TemplateFuncMap() template.FuncMap {
 		"smeldr_excerpt":      smeldrExcerpt,
 		"smeldr_csrf_token":   smeldrCSRFToken,
 		"smeldr_llms_entries": smeldrLLMsEntries,
-		"markdown":           renderMarkdown,
+		"markdown":            renderMarkdown,
 	}
 }
