@@ -33,7 +33,7 @@ type AuthFunc interface {
 
 // productionWarner is an optional capability interface implemented by AuthFunc
 // values that should emit a warning when used outside of development.
-// Step 11 (forge.go) type-asserts each registered AuthFunc to this interface.
+// Step 11 (smeldr.go) type-asserts each registered AuthFunc to this interface.
 type productionWarner interface {
 	warnIfProduction(w io.Writer)
 }

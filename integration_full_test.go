@@ -2596,7 +2596,7 @@ type g26Post struct {
 // TestFull_G26_SignalEnqueue verifies that publishing a post via the MCP
 // interface causes injectWebhookHooks to enqueue a delivery job for any
 // active endpoint subscribed to the relevant event. This exercises the full
-// App -> module.go afterHook -> forge.go injectWebhookHooks -> outbound.go
+// App -> module.go afterHook -> smeldr.go injectWebhookHooks -> outbound.go
 // Enqueue pipeline (M11 + M1 cross-milestone).
 func TestFull_G26_SignalEnqueue(t *testing.T) {
 	db := newSQLiteDB(t)
@@ -2920,7 +2920,7 @@ type g30Post struct {
 
 // TestFull_G30_MCPScheduleWebhook verifies the cross-milestone path:
 // MCPSchedule (M10 MCP interface) -> AfterSchedule signal (A87/M11 signals.go)
-// -> injectWebhookHooks (M11 forge.go) -> Enqueue. This proves that scheduling
+// -> injectWebhookHooks (M11 smeldr.go) -> Enqueue. This proves that scheduling
 // a post via MCP triggers the correct webhook event "g30post.scheduled".
 func TestFull_G30_MCPScheduleWebhook(t *testing.T) {
 	db := newSQLiteDB(t)

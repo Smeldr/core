@@ -97,7 +97,7 @@ func (c *contextImpl) Response() http.ResponseWriter { return c.w }
 //   - Reads the authenticated [User] from the request's context (set by auth
 //     middleware); uses [GuestUser] if absent
 //   - Sets Locale to "en" (i18n deferred to v2)
-//   - Sets SiteName to "" (wired in forge.go, Step 11)
+//   - Sets SiteName to "" (wired in smeldr.go, Step 11)
 func ContextFrom(w http.ResponseWriter, r *http.Request) Context {
 	// Determine request ID: response header > request header > generated.
 	rid := w.Header().Get("X-Request-ID")

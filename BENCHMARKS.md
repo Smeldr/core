@@ -30,7 +30,7 @@ All benchmarks live in `*_test.go` files in the root `smeldr` package.
 | **`BenchmarkHTMLTemplateRender`** | M4 | `benchmarks_test.go` | **Template render time** — full show-page pipeline: content-type negotiation → repo lookup → `TemplateData[T]` assembly → `html/template` execution |
 | `BenchmarkForgeMarkdown` | M4 | `templatehelpers_test.go` | Markdown→HTML rendering via `smeldr_markdown` template helper |
 | **`BenchmarkModuleRequest`** | M4 | `module_test.go` | **Request throughput (cached)** — module show-handler with warm LRU cache; measures cache-hit path cost |
-| **`BenchmarkApp_Handler`** | M2/M4 | `forge_test.go` | **Request throughput (full stack)** — end-to-end HTTP through App middleware + mux + module list handler |
+| **`BenchmarkApp_Handler`** | M2/M4 | `smeldr_test.go` | **Request throughput (full stack)** — end-to-end HTTP through App middleware + mux + module list handler |
 | **`BenchmarkInMemoryCacheHIT`** | M1 | `middleware_test.go` | **Cache hit rate cost** — full middleware cache `ServeHTTP` on a warm entry; baseline for cache-layer overhead |
 | `BenchmarkConsentFor_granted` | M6 | `benchmarks_test.go` | Cookie consent check — cost on every `SetCookieIfConsented` call |
 | `BenchmarkRedirectStore_Get_exact` | M7 | `benchmarks_test.go` | O(1) exact-match lookup in a 100-entry redirect table |
