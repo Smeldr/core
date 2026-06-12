@@ -342,3 +342,23 @@ Existing `TestMigration_ActorIDColumn` in social updated: it creates `forge_soci
 ### Version
 
 oauth v0.3.0 (minor) · media v1.6.0 (minor) · social v0.9.0 (minor).
+
+---
+
+## A148 — Security: bump jackc/pgx/v5 v5.8.0 → v5.9.2 (pgx/v0.1.1)
+
+**Date:** 2026-06-11
+**Status:** Agreed
+**Level:** 1 (dependency bump; no API or behaviour change)
+
+### Decision
+
+Two Dependabot security alerts (1 Critical, 1 Low severity) were reported against
+`github.com/jackc/pgx/v5 v5.8.0` in the `smeldr.dev/core/pgx` submodule.
+
+Bump `github.com/jackc/pgx/v5` to v5.9.2 via `go get` + `go mod tidy`. No code
+changes required. All existing integration tests pass.
+
+### Version
+
+pgx/v0.1.1 (patch — dependency bump only).
