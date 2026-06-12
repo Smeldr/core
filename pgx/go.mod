@@ -1,10 +1,10 @@
 module smeldr.dev/core/pgx
 
-go 1.26.3
+go 1.26.4
 
 require (
 	github.com/jackc/pgx/v5 v5.9.2
-	smeldr.dev/core v1.29.0
+	smeldr.dev/core v1.38.0
 )
 
 require (

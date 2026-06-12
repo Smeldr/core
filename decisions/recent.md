@@ -362,3 +362,22 @@ changes required. All existing integration tests pass.
 ### Version
 
 pgx/v0.1.1 (patch — dependency bump only).
+
+---
+
+## A149 — Dependency alignment: bump smeldr.dev/core v1.29.0 → v1.38.0 in pgx (pgx/v0.1.2)
+
+**Date:** 2026-06-12
+**Status:** Agreed
+**Level:** 1 (dependency bump; no API or behaviour change)
+
+### Decision
+
+`smeldr.dev/core/pgx` had its minimum `smeldr.dev/core` pinned at v1.29.0, nine
+minor versions behind the current release (v1.38.0). Bump via `go get` + `go mod tidy`.
+No code changes — the pgx integration adapter has no imports that changed between
+v1.29.0 and v1.38.0. Tests green.
+
+### Version
+
+pgx/v0.1.2 (patch — dependency alignment only).
