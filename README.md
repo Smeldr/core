@@ -4,20 +4,8 @@ A Go framework for content-driven applications. Zero runtime dependencies. AI-na
 
 [![Go Reference](https://pkg.go.dev/badge/smeldr.dev/core.svg)](https://pkg.go.dev/smeldr.dev/core)
 
-**v1.36.2 — stable.** Public APIs are intended to be stable within v1. Breaking changes may still occur in Phase 2 where the architecture demands it. See the stability map below. See [CHANGELOG.md](CHANGELOG.md).
-
-**Status: Phase 2 — active production dogfooding.**
-Smeldr powers smeldr.dev and is under active development. The core architecture is in place; APIs may still evolve as dogfooding reveals better shapes. Use it today if you are comfortable following changes. The stability map below shows which areas are settled and which are still moving.
-
-**Stability map**
-
-| Tier | Areas |
-|------|-------|
-| Stable | Content lifecycle, module routing, MemoryRepo, SEO / feed / AI index endpoints, auth |
-| Dogfooding | SQLRepo, webhooks, audit trail, token management, log capture |
-| Experimental | smeldr.dev/social, smeldr.dev/agent, some MCP write workflows |
-
-Breaking changes are documented in [CHANGELOG.md](CHANGELOG.md).
+**v1.38.0 — stable.** Public APIs are stable within v1.
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## 30-second start
 
