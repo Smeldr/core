@@ -1,11 +1,28 @@
 ﻿# Smeldr
 
-A Go framework for content-driven applications. Zero runtime dependencies. AI-native by default.
+Content-driven backend for agents, readers, and APIs.
 
 [![Go Reference](https://pkg.go.dev/badge/smeldr.dev/core.svg)](https://pkg.go.dev/smeldr.dev/core)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Smeldr/core)](https://goreportcard.com/report/github.com/Smeldr/core)
 [![codecov](https://codecov.io/gh/Smeldr/core/graph/badge.svg)](https://codecov.io/gh/Smeldr/core)
 [![Version](https://img.shields.io/github/v/release/smeldr/core?filter=v*&color=%2341A300)](https://github.com/smeldr/core/releases/latest)
+
+Smeldr has MCP as primary interface.
+Go. Zero runtime dependencies.
+
+Start a chat with your favorite agent, create content together and then...
+
+...build and publish websites. Edit sections, upload images and manage access directly in chat. Hook up your workflow states to AI actions.
+
+...schedule, change, delete posts on X, Mastodon or LinkedIn
+
+...build apps and manage data and automate workflows
+
+...manage multiple agents to react to signals with the built-in agent runtime
+
+Or coordinate your entire pipeline and automated workflow, AI actions and human review included.
+
+Directly from chat.
 
 **v1.38.0 — stable.** Public APIs are stable within v1.
 See [CHANGELOG.md](CHANGELOG.md).
