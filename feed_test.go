@@ -398,3 +398,24 @@ func TestFeedDefaultTitle(t *testing.T) {
 		}
 	})
 }
+
+func TestGuessMIMEType(t *testing.T) {
+	cases := []struct {
+		url  string
+		want string
+	}{
+		{"/img/photo.png", "image/png"},
+		{"/img/anim.gif", "image/gif"},
+		{"/img/logo.webp", "image/webp"},
+		{"/img/icon.svg", "image/svg+xml"},
+		{"/img/photo.jpg", "image/jpeg"},
+		{"/img/unknown.bmp", "image/jpeg"}, // default
+		{"/img/photo.PNG", "image/png"},    // case-insensitive
+		{"/img/photo.png?v=2", "image/png"}, // query stripped
+	}
+	for _, tc := range cases {
+		if got := guessMIMEType(tc.url); got != tc.want {
+			t.Errorf("guessMIMEType(%q) = %q, want %q", tc.url, got, tc.want)
+		}
+	}
+}

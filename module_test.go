@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -920,4 +922,1181 @@ func TestModule_previewToken(t *testing.T) {
 			t.Errorf("got %d, want 404 (archived must not be previewable)", w.Code)
 		}
 	})
+}
+
+// — singleInstanceHandler —————————————————————————————————————————————————
+
+func TestModule_singleInstanceHandler_found(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	seedPost(t, repo, "Config Page", Published)
+
+	m := newTestModule(repo, SingleInstance())
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/testposts", nil)
+	m.singleInstanceHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestModule_singleInstanceHandler_empty(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := newTestModule(repo, SingleInstance())
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/testposts", nil)
+	m.singleInstanceHandler(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (empty repo)", w.Code)
+	}
+}
+
+// — updateHandler / deleteHandler notFound ————————————————————————————————
+
+func TestModule_updateHandler_notFound(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := newTestModule(repo)
+
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/testposts/missing", strings.NewReader(`{"Title":"x"}`)), editorUser())
+	r.SetPathValue("slug", "missing")
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestModule_deleteHandler_notFound(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := newTestModule(repo)
+
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodDelete, "/testposts/missing", nil), editorUser())
+	r.SetPathValue("slug", "missing")
+	m.deleteHandler(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+// — Middleware applied in Register ————————————————————————————————————————
+
+func TestModule_Middleware_appliedOnRegister(t *testing.T) {
+	var called atomic.Bool
+	mw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called.Store(true)
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	repo := NewMemoryRepo[*testPost]()
+	seedPost(t, repo, "Hello", Published)
+	m := newTestModule(repo, Middleware(mw))
+
+	mux := http.NewServeMux()
+	m.Register(mux)
+
+	// POST /testposts triggers the create handler (wrapped with middleware).
+	body := strings.NewReader(`{"Title":"New Post"}`)
+	req := withUser(httptest.NewRequest(http.MethodPost, "/testposts", body), editorUser())
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if !called.Load() {
+		t.Error("middleware was not called after Register")
+	}
+}
+
+// — singleInstanceHandler extended coverage ——————————————————————————————————
+
+func TestModule_singleInstanceHandler_cacheHIT(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	seedPost(t, repo, "Config Page", Published)
+
+	m := newTestModule(repo, SingleInstance(), Cache(time.Minute))
+
+	// First request: MISS — populates cache.
+	w1 := httptest.NewRecorder()
+	r1 := httptest.NewRequest(http.MethodGet, "/testposts", nil)
+	m.singleInstanceHandler(w1, r1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("first request status = %d, want 200", w1.Code)
+	}
+
+	// Second request: HIT — served from cache (covers the early-return branch).
+	w2 := httptest.NewRecorder()
+	r2 := httptest.NewRequest(http.MethodGet, "/testposts", nil)
+	m.singleInstanceHandler(w2, r2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("second request status = %d, want 200", w2.Code)
+	}
+	if w2.Header().Get("X-Cache") != "HIT" {
+		t.Errorf("X-Cache = %q, want HIT", w2.Header().Get("X-Cache"))
+	}
+}
+
+func TestModule_singleInstanceHandler_htmlAccept(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	seedPost(t, repo, "Config Page", Published)
+
+	m := newTestModule(repo, SingleInstance())
+	m.neg.html = true // enables text/html content negotiation
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/testposts", nil)
+	r.Header.Set("Accept", "text/html")
+	m.singleInstanceHandler(w, r)
+
+	// No template set → 406 Not Acceptable, but the HTML branch was entered.
+	if w.Code != http.StatusNotAcceptable {
+		t.Errorf("status = %d, want 406 (no template)", w.Code)
+	}
+}
+
+func TestModule_singleInstanceHandler_apiOnly_htmlRequest(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	seedPost(t, repo, "Config Page", Published)
+
+	m := newTestModule(repo, SingleInstance())
+	m.apiOnly = true
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/testposts", nil)
+	r.Header.Set("Accept", "text/html")
+	m.singleInstanceHandler(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for apiOnly + HTML accept", w.Code)
+	}
+}
+
+func TestModule_singleInstanceHandler_previewBypass(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	draft := seedPost(t, repo, "Draft Config", Draft)
+
+	const prefix = "/testposts"
+	m := newTestModule(repo, SingleInstance())
+	m.secret = []byte(testSecret)
+	m.prefix = prefix
+
+	token := encodePreviewToken(prefix, draft.Slug, []byte(testSecret), time.Hour)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, prefix+"?preview="+token, nil)
+	m.singleInstanceHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (preview bypass)", w.Code)
+	}
+}
+
+// — createHandler extended coverage ——————————————————————————————————————————
+
+func TestModule_createHandler_badJSON(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := newTestModule(repo)
+
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPost, "/testposts", strings.NewReader("not-json")), editorUser())
+	m.createHandler(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// — updateHandler extended coverage ——————————————————————————————————————————
+
+func TestModule_updateHandler_badJSON(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	p := seedPost(t, repo, "My Post", Published)
+	m := newTestModule(repo)
+
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/testposts/"+p.Slug, strings.NewReader("not-json")), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestModule_updateHandler_unpublish(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	p := seedPost(t, repo, "Live Post", Published)
+	m := newTestModule(repo)
+
+	update := map[string]any{"Title": p.Title, "Status": string(Draft)}
+	body, _ := json.Marshal(update)
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/testposts/"+p.Slug, bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	saved, _ := repo.FindBySlug(context.Background(), p.Slug)
+	if nodeStatusOf(saved) != Draft {
+		t.Errorf("status = %q, want Draft after unpublish", nodeStatusOf(saved))
+	}
+}
+
+// — Register() extended coverage ——————————————————————————————————————————————
+
+func TestModule_Register_singleInstance_withMiddleware(t *testing.T) {
+	var called atomic.Bool
+	mw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called.Store(true)
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	repo := NewMemoryRepo[*testPost]()
+	seedPost(t, repo, "Config Page", Published)
+	m := newTestModule(repo, SingleInstance(), Middleware(mw))
+
+	mux := http.NewServeMux()
+	m.Register(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/testposts", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if !called.Load() {
+		t.Error("middleware was not called for singleInstance route")
+	}
+}
+
+func TestModule_Register_sitemapHandler_nilStore(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := NewModule((*testPost)(nil), Repo(repo), At("/posts"), SitemapConfig{Priority: 0.8})
+
+	mux := http.NewServeMux()
+	m.Register(mux)
+
+	// sitemapStore is nil (not injected by App.Content) → handler returns 500.
+	r := httptest.NewRequest(http.MethodGet, "/posts/sitemap.xml", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 (nil sitemapStore)", w.Code)
+	}
+}
+
+func TestModule_Register_feedHandler_nilStore(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := NewModule((*testPost)(nil), Repo(repo), At("/posts"), Feed(FeedConfig{Title: "My Feed"}))
+
+	mux := http.NewServeMux()
+	m.Register(mux)
+
+	// feedStore is nil (not injected by App.Content) → handler returns 500.
+	r := httptest.NewRequest(http.MethodGet, "/posts/feed.xml", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 (nil feedStore)", w.Code)
+	}
+}
+
+// — findAndServe / findAndServeAIDoc ——————————————————————————————————————————
+
+func TestModule_findAndServe_previewBypass(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	draft := seedPost(t, repo, "Draft Item", Draft)
+
+	const prefix = "/posts"
+	m := newTestModule(repo)
+	m.secret = []byte(testSecret)
+	m.prefix = prefix
+
+	token := encodePreviewToken(prefix, draft.Slug, []byte(testSecret), time.Hour)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/"+draft.Slug+"?preview="+token, nil)
+	served := m.findAndServe(w, r, draft.Slug)
+
+	if !served {
+		t.Error("findAndServe should return true for valid preview token")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestModule_findAndServe_htmlAccept(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	pub := seedPost(t, repo, "Public Item", Published)
+
+	m := newTestModule(repo)
+	m.neg.html = true // enable HTML negotiation
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/"+pub.Slug, nil)
+	r.Header.Set("Accept", "text/html")
+	served := m.findAndServe(w, r, pub.Slug)
+
+	if !served {
+		t.Error("findAndServe should return true for published item")
+	}
+	// No template → 406.
+	if w.Code != http.StatusNotAcceptable {
+		t.Errorf("status = %d, want 406 (no template)", w.Code)
+	}
+}
+
+func TestModule_findAndServeAIDoc_disabled(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := newTestModule(repo) // no AIDoc feature
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/posts/any/aidoc", nil)
+	if m.findAndServeAIDoc(w, r, "any") {
+		t.Error("findAndServeAIDoc should return false when AIDoc is not enabled")
+	}
+}
+
+func TestModule_findAndServeAIDoc_notFound(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := NewModule((*testPost)(nil), Repo(repo), At("/posts"), AIIndex(AIDoc))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/posts/missing/aidoc", nil)
+	if m.findAndServeAIDoc(w, r, "missing") {
+		t.Error("findAndServeAIDoc should return false when slug not found")
+	}
+}
+
+func TestModule_findAndServeAIDoc_notVisible(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	draft := seedPost(t, repo, "Draft Item", Draft)
+	m := NewModule((*testPost)(nil), Repo(repo), At("/posts"), AIIndex(AIDoc))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/posts/"+draft.Slug+"/aidoc", nil)
+	// Guest user — Draft is not visible.
+	if m.findAndServeAIDoc(w, r, draft.Slug) {
+		t.Error("findAndServeAIDoc should return false for non-visible item")
+	}
+}
+
+func TestModule_findAndServeAIDoc_published(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	pub := seedPost(t, repo, "Public Item", Published)
+	m := NewModule((*testPost)(nil), Repo(repo), At("/posts"), AIIndex(AIDoc))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/posts/"+pub.Slug+"/aidoc", nil)
+	served := m.findAndServeAIDoc(w, r, pub.Slug)
+
+	if !served {
+		t.Error("findAndServeAIDoc should return true for published item")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+// — typeName / autoSlugFieldPath ——————————————————————————————————————————————
+
+func TestTypeName_pointerType(t *testing.T) {
+	// typeName should deref pointer types; the loop body executes for ptr input.
+	got := typeName(reflect.TypeOf((*testPost)(nil)))
+	if got != "testPost" {
+		t.Errorf("typeName(*testPost) = %q, want %q", got, "testPost")
+	}
+}
+
+type noTitlePost struct {
+	Node
+	Body string `smeldr:"required"`
+}
+
+func TestAutoSlugFieldPath_requiredFallback(t *testing.T) {
+	// noTitlePost has no Title/Name/Headline; falls back to the smeldr:"required" field.
+	path := autoSlugFieldPath(reflect.TypeOf(noTitlePost{}))
+	if path == nil {
+		t.Fatal("autoSlugFieldPath should find Body as required field")
+	}
+}
+
+type noSlugPost struct {
+	Node
+	Count int
+}
+
+func TestAutoSlugFieldPath_noSuitableField(t *testing.T) {
+	// noSlugPost has no string field suitable for slug generation.
+	path := autoSlugFieldPath(reflect.TypeOf(noSlugPost{}))
+	if path != nil {
+		t.Errorf("autoSlugFieldPath expected nil, got %v", path)
+	}
+}
+
+// — autoSlug / autoSlugFieldPath pointer type coverage ————————————————————————
+
+func TestAutoSlugFieldPath_pointerType(t *testing.T) {
+	// Passing a pointer type exercises the ptr-deref loop in autoSlugFieldPath.
+	path := autoSlugFieldPath(reflect.TypeOf((*testPost)(nil)))
+	if path == nil {
+		t.Fatal("autoSlugFieldPath(*testPost) should find Title field")
+	}
+}
+
+func TestAutoSlug_pointerValue(t *testing.T) {
+	// Passing a pointer value exercises the ptr-deref loop in autoSlug.
+	p := &testPost{Title: "Pointer Test"}
+	got := autoSlug(reflect.ValueOf(p))
+	if got != "pointer-test" {
+		t.Errorf("autoSlug(*testPost) = %q, want %q", got, "pointer-test")
+	}
+}
+
+// — Error repository helpers —————————————————————————————————————————————————
+
+var errRepoError = errors.New("repo error")
+
+// errorRepo is a Repository[T] where every operation returns errRepoError.
+type errorRepo[T any] struct{}
+
+func (r errorRepo[T]) FindByID(_ context.Context, _ string) (T, error) {
+	var zero T
+	return zero, errRepoError
+}
+func (r errorRepo[T]) FindBySlug(_ context.Context, _ string) (T, error) {
+	var zero T
+	return zero, errRepoError
+}
+func (r errorRepo[T]) FindAll(_ context.Context, _ ListOptions) ([]T, error) {
+	return nil, errRepoError
+}
+func (r errorRepo[T]) Save(_ context.Context, _ T) error    { return errRepoError }
+func (r errorRepo[T]) Delete(_ context.Context, _ string) error { return errRepoError }
+
+// savefailRepo wraps an inner repo; Save always returns errRepoError.
+type savefailRepo[T any] struct{ inner Repository[T] }
+
+func (r savefailRepo[T]) FindByID(ctx context.Context, id string) (T, error) {
+	return r.inner.FindByID(ctx, id)
+}
+func (r savefailRepo[T]) FindBySlug(ctx context.Context, s string) (T, error) {
+	return r.inner.FindBySlug(ctx, s)
+}
+func (r savefailRepo[T]) FindAll(ctx context.Context, o ListOptions) ([]T, error) {
+	return r.inner.FindAll(ctx, o)
+}
+func (r savefailRepo[T]) Save(_ context.Context, _ T) error { return errRepoError }
+func (r savefailRepo[T]) Delete(ctx context.Context, id string) error {
+	return r.inner.Delete(ctx, id)
+}
+
+// deletefailRepo wraps an inner repo; Delete always returns errRepoError.
+type deletefailRepo[T any] struct{ inner Repository[T] }
+
+func (r deletefailRepo[T]) FindByID(ctx context.Context, id string) (T, error) {
+	return r.inner.FindByID(ctx, id)
+}
+func (r deletefailRepo[T]) FindBySlug(ctx context.Context, s string) (T, error) {
+	return r.inner.FindBySlug(ctx, s)
+}
+func (r deletefailRepo[T]) FindAll(ctx context.Context, o ListOptions) ([]T, error) {
+	return r.inner.FindAll(ctx, o)
+}
+func (r deletefailRepo[T]) Save(ctx context.Context, item T) error {
+	return r.inner.Save(ctx, item)
+}
+func (r deletefailRepo[T]) Delete(_ context.Context, _ string) error { return errRepoError }
+
+// secondSavefailRepo: first Save call succeeds via inner, second and later fail.
+type secondSavefailRepo[T any] struct {
+	inner     Repository[T]
+	saveCalls int
+}
+
+func (r *secondSavefailRepo[T]) FindByID(ctx context.Context, id string) (T, error) {
+	return r.inner.FindByID(ctx, id)
+}
+func (r *secondSavefailRepo[T]) FindBySlug(ctx context.Context, s string) (T, error) {
+	return r.inner.FindBySlug(ctx, s)
+}
+func (r *secondSavefailRepo[T]) FindAll(ctx context.Context, o ListOptions) ([]T, error) {
+	return r.inner.FindAll(ctx, o)
+}
+func (r *secondSavefailRepo[T]) Save(ctx context.Context, item T) error {
+	r.saveCalls++
+	if r.saveCalls >= 2 {
+		return errRepoError
+	}
+	return r.inner.Save(ctx, item)
+}
+func (r *secondSavefailRepo[T]) Delete(ctx context.Context, id string) error {
+	return r.inner.Delete(ctx, id)
+}
+
+// — writeContent branch coverage —————————————————————————————————————————————
+
+func TestWriteContent_textHTML_returns406(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	writeContent(w, r, "text/html", "any-value")
+	if w.Code != http.StatusNotAcceptable {
+		t.Errorf("status = %d, want 406 for text/html", w.Code)
+	}
+}
+
+func TestWriteContent_textMarkdown_notMarkdownable_returns406(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	writeContent(w, r, "text/markdown", "plain-string-not-markdownable")
+	if w.Code != http.StatusNotAcceptable {
+		t.Errorf("status = %d, want 406 for non-Markdownable text/markdown", w.Code)
+	}
+}
+
+func TestWriteContent_textPlain_notMarkdownable_jsonBody(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	writeContent(w, r, "text/plain", map[string]string{"key": "val"})
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "text/plain") {
+		t.Errorf("Content-Type = %q, want text/plain", ct)
+	}
+}
+
+// — listHandler repo error ————————————————————————————————————————————————————
+
+func TestModule_listHandler_repoError(t *testing.T) {
+	m := newTestModule(errorRepo[*testPost]{})
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodGet, "/testposts", nil), editorUser())
+	m.listHandler(w, r)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+}
+
+// — singleInstanceHandler repo error —————————————————————————————————————————
+
+func TestModule_singleInstanceHandler_repoError(t *testing.T) {
+	m := newTestModule(errorRepo[*testPost]{}, SingleInstance())
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/testposts", nil)
+	m.singleInstanceHandler(w, r)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+}
+
+// — createHandler save error —————————————————————————————————————————————————
+
+func TestModule_createHandler_saveError(t *testing.T) {
+	// errorRepo.FindBySlug always errs → slug is unique → Save errs.
+	m := newTestModule(errorRepo[*testPost]{})
+	body := strings.NewReader(`{"Title":"Test Post"}`)
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPost, "/testposts", body), editorUser())
+	m.createHandler(w, r)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+}
+
+// — updateHandler error branches —————————————————————————————————————————————
+
+func TestModule_updateHandler_validationError(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	p := seedPost(t, repo, "Test Post", Draft)
+	m := newTestModule(repo)
+
+	update := map[string]any{"Title": ""}
+	body, _ := json.Marshal(update)
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/testposts/"+p.Slug, bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 422", w.Code)
+	}
+}
+
+func TestModule_updateHandler_beforeUpdateError(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	p := seedPost(t, repo, "Test Post", Draft)
+	m := newTestModule(repo, On[*testPost](BeforeUpdate, func(_ Context, _ *testPost) error {
+		return errors.New("hook error")
+	}))
+
+	update := map[string]any{"Title": p.Title}
+	body, _ := json.Marshal(update)
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/testposts/"+p.Slug, bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+}
+
+func TestModule_updateHandler_saveError(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test Post", Draft)
+	m := newTestModule(savefailRepo[*testPost]{inner: mem})
+
+	update := map[string]any{"Title": p.Title}
+	body, _ := json.Marshal(update)
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/testposts/"+p.Slug, bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+}
+
+func TestModule_updateHandler_secondSaveError(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test Post", Draft)
+	repo := &secondSavefailRepo[*testPost]{inner: mem}
+	m := newTestModule(repo)
+
+	// Draft → Published triggers a second Save to record PublishedAt.
+	update := map[string]any{"Title": p.Title, "Status": string(Published)}
+	body, _ := json.Marshal(update)
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/testposts/"+p.Slug, bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+}
+
+// — deleteHandler error branches ——————————————————————————————————————————————
+
+func TestModule_deleteHandler_beforeDeleteError(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	p := seedPost(t, repo, "Test Post", Published)
+	m := newTestModule(repo, On[*testPost](BeforeDelete, func(_ Context, _ *testPost) error {
+		return errors.New("hook error")
+	}))
+
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodDelete, "/testposts/"+p.Slug, nil), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.deleteHandler(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+}
+
+func TestModule_deleteHandler_deleteError(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test Post", Published)
+	m := newTestModule(deletefailRepo[*testPost]{inner: mem})
+
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodDelete, "/testposts/"+p.Slug, nil), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.deleteHandler(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+}
+
+// — MCPList error —————————————————————————————————————————————————————————————
+
+func TestMCPList_repoError(t *testing.T) {
+	m := newTestModule(errorRepo[*testPost]{})
+	ctx := NewTestContext(editorUser())
+	if _, err := m.MCPList(ctx); err == nil {
+		t.Error("MCPList should return error when FindAll fails")
+	}
+}
+
+// — MCPCreate error branches ——————————————————————————————————————————————————
+
+func TestMCPCreate_marshalError(t *testing.T) {
+	m := newTestModule(NewMemoryRepo[*testPost]())
+	ctx := NewTestContext(editorUser())
+	if _, err := m.MCPCreate(ctx, map[string]any{"Title": make(chan int)}); err == nil {
+		t.Error("MCPCreate should return error for un-marshallable fields")
+	}
+}
+
+func TestMCPCreate_unmarshalError(t *testing.T) {
+	m := newTestModule(NewMemoryRepo[*testPost]())
+	ctx := NewTestContext(editorUser())
+	// JSON array cannot unmarshal into a string field.
+	if _, err := m.MCPCreate(ctx, map[string]any{"Title": []int{1, 2, 3}}); err == nil {
+		t.Error("MCPCreate should return error when unmarshal fails")
+	}
+}
+
+func TestMCPCreate_validationError(t *testing.T) {
+	m := newTestModule(NewMemoryRepo[*testPost]())
+	ctx := NewTestContext(editorUser())
+	if _, err := m.MCPCreate(ctx, map[string]any{}); err == nil {
+		t.Error("MCPCreate should return error when validation fails")
+	}
+}
+
+func TestMCPCreate_saveError(t *testing.T) {
+	// errorRepo.FindBySlug errs → slug is unique → Save errs.
+	m := newTestModule(errorRepo[*testPost]{})
+	ctx := NewTestContext(editorUser())
+	if _, err := m.MCPCreate(ctx, map[string]any{"Title": "Test"}); err == nil {
+		t.Error("MCPCreate should return error when Save fails")
+	}
+}
+
+// — MCPUpdate error branches ——————————————————————————————————————————————————
+
+func TestMCPUpdate_findBySlugError(t *testing.T) {
+	m := newTestModule(errorRepo[*testPost]{})
+	ctx := NewTestContext(editorUser())
+	if _, err := m.MCPUpdate(ctx, "any-slug", map[string]any{}); err == nil {
+		t.Error("MCPUpdate should return error when FindBySlug fails")
+	}
+}
+
+func TestMCPUpdate_marshalError(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+	m := newTestModule(mem)
+	ctx := NewTestContext(editorUser())
+	if _, err := m.MCPUpdate(ctx, p.Slug, map[string]any{"Title": make(chan int)}); err == nil {
+		t.Error("MCPUpdate should return error for un-marshallable fields")
+	}
+}
+
+func TestMCPUpdate_unmarshalError(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+	m := newTestModule(mem)
+	ctx := NewTestContext(editorUser())
+	if _, err := m.MCPUpdate(ctx, p.Slug, map[string]any{"Title": []int{1, 2, 3}}); err == nil {
+		t.Error("MCPUpdate should return error when unmarshal fails")
+	}
+}
+
+func TestMCPUpdate_validationError(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test Post", Draft)
+	m := newTestModule(mem)
+	ctx := NewTestContext(editorUser())
+	if _, err := m.MCPUpdate(ctx, p.Slug, map[string]any{"Title": ""}); err == nil {
+		t.Error("MCPUpdate should return error when validation fails")
+	}
+}
+
+func TestMCPUpdate_saveError(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+	m := newTestModule(savefailRepo[*testPost]{inner: mem})
+	ctx := NewTestContext(editorUser())
+	if _, err := m.MCPUpdate(ctx, p.Slug, map[string]any{"Title": "New Title"}); err == nil {
+		t.Error("MCPUpdate should return error when Save fails")
+	}
+}
+
+// — MCPPublish error branches —————————————————————————————————————————————————
+
+func TestMCPPublish_findBySlugError(t *testing.T) {
+	m := newTestModule(errorRepo[*testPost]{})
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPPublish(ctx, "any-slug"); err == nil {
+		t.Error("MCPPublish should return error when FindBySlug fails")
+	}
+}
+
+func TestMCPPublish_saveError(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+	m := newTestModule(savefailRepo[*testPost]{inner: mem})
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPPublish(ctx, p.Slug); err == nil {
+		t.Error("MCPPublish should return error when Save fails")
+	}
+}
+
+// — MCPSchedule error branches ————————————————————————————————————————————————
+
+func TestMCPSchedule_findBySlugError(t *testing.T) {
+	m := newTestModule(errorRepo[*testPost]{})
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPSchedule(ctx, "any-slug", time.Now().Add(time.Hour)); err == nil {
+		t.Error("MCPSchedule should return error when FindBySlug fails")
+	}
+}
+
+func TestMCPSchedule_saveError(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+	m := newTestModule(savefailRepo[*testPost]{inner: mem})
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPSchedule(ctx, p.Slug, time.Now().Add(time.Hour)); err == nil {
+		t.Error("MCPSchedule should return error when Save fails")
+	}
+}
+
+// — MCPArchive error branches —————————————————————————————————————————————————
+
+func TestMCPArchive_findBySlugError(t *testing.T) {
+	m := newTestModule(errorRepo[*testPost]{})
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPArchive(ctx, "any-slug"); err == nil {
+		t.Error("MCPArchive should return error when FindBySlug fails")
+	}
+}
+
+func TestMCPArchive_saveError(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+	m := newTestModule(savefailRepo[*testPost]{inner: mem})
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPArchive(ctx, p.Slug); err == nil {
+		t.Error("MCPArchive should return error when Save fails")
+	}
+}
+
+// — MCPDelete error branches ——————————————————————————————————————————————————
+
+func TestMCPDelete_findBySlugError(t *testing.T) {
+	m := newTestModule(errorRepo[*testPost]{})
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPDelete(ctx, "any-slug"); err == nil {
+		t.Error("MCPDelete should return error when FindBySlug fails")
+	}
+}
+
+func TestMCPDelete_deleteError(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+	m := newTestModule(deletefailRepo[*testPost]{inner: mem})
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPDelete(ctx, p.Slug); err == nil {
+		t.Error("MCPDelete should return error when Delete fails")
+	}
+}
+
+// — snapshotItem non-pointer ——————————————————————————————————————————————
+
+func TestSnapshotItem_nonPointer(t *testing.T) {
+	val := snapshotItem("hello")
+	if val != "hello" {
+		t.Errorf("snapshotItem non-pointer: got %v want hello", val)
+	}
+}
+
+func TestSnapshotItem_nilPointer(t *testing.T) {
+	var p *testPost
+	val := snapshotItem(p)
+	if val != p {
+		t.Errorf("snapshotItem nil pointer: should return unchanged")
+	}
+}
+
+// — HasBlockParent non-ErrNotFound ————————————————————————————————————————
+
+func TestHasBlockParent_nonErrNotFoundError(t *testing.T) {
+	m := newTestModule(errorRepo[*testPost]{})
+	ctx := NewTestContext(User{})
+	ok, err := m.HasBlockParent(ctx, "any-id")
+	if ok {
+		t.Error("HasBlockParent should return false on repo error")
+	}
+	if err == nil {
+		t.Error("HasBlockParent should return non-nil error on repo error")
+	}
+}
+
+// — collectStats countByStatus error ——————————————————————————————————————
+
+// errorStatusCounterRepo implements Repository[T] and statusCounter,
+// with countByStatus always returning an error.
+type errorStatusCounterRepo[T any] struct{}
+
+func (r errorStatusCounterRepo[T]) FindByID(_ context.Context, _ string) (T, error) {
+	var zero T
+	return zero, errRepoError
+}
+func (r errorStatusCounterRepo[T]) FindBySlug(_ context.Context, _ string) (T, error) {
+	var zero T
+	return zero, errRepoError
+}
+func (r errorStatusCounterRepo[T]) FindAll(_ context.Context, _ ListOptions) ([]T, error) {
+	return nil, errRepoError
+}
+func (r errorStatusCounterRepo[T]) Save(_ context.Context, _ T) error    { return errRepoError }
+func (r errorStatusCounterRepo[T]) Delete(_ context.Context, _ string) error { return errRepoError }
+func (r errorStatusCounterRepo[T]) countByStatus(_ context.Context) (map[Status]int, error) {
+	return nil, errRepoError
+}
+
+func TestCollectStats_countByStatusError(t *testing.T) {
+	m := newTestModule(errorStatusCounterRepo[*testPost]{})
+	ctx := NewTestContext(User{})
+	s := m.collectStats(ctx)
+	if len(s.Counts) != 0 {
+		t.Errorf("collectStats on error: Counts should be empty, got %v", s.Counts)
+	}
+}
+
+// — notifyAfter panic recovery ————————————————————————————————————————————
+
+func TestNotifyAfter_panicRecovery(t *testing.T) {
+	m := newTestModule(NewMemoryRepo[*testPost]())
+	panicked := make(chan struct{})
+	m.setAfterHook(func(_ Context, _ Signal, _ afterHookMeta, _ any) {
+		close(panicked)
+		panic("test panic from afterHook")
+	})
+	ctx := NewTestContext(User{})
+	p := &testPost{Node: Node{ID: "1", Slug: "slug"}}
+	m.notifyAfter(ctx, AfterCreate, "", p)
+	// Wait for the goroutine to panic and recover.
+	select {
+	case <-panicked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("afterHook goroutine never ran")
+	}
+	time.Sleep(10 * time.Millisecond) // let recover+log complete
+}
+
+// — regenerateFeed error paths ————————————————————————————————————————————
+
+func TestRegenerateFeed_findAllError(t *testing.T) {
+	m := newTestModule(errorRepo[*testPost]{}, Feed(FeedConfig{Title: "Test"}))
+	m.setFeedStore(NewFeedStore("site", "https://example.com"), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateFeed(ctx) // should return silently on FindAll error
+}
+
+func TestRegenerateFeed_singleInstance_canonical(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := &testPost{Node: Node{ID: "1", Slug: "slug", Status: Published}}
+	_ = mem.Save(context.Background(), p)
+
+	m := newTestModule(mem, Feed(FeedConfig{Title: "Test"}), SingleInstance())
+	m.setFeedStore(NewFeedStore("site", "https://example.com"), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateFeed(ctx)
+}
+
+func TestRegenerateFeed_standalone_canonical(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := &testPost{Node: Node{ID: "1", Slug: "my-slug", Status: Published}}
+	_ = mem.Save(context.Background(), p)
+
+	m := newTestModule(mem, Feed(FeedConfig{Title: "Test"}), Standalone())
+	m.setFeedStore(NewFeedStore("site", "https://example.com"), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateFeed(ctx)
+}
+
+// — aiDocHandler FindBySlug error ——————————————————————————————————————————
+
+func TestAiDocHandler_findBySlugError(t *testing.T) {
+	m := newTestModule(errorRepo[*testPost]{})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/testposts/missing.aidoc", nil)
+	r.SetPathValue("slug", "missing")
+	m.aiDocHandler(w, r)
+	if w.Code != http.StatusInternalServerError && w.Code != http.StatusNotFound {
+		t.Errorf("aiDocHandler repo error: got %d, want 500 or 404", w.Code)
+	}
+}
+
+// — regenerateSitemap error paths —————————————————————————————————————————
+
+func TestRegenerateSitemap_findAllError(t *testing.T) {
+	// sitemapPost implements SitemapNode so SitemapConfig is accepted.
+	errRepo := errorRepo[*sitemapPost]{}
+	m := NewModule((*sitemapPost)(nil), Repo(errRepo), SitemapConfig{})
+	m.setSitemap(NewSitemapStore(), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateSitemap(ctx) // should return silently on FindAll error
+}
+
+func TestRegenerateSitemap_singleInstance_canonical(t *testing.T) {
+	mem := NewMemoryRepo[*sitemapPost]()
+	p := &sitemapPost{Node: Node{ID: "1", Slug: "slug", Status: Published}}
+	_ = mem.Save(context.Background(), p)
+
+	m := NewModule((*sitemapPost)(nil), Repo(mem), SitemapConfig{}, SingleInstance())
+	m.setSitemap(NewSitemapStore(), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateSitemap(ctx)
+}
+
+func TestRegenerateSitemap_standalone_canonical(t *testing.T) {
+	mem := NewMemoryRepo[*sitemapPost]()
+	p := &sitemapPost{Node: Node{ID: "1", Slug: "my-slug", Status: Published}}
+	_ = mem.Save(context.Background(), p)
+
+	m := NewModule((*sitemapPost)(nil), Repo(mem), SitemapConfig{}, Standalone())
+	m.setSitemap(NewSitemapStore(), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateSitemap(ctx)
+}
+
+// — regenerateAI error paths ——————————————————————————————————————————————
+
+func TestRegenerateAI_findAllError(t *testing.T) {
+	m := newTestModule(errorRepo[*testPost]{}, AIIndex(LLMsTxt))
+	m.setAIRegistry(NewLLMsStore("site"), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateAI(ctx) // should return silently on FindAll error
+}
+
+func TestRegenerateAI_skipEmptyTitle(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	// testPost with empty Title — should be skipped in LLMsTxt compact entries.
+	p := &testPost{Node: Node{ID: "1", Slug: "s", Status: Published}, Title: ""}
+	_ = mem.Save(context.Background(), p)
+
+	m := newTestModule(mem, AIIndex(LLMsTxt))
+	m.setAIRegistry(NewLLMsStore("site"), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateAI(ctx)
+}
+
+func TestRegenerateAI_singleInstance_compact(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := &testPost{Node: Node{ID: "1", Slug: "s", Status: Published}, Title: "Home"}
+	_ = mem.Save(context.Background(), p)
+
+	m := newTestModule(mem, AIIndex(LLMsTxt), SingleInstance())
+	m.setAIRegistry(NewLLMsStore("site"), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateAI(ctx)
+}
+
+func TestRegenerateAI_standalone_compact(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := &testPost{Node: Node{ID: "1", Slug: "my-slug", Status: Published}, Title: "Article"}
+	_ = mem.Save(context.Background(), p)
+
+	m := newTestModule(mem, AIIndex(LLMsTxt), Standalone())
+	m.setAIRegistry(NewLLMsStore("site"), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateAI(ctx)
+}
+
+func TestRegenerateAI_full_withPublishedAt(t *testing.T) {
+	mem := NewMemoryRepo[*testMDPost]()
+	pub := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &testMDPost{
+		Node:  Node{ID: "1", Slug: "s", Status: Published, PublishedAt: pub},
+		Title: "My Doc",
+		Body:  "content",
+	}
+	_ = mem.Save(context.Background(), p)
+
+	m := NewModule((*testMDPost)(nil), Repo(mem), AIIndex(LLMsTxtFull))
+	m.setAIRegistry(NewLLMsStore("site"), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateAI(ctx)
+}
+
+func TestRegenerateAI_singleInstance_full(t *testing.T) {
+	mem := NewMemoryRepo[*testMDPost]()
+	p := &testMDPost{
+		Node:  Node{ID: "1", Slug: "s", Status: Published},
+		Title: "Home",
+		Body:  "content",
+	}
+	_ = mem.Save(context.Background(), p)
+
+	m := NewModule((*testMDPost)(nil), Repo(mem), AIIndex(LLMsTxtFull), SingleInstance())
+	m.setAIRegistry(NewLLMsStore("site"), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateAI(ctx)
+}
+
+func TestRegenerateAI_standalone_full(t *testing.T) {
+	mem := NewMemoryRepo[*testMDPost]()
+	p := &testMDPost{
+		Node:  Node{ID: "1", Slug: "my-slug", Status: Published},
+		Title: "Article",
+		Body:  "content",
+	}
+	_ = mem.Save(context.Background(), p)
+
+	m := NewModule((*testMDPost)(nil), Repo(mem), AIIndex(LLMsTxtFull), Standalone())
+	m.setAIRegistry(NewLLMsStore("site"), "https://example.com")
+	ctx := NewTestContext(User{})
+	m.regenerateAI(ctx)
+}
+
+// — Register with sitemapStore/feedStore nil (safety guard paths) —————————
+
+func TestRegister_sitemapStore_nil_returns500(t *testing.T) {
+	mem := NewMemoryRepo[*sitemapPost]()
+	m := NewModule((*sitemapPost)(nil), Repo(mem), SitemapConfig{})
+	// Register without calling setSitemap → sitemapStore is nil.
+	mux := http.NewServeMux()
+	m.Register(mux)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/sitemapposts/sitemap.xml", nil)
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("sitemap with nil store: got %d want 500", w.Code)
+	}
+}
+
+func TestRegister_feedStore_nil_returns500(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	m := newTestModule(mem, Feed(FeedConfig{Title: "Test"}))
+	// Register without calling setFeedStore → feedStore is nil.
+	mux := http.NewServeMux()
+	m.Register(mux)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/testposts/feed.xml", nil)
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("feed with nil store: got %d want 500", w.Code)
+	}
+}
+
+// — Register with module-level middleware ——————————————————————————————————
+
+func TestRegister_withMiddleware_wrapsHandlers(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	called := false
+	mw := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = true
+			h.ServeHTTP(w, r)
+		})
+	}
+	m := newTestModule(mem, Middleware(mw))
+	mux := http.NewServeMux()
+	m.Register(mux)
+
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPost, "/testposts", strings.NewReader(`{"Title":"T"}`)), editorUser())
+	mux.ServeHTTP(w, r)
+	if !called {
+		t.Error("middleware should have been called")
+	}
 }

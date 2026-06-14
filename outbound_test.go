@@ -435,3 +435,28 @@ func TestBuildWebhookPayloadJSON(t *testing.T) {
 		t.Errorf("Event: got %q want article.scheduled", p.Event)
 	}
 }
+
+func TestWorkerPool_DeliveryStats_empty(t *testing.T) {
+	pool, _ := outboundTestDB(t)
+	ctx := context.Background()
+
+	total, success, failed, last, err := pool.DeliveryStats(ctx, "no-such-endpoint")
+	if err != nil {
+		t.Fatalf("DeliveryStats: %v", err)
+	}
+	if total != 0 || success != 0 || failed != 0 {
+		t.Errorf("empty: got total=%d success=%d failed=%d, want all 0", total, success, failed)
+	}
+	if last != nil {
+		t.Errorf("lastAttempt should be nil for endpoint with no logs, got %v", last)
+	}
+}
+
+func TestNewWorkerPool_zeroWorkers_defaultsTen(t *testing.T) {
+	store := NewWebhookStore(nil, []byte("k"))
+	pool := newWorkerPool(nil, store, realClock{}, 0)
+	if pool.workers != 10 {
+		t.Errorf("workers: got %d want 10 when 0 passed", pool.workers)
+	}
+}
+

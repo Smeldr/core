@@ -381,3 +381,68 @@ v1.29.0 and v1.38.0. Tests green.
 ### Version
 
 pgx/v0.1.2 (patch — dependency alignment only).
+
+---
+
+## A150 — T102/N60: statement coverage lifted to ≥97% (core v1.38.0)
+
+**Date:** 2026-06-14
+**Status:** Agreed
+**Level:** 1 (test-only; no exported symbols or behaviour changed)
+
+### Decision
+
+Statement coverage for `smeldr.dev/core` was at 95.9% (≈4287/4471 stmts).
+T102/N60 targets ≥97%. Fifty-one uncovered statement blocks across twelve
+source files were identified via `go tool cover -func=coverage.out` and
+covered with targeted tests in a new `coverage_test.go` file.
+
+### What was covered
+
+- **templates.go**: nil `tplList`, navTree branch, template-Execute error in
+  `renderListHTML`; navTree branch and Execute error in `renderShowHTML`;
+  invalid-syntax guard in `errorTemplate` (9 stmts).
+- **module.go**: preview-bypass HTML path in `showHandler` and
+  `singleInstanceHandler`; `MaxBytesError` in `createHandler` and
+  `updateHandler`; `AfterSchedule` transition in `updateHandler`;
+  `nil ScheduledAt continue` in `processScheduled`; no-Repo and
+  APIOnly+SingleInstance panics in `NewModule`; no-ID/Slug/Status panic in
+  `getNodeFields`; pointer-field inner loop and exported anonymous non-Node
+  skip in `MCPSchema`; all five uncovered blocks in `coerceSliceFields`
+  (ptr input, non-struct, ptr-slice field, key-not-in-map, value-not-string);
+  `pv.Elem()` branch in `ptrToT` (≈24 stmts).
+- **smeldr.go**: navTree load error path; `ensureBootstrap` via real SQLite
+  DB with `smeldr_tokens` table (3 stmts).
+- **edges.go**: QueryRowContext scan error and ExecContext error in `AddChild`;
+  QueryContext error in `ChildrenOf`; ExecContext error in `RemoveChild`
+  (4 stmts).
+- **outbound.go**: decrypt error → `moveToDeadLetter` + `logDelivery` +
+  return in `processJob` (3 stmts).
+- **nav.go**: sort comparator in `List`; ExecContext error in `Delete`
+  (2 stmts).
+- **node.go**: non-struct panic in `validateStruct`; bad `min=`/`max=` tag
+  panics and empty-tag-part continue in `parseConstraints` (4 stmts).
+- **redirects.go**: sort comparator in `Add`; query error in `Load` (2 stmts).
+- **markdown.go**: unterminated code fence; no `](` marker; no `)` closer in
+  `mdApplyLinks` (5 stmts).
+
+### New mock type
+
+`execErrQueryOKDB` — ExecContext fails, QueryRowContext returns `int64(0)`;
+used to drive the `AddChild` ExecContext-error path without triggering the
+upstream QueryRowContext scan error first.
+
+### Codecov gate
+
+`codecov.yml` added at repo root: project target 96%, threshold 0.5%, patch
+gate disabled (test-only PR).
+
+### Result
+
+`go test ./... -count=1 -coverprofile=coverage.out`: **97.1%** (≥97% target met).
+
+### Files changed
+
+- **`coverage_test.go`**: 41 new test functions + `execErrQueryOKDB` mock type
+  added; import block extended with `"bytes"` and `"encoding/json"`.
+- **`codecov.yml`**: new file — Codecov project gate at 96%, patch gate off.

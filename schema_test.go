@@ -333,3 +333,40 @@ func BenchmarkSchemaFor_Article(b *testing.B) {
 		SchemaFor(head, content)
 	}
 }
+
+func TestRenderAppSchema_nilOrEmpty(t *testing.T) {
+	if got := renderAppSchema(nil); got != "" {
+		t.Errorf("renderAppSchema(nil) = %q, want empty", got)
+	}
+	if got := renderAppSchema(&AppSchema{}); got != "" {
+		t.Errorf("renderAppSchema(&AppSchema{}) = %q, want empty (Type is empty)", got)
+	}
+}
+
+func TestRenderAppSchema_noLogo(t *testing.T) {
+	got := renderAppSchema(&AppSchema{Type: "Organization", Name: "Acme", URL: "https://acme.com"})
+	if got == "" {
+		t.Fatal("renderAppSchema returned empty string")
+	}
+	s := string(got)
+	if !strings.Contains(s, "Organization") {
+		t.Errorf("output missing \"Organization\": %s", s)
+	}
+	if !strings.Contains(s, "Acme") {
+		t.Errorf("output missing \"Acme\": %s", s)
+	}
+	if strings.Contains(s, "ImageObject") {
+		t.Errorf("output should not contain \"ImageObject\" when Logo is empty: %s", s)
+	}
+}
+
+func TestRenderAppSchema_withLogo(t *testing.T) {
+	got := renderAppSchema(&AppSchema{Type: "Organization", Name: "Acme", Logo: "https://acme.com/logo.png"})
+	s := string(got)
+	if !strings.Contains(s, "ImageObject") {
+		t.Errorf("output missing \"ImageObject\": %s", s)
+	}
+	if !strings.Contains(s, "https://acme.com/logo.png") {
+		t.Errorf("output missing logo URL: %s", s)
+	}
+}

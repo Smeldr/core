@@ -947,3 +947,394 @@ func TestEncodeDecodeUploadToken(t *testing.T) {
 		}
 	})
 }
+
+// — VerifyTokenString —————————————————————————————————————————————————————
+
+func TestVerifyTokenString_noStore(t *testing.T) {
+	secret := []byte(testSecret)
+	original := User{ID: "u1", Name: "Alice", Roles: []Role{Editor}}
+	tok, err := SignToken(original, testSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+	user, ok := VerifyTokenString(tok, secret, nil)
+	if !ok {
+		t.Fatal("VerifyTokenString: expected ok=true")
+	}
+	if user.ID != original.ID {
+		t.Errorf("User.ID: got %q, want %q", user.ID, original.ID)
+	}
+}
+
+func TestVerifyTokenString_invalid(t *testing.T) {
+	user, ok := VerifyTokenString("not-a-valid-token", []byte(testSecret), nil)
+	if ok {
+		t.Error("expected ok=false for invalid token")
+	}
+	if user.ID != GuestUser.ID {
+		t.Errorf("expected GuestUser, got %+v", user)
+	}
+}
+
+// newTestTokensDB creates an in-memory SQLite DB with the smeldr_tokens table.
+func newTestTokensDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_tokens (
+			id         TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			role       TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			revoked_at TEXT,
+			created_at TEXT NOT NULL
+		)`)
+	if err != nil {
+		t.Fatalf("create smeldr_tokens: %v", err)
+	}
+	return db
+}
+
+func TestVerifyTokenString_withStore_valid(t *testing.T) {
+	db := newTestTokensDB(t)
+	ts := NewTokenStore(db, testSecret)
+	ctx := context.Background()
+
+	raw, err := ts.Create(ctx, "test-token", "editor", time.Hour)
+	if err != nil {
+		t.Fatalf("ts.Create: %v", err)
+	}
+
+	user, ok := VerifyTokenString(raw, []byte(testSecret), ts)
+	if !ok {
+		t.Fatal("expected ok=true for valid, non-revoked token")
+	}
+	if !user.HasRole(Editor) {
+		t.Error("expected user to have Editor role")
+	}
+}
+
+func TestVerifyTokenString_withStore_revoked(t *testing.T) {
+	db := newTestTokensDB(t)
+	ts := NewTokenStore(db, testSecret)
+	ctx := context.Background()
+
+	raw, err := ts.Create(ctx, "to-revoke", "editor", time.Hour)
+	if err != nil {
+		t.Fatalf("ts.Create: %v", err)
+	}
+	// Determine the fingerprint and revoke it directly.
+	records, err := ts.List(ctx)
+	if err != nil || len(records) == 0 {
+		t.Fatalf("ts.List: %v / %d", err, len(records))
+	}
+	if err := ts.Revoke(ctx, records[0].ID); err != nil {
+		t.Fatalf("ts.Revoke: %v", err)
+	}
+
+	user, ok := VerifyTokenString(raw, []byte(testSecret), ts)
+	if ok {
+		t.Error("expected ok=false for revoked token")
+	}
+	if user.ID != GuestUser.ID {
+		t.Errorf("expected GuestUser for revoked token, got %+v", user)
+	}
+}
+
+func TestVerifyTokenString_withStore_notFound(t *testing.T) {
+	db := newTestTokensDB(t)
+	ts := NewTokenStore(db, testSecret)
+
+	// Token is cryptographically valid but fingerprint is absent from the table.
+	raw, err := SignToken(User{ID: "x", Roles: []Role{Editor}}, testSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+
+	user, ok := VerifyTokenString(raw, []byte(testSecret), ts)
+	if ok {
+		t.Error("expected ok=false when fingerprint is absent from table")
+	}
+	if user.ID != GuestUser.ID {
+		t.Errorf("expected GuestUser, got %+v", user)
+	}
+}
+
+// — decodeToken error paths ————————————————————————————————————————————————
+
+func TestDecodeToken_invalidBase64(t *testing.T) {
+	badPayload := "!invalid!"
+	sig := tokenHMAC(badPayload, testSecret)
+	_, err := decodeToken(badPayload+"."+sig, testSecret)
+	if !errors.Is(err, ErrUnauth) {
+		t.Errorf("expected ErrUnauth, got %v", err)
+	}
+}
+
+func TestDecodeToken_invalidJSON(t *testing.T) {
+	payload := base64.RawURLEncoding.EncodeToString([]byte("not-json"))
+	sig := tokenHMAC(payload, testSecret)
+	_, err := decodeToken(payload+"."+sig, testSecret)
+	if !errors.Is(err, ErrUnauth) {
+		t.Errorf("expected ErrUnauth, got %v", err)
+	}
+}
+
+// — decodePreviewToken error paths ————————————————————————————————————————
+
+func TestDecodePreviewToken_invalidBase64(t *testing.T) {
+	badPayload := "!invalid!"
+	sig := tokenHMAC(badPayload, testSecret)
+	_, _, err := decodePreviewToken(badPayload+"."+sig, []byte(testSecret))
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestDecodePreviewToken_fieldsNotThree(t *testing.T) {
+	raw := base64.RawURLEncoding.EncodeToString([]byte("onepart"))
+	sig := tokenHMAC(raw, testSecret)
+	_, _, err := decodePreviewToken(raw+"."+sig, []byte(testSecret))
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// — decodeUploadToken error paths —————————————————————————————————————————
+
+func TestDecodeUploadToken_noDot(t *testing.T) {
+	if err := decodeUploadToken("nodots", []byte(testSecret)); !errors.Is(err, ErrUnauth) {
+		t.Errorf("expected ErrUnauth, got %v", err)
+	}
+}
+
+func TestDecodeUploadToken_invalidBase64(t *testing.T) {
+	badPayload := "!invalid!"
+	sig := tokenHMAC(badPayload, testSecret)
+	if err := decodeUploadToken(badPayload+"."+sig, []byte(testSecret)); !errors.Is(err, ErrUnauth) {
+		t.Errorf("expected ErrUnauth, got %v", err)
+	}
+}
+
+// — TokenStore DB error path stubs ————————————————————————————————————————
+
+// errExecDB always fails ExecContext.
+type errExecDB struct{}
+
+func (e *errExecDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, errors.New("exec error")
+}
+func (e *errExecDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, nil
+}
+func (e *errExecDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
+	conn := &guardRowConn{noRow: true}
+	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+}
+
+// errQueryDB always fails QueryContext.
+type errQueryDB struct{}
+
+func (e *errQueryDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (e *errQueryDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, errors.New("query error")
+}
+func (e *errQueryDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
+	conn := &guardRowConn{noRow: true}
+	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+}
+
+// errRowConn is a sql driver.Connector whose Next returns a non-EOF error,
+// causing sql.Row.Scan to return an error that is not sql.ErrNoRows.
+type errRowConn struct{}
+
+func (c *errRowConn) Connect(_ context.Context) (driver.Conn, error) { return c, nil }
+func (c *errRowConn) Driver() driver.Driver                          { return dummyDriver{} }
+func (c *errRowConn) Prepare(_ string) (driver.Stmt, error)         { return c, nil }
+func (c *errRowConn) Close() error                                   { return nil }
+func (c *errRowConn) Begin() (driver.Tx, error)                     { return nil, nil }
+func (c *errRowConn) NumInput() int                                  { return -1 }
+func (c *errRowConn) Exec(_ []driver.Value) (driver.Result, error)  { return nil, nil }
+func (c *errRowConn) Query(_ []driver.Value) (driver.Rows, error)   { return c, nil }
+func (c *errRowConn) Columns() []string                             { return []string{"v"} }
+func (c *errRowConn) Next(_ []driver.Value) error                   { return errors.New("scan error") }
+
+// revokeRoleErrDB makes every QueryRowContext fail with a scan error.
+type revokeRoleErrDB struct{}
+
+func (r *revokeRoleErrDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (r *revokeRoleErrDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, nil
+}
+func (r *revokeRoleErrDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
+	conn := &errRowConn{}
+	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+}
+
+// revokeAdminCountErrDB returns "admin" for the first QueryRowContext call
+// and fails the second, covering the admin-guard COUNT error path.
+type revokeAdminCountErrDB struct{ calls int }
+
+func (r *revokeAdminCountErrDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (r *revokeAdminCountErrDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, nil
+}
+func (r *revokeAdminCountErrDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
+	r.calls++
+	if r.calls == 1 {
+		conn := &guardRowConn{val: "admin"}
+		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+	}
+	conn := &errRowConn{}
+	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+}
+
+// revokeUpdateErrDB returns no-row (role = "", not admin) and fails ExecContext.
+type revokeUpdateErrDB struct{}
+
+func (r *revokeUpdateErrDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, errors.New("update error")
+}
+func (r *revokeUpdateErrDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, nil
+}
+func (r *revokeUpdateErrDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
+	conn := &guardRowConn{noRow: true}
+	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+}
+
+// bootstrapFailInsertDB returns count=0 (empty) but fails ExecContext,
+// covering ensureBootstrap's "Create fails" warning path.
+type bootstrapFailInsertDB struct{}
+
+func (b *bootstrapFailInsertDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, errors.New("insert failed")
+}
+func (b *bootstrapFailInsertDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, errors.New("not used")
+}
+func (b *bootstrapFailInsertDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
+	conn := &guardRowConn{val: int64(0)}
+	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+}
+
+// — TokenStore error tests ————————————————————————————————————————————————
+
+func TestTokenStore_Create_execError(t *testing.T) {
+	store := NewTokenStore(&errExecDB{}, testSecret)
+	_, err := store.Create(context.Background(), "test", "author", time.Hour)
+	if !errors.Is(err, ErrInternal) {
+		t.Errorf("expected ErrInternal, got %v", err)
+	}
+}
+
+func TestTokenStore_List_queryError(t *testing.T) {
+	store := NewTokenStore(&errQueryDB{}, testSecret)
+	_, err := store.List(context.Background())
+	if !errors.Is(err, ErrInternal) {
+		t.Errorf("expected ErrInternal, got %v", err)
+	}
+}
+
+func TestTokenStore_List_revokedToken(t *testing.T) {
+	db := newTestTokensDB(t)
+	ts := NewTokenStore(db, testSecret)
+	ctx := context.Background()
+
+	if _, err := ts.Create(ctx, "tok", "editor", time.Hour); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	records, err := ts.List(ctx)
+	if err != nil {
+		t.Fatalf("List before revoke: %v", err)
+	}
+	if err := ts.Revoke(ctx, records[0].ID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	records, err = ts.List(ctx)
+	if err != nil {
+		t.Fatalf("List after revoke: %v", err)
+	}
+	if records[0].RevokedAt.IsZero() {
+		t.Error("expected RevokedAt to be non-zero after revoke")
+	}
+}
+
+func TestTokenStore_Revoke_roleQueryError(t *testing.T) {
+	store := NewTokenStore(&revokeRoleErrDB{}, testSecret)
+	if err := store.Revoke(context.Background(), "some-id"); !errors.Is(err, ErrInternal) {
+		t.Errorf("expected ErrInternal, got %v", err)
+	}
+}
+
+func TestTokenStore_Revoke_adminCountError(t *testing.T) {
+	store := NewTokenStore(&revokeAdminCountErrDB{}, testSecret)
+	if err := store.Revoke(context.Background(), "some-id"); !errors.Is(err, ErrInternal) {
+		t.Errorf("expected ErrInternal, got %v", err)
+	}
+}
+
+func TestTokenStore_Revoke_updateError(t *testing.T) {
+	store := NewTokenStore(&revokeUpdateErrDB{}, testSecret)
+	if err := store.Revoke(context.Background(), "some-id"); !errors.Is(err, ErrInternal) {
+		t.Errorf("expected ErrInternal, got %v", err)
+	}
+}
+
+func TestTokenStore_ensureBootstrap_createFails(t *testing.T) {
+	store := NewTokenStore(&bootstrapFailInsertDB{}, testSecret)
+	store.ensureBootstrap(context.Background())
+}
+
+func TestTokenStore_probeTable_success(t *testing.T) {
+	db := newTestTokensDB(t)
+	ts := NewTokenStore(db, testSecret)
+	if err := ts.probeTable(context.Background()); err != nil {
+		t.Errorf("probeTable: %v", err)
+	}
+}
+
+func TestTokenStore_List_empty(t *testing.T) {
+	db := newTestTokensDB(t)
+	ts := NewTokenStore(db, testSecret)
+
+	records, err := ts.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("List on empty table: got %d records, want 0", len(records))
+	}
+}
+
+func TestTokenStore_List_withRecords(t *testing.T) {
+	db := newTestTokensDB(t)
+	ts := NewTokenStore(db, testSecret)
+	ctx := context.Background()
+
+	if _, err := ts.Create(ctx, "first", "author", time.Hour); err != nil {
+		t.Fatalf("Create first: %v", err)
+	}
+	if _, err := ts.Create(ctx, "second", "editor", time.Hour); err != nil {
+		t.Fatalf("Create second: %v", err)
+	}
+
+	records, err := ts.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("List: got %d records, want 2", len(records))
+	}
+	names := map[string]bool{records[0].Name: true, records[1].Name: true}
+	if !names["first"] || !names["second"] {
+		t.Errorf("List: unexpected names %q, %q", records[0].Name, records[1].Name)
+	}
+}

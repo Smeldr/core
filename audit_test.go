@@ -359,3 +359,90 @@ func TestAuditHandler_NotMountedWithoutAudit(t *testing.T) {
 		t.Error("/_audit should not be mounted when App.Audit() was not called")
 	}
 }
+
+func TestAuditHandler_ValidFromParam(t *testing.T) {
+	store := &fakeAuditStore{}
+	secret := []byte("audit-test-secret-12345678901234")
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  secret,
+	}))
+	app.Audit(store)
+
+	tok, _ := SignToken(User{ID: "u5", Roles: []Role{Editor}}, string(secret), 0)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/_audit?from=2026-01-01T00:00:00Z", nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	app.Handler().ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestAuditHandler_ValidToParam(t *testing.T) {
+	store := &fakeAuditStore{}
+	secret := []byte("audit-test-secret-12345678901234")
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  secret,
+	}))
+	app.Audit(store)
+
+	tok, _ := SignToken(User{ID: "u6", Roles: []Role{Editor}}, string(secret), 0)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/_audit?to=2026-12-31T23:59:59Z", nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	app.Handler().ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestAuditHandler_BadToParam(t *testing.T) {
+	store := &fakeAuditStore{}
+	secret := []byte("audit-test-secret-12345678901234")
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  secret,
+	}))
+	app.Audit(store)
+
+	tok, _ := SignToken(User{ID: "u7", Roles: []Role{Editor}}, string(secret), 0)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/_audit?to=not-a-date", nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	app.Handler().ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// errAuditStore returns an error from List.
+type errAuditStore struct{}
+
+func (s *errAuditStore) Append(_ context.Context, _ AuditRecord) error { return nil }
+func (s *errAuditStore) List(_ context.Context, _ AuditFilter) ([]AuditRecord, error) {
+	return nil, errRepoError
+}
+
+func TestAuditHandler_ListError(t *testing.T) {
+	secret := []byte("audit-test-secret-12345678901234")
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  secret,
+	}))
+	app.Audit(&errAuditStore{})
+
+	tok, _ := SignToken(User{ID: "u8", Roles: []Role{Editor}}, string(secret), 0)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/_audit", nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	app.Handler().ServeHTTP(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+}

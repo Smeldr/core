@@ -236,6 +236,23 @@ func TestForgeLLMSEntries(t *testing.T) {
 	}
 }
 
+// — smeldrRFC3339 ——————————————————————————————————————————————————————————
+
+func TestSmeldrRFC3339_formatted(t *testing.T) {
+	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
+	got := smeldrRFC3339(ts)
+	if got != "2026-01-15T10:30:00Z" {
+		t.Errorf("smeldrRFC3339 = %q, want 2026-01-15T10:30:00Z", got)
+	}
+}
+
+func TestSmeldrRFC3339_zero(t *testing.T) {
+	got := smeldrRFC3339(time.Time{})
+	if got != "" {
+		t.Errorf("smeldrRFC3339(zero) = %q, want empty string", got)
+	}
+}
+
 var benchMarkdownBody = strings.Repeat(
 	"# Section Title\n\nThis is a paragraph with **bold** and *italic* text and a "+
 		"[link](https://example.com). It also has `code` inline.\n\n"+

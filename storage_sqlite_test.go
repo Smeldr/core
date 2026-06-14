@@ -50,3 +50,45 @@ func TestRepoParity_SQLRepo(t *testing.T) {
 	repo := NewSQLRepo[parityItem](sqldb)
 	runRepoParity(t, repo)
 }
+
+func TestSQLRepo_FindAll_OrderBy_knownField(t *testing.T) {
+	sqldb := newSQLiteDB(t)
+	createParityItemsTable(t, sqldb)
+	repo := NewSQLRepo[parityItem](sqldb)
+	ctx := context.Background()
+
+	items := []parityItem{
+		{ID: "1", Slug: "b", Title: "Banana", Status: "draft"},
+		{ID: "2", Slug: "a", Title: "Apple", Status: "draft"},
+	}
+	for _, it := range items {
+		if err := repo.Save(ctx, it); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+
+	results, err := repo.FindAll(ctx, ListOptions{OrderBy: "Title"})
+	if err != nil {
+		t.Fatalf("FindAll OrderBy Title: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].Title != "Apple" {
+		t.Errorf("results[0].Title = %q, want \"Apple\"", results[0].Title)
+	}
+}
+
+func TestSQLRepo_FindAll_OrderBy_unknownField(t *testing.T) {
+	sqldb := newSQLiteDB(t)
+	createParityItemsTable(t, sqldb)
+	repo := NewSQLRepo[parityItem](sqldb)
+	ctx := context.Background()
+
+	// Unknown field: columnForField returns false, no ORDER BY is added.
+	results, err := repo.FindAll(ctx, ListOptions{OrderBy: "NonExistentField"})
+	if err != nil {
+		t.Fatalf("FindAll unknown OrderBy: %v", err)
+	}
+	_ = results // result count not important; we just verify no error
+}

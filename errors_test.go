@@ -377,3 +377,20 @@ func TestSentinels_new(t *testing.T) {
 		})
 	}
 }
+
+func TestValidationError_Error_multifield(t *testing.T) {
+	ve := Require(Err("title", "required"), Err("body", "too short"))
+	if ve == nil {
+		t.Fatal("Require returned nil")
+	}
+	msg := ve.Error()
+	if !strings.Contains(msg, "title") {
+		t.Errorf("Error() missing field name \"title\": %q", msg)
+	}
+	if !strings.Contains(msg, "body") {
+		t.Errorf("Error() missing field name \"body\": %q", msg)
+	}
+	if !strings.Contains(msg, ", ") {
+		t.Errorf("Error() multi-field should join with \", \": %q", msg)
+	}
+}

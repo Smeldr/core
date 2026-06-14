@@ -3,6 +3,7 @@ package smeldr
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -294,6 +295,63 @@ func TestSitemapStore_IndexHandler(t *testing.T) {
 	}
 	if idx.Sitemaps[1].Loc != "https://example.com/posts/sitemap.xml" {
 		t.Errorf("Sitemaps[1].Loc = %q", idx.Sitemaps[1].Loc)
+	}
+}
+
+// — WriteSitemap error paths ——————————————————————————————————————————————
+
+// failWriter always fails the first Write call.
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("write error") }
+
+// afterFirstWriter succeeds the first Write, fails all subsequent ones.
+type afterFirstWriter struct{ wrote bool }
+
+func (w *afterFirstWriter) Write(p []byte) (int, error) {
+	if w.wrote {
+		return 0, errors.New("write error")
+	}
+	w.wrote = true
+	return len(p), nil
+}
+
+func TestWriteSitemapFragment_headerWriteError(t *testing.T) {
+	err := WriteSitemapFragment(failWriter{}, []SitemapEntry{{Loc: "https://x.com/"}})
+	if err == nil {
+		t.Error("expected error from header write failure")
+	}
+}
+
+func TestWriteSitemapFragment_encodeError(t *testing.T) {
+	err := WriteSitemapFragment(&afterFirstWriter{}, []SitemapEntry{{Loc: "https://x.com/"}})
+	if err == nil {
+		t.Error("expected error from encode failure")
+	}
+}
+
+func TestWriteSitemapIndex_headerWriteError(t *testing.T) {
+	err := WriteSitemapIndex(failWriter{}, []string{"https://x.com/sitemap1.xml"}, time.Time{})
+	if err == nil {
+		t.Error("expected error from header write failure")
+	}
+}
+
+func TestWriteSitemapIndex_nonZeroLastMod(t *testing.T) {
+	var buf bytes.Buffer
+	lastMod := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	if err := WriteSitemapIndex(&buf, []string{"https://x.com/sitemap1.xml"}, lastMod); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "2025-06-01") {
+		t.Errorf("expected lastMod date in output, got: %s", buf.String())
+	}
+}
+
+func TestWriteSitemapIndex_encodeError(t *testing.T) {
+	err := WriteSitemapIndex(&afterFirstWriter{}, []string{"https://x.com/sitemap1.xml"}, time.Time{})
+	if err == nil {
+		t.Error("expected error from encode failure")
 	}
 }
 

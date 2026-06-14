@@ -170,6 +170,19 @@ func TestValidateBlockFields_EmptyFieldsTreatedAsEmpty(t *testing.T) {
 	}
 }
 
+func TestParseFields_invalidJSON(t *testing.T) {
+	schema := &smeldr.ContentTypeSchema{
+		ID:       "test-id",
+		TypeName: "test_type",
+		Label:    "test_type",
+		Fields:   json.RawMessage(`{invalid json}`),
+	}
+	_, err := schema.ParseFields()
+	if err == nil {
+		t.Error("expected error for invalid JSON in Fields")
+	}
+}
+
 // schemaWith builds a ContentTypeSchema without touching the database.
 func schemaWith(t *testing.T, typeName string, fields []smeldr.SchemaField) *smeldr.ContentTypeSchema {
 	t.Helper()

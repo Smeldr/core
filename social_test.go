@@ -161,3 +161,38 @@ func TestForgeHeadNoOGWithoutTitle(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeOGDefaults_nil(t *testing.T) {
+	h := Head{Title: "Test"}
+	got := mergeOGDefaults(h, nil)
+	if got.Title != "Test" {
+		t.Errorf("mergeOGDefaults(nil): Title changed to %q", got.Title)
+	}
+}
+
+func TestMergeOGDefaults_appliesImage(t *testing.T) {
+	h := Head{}
+	d := &OGDefaults{Image: Image{URL: "https://example.com/og.png"}}
+	got := mergeOGDefaults(h, d)
+	if got.Image.URL != d.Image.URL {
+		t.Errorf("Image.URL = %q, want %q", got.Image.URL, d.Image.URL)
+	}
+}
+
+func TestMergeOGDefaults_skipsExistingImage(t *testing.T) {
+	h := Head{Image: Image{URL: "https://existing.com/img.png"}}
+	d := &OGDefaults{Image: Image{URL: "https://fallback.com/og.png"}}
+	got := mergeOGDefaults(h, d)
+	if got.Image.URL != "https://existing.com/img.png" {
+		t.Errorf("existing Image.URL overridden: got %q", got.Image.URL)
+	}
+}
+
+func TestMergeOGDefaults_appliesCreator(t *testing.T) {
+	h := Head{}
+	d := &OGDefaults{TwitterCreator: "@smeldr"}
+	got := mergeOGDefaults(h, d)
+	if got.Social.Twitter.Creator != "@smeldr" {
+		t.Errorf("TwitterCreator = %q, want \"@smeldr\"", got.Social.Twitter.Creator)
+	}
+}

@@ -482,3 +482,197 @@ func BenchmarkInMemoryCacheHIT(b *testing.B) {
 		}
 	}
 }
+
+// — CSRF ——————————————————————————————————————————————————————————————————
+
+func TestCSRF_missingToken(t *testing.T) {
+	auth := CookieSession("session", testSecret)
+	mw := CSRF(auth)
+	handler := mw(okHandler("ok"))
+
+	req := httptest.NewRequest(http.MethodPost, "/submit", nil)
+	// Set CSRF cookie so the middleware doesn't issue a new one, but do NOT set X-CSRF-Token header.
+	req.AddCookie(&http.Cookie{Name: CSRFCookieName, Value: "abc123"})
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("POST without X-CSRF-Token header: got %d, want 403", w.Code)
+	}
+}
+
+func TestCSRF_wrongToken(t *testing.T) {
+	auth := CookieSession("session", testSecret)
+	mw := CSRF(auth)
+	handler := mw(okHandler("ok"))
+
+	req := httptest.NewRequest(http.MethodPost, "/submit", nil)
+	req.AddCookie(&http.Cookie{Name: CSRFCookieName, Value: "correct-token"})
+	req.Header.Set("X-CSRF-Token", "wrong-token")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("POST with wrong X-CSRF-Token: got %d, want 403", w.Code)
+	}
+}
+
+// — InMemoryCache moveToFront —————————————————————————————————————————————
+
+func TestInMemoryCache_moveToFront(t *testing.T) {
+	// Two entries needed so the first entry is NOT at head when re-accessed.
+	mw := InMemoryCache(time.Minute, CacheMaxEntries(10))
+	handler := mw(okHandler("body"))
+
+	// Populate /a — /a is head.
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/a", nil))
+	// Populate /b — /b is now head; /a is no longer head.
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/b", nil))
+	// Access /a — triggers moveToFront on a non-head entry (covers the unlink+pushFront path).
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/a", nil))
+
+	if got := w.Header().Get("X-Cache"); got != "HIT" {
+		t.Errorf("X-Cache = %q, want \"HIT\"", got)
+	}
+}
+
+// — realClientIP ——————————————————————————————————————————————————————————
+
+func TestRealClientIP_xRealIP(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-Real-IP", "1.2.3.4")
+	if got := realClientIP(r); got != "1.2.3.4" {
+		t.Errorf("realClientIP(X-Real-IP) = %q, want %q", got, "1.2.3.4")
+	}
+}
+
+func TestRealClientIP_remoteAddr_noPort(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Del("X-Real-IP")
+	r.Header.Del("X-Forwarded-For")
+	// A RemoteAddr without a port causes net.SplitHostPort to fail.
+	r.RemoteAddr = "1.2.3.4"
+	if got := realClientIP(r); got != "1.2.3.4" {
+		t.Errorf("realClientIP(no-port RemoteAddr) = %q, want %q", got, "1.2.3.4")
+	}
+}
+
+func TestRealClientIP_remoteAddr_withPort(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Del("X-Real-IP")
+	r.Header.Del("X-Forwarded-For")
+	r.RemoteAddr = "1.2.3.4:5678"
+	if got := realClientIP(r); got != "1.2.3.4" {
+		t.Errorf("realClientIP(with-port) = %q, want %q", got, "1.2.3.4")
+	}
+}
+
+// — statusRecorder.Write and RequestLogger zero-status coverage ————————————
+
+func TestRequestLogger_handlerNoWriteHeader(t *testing.T) {
+	// Handler calls w.Write without WriteHeader first. Covers:
+	// - statusRecorder.Write "if s.status == 0" branch
+	// - RequestLogger "if status == 0 { status = 200 }" branch
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("hello")) //nolint:errcheck
+	})
+	mw := RequestLogger()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	mw(handler).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status: got %d want %d", w.Code, http.StatusOK)
+	}
+}
+
+// — rateLimiter.allow token overflow cap ——————————————————————————————————
+
+func TestRateLimit_tokenRefill_capAtMax(t *testing.T) {
+	// 1 token per millisecond. After exhausting and waiting 5 ms the refill
+	// must be capped at max (1), not exceed it — covers allow() lines 191-192.
+	mw, stop := NewRateLimiter(1, time.Millisecond)
+	t.Cleanup(stop)
+	h := mw(okHandler("ok"))
+	addr := "192.0.2.100:9999"
+
+	req1 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req1.RemoteAddr = addr
+	h.ServeHTTP(httptest.NewRecorder(), req1)
+
+	time.Sleep(5 * time.Millisecond)
+
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.RemoteAddr = addr
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req2)
+	if w.Code != http.StatusOK {
+		t.Errorf("after refill: got %d want %d", w.Code, http.StatusOK)
+	}
+}
+
+// — rateLimiter.sweep bucket deletion —————————————————————————————————————
+
+func TestRateLimiter_sweep_deletesOldBucket(t *testing.T) {
+	rl := &rateLimiter{
+		buckets: make(map[string]*ipBucket),
+		rate:    1,
+		max:     1,
+	}
+	old := &ipBucket{tokens: 1, lastSeen: time.Now().Add(-time.Second)}
+	rl.buckets["old-ip"] = old
+
+	rl.sweep(500 * time.Millisecond)
+
+	if _, exists := rl.buckets["old-ip"]; exists {
+		t.Error("expected old bucket to be deleted by sweep")
+	}
+}
+
+// — RateLimit non-proxy path with no-port RemoteAddr ——————————————————————
+
+func TestRateLimit_remoteAddr_noPort(t *testing.T) {
+	mw := RateLimit(10, time.Second)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1" // no port — SplitHostPort fails
+	w := httptest.NewRecorder()
+	mw(okHandler("ok")).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status: got %d want %d", w.Code, http.StatusOK)
+	}
+}
+
+// — CSRF passthrough for non-csrfAware auth ——————————————————————————————
+
+func TestCSRF_nonCsrfAwareAuth_passesThrough(t *testing.T) {
+	// BearerHMAC does not implement csrfAware → CSRF returns a no-op wrapper.
+	auth := BearerHMAC(testSecret)
+	mw := CSRF(auth)
+	handler := mw(okHandler("ok"))
+
+	req := httptest.NewRequest(http.MethodPost, "/submit", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("CSRF passthrough: got %d want %d", w.Code, http.StatusOK)
+	}
+}
+
+// — CSRF valid token passes ——————————————————————————————————————————————
+
+func TestCSRF_validToken_passes(t *testing.T) {
+	auth := CookieSession("session", testSecret)
+	mw := CSRF(auth)
+	handler := mw(okHandler("ok"))
+
+	token := "valid-csrf-token-value"
+	req := httptest.NewRequest(http.MethodPost, "/submit", nil)
+	req.AddCookie(&http.Cookie{Name: CSRFCookieName, Value: token})
+	req.Header.Set("X-CSRF-Token", token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("CSRF valid token: got %d want %d", w.Code, http.StatusOK)
+	}
+}
+

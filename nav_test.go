@@ -1,6 +1,7 @@
 package smeldr
 
 import (
+	"context"
 	"testing"
 )
 
@@ -238,5 +239,185 @@ func TestNavTree_deepCopy(t *testing.T) {
 	tree2 := nt.Tree()
 	if tree2[0].Label == "mutated" {
 		t.Error("Tree() should return independent copies — mutation affected internal state")
+	}
+}
+
+func TestBoolToInt(t *testing.T) {
+	if boolToInt(true) != 1 {
+		t.Error("boolToInt(true) should be 1")
+	}
+	if boolToInt(false) != 0 {
+		t.Error("boolToInt(false) should be 0")
+	}
+}
+
+func TestNavTree_CodeMode_writeErrors(t *testing.T) {
+	var nt NavTree // no db set — code mode
+	ctx := context.Background()
+
+	if _, err := nt.Create(ctx, NavItem{Label: "x"}); err == nil {
+		t.Error("Create in code mode should return error")
+	}
+	if _, err := nt.Update(ctx, NavItem{ID: "x"}); err == nil {
+		t.Error("Update in code mode should return error")
+	}
+	if err := nt.Delete(ctx, "x"); err == nil {
+		t.Error("Delete in code mode should return error")
+	}
+}
+
+func TestNavTree_DB_migrate(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	var nt NavTree
+	if err := nt.migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if !nt.HasDB() {
+		t.Error("HasDB() should be true after migrate")
+	}
+}
+
+func TestNavTree_DB_load_empty(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	var nt NavTree
+	if err := nt.migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := nt.load(ctx, db); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if nt.Tree() != nil {
+		t.Error("Tree() should be nil on empty table")
+	}
+}
+
+func TestNavTree_DB_Create(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	var nt NavTree
+	if err := nt.migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	item, err := nt.Create(ctx, NavItem{Label: "Home", Path: "/", Hidden: true, Ghost: false})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if item.ID == "" {
+		t.Error("Create should assign an ID")
+	}
+
+	tree := nt.Tree()
+	if len(tree) != 1 {
+		t.Fatalf("Tree() len: got %d, want 1", len(tree))
+	}
+	if tree[0].Label != "Home" {
+		t.Errorf("Label: got %q, want \"Home\"", tree[0].Label)
+	}
+	if !tree[0].Hidden {
+		t.Error("Hidden should be true")
+	}
+}
+
+func TestNavTree_DB_Update(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	var nt NavTree
+	if err := nt.migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	created, err := nt.Create(ctx, NavItem{Label: "Old"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	created.Label = "New"
+	updated, err := nt.Update(ctx, created)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Label != "New" {
+		t.Errorf("Label after update: got %q, want \"New\"", updated.Label)
+	}
+
+	tree := nt.Tree()
+	if len(tree) != 1 || tree[0].Label != "New" {
+		t.Errorf("Tree after update: unexpected state")
+	}
+}
+
+func TestNavTree_DB_Update_notFound(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	var nt NavTree
+	if err := nt.migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	_, err := nt.Update(ctx, NavItem{ID: "nonexistent", Label: "x"})
+	if err != ErrNotFound {
+		t.Errorf("Update nonexistent: got %v, want ErrNotFound", err)
+	}
+}
+
+func TestNavTree_DB_Delete(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	var nt NavTree
+	if err := nt.migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	item, err := nt.Create(ctx, NavItem{Label: "Temp"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := nt.Delete(ctx, item.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if nt.Tree() != nil {
+		t.Error("Tree() should be nil after deleting the only item")
+	}
+}
+
+func TestNavTree_DB_Delete_notFound(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	var nt NavTree
+	if err := nt.migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	if err := nt.Delete(ctx, "nonexistent"); err != ErrNotFound {
+		t.Errorf("Delete nonexistent: got %v, want ErrNotFound", err)
+	}
+}
+
+func TestNavTree_DB_Delete_cascade(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	var nt NavTree
+	if err := nt.migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	parent, err := nt.Create(ctx, NavItem{Label: "Parent"})
+	if err != nil {
+		t.Fatalf("Create parent: %v", err)
+	}
+	_, err = nt.Create(ctx, NavItem{Label: "Child", ParentID: parent.ID})
+	if err != nil {
+		t.Fatalf("Create child: %v", err)
+	}
+
+	if err := nt.Delete(ctx, parent.ID); err != nil {
+		t.Fatalf("Delete parent: %v", err)
+	}
+	if nt.Tree() != nil {
+		t.Error("Tree() should be nil after cascade delete of parent+child")
 	}
 }

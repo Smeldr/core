@@ -935,3 +935,81 @@ func runRepoParity(t *testing.T, repo Repository[parityItem]) {
 func TestRepoParity_MemoryRepo(t *testing.T) {
 	runRepoParity(t, NewMemoryRepo[parityItem]())
 }
+
+// — stringField nil pointer ——————————————————————————————————————————————
+
+func TestStringField_nilPointer(t *testing.T) {
+	type withTitle struct {
+		Node
+		Title string
+	}
+	var p *withTitle // nil pointer
+	got := stringField(p, "Title")
+	if got != "" {
+		t.Errorf("stringField(nil) = %q, want empty string", got)
+	}
+}
+
+// — SQLRepo.Seq error-path coverage —————————————————————————————————————————
+
+func TestSQLRepo_Seq_queryContextError(t *testing.T) {
+	db := newSQLiteDB(t)
+	createParityItemsTable(t, db)
+	repo := NewSQLRepo[parityItem](db)
+
+	// Close the DB so QueryContext fails immediately.
+	db.Close()
+
+	seq := repo.Seq(context.Background(), ListOptions{})
+	var gotErr error
+	for _, err := range seq {
+		gotErr = err
+	}
+	if gotErr == nil {
+		t.Error("Seq should yield an error when QueryContext fails on a closed DB")
+	}
+}
+
+func TestSQLRepo_Seq_yieldReturnsFalse(t *testing.T) {
+	db := newSQLiteDB(t)
+	createParityItemsTable(t, db)
+	repo := NewSQLRepo[parityItem](db)
+	ctx := context.Background()
+
+	// Seed two items so at least one row exists.
+	for _, it := range []parityItem{
+		{ID: "s1", Slug: "alpha", Title: "Alpha", Status: "published"},
+		{ID: "s2", Slug: "beta", Title: "Beta", Status: "draft"},
+	} {
+		if err := repo.Save(ctx, it); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+
+	// Iterate but break after the first item — yield returns false → early return.
+	seq := repo.Seq(ctx, ListOptions{})
+	count := 0
+	for item, err := range seq {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		_ = item
+		count++
+		break // causes yield to return false
+	}
+	if count != 1 {
+		t.Errorf("iterated %d items before break, want 1", count)
+	}
+}
+
+// — QueryOne[T] error-path coverage —————————————————————————————————————————
+
+func TestQueryOne_queryError(t *testing.T) {
+	db := newSQLiteDB(t)
+	db.Close() // closed DB → Query[T] fails
+
+	_, err := QueryOne[parityItem](context.Background(), db, "SELECT * FROM parity_items")
+	if err == nil {
+		t.Error("QueryOne should return error when the underlying Query fails")
+	}
+}

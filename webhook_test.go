@@ -2,6 +2,7 @@ package smeldr
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net"
 	"strings"
@@ -350,5 +351,159 @@ func TestBuildWebhookPayload(t *testing.T) {
 	_, err = buildWebhookPayload("Post", item, BeforeCreate)
 	if err == nil {
 		t.Fatal("buildWebhookPayload with BeforeCreate should return error")
+	}
+}
+
+// createWebhookEndpointsTable creates the smeldr_webhook_endpoints table on db.
+func createWebhookEndpointsTable(t *testing.T, db interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_webhook_endpoints (
+			id         TEXT    PRIMARY KEY,
+			events     TEXT    NOT NULL,
+			target_url TEXT    NOT NULL,
+			secret_enc TEXT    NOT NULL,
+			active     BOOLEAN NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL
+		)`)
+	if err != nil {
+		t.Fatalf("create smeldr_webhook_endpoints: %v", err)
+	}
+}
+
+func TestWebhookStore_Create_valid(t *testing.T) {
+	db := newSQLiteDB(t)
+	createWebhookEndpointsTable(t, db)
+	store := NewWebhookStore(db, []byte("test-key-32bytes-xxxxxxxxxxxx!!!"))
+	ctx := context.Background()
+
+	// 8.8.8.8 is a public IP literal — Go resolves it without DNS, always passes SSRF check.
+	ep, secret, err := store.Create(ctx, "https://8.8.8.8", []string{"post.create"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if ep.ID == "" {
+		t.Error("Create should assign a non-empty endpoint ID")
+	}
+	if secret == "" {
+		t.Error("Create should return a non-empty plaintext secret")
+	}
+}
+
+func TestWebhookStore_Create_httpURL(t *testing.T) {
+	db := newSQLiteDB(t)
+	store := NewWebhookStore(db, []byte("test-key-32bytes-xxxxxxxxxxxx!!!"))
+	ctx := context.Background()
+
+	_, _, err := store.Create(ctx, "http://example.com", []string{"post.create"})
+	if err == nil {
+		t.Error("Create with http:// URL should return error (SSRF guard requires HTTPS)")
+	}
+}
+
+func TestWebhookStore_Create_privateIP(t *testing.T) {
+	db := newSQLiteDB(t)
+	store := NewWebhookStore(db, []byte("test-key-32bytes-xxxxxxxxxxxx!!!"))
+	ctx := context.Background()
+
+	_, _, err := store.Create(ctx, "https://192.168.1.1", []string{"post.create"})
+	if err == nil {
+		t.Error("Create with private IP should return error (SSRF guard)")
+	}
+}
+
+// — decryptSecret error paths —————————————————————————————————————————————
+
+func TestWebhookStore_decryptSecret_invalidBase64(t *testing.T) {
+	store := NewWebhookStore(nil, []byte("test-key-32bytes-xxxxxxxxxxxx!!!"))
+	_, err := store.decryptSecret("not-valid-base64!!!")
+	if err == nil {
+		t.Error("decryptSecret with invalid base64 should return an error")
+	}
+	if !strings.Contains(err.Error(), "base64") {
+		t.Errorf("error should mention base64, got: %v", err)
+	}
+}
+
+func TestWebhookStore_decryptSecret_tooShort(t *testing.T) {
+	store := NewWebhookStore(nil, []byte("test-key-32bytes-xxxxxxxxxxxx!!!"))
+	// 8 bytes encoded as base64 — less than AES-GCM nonce size (12).
+	shortEnc := "AAAAAAAAAAA=" // 8 bytes
+	_, err := store.decryptSecret(shortEnc)
+	if err == nil {
+		t.Error("decryptSecret with too-short ciphertext should return an error")
+	}
+}
+
+// — WebhookStore DB error paths ———————————————————————————————————————————
+
+func TestWebhookStore_Create_insertError(t *testing.T) {
+	store := NewWebhookStore(&errExecDB{}, []byte("test-key-32bytes-xxxxxxxxxxxx!!!"))
+	ctx := context.Background()
+	// 8.8.8.8 passes SSRF validation; the ExecContext INSERT will then fail.
+	_, _, err := store.Create(ctx, "https://8.8.8.8", []string{"post.created"})
+	if err == nil {
+		t.Error("expected error when INSERT fails")
+	}
+}
+
+func TestWebhookStore_List_queryContextError(t *testing.T) {
+	store := NewWebhookStore(&errQueryDB{}, []byte("test-key-32bytes-xxxxxxxxxxxx!!!"))
+	_, err := store.List(context.Background())
+	if err == nil {
+		t.Error("expected error when QueryContext fails")
+	}
+}
+
+func TestWebhookStore_EndpointsForEvent_queryContextError(t *testing.T) {
+	store := NewWebhookStore(&errQueryDB{}, []byte("test-key-32bytes-xxxxxxxxxxxx!!!"))
+	_, err := store.EndpointsForEvent(context.Background(), "post.created")
+	if err == nil {
+		t.Error("expected error when QueryContext fails")
+	}
+}
+
+// — webhookDispatch error paths ———————————————————————————————————————————
+
+func TestWebhookDispatch_signalNotDeliverable(t *testing.T) {
+	store := NewWebhookStore(nil, []byte("k"))
+	pool := newWorkerPool(nil, store, realClock{}, 1)
+	ev := SignalEvent{Type: "Post"}
+	// BeforeCreate is not a delivery signal — dispatched returns nil immediately.
+	if err := webhookDispatch(context.Background(), ev, BeforeCreate, store, pool); err != nil {
+		t.Errorf("expected nil, got %v", err)
+	}
+}
+
+func TestWebhookDispatch_endpointsLookupError(t *testing.T) {
+	store := NewWebhookStore(&errQueryDB{}, []byte("k"))
+	pool := newWorkerPool(&errExecDB{}, store, realClock{}, 1)
+	ev := SignalEvent{Type: "Post", raw: &testPost{}}
+	// EndpointsForEvent fails — function logs and returns nil.
+	if err := webhookDispatch(context.Background(), ev, AfterCreate, store, pool); err != nil {
+		t.Errorf("expected nil, got %v", err)
+	}
+}
+
+func TestWebhookDispatch_enqueueError(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	createWebhookEndpointsTable(t, db)
+	store := NewWebhookStore(db, []byte("test-key-32bytes-xxxxxxxxxxxx!!!"))
+	enc, _ := store.encryptSecret([]byte("plain"))
+	eventsJSON := `["testpost.created"]`
+	_, _ = db.ExecContext(ctx,
+		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1,$2,$3,$4,$5,datetime('now'))`,
+		"ep-1", eventsJSON, "https://8.8.8.8/hook", enc, 1,
+	)
+	// Pool uses errExecDB → Enqueue always fails (INSERT into smeldr_outbound_jobs errors).
+	pool := newWorkerPool(&errExecDB{}, store, realClock{}, 1)
+	ev := SignalEvent{Type: "testpost", raw: &testPost{}}
+	// Enqueue error is logged, not returned.
+	if err := webhookDispatch(ctx, ev, AfterCreate, store, pool); err != nil {
+		t.Errorf("expected nil, got %v", err)
 	}
 }

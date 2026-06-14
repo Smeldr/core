@@ -351,6 +351,70 @@ type benchStruct struct {
 	Slug  string `smeldr:"slug"`
 }
 
+// — makeMin / makeMax int, uint, float branches ——————————————————————————
+
+type minMaxIntStruct struct {
+	Node
+	Count int     `smeldr:"min=5,max=100"`
+	Score float64 `smeldr:"min=0,max=10"`
+	Rank  uint    `smeldr:"min=1,max=50"`
+}
+
+func TestValidation_minInt_tooSmall(t *testing.T) {
+	v := &minMaxIntStruct{Node: Node{ID: "1", Slug: "s", Status: Published}, Count: 2, Score: 5, Rank: 1}
+	err := RunValidation(v)
+	if err == nil {
+		t.Error("expected validation error for Count < min 5")
+	}
+}
+
+func TestValidation_maxInt_tooLarge(t *testing.T) {
+	v := &minMaxIntStruct{Node: Node{ID: "1", Slug: "s", Status: Published}, Count: 200, Score: 5, Rank: 1}
+	err := RunValidation(v)
+	if err == nil {
+		t.Error("expected validation error for Count > max 100")
+	}
+}
+
+func TestValidation_minFloat_tooSmall(t *testing.T) {
+	v := &minMaxIntStruct{Node: Node{ID: "1", Slug: "s", Status: Published}, Count: 10, Score: -1, Rank: 1}
+	err := RunValidation(v)
+	if err == nil {
+		t.Error("expected validation error for Score < min 0")
+	}
+}
+
+func TestValidation_maxFloat_tooLarge(t *testing.T) {
+	v := &minMaxIntStruct{Node: Node{ID: "1", Slug: "s", Status: Published}, Count: 10, Score: 11, Rank: 1}
+	err := RunValidation(v)
+	if err == nil {
+		t.Error("expected validation error for Score > max 10")
+	}
+}
+
+func TestValidation_minUint_tooSmall(t *testing.T) {
+	v := &minMaxIntStruct{Node: Node{ID: "1", Slug: "s", Status: Published}, Count: 10, Score: 5, Rank: 0}
+	err := RunValidation(v)
+	if err == nil {
+		t.Error("expected validation error for Rank < min 1")
+	}
+}
+
+func TestValidation_maxUint_tooLarge(t *testing.T) {
+	v := &minMaxIntStruct{Node: Node{ID: "1", Slug: "s", Status: Published}, Count: 10, Score: 5, Rank: 100}
+	err := RunValidation(v)
+	if err == nil {
+		t.Error("expected validation error for Rank > max 50")
+	}
+}
+
+func TestValidation_minMaxInt_valid(t *testing.T) {
+	v := &minMaxIntStruct{Node: Node{ID: "1", Slug: "s", Status: Published}, Count: 10, Score: 5, Rank: 10}
+	if err := RunValidation(v); err != nil {
+		t.Errorf("unexpected validation error: %v", err)
+	}
+}
+
 // BenchmarkValidateStructCached measures the cached reflection path (all runs
 // after the first). The first run populates the cache; subsequent runs are
 // pure slice iteration — no reflection.

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // — Test helpers ——————————————————————————————————————————————————————————
@@ -560,6 +561,94 @@ func TestLLMsTxt_gzip(t *testing.T) {
 	decompressed := string(decompressGzip(t, w.Body.Bytes()))
 	if !strings.Contains(decompressed, "Gzip Article") {
 		t.Errorf("decompressed body missing entry title:\n%s", decompressed[:min(200, len(decompressed))])
+	}
+}
+
+// — renderAIDoc coverage paths ————————————————————————————————————————————
+
+// testMarkdownablePost implements Markdownable but NOT AIDocSummary.
+type testMarkdownablePost struct {
+	Node
+	Title string
+	Body  string
+}
+
+func (p *testMarkdownablePost) Markdown() string { return p.Body }
+func (p *testMarkdownablePost) Head() Head        { return Head{Title: p.Title} }
+
+func TestRenderAIDoc_nonMarkdownable(t *testing.T) {
+	// Non-Markdownable item → JSON marshalled body.
+	item := &testPost{
+		Node:  Node{ID: "id1", Slug: "slug1", Status: Published},
+		Title: "Test",
+	}
+	head := Head{Title: "Test", Type: "article"}
+	n := Node{ID: "id1", Slug: "slug1"}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	renderAIDoc(w, r, head, n, item, false)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "+++aidoc+v1+++") {
+		t.Errorf("body missing aidoc header:\n%s", body)
+	}
+	// Non-Markdownable → JSON in body.
+	if !strings.Contains(body, `"Title"`) {
+		t.Errorf("body should contain JSON for non-Markdownable item:\n%s", body)
+	}
+}
+
+func TestRenderAIDoc_markdownableNoSummary(t *testing.T) {
+	// Markdownable without AIDocSummary + empty description → Excerpt fallback.
+	item := &testMarkdownablePost{
+		Node:  Node{ID: "id2", Slug: "slug2", Status: Published},
+		Title: "Markdown Post",
+		Body:  "Some markdown content that is long enough for excerpt.",
+	}
+	// Empty description so the Markdownable excerpt branch is hit.
+	head := Head{Title: "Markdown Post"}
+	n := Node{ID: "id2", Slug: "slug2"}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	renderAIDoc(w, r, head, n, item, false)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "+++aidoc+v1+++") {
+		t.Errorf("body missing aidoc header:\n%s", body)
+	}
+}
+
+func TestRenderAIDoc_authorCreatedTags(t *testing.T) {
+	// Covers head.Author, n.CreatedAt, and head.Tags branches.
+	item := &testAIPost{
+		Node:  Node{ID: "id3", Slug: "slug3", Status: Published},
+		Title: "Tagged Post",
+		Body:  "body",
+	}
+	createdAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	n := Node{ID: "id3", Slug: "slug3", CreatedAt: createdAt}
+	head := Head{
+		Title:  "Tagged Post",
+		Author: "Alice",
+		Tags:   []string{"go", "testing"},
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	renderAIDoc(w, r, head, n, item, true) // withoutID=true
+
+	body := w.Body.String()
+	if !strings.Contains(body, "author:   Alice") {
+		t.Errorf("body missing author field:\n%s", body)
+	}
+	if !strings.Contains(body, "created:  2026-01-01") {
+		t.Errorf("body missing created field:\n%s", body)
+	}
+	if !strings.Contains(body, "tags:     [go, testing]") {
+		t.Errorf("body missing tags field:\n%s", body)
+	}
+	// withoutID=true → no id: line.
+	if strings.Contains(body, "id:") {
+		t.Errorf("body should not contain id: when withoutID=true:\n%s", body)
 	}
 }
 

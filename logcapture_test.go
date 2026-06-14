@@ -325,3 +325,109 @@ func TestCaptureLogs_InstallsGlobalTee(t *testing.T) {
 		t.Errorf("captured msg = %q, want captured-info", entries[0].Msg)
 	}
 }
+
+// — teeHandler early-return branches ——————————————————————————————————————
+
+func TestTeeHandler_WithAttrs_empty(t *testing.T) {
+	prev := slog.Default()
+	t.Cleanup(func() { restoreDefaultLogging(prev) })
+
+	app := &App{}
+	app.CaptureLogs()
+
+	tee, ok := slog.Default().Handler().(*teeHandler)
+	if !ok {
+		t.Fatalf("handler is %T, want *teeHandler", slog.Default().Handler())
+	}
+
+	// WithAttrs with empty slice should return the same handler (early return).
+	got := tee.WithAttrs(nil)
+	if got != tee {
+		t.Error("WithAttrs(nil) should return the same handler")
+	}
+	got2 := tee.WithAttrs([]slog.Attr{})
+	if got2 != tee {
+		t.Error("WithAttrs([]) should return the same handler")
+	}
+}
+
+func TestTeeHandler_WithGroup_emptyName(t *testing.T) {
+	prev := slog.Default()
+	t.Cleanup(func() { restoreDefaultLogging(prev) })
+
+	app := &App{}
+	app.CaptureLogs()
+
+	tee, ok := slog.Default().Handler().(*teeHandler)
+	if !ok {
+		t.Fatalf("handler is %T, want *teeHandler", slog.Default().Handler())
+	}
+
+	// WithGroup with empty name should return the same handler (early return).
+	got := tee.WithGroup("")
+	if got != tee {
+		t.Error("WithGroup(\"\") should return the same handler")
+	}
+}
+
+// — addAttr branch coverage ——————————————————————————————————————————————————
+
+func newCaptureLogger(t *testing.T) (*teeHandler, func()) {
+	t.Helper()
+	prev := slog.Default()
+	app := &App{}
+	app.CaptureLogs(WithLogLevel(slog.LevelDebug))
+	tee, ok := slog.Default().Handler().(*teeHandler)
+	if !ok {
+		t.Fatalf("handler is %T, want *teeHandler", slog.Default().Handler())
+	}
+	return tee, func() { restoreDefaultLogging(prev) }
+}
+
+func TestAddAttr_emptyAttr(t *testing.T) {
+	_, cleanup := newCaptureLogger(t)
+	defer cleanup()
+	// Zero-value slog.Attr — addAttr returns immediately (a.Equal(slog.Attr{})).
+	slog.Info("zero-attr-test", slog.Attr{})
+}
+
+func TestAddAttr_emptyGroup(t *testing.T) {
+	_, cleanup := newCaptureLogger(t)
+	defer cleanup()
+	// Group with no children — addAttr returns early (len(group) == 0).
+	slog.Info("empty-group-test", slog.Group("g"))
+}
+
+func TestAddAttr_anonGroup(t *testing.T) {
+	tee, cleanup := newCaptureLogger(t)
+	defer cleanup()
+	// Anonymous group (Key=="") — addAttr inlines children into parent map.
+	slog.Info("anon-group-test", slog.Attr{
+		Key:   "",
+		Value: slog.GroupValue(slog.String("inner", "val")),
+	})
+	entries, _, _ := tee.ring.snapshot()
+	if len(entries) == 0 {
+		t.Fatal("no entries captured")
+	}
+	last := entries[len(entries)-1]
+	if v, ok := last.Attrs["inner"]; !ok || v != "val" {
+		t.Errorf("inlined attr 'inner' = %v (ok=%v), want 'val'", v, ok)
+	}
+}
+
+func TestAddAttr_emptyKeyNonGroup(t *testing.T) {
+	_, cleanup := newCaptureLogger(t)
+	defer cleanup()
+	// Non-group attr with empty Key — addAttr skips it (final if a.Key=="" guard).
+	slog.Info("empty-key-test", slog.Attr{Key: "", Value: slog.StringValue("skipped")})
+}
+
+// — levelAtLeast coverage ———————————————————————————————————————————————————
+
+func TestLevelAtLeast_unparseableLevel(t *testing.T) {
+	// An unrecognisable level string should always pass through (returns true).
+	if !levelAtLeast("NOTLEVEL", slog.LevelInfo) {
+		t.Error("levelAtLeast with unparseable level should return true")
+	}
+}

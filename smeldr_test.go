@@ -530,6 +530,311 @@ func TestApp_health_httpsExempt(t *testing.T) {
 // Benchmark
 // ——————————————————————————————————————————————————————————————
 
+// ——————————————————————————————————————————————————————————————
+// MustConfig — SMELDR_CONFIG env var path
+// ——————————————————————————————————————————————————————————————
+
+func TestMustConfig_envVarPath(t *testing.T) {
+	// Write a minimal smeldr.config to a temp file.
+	f, err := os.CreateTemp("", "smeldr-*.config")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	defer os.Remove(f.Name())
+	f.WriteString("# test config\n") //nolint:errcheck
+	f.Close()
+
+	t.Setenv("SMELDR_CONFIG", f.Name())
+
+	// MustConfig should read the env-var path without panicking.
+	cfg := MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("supersecretkey16"),
+	})
+	if cfg.BaseURL != "https://example.com" {
+		t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, "https://example.com")
+	}
+}
+
+// ——————————————————————————————————————————————————————————————
+// Handler — NavModeCode path + setNavTree
+// ——————————————————————————————————————————————————————————————
+
+func TestApp_Handler_navModeCode(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := NewModule((*testPost)(nil), Repo(repo))
+
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	app.Nav(NavItem{Label: "Home", Path: "/"})
+	app.Content(m) // adds m to navTreeModules
+
+	// Handler() triggers the NavModeCode branch and calls m.setNavTree.
+	h := app.Handler()
+	if app.navTree == nil {
+		t.Fatal("navTree should be non-nil after Handler() with Nav items")
+	}
+	if m.navTree == nil {
+		t.Fatal("module navTree should be set via setNavTree after Handler()")
+	}
+
+	// Verify the tree is usable.
+	req := httptest.NewRequest("GET", "/testposts", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("list status = %d, want 200", w.Code)
+	}
+}
+
+// ——————————————————————————————————————————————————————————————
+// Handler — OGDefaults root-relative image URL resolution
+// ——————————————————————————————————————————————————————————————
+
+func TestApp_Handler_OGDefaults_rootRelative(t *testing.T) {
+	app := New(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("supersecretkey16"),
+		OGDefaults: &OGDefaults{
+			TwitterSite: "@example",
+			Image:       Image{URL: "/static/og.png", Width: 1200, Height: 630},
+		},
+	})
+	app.Handler()
+
+	og := app.seo.ogDefaults
+	if og == nil {
+		t.Fatal("seo.ogDefaults should be non-nil after Handler()")
+	}
+	want := "https://example.com/static/og.png"
+	if og.Image.URL != want {
+		t.Errorf("og.Image.URL = %q, want %q", og.Image.URL, want)
+	}
+}
+
+func TestApp_Handler_OGDefaults_absoluteURL(t *testing.T) {
+	app := New(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("supersecretkey16"),
+		OGDefaults: &OGDefaults{
+			Image: Image{URL: "https://cdn.example.com/og.png"},
+		},
+	})
+	app.Handler()
+
+	og := app.seo.ogDefaults
+	if og == nil {
+		t.Fatal("seo.ogDefaults should be non-nil after Handler()")
+	}
+	// Absolute URL should be preserved unchanged.
+	if og.Image.URL != "https://cdn.example.com/og.png" {
+		t.Errorf("og.Image.URL = %q, want unchanged absolute URL", og.Image.URL)
+	}
+}
+
+// ——————————————————————————————————————————————————————————————
+// Handler — audit handler registration
+// ——————————————————————————————————————————————————————————————
+
+type mockAuditStore struct{}
+
+func (mockAuditStore) Append(_ context.Context, _ AuditRecord) error   { return nil }
+func (mockAuditStore) List(_ context.Context, _ AuditFilter) ([]AuditRecord, error) {
+	return nil, nil
+}
+
+func TestApp_Handler_auditHandler(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	app.Audit(mockAuditStore{})
+	h := app.Handler()
+
+	// /_audit is protected by auth; unauthenticated request gets 401.
+	req := httptest.NewRequest("GET", "/_audit", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code == http.StatusNotFound {
+		t.Error("/_audit route not registered (got 404)")
+	}
+}
+
+// ——————————————————————————————————————————————————————————————
+// Handler — logs handler registration
+// ——————————————————————————————————————————————————————————————
+
+func TestApp_Handler_logsHandler(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	app.CaptureLogs()
+	h := app.Handler()
+
+	// /_logs is protected by auth; unauthenticated request gets 401.
+	req := httptest.NewRequest("GET", "/_logs", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code == http.StatusNotFound {
+		t.Error("/_logs route not registered (got 404)")
+	}
+}
+
+// ——————————————————————————————————————————————————————————————
+// Handler — cookie manifest registration
+// ——————————————————————————————————————————————————————————————
+
+func TestApp_Handler_cookiesManifest(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	app.Cookies(Cookie{Name: "session", Category: Necessary, Purpose: "Keeps you logged in."})
+	h := app.Handler()
+
+	req := httptest.NewRequest("GET", "/.well-known/cookies.json", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("cookies manifest status = %d, want 200", w.Code)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode cookies.json: %v", err)
+	}
+	if got["count"] == nil {
+		t.Error("cookies manifest should have a count field")
+	}
+}
+
+// ——————————————————————————————————————————————————————————————
+// Run — with registered module (scheduler path)
+// ——————————————————————————————————————————————————————————————
+
+func TestApp_Run_withModule(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("could not find free port: %v", err)
+	}
+	addr := l.Addr().String()
+	l.Close()
+
+	repo := NewMemoryRepo[*testPost]()
+	m := NewModule((*testPost)(nil), Repo(repo))
+
+	app := New(Config{
+		BaseURL:      "https://example.com",
+		Secret:       []byte("supersecretkey16"),
+		ReadTimeout:  time.Second,
+		WriteTimeout: time.Second,
+		IdleTimeout:  time.Second,
+	})
+	app.Content(m) // adds m to schedulerModules
+
+	done := make(chan error, 1)
+	go func() {
+		done <- app.Run(addr)
+	}()
+
+	// Poll until ready (max 2 s).
+	deadline := time.Now().Add(2 * time.Second)
+	ready := false
+	for time.Now().Before(deadline) {
+		resp, err := http.Get("http://" + addr + "/testposts")
+		if err == nil {
+			io.Copy(io.Discard, resp.Body) //nolint:errcheck
+			resp.Body.Close()
+			ready = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("server did not become ready within 2 s")
+	}
+
+	proc, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("FindProcess: %v", err)
+	}
+	if err := proc.Signal(os.Interrupt); err != nil {
+		t.Skipf("cannot send signal on this platform (%v); skipping", err)
+	}
+
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("Run returned error: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not shut down within 2 s after SIGINT")
+	}
+}
+
+// ——————————————————————————————————————————————————————————————
+// Run — scheduler + webhook pool, fail-fast (covers start/stop defers)
+// ——————————————————————————————————————————————————————————————
+
+func TestApp_Run_schedulerAndWebhookPool_failFast(t *testing.T) {
+	db := newSQLiteDB(t)
+	store := NewWebhookStore(db, []byte("supersecretkey16"))
+
+	repo := NewMemoryRepo[*testPost]()
+	m := NewModule((*testPost)(nil), Repo(repo))
+
+	app := New(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("supersecretkey16"),
+		DB:      db,
+	})
+	app.Content(m)      // adds m to schedulerModules
+	app.Webhooks(store) // sets webhookPool
+
+	// Bind a listener first so that app.Run using the same addr fails immediately
+	// with "address already in use". This causes Run() to return quickly while
+	// still exercising the webhookPool.Start/Stop and schedCancel/sched.Wait
+	// deferred cleanup paths.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("could not bind listener: %v", err)
+	}
+	defer l.Close()
+	addr := l.Addr().String()
+
+	runErr := app.Run(addr)
+	if runErr == nil {
+		t.Error("expected error when address is already in use")
+	}
+}
+
+// ——————————————————————————————————————————————————————————————
+// WebhookPool
+// ——————————————————————————————————————————————————————————————
+
+func TestApp_WebhookPool_nil(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	// No Webhooks() called → pool is nil.
+	if app.WebhookPool() != nil {
+		t.Error("WebhookPool() should return nil when no webhook store is configured")
+	}
+}
+
+func TestApp_WebhookPool_nonNil(t *testing.T) {
+	db := newSQLiteDB(t)
+	store := NewWebhookStore(db, []byte("supersecretkey16"))
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16"), DB: db})
+	app.Webhooks(store)
+
+	p1 := app.WebhookPool()
+	if p1 == nil {
+		t.Fatal("WebhookPool() = nil; want non-nil pool after Webhooks()")
+	}
+
+	// Second call returns the same pool (covers the non-nil return branch).
+	p2 := app.WebhookPool()
+	if p1 != p2 {
+		t.Error("WebhookPool() should return the same pool on repeated calls")
+	}
+}
+
+// ——————————————————————————————————————————————————————————————
+// Benchmark
+// ——————————————————————————————————————————————————————————————
+
 func BenchmarkApp_Handler(b *testing.B) {
 	repo := NewMemoryRepo[*testPost]()
 	// Pre-populate with a few items.
@@ -555,4 +860,186 @@ func BenchmarkApp_Handler(b *testing.B) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
 	}
+}
+
+// — App.Cookies dedup ——————————————————————————————————————————————————————
+
+func TestApp_Cookies_dedup(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
+	session := Cookie{Name: "session", Category: Necessary}
+	prefs := Cookie{Name: "prefs", Category: Preferences}
+
+	app.Cookies(session)
+	app.Cookies(session, prefs) // "session" already registered — must not duplicate
+
+	count := 0
+	for _, d := range app.cookieDecls {
+		if d.Name == "session" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("Cookies dedup: session appears %d times, want 1", count)
+	}
+}
+
+// — App.Redirects error path ——————————————————————————————————————————————
+
+func TestApp_Redirects_createTableError(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
+	if err := app.Redirects(&errExecDB{}); err == nil {
+		t.Error("expected error when CreateRedirectsTable fails")
+	}
+}
+
+// — App.Handler TokenStore probe error ————————————————————————————————————
+
+func TestApp_Handler_tokenStoreProbeError(t *testing.T) {
+	// errExecDB.QueryRowContext returns a no-row Row → Scan returns sql.ErrNoRows
+	// → probeTable returns error → WARN is printed, ensureBootstrap is skipped.
+	ts := NewTokenStore(&errExecDB{}, testSecret)
+	app := New(Config{
+		BaseURL:    "https://example.com",
+		Secret:     []byte("testsecret16chars"),
+		TokenStore: ts,
+	})
+	_ = app.Handler() // should not panic
+}
+
+// — App.Handler AppSchema / OGDefaults auto-apply ————————————————————————
+
+func TestApp_Handler_appSchemaAndOGDefaults(t *testing.T) {
+	schema := &AppSchema{Type: "Organization", Name: "Test Org", URL: "https://example.com"}
+	og := &OGDefaults{Image: Image{URL: "/og.png"}}
+	app := New(Config{
+		BaseURL:    "https://example.com",
+		Secret:     []byte("testsecret16chars"),
+		AppSchema:  schema,
+		OGDefaults: og,
+	})
+	_ = app.Handler()
+}
+
+func TestApp_Handler_ogDefaults_absoluteImage(t *testing.T) {
+	// OGDefaults with absolute image URL — takes the else branch (no root-relative resolution).
+	og := &OGDefaults{Image: Image{URL: "https://cdn.example.com/og.png"}}
+	app := New(Config{
+		BaseURL:    "https://example.com",
+		Secret:     []byte("testsecret16chars"),
+		OGDefaults: og,
+	})
+	_ = app.Handler()
+}
+
+// — App.Handler LLMs store registration ——————————————————————————————————
+
+func TestApp_Handler_llmsTxtRegistration(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	m := newTestModule(mem, AIIndex(LLMsTxt))
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
+	app.Content(m)
+	_ = app.Handler() // should register GET /llms.txt route
+}
+
+func TestApp_Handler_llmsFullTxtRegistration(t *testing.T) {
+	mem := NewMemoryRepo[*testMDPost]()
+	m := NewModule((*testMDPost)(nil), Repo(mem), AIIndex(LLMsTxtFull))
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
+	app.Content(m)
+	_ = app.Handler() // should register GET /llms-full.txt route
+}
+
+// — App.Handler standalone dispatch registration ——————————————————————————
+
+func TestApp_Handler_standaloneDispatch(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := &testPost{Node: Node{ID: "1", Slug: "my-slug", Status: Published}}
+	_ = mem.Save(context.Background(), p)
+
+	m := newTestModule(mem, Standalone())
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
+	app.Content(m)
+	h := app.Handler()
+
+	// GET /{slug} — should dispatch to the standalone module.
+	req := httptest.NewRequest(http.MethodGet, "/my-slug", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	// The slug exists — either 200 OK or 200 JSON response.
+	if w.Code != http.StatusOK {
+		t.Errorf("GET /{slug} standalone: got %d want 200", w.Code)
+	}
+}
+
+func TestApp_Handler_standaloneAIDocNotFound(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	m := newTestModule(mem, Standalone())
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
+	app.Content(m)
+	h := app.Handler()
+
+	// GET /{slug}/aidoc for unknown slug — should 404.
+	req := httptest.NewRequest(http.MethodGet, "/unknown-slug/aidoc", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("GET /{slug}/aidoc not found: got %d want 404", w.Code)
+	}
+}
+
+// — App.Handler NavModeCode registration —————————————————————————————————
+
+func TestApp_Handler_navCodeItems(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
+	app.Nav(NavItem{ID: "home", Label: "Home", Path: "/"})
+	_ = app.Handler() // should build navTree from code items
+	if app.navTree == nil {
+		t.Error("navTree should be set after Handler() with NavModeCode items")
+	}
+}
+
+// — App.Run error paths ———————————————————————————————————————————————————
+
+func TestApp_Run_loadPartialsError(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
+	app.Partials("non-existent-partials-dir-xyz")
+	err := app.Run(":0")
+	if err == nil {
+		t.Error("expected error from loadPartials with non-existent dir")
+	}
+}
+
+func TestApp_Run_parseTemplatesError(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	// Templates("non-existent-dir") with required=true → parseTemplates fails.
+	m := newTestModule(mem, Templates("non-existent-dir-xyz"))
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
+	app.Content(m)
+	err := app.Run(":0")
+	if err == nil {
+		t.Error("expected error from parseTemplates with non-existent template dir")
+	}
+}
+
+// — App.MustParseTemplate panic paths ————————————————————————————————————
+
+func TestMustParseTemplate_parseError_panics(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic from MustParseTemplate with non-existent file")
+		}
+	}()
+	app.MustParseTemplate("non-existent-file-xyz.html")
+}
+
+func TestMustParseTemplate_loadPartialsError_panics(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
+	app.Partials("non-existent-partials-dir-xyz")
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic from MustParseTemplate when loadPartials fails")
+		}
+	}()
+	app.MustParseTemplate("any.html")
 }
