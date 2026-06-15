@@ -13,436 +13,155 @@ Archived 2026-06-05: A121–A125 → phase4-archive.md
 Archived 2026-06-07: A126–A130 → phase5-archive.md
 Archived 2026-06-09: A131–A135 → phase6-archive.md
 Archived 2026-06-10: A136–A138 → phase7-archive.md
+Archived 2026-06-15: A139–A150 → phase8-archive.md
 
 ---
 
-## A139 — `migrateLegacyTableNames` idempotency fix (core v1.36.2)
+## A151 — T104 Increment 1: schema generalisation + content-type registry (core v1.39.0)
 
-**Date:** 2026-06-09
+**Date:** 2026-06-15
 **Status:** Agreed
-**Level:** 2 (bug fix; behaviour change in `migrateLegacyTableNames` error path)
+**Level:** 2 (new exported symbols; no breaking changes)
 
 ### Decision
 
-`migrateLegacyTableNames` checked whether the source (`forge_*`) table existed,
-but did not check whether the destination (`smeldr_*`) table already existed. If
-both tables coexist — indicating a partial migration from a previous run — the
-rename attempt failed with:
+T104 Increment 1 generalises the schema layer and introduces the content-type
+registry. Five deliverables shipped together:
 
+**1. `kind` column on `smeldr_content_type_schemas`**
+New `TEXT NOT NULL DEFAULT 'block'` column discriminates block types from
+content types. Added to `CreateSchemaTable` DDL. `MigrateSchemaKindColumn(db)` adds
+the column to existing databases via `PRAGMA table_info` probe (idempotent, safe on
+every boot). `ContentTypeSchema` struct gains `Kind string \`db:"kind"\``.
+
+**2. `SchemaField.Role` and `SchemaField.Relation`**
+Two new fields in the schema field JSON:
+- `Role string` — semantic seam: `"title"` / `"description"` / `"og_image"` /
+  `"body"` / `"summary"`. At most one field per schema may carry each role.
+  Read by T72 (head/SEO), T96 (summary cards), and the render path.
+- `Relation string` — forward-compat placeholder marking a field as a future
+  T06 edge-backed relation. Non-empty value = "this field will become a T06 edge".
+  Distinct from a render reference (`{Name}ID` in Fields).
+
+**3. `ValidateFields` (renamed from `ValidateBlockFields`)**
+`ValidateBlockFields` → `ValidateFields` with a back-compat alias:
+- Type checking: `string`, `integer` (whole numbers), `boolean`, `array`, `object`.
+- URL format: strings with `Format: "url"` that start with `"/"` are accepted as
+  relative paths; other non-empty strings validated with `url.Parse`.
+- Duplicate role rejection: returns an error when two schema fields carry the same
+  non-empty `Role`.
+- JSON `null` passes type checking (required check catches it separately).
+
+**4. `ContentTypeRegistry` + `TypeDescriptor` + `App.TypeRegistry()`**
+`registry.go` (new file):
+- `TypeDescriptor` — extensible type envelope: `Name` (PascalCase for compiled /
+  snake_case for runtime), `Prefix` (URL prefix), `Schema` (`*ContentTypeSchema`;
+  nil for compiled modules in this increment), `Kind` (`"block"` / `"content"`).
+- `ContentTypeRegistry` — concurrency-safe registry (RWMutex); dual key-space;
+  prefix uniqueness enforced globally.
+- Methods: `Register(d)` (panics on dup name or prefix), `RegisterPrefix(prefix, name)`
+  (idempotent for same-name, panics on prefix claimed by different type),
+  `Lookup(name)`, `LookupByPrefix(prefix)`, `All()`.
+- `App.TypeRegistry()` — returns the app's `*ContentTypeRegistry`.
+- `App.Content()` auto-registers compiled modules at `Content()` time with
+  soft-dup guard: first call wins, subsequent calls for the same TypeName call
+  `RegisterPrefix` instead of `Register`.
+
+**5. `idx_dynamic_content_type_status` index**
+`CREATE INDEX IF NOT EXISTS idx_dynamic_content_type_status ON smeldr_dynamic_content
+(type_name, status, published_at DESC)` added to `CreateBlockTables`. Supports
+efficient type+status queries for ContentList resolver (T96) and future dynamic
+content tools.
+
+### Tests (21 new tests)
+
+`schemas_test.go`: `TestMigrateSchemaKindColumn` (3 cases: fresh DB, pre-T104 DB,
+idempotent re-run), `SeedBlockTypeSchemas_KindDefaultsToBlock`,
+`SchemaField_RoleAndRelationRoundtrip`, `ValidateFields` type checks (5 cases),
+URL format (2 cases), `DuplicateRoleRejected`, `NullValueSkipsTypeCheck`,
+`ValidateBlockFields_Alias`.
+
+`registry_test.go` (via `schemas_test.go` helpers): `RegisterAndLookup`,
+`LookupByPrefix`, `LookupMissing`, `DuplicateNamePanics`, `DuplicatePrefixPanics`,
+`All` (via `testRegistry` helper using `smeldr.New(...).TypeRegistry()`).
+
+### Design frame
+
+See `architect/design/content-type-model.md` — this increment ships the descriptor
+envelope and the registry linchpin (steps 1 + 2 of the sequencing plan). T96
+(ContentList resolver) is the first consumer.
+
+### Version
+
+core v1.39.0 (minor — new exported symbols: `MigrateSchemaKindColumn`, `ValidateFields`,
+`ContentTypeRegistry`, `TypeDescriptor`, `App.TypeRegistry()`, `LookupByPrefix`,
+`RegisterPrefix`, `ValidateBlockFields` alias). Branch: feat/t104-registry (fbb8442).
+
+---
+
+## A152 — T96: ContentList block resolver (core v1.40.0)
+
+**Date:** 2026-06-15
+**Status:** Agreed
+**Level:** 2 (new exported symbols; no breaking changes)
+
+### Decision
+
+T96 wires the `content_list` block type to the `ContentTypeRegistry` so that a CMS
+block can dynamically inject Published content items at render time.
+
+**1. `ContentLister` interface**
+New unexported-method interface in `registry.go`:
+```go
+type ContentLister interface {
+    listPublished(ctx context.Context, opts ListOptions) ([]map[string]any, error)
+}
 ```
-WARN smeldr: legacy table migration failed — rename forge_* tables manually
-error="... there is already another table or index with this name: smeldr_audit_log"
+`Module[T]` implements `ContentLister` via a new `listPublished` method added to
+`module.go`. Type erasure is via JSON marshal→unmarshal to `map[string]any`; the
+variable is named `row` (not `m`) to avoid shadowing the `m` receiver.
+
+**2. `TypeDescriptor.Fetch`**
+New field on `TypeDescriptor` (registry.go):
+```go
+Fetch func(ctx context.Context, opts ListOptions) ([]map[string]any, error)
 ```
+Wired at `App.Content()` time: after registering the module's `TypeDescriptor`,
+if the module implements `ContentLister`, `desc.Fetch = cl.listPublished` is set.
 
-The function's own docstring claimed "idempotent" — that claim was wrong.
+**3. BlockRenderer registry + ContentList resolver (serveblocks.go)**
+- `BlockRenderer` gains `registry *ContentTypeRegistry` field.
+- `App.ServeBlocks` passes `registry: a.typeRegistry` in the struct literal.
+- `renderBlock` signature extended with `ctx context.Context` as first parameter;
+  all internal callers updated (`Render` loop + recursive call).
+- After reference-field resolution, a `content_list` special case:
+  reads `ContentType` from block data → `LookupByPrefix` → if `Fetch != nil` →
+  calls `Fetch(ctx, contentListOpts(data))` → sets `data["Items"]`.
+  Graceful skips (no items, no error): unknown type, nil Fetch, empty ContentType,
+  Fetch error (logged).
+- Normal child-edge Items path runs only when ContentList resolution was not
+  performed (`resolvedContentList` flag).
+- `contentListOpts(data map[string]any) ListOptions` helper: `Limit` → `PerPage`,
+  `Page` → `Page`; `SortField` "published_at"/"created_at"/"title" → `OrderBy`;
+  `SortDir` "desc" → `Desc=true`; JSON float64 → int conversion.
+- `slog.Warn` on each silent fall-through: empty ContentType, unknown ContentType
+  (LookupByPrefix nil), nil Fetch (dynamic type not yet supported), FilterTags
+  non-empty (field present but not yet supported). Fetch error also logs Warn.
 
-Fix: in the `toRename`-building loop, a second `sqlite_master` query checks
-whether the destination already exists. If it does, that pair is skipped with
-`slog.Warn` and the loop continues. The docstring is updated to accurately
-describe this behaviour.
+### Tests (9 new tests in serveblocks_test.go)
 
-### Files changed
-
-- **`core/migrate.go`**: destination-existence check added; docstring updated.
-- **`core/migrate_test.go`** (new): two tests:
-  - `TestMigrateLegacyTableNames_destinationExists`: both `forge_tokens` and
-    `smeldr_tokens` exist; function returns nil and no rename is attempted.
-  - `TestMigrateLegacyTableNames_sourceOnly`: only `forge_tokens` exists;
-    renamed to `smeldr_tokens` as normal.
-
-### Version
-
-core v1.36.2 (patch; no exported-symbol or interface change).
-
----
-
-## A140 — X publisher debug logging (social v0.8.3)
-
-**Date:** 2026-06-09
-**Status:** Agreed
-**Level:** 2 (new observable behaviour — slog output; no exported-symbol change)
-
-### Decision
-
-`twitter.go` had no `slog` calls. When a 403 or other unexpected status occurred
-on media upload or tweet publish, there was no way to see the HTTP status, X's
-`X-Request-Id`, or the response body without a debugger.
-
-Fix: targeted logging in `uploadXMedia` and `publish`:
-- `slog.Debug` immediately before each HTTP call: method and URL (access token
-  never logged)
-- `slog.Warn` on any non-2xx response: HTTP status, truncated body (≤256 chars),
-  and the `X-Request-Id` response header from X
-
-### Files changed
-
-- **`social/twitter.go`**: `slog.Debug` + `slog.Warn` in `uploadXMedia`;
-  `slog.Debug` + `slog.Warn` in `publish`. Import `"log/slog"` added.
-- **`social/twitter_test.go`**: `TestPublish_logsWarnOnNonSuccess` — stub server
-  returns 403; asserts WARN record with "non-2xx" in message. `slogCapture`
-  helper struct implements `slog.Handler`.
+`TestContentList_Resolves` — happy path: content_list block with ContentType="posts",
+Fetch returns 3 items, Items appear in order.
+`TestContentList_LimitPassedToFetch` — Limit=5 in block data → ListOptions.PerPage=5.
+`TestContentList_UnknownContentType` — no descriptor in registry → no items.
+`TestContentList_NilFetch` — descriptor registered, Fetch=nil → no items.
+`TestContentList_EmptyContentType` — empty ContentType field → Fetch not called.
+`TestContentListOpts` — Limit+Page round-trip.
+`TestContentListOpts_Defaults` — empty data → zero opts.
+`TestContentListOpts_SortField` — published_at/created_at/title → OrderBy; unknown ignored.
+`TestContentListOpts_SortDir` — desc→Desc=true; asc→Desc=false.
 
 ### Version
 
-social v0.8.3 (patch; no exported-symbol or interface change).
-
----
-
-## A141 — X media upload: INIT/APPEND/FINALIZE chunked protocol
-
-**Date:** 2026-06-10
-**Status:** Agreed
-**Level:** 1 (isolated fix in social package; no exported-symbol change)
-
-### Decision
-
-`uploadXMedia` in `social/twitter.go` sent a single multipart POST to the X v2
-`/2/media/upload` endpoint without a `command` field. X's gateway rejects any
-request missing `command` with a generic `{"title":"Forbidden","type":"about:blank"}`
-403 and no `X-Request-Id` header — the request never reaches X's API handler,
-making the failure undebuggable. This explains why all X media posts failed with
-403 despite valid user tokens.
-
-Fix: rewrite `uploadXMedia` to perform the three mandatory steps in sequence:
-1. **INIT** — `command=INIT`, `media_type`, `total_bytes`, `media_category=tweet_image`
-   → returns `media_id` in `{"data":{"id":"..."}}`.
-2. **APPEND** — `command=APPEND`, `media_id`, `segment_index=0`, binary image bytes
-   as `media` part → expects any 2xx (typically 204 No Content).
-3. **FINALIZE** — `command=FINALIZE`, `media_id` → confirms upload; returns same
-   response structure as INIT.
-
-For `tweet_image`, processing is synchronous — no `processing_info` polling needed
-after FINALIZE. Existing `slog.Debug`/`slog.Warn` calls (A140) applied to each of
-the three HTTP calls. `strconv` import added for `strconv.Itoa(len(imgBytes))`.
-No signature or exported-symbol change.
-
-### Files changed
-
-- **`social/twitter.go`**: `uploadXMedia` rewritten with three-step protocol.
-  `strconv` import added. Comment updated to describe chunked protocol.
-- **`social/twitter_test.go`**: `TestUploadXMedia` happy-path handler updated to
-  serve three distinct commands (INIT→201, APPEND→204, FINALIZE→200) using an
-  `atomic.Int32` call counter; asserts all INIT/APPEND/FINALIZE field values.
-  Two new error sub-cases added: "APPEND 403 returns terminal publishError" and
-  "FINALIZE 403 returns terminal publishError".
-
-### Version
-
-social v0.8.4 (patch; no exported-symbol or interface change).
-
----
-
-## A142 — X OAuth scope configurable (social v0.8.5)
-
-**Date:** 2026-06-10
-**Status:** Agreed
-**Level:** 1 (isolated change in social package; no exported-symbol change)
-
-### Decision
-
-`xConfig` had no `Scopes` field — the OAuth 2.0 scope string was hardcoded in `authURL()` omitting `media.write`. This caused 403 on every INIT request to the X v2 media upload endpoint. `PlatformConfig.Scopes` already existed and was persisted, but was never threaded into `xConfig`.
-
-Fix: add `Scopes []string` to `xConfig`; add `effectiveScope()` method returning default (with `media.write`) when empty or joined custom scopes; update `authURL()` to call `effectiveScope()`; thread `cfg.Scopes` in both `xConfig` construction sites; update `scope` field description in `config_mcp.go`.
-
-### Files changed
-
-- **`social/twitter.go`**: `Scopes []string` on `xConfig`; `effectiveScope()` method; `authURL()` uses it; `"strings"` import.
-- **`social/social.go`**: `Scopes: dbCfg.Scopes` in `New()` and `reloadPlatformClient()`.
-- **`social/config_mcp.go`**: `scope` description updated to cover both X and Mastodon defaults.
-- **`social/twitter_test.go`**: `TestEffectiveScope` (2 cases).
-
-### Version
-
-social v0.8.5 (patch; no exported-symbol or interface change).
-
----
-
-## A143 — Streamable HTTP SSE response mode (mcp v1.18.0)
-
-**Date:** 2026-06-10
-**Status:** Agreed
-**Level:** 1 (isolated change in mcp/transport.go; no exported-symbol change)
-
-### Decision
-
-`messageHandler` always responded with `Content-Type: application/json`, ignoring `Accept`. MCP 2025-11-25 streamable HTTP spec requires that when a client sends `Accept: text/event-stream` on `POST /mcp`, the server responds with `Content-Type: text/event-stream` and streams the JSON-RPC response as a single SSE event. Claude.ai web requires this for OAuth-authenticated MCP connections.
-
-Fix: after dispatching via `s.handle()`, branch on `strings.Contains(r.Header.Get("Accept"), "text/event-stream")`. SSE path: `text/event-stream` header + `data: <json>\n\n` + flush. JSON path (default): unchanged.
-
-### Files changed
-
-- **`mcp/transport.go`**: last three lines of `messageHandler` replaced with Accept-based branch.
-- **`mcp/mcp_test.go`**: `TestMessageHandler_AcceptSSE_ReturnsEventStream` + `TestMessageHandler_NoAccept_ReturnsJSON`.
-
-### Version
-
-mcp v1.18.0 (minor; new observable behaviour).
-
----
-
-## A144 — media StatsExtProvider (media v1.5.0)
-
-**Date:** 2026-06-10
-**Status:** Agreed
-**Level:** 2 (new exported-interface implementation; new file)
-
-### Decision
-
-`smeldr.dev/media` deferred implementing `StatsExtProvider` when the interface was introduced in core v1.35.0 (A126). The `forge_media` table has `mime_type` and `size_bytes` columns — everything needed.
-
-Fix: add `stats.go` to media package implementing `StatsKey() string` (returns `"media"`) and `ProvideStats(ctx) (map[string]any, error)` on `*Server`. Two queries: `COUNT(*) + COALESCE(SUM(size_bytes), 0)` for `file_count`/`total_bytes`; `GROUP BY mime_type` for `by_type` breakdown.
-
-### Files changed
-
-- **`media/stats.go`**: NEW — `StatsExtProvider` implementation on `*Server`.
-- **`media/stats_test.go`**: NEW — `TestProvideStats` + `TestProvideStats_empty`.
-
-### Version
-
-media v1.5.0 (minor; new exported interface implementation).
-
----
-
-## A145 — T94: content-type instances as block-section parents (core v1.37.0 · mcp v1.19.0)
-
-**Date:** 2026-06-10
-**Status:** Agreed
-**Level:** 2 (new exported interface + option; no breaking changes)
-
-### Decision
-
-The block system (T32) only accepted `DynamicNode` IDs as `parent_id` in `add_section`/`add_item`. Content-type instances (Post, Essay, custom types) could not host block sections without being stored as DynamicNodes — defeating the purpose of the native content type.
-
-Fix: introduce `ContentParentProvider` interface and `BlockHost()` option. Modules opt in via `app.Content(m, smeldr.BlockHost())`. The MCP `resolveParentType()` helper tries the DynamicNode repo first; if not found, iterates registered `ContentParentProvider` instances; returns -32602 if no provider claims the ID. Body and sections coexist as independent data paths (body in the module's own table; sections in `smeldr_content_edges`).
-
-Ride-along T98: mojibake em-dashes in `integration_full_test.go` G-index legend and section headers replaced with plain hyphens.
-
-### Files changed (core)
-
-- **`block_host.go`**: NEW — `ContentParentProvider` + `blockHostProvider` interfaces.
-- **`block_host_test.go`**: NEW — 6 unit tests.
-- **`forge.go`**: `blockParents []ContentParentProvider` on App; `blockHostProvider` check in `Content()`.
-- **`module.go`**: `BlockHost() Option` + `blockHost bool` field + `blockHostEnabled()`/`BlockParentTypeName()`/`HasBlockParent()` methods on `Module[T]`.
-- **`stats.go`**: `RegisterBlockParent()` + `BlockParents()` on App.
-- **`integration_full_test.go`**: T98 mojibake fix.
-- **`CHANGELOG.md`**: `[1.37.0]` entry.
-- **`DECISIONS.md`**: A145 index row.
-
-### Files changed (mcp)
-
-- **`edge_tools.go`**: `resolveParentType()` helper + updated `addEdge()` + updated tool description.
-- **`edge_tools_test.go`**: 3 new tests (ContentInstance parent, unknown parent, DynamicNode unaffected).
-- **`mcp.go`**: `blockParents []smeldr.ContentParentProvider` on Server; `WithBlocks()` populates from `app.BlockParents()`.
-- **`CHANGELOG.md`**: `[1.19.0]` entry.
-
-### Version
-
-core v1.37.0 (minor; new exported symbols: `ContentParentProvider`, `BlockHost`, `RegisterBlockParent`, `BlockParents`) · mcp v1.19.0 (minor; `add_section`/`add_item` accept content-instance parents).
-
----
-
-## A146 — T97: Schema-defined block types (core v1.38.0 · mcp v1.20.0)
-
-**Date:** 2026-06-10
-**Status:** Agreed
-**Level:** 1 (new exported symbols, new MCP tools; additive — no breaking changes)
-
-### Decision
-
-Block types in the T32 system lacked a machine-readable field specification. Content authors using `create_node` had no way to discover what fields a type expected, and the MCP layer could not validate calls or generate typed shorthand tools. T97 introduces a schema layer addressing both gaps without breaking any existing callers.
-
-### Core: `schemas.go` (new)
-
-**Types**: `SchemaField` (`Name`, `Type`, `Required`, `Format`, `Description` — JSON Schema type names); `ContentTypeSchema` (`ID`, `TypeName`, `Label`, `Fields json.RawMessage`, `CreatedAt`, `UpdatedAt`).
-
-**`SchemaStore`** — `FindByTypeName(ctx, typeName)` (returns `ErrNotFound` when absent) and `All(ctx)` (all schemas ordered by `type_name`).
-
-**`CreateSchemaTable(db)`** — `CREATE TABLE IF NOT EXISTS smeldr_content_type_schemas`. Idempotent. Called separately from `CreateBlockTables` by the operator at startup.
-
-**`SeedBlockTypeSchemas(db)`** — `INSERT OR IGNORE` seeds 16 canonical block types: `content_block`, `image`, `link_item`, `html_block`, `quote`, `contact_card`, `faq_item`, `content_grid`, `gallery`, `link_collection`, `html_grid`, `faq`, `team`, `hero`, `footer`, `content_list`. Idempotent. Fields column stored as BLOB (`json.RawMessage`, not `string`) for SQLite driver scan compatibility.
-
-**`ValidateBlockFields(schema, fields)`** — rejects unknown fields (`"unknown field %q for type %q"`) and missing required fields (`"required field %q missing for type %q"`). `ErrNotFound` on schema lookup → pass-through (backwards compat). Nil/empty fields treated as `{}`.
-
-### MCP: `schema_tools.go` (new)
-
-**`get_content_type_schema(type_name)`** — returns `{type_name, label, fields: []SchemaField}` for one type; -32602 when not found.
-**`list_content_type_schemas()`** — returns `{items: [{type_name, label}]}` for all 16 types. Both tools require Author role.
-
-### MCP: `typed_tools.go` (new)
-
-**`generateTypedTools(schemas)`** — generates one `create_<type_name>` tool per schema at startup. Named, typed parameters derived from field definitions; required fields mapped to JSON Schema `"required"` array.
-
-**`handleTypedTool(ctx, name, args)`** — `args` IS the fields dict (not nested under `"fields"`); marshals, validates against schema, saves `DynamicNode`. `typeName = strings.TrimPrefix(name, "create_")`. Intercepted before `parseToolName + moduleForType` to prevent "unknown tool" fallthrough.
-
-### MCP: `mcp.go` + `node_tools.go` + `tool.go`
-
-`Server` gains `schemaStore`, `typedTools`, `typedToolSet`. `WithBlocks()` extended to construct `SchemaStore` and generate typed tools at startup; schema table missing → graceful degradation (typed tools nil, no error).
-
-`create_node` and `update_node` validate fields against schema when `schemaStore != nil`; `ErrNotFound` → pass-through (backwards compat for unregistered types).
-
-### Tests
-
-`schemas_test.go` (core, 10 tests): idempotency, 16-type seed verification, `FindByTypeName`/`NotFound`, `ValidateBlockFields` accept/reject/empty. `schema_tools_test.go` (mcp, 9 tests): schema discovery tools, typed tool presence at startup, create via typed tool, missing-required rejection, `create_node` schema validation pass/fail/passthrough.
-
-### Design decisions
-
-**Supplement, not replace**: `create_node` unchanged and never removed. Schema validation is additive — previously-valid calls continue to work. Typed tools are the preferred path but not the only one.
-
-**Seed-only for T97**: No MCP tool to write/modify schemas in this release. Schema writability is T55/T49 territory.
-
-### Version
-
-core v1.38.0 (minor — new exported symbols: `SchemaField`, `ContentTypeSchema`, `SchemaStore`, `NewSchemaStore`, `CreateSchemaTable`, `SeedBlockTypeSchemas`, `ValidateBlockFields`) · mcp v1.20.0 (minor — new tools: `get_content_type_schema`, `list_content_type_schemas`, `create_<type_name>` × 16).
-
----
-
-## A147 — T102: DB table rename forge_* → smeldr_* in standalone modules (oauth v0.3.0 · media v1.6.0 · social v0.9.0)
-
-**Date:** 2026-06-11
-**Status:** Agreed
-**Level:** 2 (behaviour change at startup; no API changes; existing data preserved)
-
-### Decision
-
-Three standalone modules (oauth, media, social) retained their original `forge_*` table names after the T100 package-rename wave. T102 completes the storage-layer rename by adding an idempotent startup migration to each module, matching the pattern established in core A109.
-
-### Pattern (identical to core `migrate.go`)
-
-Each module gains a `migrate.go` with `migrateLegacyTableNames(ctx, db)`:
-
-1. **SQLite probe** — `SELECT COUNT(*) FROM sqlite_master`. Returns nil silently for non-SQLite databases.
-2. **Per-pair source check** — skip if source (`forge_*`) is absent (fresh install or already migrated).
-3. **Per-pair destination check** — if destination (`smeldr_*`) already exists, log `slog.Warn` and skip rather than fail (partial-migration recovery).
-4. **Single transaction** — all renames execute in `BeginTx` when the driver supports it; rollback on any error.
-5. **`slog.Info` per rename** — operator-visible record of each table rename.
-
-Migration runs as the first statement in the module's setup function, before any `CREATE TABLE IF NOT EXISTS`.
-
-### Table map
-
-| Module | Tables renamed |
-|--------|----------------|
-| oauth | `forge_oauth_codes`, `forge_oauth_tokens`, `forge_oauth_refresh_tokens` → `smeldr_oauth_*` |
-| media | `forge_media` → `smeldr_media` |
-| social | `forge_social_credentials`, `forge_social_posts`, `forge_social_oauth_states`, `forge_social_delivery_log`, `forge_social_route_jobs`, `forge_social_route_log`, `forge_social_publication_schedules`, `forge_social_platform_config` → `smeldr_social_*` |
-
-### social: existing column migrations updated
-
-Two pre-existing `ALTER TABLE` column migrations in `social/schema.go` referenced `forge_social_credentials` and `forge_social_oauth_states`. These are updated to `smeldr_social_*` — they now run after the rename, so the tables already carry the new names.
-
-### Tests
-
-Three scenarios per module (9 tests total):
-- **Fresh DB**: tables created directly as `smeldr_*`; no `forge_*` ever present.
-- **Existing forge_* DB**: all legacy tables present at startup; verified renamed after `CreateTables`/`NewSQLiteStore`.
-- **Idempotent re-run**: migration called twice on already-renamed DB; must not error.
-
-Existing `TestMigration_ActorIDColumn` in social updated: it creates `forge_social_credentials` (old schema, no `actor_id`) to simulate a v0.1.0 database; after `CreateTables` the table is renamed then column-migrated; the INSERT assertion updated to reference `smeldr_social_credentials`.
-
-### Version
-
-oauth v0.3.0 (minor) · media v1.6.0 (minor) · social v0.9.0 (minor).
-
----
-
-## A148 — Security: bump jackc/pgx/v5 v5.8.0 → v5.9.2 (pgx/v0.1.1)
-
-**Date:** 2026-06-11
-**Status:** Agreed
-**Level:** 1 (dependency bump; no API or behaviour change)
-
-### Decision
-
-Two Dependabot security alerts (1 Critical, 1 Low severity) were reported against
-`github.com/jackc/pgx/v5 v5.8.0` in the `smeldr.dev/core/pgx` submodule.
-
-Bump `github.com/jackc/pgx/v5` to v5.9.2 via `go get` + `go mod tidy`. No code
-changes required. All existing integration tests pass.
-
-### Version
-
-pgx/v0.1.1 (patch — dependency bump only).
-
----
-
-## A149 — Dependency alignment: bump smeldr.dev/core v1.29.0 → v1.38.0 in pgx (pgx/v0.1.2)
-
-**Date:** 2026-06-12
-**Status:** Agreed
-**Level:** 1 (dependency bump; no API or behaviour change)
-
-### Decision
-
-`smeldr.dev/core/pgx` had its minimum `smeldr.dev/core` pinned at v1.29.0, nine
-minor versions behind the current release (v1.38.0). Bump via `go get` + `go mod tidy`.
-No code changes — the pgx integration adapter has no imports that changed between
-v1.29.0 and v1.38.0. Tests green.
-
-### Version
-
-pgx/v0.1.2 (patch — dependency alignment only).
-
----
-
-## A150 — T102/N60: statement coverage lifted to ≥97% (core v1.38.0)
-
-**Date:** 2026-06-14
-**Status:** Agreed
-**Level:** 1 (test-only; no exported symbols or behaviour changed)
-
-### Decision
-
-Statement coverage for `smeldr.dev/core` was at 95.9% (≈4287/4471 stmts).
-T102/N60 targets ≥97%. Fifty-one uncovered statement blocks across twelve
-source files were identified via `go tool cover -func=coverage.out` and
-covered with targeted tests in a new `coverage_test.go` file.
-
-### What was covered
-
-- **templates.go**: nil `tplList`, navTree branch, template-Execute error in
-  `renderListHTML`; navTree branch and Execute error in `renderShowHTML`;
-  invalid-syntax guard in `errorTemplate` (9 stmts).
-- **module.go**: preview-bypass HTML path in `showHandler` and
-  `singleInstanceHandler`; `MaxBytesError` in `createHandler` and
-  `updateHandler`; `AfterSchedule` transition in `updateHandler`;
-  `nil ScheduledAt continue` in `processScheduled`; no-Repo and
-  APIOnly+SingleInstance panics in `NewModule`; no-ID/Slug/Status panic in
-  `getNodeFields`; pointer-field inner loop and exported anonymous non-Node
-  skip in `MCPSchema`; all five uncovered blocks in `coerceSliceFields`
-  (ptr input, non-struct, ptr-slice field, key-not-in-map, value-not-string);
-  `pv.Elem()` branch in `ptrToT` (≈24 stmts).
-- **smeldr.go**: navTree load error path; `ensureBootstrap` via real SQLite
-  DB with `smeldr_tokens` table (3 stmts).
-- **edges.go**: QueryRowContext scan error and ExecContext error in `AddChild`;
-  QueryContext error in `ChildrenOf`; ExecContext error in `RemoveChild`
-  (4 stmts).
-- **outbound.go**: decrypt error → `moveToDeadLetter` + `logDelivery` +
-  return in `processJob` (3 stmts).
-- **nav.go**: sort comparator in `List`; ExecContext error in `Delete`
-  (2 stmts).
-- **node.go**: non-struct panic in `validateStruct`; bad `min=`/`max=` tag
-  panics and empty-tag-part continue in `parseConstraints` (4 stmts).
-- **redirects.go**: sort comparator in `Add`; query error in `Load` (2 stmts).
-- **markdown.go**: unterminated code fence; no `](` marker; no `)` closer in
-  `mdApplyLinks` (5 stmts).
-
-### New mock type
-
-`execErrQueryOKDB` — ExecContext fails, QueryRowContext returns `int64(0)`;
-used to drive the `AddChild` ExecContext-error path without triggering the
-upstream QueryRowContext scan error first.
-
-### Codecov gate
-
-`codecov.yml` added at repo root: project target 96%, threshold 0.5%, patch
-gate disabled (test-only PR).
-
-### Result
-
-`go test ./... -count=1 -coverprofile=coverage.out`: **97.1%** (≥97% target met).
-
-### Files changed
-
-- **`coverage_test.go`**: 41 new test functions + `execErrQueryOKDB` mock type
-  added; import block extended with `"bytes"` and `"encoding/json"`.
-- **`codecov.yml`**: new file — Codecov project gate at 96%, patch gate off.
+core v1.40.0 (minor — new exported symbols: `ContentLister`, `TypeDescriptor.Fetch`).
+Branch: feat/t96-contentlist.

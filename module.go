@@ -728,6 +728,31 @@ func (m *Module[T]) collectStats(ctx context.Context) ContentTypeStats {
 // opted into block hosting via [BlockHost].
 func (m *Module[T]) blockHostEnabled() bool { return m.blockHost }
 
+// listPublished implements [ContentLister]. Returns Published items as
+// type-erased maps for the ContentList block resolver (T96). JSON
+// marshal/unmarshal performs the type erasure: T becomes map[string]any so
+// templates can range over the result without knowing the concrete type.
+func (m *Module[T]) listPublished(ctx context.Context, opts ListOptions) ([]map[string]any, error) {
+	opts.Status = []Status{Published}
+	items, err := m.repo.FindAll(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		raw, err := json.Marshal(item)
+		if err != nil {
+			continue
+		}
+		var row map[string]any
+		if err := json.Unmarshal(raw, &row); err != nil {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
 // BlockParentTypeName implements [ContentParentProvider]. Returns the lower-case
 // Go type name stored as parent_type in the content-edge table.
 func (m *Module[T]) BlockParentTypeName() string { return strings.ToLower(m.contentTypeName) }

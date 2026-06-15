@@ -272,6 +272,7 @@ type App struct {
 	mcpModules             []MCPModule                         // modules registered with smeldr.MCP(...)
 	standaloneModules      []standaloneDispatcher              // Standalone() modules; for top-level /{slug} dispatch
 	standaloneReg          bool                                // true once GET /{slug} and GET /{slug}/aidoc are registered
+	typeRegistry           *ContentTypeRegistry                // content-type registry; always non-nil after New()
 	rebuildDone            bool                                // true once startup rebuildAll goroutine is launched
 	partialsDir            string                              // set by App.Partials(); shared partial templates loaded at Run() time
 	tokenStore             *TokenStore                         // non-nil when Config.TokenStore is set; enables DB-backed token management
@@ -325,6 +326,7 @@ func New(cfg Config) *App {
 		middleware:    []func(http.Handler) http.Handler{Authenticate(auth)},
 		redirectStore: NewRedirectStore(),
 		tokenStore:    cfg.TokenStore,
+		typeRegistry:  newContentTypeRegistry(),
 	}
 	if cfg.DB != nil {
 		if err := migrateLegacyTableNames(context.Background(), cfg.DB); err != nil {
@@ -469,6 +471,30 @@ func (a *App) Content(v any, opts ...Option) {
 		if mm, ok := r.(MCPModule); ok && len(mm.MCPMeta().Operations) > 0 {
 			a.mcpModules = append(a.mcpModules, mm)
 		}
+		if mm, ok := r.(MCPModule); ok {
+			if meta := mm.MCPMeta(); meta.TypeName != "" {
+				// Compiled modules may share a Go struct type (same TypeName) while
+				// appearing at different URL prefixes (e.g. two Module[*Post] at
+				// /posts and /articles). The first call registers the descriptor;
+				// subsequent calls for the same TypeName register as aliases.
+				// The panicking Register() path is reserved for runtime types
+				// (define_content_type, T104 increment 2+).
+				if a.typeRegistry.Lookup(meta.TypeName) == nil {
+					a.typeRegistry.Register(&TypeDescriptor{
+						Name:   meta.TypeName,
+						Prefix: meta.Prefix,
+						Kind:   "content",
+					})
+				} else if meta.Prefix != "" {
+					a.typeRegistry.RegisterPrefix(meta.Prefix, meta.TypeName)
+				}
+				if cl, ok := r.(ContentLister); ok {
+					if desc := a.typeRegistry.Lookup(meta.TypeName); desc != nil {
+						desc.Fetch = cl.listPublished
+					}
+				}
+			}
+		}
 		if sd, ok := r.(standaloneDispatcher); ok && sd.standaloneEnabled() {
 			a.standaloneModules = append(a.standaloneModules, sd)
 		}
@@ -499,6 +525,12 @@ func (a *App) Content(v any, opts ...Option) {
 // tool registry. The returned slice is the App's live internal slice and must
 // not be modified by the caller.
 func (a *App) MCPModules() []MCPModule { return a.mcpModules }
+
+// TypeRegistry returns the app's content-type registry. Compiled modules are
+// registered at [App.Content] time; runtime-defined types are registered when
+// define_content_type is called (T104 increment 2+). T96 (ContentList resolver)
+// and T06 (relation endpoints) share this registry.
+func (a *App) TypeRegistry() *ContentTypeRegistry { return a.typeRegistry }
 
 // Config returns a copy of the application configuration. It is intended for
 // use by companion packages (such as forge-media) that need access to

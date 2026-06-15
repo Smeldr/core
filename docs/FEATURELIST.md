@@ -2,13 +2,13 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.36.1 (A137) + smeldr.dev/mcp v1.17.2 + smeldr.dev/cli v0.14.1 + smeldr.dev/oauth v0.2.0 + smeldr.dev/social v0.8.1 + smeldr.dev/agent v0.5.1 + smeldr.dev/media v1.4.1 + smeldr.dev/core/pgx v0.1.0.
+Last updated: v1.40.0 (A152) + smeldr.dev/mcp v1.17.2 + smeldr.dev/cli v0.14.1 + smeldr.dev/oauth v0.2.0 + smeldr.dev/social v0.8.1 + smeldr.dev/agent v0.5.1 + smeldr.dev/media v1.4.1 + smeldr.dev/core/pgx v0.1.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.36.1 | Stable |
+| `smeldr.dev/core` | v1.40.0 | Stable |
 | `smeldr.dev/mcp` | v1.16.0 | Stable |
 | `smeldr.dev/oauth` | v0.1.5 | Beta |
 | `smeldr.dev/core/pgx` | v0.1.0 | Beta |
@@ -52,11 +52,19 @@ Labels are reviewed at every module minor or major version bump.
 - DynamicNode — one generic content type for all block types, type-specific fields stored as JSON, discriminated by `type_name`; embeds `Node` for the standard lifecycle
 - `NewDynamicContentRepo(db)` — `SQLRepo` bound to `smeldr_dynamic_content`
 - ContentEdgeStore — composition edges (`smeldr_content_edges`); one table for page→block and collection→item, ordered by `sort_order`, batch-loaded via `ChildrenOf` (no N+1)
-- `CreateBlockTables(db)` — single idempotent grouped table creator for the block schema
+- `CreateBlockTables(db)` — single idempotent grouped table creator for the block schema; includes `idx_dynamic_content_type_status` (A151)
 - `App.ServeBlocks(dir)` + `BlockRenderer.Render` — convention-template rendering engine (`templates/blocks/<type_name>.html`); batched load (no N+1), cycle protection, graceful degradation; renders only Published blocks
 - Reference-field resolution — `{Name}ID` → `.{Name}` sub-object (`ImageID` → `.Image` on content_block/contact_card/hero); Published-only, `{{ with }}`-guarded, batched
 - Block `Fields` use PascalCase keys (canonical convention; matches the block-system type tables)
-- Still building on top: schema seeding (c5), CLI (c6), content_type_schemas table (c7), ContentList dynamic block (c4b)
+- `ContentTypeSchema`, `SchemaField` — field-descriptor and schema types (A146); `SchemaField.Role` and `SchemaField.Relation` for semantic seams and relation placeholders (A151)
+- `SchemaStore` with `FindByTypeName` and `All` — reads from `smeldr_content_type_schemas`
+- `CreateSchemaTable(db)` — creates `smeldr_content_type_schemas` with `kind TEXT NOT NULL DEFAULT 'block'` column (A151); `MigrateSchemaKindColumn(db)` adds column to existing databases (idempotent)
+- `SeedBlockTypeSchemas(db)` — seeds all 16 canonical block type schemas (A146)
+- `ValidateFields(schema, fields)` — rejects unknown fields, missing required fields, type mismatches, bad URL formats, and duplicate role assignments; `ValidateBlockFields` alias retained (A151)
+- `ContentTypeRegistry` + `TypeDescriptor` + `App.TypeRegistry()` — concurrency-safe name/prefix registry; dual key-space (PascalCase compiled + snake_case runtime); `Register`, `RegisterPrefix`, `Lookup`, `LookupByPrefix`, `All`; auto-populated at `App.Content()` time (A151)
+- `ContentLister` interface — implemented by `Module[T]`; exposes `listPublished` as `TypeDescriptor.Fetch` for the ContentList block resolver (A152)
+- ContentList block resolver — `content_list` block injects `.Items` (type-erased `[]map[string]any`) from the content-type registry at render time; `Limit`/`Page` block fields map to `ListOptions`; graceful skip for unknown type, nil Fetch, or empty ContentType (A152)
+- Still building on top: CLI block commands (c6)
 
 ## Rendering — Stable
 

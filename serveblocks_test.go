@@ -637,3 +637,188 @@ func TestServeBlocks_RefBatched_NoNPlus1(t *testing.T) {
 		t.Errorf("expected bounded query count (~4) for 8 refs, got %d — N+1 regression", cdb.n)
 	}
 }
+
+// ── ContentList resolver (T96) ────────────────────────────────────────────────
+
+// newContentListRenderer creates a BlockRenderer whose TypeRegistry contains desc
+// (pass nil to leave the registry empty).
+func newContentListRenderer(t *testing.T, f *blockFixture, desc *TypeDescriptor) *BlockRenderer {
+	t.Helper()
+	app := New(Config{BaseURL: "http://localhost", Secret: []byte("test-secret-32-bytes-xxxxxxxxxxxx"), DB: f.db})
+	if desc != nil {
+		app.TypeRegistry().Register(desc)
+	}
+	r, err := app.ServeBlocks(f.dir)
+	if err != nil {
+		t.Fatalf("ServeBlocks: %v", err)
+	}
+	return r
+}
+
+const contentListTpl = `{{range .Items}}<article>{{index . "Title"}}</article>{{end}}`
+
+func TestContentList_Resolves(t *testing.T) {
+	tpls := map[string]string{"content_list": contentListTpl}
+	f := newBlockFixture(t, tpls)
+	f.put("cl", "content_list", Published, `{"ContentType":"posts"}`)
+	f.link("p", "page", "cl", "content_list", "section")
+
+	fetchCalled := false
+	r := newContentListRenderer(t, f, &TypeDescriptor{
+		Name:   "Post",
+		Prefix: "/posts",
+		Kind:   "content",
+		Fetch: func(_ context.Context, _ ListOptions) ([]map[string]any, error) {
+			fetchCalled = true
+			return []map[string]any{
+				{"Title": "Post Alpha"},
+				{"Title": "Post Beta"},
+				{"Title": "Post Gamma"},
+			}, nil
+		},
+	})
+	out, err := r.Render(context.Background(), "page", "p")
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !fetchCalled {
+		t.Error("Fetch should have been called for content_list block")
+	}
+	mustOrder(t, string(out), "Post Alpha", "Post Beta", "Post Gamma")
+}
+
+func TestContentList_LimitPassedToFetch(t *testing.T) {
+	tpls := map[string]string{"content_list": contentListTpl}
+	f := newBlockFixture(t, tpls)
+	f.put("cl", "content_list", Published, `{"ContentType":"posts","Limit":5}`)
+	f.link("p", "page", "cl", "content_list", "section")
+
+	var gotOpts ListOptions
+	r := newContentListRenderer(t, f, &TypeDescriptor{
+		Name:   "Post",
+		Prefix: "/posts",
+		Kind:   "content",
+		Fetch: func(_ context.Context, opts ListOptions) ([]map[string]any, error) {
+			gotOpts = opts
+			return nil, nil
+		},
+	})
+	if _, err := r.Render(context.Background(), "page", "p"); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if gotOpts.PerPage != 5 {
+		t.Errorf("Limit=5 in block data should set PerPage=5, got %d", gotOpts.PerPage)
+	}
+}
+
+func TestContentList_UnknownContentType(t *testing.T) {
+	tpls := map[string]string{"content_list": contentListTpl}
+	f := newBlockFixture(t, tpls)
+	f.put("cl", "content_list", Published, `{"ContentType":"unknown"}`)
+	f.link("p", "page", "cl", "content_list", "section")
+
+	r := newContentListRenderer(t, f, nil) // registry empty
+	out, err := r.Render(context.Background(), "page", "p")
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(string(out), "<article") {
+		t.Errorf("unknown ContentType should produce no items:\n%s", out)
+	}
+}
+
+func TestContentList_NilFetch(t *testing.T) {
+	tpls := map[string]string{"content_list": contentListTpl}
+	f := newBlockFixture(t, tpls)
+	f.put("cl", "content_list", Published, `{"ContentType":"posts"}`)
+	f.link("p", "page", "cl", "content_list", "section")
+
+	r := newContentListRenderer(t, f, &TypeDescriptor{
+		Name:   "Post",
+		Prefix: "/posts",
+		Kind:   "content",
+		Fetch:  nil, // descriptor registered but no Fetch wired
+	})
+	out, err := r.Render(context.Background(), "page", "p")
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(string(out), "<article") {
+		t.Errorf("nil Fetch should produce no items:\n%s", out)
+	}
+}
+
+func TestContentList_EmptyContentType(t *testing.T) {
+	tpls := map[string]string{"content_list": contentListTpl}
+	f := newBlockFixture(t, tpls)
+	f.put("cl", "content_list", Published, `{"ContentType":""}`)
+	f.link("p", "page", "cl", "content_list", "section")
+
+	r := newContentListRenderer(t, f, &TypeDescriptor{
+		Name:   "Post",
+		Prefix: "/posts",
+		Kind:   "content",
+		Fetch: func(_ context.Context, _ ListOptions) ([]map[string]any, error) {
+			return []map[string]any{{"Title": "ShouldNotAppear"}}, nil
+		},
+	})
+	out, err := r.Render(context.Background(), "page", "p")
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(string(out), "ShouldNotAppear") {
+		t.Errorf("empty ContentType must not invoke Fetch:\n%s", out)
+	}
+}
+
+// ── contentListOpts unit tests ───────────────────────────────────────────────
+
+func TestContentListOpts(t *testing.T) {
+	opts := contentListOpts(map[string]any{"Limit": float64(10), "Page": float64(2)})
+	if opts.PerPage != 10 {
+		t.Errorf("Limit should map to PerPage=10, got %d", opts.PerPage)
+	}
+	if opts.Page != 2 {
+		t.Errorf("Page should map to Page=2, got %d", opts.Page)
+	}
+}
+
+func TestContentListOpts_Defaults(t *testing.T) {
+	opts := contentListOpts(map[string]any{})
+	if opts.PerPage != 0 || opts.Page != 0 {
+		t.Errorf("empty data should yield zero opts, got %+v", opts)
+	}
+}
+
+func TestContentListOpts_SortField(t *testing.T) {
+	cases := []struct {
+		field   string
+		want    string
+	}{
+		{"published_at", "PublishedAt"},
+		{"created_at", "CreatedAt"},
+		{"title", "Title"},
+	}
+	for _, c := range cases {
+		opts := contentListOpts(map[string]any{"SortField": c.field})
+		if opts.OrderBy != c.want {
+			t.Errorf("SortField %q should map to OrderBy=%q, got %q", c.field, c.want, opts.OrderBy)
+		}
+	}
+	// unknown SortField is ignored
+	opts := contentListOpts(map[string]any{"SortField": "unknown"})
+	if opts.OrderBy != "" {
+		t.Errorf("unknown SortField should leave OrderBy empty, got %q", opts.OrderBy)
+	}
+}
+
+func TestContentListOpts_SortDir(t *testing.T) {
+	opts := contentListOpts(map[string]any{"SortDir": "desc"})
+	if !opts.Desc {
+		t.Error("SortDir=desc should set Desc=true")
+	}
+	opts = contentListOpts(map[string]any{"SortDir": "asc"})
+	if opts.Desc {
+		t.Error("SortDir=asc should leave Desc=false")
+	}
+}
