@@ -70,6 +70,7 @@ type BlockRenderer struct {
 	db        DB
 	templates map[string]*template.Template // type_name → parsed template
 	maxDepth  int
+	registry  *ContentTypeRegistry // nil when no type registry is available
 }
 
 // ServeBlocks ensures the block tables exist, parses the block templates in dir
@@ -99,6 +100,7 @@ func (a *App) ServeBlocks(dir string) (*BlockRenderer, error) {
 		db:        db,
 		templates: tmpls,
 		maxDepth:  defaultBlockMaxDepth,
+		registry:  a.typeRegistry,
 	}, nil
 }
 
@@ -152,7 +154,7 @@ func (r *BlockRenderer) Render(ctx context.Context, pageType, pageID string) (te
 	var out strings.Builder
 	path := make(map[string]bool)
 	for _, e := range sectionEdges {
-		out.WriteString(string(r.renderBlock(e.ChildID, blocks, childEdges, path, 0)))
+		out.WriteString(string(r.renderBlock(ctx, e.ChildID, blocks, childEdges, path, 0)))
 	}
 	return template.HTML(out.String()), nil
 }
@@ -269,7 +271,7 @@ func (r *BlockRenderer) loadBlocks(ctx context.Context, ids []string) []*Dynamic
 // missing template, malformed Fields, or a template execution error — each logged
 // where it is a real fault. path is the set of block IDs on the current DFS path,
 // used to break cycles; it is mutated and restored across recursion.
-func (r *BlockRenderer) renderBlock(id string, blocks map[string]*DynamicNode, childEdges map[string][]ContentEdge, path map[string]bool, depth int) template.HTML {
+func (r *BlockRenderer) renderBlock(ctx context.Context, id string, blocks map[string]*DynamicNode, childEdges map[string][]ContentEdge, path map[string]bool, depth int) template.HTML {
 	if depth >= r.maxDepth || path[id] {
 		return ""
 	}
@@ -301,16 +303,42 @@ func (r *BlockRenderer) renderBlock(id string, blocks map[string]*DynamicNode, c
 		}
 	}
 
-	if items := childEdges[id]; len(items) > 0 {
-		path[id] = true
-		rendered := make([]template.HTML, 0, len(items))
-		for _, e := range items {
-			if h := r.renderBlock(e.ChildID, blocks, childEdges, path, depth+1); h != "" {
-				rendered = append(rendered, h)
+	// ContentList resolver: fetch Published items via the content-type registry.
+	// Takes priority over child-edge Items when the block specifies a ContentType.
+	resolvedContentList := false
+	if block.TypeName == "content_list" && r.registry != nil {
+		ct, _ := data["ContentType"].(string)
+		if ct == "" {
+			slog.Warn("serveblocks: content_list block has empty ContentType", "id", id)
+		} else if desc := r.registry.LookupByPrefix(ct); desc == nil {
+			slog.Warn("serveblocks: content_list ContentType not in registry", "content_type", ct, "id", id)
+		} else if desc.Fetch == nil {
+			slog.Warn("serveblocks: content_list ContentType has no Fetch (dynamic type not yet supported)", "content_type", ct, "id", id)
+		} else {
+			if ft, _ := data["FilterTags"].(string); ft != "" {
+				slog.Warn("serveblocks: content_list FilterTags not yet supported, ignoring", "content_type", ct, "id", id)
+			}
+			if items, err := desc.Fetch(ctx, contentListOpts(data)); err == nil {
+				data["Items"] = items
+				resolvedContentList = true
+			} else {
+				slog.Warn("serveblocks: content_list fetch failed", "content_type", ct, "id", id, "err", err)
 			}
 		}
-		delete(path, id)
-		data["Items"] = rendered
+	}
+
+	if !resolvedContentList {
+		if items := childEdges[id]; len(items) > 0 {
+			path[id] = true
+			rendered := make([]template.HTML, 0, len(items))
+			for _, e := range items {
+				if h := r.renderBlock(ctx, e.ChildID, blocks, childEdges, path, depth+1); h != "" {
+					rendered = append(rendered, h)
+				}
+			}
+			delete(path, id)
+			data["Items"] = rendered
+		}
 	}
 
 	var buf bytes.Buffer
@@ -362,4 +390,31 @@ func childIDsOf(edges []ContentEdge) []string {
 		ids[i] = e.ChildID
 	}
 	return ids
+}
+
+// contentListOpts extracts ListOptions from a content_list block's data map.
+// JSON numbers decode as float64; Limit→PerPage, Page→Page, SortField→OrderBy,
+// SortDir "desc"→Desc=true.
+func contentListOpts(data map[string]any) ListOptions {
+	var opts ListOptions
+	if v, ok := data["Limit"].(float64); ok && v > 0 {
+		opts.PerPage = int(v)
+	}
+	if v, ok := data["Page"].(float64); ok && v > 0 {
+		opts.Page = int(v)
+	}
+	if sf, ok := data["SortField"].(string); ok {
+		switch sf {
+		case "published_at":
+			opts.OrderBy = "PublishedAt"
+		case "created_at":
+			opts.OrderBy = "CreatedAt"
+		case "title":
+			opts.OrderBy = "Title"
+		}
+	}
+	if sd, ok := data["SortDir"].(string); ok && sd == "desc" {
+		opts.Desc = true
+	}
+	return opts
 }

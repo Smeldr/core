@@ -23,6 +23,45 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.40.0] — 2026-06-15
+
+### Added
+
+- `ContentLister` interface — implemented by `Module[T]`; exposes `listPublished`
+  as `TypeDescriptor.Fetch` for the ContentList block resolver (T96/A152).
+- `TypeDescriptor.Fetch` field — `func(ctx, ListOptions) ([]map[string]any, error)`;
+  wired at `App.Content()` time for any module implementing `ContentLister`.
+- ContentList block resolver — `content_list` blocks now inject `.Items`
+  (`[]map[string]any`) via the content-type registry at render time. Block fields
+  `Limit`→`PerPage`, `Page`→`Page`, `SortField` ("published_at"/"created_at"/"title")
+  →`OrderBy`, `SortDir` "desc"→`Desc`. `slog.Warn` on each skip path: empty
+  `ContentType`, unknown type, nil `Fetch`, `FilterTags` present (not yet
+  supported), fetch error. (T96/A152)
+
+---
+
+## [1.39.0] — 2026-06-15
+
+### Added
+
+- `kind TEXT NOT NULL DEFAULT 'block'` column on `smeldr_content_type_schemas`
+  (added to `CreateSchemaTable` DDL; `MigrateSchemaKindColumn(db)` migrates
+  existing databases — idempotent, safe on every boot) (T104/A151).
+- `SchemaField.Role` — semantic seam: `"title"` / `"description"` / `"og_image"` /
+  `"body"` / `"summary"`; at most one field per schema per role (T104/A151).
+- `SchemaField.Relation` — forward-compat placeholder for future T06 edge-backed
+  relations (T104/A151).
+- `ValidateFields(schema, fields)` — extends `ValidateBlockFields` with type
+  checking, URL format validation, and duplicate-role rejection; `ValidateBlockFields`
+  retained as alias (T104/A151).
+- `ContentTypeRegistry` + `TypeDescriptor` + `App.TypeRegistry()` — concurrency-safe
+  name/prefix registry; dual key-space; auto-populated at `App.Content()` time
+  (`registry.go`) (T104/A151).
+- `idx_dynamic_content_type_status` index on `smeldr_dynamic_content` for efficient
+  type+status queries (added to `CreateBlockTables`) (T104/A151).
+
+---
+
 ## [1.38.0] — 2026-06-10
 
 ### Added

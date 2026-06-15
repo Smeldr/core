@@ -3011,8 +3011,7 @@ pre-rendered). Markdown fields arrive already rendered to safe HTML; output them
 directly (`{{ .Body }}`) — do not call a markdown helper in the template.
 
 Block `Fields` **must use PascalCase keys** (matching the block-system type tables)
-or the template accessors will not bind. ContentList (the dynamic cross-module
-query block) is not yet supported by the engine.
+or the template accessors will not bind.
 
 **Reference fields.** A field named `{Name}ID` is resolved to a `.{Name}`
 sub-object holding the referenced block's full template data. The built-in mapping
@@ -3026,3 +3025,137 @@ carries `.MediaURL`, `.AltText`, `.Title`, `.Caption` (Caption markdown-rendered
 Resolution is **Published-only** and **`{{ with }}`-guarded**: an absent,
 unpublished, or dangling reference produces no `.Image` key, so the guard renders
 nothing — no error. Referenced blocks are batch-loaded in one query (no N+1).
+
+### `ContentTypeSchema` and `SchemaField`
+
+`ContentTypeSchema` is the schema descriptor for a block or content type. It is
+stored in `smeldr_content_type_schemas` and read by `SchemaStore`. `SchemaField`
+describes one field within a schema.
+
+```go
+type ContentTypeSchema struct {
+    ID       string
+    TypeName string
+    Kind     string // "block" | "content" — discriminates block types from content types
+    Fields   []SchemaField
+}
+
+type SchemaField struct {
+    Name     string
+    Type     string   // "string" | "integer" | "boolean" | "array" | "object"
+    Required bool
+    Format   string   // "url" etc. — format hint for validation
+    Role     string   // "title" | "description" | "og_image" | "body" | "summary"
+    Relation string   // non-empty = future T06 edge-backed relation placeholder
+}
+```
+
+`Role` is a semantic seam read by T72 (head/SEO) and the ContentList renderer
+(summary cards). At most one field per schema may carry each role.
+
+### `CreateSchemaTable` and `MigrateSchemaKindColumn`
+
+```go
+smeldr.CreateSchemaTable(db)      // creates smeldr_content_type_schemas (idempotent)
+smeldr.MigrateSchemaKindColumn(db) // adds kind column to existing databases (idempotent)
+```
+
+`CreateSchemaTable` is called internally; call it explicitly only when bootstrapping
+a database without going through `App`. `MigrateSchemaKindColumn` is safe to call
+on every boot — it probes `PRAGMA table_info` and is a no-op when the column already
+exists.
+
+### `ValidateFields` — schema-driven field validation
+
+```go
+err := smeldr.ValidateFields(schema, fields)
+```
+
+Validates `fields` (a `map[string]any`) against `schema`. Returns an error when:
+- A required field is missing or `null`.
+- A field's value type does not match the schema (`"string"`, `"integer"`, etc.).
+- A string field with `Format: "url"` contains a non-URL value (relative `/path`
+  strings are accepted as internal links).
+- Two schema fields share the same non-empty `Role`.
+
+Unschematised types (schema is nil) are not validated — backwards-compatible.
+`ValidateBlockFields` is retained as an alias.
+
+### `ContentTypeRegistry` and `TypeDescriptor`
+
+`ContentTypeRegistry` is a concurrency-safe name/prefix registry owned by `App`.
+It is the linchpin shared by the ContentList block resolver (T96) and the future
+relation endpoint system (T06).
+
+```go
+type TypeDescriptor struct {
+    Name   string
+    Prefix string             // URL prefix (e.g. "/posts")
+    Schema *ContentTypeSchema // nil for compiled modules in this increment
+    Kind   string             // "block" | "content"
+    Fetch  func(ctx context.Context, opts ListOptions) ([]map[string]any, error)
+}
+```
+
+`Fetch` is set automatically at `App.Content()` time for any `Module[T]` that
+implements `ContentLister` (i.e. every compiled module). It returns Published items
+as type-erased `map[string]any` for the ContentList block resolver.
+
+| Method | Effect |
+|--------|--------|
+| `Register(d *TypeDescriptor)` | Adds descriptor. Panics on duplicate name or prefix. |
+| `RegisterPrefix(prefix, name string)` | Adds prefix alias for existing type. Idempotent for same name; panics if prefix claimed by different type. |
+| `Lookup(name string) *TypeDescriptor` | Returns descriptor or nil. |
+| `LookupByPrefix(prefix string) *TypeDescriptor` | Strips leading `/` before lookup. |
+| `All() []*TypeDescriptor` | Snapshot of all registered descriptors. |
+
+Compiled modules are auto-registered at `App.Content()` time with a soft-dup
+guard: the first `Content()` call for a type name wins; subsequent calls for the
+same `TypeName` call `RegisterPrefix` instead.
+
+### `App.TypeRegistry`
+
+```go
+reg := app.TypeRegistry() // *ContentTypeRegistry
+```
+
+Returns the app's type registry. Use it to register runtime-defined types (T104
+increment 2+) or to look up a type by name or prefix from outside the framework.
+
+### ContentList block resolver — `ContentLister` interface
+
+The `content_list` block type supports dynamic item injection via the
+`ContentTypeRegistry`. When `BlockRenderer.Render` encounters a `content_list`
+block, it:
+
+1. Reads `ContentType` from the block's `Fields` (e.g. `"posts"` — no leading `/`).
+2. Calls `registry.LookupByPrefix(ContentType)` to find the `TypeDescriptor`.
+3. If `desc.Fetch != nil`, calls `desc.Fetch(ctx, opts)` where `opts` is derived
+   from the block's `Limit` and `Page` fields.
+4. Sets `.Items` to the returned `[]map[string]any` for the template.
+
+Graceful skips (no items, no error): unknown `ContentType`, nil `Fetch`, empty
+`ContentType`, or a `Fetch` that returns an error (logged via `slog`).
+
+```go
+// ContentLister is implemented by Module[T]. Fetch is wired at App.Content() time.
+type ContentLister interface {
+    listPublished(ctx context.Context, opts ListOptions) ([]map[string]any, error)
+}
+```
+
+**Template contract for `content_list`:** `.Items` is `[]map[string]any` (unlike
+collection blocks where `.Items` is `[]template.HTML`). Access fields with
+`{{index . "Title"}}` or dot notation:
+
+```html
+{{range .Items}}
+  <article>
+    <h2>{{index . "Title"}}</h2>
+    <p>{{index . "Excerpt"}}</p>
+  </article>
+{{end}}
+```
+
+`Limit` maps to `ListOptions.PerPage`; `Page` maps to `ListOptions.Page`. Both
+fields are optional — omit for no pagination.
