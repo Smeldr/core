@@ -2,13 +2,13 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.40.0 (A152) + smeldr.dev/mcp v1.17.2 + smeldr.dev/cli v0.14.1 + smeldr.dev/oauth v0.2.0 + smeldr.dev/social v0.8.1 + smeldr.dev/agent v0.5.1 + smeldr.dev/media v1.4.1 + smeldr.dev/core/pgx v0.1.0.
+Last updated: v1.41.0 (A153) + smeldr.dev/mcp v1.17.2 + smeldr.dev/cli v0.14.1 + smeldr.dev/oauth v0.2.0 + smeldr.dev/social v0.8.1 + smeldr.dev/agent v0.5.1 + smeldr.dev/media v1.4.1 + smeldr.dev/core/pgx v0.1.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.40.0 | Stable |
+| `smeldr.dev/core` | v1.41.0 | Stable |
 | `smeldr.dev/mcp` | v1.16.0 | Stable |
 | `smeldr.dev/oauth` | v0.1.5 | Beta |
 | `smeldr.dev/core/pgx` | v0.1.0 | Beta |

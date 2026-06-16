@@ -3159,3 +3159,56 @@ collection blocks where `.Items` is `[]template.HTML`). Access fields with
 
 `Limit` maps to `ListOptions.PerPage`; `Page` maps to `ListOptions.Page`. Both
 fields are optional — omit for no pagination.
+
+---
+
+## Dynamic content
+
+Runtime-defined content types are created with `App.DefineContentType` and served
+with `App.ServeDynamicContent`.
+
+**Define a content type**
+
+```go
+fields, _ := json.Marshal([]smeldr.SchemaField{
+    {Name: "Title", Type: "string", Required: true, Role: "title"},
+    {Name: "Body",  Type: "string", Role: "body"},
+})
+err := app.DefineContentType(&smeldr.ContentTypeSchema{
+    TypeName: "recipe",
+    Label:    "Recipe",
+    Kind:     "content",
+    Fields:   json.RawMessage(fields),
+})
+```
+
+This registers the type under the URL prefix `/recipes` (derived by `PluralSnake`).
+
+**Serve public and admin routes**
+
+```go
+app.ServeDynamicContent()
+```
+
+Public: `GET /recipes/{slug}` returns a published item as JSON.
+Admin (Editor+): `POST /_content/recipes`, `GET /_content/recipes`,
+`GET /_content/recipes/{id}`, `PATCH /_content/recipes/{id}`,
+`POST /_content/recipes/{id}/status`.
+
+**Access a repo from application code**
+
+```go
+repo, err := app.DynamicContentRepo("recipe")
+if err != nil { ... }
+
+id, err := repo.CreateDraft(ctx, schema, fields)
+item, err := repo.GetBySlug(ctx, "chocolate-cake")
+items, err := repo.List(ctx, smeldr.ListOptions{Status: "published", PerPage: 10})
+err = repo.UpdateFields(ctx, id, newFields)
+err = repo.SetStatus(ctx, id, "published")
+```
+
+**Validation helpers**
+
+`smeldr.ValidateSchemaDef(schema)` validates a schema before writing.
+`smeldr.PluralSnake(name)` returns the plural URL prefix for a type name.

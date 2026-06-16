@@ -273,6 +273,9 @@ type App struct {
 	standaloneModules      []standaloneDispatcher              // Standalone() modules; for top-level /{slug} dispatch
 	standaloneReg          bool                                // true once GET /{slug} and GET /{slug}/aidoc are registered
 	typeRegistry           *ContentTypeRegistry                // content-type registry; always non-nil after New()
+	dynamicContentEnabled  bool                                // true after ServeDynamicContent() is called
+	dynamicContentReg      bool                                // true once /_content/ routes and 2-segment dispatcher are registered
+	dynamicTypesLoaded     bool                                // guards loadDynamicTypes idempotency
 	rebuildDone            bool                                // true once startup rebuildAll goroutine is launched
 	partialsDir            string                              // set by App.Partials(); shared partial templates loaded at Run() time
 	tokenStore             *TokenStore                         // non-nil when Config.TokenStore is set; enables DB-backed token management
@@ -885,17 +888,57 @@ func (a *App) Handler() http.Handler {
 			newRedirectManifestHandler(u2.Hostname(), a.redirectStore, a.redirectManifestOpts...),
 		)
 	}
-	// Standalone module dispatch: route GET /{slug} and GET /{slug}/aidoc to the
-	// module that owns the item. Must be registered before the "/" fallback so that
-	// the ServeMux specificity rules route single-segment paths here first; if no
-	// module matches, the handler delegates to the redirect store (which 404s as
-	// a last resort).
-	if len(a.standaloneModules) > 0 && !a.standaloneReg {
+	// Dynamic content: load runtime-defined types from DB and register routes.
+	// Must be done before the standalone dispatch block so the 2-segment
+	// wildcard and /_content/ routes are registered first.
+	if a.dynamicContentEnabled {
+		a.loadDynamicTypes(context.Background())
+	}
+	if a.dynamicContentEnabled && !a.dynamicContentReg {
+		a.dynamicContentReg = true
+		dynAuth := a.cfg.Auth
+		if dynAuth == nil {
+			dynAuth = BearerHMAC(string(a.cfg.Secret))
+		}
+		dynReg := a.typeRegistry
+		dynApp := a
+		// GET /{seg1}/{seg2} — dynamic type item; literal /{slug}/aidoc takes precedence.
+		a.mux.Handle("GET /{seg1}/{seg2}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			prefix := r.PathValue("seg1")
+			slug := r.PathValue("seg2")
+			if desc := dynReg.LookupByPrefix(prefix); desc != nil && desc.Kind == "content" {
+				serveDynamicItem(w, r, dynApp, desc, slug)
+				return
+			}
+			WriteError(w, r, ErrNotFound)
+		}))
+		a.mux.Handle("POST /_content/types", newDefineTypeHandler(a, dynAuth))
+		a.mux.Handle("GET /_content/{prefix}", newAdminListHandler(a, dynAuth))
+		a.mux.Handle("GET /_content/{prefix}/{id}", newAdminGetHandler(a, dynAuth))
+		a.mux.Handle("POST /_content/{prefix}", newCreateContentHandler(a, dynAuth))
+		a.mux.Handle("PATCH /_content/{prefix}/{id}", newUpdateContentHandler(a, dynAuth))
+		a.mux.Handle("POST /_content/{prefix}/{id}/status", newSetStatusHandler(a, dynAuth))
+	}
+	// Single-segment dispatch: GET /{slug} routes to dynamic list, standalone
+	// modules, or the redirect store (404 fallback). Always registered so that
+	// the redirect store is reached via a consistent path regardless of whether
+	// standalone modules are present.
+	//
+	// GET /{slug}/aidoc is only registered when standalone modules exist; the
+	// 2-segment literal-wildcard pattern conflicts with per-module patterns
+	// like GET /posts/{slug} registered by non-standalone modules.
+	if !a.standaloneReg {
 		a.standaloneReg = true
 		sds := a.standaloneModules
 		rs := a.redirectStore
+		reg := a.typeRegistry
+		appRef := a
 		a.mux.Handle("GET /{slug}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			slug := r.PathValue("slug")
+			if desc := reg.LookupByPrefix(slug); desc != nil && desc.Kind == "content" {
+				serveDynamicList(w, r, appRef, desc)
+				return
+			}
 			for _, sd := range sds {
 				if sd.findAndServe(w, r, slug) {
 					return
@@ -903,15 +946,17 @@ func (a *App) Handler() http.Handler {
 			}
 			rs.handler().ServeHTTP(w, r)
 		}))
-		a.mux.Handle("GET /{slug}/aidoc", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			slug := r.PathValue("slug")
-			for _, sd := range sds {
-				if sd.findAndServeAIDoc(w, r, slug) {
-					return
+		if len(sds) > 0 {
+			a.mux.Handle("GET /{slug}/aidoc", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				slug := r.PathValue("slug")
+				for _, sd := range sds {
+					if sd.findAndServeAIDoc(w, r, slug) {
+						return
+					}
 				}
-			}
-			WriteError(w, r, ErrNotFound)
-		}))
+				WriteError(w, r, ErrNotFound)
+			}))
+		}
 	}
 	if !a.redirectFallbackReg {
 		a.redirectFallbackReg = true
@@ -1139,6 +1184,31 @@ func (a *App) RedirectDB() DB { return a.redirectDB }
 //	app.RedirectManifestAuth(smeldr.BearerHMAC(secret, smeldr.Editor))
 func (a *App) RedirectManifestAuth(auth AuthFunc) {
 	a.redirectManifestOpts = append(a.redirectManifestOpts, ManifestAuth(auth))
+}
+
+// ServeDynamicContent activates the dynamic content substrate. It creates the
+// necessary database tables (smeldr_content_type_schemas, smeldr_dynamic_content)
+// and migrates existing tables so the kind column is present. Handler() will
+// then register the unified 2-segment dispatcher and the /_content/ admin
+// namespace. Panics when Config.DB is nil.
+//
+//	smeldr.CreateSchemaTable(db)   // optional: ServeDynamicContent calls this
+//	app.ServeDynamicContent()
+func (a *App) ServeDynamicContent() *App {
+	if a.cfg.DB == nil {
+		panic("smeldr: ServeDynamicContent requires Config.DB")
+	}
+	if err := CreateSchemaTable(a.cfg.DB); err != nil {
+		panic("smeldr: ServeDynamicContent CreateSchemaTable: " + err.Error())
+	}
+	if err := MigrateSchemaKindColumn(a.cfg.DB); err != nil {
+		slog.Warn("smeldr: ServeDynamicContent MigrateSchemaKindColumn", "err", err)
+	}
+	if err := CreateBlockTables(a.cfg.DB); err != nil {
+		panic("smeldr: ServeDynamicContent CreateBlockTables: " + err.Error())
+	}
+	a.dynamicContentEnabled = true
+	return a
 }
 
 // forgeVersions reads the binary's embedded build info and returns a map of

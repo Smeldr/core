@@ -165,3 +165,73 @@ Fetch returns 3 items, Items appear in order.
 
 core v1.40.0 (minor — new exported symbols: `ContentLister`, `TypeDescriptor.Fetch`).
 Branch: feat/t96-contentlist.
+
+---
+
+## A153 — T104 Inc 2: dynamic content substrate (core v1.41.0)
+
+**Date:** 2026-06-16
+**Status:** Agreed
+**Level:** 2 (new exported symbols; no breaking changes)
+
+### Decision
+
+T104 increment 2 adds the full dynamic content substrate: per-type CRUD repositories
+backed by `smeldr_dynamic_content`, a `ServeDynamicContent()` app method that registers
+public and admin HTTP routes, and the `DefineContentType` + `DynamicContentRepo` app
+methods for operator use.
+
+**1. Exported helpers (`dynamic.go`)**
+- `PluralSnake(name string) string` (exported from unexported `pluralSnake`) — English
+  plural for snake_case type names; consonant+y → -ies rule; all others get plain -s.
+- `ValidateSchemaDef(schema *ContentTypeSchema) error` (exported from `validateSchemaDef`)
+  — validates TypeName (required), field types (6 known: string/integer/boolean/array/object/number),
+  and Role values (title/description/og_image/body/summary).
+
+**2. `DynamicTypeRepo` (`dynamic.go`)**
+Per-type repository backed by `smeldr_dynamic_content`:
+- `CreateDraft(ctx, schema, fields)` — derives slug from title field; collision-safe via
+  `uniqueSlug` (counter suffix up to 100); validates required fields via schema.
+- `GetBySlug(ctx, slug)` → `map[string]any` or `ErrNotFound`
+- `GetByID(ctx, id)` → `map[string]any` or `ErrNotFound`
+- `List(ctx, opts ListOptions)` → `[]map[string]any` (status filter, pagination, ordering)
+- `UpdateFields(ctx, id, fields)` — PATCH semantics (merge, not replace); re-validates required
+- `SetStatus(ctx, id, status)` — draft → published → archived; updates `published_at` on publish
+
+**3. App methods**
+- `App.DefineContentType(schema *ContentTypeSchema) error` — saves schema to
+  `smeldr_content_type_schemas`, registers `TypeDescriptor{Kind:"content"}` in the type
+  registry, claims URL prefix `"/" + PluralSnake(schema.TypeName)`. Returns error on
+  duplicate, nil DB, or invalid schema.
+- `App.DynamicContentRepo(typeName string) (*DynamicTypeRepo, error)` — returns a typed
+  repo for a registered content type. Rejects compiled (`Kind != "content"`) types.
+- `loadDynamicTypes(ctx, db, app)` — loads all `kind="content"` schemas from DB on boot,
+  calls `DefineContentType` for each; idempotent (skips already-registered types and prefixes).
+
+**4. `App.ServeDynamicContent()` (`smeldr.go`)**
+Panics if `Config.DB` is nil. Calls `loadDynamicTypes` then registers:
+- **Public:** `GET /{slug}` (always; checks registry), `GET /{seg1}/{seg2}` (only when enabled)
+- **Admin** (`/_content/*`, Editor+ auth, only when `dynamicContentEnabled && !dynamicContentReg`):
+  - `POST /_content/{prefix}` — create draft
+  - `GET /_content/{prefix}` — list items (pagination via `?page=` / `?per_page=`)
+  - `GET /_content/{prefix}/{id}` — get item by ID
+  - `PATCH /_content/{prefix}/{id}` — update fields
+  - `POST /_content/{prefix}/{id}/status` — set status
+- All handlers reject unknown prefixes (404) and compiled types (404).
+
+### Tests
+
+- `dynamic_test.go` (new, 40+ tests) — `DynamicTypeRepo` CRUD, `PluralSnake` (12 cases),
+  `ValidateSchemaDef` (13 cases), `SchemaStore.AllByKind`, `MigrateSchemaKindColumn`
+- `dynamic_app_test.go` (new, 50+ tests) — `DefineContentType`, `DynamicContentRepo`,
+  `loadDynamicTypes`, `ServeDynamicContent` panic, public HTTP routing, all 6 admin endpoints
+- `schemas_test.go` — 2 new tests: `ValidateBlockFields` invalid schema/fields JSON
+- `dynamic_app_test.go` also covers `TypeRegistry.All()` and `RegisterPrefix` idempotent path
+
+Coverage: 96.0% (gate ≥96.0% ✓)
+
+### Version
+
+core v1.41.0 (minor — new exported symbols: `PluralSnake`, `ValidateSchemaDef`,
+`DynamicTypeRepo`, `App.DefineContentType`, `App.DynamicContentRepo`, `App.ServeDynamicContent`).
+Branch: feat/t104-dynamic.

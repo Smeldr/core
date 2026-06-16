@@ -23,6 +23,42 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.41.0] — 2026-06-16
+
+### Added
+
+- `App.ServeDynamicContent() *App` — registers public and admin HTTP routes for
+  runtime-defined content types. Panics if `Config.DB` is nil. Loads all
+  `kind="content"` schemas from the database on first call (idempotent). Public
+  routes: `GET /{slug}` (single item by slug, published only) and
+  `GET /{seg1}/{seg2}` (reserved for future sub-type routing). Admin routes under
+  `/_content/{prefix}`: `POST` (create draft), `GET` (list with pagination),
+  `GET /{id}` (get by ID), `PATCH /{id}` (update fields), `POST /{id}/status`
+  (set status). All admin routes require Editor role. (T104/A153)
+- `App.DefineContentType(schema *ContentTypeSchema) error` — saves a content-type
+  schema to `smeldr_content_type_schemas`, registers a `TypeDescriptor` (Kind:
+  `"content"`) in the type registry, and claims the URL prefix
+  `"/" + PluralSnake(schema.TypeName)`. Returns an error on nil DB, duplicate
+  type name, or invalid schema. (T104/A153)
+- `App.DynamicContentRepo(typeName string) (*DynamicTypeRepo, error)` — returns a
+  `DynamicTypeRepo` for a registered runtime-defined content type. Rejects
+  compiled (`Kind != "content"`) types with an error. (T104/A153)
+- `DynamicTypeRepo` — per-type CRUD repository backed by `smeldr_dynamic_content`:
+  `CreateDraft` (slug derived from title field, collision-safe), `GetBySlug`,
+  `GetByID`, `List` (pagination, status filter, ordering), `UpdateFields` (PATCH
+  semantics — merge, not replace; re-validates required fields), `SetStatus`
+  (draft → published → archived; sets `published_at` on publish). (T104/A153)
+- `PluralSnake(name string) string` — English-plural helper for snake_case type
+  names. Consonant+y endings use the -ies rule; all others get plain -s.
+  `"recipe"` → `"recipes"`, `"story"` → `"stories"`. (T104/A153)
+- `ValidateSchemaDef(schema *ContentTypeSchema) error` — validates a
+  `ContentTypeSchema` before writing to the database: requires non-empty
+  `TypeName`, known field types (`string`/`integer`/`boolean`/`array`/`object`/
+  `number`), and recognised `Role` values (`title`/`description`/`og_image`/
+  `body`/`summary`). (T104/A153)
+
+---
+
 ## [1.40.0] — 2026-06-15
 
 ### Added

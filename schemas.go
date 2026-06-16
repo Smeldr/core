@@ -18,16 +18,24 @@ type SchemaField struct {
 	Required    bool   `json:"required"`
 	Format      string `json:"format,omitempty"`
 	Description string `json:"description,omitempty"`
+	// Role identifies the semantic role of this field: "title", "description",
+	// "og_image", "body", or "summary". At most one field per role per schema.
+	// Drives auto-slug generation (title), ContentList cards, and T72 head derivation.
+	Role string `json:"role,omitempty"`
+	// Relation is a placeholder for T06 edge-backed semantic links between types.
+	// Set to "edge" when this field points to another content type reactively.
+	Relation string `json:"relation,omitempty"`
 }
 
-// ContentTypeSchema holds the declared field definitions for one block type.
+// ContentTypeSchema holds the declared field definitions for one content type.
 // Schemas for the 16 canonical block types are seeded at startup via
-// [SeedBlockTypeSchemas]. The schema table is read-only via MCP; schema
-// writability is a future concern (T55/T49).
+// [SeedBlockTypeSchemas]. Runtime-defined schemas (Kind "content") are written
+// via [SchemaStore.Save] when [App.DefineContentType] is called.
 type ContentTypeSchema struct {
 	ID        string          `db:"id"`
 	TypeName  string          `db:"type_name"`
 	Label     string          `db:"label"`
+	Kind      string          `db:"kind"` // "block" | "content"; default "block"
 	Fields    json.RawMessage `db:"fields"`
 	CreatedAt time.Time       `db:"created_at"`
 	UpdatedAt time.Time       `db:"updated_at"`
@@ -78,6 +86,53 @@ func (s *SchemaStore) All(ctx context.Context) ([]*ContentTypeSchema, error) {
 	return rows, nil
 }
 
+// AllByKind returns all schemas with the given kind ("block" | "content"),
+// ordered by type_name.
+func (s *SchemaStore) AllByKind(ctx context.Context, kind string) ([]*ContentTypeSchema, error) {
+	rows, err := Query[*ContentTypeSchema](ctx, s.db,
+		"SELECT * FROM smeldr_content_type_schemas WHERE kind = $1 ORDER BY type_name", kind)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []*ContentTypeSchema{}
+	}
+	return rows, nil
+}
+
+// Save upserts schema into smeldr_content_type_schemas keyed on type_name.
+// On insert, ID and CreatedAt are set when zero. On conflict the label, kind,
+// fields, and updated_at are updated while id and created_at are preserved.
+func (s *SchemaStore) Save(ctx context.Context, schema *ContentTypeSchema) error {
+	if schema.ID == "" {
+		schema.ID = NewID()
+	}
+	now := time.Now().UTC()
+	schema.UpdatedAt = now
+	if schema.CreatedAt.IsZero() {
+		schema.CreatedAt = now
+	}
+	kind := schema.Kind
+	if kind == "" {
+		kind = "block"
+	}
+	fields := schema.Fields
+	if len(fields) == 0 {
+		fields = json.RawMessage("[]")
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO smeldr_content_type_schemas (id, type_name, label, kind, fields, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT(type_name) DO UPDATE SET
+    label      = excluded.label,
+    kind       = excluded.kind,
+    fields     = excluded.fields,
+    updated_at = excluded.updated_at`,
+		schema.ID, schema.TypeName, schema.Label, kind,
+		fields, schema.CreatedAt, schema.UpdatedAt)
+	return err
+}
+
 // CreateSchemaTable creates smeldr_content_type_schemas if it does not exist.
 // Call once at startup alongside [CreateBlockTables]. Idempotent.
 func CreateSchemaTable(db DB) error {
@@ -86,10 +141,40 @@ CREATE TABLE IF NOT EXISTS smeldr_content_type_schemas (
 	id         TEXT NOT NULL PRIMARY KEY,
 	type_name  TEXT NOT NULL UNIQUE,
 	label      TEXT NOT NULL DEFAULT '',
+	kind       TEXT NOT NULL DEFAULT 'block',
 	fields     TEXT NOT NULL DEFAULT '[]',
 	created_at DATETIME NOT NULL,
 	updated_at DATETIME NOT NULL
 )`)
+	return err
+}
+
+// MigrateSchemaKindColumn adds the kind column to smeldr_content_type_schemas
+// when it is missing. Safe to call on every boot; no-op when the column exists
+// or when the database does not support PRAGMA table_info (non-SQLite).
+func MigrateSchemaKindColumn(db DB) error {
+	ctx := context.Background()
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_content_type_schemas)")
+	if err != nil {
+		return nil // non-SQLite; assume schema is current
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt *string
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			continue
+		}
+		if name == "kind" {
+			return nil // already present
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx,
+		`ALTER TABLE smeldr_content_type_schemas ADD COLUMN kind TEXT NOT NULL DEFAULT 'block'`)
 	return err
 }
 
@@ -258,6 +343,42 @@ func SeedBlockTypeSchemas(db DB) error {
 			NewID(), s.typeName, s.label, json.RawMessage(raw), now, now,
 		); err != nil {
 			return fmt.Errorf("SeedBlockTypeSchemas: insert %s: %w", s.typeName, err)
+		}
+	}
+	return nil
+}
+
+// ValidateSchemaDef checks that a ContentTypeSchema is well-formed before
+// writing it to the database. Returns an error on empty TypeName, unknown field
+// types, or unrecognised Role values.
+func ValidateSchemaDef(schema *ContentTypeSchema) error {
+	if schema.TypeName == "" {
+		return fmt.Errorf("smeldr: schema TypeName is required")
+	}
+	if len(schema.Fields) == 0 {
+		return nil
+	}
+	fields, err := schema.ParseFields()
+	if err != nil {
+		return fmt.Errorf("smeldr: schema Fields JSON invalid: %w", err)
+	}
+	knownTypes := map[string]bool{
+		"string": true, "integer": true, "boolean": true,
+		"array": true, "object": true, "number": true,
+	}
+	knownRoles := map[string]bool{
+		"": true, "title": true, "description": true,
+		"og_image": true, "body": true, "summary": true,
+	}
+	for _, f := range fields {
+		if f.Name == "" {
+			return fmt.Errorf("smeldr: schema field Name is required")
+		}
+		if !knownTypes[f.Type] {
+			return fmt.Errorf("smeldr: schema field %q has unknown type %q", f.Name, f.Type)
+		}
+		if !knownRoles[f.Role] {
+			return fmt.Errorf("smeldr: schema field %q has unknown role %q (valid: title, description, og_image, body, summary)", f.Name, f.Role)
 		}
 	}
 	return nil

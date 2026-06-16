@@ -183,6 +183,24 @@ func TestParseFields_invalidJSON(t *testing.T) {
 	}
 }
 
+func TestValidateBlockFields_InvalidSchemaJSON(t *testing.T) {
+	schema := &smeldr.ContentTypeSchema{
+		ID:       "x",
+		TypeName: "bad_schema",
+		Fields:   json.RawMessage(`{invalid}`),
+	}
+	if err := smeldr.ValidateBlockFields(schema, json.RawMessage(`{"Title":"x"}`)); err == nil {
+		t.Fatal("expected error for invalid schema JSON")
+	}
+}
+
+func TestValidateBlockFields_InvalidFieldsJSON(t *testing.T) {
+	schema := schemaWith(t, "x", []smeldr.SchemaField{{Name: "Title", Type: "string"}})
+	if err := smeldr.ValidateBlockFields(schema, json.RawMessage(`{bad json`)); err == nil {
+		t.Fatal("expected error for invalid fields JSON")
+	}
+}
+
 // schemaWith builds a ContentTypeSchema without touching the database.
 func schemaWith(t *testing.T, typeName string, fields []smeldr.SchemaField) *smeldr.ContentTypeSchema {
 	t.Helper()
