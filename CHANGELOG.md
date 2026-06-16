@@ -23,6 +23,44 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.41.1] — 2026-06-16
+
+### Added
+
+- `ContentTypeSchema.URLPrefix string` — operator-set public URL prefix for a
+  content type. Empty string means admin-only (no public GET routes registered).
+  Must start with `"/"` when non-empty. Set via `DefineContentType` schema or via
+  the `POST /_content/types` JSON body (`url_prefix` field). (T104/A154)
+- `MigrateURLPrefixColumn(db DB) error` — idempotent migration that adds the
+  `url_prefix` column to `smeldr_content_type_schemas` when it is missing. Uses
+  `PRAGMA table_info`; returns nil for non-SQLite databases. Called automatically
+  by `ServeDynamicContent`. (T104/A154)
+
+### Changed
+
+- `DefineContentType`: public routes (`GET {prefix}`, `GET {prefix}/{slug}`) are
+  now registered only when `schema.URLPrefix` is non-empty. Previously the prefix
+  was derived automatically via `PluralSnake(TypeName)`. Types with no URLPrefix
+  are admin-only. (T104/A154)
+- Admin routes changed from `/_content/{prefix}` to `/_content/{type}` — the
+  path variable now holds the `type_name`, not the URL prefix. Callers must update
+  URLs accordingly. (T104/A154)
+- `ContentList` block field `ContentType` now holds the `type_name` (e.g.
+  `"recipe"`) instead of the URL prefix (e.g. `"recipes"`). Update existing block
+  data when upgrading from v1.41.0. (T104/A154)
+- `SetStatus` now triggers a background sitemap rebuild for types with a URLPrefix.
+  The fragment is written to `sitemapStore` and served at
+  `GET {prefix}/sitemap.xml`. (T104/A154)
+
+### Fixed
+
+- `GET /{seg1}/{seg2}` catch-all wildcard removed from `ServeDynamicContent`.
+  The wildcard conflicted with literal 2-segment routes (e.g. `GET /static/`) in
+  Go 1.22's `ServeMux`. Public item routes are now registered per type at
+  `GET {URLPrefix}/{slug}`. (T104/A154)
+
+---
+
 ## [1.41.0] — 2026-06-16
 
 ### Added

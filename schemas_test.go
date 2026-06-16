@@ -4,11 +4,26 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	_ "modernc.org/sqlite"
 	smeldr "smeldr.dev/core"
 )
+
+// errDB is a minimal smeldr.DB implementation that errors on every call.
+// Used to test the non-SQLite early-return path in MigrateURLPrefixColumn.
+type errDB struct{}
+
+func (errDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, fmt.Errorf("not supported")
+}
+func (errDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, fmt.Errorf("not supported")
+}
+func (errDB) QueryRowContext(_ context.Context, _ string, _ ...any) *sql.Row {
+	return nil
+}
 
 func newSchemaDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -110,6 +125,54 @@ func TestSchemaStore_FindByTypeName_NotFound(t *testing.T) {
 	_, err := store.FindByTypeName(context.Background(), "custom_nonexistent_type")
 	if err != smeldr.ErrNotFound {
 		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestMigrateURLPrefixColumn_AddsColumn(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Skipf("sqlite unavailable: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
+
+	// Old-style table without url_prefix column
+	_, err = db.Exec(`CREATE TABLE smeldr_content_type_schemas (
+		id        TEXT NOT NULL PRIMARY KEY,
+		type_name TEXT NOT NULL UNIQUE,
+		label     TEXT NOT NULL DEFAULT '',
+		kind      TEXT NOT NULL DEFAULT '',
+		fields    TEXT NOT NULL DEFAULT '[]',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	)`)
+	if err != nil {
+		t.Fatalf("create old table: %v", err)
+	}
+
+	if err := smeldr.MigrateURLPrefixColumn(db); err != nil {
+		t.Fatalf("MigrateURLPrefixColumn: %v", err)
+	}
+
+	// Column should now exist
+	_, err = db.Exec(`INSERT INTO smeldr_content_type_schemas
+		(id, type_name, label, kind, url_prefix, fields, created_at, updated_at)
+		VALUES ('1', 'test', 'Test', 'content', '/tests', '[]', '2025-01-01', '2025-01-01')`)
+	if err != nil {
+		t.Errorf("url_prefix column should exist after migration: %v", err)
+	}
+
+	// Idempotent: second call is a no-op
+	if err := smeldr.MigrateURLPrefixColumn(db); err != nil {
+		t.Fatalf("second MigrateURLPrefixColumn: %v", err)
+	}
+}
+
+// TestMigrateURLPrefixColumn_NonSQLite verifies that a QueryContext error (e.g. from
+// a non-SQLite DB) causes MigrateURLPrefixColumn to return nil (assumed current schema).
+func TestMigrateURLPrefixColumn_NonSQLite(t *testing.T) {
+	if err := smeldr.MigrateURLPrefixColumn(errDB{}); err != nil {
+		t.Fatalf("expected nil for non-SQLite DB, got: %v", err)
 	}
 }
 

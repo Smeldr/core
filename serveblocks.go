@@ -310,10 +310,10 @@ func (r *BlockRenderer) renderBlock(ctx context.Context, id string, blocks map[s
 		ct, _ := data["ContentType"].(string)
 		if ct == "" {
 			slog.Warn("serveblocks: content_list block has empty ContentType", "id", id)
-		} else if desc := r.registry.LookupByPrefix(ct); desc == nil {
-			slog.Warn("serveblocks: content_list ContentType not in registry", "content_type", ct, "id", id)
+		} else if desc := r.registry.Lookup(ct); desc == nil {
+			slog.Warn("serveblocks: content_list ContentType (type_name) not in registry", "content_type", ct, "id", id)
 		} else if desc.Fetch == nil {
-			slog.Warn("serveblocks: content_list ContentType has no Fetch (dynamic type not yet supported)", "content_type", ct, "id", id)
+			slog.Warn("serveblocks: content_list ContentType has no Fetch", "content_type", ct, "id", id)
 		} else {
 			if ft, _ := data["FilterTags"].(string); ft != "" {
 				slog.Warn("serveblocks: content_list FilterTags not yet supported, ignoring", "content_type", ct, "id", id)

@@ -235,3 +235,62 @@ Coverage: 96.0% (gate ≥96.0% ✓)
 core v1.41.0 (minor — new exported symbols: `PluralSnake`, `ValidateSchemaDef`,
 `DynamicTypeRepo`, `App.DefineContentType`, `App.DynamicContentRepo`, `App.ServeDynamicContent`).
 Branch: feat/t104-dynamic.
+
+---
+
+## A154 — T104 Inc 2 patch: operator-controlled URL routing (core v1.41.1)
+
+**Root cause of A153 bug:** `ServeDynamicContent()` registered `GET /{seg1}/{seg2}` as
+a catch-all wildcard that conflicted with literal 2-segment paths (e.g. `GET /static/`)
+in Go 1.22's `ServeMux`. The deeper issue: auto-deriving the public URL from the type name
+(`PluralSnake`) is wrong — URL structure is the operator's decision.
+
+### Changes
+
+**`schemas.go`**
+- `ContentTypeSchema.URLPrefix string` (db: `url_prefix`) — public URL prefix; empty = admin-only, no public routes.
+- `MigrateURLPrefixColumn(db DB) error` — idempotent `PRAGMA table_info` probe; adds `url_prefix TEXT NOT NULL DEFAULT ''` when missing.
+- `CreateSchemaTable` DDL: `url_prefix` column added.
+- `SchemaStore.Save`: upserts include `url_prefix`.
+- `ValidateSchemaDef`: rejects non-empty URLPrefix that does not start with `"/"`.
+
+**`dynamic.go`**
+- `DefineContentType`: derives `prefix = schema.URLPrefix` (may be empty); when non-empty, registers `GET prefix` + `GET prefix/{slug}` on the mux. Empty prefix = admin-only type.
+- `loadDynamicTypes`: same prefix logic; warns + skips on URLPrefix collision (not type-name collision).
+- Admin handlers: all 5 changed from `{prefix}` (URL prefix) to `{type}` (type_name) path variable; `LookupByPrefix` → `Lookup`.
+- `newDefineTypeHandler`: decodes `url_prefix` from JSON body, passes to schema.
+- `rebuildDynamicSitemap(ctx, desc)`: called in goroutine after `SetStatus`; writes XML fragment for all Published items to `sitemapStore`; no-op if `desc.Prefix == ""` or `sitemapStore == nil`.
+
+**`smeldr.go`**
+- Removed `GET /{seg1}/{seg2}` catch-all wildcard (root cause of mux conflict).
+- `GET /{slug}` handler no longer dispatches through `LookupByPrefix`; falls through to standalone modules + redirect store.
+- Admin routes: `/_content/{prefix}` → `/_content/{type}`.
+- `ServeDynamicContent()`: calls `MigrateURLPrefixColumn`; initialises `sitemapStore` if nil.
+
+**`serveblocks.go`**
+- `ContentList` resolver: `LookupByPrefix(ct)` → `Lookup(ct)`; block data `ContentType` field now holds `type_name` (not URL prefix).
+
+### Breaking change (from A153)
+
+Operators using the A153 content block API must update `ContentType` in `content_list` block data from URL prefix (e.g. `"posts"`) to type_name (e.g. `"post"`). The A153 public routing (`GET /pluralname`) is replaced by explicit `URLPrefix` on the schema.
+
+### Tests
+
+17 new tests across `dynamic_app_test.go`, `dynamic_test.go`, `serveblocks_test.go`, `schemas_test.go`:
+- `TestDefineContentType_WithURLPrefix`, `TestDefineContentType_NoURLPrefix`
+- `TestLoadDynamicTypes_URLPrefix`, `TestLoadDynamicTypes_URLPrefixCollision`, `TestLoadDynamicTypes_SlugRoute`, `TestLoadDynamicTypes_DBError`
+- `TestServeDynamicContent_NoPanic_WithStaticRoute`
+- `TestAdminRoutes_TypeName`
+- `TestRebuildDynamicSitemap`, `TestRebuildDynamicSitemap_NoPrefix`
+- `TestContentList_UsesTypeName` (serveblocks_test.go)
+- `TestValidateSchemaDef_URLPrefix_BadFormat`, `TestValidateSchemaDef_URLPrefix_Valid`
+- `TestMigrateURLPrefixColumn_AddsColumn`, `TestMigrateURLPrefixColumn_NonSQLite`
+- `TestDynamicContentRepo_NilDB_Registered`
+- Fixed: `TestContentList_Resolves`, `TestContentList_LimitPassedToFetch`, `TestContentList_NilFetch`, `TestContentList_EmptyContentType` — ContentType field updated to type_name
+
+Coverage: 96.0% (gate ≥96.0% ✓)
+
+### Version
+
+core v1.41.1 (patch — no new exported symbols; `ContentTypeSchema.URLPrefix` field added;
+`MigrateURLPrefixColumn` exported). Branch: fix/t104-dynamic-routing.

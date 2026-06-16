@@ -660,12 +660,12 @@ const contentListTpl = `{{range .Items}}<article>{{index . "Title"}}</article>{{
 func TestContentList_Resolves(t *testing.T) {
 	tpls := map[string]string{"content_list": contentListTpl}
 	f := newBlockFixture(t, tpls)
-	f.put("cl", "content_list", Published, `{"ContentType":"posts"}`)
+	f.put("cl", "content_list", Published, `{"ContentType":"post"}`)
 	f.link("p", "page", "cl", "content_list", "section")
 
 	fetchCalled := false
 	r := newContentListRenderer(t, f, &TypeDescriptor{
-		Name:   "Post",
+		Name:   "post",
 		Prefix: "/posts",
 		Kind:   "content",
 		Fetch: func(_ context.Context, _ ListOptions) ([]map[string]any, error) {
@@ -690,12 +690,12 @@ func TestContentList_Resolves(t *testing.T) {
 func TestContentList_LimitPassedToFetch(t *testing.T) {
 	tpls := map[string]string{"content_list": contentListTpl}
 	f := newBlockFixture(t, tpls)
-	f.put("cl", "content_list", Published, `{"ContentType":"posts","Limit":5}`)
+	f.put("cl", "content_list", Published, `{"ContentType":"post","Limit":5}`)
 	f.link("p", "page", "cl", "content_list", "section")
 
 	var gotOpts ListOptions
 	r := newContentListRenderer(t, f, &TypeDescriptor{
-		Name:   "Post",
+		Name:   "post",
 		Prefix: "/posts",
 		Kind:   "content",
 		Fetch: func(_ context.Context, opts ListOptions) ([]map[string]any, error) {
@@ -730,11 +730,11 @@ func TestContentList_UnknownContentType(t *testing.T) {
 func TestContentList_NilFetch(t *testing.T) {
 	tpls := map[string]string{"content_list": contentListTpl}
 	f := newBlockFixture(t, tpls)
-	f.put("cl", "content_list", Published, `{"ContentType":"posts"}`)
+	f.put("cl", "content_list", Published, `{"ContentType":"post"}`)
 	f.link("p", "page", "cl", "content_list", "section")
 
 	r := newContentListRenderer(t, f, &TypeDescriptor{
-		Name:   "Post",
+		Name:   "post",
 		Prefix: "/posts",
 		Kind:   "content",
 		Fetch:  nil, // descriptor registered but no Fetch wired
@@ -755,7 +755,7 @@ func TestContentList_EmptyContentType(t *testing.T) {
 	f.link("p", "page", "cl", "content_list", "section")
 
 	r := newContentListRenderer(t, f, &TypeDescriptor{
-		Name:   "Post",
+		Name:   "post",
 		Prefix: "/posts",
 		Kind:   "content",
 		Fetch: func(_ context.Context, _ ListOptions) ([]map[string]any, error) {
@@ -769,6 +769,34 @@ func TestContentList_EmptyContentType(t *testing.T) {
 	if strings.Contains(string(out), "ShouldNotAppear") {
 		t.Errorf("empty ContentType must not invoke Fetch:\n%s", out)
 	}
+}
+
+// TestContentList_UsesTypeName documents the A154 contract: ContentList blocks
+// reference the type_name (e.g. "article"), not the URL prefix (e.g. "articles").
+func TestContentList_UsesTypeName(t *testing.T) {
+	tpls := map[string]string{"content_list": contentListTpl}
+	f := newBlockFixture(t, tpls)
+	f.put("cl", "content_list", Published, `{"ContentType":"article"}`)
+	f.link("p", "page", "cl", "content_list", "section")
+
+	fetchCalled := false
+	r := newContentListRenderer(t, f, &TypeDescriptor{
+		Name:   "article",
+		Prefix: "/articles",
+		Kind:   "content",
+		Fetch: func(_ context.Context, _ ListOptions) ([]map[string]any, error) {
+			fetchCalled = true
+			return []map[string]any{{"Title": "A154 contract"}}, nil
+		},
+	})
+	out, err := r.Render(context.Background(), "page", "p")
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !fetchCalled {
+		t.Error("Fetch should be called when ContentType matches type_name, not URL prefix")
+	}
+	mustOrder(t, string(out), "A154 contract")
 }
 
 // ── contentListOpts unit tests ───────────────────────────────────────────────

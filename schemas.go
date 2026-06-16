@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -31,11 +32,15 @@ type SchemaField struct {
 // Schemas for the 16 canonical block types are seeded at startup via
 // [SeedBlockTypeSchemas]. Runtime-defined schemas (Kind "content") are written
 // via [SchemaStore.Save] when [App.DefineContentType] is called.
+//
+// URLPrefix is the operator-chosen public URL prefix (e.g. "/recipes"). When
+// empty, the type has no public URL and is accessible only via admin routes.
 type ContentTypeSchema struct {
 	ID        string          `db:"id"`
 	TypeName  string          `db:"type_name"`
 	Label     string          `db:"label"`
-	Kind      string          `db:"kind"` // "block" | "content"; default "block"
+	Kind      string          `db:"kind"`      // "block" | "content"; default "block"
+	URLPrefix string          `db:"url_prefix"` // public URL prefix; empty = admin-only
 	Fields    json.RawMessage `db:"fields"`
 	CreatedAt time.Time       `db:"created_at"`
 	UpdatedAt time.Time       `db:"updated_at"`
@@ -102,7 +107,8 @@ func (s *SchemaStore) AllByKind(ctx context.Context, kind string) ([]*ContentTyp
 
 // Save upserts schema into smeldr_content_type_schemas keyed on type_name.
 // On insert, ID and CreatedAt are set when zero. On conflict the label, kind,
-// fields, and updated_at are updated while id and created_at are preserved.
+// url_prefix, fields, and updated_at are updated while id and created_at are
+// preserved.
 func (s *SchemaStore) Save(ctx context.Context, schema *ContentTypeSchema) error {
 	if schema.ID == "" {
 		schema.ID = NewID()
@@ -121,14 +127,15 @@ func (s *SchemaStore) Save(ctx context.Context, schema *ContentTypeSchema) error
 		fields = json.RawMessage("[]")
 	}
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO smeldr_content_type_schemas (id, type_name, label, kind, fields, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO smeldr_content_type_schemas (id, type_name, label, kind, url_prefix, fields, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT(type_name) DO UPDATE SET
     label      = excluded.label,
     kind       = excluded.kind,
+    url_prefix = excluded.url_prefix,
     fields     = excluded.fields,
     updated_at = excluded.updated_at`,
-		schema.ID, schema.TypeName, schema.Label, kind,
+		schema.ID, schema.TypeName, schema.Label, kind, schema.URLPrefix,
 		fields, schema.CreatedAt, schema.UpdatedAt)
 	return err
 }
@@ -142,10 +149,40 @@ CREATE TABLE IF NOT EXISTS smeldr_content_type_schemas (
 	type_name  TEXT NOT NULL UNIQUE,
 	label      TEXT NOT NULL DEFAULT '',
 	kind       TEXT NOT NULL DEFAULT 'block',
+	url_prefix TEXT NOT NULL DEFAULT '',
 	fields     TEXT NOT NULL DEFAULT '[]',
 	created_at DATETIME NOT NULL,
 	updated_at DATETIME NOT NULL
 )`)
+	return err
+}
+
+// MigrateURLPrefixColumn adds the url_prefix column to
+// smeldr_content_type_schemas when it is absent. Idempotent; safe to call on
+// every boot. A no-op on non-SQLite databases that do not support PRAGMA.
+func MigrateURLPrefixColumn(db DB) error {
+	ctx := context.Background()
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_content_type_schemas)")
+	if err != nil {
+		return nil // non-SQLite; assume schema is current
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt *string
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			continue
+		}
+		if name == "url_prefix" {
+			return nil // already present
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx,
+		`ALTER TABLE smeldr_content_type_schemas ADD COLUMN url_prefix TEXT NOT NULL DEFAULT ''`)
 	return err
 }
 
@@ -349,11 +386,14 @@ func SeedBlockTypeSchemas(db DB) error {
 }
 
 // ValidateSchemaDef checks that a ContentTypeSchema is well-formed before
-// writing it to the database. Returns an error on empty TypeName, unknown field
-// types, or unrecognised Role values.
+// writing it to the database. Returns an error on empty TypeName, a URLPrefix
+// that does not start with "/", unknown field types, or unrecognised Role values.
 func ValidateSchemaDef(schema *ContentTypeSchema) error {
 	if schema.TypeName == "" {
 		return fmt.Errorf("smeldr: schema TypeName is required")
+	}
+	if schema.URLPrefix != "" && !strings.HasPrefix(schema.URLPrefix, "/") {
+		return fmt.Errorf("smeldr: URLPrefix must start with \"/\", got %q", schema.URLPrefix)
 	}
 	if len(schema.Fields) == 0 {
 		return nil

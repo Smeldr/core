@@ -35,10 +35,11 @@ func recipeSchema() *smeldr.ContentTypeSchema {
 		{Name: "Body", Type: "string", Role: "body"},
 	})
 	return &smeldr.ContentTypeSchema{
-		TypeName: "recipe",
-		Label:    "Recipe",
-		Kind:     "content",
-		Fields:   json.RawMessage(fields),
+		TypeName:  "recipe",
+		Label:     "Recipe",
+		Kind:      "content",
+		URLPrefix: "/recipes",
+		Fields:    json.RawMessage(fields),
 	}
 }
 
@@ -489,6 +490,20 @@ func TestValidateSchemaDef_AllKnownTypes(t *testing.T) {
 		if err := smeldr.ValidateSchemaDef(schema); err != nil {
 			t.Errorf("type %q should be valid, got: %v", typ, err)
 		}
+	}
+}
+
+func TestValidateSchemaDef_URLPrefix_BadFormat(t *testing.T) {
+	schema := &smeldr.ContentTypeSchema{TypeName: "post", URLPrefix: "no-leading-slash"}
+	if err := smeldr.ValidateSchemaDef(schema); err == nil {
+		t.Fatal("expected error for URLPrefix without leading slash")
+	}
+}
+
+func TestValidateSchemaDef_URLPrefix_Valid(t *testing.T) {
+	schema := &smeldr.ContentTypeSchema{TypeName: "post", URLPrefix: "/posts"}
+	if err := smeldr.ValidateSchemaDef(schema); err != nil {
+		t.Fatalf("ValidateSchemaDef with valid URLPrefix: %v", err)
 	}
 }
 

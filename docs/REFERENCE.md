@@ -3034,10 +3034,11 @@ describes one field within a schema.
 
 ```go
 type ContentTypeSchema struct {
-    ID       string
-    TypeName string
-    Kind     string // "block" | "content" — discriminates block types from content types
-    Fields   []SchemaField
+    ID        string
+    TypeName  string
+    Kind      string // "block" | "content" — discriminates block types from content types
+    Fields    []SchemaField
+    URLPrefix string // operator-set public URL prefix; empty = admin-only, no public routes; must start with "/"
 }
 
 type SchemaField struct {
@@ -3128,14 +3129,19 @@ The `content_list` block type supports dynamic item injection via the
 `ContentTypeRegistry`. When `BlockRenderer.Render` encounters a `content_list`
 block, it:
 
-1. Reads `ContentType` from the block's `Fields` (e.g. `"posts"` — no leading `/`).
-2. Calls `registry.LookupByPrefix(ContentType)` to find the `TypeDescriptor`.
+1. Reads `ContentType` from the block's `Fields` — this is the **type_name**
+   (e.g. `"recipe"`, `"post"`), not the URL prefix.
+2. Calls `registry.Lookup(ContentType)` to find the `TypeDescriptor` by type_name.
 3. If `desc.Fetch != nil`, calls `desc.Fetch(ctx, opts)` where `opts` is derived
    from the block's `Limit` and `Page` fields.
 4. Sets `.Items` to the returned `[]map[string]any` for the template.
 
 Graceful skips (no items, no error): unknown `ContentType`, nil `Fetch`, empty
 `ContentType`, or a `Fetch` that returns an error (logged via `slog`).
+
+**Breaking change (A154):** `ContentType` block field must hold the **type_name**
+(lowercase snake_case, e.g. `"recipe"`) — not the URL prefix (e.g. `"/recipes"`).
+Existing `content_list` blocks using a URL prefix value must be updated.
 
 ```go
 // ContentLister is implemented by Module[T]. Fetch is wired at App.Content() time.
@@ -3165,24 +3171,27 @@ fields are optional — omit for no pagination.
 ## Dynamic content
 
 Runtime-defined content types are created with `App.DefineContentType` and served
-with `App.ServeDynamicContent`.
+with `App.ServeDynamicContent`. Public URL routing is operator-controlled via
+`ContentTypeSchema.URLPrefix` (A154).
 
-**Define a content type**
+**Define a content type with a public URL**
 
 ```go
 fields, _ := json.Marshal([]smeldr.SchemaField{
     {Name: "Title", Type: "string", Required: true, Role: "title"},
     {Name: "Body",  Type: "string", Role: "body"},
 })
-err := app.DefineContentType(&smeldr.ContentTypeSchema{
-    TypeName: "recipe",
-    Label:    "Recipe",
-    Kind:     "content",
-    Fields:   json.RawMessage(fields),
+desc, err := app.DefineContentType(&smeldr.ContentTypeSchema{
+    TypeName:  "recipe",
+    Kind:      "content",
+    Fields:    json.RawMessage(fields),
+    URLPrefix: "/recipes",  // operator-set; empty = admin-only, no public routes
 })
 ```
 
-This registers the type under the URL prefix `/recipes` (derived by `PluralSnake`).
+`URLPrefix` must start with `"/"`. When non-empty, `DefineContentType` registers
+`GET {URLPrefix}/{slug}` as the public read route. Empty `URLPrefix` means the type
+is accessible via the admin API only.
 
 **Serve public and admin routes**
 
@@ -3190,10 +3199,28 @@ This registers the type under the URL prefix `/recipes` (derived by `PluralSnake
 app.ServeDynamicContent()
 ```
 
-Public: `GET /recipes/{slug}` returns a published item as JSON.
-Admin (Editor+): `POST /_content/recipes`, `GET /_content/recipes`,
-`GET /_content/recipes/{id}`, `PATCH /_content/recipes/{id}`,
-`POST /_content/recipes/{id}/status`.
+Call this once at startup. It:
+1. Runs `MigrateURLPrefixColumn` on `smeldr_dynamic_content`.
+2. Initialises the in-memory sitemap store.
+3. Loads all persisted dynamic types from the DB at boot (`loadDynamicTypes`).
+4. Registers 5 admin endpoints keyed by **type_name** (not URL prefix):
+
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| `POST` | `/_content/types` | Admin | Define a new content type |
+| `POST` | `/_content/{type}` | Editor+ | Create a draft item |
+| `GET` | `/_content/{type}` | Editor+ | List all items (all statuses) |
+| `GET` | `/_content/{type}/{id}` | Editor+ | Get item by ID |
+| `PATCH` | `/_content/{type}/{id}` | Editor+ | Update fields (PATCH semantics) |
+| `POST` | `/_content/{type}/{id}/status` | Editor+ | Set status |
+
+`{type}` is the `type_name` (e.g. `recipe`), not the URL prefix.
+
+**Sitemap auto-rebuild**
+
+`SetStatus` fires a background goroutine that regenerates `{URLPrefix}/sitemap.xml`
+in the in-memory sitemap store after each status change. Types without a `URLPrefix`
+are not included in the sitemap.
 
 **Access a repo from application code**
 
@@ -3208,7 +3235,20 @@ err = repo.UpdateFields(ctx, id, newFields)
 err = repo.SetStatus(ctx, id, "published")
 ```
 
+**Database migration**
+
+When upgrading an existing database that pre-dates A154, call once at startup:
+
+```go
+smeldr.MigrateURLPrefixColumn(db) // idempotent; no-op on non-SQLite
+```
+
+`ServeDynamicContent` calls this automatically. Use the explicit call only when
+bootstrapping a database without going through `App`.
+
 **Validation helpers**
 
-`smeldr.ValidateSchemaDef(schema)` validates a schema before writing.
-`smeldr.PluralSnake(name)` returns the plural URL prefix for a type name.
+`smeldr.ValidateSchemaDef(schema)` validates a schema before writing; checks
+`TypeName`, `URLPrefix` format (must start with `"/"`), field types, and roles.
+`smeldr.PluralSnake(name)` returns the default plural URL prefix for a type name
+(e.g. `"recipe"` → `"recipes"`, `"story"` → `"stories"`).

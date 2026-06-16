@@ -2,7 +2,7 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.41.0 (A153) + smeldr.dev/mcp v1.17.2 + smeldr.dev/cli v0.14.1 + smeldr.dev/oauth v0.2.0 + smeldr.dev/social v0.8.1 + smeldr.dev/agent v0.5.1 + smeldr.dev/media v1.4.1 + smeldr.dev/core/pgx v0.1.0.
+Last updated: v1.41.1 (A154) + smeldr.dev/mcp v1.21.1 + smeldr.dev/cli v0.14.1 + smeldr.dev/oauth v0.2.0 + smeldr.dev/social v0.8.1 + smeldr.dev/agent v0.5.1 + smeldr.dev/media v1.4.1 + smeldr.dev/core/pgx v0.1.0.
 
 ## Module stability
 
@@ -63,7 +63,17 @@ Labels are reviewed at every module minor or major version bump.
 - `ValidateFields(schema, fields)` — rejects unknown fields, missing required fields, type mismatches, bad URL formats, and duplicate role assignments; `ValidateBlockFields` alias retained (A151)
 - `ContentTypeRegistry` + `TypeDescriptor` + `App.TypeRegistry()` — concurrency-safe name/prefix registry; dual key-space (PascalCase compiled + snake_case runtime); `Register`, `RegisterPrefix`, `Lookup`, `LookupByPrefix`, `All`; auto-populated at `App.Content()` time (A151)
 - `ContentLister` interface — implemented by `Module[T]`; exposes `listPublished` as `TypeDescriptor.Fetch` for the ContentList block resolver (A152)
-- ContentList block resolver — `content_list` block injects `.Items` (type-erased `[]map[string]any`) from the content-type registry at render time; `Limit`/`Page` block fields map to `ListOptions`; graceful skip for unknown type, nil Fetch, or empty ContentType (A152)
+- ContentList block resolver — `content_list` block injects `.Items` (type-erased `[]map[string]any`) from the content-type registry at render time; `Limit`/`Page` block fields map to `ListOptions`; graceful skip for unknown type, nil Fetch, or empty ContentType; `ContentType` field stores `type_name` (e.g. `"recipe"`) not the URL prefix (A152/A154)
+- `DynamicTypeRepo` — per-type CRUD repository for runtime-defined content types backed by `smeldr_dynamic_content`: `CreateDraft` (slug from title field, collision-safe), `GetBySlug`, `GetByID`, `List` (pagination, status filter, ordering), `UpdateFields` (PATCH semantics), `SetStatus` (draft/published/archived; sets `published_at` on publish) (A153)
+- `App.DefineContentType(schema *ContentTypeSchema) (*TypeDescriptor, error)` — saves schema, registers `TypeDescriptor{Kind:"content"}`, and registers public routes at `schema.URLPrefix` when non-empty (A153/A154)
+- `App.DynamicContentRepo(typeName string) (*DynamicTypeRepo, error)` — returns a typed CRUD repo for a registered runtime-defined content type (A153)
+- `App.ServeDynamicContent() *App` — opt-in call that runs `MigrateURLPrefixColumn`, initialises the sitemap store, enables boot-time `loadDynamicTypes`, and registers 5 admin `/_content/{type}` endpoints (Editor+). Returns `*App` for chaining. Panics if `Config.DB` is nil. (A153/A154)
+- `ContentTypeSchema.URLPrefix string` — operator-set public URL prefix; empty = admin-only; must start with `"/"` (A154)
+- `MigrateURLPrefixColumn(db DB) error` — idempotent column migration for `url_prefix`; no-op on non-SQLite (A154)
+- `PluralSnake(name string) string` — English plural helper (consonant+y→-ies rule) (A153)
+- `ValidateSchemaDef(schema *ContentTypeSchema) error` — validates TypeName, URLPrefix format, field types, and roles (A153/A154)
+- Admin content API (`/_content/{type}`) — 5 endpoints (Editor+): `POST` create draft, `GET` list all statuses, `GET /{id}` get by ID, `PATCH /{id}` update fields, `POST /{id}/status` set status; `POST /_content/types` (Admin) defines a type (A153/A154)
+- Sitemap auto-rebuild — `SetStatus` triggers a background goroutine that writes `{URLPrefix}/sitemap.xml` to the in-memory sitemap store after each status change (A154)
 - Still building on top: CLI block commands (c6)
 
 ## Rendering — Stable

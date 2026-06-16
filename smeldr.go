@@ -900,24 +900,12 @@ func (a *App) Handler() http.Handler {
 		if dynAuth == nil {
 			dynAuth = BearerHMAC(string(a.cfg.Secret))
 		}
-		dynReg := a.typeRegistry
-		dynApp := a
-		// GET /{seg1}/{seg2} — dynamic type item; literal /{slug}/aidoc takes precedence.
-		a.mux.Handle("GET /{seg1}/{seg2}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			prefix := r.PathValue("seg1")
-			slug := r.PathValue("seg2")
-			if desc := dynReg.LookupByPrefix(prefix); desc != nil && desc.Kind == "content" {
-				serveDynamicItem(w, r, dynApp, desc, slug)
-				return
-			}
-			WriteError(w, r, ErrNotFound)
-		}))
 		a.mux.Handle("POST /_content/types", newDefineTypeHandler(a, dynAuth))
-		a.mux.Handle("GET /_content/{prefix}", newAdminListHandler(a, dynAuth))
-		a.mux.Handle("GET /_content/{prefix}/{id}", newAdminGetHandler(a, dynAuth))
-		a.mux.Handle("POST /_content/{prefix}", newCreateContentHandler(a, dynAuth))
-		a.mux.Handle("PATCH /_content/{prefix}/{id}", newUpdateContentHandler(a, dynAuth))
-		a.mux.Handle("POST /_content/{prefix}/{id}/status", newSetStatusHandler(a, dynAuth))
+		a.mux.Handle("GET /_content/{type}", newAdminListHandler(a, dynAuth))
+		a.mux.Handle("GET /_content/{type}/{id}", newAdminGetHandler(a, dynAuth))
+		a.mux.Handle("POST /_content/{type}", newCreateContentHandler(a, dynAuth))
+		a.mux.Handle("PATCH /_content/{type}/{id}", newUpdateContentHandler(a, dynAuth))
+		a.mux.Handle("POST /_content/{type}/{id}/status", newSetStatusHandler(a, dynAuth))
 	}
 	// Single-segment dispatch: GET /{slug} routes to dynamic list, standalone
 	// modules, or the redirect store (404 fallback). Always registered so that
@@ -931,14 +919,8 @@ func (a *App) Handler() http.Handler {
 		a.standaloneReg = true
 		sds := a.standaloneModules
 		rs := a.redirectStore
-		reg := a.typeRegistry
-		appRef := a
 		a.mux.Handle("GET /{slug}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			slug := r.PathValue("slug")
-			if desc := reg.LookupByPrefix(slug); desc != nil && desc.Kind == "content" {
-				serveDynamicList(w, r, appRef, desc)
-				return
-			}
 			for _, sd := range sds {
 				if sd.findAndServe(w, r, slug) {
 					return
@@ -1188,9 +1170,9 @@ func (a *App) RedirectManifestAuth(auth AuthFunc) {
 
 // ServeDynamicContent activates the dynamic content substrate. It creates the
 // necessary database tables (smeldr_content_type_schemas, smeldr_dynamic_content)
-// and migrates existing tables so the kind column is present. Handler() will
-// then register the unified 2-segment dispatcher and the /_content/ admin
-// namespace. Panics when Config.DB is nil.
+// and migrates existing tables. Handler() will then register the /_content/ admin
+// namespace and, for each content type with a URLPrefix, specific public routes.
+// Panics when Config.DB is nil.
 //
 //	smeldr.CreateSchemaTable(db)   // optional: ServeDynamicContent calls this
 //	app.ServeDynamicContent()
@@ -1204,8 +1186,14 @@ func (a *App) ServeDynamicContent() *App {
 	if err := MigrateSchemaKindColumn(a.cfg.DB); err != nil {
 		slog.Warn("smeldr: ServeDynamicContent MigrateSchemaKindColumn", "err", err)
 	}
+	if err := MigrateURLPrefixColumn(a.cfg.DB); err != nil {
+		slog.Warn("smeldr: ServeDynamicContent MigrateURLPrefixColumn", "err", err)
+	}
 	if err := CreateBlockTables(a.cfg.DB); err != nil {
 		panic("smeldr: ServeDynamicContent CreateBlockTables: " + err.Error())
+	}
+	if a.sitemapStore == nil {
+		a.sitemapStore = NewSitemapStore()
 	}
 	a.dynamicContentEnabled = true
 	return a

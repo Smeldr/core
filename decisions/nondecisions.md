@@ -50,3 +50,35 @@ No exported Go symbols added, removed, or renamed.
 No build, vet, or test changes required.
 
 ---
+
+## Non-Decision: Dynamic content slug immutability (T104)
+
+**Decision not taken:** Slug auto-update when a content item's title field is edited.
+
+### What was considered
+
+When `UpdateFields` is called with a new title value, should `DynamicTypeRepo` regenerate
+the slug to reflect the new title? Auto-updating slugs would keep URLs "tidy" for items
+that are still in draft. Published items would need to stay stable (broken links).
+
+### Why not
+
+URL stability is a first-class SEO and operational requirement. Any slug-update logic
+requires tracking "was ever published", redirect creation, and canonical URL management —
+all of which belong in operator code or a future T-series task, not the core data layer.
+The core's job is to be a reliable data store. Slug mutation without an explicit operator
+action violates the principle of least surprise.
+
+### Current behaviour
+
+Slugs are set once at `CreateDraft` time from the title-role field (or `"item"` fallback).
+`UpdateFields` never touches the slug. Operators who need to change a slug must do so
+directly via `UpdateFields({Slug: "new-slug"})` — the slug field is not special-cased
+and is writable like any other field.
+
+### Consequences
+
+No exported Go symbols added, removed, or renamed.
+No migration or test changes required.
+
+---

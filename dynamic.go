@@ -1,6 +1,7 @@
 package smeldr
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -222,7 +223,8 @@ func titleSlug(schema *ContentTypeSchema, fields map[string]any) string {
 
 // PluralSnake returns the English plural of a snake_case or lower-cased type
 // name. Consonant+y endings use the -ies rule; all others get a plain -s.
-// Used to derive the URL prefix for a runtime content type (e.g. "story" → "stories").
+// Utility function for generating URL suggestions (e.g. "story" → "stories");
+// not used internally for routing (operators set URLPrefix on ContentTypeSchema).
 func PluralSnake(name string) string {
 	if len(name) >= 2 && name[len(name)-1] == 'y' {
 		prev := name[len(name)-2]
@@ -259,8 +261,9 @@ func (r *DynamicTypeRepo) slugExists(ctx context.Context, slug string) bool {
 // DefineContentType registers a new runtime-defined content type. The schema is
 // written to smeldr_content_type_schemas (kind forced to "content") and the type
 // is registered in the App's ContentTypeRegistry with a Fetch function backed by
-// [DynamicTypeRepo.List]. Returns an error on invalid schema, DB failure, or
-// name/prefix collision; never panics.
+// [DynamicTypeRepo.List]. When schema.URLPrefix is non-empty, public GET routes
+// are registered on the app's mux for that prefix. Returns an error on invalid
+// schema, DB failure, or name/prefix collision; never panics.
 func (a *App) DefineContentType(ctx context.Context, schema *ContentTypeSchema) (*TypeDescriptor, error) {
 	if a.cfg.DB == nil {
 		return nil, fmt.Errorf("smeldr: DefineContentType requires Config.DB")
@@ -278,8 +281,8 @@ func (a *App) DefineContentType(ctx context.Context, schema *ContentTypeSchema) 
 	if a.typeRegistry.Lookup(schema.TypeName) != nil {
 		return nil, fmt.Errorf("smeldr: content type %q already registered", schema.TypeName)
 	}
-	prefix := "/" + PluralSnake(schema.TypeName)
-	if a.typeRegistry.LookupByPrefix(prefix) != nil {
+	prefix := schema.URLPrefix // may be empty; empty = no public URL
+	if prefix != "" && a.typeRegistry.LookupByPrefix(prefix) != nil {
 		return nil, fmt.Errorf("smeldr: content type prefix %q already claimed", prefix)
 	}
 	store := NewSchemaStore(a.cfg.DB)
@@ -295,6 +298,15 @@ func (a *App) DefineContentType(ctx context.Context, schema *ContentTypeSchema) 
 		Fetch:  repo.List,
 	}
 	a.typeRegistry.Register(desc)
+	if prefix != "" {
+		appRef := a
+		a.mux.Handle("GET "+prefix, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			serveDynamicList(w, r, appRef, desc)
+		}))
+		a.mux.Handle("GET "+prefix+"/{slug}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			serveDynamicItem(w, r, appRef, desc, r.PathValue("slug"))
+		}))
+	}
 	return desc, nil
 }
 
@@ -317,8 +329,9 @@ func (a *App) DynamicContentRepo(typeName string) (*DynamicTypeRepo, error) {
 
 // loadDynamicTypes queries smeldr_content_type_schemas for all kind='content'
 // rows and registers each as a TypeDescriptor backed by [DynamicTypeRepo.List].
-// Idempotent; skips types already in the registry. Called by Handler() when
-// ServeDynamicContent was called.
+// When a schema has a non-empty URLPrefix, public GET routes are registered on
+// the app's mux for that prefix. Idempotent; skips types already in the registry.
+// Called by Handler() when ServeDynamicContent was called.
 func (a *App) loadDynamicTypes(ctx context.Context) {
 	if a.dynamicTypesLoaded || a.cfg.DB == nil {
 		return
@@ -334,27 +347,38 @@ func (a *App) loadDynamicTypes(ctx context.Context) {
 		if a.typeRegistry.Lookup(schema.TypeName) != nil {
 			continue
 		}
-		prefix := "/" + PluralSnake(schema.TypeName)
-		if a.typeRegistry.LookupByPrefix(prefix) != nil {
+		prefix := schema.URLPrefix // may be empty; empty = no public URL
+		if prefix != "" && a.typeRegistry.LookupByPrefix(prefix) != nil {
 			slog.WarnContext(ctx, "smeldr: loadDynamicTypes prefix collision",
 				"type", schema.TypeName, "prefix", prefix)
 			continue
 		}
 		repo := NewDynamicTypeRepo(a.cfg.DB, schema.TypeName, schema)
-		a.typeRegistry.Register(&TypeDescriptor{
+		desc := &TypeDescriptor{
 			Name:   schema.TypeName,
 			Prefix: prefix,
 			Schema: schema,
 			Kind:   "content",
 			Fetch:  repo.List,
-		})
+		}
+		a.typeRegistry.Register(desc)
+		if prefix != "" {
+			appRef := a
+			d := desc // capture loop variable
+			a.mux.Handle("GET "+prefix, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				serveDynamicList(w, r, appRef, d)
+			}))
+			a.mux.Handle("GET "+prefix+"/{slug}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				serveDynamicItem(w, r, appRef, d, r.PathValue("slug"))
+			}))
+		}
 	}
 }
 
 // — public HTTP handlers ——————————————————————————————————————————————————————
 
 // serveDynamicList serves a JSON list of Published items for the given type.
-// Called from the unified GET /{slug} dispatcher in Handler().
+// Called from the type-specific GET /{prefix} route registered by DefineContentType.
 func serveDynamicList(w http.ResponseWriter, r *http.Request, a *App, desc *TypeDescriptor) {
 	opts := listOptsFromRequest(r)
 	opts.Status = []Status{Published}
@@ -371,7 +395,7 @@ func serveDynamicList(w http.ResponseWriter, r *http.Request, a *App, desc *Type
 }
 
 // serveDynamicItem serves a single Published item by slug as JSON.
-// Called from the unified GET /{seg1}/{seg2} dispatcher in Handler().
+// Called from the type-specific GET /{prefix}/{slug} route registered by DefineContentType.
 func serveDynamicItem(w http.ResponseWriter, r *http.Request, a *App, desc *TypeDescriptor, slug string) {
 	repo, err := a.DynamicContentRepo(desc.Name)
 	if err != nil {
@@ -434,18 +458,20 @@ func newDefineTypeHandler(a *App, auth AuthFunc) http.Handler {
 			return
 		}
 		var req struct {
-			TypeName string          `json:"type_name"`
-			Label    string          `json:"label"`
-			Fields   json.RawMessage `json:"fields"`
+			TypeName  string          `json:"type_name"`
+			Label     string          `json:"label"`
+			URLPrefix string          `json:"url_prefix"`
+			Fields    json.RawMessage `json:"fields"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			WriteError(w, r, ErrBadRequest)
 			return
 		}
 		schema := &ContentTypeSchema{
-			TypeName: req.TypeName,
-			Label:    req.Label,
-			Fields:   req.Fields,
+			TypeName:  req.TypeName,
+			Label:     req.Label,
+			URLPrefix: req.URLPrefix,
+			Fields:    req.Fields,
 		}
 		desc, err := a.DefineContentType(r.Context(), schema)
 		if err != nil {
@@ -461,7 +487,7 @@ func newDefineTypeHandler(a *App, auth AuthFunc) http.Handler {
 	})
 }
 
-// newAdminListHandler serves GET /_content/{prefix} — lists items at any status.
+// newAdminListHandler serves GET /_content/{type} — lists items at any status.
 // Supports ?status= filter. Requires Editor role.
 func newAdminListHandler(a *App, auth AuthFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -470,8 +496,8 @@ func newAdminListHandler(a *App, auth AuthFunc) http.Handler {
 			WriteError(w, r, ErrForbidden)
 			return
 		}
-		prefix := r.PathValue("prefix")
-		desc := a.typeRegistry.LookupByPrefix(prefix)
+		typeName := r.PathValue("type")
+		desc := a.typeRegistry.Lookup(typeName)
 		if desc == nil || desc.Kind != "content" {
 			WriteError(w, r, ErrNotFound)
 			return
@@ -498,7 +524,7 @@ func newAdminListHandler(a *App, auth AuthFunc) http.Handler {
 	})
 }
 
-// newAdminGetHandler serves GET /_content/{prefix}/{id} — gets a node by ID.
+// newAdminGetHandler serves GET /_content/{type}/{id} — gets a node by ID.
 // Requires Editor role.
 func newAdminGetHandler(a *App, auth AuthFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -507,8 +533,8 @@ func newAdminGetHandler(a *App, auth AuthFunc) http.Handler {
 			WriteError(w, r, ErrForbidden)
 			return
 		}
-		prefix := r.PathValue("prefix")
-		desc := a.typeRegistry.LookupByPrefix(prefix)
+		typeName := r.PathValue("type")
+		desc := a.typeRegistry.Lookup(typeName)
 		if desc == nil || desc.Kind != "content" {
 			WriteError(w, r, ErrNotFound)
 			return
@@ -529,7 +555,7 @@ func newAdminGetHandler(a *App, auth AuthFunc) http.Handler {
 	})
 }
 
-// newCreateContentHandler serves POST /_content/{prefix} — creates a draft.
+// newCreateContentHandler serves POST /_content/{type} — creates a draft.
 // Requires Editor role.
 func newCreateContentHandler(a *App, auth AuthFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -538,8 +564,8 @@ func newCreateContentHandler(a *App, auth AuthFunc) http.Handler {
 			WriteError(w, r, ErrForbidden)
 			return
 		}
-		prefix := r.PathValue("prefix")
-		desc := a.typeRegistry.LookupByPrefix(prefix)
+		typeName := r.PathValue("type")
+		desc := a.typeRegistry.Lookup(typeName)
 		if desc == nil || desc.Kind != "content" {
 			WriteError(w, r, ErrNotFound)
 			return
@@ -565,7 +591,7 @@ func newCreateContentHandler(a *App, auth AuthFunc) http.Handler {
 	})
 }
 
-// newUpdateContentHandler serves PATCH /_content/{prefix}/{id} — patches fields.
+// newUpdateContentHandler serves PATCH /_content/{type}/{id} — patches fields.
 // Requires Editor role.
 func newUpdateContentHandler(a *App, auth AuthFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -574,8 +600,8 @@ func newUpdateContentHandler(a *App, auth AuthFunc) http.Handler {
 			WriteError(w, r, ErrForbidden)
 			return
 		}
-		prefix := r.PathValue("prefix")
-		desc := a.typeRegistry.LookupByPrefix(prefix)
+		typeName := r.PathValue("type")
+		desc := a.typeRegistry.Lookup(typeName)
 		if desc == nil || desc.Kind != "content" {
 			WriteError(w, r, ErrNotFound)
 			return
@@ -609,7 +635,7 @@ func newUpdateContentHandler(a *App, auth AuthFunc) http.Handler {
 	})
 }
 
-// newSetStatusHandler serves POST /_content/{prefix}/{id}/status — sets status.
+// newSetStatusHandler serves POST /_content/{type}/{id}/status — sets status.
 // Requires Editor role.
 func newSetStatusHandler(a *App, auth AuthFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -618,8 +644,8 @@ func newSetStatusHandler(a *App, auth AuthFunc) http.Handler {
 			WriteError(w, r, ErrForbidden)
 			return
 		}
-		prefix := r.PathValue("prefix")
-		desc := a.typeRegistry.LookupByPrefix(prefix)
+		typeName := r.PathValue("type")
+		desc := a.typeRegistry.Lookup(typeName)
 		if desc == nil || desc.Kind != "content" {
 			WriteError(w, r, ErrNotFound)
 			return
@@ -654,7 +680,48 @@ func newSetStatusHandler(a *App, auth AuthFunc) http.Handler {
 			return
 		}
 		writeDynamicJSON(w, map[string]any{"id": id, "status": body.Status})
+		go a.rebuildDynamicSitemap(context.Background(), desc)
 	})
+}
+
+// rebuildDynamicSitemap updates the sitemap fragment for the given content type.
+// A no-op when the type has no URLPrefix or when the sitemapStore is nil.
+// Called in a goroutine from newSetStatusHandler so it does not block responses.
+func (a *App) rebuildDynamicSitemap(ctx context.Context, desc *TypeDescriptor) {
+	if desc.Prefix == "" || a.sitemapStore == nil {
+		return
+	}
+	repo, err := a.DynamicContentRepo(desc.Name)
+	if err != nil {
+		return
+	}
+	items, err := repo.List(ctx, ListOptions{Status: []Status{Published}})
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: rebuildDynamicSitemap", "type", desc.Name, "err", err)
+		return
+	}
+	baseURL := strings.TrimRight(a.cfg.BaseURL, "/")
+	entries := make([]SitemapEntry, 0, len(items))
+	for _, item := range items {
+		slug, _ := item["Slug"].(string)
+		if slug == "" {
+			continue
+		}
+		e := SitemapEntry{
+			Loc:      baseURL + desc.Prefix + "/" + slug,
+			Priority: 0.5,
+		}
+		if pa, ok := item["PublishedAt"].(time.Time); ok {
+			e.LastMod = pa
+		}
+		entries = append(entries, e)
+	}
+	var buf bytes.Buffer
+	if err := WriteSitemapFragment(&buf, entries); err != nil {
+		slog.WarnContext(ctx, "smeldr: rebuildDynamicSitemap write", "err", err)
+		return
+	}
+	a.sitemapStore.Set(desc.Prefix+"/sitemap.xml", buf.Bytes())
 }
 
 // nodeToMap converts a DynamicNode to a type-erased map for JSON responses.
