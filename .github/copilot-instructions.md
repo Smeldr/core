@@ -256,6 +256,60 @@ em dashes, bullets, and other non-ASCII characters (mojibake).
 
 ---
 
+## Haiku delegation — mechanical deliverables
+
+Use the Agent tool with `model: "haiku"` for mechanical, repetitive writing
+tasks that are fully determined by known values and do not require reading the
+codebase or making judgment calls. Haiku is faster; reserve Sonnet for code,
+analysis, and decisions.
+
+**Mark eligible tasks `[Haiku]` in the plan before implementation starts.**
+All `[Haiku]`-marked deliverables must be completed by a Haiku sub-agent and
+reviewed before `commit-ready` is sent. Writing them inline as Sonnet is a
+protocol violation.
+
+### Eligible for Haiku delegation
+
+- CHANGELOG entries (fixed format, known commits)
+- FEATURELIST.md rows (template row from feature data already in the plan)
+- REFERENCE.md entries (template entry from API data already read)
+- Skill file version line updates (one known value)
+- DECISIONS.md entries (fixed format, known decision text)
+- README badge or section additions with exact content specified
+
+### Not eligible (remains Sonnet)
+
+- Plan writing
+- Feature code (any .go file)
+- Architecture decisions
+- Context file updates
+- Review of Haiku output
+- Anything requiring codebase reading or judgment
+
+### How to delegate
+
+1. Read all relevant files first so you have the exact current content.
+2. Call Agent with `model: "haiku"` and a fully self-contained prompt
+   containing: (a) absolute file path, (b) the current file section or
+   full content, (c) what symbols/concepts are being documented, (d) the
+   exact format required with a representative existing row as example,
+   (e) what was actually implemented (brief — Haiku must match reality,
+   not the plan), (f) instruction to return the new content block only.
+3. Review Haiku output against the implementation before staging.
+   Fix what is wrong. Treat output as a first draft, not a finished deliverable.
+
+**Agent tool call syntax:**
+
+```
+Agent({
+  description: "Write CHANGELOG entry for vX.Y.Z",
+  model: "haiku",
+  prompt: "<full self-contained prompt>"
+})
+```
+
+---
+
 ## Standard step workflow
 
 Every step — without exception — follows this exact sequence:
@@ -600,16 +654,26 @@ date, a tagger, and a message, and appear as formal releases on GitHub.
 - Patch releases (bug fixes, no API change) get a tag
 - Amendments alone do not get a tag unless they ship with a milestone
 
-**Sub-module tagging rule (non-negotiable):**
-Any commit that modifies files under `smeldr.dev/mcp/` (or any other sub-module
-directory) in a way that affects behaviour **must** also produce a sub-module tag.
-The sub-module tag uses the prefix convention: `smeldr.dev/mcp/vX.Y.Z`.
-- Update `smeldr.dev/mcp/CHANGELOG.md` with a `[X.Y.Z]` section before tagging.
-- The root module version and the sub-module version are bumped **independently**
-  — a patch to `smeldr.dev/mcp/mcp.go` does not require a root version bump if no
-  root-package files changed behaviourally, and vice versa.
+**Standalone module tagging rule (non-negotiable):**
+smeldr.dev/mcp, smeldr.dev/cli, smeldr.dev/media, smeldr.dev/social,
+smeldr.dev/oauth, smeldr.dev/agent are **standalone repos** at separate
+local paths — they are not subdirectories of smeldr/core. Each has its own
+go.mod and its own GitHub repo.
+
+Tag format for standalone repos: `vX.Y.Z` — **never** a prefix form like
+`smeldr.dev/mcp/vX.Y.Z`. Prefix-form tags break the Go module proxy; the
+proxy permanently caches the wrong go.sum and a bad tag cannot be retracted
+without a new patch version.
+
+Tags and pushes for standalone repos must be run with `git -C <absolute-path>`,
+not from the core working directory.
+
+- Update the standalone module's own `CHANGELOG.md` with a `[X.Y.Z]` section before tagging.
+- The root module version and the standalone module version are bumped **independently**
+  — a change to smeldr.dev/mcp does not require a core version bump if no
+  core-package files changed behaviourally, and vice versa.
 - At the end of every commit, explicitly state which module tags are required:
-  root (`vX.Y.Z`) and/or sub-module (`smeldr.dev/mcp/vX.Y.Z`).
+  core (`vX.Y.Z`) and/or standalone module (`vX.Y.Z` in that module's repo).
 
 **CHANGELOG ownership — non-negotiable:**
 Each module owns its own CHANGELOG. Never add submodule release notes as subsections
@@ -637,13 +701,16 @@ The detail belongs in the submodule's own file.
    version. Running this checklist before tagging is the only way to avoid that.
 
 **Tag and push sequence:**
-```
+```powershell
+# core
 git tag -a vX.Y.Z -m "Smeldr vX.Y.Z — {one line summary}"
 git push origin main
 git push origin vX.Y.Z
-# if smeldr.dev/mcp also changed:
-git tag -a smeldr.dev/mcp/vX.Y.Z -m "smeldr.dev/mcp vX.Y.Z — {one line summary}"
-git push origin smeldr.dev/mcp/vX.Y.Z
+
+# standalone module (e.g. mcp) — run from the standalone repo
+git -C "C:\Users\peter\Documents\Code\Smeldr\mcp" tag -a vX.Y.Z -m "smeldr.dev/mcp vX.Y.Z — {one line summary}"
+git -C "C:\Users\peter\Documents\Code\Smeldr\mcp" push origin main
+git -C "C:\Users\peter\Documents\Code\Smeldr\mcp" push origin vX.Y.Z
 ```
 
 Push commits and each tag **separately** — never in the same command.
@@ -663,7 +730,7 @@ gh release create <tag> --title "<title>" --notes-file release-notes.tmp
 | Tag | Repo | Release title format |
 |-----|------|----------------------|
 | `vX.Y.Z` | core | `Smeldr vX.Y.Z — {release name}` |
-| `smeldr.dev/mcp/vX.Y.Z` | mcp | `smeldr.dev/mcp vX.Y.Z — {release name}` |
+| `vX.Y.Z` (in mcp repo) | mcp | `smeldr.dev/mcp vX.Y.Z — {release name}` |
 | CLI/media/social/oauth/agent tags | that module's repo | `smeldr.dev/<module> vX.Y.Z — {release name}` |
 
 The release name is a short (2-4 word) phrase that captures the primary change —
@@ -685,7 +752,7 @@ Remove-Item release-notes.tmp
 - Tag before `CHANGELOG.md` is updated for the version
 - Use a lightweight tag (`git tag vX.Y.Z` without `-a`) for a release
 - Push the tag in the same command as commits
-- Ship a behavioural change to `smeldr.dev/mcp/` without a `smeldr.dev/mcp/vX.Y.Z` tag
+- Ship a behavioural change to a standalone module without tagging and pushing `vX.Y.Z` in that module's repo
 
 ---
 
