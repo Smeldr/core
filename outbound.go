@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
@@ -166,7 +168,12 @@ func (p *workerPool) Stop() {
 // Enqueue persists job into smeldr_outbound_jobs so the worker pool will pick
 // it up. Callers should set job.ID (via NewID) before calling.
 func (p *workerPool) Enqueue(ctx context.Context, job OutboundJob) error {
-	_, err := p.db.ExecContext(ctx, `
+	u, err := url.Parse(job.TargetURL)
+	if err != nil || u.Scheme != "https" {
+		return fmt.Errorf("smeldr: webhook: target_url must use https scheme")
+	}
+
+	_, err = p.db.ExecContext(ctx, `
 		INSERT INTO smeldr_outbound_jobs
 			(id, endpoint_id, target_url, secret_enc, payload, event, attempts, next_retry_at, created_at, expires_at, status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
@@ -505,14 +512,60 @@ func signPayload(secret []byte, timestamp int64, body []byte) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
+// ssrfSafeDialContext returns a DialContext function that resolves the target
+// hostname before connecting and rejects any address that falls in a private or
+// reserved IP range. The check happens at dial time, not at URL-parse time, so
+// a hostname that DNS-rebinds to a private IP after validation is still blocked.
+func ssrfSafeDialContext() func(ctx context.Context, network, addr string) (net.Conn, error) {
+	// cgnat covers the carrier-grade NAT range 100.64.0.0/10.
+	_, cgnat, _ := net.ParseCIDR("100.64.0.0/10")
+	// uniqueLocal covers IPv6 unique-local fc00::/7.
+	_, uniqueLocal, _ := net.ParseCIDR("fc00::/7")
+
+	isPrivate := func(ip net.IP) bool {
+		return ip.IsLoopback() ||
+			ip.IsPrivate() ||
+			ip.IsLinkLocalUnicast() ||
+			ip.IsUnspecified() ||
+			cgnat.Contains(ip) ||
+			uniqueLocal.Contains(ip)
+	}
+
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, fmt.Errorf("smeldr: webhook: invalid address %q: %w", addr, err)
+		}
+
+		addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, fmt.Errorf("smeldr: webhook: dns lookup %q: %w", host, err)
+		}
+		if len(addrs) == 0 {
+			return nil, fmt.Errorf("smeldr: webhook: no addresses for %q", host)
+		}
+
+		for _, a := range addrs {
+			if isPrivate(a.IP) {
+				return nil, fmt.Errorf("smeldr: webhook: target resolves to a private/reserved address")
+			}
+		}
+
+		return (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort(addrs[0].IP.String(), port))
+	}
+}
+
 // outboundClient is the HTTP client used for all webhook deliveries.
-// It enforces a 30-second timeout and blocks all redirects: webhook targets
-// must not redirect, and following a redirect to a private IP would bypass
-// the SSRF validation performed at endpoint creation time.
+// It enforces a 30-second timeout, blocks all redirects to prevent
+// redirect-based SSRF bypass, and uses a custom dialer that rejects
+// connections to private and reserved IP ranges.
 var outboundClient = &http.Client{
 	Timeout: 30 * time.Second,
 	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
+	},
+	Transport: &http.Transport{
+		DialContext: ssrfSafeDialContext(),
 	},
 }
 

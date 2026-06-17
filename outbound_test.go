@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -340,6 +341,12 @@ func TestWorkerPool_RetryDead(t *testing.T) {
 
 // TestHTTPDeliver_Success verifies header sending via httptest server.
 func TestHTTPDeliver_Success(t *testing.T) {
+	// Replace the SSRF-safe client with a plain one so the test server on
+	// 127.0.0.1 is reachable. Restored after the test.
+	orig := outboundClient
+	outboundClient = &http.Client{Timeout: 5 * time.Second}
+	defer func() { outboundClient = orig }()
+
 	var gotHeaders http.Header
 	var gotBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -401,6 +408,10 @@ func TestHTTPDeliver_Success(t *testing.T) {
 
 // TestHTTPDeliver_Non2xx verifies that a 500 response returns webhookHTTPError.
 func TestHTTPDeliver_Non2xx(t *testing.T) {
+	orig := outboundClient
+	outboundClient = &http.Client{Timeout: 5 * time.Second}
+	defer func() { outboundClient = orig }()
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -457,6 +468,56 @@ func TestNewWorkerPool_zeroWorkers_defaultsTen(t *testing.T) {
 	pool := newWorkerPool(nil, store, realClock{}, 0)
 	if pool.workers != 10 {
 		t.Errorf("workers: got %d want 10 when 0 passed", pool.workers)
+	}
+}
+
+func TestSSRFProtection(t *testing.T) {
+	dial := ssrfSafeDialContext()
+	ctx := context.Background()
+
+	blocked := []string{
+		"127.0.0.1",
+		"10.0.0.1",
+		"192.168.1.1",
+		"169.254.169.254",
+		"::1",
+		"fe80::1",
+		"100.64.0.1",
+		"fc00::1",
+	}
+	for _, ip := range blocked {
+		addr := net.JoinHostPort(ip, "443")
+		_, err := dial(ctx, "tcp", addr)
+		if err == nil {
+			t.Errorf("ssrfSafeDialContext: expected error for %s, got nil", ip)
+		}
+	}
+}
+
+func TestEnqueueHTTPSValidation(t *testing.T) {
+	pool, _ := outboundTestDB(t)
+	ctx := context.Background()
+
+	job := OutboundJob{
+		ID:          NewID(),
+		EndpointID:  "ep1",
+		TargetURL:   "http://example.com/hook",
+		SecretEnc:   "s",
+		Payload:     []byte("{}"),
+		Event:       "test",
+		Attempts:    0,
+		NextRetryAt: time.Now(),
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(time.Hour),
+		Status:      "pending",
+	}
+	if err := pool.Enqueue(ctx, job); err == nil {
+		t.Error("Enqueue: expected error for http:// target, got nil")
+	}
+
+	job.TargetURL = "https://example.com/hook"
+	if err := pool.Enqueue(ctx, job); err != nil {
+		t.Errorf("Enqueue: unexpected error for https:// target: %v", err)
 	}
 }
 

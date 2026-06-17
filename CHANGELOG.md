@@ -59,6 +59,29 @@ under Milestone 10 and the v2+ Roadmap section.
   Go 1.22's `ServeMux`. Public item routes are now registered per type at
   `GET {URLPrefix}/{slug}`. (T104/A154)
 
+## [1.41.2] — 2026-06-17
+
+### Added
+
+- `ssrfSafeDialContext()` — unexported func returning an `http.DialContext` that
+  resolves hostnames via DNS before connecting and rejects connections to
+  restricted IP ranges: loopback, RFC1918 (10/8, 172.16/12, 192.168/16),
+  link-local (169.254/16, fe80::/10), unspecified, CGNAT (100.64.0.0/10),
+  IPv6 unique-local (fc00::/7). Check performed at dial time to prevent DNS
+  rebinding attacks. Wired into `outboundClient` via
+  `&http.Transport{DialContext: ssrfSafeDialContext()}`. (A155)
+
+### Changed
+
+- `workerPool.Enqueue` now rejects `target_url` values whose scheme is not
+  `https`. Returns `"smeldr: webhook: target_url must use https scheme"`. (A155)
+
+### Fixed
+
+- Comment on `outboundClient` previously claimed "SSRF validation performed at
+  endpoint creation time" — no such validation existed. Replaced with accurate
+  description of the client's redirect-blocking and SSRF-safe dialer. (A155)
+
 ---
 
 ## [1.41.0] — 2026-06-16

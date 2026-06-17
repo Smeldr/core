@@ -294,3 +294,43 @@ Coverage: 96.0% (gate ≥96.0% ✓)
 
 core v1.41.1 (patch — no new exported symbols; `ContentTypeSchema.URLPrefix` field added;
 `MigrateURLPrefixColumn` exported). Branch: fix/t104-dynamic-routing.
+
+---
+
+## A155 — security: SSRF fix in outbound webhook transport (core v1.41.2)
+
+**Finding:** code review identified two issues in `outbound.go`: (1) `outboundClient`
+blocked redirects but allowed direct connections to private IP ranges — an operator with
+Editor access could register a webhook at `http://169.254.169.254/` and probe the internal
+network; (2) a comment falsely claimed "SSRF validation performed at endpoint creation time"
+when no such validation existed.
+
+### Changes
+
+**`outbound.go`**
+- `ssrfSafeDialContext()` — new unexported func returning `DialContext`. Resolves hostname
+  via `net.DefaultResolver.LookupIPAddr` before connecting; rejects if any resolved IP is
+  loopback, RFC1918, link-local, unspecified, CGNAT (100.64.0.0/10), or IPv6 unique-local
+  (fc00::/7). Check is at dial time, not URL-parse time — defeats DNS rebinding attacks.
+  Wired into `outboundClient` via `&http.Transport{DialContext: ssrfSafeDialContext()}`.
+- `workerPool.Enqueue`: rejects `target_url` values whose scheme is not `"https"`. Returns
+  `"smeldr: webhook: target_url must use https scheme"`.
+- `outboundClient` comment corrected: removed false "SSRF validation at endpoint creation
+  time" claim; replaced with accurate description of redirect-blocking and dialer-based
+  IP-range rejection.
+
+### Tests
+
+2 new tests in `outbound_test.go`:
+- `TestSSRFProtection` — 8 blocked addresses: 127.0.0.1, 10.0.0.1, 192.168.1.1,
+  169.254.169.254, ::1, fe80::1, 100.64.0.1, fc00::1
+- `TestEnqueueHTTPSValidation` — http scheme rejected, https accepted
+
+Existing `TestHTTPDeliver_Success` / `TestHTTPDeliver_Non2xx` updated to temporarily swap
+`outboundClient` with a plain client (test servers run on 127.0.0.1).
+
+Coverage: 96.0% (gate ≥96.0% ✓)
+
+### Version
+
+core v1.41.2 (patch — no exported symbols changed). Branch: fix/ssrf-outbound-transport.
