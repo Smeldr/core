@@ -576,6 +576,31 @@ app.Content(&BlogPost{},
 
 `ListHeadFunc` is independent of `HeadFunc` — both can be set on the same module.
 
+### Page meta overrides (operator-managed)
+
+`PageMetaStore` provides a database-backed SEO override layer for URL paths. It sits between the content item's own `Head()` and the global `SiteConfig`/`OGDefaults` fallback.
+
+**Create the table once at startup:**
+```go
+smeldr.CreatePageMetaTable(db)
+store := smeldr.NewPageMetaStore(db)
+app.PageMeta(store)
+```
+
+**In list modules:** when no `ListHeadFunc` is configured, `renderListHTML` automatically looks up the request path in the store and applies any stored override.
+
+**In custom handlers:** call `App.GetPageMeta` to retrieve a `Head` value for any path:
+```go
+head := app.GetPageMeta(ctx, r.URL.Path)
+```
+Returns a zero `Head` when no override is stored for the path.
+
+**Manage overrides via MCP** (Admin role — requires `mcp.WithPageMeta(db)`):
+- `set_page_meta` — upsert title/description/og:image for a path
+- `get_page_meta` — retrieve current overrides
+- `delete_page_meta` — remove overrides (falls back to content type Head)
+- `list_page_meta` — list all stored overrides
+
 ### Rich result types
 
 ```go

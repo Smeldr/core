@@ -334,3 +334,60 @@ Coverage: 96.0% (gate ≥96.0% ✓)
 ### Version
 
 core v1.41.2 (patch — no exported symbols changed). Branch: fix/ssrf-outbound-transport.
+
+---
+
+## A157 — T72 PageMeta — per-path SEO override layer (core v1.42.0)
+
+**Date:** 2026-06-19
+**Status:** Agreed
+**Level:** 2 (new exported symbols; no breaking changes)
+
+### Decision
+
+T72 adds `PageMetaStore` — a per-path SEO override layer inserted between each content item's own `Head()` implementation and the global `SiteConfig.og_image`/`OGDefaults` fallback.
+
+An operator uses `App.PageMeta(store)` at wiring time and `App.GetPageMeta(ctx, path)` in custom handlers. The framework uses the store automatically in `renderListHTML` when no `ListHeadFunc` is configured.
+
+### Changes
+
+**`pagemeta.go`** (new file):
+- `PageMeta` struct — `Path`, `MetaTitle`, `Description`, `OGImage` string fields
+- `PageMetaStore` — backed by `smeldr.DB`
+- `NewPageMetaStore(db DB) *PageMetaStore`
+- `CreatePageMetaTable(db DB) error` — `smeldr_page_meta` DDL (idempotent)
+- `Set(ctx, path, title, description, ogImage)` — INSERT OR REPLACE upsert
+- `Get(ctx, path)` — returns zero `PageMeta` (nil error) when no row exists; caller checks `meta.Path != ""`
+- `Delete(ctx, path)` — no-op when path absent
+- `List(ctx)` — all entries ordered by path
+
+**`smeldr.go`**:
+- `App.PageMeta(store *PageMetaStore) *App` — wires the store; returns `*App` for chaining
+- `App.GetPageMeta(ctx context.Context, path string) Head` — returns a populated `Head` (Title, Description, Image.URL); zero `Head` when store nil or no entry
+- `App.Handler()` push loop: injects `pageMetaStore` into all `templateModules` via `setPageMetaStore`
+
+**`module.go`**:
+- `pageMetaStore *PageMetaStore` field on `Module[T]`
+
+**`templates.go`**:
+- `setPageMetaStore(s *PageMetaStore)` on `Module[T]`
+- `renderListHTML`: when `listHeadFunc` is nil AND `pageMetaStore` is non-nil, looks up `r.URL.Path`; sets `data.Head` if `meta.Path != ""`; `listHeadFunc` takes priority
+
+### Tests
+
+14 new tests in `pagemeta_test.go`:
+- `TestCreatePageMetaTable_Idempotent`
+- `TestPageMetaStore_Set_Get`, `TestPageMetaStore_Get_Missing`, `TestPageMetaStore_Set_Upsert`
+- `TestPageMetaStore_Delete`, `TestPageMetaStore_Delete_Missing`, `TestPageMetaStore_List`
+- `TestApp_GetPageMeta_NoStore`, `TestApp_GetPageMeta_Found`, `TestApp_GetPageMeta_Missing`
+- `TestRenderListHTML_PageMeta_UsedWhenNoListHeadFunc`, `TestRenderListHTML_PageMeta_ListHeadFuncPriority`
+- `TestApp_Handler_InjectsPageMetaStore`
+- `TestRenderListHTML_PageMeta_NoEntryForPath`
+
+Coverage: 96.0% (gate ≥96.0% ✓)
+
+### Version
+
+core v1.42.0 (minor — new exported symbols: `PageMeta`, `PageMetaStore`, `NewPageMetaStore`, `CreatePageMetaTable`, `App.PageMeta`, `App.GetPageMeta`). Branch: feat/t72-page-meta.
+
+---

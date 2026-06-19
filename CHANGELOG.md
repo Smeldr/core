@@ -23,6 +23,28 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.42.0] — 2026-06-19
+
+### Added
+
+- `PageMeta` struct with fields `Path`, `MetaTitle`, `Description`, `OGImage` — holds per-path SEO overrides. (T72/A157)
+- `PageMetaStore` — DB-backed store for per-path SEO overrides. (T72/A157)
+- `NewPageMetaStore(db DB) *PageMetaStore` — constructor. (T72/A157)
+- `CreatePageMetaTable(db DB) error` — creates the `smeldr_page_meta` table (idempotent; `IF NOT EXISTS`). (T72/A157)
+- `PageMetaStore.Set(ctx, path, title, description, ogImage string) error` — upserts overrides for a path via `INSERT OR REPLACE`. (T72/A157)
+- `PageMetaStore.Get(ctx, path string) (PageMeta, error)` — returns stored overrides; returns zero `PageMeta` and nil error when no row exists. (T72/A157)
+- `PageMetaStore.Delete(ctx, path string) error` — removes overrides for a path; no-op when path absent. (T72/A157)
+- `PageMetaStore.List(ctx) ([]PageMeta, error)` — lists all stored overrides, ordered by path. (T72/A157)
+- `App.PageMeta(store *PageMetaStore) *App` — wires the store into the app for use by template modules and `GetPageMeta`. Returns `*App` for chaining. (T72/A157)
+- `App.GetPageMeta(ctx context.Context, path string) Head` — returns a `Head` populated from the store for the given path; returns zero `Head` when the store is nil or no override exists. (T72/A157)
+
+### Changed
+
+- `renderListHTML`: when no `ListHeadFunc` is configured and a `PageMetaStore` is wired, the list page head is automatically populated from the store for the request path. `ListHeadFunc` takes priority when set. (T72/A157)
+- `App.Handler()` push loop now injects the `PageMetaStore` into all template modules via `setPageMetaStore`. (T72/A157)
+
+---
+
 ## [1.41.1] — 2026-06-16
 
 ### Added

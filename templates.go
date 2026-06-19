@@ -161,6 +161,13 @@ func (m *Module[T]) setNavTree(nt *NavTree) {
 	m.navTree = nt
 }
 
+// setPageMetaStore stores the [PageMetaStore] so that [renderListHTML] can
+// look up per-path SEO overrides when no [ListHeadFunc] is configured.
+// Called by [App.Handler] after [App.PageMeta] has been wired.
+func (m *Module[T]) setPageMetaStore(s *PageMetaStore) {
+	m.pageMetaStore = s
+}
+
 // setPartials stores the pre-loaded partial template sources so they are
 // registered into each module template set during [Module.parseTemplates].
 // Called by [App.Run] after [App.Partials] has loaded the partials directory.
@@ -316,6 +323,16 @@ func (m *Module[T]) renderListHTML(w http.ResponseWriter, r *http.Request, ctx C
 	if m.listHeadFunc != nil {
 		if fn, ok := m.listHeadFunc.(func(Context, []T) Head); ok {
 			head := fn(ctx, items)
+			head = mergeOGDefaults(head, m.ogDefaults)
+			data.Head = head
+		}
+	} else if m.pageMetaStore != nil {
+		if meta, err := m.pageMetaStore.Get(r.Context(), r.URL.Path); err == nil && meta.Path != "" {
+			head := Head{
+				Title:       meta.MetaTitle,
+				Description: meta.Description,
+				Image:       Image{URL: meta.OGImage},
+			}
 			head = mergeOGDefaults(head, m.ogDefaults)
 			data.Head = head
 		}

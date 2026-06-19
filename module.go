@@ -478,7 +478,8 @@ type Module[T any] struct {
 
 	contextFunc func(Context, any) (any, error) // nil when no ContextFunc option given
 
-	navTree *NavTree // non-nil when App.NavTree is active; set by App.Handler via setNavTree
+	navTree       *NavTree       // non-nil when App.NavTree is active; set by App.Handler via setNavTree
+	pageMetaStore *PageMetaStore // nil until App.PageMeta is called; injected by App.Handler push loop
 
 	contentTypeName string                                    // unqualified type name; set by NewModule
 	afterHook       func(Context, Signal, afterHookMeta, any) // nil until wired by App; called async on delivery signals

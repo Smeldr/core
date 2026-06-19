@@ -283,6 +283,8 @@ type App struct {
 	navCodeItems           []NavItem                           // items supplied via App.Nav() for NavModeCode
 	navTreeModules         []interface{ setNavTree(*NavTree) } // modules that receive the navTree after startup
 
+	pageMetaStore *PageMetaStore // non-nil when App.PageMeta() was called; injected into templateModules at Handler() time
+
 	auditStore      AuditStore // non-nil when App.Audit() was called
 	auditHandlerReg bool       // true once GET /_audit is registered
 
@@ -648,6 +650,46 @@ func (a *App) Webhooks(store *WebhookStore) *App {
 	return a
 }
 
+// PageMeta wires store as the per-path SEO override store for this application.
+// When wired, [renderListHTML] automatically looks up the request path in store
+// and uses the stored values for Title, Description, and og:image when no
+// [ListHeadFunc] is configured. Custom handlers may also call [App.GetPageMeta]
+// directly.
+//
+// The smeldr_page_meta table must exist before PageMeta is called.
+// See [CreatePageMetaTable] for the required DDL.
+//
+// PageMeta returns the App for chaining.
+func (a *App) PageMeta(store *PageMetaStore) *App {
+	a.pageMetaStore = store
+	return a
+}
+
+// GetPageMeta returns the operator-configured SEO overrides for the given path
+// as a [Head] value. If no entry exists for path or if no [PageMetaStore] has
+// been wired via [App.PageMeta], GetPageMeta returns a zero [Head].
+//
+// Typical usage in a custom handler:
+//
+//	func handler(w http.ResponseWriter, r *http.Request) {
+//	    head := app.GetPageMeta(r.Context(), r.URL.Path)
+//	    // head.Title, head.Description, head.Image.URL are populated when set
+//	}
+func (a *App) GetPageMeta(ctx context.Context, path string) Head {
+	if a.pageMetaStore == nil {
+		return Head{}
+	}
+	meta, err := a.pageMetaStore.Get(ctx, path)
+	if err != nil || meta.Path == "" {
+		return Head{}
+	}
+	return Head{
+		Title:       meta.MetaTitle,
+		Description: meta.Description,
+		Image:       Image{URL: meta.OGImage},
+	}
+}
+
 // Audit wires store as the audit trail for this application. It subscribes to
 // [AfterPublish], [AfterSchedule], [AfterArchive], and [AfterDelete] on the
 // signal bus and persists an [AuditRecord] for each event. Errors from
@@ -975,6 +1017,11 @@ func (a *App) Handler() http.Handler {
 				setSEODefaults(*OGDefaults, *AppSchema, *HeadAssets)
 			}); ok {
 				s.setSEODefaults(a.seo.ogDefaults, a.seo.appSchema, a.seo.headAssets)
+			}
+			if a.pageMetaStore != nil {
+				if s, ok := tp.(interface{ setPageMetaStore(*PageMetaStore) }); ok {
+					s.setPageMetaStore(a.pageMetaStore)
+				}
 			}
 		}
 	}

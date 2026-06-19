@@ -410,6 +410,23 @@ These tools are available when the site has `App.Redirects(db)` called at startu
 - `is_prefix: true` makes `from` a path prefix — the unmatched suffix is appended to `to` at request time
 - Changes are in-memory-immediate: no server restart required
 
+### Page meta management tools (Admin role required)
+
+These tools are available when the MCP server is started with `mcp.WithPageMeta(db)`:
+
+| Tool | Description |
+|------|-------------|
+| `set_page_meta` | Upserts SEO overrides (title, description, og:image) for a URL path. `path` required (must start with `/`). Changes apply to the next request. |
+| `get_page_meta` | Returns stored SEO overrides for a URL path. Returns empty fields when no override is stored. |
+| `delete_page_meta` | Removes stored SEO overrides for a URL path. The path falls back to the content type's own `Head()` and global defaults. |
+| `list_page_meta` | Lists all stored SEO overrides, ordered by path. |
+
+**Page meta rules:**
+- `path` must start with `/`
+- `meta_title`, `meta_description`, and `og_image` are all optional; omit to clear that field
+- `ListHeadFunc` takes priority over stored overrides on list pages
+- Override is a no-op if `mcp.WithPageMeta(db)` was not called
+
 ### Connection setup
 
 See the smeldr.dev/mcp README for Claude Desktop, Cursor, and SSE configuration.

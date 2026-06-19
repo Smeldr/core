@@ -2,14 +2,14 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.41.1 (A154) + smeldr.dev/mcp v1.21.1 + smeldr.dev/cli v0.14.1 + smeldr.dev/oauth v0.2.0 + smeldr.dev/social v0.8.1 + smeldr.dev/agent v0.5.1 + smeldr.dev/media v1.4.1 + smeldr.dev/core/pgx v0.1.0.
+Last updated: v1.42.0 (A157) + smeldr.dev/mcp v1.22.0 + smeldr.dev/cli v0.15.0 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.0 + smeldr.dev/agent v0.5.1 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.41.0 | Stable |
-| `smeldr.dev/mcp` | v1.16.0 | Stable |
+| `smeldr.dev/core` | v1.42.0 | Stable |
+| `smeldr.dev/mcp` | v1.22.0 | Stable |
 | `smeldr.dev/oauth` | v0.1.5 | Beta |
 | `smeldr.dev/core/pgx` | v0.1.0 | Beta |
 | `smeldr.dev/media` | v1.3.0 | Beta |
@@ -36,6 +36,7 @@ Labels are reviewed at every module minor or major version bump.
 - RSS feed — `GET /{prefix}/feed.xml` plus aggregate `GET /feed.xml`
 - Sitemap entries — `GET /{prefix}/sitemap.xml` merged into `GET /sitemap.xml`; regenerated on every publish, update, and delete — never stale, no cron
 - SEO meta tags — `<title>`, `<meta description>`, canonical URL in every `<head>`
+- Per-path SEO overrides — `PageMetaStore` layer between item `Head()` and global defaults; managed via 4 Admin MCP tools; auto-applied to list pages when no `ListHeadFunc` is configured
 - Open Graph tags — `og:title`, `og:image`, `og:type`, `article:published_time` and more
 - Twitter Cards — `twitter:card`, `twitter:title`, `twitter:image`
 - AI index formats — `/llms.txt` compact index, `/llms-full.txt` Markdown corpus, per-item `/aidoc` token-efficient endpoint

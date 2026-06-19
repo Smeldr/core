@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or pilot agent.
 
-Current versions: smeldr.dev/core v1.41.0 · smeldr.dev/mcp v1.20.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.0 · smeldr.dev/social v0.9.0 · smeldr.dev/agent v0.5.1 · smeldr.dev/core/pgx v0.1.2
+Current versions: smeldr.dev/core v1.42.0 · smeldr.dev/mcp v1.22.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.0 · smeldr.dev/social v0.9.0 · smeldr.dev/agent v0.5.1 · smeldr.dev/core/pgx v0.1.2
 
 ---
 
@@ -259,6 +259,7 @@ Tools are named from the type in lower_snake_case.
 | `create_webhook` / `list_webhooks` / `delete_webhook` | Admin | Webhook endpoints |
 | `list_webhook_deliveries` / `retry_webhook` | Admin | Delivery introspection and retry |
 | `create_redirect` / `list_redirects` / `delete_redirect` | Editor+ | Redirect rule management (requires `app.Redirects(db)`) |
+| `set_page_meta` / `get_page_meta` / `delete_page_meta` / `list_page_meta` | Admin | Per-path SEO overrides (requires `mcp.WithPageMeta(db)`) |
 
 Block system (T32, enabled with `mcp.WithBlocks()`; blocks addressed by ID, not slug):
 
@@ -383,7 +384,7 @@ mcpSrv := mcp.New(app,
 ```
 weekday: 0=Sunday, 1=Monday … 6=Saturday. Empty timezone silently defaults to UTC.
 
-**Platform config (v0.5.0+):** call `create_platform_config` (Admin) with `platform`, `client_id`, `client_secret`, `redirect_url`, and (for Mastodon) `instance_url`. Optional: `scope` (space-separated OAuth 2.0 scopes; Mastodon default: `"write:statuses write:media"`; only applies to Mastodon). Credentials are stored AES-256-GCM encrypted in the DB. X requires a registered app in the Twitter developer portal with OAuth 2.0 enabled.
+**Platform config (v0.5.0+):** call `create_platform_config` (Admin) with `platform`, `client_id`, `client_secret`, `redirect_url`, and (for Mastodon) `instance_url`. Optional: `scope` (space-separated OAuth 2.0 scopes; X default: `"tweet.read users.read tweet.write offline.access media.write"`; Mastodon default: `"write:statuses write:media"`). Credentials are stored AES-256-GCM encrypted in the DB. X requires a registered app in the Twitter developer portal with OAuth 2.0 enabled.
 
 **X OAuth 2.0 + PKCE:** call `create_social_credential` with `platform=x` → returns a `redirect_url` containing the PKCE challenge. The code verifier is stored server-side — agents never see it. Operator completes the flow in a browser; callback saves the token automatically.
 
@@ -597,3 +598,26 @@ The canonical source for this file is:
 When updating: edit here first, then sync to `core/skills/smeldr.md` via the
 doc-gate Copy-Item step before any M-number commit.
 Pilots read this file directly — no copies to distribute.
+
+---
+
+## Haiku delegation — plan marking
+
+Every corepilot plan for a task that contains mechanical deliverables should include
+a Haiku-scan step. For each deliverable in the plan, mark it `[Haiku]` if it is
+template-eligible, or leave it unmarked (implicitly Sonnet).
+
+Eligible categories are defined in `context/corepilot.md` under
+"Haiku delegation — mekaniske leverancer".
+
+This makes delegation decisions explicit and reviewable by the architect.
+
+**Example plan entry:**
+
+| Deliverable | Owner |
+|-------------|-------|
+| coverage_test.go — 41 test stubs from plan table | [Haiku] |
+| codecov.yml — new file with exact content specified | [Haiku] |
+| decisions/recent.md — A150 entry (fixed format) | [Haiku] |
+| context/corepilot.md — coverage gate addition | Sonnet |
+| Plan writing | Sonnet |
