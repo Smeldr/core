@@ -264,6 +264,7 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 |---|-------|--------|------|
 | A96 | Non-Decision: sitemap ping (T39) — Forge will not provide opt-in sitemap ping. Google deprecated their endpoint in 2023; IndexNow requires API key + verification file (app-level setup). Developer pattern: `App.OnSignal(AfterPublish, ...)`. REFERENCE.md: new "Search engine indexing" section. | Agreed | 2026-05-16 |
 | ND-T104 | Non-Decision: dynamic content slug immutability (T104) — `UpdateFields` will not regenerate the slug when the title field changes. URL stability is a first-class SEO requirement; slug mutation without operator intent violates least-surprise. Operators can write slug directly via `UpdateFields({Slug: "new-slug"})`. | Agreed | 2026-06-16 |
+| A156 | Non-Decision: HTML rendering for dynamic types + cloud block rendering (A156a, A156b) — Core will not provide HTML rendering for dynamic content types or supply block templates for cloud context. Rendering is a presentation concern (cloud layer); core is data/lifecycle. JSON API (`GET /{prefix}/{slug}`) serves headless by default. Standalone sites use own templates + JSON. Cloud operators use presentation layer templates. | Agreed | 2026-06-17 |
 
 ---
 

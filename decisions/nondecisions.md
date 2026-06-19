@@ -82,3 +82,69 @@ No exported Go symbols added, removed, or renamed.
 No migration or test changes required.
 
 ---
+
+## Non-Decision A156a — HTML rendering for dynamic content types
+
+**Date:** 2026-06-17
+**Status:** Agreed
+**Level:** 1 (docs-only — no code change)
+
+### What was considered
+
+Building HTML surface into core for runtime-defined dynamic content types — generic
+schema-aware renderer, DB-stored templates (text/template), universal list/show template.
+
+### Decision
+
+Smeldr will not provide HTML rendering for dynamic content types. Dynamic types serve
+JSON (headless) by default.
+
+### Rationale
+
+Core is a data and lifecycle layer. Rendering is a presentation concern. Cloud presentation
+layer handles templates, styling, and operator-uploaded views. Embedding rendering in core
+couples the data layer to presentation decisions that vary per cloud operator.
+
+### Developer pattern
+
+Use the JSON API (`GET /{url_prefix}/{slug}`). For HTML in a standalone site, implement
+templates in your own application.
+
+### Consequences
+
+No exported Go symbols added, removed, or renamed.
+No build, vet, or test changes required.
+
+---
+
+## Non-Decision A156b — Block rendering as cloud concern
+
+**Date:** 2026-06-17
+**Status:** Agreed
+**Level:** 1 (docs-only — no code change)
+
+### What was considered
+
+Shipping block rendering templates (hero, gallery, content grid, etc.) as part of core
+for cloud operators.
+
+### Decision
+
+Core retains block data model and `app.ServeBlocks()` for developer sites. Templates that
+render blocks to HTML in a cloud context belong to the cloud presentation layer.
+
+### Rationale
+
+Same core/cloud separation. Which template renders a hero block is a product decision,
+not a framework decision.
+
+### Developer pattern
+
+For standalone sites, use `app.ServeBlocks()` (existing).
+
+### Consequences
+
+No exported Go symbols added, removed, or renamed.
+No build, vet, or test changes required.
+
+---

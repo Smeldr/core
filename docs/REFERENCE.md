@@ -3252,3 +3252,9 @@ bootstrapping a database without going through `App`.
 `TypeName`, `URLPrefix` format (must start with `"/"`), field types, and roles.
 `smeldr.PluralSnake(name)` returns the default plural URL prefix for a type name
 (e.g. `"recipe"` → `"recipes"`, `"story"` → `"stories"`).
+
+**HTML rendering**
+
+Dynamic content types serve JSON by default. For HTML rendering in a standalone
+site, implement templates in your application using the JSON API as the data
+source. Cloud rendering is outside core scope (A156).
