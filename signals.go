@@ -59,6 +59,20 @@ const (
 	// AfterArchive, and AfterDelete. It is debounced to coalesce burst changes
 	// into a single sitemap and feed rebuild.
 	SitemapRegenerate Signal = "sitemap_regenerate"
+
+	// AfterRelationCascade fires when a content item's relation premise changes —
+	// i.e., a target item it references has been published, archived, deleted, or
+	// unpublished. Fired once per source-side dependent, debounced 500 ms per
+	// source item to coalesce rapid multi-edge events.
+	//
+	// Field semantics differ from other signals (documented semantic reuse):
+	//   - Type / Slug / NodeID describe the source-side dependent (the item that
+	//     holds the relation), not the item that changed status.
+	//   - PreviousState holds the trigger signal name (e.g. "after_archive"),
+	//     not a lifecycle state string.
+	//   - ActorID holds the NodeID of the changed target item (for traceability),
+	//     not a human actor ID.
+	AfterRelationCascade Signal = "relation.cascade"
 )
 
 // signalHandler is the internal, type-erased handler signature used by
@@ -208,6 +222,11 @@ type SignalEvent struct {
 	// "guest" for unauthenticated requests.
 	ActorRole string
 
+	// NodeID is the stable UUID of the content item. Populated for all signals
+	// since A161; previously empty. For [AfterRelationCascade], this is the
+	// source-side dependent's UUID (the item that holds the relation).
+	NodeID string
+
 	// ActorID is the stable ID of the authenticated user. Empty for
 	// unauthenticated requests.
 	ActorID string
@@ -252,6 +271,7 @@ func buildSignalEvent(ctx Context, _ Signal, meta afterHookMeta, item any, baseU
 	return SignalEvent{
 		Type:          meta.TypeName,
 		Slug:          slug,
+		NodeID:        n.ID,
 		Title:         title,
 		URL:           url,
 		Timestamp:     time.Now(),

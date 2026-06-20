@@ -17,6 +17,26 @@ Archived 2026-06-15: A139–A150 → phase8-archive.md
 
 ---
 
+## A161 — T06 step 4: Layer 2 reactive cascade signal (v1.42.4, 2026-06-20)
+
+**Context:** T06 Layer 2 requires that content items depending on a target are notified when that target changes status — without the dependent being re-saved.
+
+**Decision:** Add `AfterRelationCascade Signal = "relation.cascade"`. `App.Relations()` subscribes `buildCascadeHandler` to `AfterPublish`, `AfterArchive`, `AfterDelete`, and `AfterUnpublish`. The handler calls `GetByTarget` to find source-side dependents, applies visited-set and idempotency guards, and fires `AfterRelationCascade` once per unique source item via a per-source debouncer (500 ms).
+
+**SignalEvent.NodeID:** Added `NodeID string` field to `SignalEvent`, populated from `Node.ID` in `buildSignalEvent`. Required for `GetByTarget(ctx, targetType, targetID)` to resolve the target by UUID rather than slug. Non-breaking addition — previously absent, now populated for all signals.
+
+**Semantic field reuse in AfterRelationCascade:** `PreviousState` carries the trigger signal name (e.g. `"after_archive"`); `ActorID` carries the changed target item's NodeID. Documented semantic mismatch — acceptable to avoid adding new fields to SignalEvent.
+
+**Debounce pattern:** One `*debouncer` per `"sourceType:sourceID"` key in a `sync.Map`. Debouncer fires after 500 ms of silence, then deletes itself from the Map to bound memory. Mirrors the sitemap debouncer pattern in module.go.
+
+**emitSignal:** Unexported `App.emitSignal(ctx, sig, ev)` wraps `dispatchBus` for use inside signal handler goroutines. The cascade debouncer fires in a timer goroutine — `emitSignal` is safe to call there because it does not re-enter the bus goroutine.
+
+**Guards:** (1) visited-set per run deduplicates by source item; (2) idempotency-set per run deduplicates by edge ID; (3) depth = 1 enforced by subscribing only to status-change signals, not to AfterRelationCascade itself.
+
+**Scope deferred:** Layer 3 (structural sweep), MCP tools, inferred edges, multi-hop cascade.
+
+---
+
 ## A160 — T06 step 3: Layer 1 save-path relation recompute (v1.42.3, 2026-06-20)
 
 **Context:** T06 Layer 1 requires that asserted relations are kept in sync with content field values on every save, without the operator calling `Assert` explicitly.
