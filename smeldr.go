@@ -285,6 +285,8 @@ type App struct {
 
 	pageMetaStore *PageMetaStore // non-nil when App.PageMeta() was called; injected into templateModules at Handler() time
 
+	relationStore *RelationStore // non-nil when App.Relations() was called
+
 	auditStore      AuditStore // non-nil when App.Audit() was called
 	auditHandlerReg bool       // true once GET /_audit is registered
 
@@ -688,6 +690,20 @@ func (a *App) GetPageMeta(ctx context.Context, path string) Head {
 		Description: meta.Description,
 		Image:       Image{URL: meta.OGImage},
 	}
+}
+
+// Relations wires store as the relation graph store for this application.
+// Layer 1 (save-path edge recompute) and Layer 2 (signal subscriptions) attach to
+// this store in subsequent tasks. Calling Relations multiple times replaces the store
+// (last write wins, consistent with [App.Audit] and [App.PageMeta]).
+func (a *App) Relations(store *RelationStore) *App {
+	a.relationStore = store
+	return a
+}
+
+// RelationStore returns the [RelationStore] wired via [App.Relations], or nil if none.
+func (a *App) RelationStore() *RelationStore {
+	return a.relationStore
 }
 
 // Audit wires store as the audit trail for this application. It subscribes to

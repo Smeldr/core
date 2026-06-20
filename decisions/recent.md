@@ -17,6 +17,22 @@ Archived 2026-06-15: A139–A150 → phase8-archive.md
 
 ---
 
+## A159 — T06 step 2: relation schema + stores (v1.42.2, 2026-06-20)
+
+**Context:** T06 content-relations needs a persistent, queryable edge store and a runtime registry of relation kinds before any layer can assert, derive, or validate edges.
+
+**Decision:** Add `smeldr_relation_kinds` (kind registry) and `smeldr_relations` (edge store) as separate tables. `RelationEdge` does not embed `Node` — relations are graph edges, not content items.
+
+**Registry:** `RelationKindRegistry` is an in-memory map hydrated from the DB at `NewRelationStore` time. `UpsertKind` updates the DB and the registry atomically (Lock). `GetKind` and `ListKinds` are registry-only (RLock, no DB round-trip).
+
+**CAS on upsert:** `UpsertKind` uses `INSERT ... ON CONFLICT (type_name) DO UPDATE SET` (house style — not `INSERT OR REPLACE`, which is SQLite-only). `id` and `created_at` are preserved on conflict.
+
+**Assert-only for now:** `Assert` rejects `edge_class != "asserted"` — inferred edges (`ProposeRelation`) are deferred to Layer 2.
+
+**Scope deferred:** Layer 1 (save-path edge recompute from `SchemaField.Relation`), Layer 2 (AfterPublish signal subscriptions, cascade guards), Layer 3 (structural sweep), MCP tools (`assert_relation`, `get_relations`, `preview_impact`), `BulkRecompute`.
+
+---
+
 ## A158 — Node.Rev optimistic-concurrency token (v1.42.1, 2026-06-20)
 
 **Context:** T06 (content relations) requires a collision-free `(edge, node-state-version)` key and a way to resolve the concurrent-append `SortOrder` race in `edges.go`. A per-node revision counter solves both.

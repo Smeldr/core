@@ -23,6 +23,28 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.42.2] — 2026-06-20
+
+### Added
+- `RelationKindDef` — Go struct for named relation-kind registrations (`type_name`, `mode`, `directional`, `weighted`, `type_pairs`, `attributes`).
+- `RelationEdge` — Go struct for typed adjacency edges; does not embed `Node` (graph edges are not content items).
+- `RelationKindRegistry` — in-memory thread-safe registry, hydrated from `smeldr_relation_kinds` at startup.
+- `RelationStore` — wraps `DB`; holds the registry; created with `NewRelationStore(db DB)`.
+- `CreateRelationTables(db DB) error` — idempotent DDL creator for `smeldr_relation_kinds`, `smeldr_relations`, and three indexes (`idx_relations_source`, `idx_relations_target`, `idx_relations_governance_temporal`).
+- `NewRelationStore(db DB) (*RelationStore, error)` — creates the store and hydrates the registry.
+- `ValidateRelationKindDef(def RelationKindDef) error` — validates `type_name` non-empty, `mode` ∈ {derived, asserted, inferable}, `type_pairs` valid JSON.
+- `(*RelationStore).UpsertKind(ctx, def) error` — upsert by `type_name`; updates registry atomically on success.
+- `(*RelationStore).GetKind(typeName string) (RelationKindDef, bool)` — registry read, no DB round-trip.
+- `(*RelationStore).ListKinds() []RelationKindDef` — sorted by `type_name`.
+- `(*RelationStore).Assert(ctx, edge RelationEdge) error` — inserts or updates an asserted edge; rejects unknown kinds and non-asserted `edge_class`.
+- `(*RelationStore).GetBySource(ctx, sourceType, sourceID, kind string) ([]RelationEdge, error)` — `kind=""` returns all kinds.
+- `(*RelationStore).GetByTarget(ctx, targetType, targetID, kind string) ([]RelationEdge, error)`.
+- `(*RelationStore).Delete(ctx, id string) error` — hard delete by relation ID.
+- `App.Relations(store *RelationStore) *App` — wires the store into the application.
+- `App.RelationStore() *RelationStore` — returns the wired store (nil if not wired).
+
+---
+
 ## [1.42.1] — 2026-06-20
 
 ### Breaking / Migration required
