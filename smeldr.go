@@ -2,6 +2,7 @@ package smeldr
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -285,7 +286,10 @@ type App struct {
 
 	pageMetaStore *PageMetaStore // non-nil when App.PageMeta() was called; injected into templateModules at Handler() time
 
-	relationStore *RelationStore // non-nil when App.Relations() was called
+	relationStore  *RelationStore // non-nil when App.Relations() was called
+	schemaStore    *SchemaStore   // non-nil when App.Relations() was called; used by syncSaveHook
+	syncSaveHook   SyncSaveHook   // non-nil when App.Relations() was called; fired synchronously after save
+	syncHookModules []interface{ setSyncSaveHook(func(context.Context, string, string, any) error) }
 
 	auditStore      AuditStore // non-nil when App.Audit() was called
 	auditHandlerReg bool       // true once GET /_audit is registered
@@ -519,6 +523,11 @@ func (a *App) Content(v any, opts ...Option) {
 		}); ok {
 			a.hookableModules = append(a.hookableModules, hk)
 		}
+		if sh, ok := r.(interface {
+			setSyncSaveHook(func(context.Context, string, string, any) error)
+		}); ok {
+			a.syncHookModules = append(a.syncHookModules, sh)
+		}
 		return
 	}
 	// NewModule is called with an any-typed value — type assertion to any loses
@@ -696,9 +705,81 @@ func (a *App) GetPageMeta(ctx context.Context, path string) Head {
 // Layer 1 (save-path edge recompute) and Layer 2 (signal subscriptions) attach to
 // this store in subsequent tasks. Calling Relations multiple times replaces the store
 // (last write wins, consistent with [App.Audit] and [App.PageMeta]).
+// SyncSaveHook is a synchronous callback fired by Module save handlers
+// immediately after a successful repo.Save. Returning a non-nil error aborts
+// the request with that error. Wire one via [App.Relations].
+type SyncSaveHook func(ctx context.Context, typeName, id string, item any) error
+
 func (a *App) Relations(store *RelationStore) *App {
 	a.relationStore = store
+	a.schemaStore = NewSchemaStore(a.cfg.DB)
+	ss := a.schemaStore
+	a.syncSaveHook = func(ctx context.Context, typeName, id string, item any) error {
+		schema, err := ss.FindByTypeName(ctx, typeName)
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		fields, err := schema.ParseFields()
+		if err != nil {
+			return nil
+		}
+		incoming := extractRelationEdges(typeName, id, fields, item, store)
+		return store.RecomputeAsserted(ctx, typeName, id, incoming)
+	}
 	return a
+}
+
+// extractRelationEdges reads the DynamicNode item's Fields JSON, finds all
+// SchemaFields with Relation="edge", and builds the corresponding RelationEdge
+// slice. The relation_kind equals the field name; target_type is derived from
+// the first entry in the kind's TypePairs. Fields whose kind is not registered
+// or has no TypePairs are silently skipped.
+func extractRelationEdges(sourceType, sourceID string, fields []SchemaField, item any, store *RelationStore) []RelationEdge {
+	dn, ok := item.(*DynamicNode)
+	if !ok || len(dn.Fields) == 0 {
+		return nil
+	}
+	var fieldMap map[string]any
+	if err := json.Unmarshal(dn.Fields, &fieldMap); err != nil {
+		return nil
+	}
+	var out []RelationEdge
+	for _, f := range fields {
+		if f.Relation != "edge" {
+			continue
+		}
+		val, ok := fieldMap[f.Name]
+		if !ok {
+			continue
+		}
+		targetID, ok := val.(string)
+		if !ok || targetID == "" {
+			continue
+		}
+		kind, exists := store.GetKind(f.Name)
+		if !exists {
+			continue
+		}
+		var pairs []struct {
+			SourceType string `json:"source_type"`
+			TargetType string `json:"target_type"`
+		}
+		if err := json.Unmarshal(kind.TypePairs, &pairs); err != nil || len(pairs) == 0 {
+			continue
+		}
+		out = append(out, RelationEdge{
+			SourceType:   sourceType,
+			SourceID:     sourceID,
+			TargetType:   pairs[0].TargetType,
+			TargetID:     targetID,
+			RelationKind: f.Name,
+			EdgeClass:    "asserted",
+		})
+	}
+	return out
 }
 
 // RelationStore returns the [RelationStore] wired via [App.Relations], or nil if none.
@@ -1090,6 +1171,11 @@ func (a *App) Handler() http.Handler {
 	if a.navTree != nil {
 		for _, m := range a.navTreeModules {
 			m.setNavTree(a.navTree)
+		}
+	}
+	if a.syncSaveHook != nil {
+		for _, m := range a.syncHookModules {
+			m.setSyncSaveHook(a.syncSaveHook)
 		}
 	}
 	// A34: trigger a one-shot startup rebuild of all derived content (sitemap,

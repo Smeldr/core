@@ -483,6 +483,7 @@ type Module[T any] struct {
 
 	contentTypeName string                                    // unqualified type name; set by NewModule
 	afterHook       func(Context, Signal, afterHookMeta, any) // nil until wired by App; called async on delivery signals
+	syncSaveHook    func(context.Context, string, string, any) error // nil until wired by App.Relations; called sync after save
 	secret          []byte                                    // set by App.Content via setSecret; used for preview token validation
 
 	stopCh chan struct{} // closed by Stop() to terminate the cache sweep goroutine
@@ -694,6 +695,13 @@ func (m *Module[T]) Stop() {
 // delivery signal. App.Content uses this to wire the signal bus into every module.
 func (m *Module[T]) setAfterHook(fn func(Context, Signal, afterHookMeta, any)) {
 	m.afterHook = fn
+}
+
+// setSyncSaveHook registers the function called synchronously after each
+// successful repo.Save in the HTTP/MCP handlers. App.Handler wires this when
+// App.Relations has been called.
+func (m *Module[T]) setSyncSaveHook(fn func(context.Context, string, string, any) error) {
+	m.syncSaveHook = fn
 }
 
 // setSecret injects the application signing secret into the module so that
@@ -1635,6 +1643,12 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	if m.syncSaveHook != nil {
+		if err := m.syncSaveHook(ctx, m.contentTypeName, nodeIDOf(item), item); err != nil {
+			WriteError(w, r, err)
+			return
+		}
+	}
 
 	// AfterCreate hooks (asynchronous).
 	m.notifyAfter(ctx, AfterCreate, "", item)
@@ -1710,6 +1724,12 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	if prevStatus != Published && newStatus == Published {
 		setNodeTime(item, "PublishedAt", time.Now().UTC())
 		if err := m.repo.Save(ctx, item); err != nil {
+			WriteError(w, r, err)
+			return
+		}
+	}
+	if m.syncSaveHook != nil {
+		if err := m.syncSaveHook(ctx, m.contentTypeName, nodeIDOf(item), item); err != nil {
 			WriteError(w, r, err)
 			return
 		}
@@ -2054,6 +2074,11 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	if err := m.repo.Save(ctx, item); err != nil {
 		return nil, err
 	}
+	if m.syncSaveHook != nil {
+		if err := m.syncSaveHook(ctx, m.contentTypeName, nodeIDOf(item), item); err != nil {
+			return nil, err
+		}
+	}
 	m.notifyAfter(ctx, AfterCreate, "", item)
 	m.invalidateCache()
 	return item, nil
@@ -2096,6 +2121,11 @@ func (m *Module[T]) MCPUpdate(ctx Context, slug string, fields map[string]any) (
 	}
 	if err := m.repo.Save(ctx, item); err != nil {
 		return nil, err
+	}
+	if m.syncSaveHook != nil {
+		if err := m.syncSaveHook(ctx, m.contentTypeName, nodeIDOf(item), item); err != nil {
+			return nil, err
+		}
 	}
 	m.notifyAfter(ctx, AfterUpdate, string(nodeStatusOf(existing)), item)
 	m.invalidateCache()
