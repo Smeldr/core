@@ -17,6 +17,18 @@ Archived 2026-06-15: A139–A150 → phase8-archive.md
 
 ---
 
+## A163 — T06 step 6: MCP relation kind tools (v1.42.6, 2026-06-20)
+
+**Context:** T06 agents need to manage the relation kind registry through MCP — not just query and assert edges, but also register and inspect kinds dynamically.
+
+**Decision:** Add two thin wrapper methods to `RelationStore`: `MCPUpsertRelationKind` and `MCPListRelationKinds`. Both delegate to existing `UpsertKind`/`ListKinds`. `MCPUpsertRelationKind` returns the stored `RelationKindDef` (with generated ID and timestamps) so callers don't need a follow-up `GetKind`. `MCPListRelationKinds` always returns a non-nil slice to simplify forge-mcp serialisation.
+
+**Completeness:** These two tools complete the MCP surface for T06. Agents can now register kinds and assert/query/preview relations entirely through MCP without touching application code.
+
+**Deferred:** `delete_relation_kind` (requires cascade handling on existing edges), `get_relation_kind` (agents can use list + client-side filter).
+
+---
+
 ## A162 — T06 step 5: MCP relation tools (v1.42.5, 2026-06-20)
 
 **Context:** T06 relation graph needs MCP-accessible tools so agents and operators can assert, query, and preview edges without direct DB access.

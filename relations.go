@@ -397,6 +397,23 @@ func (s *RelationStore) MCPPreviewImpact(ctx context.Context, typeName, id strin
 	return s.GetByTarget(ctx, typeName, id, "")
 }
 
+// MCPUpsertRelationKind registers or updates a relation kind via MCP.
+// Delegates to UpsertKind (which validates and persists), then returns
+// the stored RelationKindDef from the in-memory registry.
+func (s *RelationStore) MCPUpsertRelationKind(ctx context.Context, def RelationKindDef) (RelationKindDef, error) {
+	if err := s.UpsertKind(ctx, def); err != nil {
+		return RelationKindDef{}, err
+	}
+	stored, _ := s.GetKind(def.TypeName)
+	return stored, nil
+}
+
+// MCPListRelationKinds returns all registered relation kinds sorted by type_name.
+// Thin wrapper over ListKinds so forge-mcp has a uniform MCPXxx naming convention.
+func (s *RelationStore) MCPListRelationKinds() []RelationKindDef {
+	return s.ListKinds()
+}
+
 // GetBySource returns all edges where source_type and source_id match.
 // If kind is non-empty, only edges with that relation_kind are returned.
 func (s *RelationStore) GetBySource(ctx context.Context, sourceType, sourceID, kind string) ([]RelationEdge, error) {
