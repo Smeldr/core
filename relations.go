@@ -430,3 +430,170 @@ func intOf(b bool) int {
 	}
 	return 0
 }
+
+// RelationSource carries the source identity and current set of incoming
+// asserted edges for one content item. Used by [RelationStore.BulkRecompute].
+type RelationSource struct {
+	SourceType string
+	SourceID   string
+	Incoming   []RelationEdge
+}
+
+// RecomputeAsserted performs a differential update of the asserted edges for
+// one content item. It selects the current asserted rows, diffs against
+// incoming, and applies only the delta (delete stale, insert new).
+//
+// Key: (target_type, target_id, relation_kind). Returns nil immediately when
+// the diff is empty — the common case costs exactly one SELECT and zero writes.
+// Runs inside a transaction when the DB supports BeginTx; falls back to
+// sequential writes otherwise.
+func (s *RelationStore) RecomputeAsserted(ctx context.Context, sourceType, sourceID string, incoming []RelationEdge) error {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT "+relationColumns+
+			" FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 AND edge_class='asserted'",
+		sourceType, sourceID)
+	if err != nil {
+		return err
+	}
+	currentEdges, err := collectEdges(rows)
+	rows.Close()
+	if err != nil {
+		return err
+	}
+
+	toDelete, toInsert := computeRelationDiff(currentEdges, incoming)
+	if len(toDelete) == 0 && len(toInsert) == 0 {
+		return nil
+	}
+	return s.applyRelationDiff(ctx, s.db, toDelete, toInsert, sourceType, sourceID)
+}
+
+// BulkRecompute applies [RelationStore.RecomputeAsserted] to a batch of items.
+// All SELECTs are performed first, then all writes are applied — efficient for
+// post-import scenarios where per-save overhead would accumulate.
+// Call it explicitly after bulk import; it is not called from the save path.
+func (s *RelationStore) BulkRecompute(ctx context.Context, items []RelationSource) error {
+	type diff struct {
+		sourceType string
+		sourceID   string
+		toDelete   []string
+		toInsert   []RelationEdge
+	}
+
+	diffs := make([]diff, 0, len(items))
+	for _, src := range items {
+		rows, err := s.db.QueryContext(ctx,
+			"SELECT "+relationColumns+
+				" FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 AND edge_class='asserted'",
+			src.SourceType, src.SourceID)
+		if err != nil {
+			return err
+		}
+		current, err := collectEdges(rows)
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		td, ti := computeRelationDiff(current, src.Incoming)
+		if len(td) > 0 || len(ti) > 0 {
+			diffs = append(diffs, diff{src.SourceType, src.SourceID, td, ti})
+		}
+	}
+
+	for _, d := range diffs {
+		if err := s.applyRelationDiff(ctx, s.db, d.toDelete, d.toInsert, d.sourceType, d.sourceID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// computeRelationDiff returns the IDs to delete and edges to insert given the
+// current set and the desired incoming set. Key: (target_type, target_id, relation_kind).
+func computeRelationDiff(current, incoming []RelationEdge) (toDelete []string, toInsert []RelationEdge) {
+	type key struct{ tt, tid, kind string }
+
+	cur := make(map[key]string, len(current))
+	for _, e := range current {
+		cur[key{e.TargetType, e.TargetID, e.RelationKind}] = e.ID
+	}
+	inc := make(map[key]RelationEdge, len(incoming))
+	for _, e := range incoming {
+		inc[key{e.TargetType, e.TargetID, e.RelationKind}] = e
+	}
+
+	for k, id := range cur {
+		if _, exists := inc[k]; !exists {
+			toDelete = append(toDelete, id)
+		}
+	}
+	for k, e := range inc {
+		if _, exists := cur[k]; !exists {
+			toInsert = append(toInsert, e)
+		}
+	}
+	return
+}
+
+type txBeginner interface {
+	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+}
+
+type edgeExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+// applyRelationDiff deletes toDelete IDs and inserts toInsert edges for the
+// given source, stamping SourceType/SourceID/EdgeClass/timestamps on inserts.
+// Wraps in a transaction when exec implements BeginTx.
+func (s *RelationStore) applyRelationDiff(ctx context.Context, db edgeExecer, toDelete []string, toInsert []RelationEdge, sourceType, sourceID string) error {
+	var exec edgeExecer = db
+	commit := func() error { return nil }
+
+	if txdb, ok := s.db.(txBeginner); ok {
+		tx, err := txdb.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback() //nolint:errcheck
+		exec = tx
+		commit = tx.Commit
+	}
+
+	for _, id := range toDelete {
+		if _, err := exec.ExecContext(ctx, "DELETE FROM smeldr_relations WHERE id=$1", id); err != nil {
+			return err
+		}
+	}
+
+	now := time.Now().UTC()
+	for _, e := range toInsert {
+		if e.ID == "" {
+			e.ID = NewID()
+		}
+		e.SourceType = sourceType
+		e.SourceID = sourceID
+		e.EdgeClass = "asserted"
+		if e.CreatedAt.IsZero() {
+			e.CreatedAt = now
+		}
+		e.UpdatedAt = now
+		if e.Attributes == nil {
+			e.Attributes = json.RawMessage("{}")
+		}
+		_, err := exec.ExecContext(ctx,
+			"INSERT INTO smeldr_relations ("+relationColumns+") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+			e.ID, e.SourceType, e.SourceID,
+			e.TargetType, e.TargetID,
+			e.RelationKind, e.EdgeClass,
+			e.Confidence, e.ValidAt, e.InvalidAt,
+			e.CreatedByJob, string(e.Attributes),
+			e.CreatedAt, e.UpdatedAt,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return commit()
+}

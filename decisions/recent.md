@@ -17,6 +17,24 @@ Archived 2026-06-15: A139–A150 → phase8-archive.md
 
 ---
 
+## A160 — T06 step 3: Layer 1 save-path relation recompute (v1.42.3, 2026-06-20)
+
+**Context:** T06 Layer 1 requires that asserted relations are kept in sync with content field values on every save, without the operator calling `Assert` explicitly.
+
+**Decision:** Add `RecomputeAsserted` to `RelationStore` — a differential algorithm (SELECT current → diff → delete stale + insert new). Common case costs exactly 1 SELECT and 0 writes. Wire it into `createHandler`, `updateHandler`, `MCPCreate`, and `MCPUpdate` via a new `SyncSaveHook` type on `App`. The hook is synchronous: errors abort the request.
+
+**Schema resolution:** The hook closure calls `SchemaStore.FindByTypeName` to read the item's content-type schema. Returns nil immediately for compiled types (no schema registered → ErrNotFound). For dynamic types, finds all `SchemaField` entries with `Relation: "edge"`, unmarshals the item's `DynamicNode.Fields` JSON, and extracts target IDs.
+
+**target_type resolution:** `extractRelationEdges` looks up the registered `RelationKindDef` by field name (the field name IS the relation kind). `TypePairs[0].TargetType` gives the target type. Skips if kind not registered or TypePairs empty.
+
+**Hook wiring:** `App.Content()` collects modules implementing `setSyncSaveHook`. `App.Handler()` wires the hook into all collected modules after startup — mirrors the `afterHook`/`setAfterHook` pattern.
+
+**BulkRecompute:** Phase 1 = all SELECTs + diff computation. Phase 2 = all deletes + inserts. Intended for post-import scenarios; not called from the save path.
+
+**Scope deferred:** Layer 2 (AfterPublish signal, cascade guards), Layer 3 (structural sweep), MCP tools, `DynamicTypeRepo` direct paths (status-only saves skip hook).
+
+---
+
 ## A159 — T06 step 2: relation schema + stores (v1.42.2, 2026-06-20)
 
 **Context:** T06 content-relations needs a persistent, queryable edge store and a runtime registry of relation kinds before any layer can assert, derive, or validate edges.

@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.42.3] — 2026-06-20
+
+### Added
+- `(*RelationStore).RecomputeAsserted(ctx, sourceType, sourceID string, incoming []RelationEdge) error` — Layer 1 differential save-path edge recompute: SELECT current asserted edges, compute diff, delete stale, insert new. Common case (no field changes) costs exactly one SELECT and zero writes. (A160)
+- `(*RelationStore).BulkRecompute(ctx, items []RelationSource) error` — batched post-import variant: all SELECTs first, then all deletes + inserts. (A160)
+- `RelationSource` struct — carries `SourceType`, `SourceID string`, and `Incoming []RelationEdge` for `BulkRecompute`. (A160)
+- `SyncSaveHook` type — `func(ctx context.Context, typeName, id string, item any) error`. (A160)
+- `App.Relations()` now builds a `SyncSaveHook` closure: reads the item's registered schema, finds `Relation: "edge"` fields, extracts target IDs, calls `RecomputeAsserted`. No-op for compiled types (no schema entry). (A160)
+
+### Changed
+- `Module[T].createHandler`, `.updateHandler`, `.MCPCreate`, `.MCPUpdate` — call `SyncSaveHook` synchronously after `repo.Save`; error aborts the request. (A160)
+
+---
+
 ## [1.42.2] — 2026-06-20
 
 ### Added
