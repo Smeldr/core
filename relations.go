@@ -597,3 +597,62 @@ func (s *RelationStore) applyRelationDiff(ctx context.Context, db edgeExecer, to
 
 	return commit()
 }
+
+// buildCascadeHandler returns a func suitable for [App.OnSignal] that implements
+// Layer 2 one-hop reactive cascade. When a target item changes status (published,
+// archived, deleted, unpublished), the handler looks up all source-side dependents
+// via GetByTarget and fires [AfterRelationCascade] for each unique source item.
+//
+// Guards applied per call:
+//   - visited-set: each (sourceType, sourceID) pair is notified at most once.
+//   - idempotency-set: each edge is processed at most once per run.
+//   - depth = 1: only direct dependents are notified; transitive cascades are
+//     not triggered because buildCascadeHandler subscribes to status-change
+//     signals only, not to [AfterRelationCascade] itself.
+//
+// Debouncing: cascade events are debounced 500 ms per source item via a
+// sync.Map of per-source debouncers. Multiple rapid-fire edges pointing from
+// the same source to different targets yield a single [AfterRelationCascade].
+func buildCascadeHandler(store *RelationStore, app *App) func(context.Context, SignalEvent) error {
+	var debouncers sync.Map // "sourceType:sourceID" → *debouncer
+	return func(ctx context.Context, ev SignalEvent) error {
+		edges, err := store.GetByTarget(ctx, ev.Type, ev.NodeID, "")
+		if err != nil {
+			return err
+		}
+		if len(edges) == 0 {
+			return nil
+		}
+		triggerSig := string(ev.PreviousState)
+		baseCtx := context.WithoutCancel(ctx)
+		visited := make(map[string]struct{})
+		seen := make(map[string]struct{})
+		for _, edge := range edges {
+			visitKey := edge.SourceType + ":" + edge.SourceID
+			idempKey := edge.ID + ":" + triggerSig
+			if _, ok := visited[visitKey]; ok {
+				continue
+			}
+			if _, ok := seen[idempKey]; ok {
+				continue
+			}
+			visited[visitKey] = struct{}{}
+			seen[idempKey] = struct{}{}
+
+			cascadeEv := SignalEvent{
+				Type:          edge.SourceType,
+				NodeID:        edge.SourceID,
+				PreviousState: triggerSig,
+				ActorID:       ev.NodeID,
+				Timestamp:     time.Now(),
+			}
+			key := visitKey
+			d, _ := debouncers.LoadOrStore(key, newDebouncer(500*time.Millisecond, func() {
+				debouncers.Delete(key)
+				app.emitSignal(baseCtx, AfterRelationCascade, cascadeEv)
+			}))
+			d.(*debouncer).Trigger()
+		}
+		return nil
+	}
+}

@@ -729,6 +729,11 @@ func (a *App) Relations(store *RelationStore) *App {
 		incoming := extractRelationEdges(typeName, id, fields, item, store)
 		return store.RecomputeAsserted(ctx, typeName, id, incoming)
 	}
+	ch := buildCascadeHandler(store, a)
+	a.OnSignal(AfterPublish, ch)
+	a.OnSignal(AfterArchive, ch)
+	a.OnSignal(AfterDelete, ch)
+	a.OnSignal(AfterUnpublish, ch)
 	return a
 }
 
@@ -909,6 +914,15 @@ func (a *App) dispatchBus(ctx context.Context, ev SignalEvent, sig Signal) {
 				"signal", sig, "type", ev.Type, "slug", ev.Slug, "error", err)
 		}
 	}
+}
+
+// emitSignal fires the registered [OnSignal] handlers for sig with ev.
+// Unlike the main signal bus (which runs in a dedicated goroutine), emitSignal
+// is called directly from inside an existing signal handler goroutine — it is
+// safe to call from cascade handlers and other OnSignal subscribers.
+// Each sub-handler runs with a 100 ms timeout via dispatchBus.
+func (a *App) emitSignal(ctx context.Context, sig Signal, ev SignalEvent) {
+	a.dispatchBus(ctx, ev, sig)
 }
 
 // wireSignalBus constructs the afterHook closure and injects it into every

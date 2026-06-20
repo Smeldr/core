@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.42.4] — 2026-06-20
+
+### Added
+- `AfterRelationCascade Signal = "relation.cascade"` — fires when a content item's relation premise changes (target published, archived, deleted, or unpublished). Fired once per source-side dependent, debounced 500 ms per source item. (A161)
+- `SignalEvent.NodeID string` — stable UUID of the content item. Populated for all signals; previously absent. (A161)
+- `App.emitSignal` (unexported) — fires registered OnSignal handlers directly from inside a signal handler goroutine. Safe for use in cascade handlers. (A161)
+
+### Changed
+- `App.Relations()` — now subscribes to `AfterPublish`, `AfterArchive`, `AfterDelete`, and `AfterUnpublish` to drive Layer 2 cascade propagation. (A161)
+
+---
+
 ## [1.42.3] — 2026-06-20
 
 ### Added
