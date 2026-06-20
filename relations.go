@@ -267,7 +267,14 @@ func (s *RelationStore) Assert(ctx context.Context, edge RelationEdge) error {
 	if edge.EdgeClass != "asserted" {
 		return Err("edge_class", "Assert only accepts edge_class=asserted")
 	}
+	_, err := s.insertEdge(ctx, edge)
+	return err
+}
 
+// insertEdge persists edge to smeldr_relations, generating an ID and timestamps
+// as needed. Returns the populated edge with all fields set. Called by Assert,
+// MCPAssertRelation, and MCPProposeRelation.
+func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (RelationEdge, error) {
 	now := time.Now().UTC()
 	if edge.ID == "" {
 		edge.ID = NewID()
@@ -303,7 +310,91 @@ ON CONFLICT (id) DO UPDATE SET
 		edge.CreatedByJob, string(edge.Attributes),
 		edge.CreatedAt, edge.UpdatedAt,
 	)
-	return err
+	if err != nil {
+		return RelationEdge{}, err
+	}
+	return edge, nil
+}
+
+// MCPAssertRelation manually asserts a typed edge between two content items.
+// Returns ErrNotFound when relationKind is not registered. The edge is stored
+// with edge_class="asserted" and the populated RelationEdge is returned.
+func (s *RelationStore) MCPAssertRelation(ctx context.Context,
+	sourceType, sourceID, targetType, targetID, relationKind string,
+	confidence *float64, validAt, invalidAt *time.Time,
+	attributes json.RawMessage,
+) (RelationEdge, error) {
+	if _, ok := s.GetKind(relationKind); !ok {
+		return RelationEdge{}, ErrNotFound
+	}
+	return s.insertEdge(ctx, RelationEdge{
+		SourceType:   sourceType,
+		SourceID:     sourceID,
+		TargetType:   targetType,
+		TargetID:     targetID,
+		RelationKind: relationKind,
+		EdgeClass:    "asserted",
+		Confidence:   confidence,
+		ValidAt:      validAt,
+		InvalidAt:    invalidAt,
+		Attributes:   attributes,
+	})
+}
+
+// MCPProposeRelation records an inferred edge for human or agent review.
+// Identical to MCPAssertRelation but stores edge_class="inferred". The edge is
+// NOT automatically asserted — it remains pending review.
+func (s *RelationStore) MCPProposeRelation(ctx context.Context,
+	sourceType, sourceID, targetType, targetID, relationKind string,
+	confidence *float64, validAt, invalidAt *time.Time,
+	attributes json.RawMessage,
+) (RelationEdge, error) {
+	if _, ok := s.GetKind(relationKind); !ok {
+		return RelationEdge{}, ErrNotFound
+	}
+	return s.insertEdge(ctx, RelationEdge{
+		SourceType:   sourceType,
+		SourceID:     sourceID,
+		TargetType:   targetType,
+		TargetID:     targetID,
+		RelationKind: relationKind,
+		EdgeClass:    "inferred",
+		Confidence:   confidence,
+		ValidAt:      validAt,
+		InvalidAt:    invalidAt,
+		Attributes:   attributes,
+	})
+}
+
+// MCPGetRelations queries the relation graph for a given item.
+// direction must be "source", "target", or "both".
+// kind filters by relation kind; empty string returns all kinds.
+func (s *RelationStore) MCPGetRelations(ctx context.Context, typeName, id, direction, kind string) ([]RelationEdge, error) {
+	switch direction {
+	case "source":
+		return s.GetBySource(ctx, typeName, id, kind)
+	case "target":
+		return s.GetByTarget(ctx, typeName, id, kind)
+	case "both":
+		src, err := s.GetBySource(ctx, typeName, id, kind)
+		if err != nil {
+			return nil, err
+		}
+		tgt, err := s.GetByTarget(ctx, typeName, id, kind)
+		if err != nil {
+			return nil, err
+		}
+		return append(src, tgt...), nil
+	default:
+		return nil, fmt.Errorf("smeldr: MCPGetRelations: direction must be source, target, or both; got %q", direction)
+	}
+}
+
+// MCPPreviewImpact returns which items would receive an AfterRelationCascade
+// signal if the given item changed status — without firing any signals.
+// Returns the source-side dependents found via GetByTarget.
+func (s *RelationStore) MCPPreviewImpact(ctx context.Context, typeName, id string) ([]RelationEdge, error) {
+	return s.GetByTarget(ctx, typeName, id, "")
 }
 
 // GetBySource returns all edges where source_type and source_id match.

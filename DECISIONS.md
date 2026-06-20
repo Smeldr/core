@@ -47,6 +47,7 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 | # | Title | File |
 |---|-------|------|
+| A162 | T06 step 5: MCP relation tools | [recent.md](decisions/recent.md) |
 | A161 | T06 step 4: Layer 2 reactive cascade signal | [recent.md](decisions/recent.md) |
 | A160 | T06 step 3: Layer 1 save-path relation recompute | [recent.md](decisions/recent.md) |
 | A159 | T06 step 2: relation schema + stores | [recent.md](decisions/recent.md) |

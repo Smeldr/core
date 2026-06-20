@@ -17,6 +17,24 @@ Archived 2026-06-15: A139–A150 → phase8-archive.md
 
 ---
 
+## A162 — T06 step 5: MCP relation tools (v1.42.5, 2026-06-20)
+
+**Context:** T06 relation graph needs MCP-accessible tools so agents and operators can assert, query, and preview edges without direct DB access.
+
+**Decision:** Add four methods to `RelationStore`: `MCPAssertRelation`, `MCPProposeRelation`, `MCPGetRelations`, `MCPPreviewImpact`. Wired via `App.RelationStore()` — forge-mcp checks non-nil to gate registration. No new interface required; pattern mirrors `RedirectDB()`.
+
+**insertEdge refactor:** Shared unexported `insertEdge(ctx, edge) (RelationEdge, error)` extracted from `Assert`. Returns the populated edge with generated ID and timestamps. Both `Assert` and the MCP methods use it; `Assert` behaviour is unchanged.
+
+**propose_relation:** Stores `edge_class="inferred"` by calling `insertEdge` directly, bypassing `Assert`'s edge_class guard. The inferred edge is NOT automatically asserted — pending human or agent review.
+
+**Auth:** No role-check in RelationStore layer. Authorization is enforced by forge-mcp at tool-invoke time, identical to all other tools.
+
+**preview_impact:** Read-only dry-run. Calls `GetByTarget(ctx, type, id, "")` and returns source-side dependents. No signals are fired.
+
+**Scope deferred:** `upsert_relation_kind` DDL tool, Layer 3 sweep trigger, bulk import.
+
+---
+
 ## A161 — T06 step 4: Layer 2 reactive cascade signal (v1.42.4, 2026-06-20)
 
 **Context:** T06 Layer 2 requires that content items depending on a target are notified when that target changes status — without the dependent being re-saved.
