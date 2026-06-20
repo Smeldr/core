@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.42.7] — 2026-06-20
+
+### Tests
+- Added comprehensive error-path coverage for `relations.go` and `dynamic.go`: 3 new test files (`relations_errors_test.go`, `dynamic_errors_test.go`, and additions to `coverage_test.go`) covering 30+ error scenarios including database failures, invalid input, and edge cases in relation management and dynamic type operations. Also covered success paths for module listing and field collection. Statement coverage improved from 95.3% to 96.2%, meeting gate requirement. (A164)
+
+---
+
 ## [1.42.6] — 2026-06-20
 
 ### Added

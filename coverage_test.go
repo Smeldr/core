@@ -1578,3 +1578,163 @@ func TestMdApplyLinks_noClose(t *testing.T) {
 		t.Errorf("noClose: got %q, want %q", got, input)
 	}
 }
+
+// — Module.listPublished ————————————————————————————————————————————————————
+
+func TestModule_listPublished_returnsPublishedItems(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := newTestModule(repo)
+
+	ctx := context.Background()
+	pub := &testPost{Node: Node{ID: NewID(), Slug: "p1", Status: Published}, Title: "Pub"}
+	drf := &testPost{Node: Node{ID: NewID(), Slug: "p2", Status: Draft}, Title: "Dft"}
+	for _, p := range []*testPost{pub, drf} {
+		if err := repo.Save(ctx, p); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+	items, err := m.listPublished(ctx, ListOptions{})
+	if err != nil {
+		t.Fatalf("listPublished: %v", err)
+	}
+	if len(items) != 1 {
+		t.Errorf("want 1 published item, got %d", len(items))
+	}
+	if items[0]["Title"] != "Pub" {
+		t.Errorf("want Title=Pub, got %v", items[0]["Title"])
+	}
+}
+
+// — collectDBFields: unexported field and db:"-" tag ——————————————————————
+
+type testStructWithPrivateField struct {
+	ID   string `db:"id"`
+	name string // unexported, no db tag
+}
+
+type testStructWithDashTag struct {
+	ID      string `db:"id"`
+	Ignored string `db:"-"`
+}
+
+// Covers storage.go:61-62 (unexported field continue) and 76-77 (db:"-" continue).
+func TestCollectDBFields_SkipsUnexportedAndDashTag(t *testing.T) {
+	db := newSQLiteDB(t)
+	_, err := db.ExecContext(context.Background(), "CREATE TABLE tmp (id TEXT)")
+	if err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+	// Query with a struct that has an unexported field → covers lines 61-62.
+	rows1, err := Query[*testStructWithPrivateField](context.Background(), db, "SELECT id FROM tmp")
+	if err != nil {
+		t.Fatalf("Query unexported: %v", err)
+	}
+	if len(rows1) != 0 {
+		t.Errorf("want 0 rows, got %d", len(rows1))
+	}
+	// Query with a struct that has db:"-" → covers lines 76-77.
+	rows2, err := Query[*testStructWithDashTag](context.Background(), db, "SELECT id FROM tmp")
+	if err != nil {
+		t.Fatalf("Query dash tag: %v", err)
+	}
+	if len(rows2) != 0 {
+		t.Errorf("want 0 rows, got %d", len(rows2))
+	}
+}
+
+// — SQLRepo.List with Desc ordering ————————————————————————————————————————
+
+// Covers storage.go:638-640 — the "ORDER BY col DESC" branch in SQLRepo.List.
+func TestSQLRepoList_OrderByDesc(t *testing.T) {
+	db := newSQLiteDB(t)
+	// Use the posts table set up by the standard SQLite post repo.
+	if _, err := db.ExecContext(context.Background(), `
+		CREATE TABLE IF NOT EXISTS testposts (
+			id TEXT NOT NULL PRIMARY KEY, slug TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'draft', title TEXT NOT NULL DEFAULT '',
+			body TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			scheduled_at DATETIME, published_at DATETIME, rev INTEGER NOT NULL DEFAULT 0
+		)`); err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+	repo := NewSQLRepo[*testPost](db, Table("testposts"))
+	ctx := context.Background()
+	for _, title := range []string{"Alpha", "Beta", "Gamma"} {
+		if err := repo.Save(ctx, &testPost{Node: Node{ID: NewID(), Slug: GenerateSlug(title), Status: Published}, Title: title}); err != nil {
+			t.Fatalf("Save %s: %v", title, err)
+		}
+	}
+	items, err := repo.FindAll(ctx, ListOptions{OrderBy: "Title", Desc: true})
+	if err != nil {
+		t.Fatalf("FindAll: %v", err)
+	}
+	if len(items) != 3 {
+		t.Errorf("want 3 items, got %d", len(items))
+	}
+	if items[0].Title != "Gamma" {
+		t.Errorf("want first item Gamma (desc), got %q", items[0].Title)
+	}
+}
+
+// — extractRelationEdges edge-case paths ————————————————————————————————
+
+func TestExtractRelationEdges_InvalidFieldsJSON(t *testing.T) {
+	store := &RelationStore{
+		db:       &errQueryDB{},
+		registry: &RelationKindRegistry{kinds: make(map[string]RelationKindDef)},
+	}
+	dn := &DynamicNode{Fields: json.RawMessage(`not json`)}
+	dn.ID = "d1"
+	fields := []SchemaField{{Name: "tag", Relation: "edge"}}
+	out := extractRelationEdges("article", "d1", fields, dn, store)
+	if out != nil {
+		t.Errorf("want nil for invalid JSON, got %v", out)
+	}
+}
+
+func TestExtractRelationEdges_FieldValueNotString(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateRelationTables(db); err != nil {
+		t.Fatalf("CreateRelationTables: %v", err)
+	}
+	store, err := NewRelationStore(db)
+	if err != nil {
+		t.Fatalf("NewRelationStore: %v", err)
+	}
+	if err := store.UpsertKind(context.Background(), RelationKindDef{
+		TypeName:  "tag",
+		Mode:      "asserted",
+		TypePairs: json.RawMessage(`[{"source_type":"article","target_type":"tag"}]`),
+	}); err != nil {
+		t.Fatalf("UpsertKind: %v", err)
+	}
+	// Field value is a number, not a string — should be skipped.
+	dn := &DynamicNode{Fields: json.RawMessage(`{"tag": 42}`)}
+	dn.ID = "d1"
+	fields := []SchemaField{{Name: "tag", Relation: "edge"}}
+	out := extractRelationEdges("article", "d1", fields, dn, store)
+	if len(out) != 0 {
+		t.Errorf("want 0 edges for non-string field value, got %d", len(out))
+	}
+}
+
+func TestExtractRelationEdges_FieldMissingFromJSON(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateRelationTables(db); err != nil {
+		t.Fatalf("CreateRelationTables: %v", err)
+	}
+	store, err := NewRelationStore(db)
+	if err != nil {
+		t.Fatalf("NewRelationStore: %v", err)
+	}
+	// Field "tag" is in schema but not in the JSON payload.
+	dn := &DynamicNode{Fields: json.RawMessage(`{"other": "value"}`)}
+	dn.ID = "d1"
+	fields := []SchemaField{{Name: "tag", Relation: "edge"}}
+	out := extractRelationEdges("article", "d1", fields, dn, store)
+	if len(out) != 0 {
+		t.Errorf("want 0 edges for missing field, got %d", len(out))
+	}
+}
