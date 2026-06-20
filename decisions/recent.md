@@ -17,6 +17,22 @@ Archived 2026-06-15: A139–A150 → phase8-archive.md
 
 ---
 
+## A158 — Node.Rev optimistic-concurrency token (v1.42.1, 2026-06-20)
+
+**Context:** T06 (content relations) requires a collision-free `(edge, node-state-version)` key and a way to resolve the concurrent-append `SortOrder` race in `edges.go`. A per-node revision counter solves both.
+
+**Decision:** Add `Rev int \`db:"rev"\`` to `smeldr.Node`. The storage layer owns Rev — it is always `0` on first insert and incremented on every subsequent save. Callers must not set Rev manually.
+
+**CAS in SQLRepo:** `INSERT … ON CONFLICT DO UPDATE SET … WHERE table.rev = $N`. If `RowsAffected = 0` the caller receives `ErrRevConflict` (HTTP 409) and must reload before retrying.
+
+**MemoryRepo:** increment-only via reflection on the pointer receiver; no CAS (test repo does not simulate concurrent writers).
+
+**Migration:** `MigrateNodeRevColumn(db, table)` — PRAGMA probe + `ALTER TABLE … ADD COLUMN rev INTEGER NOT NULL DEFAULT 0`. Operators must call it once per existing Node-embedding table at startup.
+
+**Rejected:** a global revision table (cross-table coordination overhead); embedding Rev only in a sub-interface (forces type assertions in storage layer).
+
+---
+
 ## A151 — T104 Increment 1: schema generalisation + content-type registry (core v1.39.0)
 
 **Date:** 2026-06-15

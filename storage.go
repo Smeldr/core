@@ -274,17 +274,39 @@ func NewMemoryRepo[T any]() *MemoryRepo[T] {
 }
 
 // Save upserts node into the repository keyed by its ID field.
-// On insert the ID is appended to the internal order list.
-// On update the existing position in the order list is preserved.
+// On insert the ID is appended to the internal order list and Rev is unchanged (stays 0).
+// On update the existing position in the order list is preserved and Rev is incremented
+// on pointer T (so the caller's Rev stays in sync for subsequent saves).
 func (r *MemoryRepo[T]) Save(_ context.Context, node T) error {
 	id := stringField(node, "ID")
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.items[id]; !exists {
 		r.order = append(r.order, id)
+	} else {
+		incrementRevField(node)
 	}
 	r.items[id] = node
 	return nil
+}
+
+// incrementRevField increments the Rev field of item when item is a non-nil pointer
+// to a struct that has a Rev int field (directly or via embedded [Node]).
+// Value types are not modified — they cannot be updated through the interface.
+func incrementRevField[T any](item T) {
+	rv := reflect.ValueOf(item)
+	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+		return
+	}
+	rv = rv.Elem()
+	path := goFieldPath(rv.Type(), "Rev")
+	if path == nil {
+		return
+	}
+	f := rv.FieldByIndex(path)
+	if f.Kind() == reflect.Int && f.CanSet() {
+		f.SetInt(f.Int() + 1)
+	}
 }
 
 // FindByID returns the item with the given ID, or [ErrNotFound].
@@ -659,14 +681,28 @@ func (r *SQLRepo[T]) Save(ctx context.Context, item T) error {
 	placeholders := make([]string, len(fields))
 	vals := make([]any, len(fields))
 	setParts := make([]string, 0, len(fields))
+	var revPH string // placeholder for the rev column in the INSERT list (e.g. "$3")
 
 	for i, f := range fields {
 		cols[i] = quoteIdent(f.name)
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
 		vals[i] = rv.FieldByIndex(f.index).Interface()
-		if f.name != "id" {
+		switch f.name {
+		case "id":
+			// excluded from SET — id is the conflict key
+		case "rev":
+			revPH = fmt.Sprintf("$%d", i+1)
+			// SET handled below: rev = table.rev + 1
+		default:
 			setParts = append(setParts, quoteIdent(f.name)+"=EXCLUDED."+quoteIdent(f.name))
 		}
+	}
+
+	if revPH != "" {
+		// Increment the stored rev rather than using EXCLUDED.rev, so the DB
+		// owns the counter. The CAS WHERE guard below prevents overwriting a
+		// concurrently incremented rev.
+		setParts = append(setParts, quoteIdent("rev")+"="+r.table+"."+quoteIdent("rev")+"+1")
 	}
 
 	query := fmt.Sprintf(
@@ -677,8 +713,23 @@ func (r *SQLRepo[T]) Save(ctx context.Context, item T) error {
 		quoteIdent("id"),
 		strings.Join(setParts, ", "),
 	)
-	_, err := r.db.ExecContext(ctx, query, vals...)
-	return err
+	if revPH != "" {
+		// CAS guard: only apply the update if the stored rev matches what the
+		// caller had when they read the item. RowsAffected = 0 means conflict.
+		query += " WHERE " + r.table + "." + quoteIdent("rev") + " = " + revPH
+	}
+
+	result, err := r.db.ExecContext(ctx, query, vals...)
+	if err != nil {
+		return err
+	}
+	if revPH != "" {
+		n, _ := result.RowsAffected()
+		if n == 0 {
+			return ErrRevConflict
+		}
+	}
+	return nil
 }
 
 // Delete removes the item with the given id. Returns [ErrNotFound] if no row
@@ -697,6 +748,40 @@ func (r *SQLRepo[T]) Delete(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// MigrateNodeRevColumn adds the rev column to table when it is absent.
+// Safe to call on every boot; no-op when the column already exists or
+// when db does not support PRAGMA table_info (non-SQLite).
+//
+// Call once per content table at startup before any Save call:
+//
+//	smeldr.MigrateNodeRevColumn(db, "posts")
+//	smeldr.MigrateNodeRevColumn(db, "stories")
+func MigrateNodeRevColumn(db DB, table string) error {
+	ctx := context.Background()
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return nil // non-SQLite; assume schema is current
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt *string
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			continue
+		}
+		if name == "rev" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx,
+		"ALTER TABLE "+quoteIdent(table)+" ADD COLUMN rev INTEGER NOT NULL DEFAULT 0")
+	return err
 }
 
 // Seq returns a lazy iterator that streams rows from the database one at a

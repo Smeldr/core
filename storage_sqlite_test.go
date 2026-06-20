@@ -3,6 +3,7 @@ package smeldr
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -91,4 +92,180 @@ func TestSQLRepo_FindAll_OrderBy_unknownField(t *testing.T) {
 		t.Fatalf("FindAll unknown OrderBy: %v", err)
 	}
 	_ = results // result count not important; we just verify no error
+}
+
+// ---------------------------------------------------------------------------
+// Node.Rev — revision counter and optimistic CAS (A158)
+// ---------------------------------------------------------------------------
+
+// revNode is a test content type that embeds Node to get the Rev field.
+type revNode struct {
+	Node
+	Body string `db:"body"`
+}
+
+// createRevNodesTable creates the schema that revNode maps to.
+func createRevNodesTable(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.ExecContext(context.Background(), `
+		CREATE TABLE rev_nodes (
+			id           TEXT NOT NULL PRIMARY KEY,
+			slug         TEXT NOT NULL DEFAULT '',
+			status       TEXT NOT NULL DEFAULT 'draft',
+			created_at   DATETIME NOT NULL DEFAULT '',
+			updated_at   DATETIME NOT NULL DEFAULT '',
+			scheduled_at DATETIME,
+			published_at DATETIME,
+			rev          INTEGER NOT NULL DEFAULT 0,
+			body         TEXT NOT NULL DEFAULT ''
+		)`)
+	if err != nil {
+		t.Fatalf("createRevNodesTable: %v", err)
+	}
+}
+
+func TestSQLRepo_Save_RevStartsAtZero(t *testing.T) {
+	db := newSQLiteDB(t)
+	createRevNodesTable(t, db)
+	repo := NewSQLRepo[*revNode](db, Table("rev_nodes"))
+	ctx := context.Background()
+
+	item := &revNode{Node: Node{ID: "zero-1", Slug: "zero"}}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := repo.FindByID(ctx, "zero-1")
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got.Rev != 0 {
+		t.Errorf("Rev = %d, want 0", got.Rev)
+	}
+}
+
+func TestSQLRepo_Save_RevIncrements(t *testing.T) {
+	db := newSQLiteDB(t)
+	createRevNodesTable(t, db)
+	repo := NewSQLRepo[*revNode](db, Table("rev_nodes"))
+	ctx := context.Background()
+
+	item := &revNode{Node: Node{ID: "inc-1", Slug: "inc"}}
+	// First insert: stored rev = 0.
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	got, _ := repo.FindByID(ctx, "inc-1")
+	if got.Rev != 0 {
+		t.Errorf("after first save: Rev = %d, want 0", got.Rev)
+	}
+
+	// Second save using the refetched item (Rev=0 matches stored): stored rev → 1.
+	if err := repo.Save(ctx, got); err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	got, _ = repo.FindByID(ctx, "inc-1")
+	if got.Rev != 1 {
+		t.Errorf("after second save: Rev = %d, want 1", got.Rev)
+	}
+
+	// Third save using the refetched item (Rev=1 matches stored): stored rev → 2.
+	if err := repo.Save(ctx, got); err != nil {
+		t.Fatalf("third save: %v", err)
+	}
+	got, _ = repo.FindByID(ctx, "inc-1")
+	if got.Rev != 2 {
+		t.Errorf("after third save: Rev = %d, want 2", got.Rev)
+	}
+}
+
+func TestSQLRepo_Save_RevConflict(t *testing.T) {
+	db := newSQLiteDB(t)
+	createRevNodesTable(t, db)
+	repo := NewSQLRepo[*revNode](db, Table("rev_nodes"))
+	ctx := context.Background()
+
+	item := &revNode{Node: Node{ID: "cas-1", Slug: "cas"}}
+	// First insert: stored rev = 0.
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	// Second save with item.Rev = 0: WHERE rev=0 matches stored rev=0 → update, stored rev→1.
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	// Third save with item.Rev = 0 (stale): WHERE rev=0 fails (stored rev=1) → ErrRevConflict.
+	err := repo.Save(ctx, item)
+	if !errors.Is(err, ErrRevConflict) {
+		t.Errorf("expected ErrRevConflict, got %v", err)
+	}
+}
+
+func TestMigrateNodeRevColumn_AddsColumn(t *testing.T) {
+	db := newSQLiteDB(t)
+	_, err := db.ExecContext(context.Background(), `
+		CREATE TABLE migrate_rev_test (
+			id   TEXT NOT NULL PRIMARY KEY,
+			slug TEXT NOT NULL DEFAULT ''
+		)`)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	if err := MigrateNodeRevColumn(db, "migrate_rev_test"); err != nil {
+		t.Fatalf("MigrateNodeRevColumn: %v", err)
+	}
+
+	// Column must exist — insert a row that uses it.
+	_, err = db.ExecContext(context.Background(),
+		`INSERT INTO migrate_rev_test (id, slug, rev) VALUES ('1', 'test', 0)`)
+	if err != nil {
+		t.Errorf("rev column should exist after migration, got: %v", err)
+	}
+}
+
+func TestMigrateNodeRevColumn_Idempotent(t *testing.T) {
+	db := newSQLiteDB(t)
+	_, _ = db.ExecContext(context.Background(), `
+		CREATE TABLE idempotent_rev_test (
+			id  TEXT NOT NULL PRIMARY KEY,
+			rev INTEGER NOT NULL DEFAULT 0
+		)`)
+
+	if err := MigrateNodeRevColumn(db, "idempotent_rev_test"); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := MigrateNodeRevColumn(db, "idempotent_rev_test"); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+}
+
+func TestMemoryRepo_Save_RevIncrement(t *testing.T) {
+	repo := NewMemoryRepo[*revNode]()
+	ctx := context.Background()
+
+	item := &revNode{Node: Node{ID: "mem-1", Slug: "mem"}}
+
+	// First save (insert): Rev stays 0.
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	if item.Rev != 0 {
+		t.Errorf("after first save: item.Rev = %d, want 0", item.Rev)
+	}
+
+	// Second save (update): Rev incremented to 1 via pointer.
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	if item.Rev != 1 {
+		t.Errorf("after second save: item.Rev = %d, want 1", item.Rev)
+	}
+
+	// Third save (update): Rev incremented to 2.
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("third save: %v", err)
+	}
+	if item.Rev != 2 {
+		t.Errorf("after third save: item.Rev = %d, want 2", item.Rev)
+	}
 }

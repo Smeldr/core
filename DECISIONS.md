@@ -43,6 +43,12 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 ## Decision index
 
+### Recent — [decisions/recent.md](decisions/recent.md)
+
+| # | Title | File |
+|---|-------|------|
+| A158 | Node.Rev optimistic-concurrency token | [recent.md](decisions/recent.md) |
+
 ### Core — [decisions/core.md](decisions/core.md)
 
 | # | Title | Status | Date |

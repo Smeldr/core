@@ -74,6 +74,13 @@ type Node struct {
 
 	// UpdatedAt is set by the storage layer on every Save.
 	UpdatedAt time.Time `db:"updated_at"`
+
+	// Rev is incremented by the storage layer on every save after the first.
+	// On first insert Rev = 0. On each subsequent save Rev = Rev + 1.
+	// Use Rev as an optimistic-concurrency token to detect concurrent writes:
+	// if two goroutines read the same node (both see Rev = 3), the second
+	// Save returns [ErrRevConflict] instead of silently overwriting.
+	Rev int `db:"rev"`
 }
 
 // GetSlug returns the URL slug for this node. Satisfies the [SitemapNode]

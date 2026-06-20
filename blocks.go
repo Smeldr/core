@@ -82,7 +82,8 @@ CREATE TABLE IF NOT EXISTS smeldr_dynamic_content (
 	created_at   DATETIME NOT NULL,
 	updated_at   DATETIME NOT NULL,
 	scheduled_at DATETIME,
-	published_at DATETIME
+	published_at DATETIME,
+	rev          INTEGER NOT NULL DEFAULT 0
 )`); err != nil {
 		return err
 	}

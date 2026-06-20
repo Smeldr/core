@@ -23,6 +23,24 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.42.1] — 2026-06-20
+
+### Breaking / Migration required
+
+Call `MigrateNodeRevColumn(db, table)` for each existing content table before the first request. Without migration, the first `Save` fails with `"table X has no column named rev"`. Tables that need migration: your app's content tables (e.g. `posts`, `stories`) AND `smeldr_dynamic_content` if `ServeBlocks` is wired.
+
+### Added
+- `Node.Rev int` field (`db:"rev"`) — optimistic-concurrency revision counter. `0` on first insert; incremented by the storage layer on every subsequent save.
+- `ErrRevConflict` sentinel error (HTTP 409, code `rev_conflict`) — returned by `SQLRepo.Save` when the caller's `Rev` does not match the stored revision.
+- `MigrateNodeRevColumn(db DB, table string) error` — idempotent migration helper; probes via `PRAGMA table_info` and adds `rev INTEGER NOT NULL DEFAULT 0` if the column is absent.
+
+### Changed
+- `SQLRepo.Save` — CAS (compare-and-swap) guard: `WHERE table.rev = $N` appended to the `ON CONFLICT DO UPDATE` clause; `RowsAffected = 0` returns `ErrRevConflict`.
+- `MemoryRepo.Save` — increments `Rev` via reflection on the pointer receiver on update (no CAS; increment-only).
+- `blocks.go`, `stats_test.go`, `example/blog/main.go` — `rev INTEGER NOT NULL DEFAULT 0` added to all Node-embedding `CREATE TABLE` DDLs.
+
+---
+
 ## [1.42.0] — 2026-06-19
 
 ### Added

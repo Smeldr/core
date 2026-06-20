@@ -103,7 +103,8 @@ func TestSQLRepo_countByStatus(t *testing.T) {
 			updated_at DATETIME NOT NULL DEFAULT '',
 			published_at DATETIME,
 			scheduled_at DATETIME,
-			title TEXT NOT NULL DEFAULT ''
+			title TEXT NOT NULL DEFAULT '',
+			rev INTEGER NOT NULL DEFAULT 0
 		)`)
 	if err != nil {
 		t.Fatalf("create table: %v", err)

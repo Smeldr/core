@@ -59,6 +59,12 @@ var (
 	// ErrConflict indicates a state conflict (e.g. duplicate slug). → 409
 	ErrConflict = newSentinel(http.StatusConflict, "conflict", "Conflict")
 
+	// ErrRevConflict is returned by [SQLRepo.Save] when the item's Rev field
+	// does not match the revision currently stored in the database. This
+	// indicates a concurrent write — reload the item and retry. → 409
+	ErrRevConflict = newSentinel(http.StatusConflict, "rev_conflict",
+		"Concurrent modification — reload and retry")
+
 	// ErrLastAdmin is returned by [TokenStore.Revoke] when the token being
 	// revoked is the last active (non-revoked, non-expired) admin token. → 409
 	ErrLastAdmin = newSentinel(http.StatusConflict, "last_admin", "Cannot revoke the last active admin token")
