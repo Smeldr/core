@@ -23,6 +23,22 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.42.5] — 2026-06-20
+
+### Added
+- `(*RelationStore).MCPAssertRelation(ctx, sourceType, sourceID, targetType, targetID, relationKind string, confidence *float64, validAt, invalidAt *time.Time, attributes json.RawMessage) (RelationEdge, error)` — manually asserts a typed edge; returns `ErrNotFound` if the kind is not registered. (A162)
+- `(*RelationStore).MCPProposeRelation(...)` — identical signature to `MCPAssertRelation` but stores `edge_class: "inferred"` for human or agent review. (A162)
+- `(*RelationStore).MCPGetRelations(ctx, typeName, id, direction, kind string) ([]RelationEdge, error)` — queries the relation graph; `direction` is `"source"`, `"target"`, or `"both"`; `kind=""` returns all kinds. (A162)
+- `(*RelationStore).MCPPreviewImpact(ctx, typeName, id string) ([]RelationEdge, error)` — dry-run: returns source-side dependents without firing any cascade signals. (A162)
+
+### Changed
+- `(*RelationStore).Assert` — now delegates to unexported `insertEdge`; behaviour unchanged. (A162)
+
+### Wiring
+`App.RelationStore()` is the gate for relation MCP tools. forge-mcp checks non-nil before registering the four tools.
+
+---
+
 ## [1.42.4] — 2026-06-20
 
 ### Added
