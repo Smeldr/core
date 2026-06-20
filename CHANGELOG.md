@@ -23,6 +23,19 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.42.6] — 2026-06-20
+
+### Added
+- `(*RelationStore).MCPUpsertRelationKind(ctx context.Context, def RelationKindDef) (RelationKindDef, error)` — registers or updates a relation kind; validates via `ValidateRelationKindDef`, persists, and returns the stored definition with generated ID and timestamps. Returns an error on invalid `mode` or empty `type_name`. (A163)
+- `(*RelationStore).MCPListRelationKinds() []RelationKindDef` — returns all registered relation kinds sorted by `type_name`; always returns a non-nil slice. (A163)
+
+### Notes
+These two tools complete the MCP surface for T06. Agents can now register kinds and assert/query/preview relations entirely through MCP without touching application code.
+
+Gate: `App.RelationStore() != nil` — forge-mcp checks this before registering both tools.
+
+---
+
 ## [1.42.5] — 2026-06-20
 
 ### Added
