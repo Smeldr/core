@@ -1338,9 +1338,10 @@ func (a *App) RedirectStore() *RedirectStore {
 }
 
 // Redirects activates database-backed redirect management. It creates the
-// smeldr_redirects table if it does not exist, loads any saved entries into
-// the in-memory store so they are immediately active, and stores db so that
-// runtime MCP and CLI operations can persist changes without a restart.
+// smeldr_routes table if it does not exist, migrates any existing
+// smeldr_redirects rows into it, loads saved entries into the in-memory store,
+// and stores db so that runtime MCP and CLI operations can persist changes
+// without a restart.
 //
 // Call once at application startup before [App.Handler] or [App.Run]:
 //
@@ -1351,7 +1352,10 @@ func (a *App) RedirectStore() *RedirectStore {
 // MCP redirect tools (create_redirect, list_redirects, delete_redirect) are
 // only registered when Redirects has been called.
 func (a *App) Redirects(db DB) error {
-	if err := CreateRedirectsTable(db); err != nil {
+	if err := CreateRoutesTable(db); err != nil {
+		return err
+	}
+	if err := MigrateRedirectsToRoutes(db); err != nil {
 		return err
 	}
 	a.redirectDB = db

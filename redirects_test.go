@@ -277,15 +277,15 @@ func TestRedirectStore_Delete_concurrent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// CreateRedirectsTable + App.Redirects + App.RedirectDB — DB integration tests
+// CreateRoutesTable + App.Redirects + App.RedirectDB — DB integration tests
 // ---------------------------------------------------------------------------
 
-func TestCreateRedirectsTable_idempotent(t *testing.T) {
+func TestCreateRoutesTable_idempotent(t *testing.T) {
 	db := newSQLiteDB(t)
-	if err := CreateRedirectsTable(db); err != nil {
+	if err := CreateRoutesTable(db); err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	if err := CreateRedirectsTable(db); err != nil {
+	if err := CreateRoutesTable(db); err != nil {
 		t.Fatalf("second call (idempotency): %v", err)
 	}
 }
@@ -304,8 +304,8 @@ func TestApp_Redirects_wires_db(t *testing.T) {
 func TestApp_Redirects_loads_existing(t *testing.T) {
 	db := newSQLiteDB(t)
 	// Seed the DB directly before wiring.
-	if err := CreateRedirectsTable(db); err != nil {
-		t.Fatalf("CreateRedirectsTable: %v", err)
+	if err := CreateRoutesTable(db); err != nil {
+		t.Fatalf("CreateRoutesTable: %v", err)
 	}
 	store := NewRedirectStore()
 	entry := RedirectEntry{From: "/old", To: "/new", Code: Permanent}
@@ -328,8 +328,8 @@ func TestApp_Redirects_loads_existing(t *testing.T) {
 
 func TestRedirectStore_Save_Delete_roundtrip(t *testing.T) {
 	db := newSQLiteDB(t)
-	if err := CreateRedirectsTable(db); err != nil {
-		t.Fatalf("CreateRedirectsTable: %v", err)
+	if err := CreateRoutesTable(db); err != nil {
+		t.Fatalf("CreateRoutesTable: %v", err)
 	}
 	s := NewRedirectStore()
 	ctx := context.Background()
@@ -368,8 +368,8 @@ func TestRedirectStore_Save_Delete_roundtrip(t *testing.T) {
 
 func TestRedirectStore_Save_IsPrefix_bool_roundtrip(t *testing.T) {
 	db := newSQLiteDB(t)
-	if err := CreateRedirectsTable(db); err != nil {
-		t.Fatalf("CreateRedirectsTable: %v", err)
+	if err := CreateRoutesTable(db); err != nil {
+		t.Fatalf("CreateRoutesTable: %v", err)
 	}
 	s := NewRedirectStore()
 	ctx := context.Background()

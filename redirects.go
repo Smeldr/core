@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -197,26 +198,12 @@ func (s *RedirectStore) Len() int {
 // DB persistence
 // ---------------------------------------------------------------------------
 
-// dbRedirectRow is the scan target for rows from the smeldr_redirects table.
+// dbRedirectRow is the scan target for redirect rows from the smeldr_routes table.
 type dbRedirectRow struct {
-	From     string `db:"from_path"`
-	To       string `db:"to_path"`
-	Code     int    `db:"code"`
+	From     string `db:"path_pattern"`
+	To       string `db:"redirect_to"`
+	Code     int    `db:"status_code"`
 	IsPrefix bool   `db:"is_prefix"`
-}
-
-// CreateRedirectsTable creates the smeldr_redirects table if it does not exist.
-// Called automatically by [App.Redirects]; also available for migration tools
-// and tests.
-func CreateRedirectsTable(db DB) error {
-	_, err := db.ExecContext(context.Background(), `
-CREATE TABLE IF NOT EXISTS smeldr_redirects (
-    from_path TEXT NOT NULL PRIMARY KEY,
-    to_path   TEXT NOT NULL DEFAULT '',
-    code      INTEGER NOT NULL DEFAULT 301,
-    is_prefix INTEGER NOT NULL DEFAULT 0
-)`)
-	return err
 }
 
 // Delete removes the entry with the given from path from the in-memory store.
@@ -231,13 +218,13 @@ func (s *RedirectStore) Delete(from string) {
 	})
 }
 
-// Load reads all rows from the smeldr_redirects table and registers them via
-// [RedirectStore.Add]. Chain collapse and validation rules are applied during
+// Load reads all redirect rows from the smeldr_routes table and registers them
+// via [RedirectStore.Add]. Chain collapse and validation rules are applied during
 // load. Call [App.Redirects] to activate database-backed management; it creates
-// the table automatically.
+// and migrates the table automatically.
 func (s *RedirectStore) Load(ctx context.Context, db DB) error {
 	rows, err := Query[dbRedirectRow](ctx, db,
-		"SELECT from_path, to_path, code, is_prefix FROM smeldr_redirects")
+		"SELECT path_pattern, redirect_to, status_code, is_prefix FROM smeldr_routes WHERE route_type='redirect'")
 	if err != nil {
 		return err
 	}
@@ -252,23 +239,24 @@ func (s *RedirectStore) Load(ctx context.Context, db DB) error {
 	return nil
 }
 
-// Save upserts e into the smeldr_redirects table and must be paired with
-// [RedirectStore.Add] to keep the in-memory store in sync.
+// Save upserts e into the smeldr_routes table with route_type='redirect' and
+// must be paired with [RedirectStore.Add] to keep the in-memory store in sync.
 func (s *RedirectStore) Save(ctx context.Context, db DB, e RedirectEntry) error {
+	now := time.Now().UTC()
 	_, err := db.ExecContext(ctx,
-		"INSERT INTO smeldr_redirects (from_path, to_path, code, is_prefix) "+
-			"VALUES ($1, $2, $3, $4) "+
-			"ON CONFLICT (from_path) DO UPDATE SET to_path=$2, code=$3, is_prefix=$4",
-		e.From, e.To, int(e.Code), e.IsPrefix,
+		"INSERT INTO smeldr_routes (id, path_pattern, route_type, redirect_to, status_code, is_prefix, created_at, updated_at) "+
+			"VALUES ($1, $2, 'redirect', $3, $4, $5, $6, $7) "+
+			"ON CONFLICT (path_pattern) DO UPDATE SET redirect_to=$3, status_code=$4, is_prefix=$5, updated_at=$7",
+		NewID(), e.From, e.To, int(e.Code), e.IsPrefix, now, now,
 	)
 	return err
 }
 
-// Remove deletes the entry with the given from path from the smeldr_redirects
+// Remove deletes the redirect row with the given from path from the smeldr_routes
 // table. Pair with [RedirectStore.Delete] to keep the in-memory store in sync.
 func (s *RedirectStore) Remove(ctx context.Context, db DB, from string) error {
 	_, err := db.ExecContext(ctx,
-		"DELETE FROM smeldr_redirects WHERE from_path = $1", from)
+		"DELETE FROM smeldr_routes WHERE path_pattern=$1 AND route_type='redirect'", from)
 	return err
 }
 
