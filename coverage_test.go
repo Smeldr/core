@@ -1624,6 +1624,8 @@ func TestCollectDBFields_SkipsUnexportedAndDashTag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CREATE TABLE: %v", err)
 	}
+	// Reference the unexported field so the linter does not flag it as unused.
+	_ = testStructWithPrivateField{name: "x"}
 	// Query with a struct that has an unexported field → covers lines 61-62.
 	rows1, err := Query[*testStructWithPrivateField](context.Background(), db, "SELECT id FROM tmp")
 	if err != nil {
