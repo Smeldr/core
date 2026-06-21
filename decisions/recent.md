@@ -17,6 +17,18 @@ Archived 2026-06-15: A139–A150 → phase8-archive.md
 
 ---
 
+## A165 — T06 step 7: Layer 3a structural sweep (v1.42.8, 2026-06-21)
+
+**Context:** T06 needs a DB-only engine to find relations whose targets are no longer live (published). Layer 3a — no LLM, no AgentJob rows.
+
+**Decision:** Add `TargetChecker` func type: `func(ctx context.Context, targetType, targetID string) (alive bool, err error)`. Add `RelationStore.SweepStructural(ctx, check TargetChecker, onStale func(ctx, edge RelationEdge)) (flagged, skipped int, err error)` — iterates all active relations (`invalid_at IS NULL OR invalid_at > now` AND `valid_at IS NULL OR valid_at <= now`), deduplicates targets via map to minimise checker calls, calls caller-supplied `TargetChecker` once per unique target, sets `invalid_at = now` on stale edges, fires `onStale` callback per flagged edge. Add `App.SweepStructural(ctx) (flagged, skipped int, err error)` — convenience wrapper with nil-store guard. Default `TargetChecker` queries `smeldr_dynamic_content` for `status = 'published'`; default `onStale` emits `AfterRelationCascade` signal.
+
+**What it does NOT do:** no LLM calls, no AgentJob rows, no MCP calls inside the sweep, no transitive traversal (one hop only), does not know which content tables exist (TargetChecker's responsibility).
+
+**Deferred:** cron scheduling lives in `smeldr/agent` (Layer 3b — separate step).
+
+---
+
 ## A163 — T06 step 6: MCP relation kind tools (v1.42.6, 2026-06-20)
 
 **Context:** T06 agents need to manage the relation kind registry through MCP — not just query and assert edges, but also register and inspect kinds dynamically.

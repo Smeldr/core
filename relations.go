@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -614,6 +615,75 @@ func (s *RelationStore) BulkRecompute(ctx context.Context, items []RelationSourc
 		}
 	}
 	return nil
+}
+
+// TargetChecker reports whether a relation target is still live (published and not
+// hard-deleted). Error means the check could not be performed — SweepStructural counts
+// that relation as skipped, not flagged.
+type TargetChecker func(ctx context.Context, targetType, targetID string) (alive bool, err error)
+
+// SweepStructural iterates all active relations (invalid_at IS NULL OR invalid_at > now,
+// AND valid_at IS NULL OR valid_at <= now) and calls check for each unique target.
+// When a target is not alive, the sweep sets invalid_at = now on each source edge
+// pointing to that target and calls onStale(ctx, edge).
+// Returns (flagged, skipped, error): flagged = relations whose target was not alive;
+// skipped = relations where check returned an error (logged, not fatal);
+// error = only on fatal DB errors that abort the sweep.
+func (s *RelationStore) SweepStructural(
+	ctx context.Context,
+	check TargetChecker,
+	onStale func(ctx context.Context, edge RelationEdge),
+) (flagged int, skipped int, err error) {
+	now := time.Now().UTC()
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT "+relationColumns+" FROM smeldr_relations "+
+			"WHERE (invalid_at IS NULL OR invalid_at > $1) "+
+			"AND (valid_at IS NULL OR valid_at <= $2)",
+		now, now,
+	)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer rows.Close()
+
+	type targetKey struct{ typ, id string }
+	byTarget := map[targetKey][]RelationEdge{}
+	for rows.Next() {
+		e, scanErr := scanEdge(rows)
+		if scanErr != nil {
+			return 0, 0, scanErr
+		}
+		k := targetKey{e.TargetType, e.TargetID}
+		byTarget[k] = append(byTarget[k], e)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, 0, err
+	}
+
+	for k, edges := range byTarget {
+		alive, checkErr := check(ctx, k.typ, k.id)
+		if checkErr != nil {
+			slog.WarnContext(ctx, "SweepStructural: target check error",
+				"target_type", k.typ, "target_id", k.id, "err", checkErr)
+			skipped++
+			continue
+		}
+		if alive {
+			continue
+		}
+		for _, e := range edges {
+			if _, updateErr := s.db.ExecContext(ctx,
+				"UPDATE smeldr_relations SET invalid_at=$1 WHERE id=$2",
+				now, e.ID,
+			); updateErr != nil {
+				return flagged, skipped, updateErr
+			}
+			e.InvalidAt = &now
+			onStale(ctx, e)
+			flagged++
+		}
+	}
+	return flagged, skipped, nil
 }
 
 // computeRelationDiff returns the IDs to delete and edges to insert given the

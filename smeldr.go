@@ -286,10 +286,12 @@ type App struct {
 
 	pageMetaStore *PageMetaStore // non-nil when App.PageMeta() was called; injected into templateModules at Handler() time
 
-	relationStore  *RelationStore // non-nil when App.Relations() was called
-	schemaStore    *SchemaStore   // non-nil when App.Relations() was called; used by syncSaveHook
-	syncSaveHook   SyncSaveHook   // non-nil when App.Relations() was called; fired synchronously after save
-	syncHookModules []interface{ setSyncSaveHook(func(context.Context, string, string, any) error) }
+	relationStore   *RelationStore // non-nil when App.Relations() was called
+	schemaStore     *SchemaStore   // non-nil when App.Relations() was called; used by syncSaveHook
+	syncSaveHook    SyncSaveHook   // non-nil when App.Relations() was called; fired synchronously after save
+	syncHookModules []interface {
+		setSyncSaveHook(func(context.Context, string, string, any) error)
+	}
 
 	auditStore      AuditStore // non-nil when App.Audit() was called
 	auditHandlerReg bool       // true once GET /_audit is registered
@@ -790,6 +792,44 @@ func extractRelationEdges(sourceType, sourceID string, fields []SchemaField, ite
 // RelationStore returns the [RelationStore] wired via [App.Relations], or nil if none.
 func (a *App) RelationStore() *RelationStore {
 	return a.relationStore
+}
+
+// SweepStructural runs a structural premise sweep using a default [TargetChecker]
+// that queries smeldr_dynamic_content by id and checks status = 'published'.
+// It fires [AfterRelationCascade] for each stale source edge via [App.emitSignal].
+// Returns (0, 0, nil) immediately if no [RelationStore] is configured.
+//
+// The default TargetChecker only knows about smeldr_dynamic_content (runtime-defined
+// content types). Applications that use compiled content types (via [Module]) must
+// supply a custom TargetChecker by calling [RelationStore.SweepStructural] directly.
+func (a *App) SweepStructural(ctx context.Context) (flagged, skipped int, err error) {
+	rs := a.RelationStore()
+	if rs == nil {
+		return 0, 0, nil
+	}
+	check := func(ctx context.Context, targetType, targetID string) (bool, error) {
+		rows, err := a.cfg.DB.QueryContext(ctx,
+			"SELECT status FROM smeldr_dynamic_content WHERE id=$1", targetID)
+		if err != nil {
+			return false, err
+		}
+		defer rows.Close()
+		if !rows.Next() {
+			return false, rows.Err()
+		}
+		var status string
+		if err := rows.Scan(&status); err != nil {
+			return false, err
+		}
+		return status == "published", nil
+	}
+	onStale := func(ctx context.Context, e RelationEdge) {
+		a.emitSignal(ctx, AfterRelationCascade, SignalEvent{
+			Type:   e.SourceType,
+			NodeID: e.SourceID,
+		})
+	}
+	return rs.SweepStructural(ctx, check, onStale)
 }
 
 // Audit wires store as the audit trail for this application. It subscribes to

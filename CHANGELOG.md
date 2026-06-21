@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.42.8] — 2026-06-21
+
+### Added
+- `type TargetChecker func(ctx context.Context, targetType, targetID string) (alive bool, err error)` — exported function type for checking whether a relation target is still live; used by `RelationStore.SweepStructural`. (A165)
+- `(*RelationStore).SweepStructural(ctx context.Context, check TargetChecker, onStale func(ctx context.Context, edge RelationEdge)) (flagged int, skipped int, err error)` — iterates all active relations (`invalid_at IS NULL OR invalid_at > now` AND `valid_at IS NULL OR valid_at <= now`), deduplicates targets via map so each unique target is checked once, marks stale edges by setting `invalid_at = now`, and calls `onStale` per edge. Returns `(flagged, skipped, error)`. (A165)
+- `(*App).SweepStructural(ctx context.Context) (flagged, skipped int, err error)` — convenience wrapper; returns `(0, 0, nil)` if no `RelationStore` is configured. Default `TargetChecker` queries `smeldr_dynamic_content` by id and checks `status = 'published'`; default `onStale` fires `AfterRelationCascade` via `emitSignal`. (A165)
+
+### Notes
+`SweepStructural` is a one-hop structural validity check: it does not make LLM calls, does not create `AgentJob` rows, does not call MCP tools, and does not traverse relations transitively. Cron scheduling lives in `smeldr/agent` (Layer 3b — separate step).
+
+---
+
 ## [1.42.7] — 2026-06-20
 
 ### Tests
