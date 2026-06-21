@@ -481,10 +481,11 @@ type Module[T any] struct {
 	navTree       *NavTree       // non-nil when App.NavTree is active; set by App.Handler via setNavTree
 	pageMetaStore *PageMetaStore // nil until App.PageMeta is called; injected by App.Handler push loop
 
-	contentTypeName string                                    // unqualified type name; set by NewModule
-	afterHook       func(Context, Signal, afterHookMeta, any) // nil until wired by App; called async on delivery signals
-	syncSaveHook    func(context.Context, string, string, any) error // nil until wired by App.Relations; called sync after save
-	secret          []byte                                    // set by App.Content via setSecret; used for preview token validation
+	contentTypeName   string                                           // unqualified type name; set by NewModule
+	afterHook         func(Context, Signal, afterHookMeta, any)        // nil until wired by App; called async on delivery signals
+	syncSaveHook      func(context.Context, string, string, any) error // nil until wired by App.Relations; called sync after save
+	secret            []byte                                           // set by App.Content via setSecret; used for preview token validation
+	cacheInvalidators []func()                                         // extra invalidation callbacks wired by App.Route for aggregate routes
 
 	stopCh chan struct{} // closed by Stop() to terminate the cache sweep goroutine
 }
@@ -737,11 +738,11 @@ func (m *Module[T]) collectStats(ctx context.Context) ContentTypeStats {
 // opted into block hosting via [BlockHost].
 func (m *Module[T]) blockHostEnabled() bool { return m.blockHost }
 
-// listPublished implements [ContentLister]. Returns Published items as
-// type-erased maps for the ContentList block resolver (T96). JSON
-// marshal/unmarshal performs the type erasure: T becomes map[string]any so
-// templates can range over the result without knowing the concrete type.
-func (m *Module[T]) listPublished(ctx context.Context, opts ListOptions) ([]map[string]any, error) {
+// ListPublished implements [Listable]. Returns Published items as type-erased
+// maps for the ContentList block resolver (T96) and aggregate route handlers.
+// JSON marshal/unmarshal performs the type erasure: T becomes map[string]any
+// so callers can range over the result without knowing the concrete type.
+func (m *Module[T]) ListPublished(ctx context.Context, opts ListOptions) ([]map[string]any, error) {
 	opts.Status = []Status{Published}
 	items, err := m.repo.FindAll(ctx, opts)
 	if err != nil {
@@ -1198,12 +1199,26 @@ func (m *Module[T]) storeCache(r *http.Request, rec *cacheRecorder) {
 	m.cache.mu.Unlock()
 }
 
-// invalidateCache flushes the module cache after a write operation.
+// invalidateCache flushes the module cache after a write operation and calls
+// any additional invalidators registered by [App.Route] for aggregate routes.
 func (m *Module[T]) invalidateCache() {
 	if m.cache != nil {
 		m.cache.Flush()
 	}
+	for _, fn := range m.cacheInvalidators {
+		fn()
+	}
 }
+
+// addCacheInvalidator registers fn to be called whenever this module's cache
+// is invalidated. Used by [App.Route] to wire cross-module invalidation for
+// aggregate routes.
+func (m *Module[T]) addCacheInvalidator(fn func()) {
+	m.cacheInvalidators = append(m.cacheInvalidators, fn)
+}
+
+// moduleURLPrefix returns the URL prefix registered via [At], or "" if none.
+func (m *Module[T]) moduleURLPrefix() string { return m.prefix }
 
 // — Content-type helpers ——————————————————————————————————————————————————
 

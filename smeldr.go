@@ -307,6 +307,8 @@ type App struct {
 	hookableModules []interface {
 		setAfterHook(func(Context, Signal, afterHookMeta, any))
 	} // modules whose afterHook is wired at Run time
+
+	routeReg []routeEntry // in-memory route registry; populated by App.Route and app.Content
 }
 
 // New creates a new [App] from cfg.
@@ -370,6 +372,50 @@ func (a *App) Use(mws ...func(http.Handler) http.Handler) {
 //	}))
 func (a *App) Handle(pattern string, handler http.Handler) {
 	a.mux.Handle(pattern, handler)
+}
+
+// cacheInvalidatable is the internal interface satisfied by Module[T] for
+// cross-module cache invalidation in aggregate routes.
+type cacheInvalidatable interface {
+	addCacheInvalidator(func())
+	invalidateCache()
+}
+
+// Route registers a route at the given URL pattern and records it in the
+// in-memory route registry. For aggregate specs (multiple content types at one
+// URL), Route also wires the aggregate handler onto the mux and cross-links
+// cache invalidation between the participating modules so that a publish in
+// any one of them flushes the aggregate route's cached responses.
+//
+// Call Route after all participating modules have been registered via
+// [App.Content]:
+//
+//	el := smeldr.NewModule[Electronics](Electronics{}, smeldr.At("/electronics"))
+//	cl := smeldr.NewModule[Clothing](Clothing{}, smeldr.At("/clothing"))
+//	app.Content(el)
+//	app.Content(cl)
+//	app.Route("/products", smeldr.Aggregate(smeldr.Serves[Electronics](el), smeldr.Serves[Clothing](cl)).List())
+func (a *App) Route(pattern string, spec RouteSpec) {
+	a.routeReg = append(a.routeReg, routeEntry{pattern: pattern, spec: spec})
+	if !spec.IsAggregate() {
+		return
+	}
+	// Aggregate: register handler and cross-wire cache invalidation so that a
+	// publish in any participating module also flushes the others.
+	a.mux.Handle("GET "+pattern, aggregateRouteHandler(spec))
+	for i, s := range spec.specs {
+		for j, other := range spec.specs {
+			if i == j {
+				continue
+			}
+			src, ok1 := s.listable.(cacheInvalidatable)
+			dst, ok2 := other.listable.(cacheInvalidatable)
+			if ok1 && ok2 {
+				dst := dst // capture
+				src.addCacheInvalidator(dst.invalidateCache)
+			}
+		}
+	}
 }
 
 // Partials sets the directory from which shared HTML partial templates are
@@ -501,9 +547,9 @@ func (a *App) Content(v any, opts ...Option) {
 				} else if meta.Prefix != "" {
 					a.typeRegistry.RegisterPrefix(meta.Prefix, meta.TypeName)
 				}
-				if cl, ok := r.(ContentLister); ok {
+				if cl, ok := r.(Listable); ok {
 					if desc := a.typeRegistry.Lookup(meta.TypeName); desc != nil {
-						desc.Fetch = cl.listPublished
+						desc.Fetch = cl.ListPublished
 					}
 				}
 			}
@@ -529,6 +575,23 @@ func (a *App) Content(v any, opts ...Option) {
 			setSyncSaveHook(func(context.Context, string, string, any) error)
 		}); ok {
 			a.syncHookModules = append(a.syncHookModules, sh)
+		}
+		// Populate route registry for modules registered with At().
+		if up, ok1 := r.(interface{ moduleURLPrefix() string }); ok1 {
+			if l, ok2 := r.(Listable); ok2 {
+				prefix := up.moduleURLPrefix()
+				if prefix != "" {
+					typeName := ""
+					if mm, ok3 := r.(MCPModule); ok3 {
+						typeName = mm.MCPMeta().TypeName
+					}
+					sp := &ServesSpec{typeName: typeName, listable: l}
+					a.routeReg = append(a.routeReg,
+						routeEntry{pattern: prefix, spec: RouteSpec{view: "list", specs: []*ServesSpec{sp}}},
+						routeEntry{pattern: prefix + "/{slug}", spec: RouteSpec{view: "item", specs: []*ServesSpec{sp}}},
+					)
+				}
+			}
 		}
 		return
 	}

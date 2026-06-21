@@ -31,14 +31,8 @@ type TypeDescriptor struct {
 	// Fetch returns Published items as type-erased maps for the ContentList
 	// block resolver (T96). Nil for runtime-defined types (T104 increment 2
 	// will handle those via DynamicContentRepo). Set at App.Content() time
-	// when the module implements ContentLister.
+	// when the module implements Listable.
 	Fetch func(ctx context.Context, opts ListOptions) ([]map[string]any, error)
-}
-
-// ContentLister is implemented by Module[T] to expose its repo's Published
-// items as type-erased maps for the ContentList block resolver (T96).
-type ContentLister interface {
-	listPublished(ctx context.Context, opts ListOptions) ([]map[string]any, error)
 }
 
 // ContentTypeRegistry is a concurrency-safe name → *TypeDescriptor registry on

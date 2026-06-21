@@ -23,6 +23,39 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.43.0] — 2026-06-21
+
+### Added
+- `type Listable interface { ListPublished(ctx context.Context, opts ListOptions) ([]map[string]any, error) }` — exported interface for modules that expose published content to aggregate routes and ContentList resolvers; replaces the unexported `ContentLister`. (A168)
+- `func Serves[T any](m *Module[T]) *ServesSpec` — single-type route spec builder; returns a `*ServesSpec` that can produce `List()` or `Show()` `RouteSpec` values. (A168)
+- `func Aggregate(specs ...*ServesSpec) *AggregateSpec` — multi-type route spec builder; combines two or more `*ServesSpec` values. (A168)
+- `(*AggregateSpec).List() RouteSpec` / `(*AggregateSpec).Show() RouteSpec` — produce aggregate-list and aggregate-item specs respectively. (A168)
+- `(*App).Route(pattern string, spec RouteSpec)` — registers a route in the in-memory `routeReg`; for aggregate specs also wires a parallel-fetch JSON handler on the mux and cross-links `cacheInvalidators` between all participating modules. (A168)
+- `aggregate.go` — internal parallel aggregate handler: `ListPublished` called concurrently on all specs, results merged and sorted by `published_at` descending (list view); slug-matched across all specs (show view). (A168)
+
+### Changed
+- `(*Module[T]).listPublished` renamed to `ListPublished` (exported) — satisfies the new `Listable` interface. (A168)
+- `App.Content` — now auto-populates `routeReg` with `list` and `item` entries for any module registered with `At(prefix)`. (A168)
+
+### Notes
+Slug collision at route-definition time is deferred; see DECISIONS.md.
+
+---
+
+## [1.42.9] — 2026-06-21
+
+### Added
+- `func CreateRoutesTable(db DB) error` — creates `smeldr_routes` (unified table for content, redirect, and gone routes) with `id`, `path_pattern` (UNIQUE), `route_type`, `view`, `type_names`, `redirect_to`, `status_code`, `is_prefix`, `created_at`, `updated_at`. Replaces `CreateRedirectsTable`. (A167)
+- `func MigrateRedirectsToRoutes(db DB) error` — idempotent migration: copies all rows from `smeldr_redirects` → `smeldr_routes` (route_type='redirect') and drops the source table; no-op if `smeldr_redirects` does not exist. (A167)
+
+### Changed
+- `(*RedirectStore).Load` — reads from `smeldr_routes WHERE route_type='redirect'` instead of `smeldr_redirects`. (A167)
+- `(*RedirectStore).Save` — upserts into `smeldr_routes` with `route_type='redirect'` and RFC-3339 timestamps. (A167)
+- `(*RedirectStore).Remove` — deletes from `smeldr_routes WHERE path_pattern=$1 AND route_type='redirect'`. (A167)
+- `(*App).Redirects(db DB)` — now calls `CreateRoutesTable` + `MigrateRedirectsToRoutes` instead of `CreateRedirectsTable`. (A167)
+
+---
+
 ## [1.42.8] — 2026-06-21
 
 ### Added

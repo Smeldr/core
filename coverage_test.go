@@ -1593,7 +1593,7 @@ func TestModule_listPublished_returnsPublishedItems(t *testing.T) {
 			t.Fatalf("Save: %v", err)
 		}
 	}
-	items, err := m.listPublished(ctx, ListOptions{})
+	items, err := m.ListPublished(ctx, ListOptions{})
 	if err != nil {
 		t.Fatalf("listPublished: %v", err)
 	}
