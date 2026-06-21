@@ -9,6 +9,21 @@ import (
 	"strings"
 )
 
+// publishedAtStr extracts the publication timestamp as a comparable string from
+// a type-erased item map. Checks "PublishedAt" (compiled types and dynamic types)
+// and "published_at" (legacy/test data) in that order. Returns "" when absent.
+func publishedAtStr(m map[string]any) string {
+	for _, key := range []string{"PublishedAt", "published_at"} {
+		switch v := m[key].(type) {
+		case string:
+			return v
+		case interface{ String() string }:
+			return v.String()
+		}
+	}
+	return ""
+}
+
 // aggregateRouteHandler returns an http.Handler that serves an aggregate route.
 // For list patterns (no {slug} segment): calls ListPublished on all specs in
 // parallel, merges results sorted by "published_at" descending, and writes JSON.
@@ -50,10 +65,10 @@ func aggregateListHandler(ctx context.Context, w http.ResponseWriter, r *http.Re
 		merged = append(merged, res.items...)
 	}
 
-	// Sort by published_at descending; items without the field sort last.
+	// Sort by PublishedAt descending; items without the field sort last.
 	slices.SortStableFunc(merged, func(a, b map[string]any) int {
-		pa, _ := a["published_at"].(string)
-		pb, _ := b["published_at"].(string)
+		pa := publishedAtStr(a)
+		pb := publishedAtStr(b)
 		return cmp.Compare(pb, pa) // descending: b before a
 	})
 
@@ -87,7 +102,7 @@ func aggregateShowHandler(ctx context.Context, w http.ResponseWriter, r *http.Re
 			continue
 		}
 		for _, item := range res.items {
-			if s, _ := item["slug"].(string); s == slug {
+			if s, _ := item["Slug"].(string); s == slug {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				json.NewEncoder(w).Encode(item) //nolint:errcheck
 				return

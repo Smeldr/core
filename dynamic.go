@@ -306,6 +306,7 @@ func (a *App) DefineContentType(ctx context.Context, schema *ContentTypeSchema) 
 		a.mux.Handle("GET "+prefix+"/{slug}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			serveDynamicItem(w, r, appRef, desc, r.PathValue("slug"))
 		}))
+		insertDynamicRoutes(ctx, a.cfg.DB, schema.TypeName, prefix)
 	}
 	return desc, nil
 }
@@ -371,8 +372,29 @@ func (a *App) loadDynamicTypes(ctx context.Context) {
 			a.mux.Handle("GET "+prefix+"/{slug}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				serveDynamicItem(w, r, appRef, d, r.PathValue("slug"))
 			}))
+			insertDynamicRoutes(ctx, a.cfg.DB, schema.TypeName, prefix)
 		}
 	}
+}
+
+// insertDynamicRoutes writes list and item rows for a dynamic content type into
+// smeldr_routes. Uses INSERT OR IGNORE so it is safe to call on every restart
+// (idempotent). No-op when prefix is empty or DB is nil.
+func insertDynamicRoutes(ctx context.Context, db DB, typeName, prefix string) {
+	if prefix == "" || db == nil {
+		return
+	}
+	typeNames, _ := json.Marshal([]string{typeName})
+	now := time.Now().UTC()
+	db.ExecContext(ctx, //nolint:errcheck
+		`INSERT OR IGNORE INTO smeldr_routes
+		    (id, path_pattern, route_type, view, type_names, created_at, updated_at)
+		 VALUES
+		    (?,  ?,            'content',  'list', ?,          ?,          ?),
+		    (?,  ?,            'content',  'item', ?,          ?,          ?)`,
+		NewID(), prefix, string(typeNames), now, now,
+		NewID(), prefix+"/{slug}", string(typeNames), now, now,
+	)
 }
 
 // — public HTTP handlers ——————————————————————————————————————————————————————
@@ -741,4 +763,3 @@ func nodeToMap(node *DynamicNode) map[string]any {
 	}
 	return m
 }
-

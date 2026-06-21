@@ -10,10 +10,10 @@ import (
 
 func TestAggregateListHandler_MergesItems(t *testing.T) {
 	s1 := &mockListable{items: []map[string]any{
-		{"slug": "alpha", "published_at": "2026-01-02T00:00:00Z"},
+		{"Slug": "alpha", "PublishedAt": "2026-01-02T00:00:00Z"},
 	}}
 	s2 := &mockListable{items: []map[string]any{
-		{"slug": "beta", "published_at": "2026-01-03T00:00:00Z"},
+		{"Slug": "beta", "PublishedAt": "2026-01-03T00:00:00Z"},
 	}}
 	spec := RouteSpec{
 		view: "aggregate-list",
@@ -38,10 +38,10 @@ func TestAggregateListHandler_MergesItems(t *testing.T) {
 
 func TestAggregateListHandler_SortsByPublishedAtDesc(t *testing.T) {
 	s1 := &mockListable{items: []map[string]any{
-		{"slug": "older", "published_at": "2026-01-01T00:00:00Z"},
+		{"Slug": "older", "PublishedAt": "2026-01-01T00:00:00Z"},
 	}}
 	s2 := &mockListable{items: []map[string]any{
-		{"slug": "newer", "published_at": "2026-06-01T00:00:00Z"},
+		{"Slug": "newer", "PublishedAt": "2026-06-01T00:00:00Z"},
 	}}
 	spec := RouteSpec{
 		view:  "aggregate-list",
@@ -78,8 +78,8 @@ func TestAggregateListHandler_UpstreamError(t *testing.T) {
 
 func TestAggregateShowHandler_FindsBySlug(t *testing.T) {
 	s1 := &mockListable{items: []map[string]any{
-		{"slug": "foo", "title": "Foo"},
-		{"slug": "bar", "title": "Bar"},
+		{"Slug": "foo", "Title": "Foo"},
+		{"Slug": "bar", "Title": "Bar"},
 	}}
 	spec := RouteSpec{
 		view:  "aggregate-item",
@@ -103,7 +103,7 @@ func TestAggregateShowHandler_FindsBySlug(t *testing.T) {
 
 func TestAggregateShowHandler_NotFound(t *testing.T) {
 	s1 := &mockListable{items: []map[string]any{
-		{"slug": "foo", "title": "Foo"},
+		{"Slug": "foo", "Title": "Foo"},
 	}}
 	spec := RouteSpec{
 		view:  "aggregate-item",
@@ -121,7 +121,7 @@ func TestAggregateShowHandler_NotFound(t *testing.T) {
 }
 
 func TestAggregateShowHandler_EmptySlug(t *testing.T) {
-	s1 := &mockListable{items: []map[string]any{{"slug": "foo"}}}
+	s1 := &mockListable{items: []map[string]any{{"Slug": "foo"}}}
 	spec := RouteSpec{
 		view:  "aggregate-item",
 		specs: []*ServesSpec{{typeName: "a", listable: s1}},

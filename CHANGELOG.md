@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.43.1] — 2026-06-21
+
+### Added
+- Publish-time slug collision check for aggregate routes: before transitioning an item to Published (via HTTP create, HTTP update, or `MCPPublish`), all registered slug checkers query sibling modules in the same aggregate route. A collision returns `ErrConflict` (HTTP 409) with a message naming the colliding type and slug. (A169)
+- `(*App).Route` now wires `slugCheckable` cross-module checkers alongside the existing `cacheInvalidatable` cross-module invalidators for each aggregate spec pair. (A169)
+- `insertDynamicRoutes` — internal helper that writes `route_type='content'` list and item rows to `smeldr_routes` when a dynamic content type has a non-empty `url_prefix`. Called from `DefineContentType` and `loadDynamicTypes` (idempotent via `INSERT OR IGNORE`). (A169)
+- `loadDynamicTypes` now backfills `smeldr_routes` for all types registered before this amendment; idempotent on repeated restarts. (A169)
+
+### Fixed
+- Cache invalidation cycle: cross-module aggregate wiring now calls `flushOwnCache()` instead of `invalidateCache()` on the target module, preventing infinite recursion when two modules invalidate each other. (A169)
+- Aggregate handler slug and sort key corrected from `"slug"`/`"published_at"` to `"Slug"`/`"PublishedAt"` (PascalCase), matching the keys returned by both `Module[T].ListPublished` and `DynamicTypeRepo.List`. (A169)
+
+---
+
 ## [1.43.0] — 2026-06-21
 
 ### Added

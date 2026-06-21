@@ -375,10 +375,17 @@ func (a *App) Handle(pattern string, handler http.Handler) {
 }
 
 // cacheInvalidatable is the internal interface satisfied by Module[T] for
-// cross-module cache invalidation in aggregate routes.
+// cross-module cache invalidation in aggregate routes. Cross-wiring uses
+// flushOwnCache (not invalidateCache) to prevent recursive cycles.
 type cacheInvalidatable interface {
 	addCacheInvalidator(func())
-	invalidateCache()
+	flushOwnCache()
+}
+
+// slugCheckable is the internal interface satisfied by Module[T] for
+// cross-module slug collision detection in aggregate routes.
+type slugCheckable interface {
+	addSlugChecker(func(ctx context.Context, slug string) error)
 }
 
 // Route registers a route at the given URL pattern and records it in the
@@ -412,7 +419,24 @@ func (a *App) Route(pattern string, spec RouteSpec) {
 			dst, ok2 := other.listable.(cacheInvalidatable)
 			if ok1 && ok2 {
 				dst := dst // capture
-				src.addCacheInvalidator(dst.invalidateCache)
+				src.addCacheInvalidator(dst.flushOwnCache)
+			}
+			// Wire slug collision check: publishing in src checks dst for conflicts.
+			if sc, ok3 := s.listable.(slugCheckable); ok3 {
+				dstTypeName := other.typeName
+				dstListable := other.listable
+				sc.addSlugChecker(func(ctx context.Context, slug string) error {
+					items, err := dstListable.ListPublished(ctx, ListOptions{Status: []Status{Published}})
+					if err != nil {
+						return err
+					}
+					for _, item := range items {
+						if s, _ := item["Slug"].(string); s == slug {
+							return fmt.Errorf("%w: slug %q already published in type %q", ErrConflict, slug, dstTypeName)
+						}
+					}
+					return nil
+				})
 			}
 		}
 	}

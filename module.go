@@ -349,6 +349,12 @@ func nodeIDOf(v any) string {
 	return rv.FieldByIndex(f.id).String()
 }
 
+func nodeSlugOf(v any) string {
+	rv := elemValue(v)
+	f := getNodeFields(rv.Type())
+	return rv.FieldByIndex(f.slug).String()
+}
+
 // autoSlugCache stores the index path of the slug-source field per struct type.
 var autoSlugCache sync.Map
 
@@ -486,6 +492,7 @@ type Module[T any] struct {
 	syncSaveHook      func(context.Context, string, string, any) error // nil until wired by App.Relations; called sync after save
 	secret            []byte                                           // set by App.Content via setSecret; used for preview token validation
 	cacheInvalidators []func()                                         // extra invalidation callbacks wired by App.Route for aggregate routes
+	slugCheckers      []func(ctx context.Context, slug string) error   // collision checkers wired by App.Route for aggregate routes
 
 	stopCh chan struct{} // closed by Stop() to terminate the cache sweep goroutine
 }
@@ -1199,12 +1206,18 @@ func (m *Module[T]) storeCache(r *http.Request, rec *cacheRecorder) {
 	m.cache.mu.Unlock()
 }
 
-// invalidateCache flushes the module cache after a write operation and calls
-// any additional invalidators registered by [App.Route] for aggregate routes.
-func (m *Module[T]) invalidateCache() {
+// flushOwnCache flushes this module's own in-memory cache without propagating
+// to cacheInvalidators, preventing cycles in cross-module aggregate wiring.
+func (m *Module[T]) flushOwnCache() {
 	if m.cache != nil {
 		m.cache.Flush()
 	}
+}
+
+// invalidateCache flushes the module cache after a write operation and calls
+// any additional invalidators registered by [App.Route] for aggregate routes.
+func (m *Module[T]) invalidateCache() {
+	m.flushOwnCache()
 	for _, fn := range m.cacheInvalidators {
 		fn()
 	}
@@ -1215,6 +1228,23 @@ func (m *Module[T]) invalidateCache() {
 // aggregate routes.
 func (m *Module[T]) addCacheInvalidator(fn func()) {
 	m.cacheInvalidators = append(m.cacheInvalidators, fn)
+}
+
+// addSlugChecker registers fn to be called before this module publishes an item.
+// Used by [App.Route] to wire cross-module slug collision detection for aggregate routes.
+func (m *Module[T]) addSlugChecker(fn func(ctx context.Context, slug string) error) {
+	m.slugCheckers = append(m.slugCheckers, fn)
+}
+
+// checkSlugCollision runs all registered slug checkers. Returns the first error
+// (which names the colliding type and slug), or nil if no collision is found.
+func (m *Module[T]) checkSlugCollision(ctx context.Context, slug string) error {
+	for _, fn := range m.slugCheckers {
+		if err := fn(ctx, slug); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // moduleURLPrefix returns the URL prefix registered via [At], or "" if none.
@@ -1654,6 +1684,15 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Slug collision check: if creating directly as Published, ensure no other
+	// module in the same aggregate route already has an item with this slug.
+	if nodeStatusOf(item) == Published {
+		if err := m.checkSlugCollision(ctx, nodeSlugOf(item)); err != nil {
+			WriteError(w, r, err)
+			return
+		}
+	}
+
 	if err := m.repo.Save(ctx, item); err != nil {
 		WriteError(w, r, err)
 		return
@@ -1726,6 +1765,15 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	if err := dispatchBefore(ctx, m.signals[BeforeUpdate], item); err != nil {
 		WriteError(w, r, err)
 		return
+	}
+
+	// Slug collision check: if transitioning to Published, ensure no other
+	// module in the same aggregate route already has an item with this slug.
+	if prevStatus != Published && newStatus == Published {
+		if err := m.checkSlugCollision(ctx, nodeSlugOf(item)); err != nil {
+			WriteError(w, r, err)
+			return
+		}
 	}
 
 	if err := m.repo.Save(ctx, item); err != nil {
@@ -2152,6 +2200,9 @@ func (m *Module[T]) MCPUpdate(ctx Context, slug string, fields map[string]any) (
 func (m *Module[T]) MCPPublish(ctx Context, slug string) error {
 	item, err := m.repo.FindBySlug(ctx, slug)
 	if err != nil {
+		return err
+	}
+	if err := m.checkSlugCollision(ctx, slug); err != nil {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
