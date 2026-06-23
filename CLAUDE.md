@@ -1,4 +1,4 @@
-﻿# Smeldr — Copilot Instructions
+# Smeldr — Agent Instructions
 
 This is the Smeldr project — a Go web framework designed for how you
 actually think. Zero dependencies. AI-first. Production-ready by default.
@@ -162,7 +162,10 @@ When in doubt: Level 2.
   **an HTTP response in an error path. The single pipeline rule is non-negotiable.**
 - `smeldr.Context` is an interface, not a struct (Decision 21)
 - `smeldr.DB` is an interface, not `*sql.DB` (Decision 22)
-- Go 1.22 minimum — do not use features introduced after 1.22
+- Go 1.26.4 minimum — do not use features introduced after 1.26.4
+- Coverage gate: a commit that drops test coverage below 96.0% must not be merged.
+  Verify before every commit:
+  `go test -coverprofile=coverage.out ./... ; go tool cover -func=coverage.out | Select-String "total:"`
 - `gofmt` always — no exceptions
 - godoc comments on every exported symbol
 - A fix or improvement that changes a file **other than** the current step's file
@@ -178,6 +181,49 @@ When in doubt: Level 2.
   addresses. Only use an address that is explicitly stated in the NEXT.md task prompt.
   If a document requires a contact address and none is provided, use the placeholder
   `[contact@example.com]` and flag it in the plan for Peter to fill in.
+
+## Signal protocol
+
+Communication with the architect uses a single file per agent in smeldr/architect/.
+This file is your signal channel — read it at session start, write to it after
+every meaningful state change.
+
+File: `C:\Users\peter\Documents\Code\Smeldr\architect\SIGNAL_CORE.md`   (corepilot)
+File: `C:\Users\peter\Documents\Code\Smeldr\architect\SIGNAL_SITE.md`   (sitepilot)
+
+Format:
+
+```
+---
+from: core
+to: architect
+seq: 3
+signal: commit-ready
+at: 2026-06-23T14:30:00Z
+---
+Optional notes / questions
+```
+
+Signals:
+
+```
+plan-ready              — plan written, awaiting architect review
+plan-feedback           — architect: plan needs changes (see notes)
+approved-start          — architect: plan approved, begin implementation
+implementing            — pilot: work in progress
+implementation-question — pilot: blocked on question (see notes)
+commit-ready            — pilot: verified, awaiting commit approval
+commit-feedback         — architect: commit needs changes (see notes)
+commit-approved         — architect: commit approved
+committed               — pilot: commit done, context updated
+```
+
+Rules:
+- seq starts at 1 per task, increments by 1 per write
+- file contains latest signal only (overwrite, not append)
+- after sending a signal that requires a response, start a Monitor watching the file
+- never stage or commit signal files
+- read signal file at session start before NEXT.md
 
 ## Before planning or writing anything
 
@@ -536,7 +582,7 @@ Wait for feedback before making any changes.
 
 **3. Apply repo doc updates**
 Apply agreed changes to docs/REFERENCE.md, README.md, and/or docs/FEATURELIST.md.
-Also update `.claude/skills/smeldr.md` when any of the following changed:
+Also update `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md` when any of the following changed:
 - MCP tools or CLI commands (update both sections; verify CLI/MCP parity)
 - Config keys (update smeldr.config section)
 - New failure modes confirmed in this release (update gotchas)
