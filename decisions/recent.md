@@ -161,3 +161,11 @@ Archived 2026-06-23: A151–A157 → phase9-archive.md
 **Decision:** Archive A151–A157 (T104 substrate + SSRF + PageMeta) to `decisions/phase9-archive.md`. Backfill DECISIONS.md index rows and recent.md bodies for A167/A168/A169. Replace CLAUDE.md with full migrated content from `.github/copilot-instructions.md` with corrections: title (`Copilot Instructions` → `Agent Instructions`), Go version (1.22 → 1.26.4), skill file reference (`.claude/skills/smeldr.md` → canonical common path), coverage gate added to non-negotiable rules, new signal protocol section added. Delete `.github/copilot-instructions.md`. Delete `NEXT.md` and `plans/core-next-plan.md`. Docs-only; no version bump, no tag, no GitHub release.
 
 ---
+
+## A171 — Wire 6 relation MCP tools in smeldr/mcp (mcp v1.23.0, 2026-06-25)
+
+**Context:** RelationStore.MCPAssertRelation and five sibling methods were added to core in A162/A163 (core v1.42.5–v1.42.6) but were never wired as MCP tools in the smeldr/mcp package. Content Relations docs (content-relations-mcp.md) carried a NOTE warning against publication until this wiring shipped.
+
+**Decision:** New `relation_tools.go` in smeldr/mcp. `Server` gains a `relationStore *smeldr.RelationStore` field set in `New()` via `app.RelationStore()`. Gate: all six tools are registered only when `relationStore != nil` (i.e. `app.Relations(store)` was called) — no new `ServerOption` required. Tool dispatch added to `handleToolsCall` before module-scoped authorisation; tool definitions added to `handleToolsList`. Roles: Author (assert_relation, propose_relation, get_relations, list_relation_kinds), Editor (preview_impact), Admin (upsert_relation_kind). Output uses `relationEdgeMap`/`relationKindMap` helpers for snake_case keys, since `RelationEdge` and `RelationKindDef` have `db:` tags only. go.mod: `smeldr.dev/core` v1.42.9 → v1.43.1. 16 tests in `relation_tools_test.go`. mcp v1.22.1 → v1.23.0.
+
+---

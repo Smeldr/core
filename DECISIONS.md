@@ -48,6 +48,7 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 | # | Title | File |
 |---|-------|------|
+| A171 | Wire 6 relation MCP tools in smeldr/mcp (assert_relation, propose_relation, get_relations, preview_impact, upsert_relation_kind, list_relation_kinds). Gated by App.RelationStore() != nil; no new ServerOption. Roles: Author/Editor/Admin per tool. Output uses snake_case map helpers. mcp v1.23.0. | [recent.md](decisions/recent.md) |
 | A170 | docs(cleanup): archive A151–A157, migrate CLAUDE.md, backfill A167–A169 | [recent.md](decisions/recent.md) |
 | A169 | T106: slug collision check + dynamic route registration | [recent.md](decisions/recent.md) |
 | A168 | T106: Listable, Serves[T], Aggregate, App.Route | [recent.md](decisions/recent.md) |

@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or pilot agent.
 
-Current versions: smeldr.dev/core v1.43.1 · smeldr.dev/mcp v1.22.1 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.0 · smeldr.dev/social v0.9.0 · smeldr.dev/agent v0.5.2 · smeldr.dev/core/pgx v0.1.2
+Current versions: smeldr.dev/core v1.43.1 · smeldr.dev/mcp v1.23.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.0 · smeldr.dev/social v0.9.0 · smeldr.dev/agent v0.5.2 · smeldr.dev/core/pgx v0.1.2
 
 ---
 
@@ -260,6 +260,10 @@ Tools are named from the type in lower_snake_case.
 | `list_webhook_deliveries` / `retry_webhook` | Admin | Delivery introspection and retry |
 | `create_redirect` / `list_redirects` / `delete_redirect` | Editor+ | Redirect rule management (requires `app.Redirects(db)`) |
 | `set_page_meta` / `get_page_meta` / `delete_page_meta` / `list_page_meta` | Admin | Per-path SEO overrides (requires `mcp.WithPageMeta(db)`) |
+| `assert_relation` / `propose_relation` / `get_relations` | Author+ | Relation graph: assert/propose edges, query by source/target/both. Gate: `app.Relations(store)` called. |
+| `preview_impact` | Editor+ | Return dependents of a target item without firing signals. Gate: `app.Relations(store)` called. |
+| `upsert_relation_kind` | Admin | Register or update a relation kind. Gate: `app.Relations(store)` called. |
+| `list_relation_kinds` | Author+ | List all registered relation kinds. Gate: `app.Relations(store)` called. |
 
 Block system (T32, enabled with `mcp.WithBlocks()`; blocks addressed by ID, not slug):
 
