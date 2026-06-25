@@ -3,6 +3,10 @@
 *.out
 cov
 coverage
+coverage.html
+cov_detail.html
+cov_pm
+cov_profile
 .vscode/
 .idea/
 *.swp
