@@ -148,3 +148,43 @@ No exported Go symbols added, removed, or renamed.
 No build, vet, or test changes required.
 
 ---
+
+## Non-Decision A172 — BSL and SSPL declined
+
+**Date:** 2026-06-28
+**Status:** Declined
+
+### What was considered
+
+Relicensing Smeldr Core from AGPL to Business Source License (BSL, as used by
+MariaDB/Hashicorp) or Server Side Public License (SSPL, as used by MongoDB and Redis).
+Both restrict the right to run the software in production without a commercial license,
+which proponents argue gives stronger commercial protection than AGPL.
+
+### Decision
+
+Declined. Smeldr Core stays AGPL permanently.
+
+### Rationale
+
+Article XII of the Smeldr Constitution states that an organization owns its operational
+model. Ownership is the starting condition, not a grant from the platform. BSL and SSPL
+make running the software in production conditional on commercial terms — this directly
+contradicts Article XII.
+
+Other projects (Elastic, MongoDB, Redis) started permissive and relicensed under commercial
+pressure, at significant cost to community trust. Smeldr started protective: AGPL from day one.
+The relicense escape is not needed and would contradict the constitutional commitment.
+
+AGPL is what makes a fully open, fully capable core safe to give away: no one can offer
+Smeldr as a service without open-sourcing their stack or holding a commercial license.
+That protection is sufficient and constitutionally sound.
+
+See also: `constitution/cloud-strategy.md` — "The commercial boundary".
+
+### Consequences
+
+No exported Go symbols added, removed, or renamed.
+No build, vet, or test changes required.
+
+---

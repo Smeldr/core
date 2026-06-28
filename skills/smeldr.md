@@ -3,7 +3,31 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or pilot agent.
 
-Current versions: smeldr.dev/core v1.43.1 · smeldr.dev/mcp v1.23.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.0 · smeldr.dev/social v0.9.0 · smeldr.dev/agent v0.5.2 · smeldr.dev/core/pgx v0.1.2
+Current versions: smeldr.dev/core v1.43.1 · smeldr.dev/mcp v1.23.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.1 · smeldr.dev/social v0.9.0 · smeldr.dev/agent v0.6.0 · smeldr.dev/core/pgx v0.1.2
+
+---
+
+## Intellectual foundation
+
+Smeldr has a constitution and vocabulary layer in `smeldr/architect/constitution/`.
+Read `constitution.md`, `vocabulary.md`, and `cloud-strategy.md` when making
+architecture decisions or designing new MCP or developer-facing surfaces.
+
+**Two vocabularies — keep them on separate surfaces.**
+
+| Internal (constitutional) | External (market / developer-facing) |
+|---------------------------|---------------------------------------|
+| Managed Item, Authority, Lineage, Evidence, Participant, Operational platform | content, permissions, history, AI-native content backend |
+
+- Constitutional vocabulary belongs in `constitution/`, design docs, DECISIONS.md, and NEXT.md.
+- Market vocabulary belongs in README, smeldr.dev copy, MCP tool descriptions, and public docs.
+- The skill and public docs are a bridge surface — convergence is deliberate, not accidental.
+
+**Publication gate:** no external surface adopts constitutional vocabulary until a second
+domain ships. Until then, lead externally with "AI-native content backend".
+
+**Concept-to-code mapping:** `vocabulary.md` is the authoritative binding
+(e.g. Managed Item → `Node` / `DynamicNode`). The code keeps its earned names.
 
 ---
 
