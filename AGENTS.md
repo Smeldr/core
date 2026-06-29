@@ -427,6 +427,21 @@ These tools are available when the MCP server is started with `mcp.WithPageMeta(
 - `ListHeadFunc` takes priority over stored overrides on list pages
 - Override is a no-op if `mcp.WithPageMeta(db)` was not called
 
+### State flow tools
+
+These tools are available when `App.Config().DB` is non-nil (any app with a database):
+
+| Tool | Role | Description |
+|------|------|-------------|
+| `transition_item` | Editor | Move a dynamic content item to a new state. Params: `type_name`, `slug`, `to_state`. Validated against the registered flow; returns -32001 if the transition is not permitted. |
+| `get_valid_transitions` | Author | List legal target states for the item's current state. Params: `type_name`, `slug`. Falls back to the default flow when no custom flow is registered. Returns `{current_state, valid_transitions: []}`. |
+| `list_items_by_state` | Author | List all items of a dynamic content type in the given state. Params: `type_name`, `state`. Returns `{type_name, state, items, count}`. |
+
+**State flow rules:**
+- `transition_item` calls `DynamicTypeRepo.SetStatus` which runs `validateTransition` internally — the same validation used by all status-change paths in the HTTP layer
+- `get_valid_transitions` queries `smeldr_state_flows` directly for the custom flow registered for `type_name`, falling back to the default flow if none is registered
+- The default flow (draft → scheduled/published/archived, scheduled → published, published → archived) is always present when a DB is configured
+
 ### Connection setup
 
 See the smeldr.dev/mcp README for Claude Desktop, Cursor, and SSE configuration.

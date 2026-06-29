@@ -215,3 +215,21 @@ New file `state.go` exports `StateFlow`, `State`, `Transition` types. `StateFlow
 12 new tests in `state_test.go`: 8 `TestValidateTransition_*` unit tests (nilDB, nonSQLite, identity, customFlow_valid, customFlow_invalid, defaultFlow_valid, defaultFlow_invalid, noFlow) + 1 `TestValidateTransition_countQueryError` (mock fail-open) + 3 `TestMCPPublish/Archive/Schedule_invalidTransition` integration tests (real SQLite with restricted flow). 1 updated test in `dynamic_app_test.go`: `TestAdminSetStatus_InvalidStatus` now uses sub-tests — unknown status → 409 (was 400); empty status → 400. Coverage: 96.0%.
 
 ---
+
+## A177 — T23 Step 4: State Flow MCP Tools (mcp v1.24.0, 2026-06-29)
+
+**Date:** 2026-06-29
+**Status:** Agreed
+**Level:** 1
+
+Add three MCP tools in new file `state_tools.go` in smeldr/mcp, all gated on `s.app.Config().DB != nil` (no new ServerOption):
+
+- `transition_item(type_name, slug, to_state)` — Editor role. Calls `DynamicTypeRepo.GetBySlug` to verify item exists, then `SetStatus` which invokes `validateTransition` internally. Returns -32001 (ErrConflict) when the transition is not permitted by the registered flow.
+- `get_valid_transitions(type_name, slug)` — Author role. Queries `smeldr_state_flows` (custom flow for type, falling back to default flow) and `smeldr_transitions WHERE from_state = currentStatus`. Returns `{current_state, valid_transitions: []}`.
+- `list_items_by_state(type_name, state)` — Author role. Calls `DynamicContentRepo.List` with status filter. Returns `{type_name, state, items, count}`.
+
+`errorFor` in tool.go extended: `errors.Is(err, smeldr.ErrConflict)` → `-32001` with the error message (was falling through to -32603 "internal error"). This also correctly surfaces transition conflicts from the pre-existing `set_content_status` tool.
+
+`go.mod`: `smeldr.dev/core` v1.43.1 → v1.44.1. 25 tests in `state_tools_test.go`. Coverage: 96.0%.
+
+---

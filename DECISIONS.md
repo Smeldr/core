@@ -48,6 +48,7 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 | # | Title | File |
 |---|-------|------|
+| A177 | T23 Step 4: three state flow MCP tools in smeldr/mcp (transition_item, get_valid_transitions, list_items_by_state). ErrConflict → -32001. core v1.44.1, mcp v1.24.0. | [recent.md](decisions/recent.md) |
 | A176 | T23 Step 3: validateTransition (unexported) in state.go — checks smeldr_transitions for permitted flow edges; ErrConflict (409) on disallowed; identity + nil DB + non-SQLite → nil. DynamicTypeRepo.SetStatus: calls validateTransition after GetByID; newSetStatusHandler: enum switch removed (empty→400, disallowed→409). Module[T] db DB + setDB; MCPPublish/Archive/Schedule call validateTransition before status change. App.Content: setDB wire. 12 new tests + 1 updated. Coverage 96.0%. v1.44.1. | [recent.md](decisions/recent.md) |
 | A175 | T23 Step 2: App.RegisterFlow(StateFlow) error + exported types StateFlow, State, Transition in state.go. INSERT OR IGNORE + SELECT id idempotency. validateFlowItems (unexported) SQLite-only unknown-state validation. 12 tests in state_test.go. v1.44.0. | [recent.md](decisions/recent.md) |
 | A174 | T23 Step 1: add smeldr_state_flows, smeldr_states, smeldr_transitions, smeldr_transition_triggers tables via migrateStateFlows() called from New(). Seed default flow (draft/scheduled/published/archived) idempotently. No exported Go symbols. Prerequisite for T23 Steps 2–9. | [recent.md](decisions/recent.md) |
