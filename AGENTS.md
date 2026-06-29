@@ -433,11 +433,14 @@ These tools are available when `App.Config().DB` is non-nil (any app with a data
 
 | Tool | Role | Description |
 |------|------|-------------|
+| `define_state_flow` | Admin | Register or update a state flow. Params: `name`, `type_name` (required), `states` (array of `{name, is_initial?, is_terminal?, suppresses_signals?}`), `transitions` (array of `{from, to, required_role?}`). Idempotent — safe to re-run. Returns `{name, type_name, state_count, transition_count}`. |
 | `transition_item` | Editor | Move a dynamic content item to a new state. Params: `type_name`, `slug`, `to_state`. Validated against the registered flow; returns -32001 if the transition is not permitted. |
 | `get_valid_transitions` | Author | List legal target states for the item's current state. Params: `type_name`, `slug`. Falls back to the default flow when no custom flow is registered. Returns `{current_state, valid_transitions: []}`. |
 | `list_items_by_state` | Author | List all items of a dynamic content type in the given state. Params: `type_name`, `state`. Returns `{type_name, state, items, count}`. |
 
 **State flow rules:**
+- `define_state_flow` calls `App.RegisterFlow` which uses INSERT OR IGNORE — re-running with the same name/type_name is safe; existing state and transition rows are preserved
+- `type_name` is required for `define_state_flow` (the default flow is seeded at startup, not via MCP)
 - `transition_item` calls `DynamicTypeRepo.SetStatus` which runs `validateTransition` internally — the same validation used by all status-change paths in the HTTP layer
 - `get_valid_transitions` queries `smeldr_state_flows` directly for the custom flow registered for `type_name`, falling back to the default flow if none is registered
 - The default flow (draft → scheduled/published/archived, scheduled → published, published → archived) is always present when a DB is configured

@@ -233,3 +233,21 @@ Add three MCP tools in new file `state_tools.go` in smeldr/mcp, all gated on `s.
 `go.mod`: `smeldr.dev/core` v1.43.1 → v1.44.1. 25 tests in `state_tools_test.go`. Coverage: 96.0%.
 
 ---
+
+## A178 — T23 Step 5: define_state_flow MCP Tool (mcp v1.24.1, 2026-06-29)
+
+**Date:** 2026-06-29
+**Status:** Agreed
+**Level:** 1
+
+Add `define_state_flow(name, type_name, states, transitions)` to `state_tools.go` in smeldr/mcp. Admin role. Calls `s.app.RegisterFlow(smeldr.StateFlow{...})` with the parameters provided; idempotent (INSERT OR IGNORE). Returns `{name, type_name, state_count, transition_count}`. Gated on `s.app.Config().DB != nil` (same gate as all state tools).
+
+`type_name` is required because `RegisterFlow` validates it as non-empty. The default flow (type_name IS NULL in smeldr_state_flows) can only be seeded at App startup; this tool registers custom flows for specific dynamic content types.
+
+Three unexported helpers added to `state_tools.go`: `parseStates([]any) ([]smeldr.State, *jsonRPCError)`, `parseTransitions([]any) ([]smeldr.Transition, *jsonRPCError)`, `boolField(map[string]any, string) bool`. Each returns -32602 on malformed input.
+
+`handleToolsCall` state tool role dispatch extended from `if p.Name == "transition_item"` (two-tier) to a `switch` with three cases: `define_state_flow` → `authoriseAdmin`, `transition_item` → `authoriseEditor`, `default` → `authorise`.
+
+11 new tests in `state_tools_test.go`. `TestStateTool_ToolsList_DBSet` and `TestIsStateTool` updated to include `define_state_flow`. Coverage: 96.1%.
+
+---
