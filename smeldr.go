@@ -347,6 +347,9 @@ func New(cfg Config) *App {
 		if err := migrateLegacyTableNames(context.Background(), cfg.DB); err != nil {
 			slog.Warn("smeldr: legacy table migration failed — rename forge_* tables manually", "error", err)
 		}
+		if err := migrateStateFlows(context.Background(), cfg.DB); err != nil {
+			slog.Warn("smeldr: state flow migration failed", "error", err)
+		}
 	}
 	return app
 }

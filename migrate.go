@@ -7,6 +7,98 @@ import (
 	"log/slog"
 )
 
+// migrateStateFlows creates the four state-flow tables and seeds the default
+// flow (draft→scheduled→published→archived). All operations are idempotent:
+// tables use CREATE TABLE IF NOT EXISTS and rows use INSERT OR IGNORE.
+// Called once at startup from [New] when [Config.DB] is non-nil.
+func migrateStateFlows(ctx context.Context, db DB) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS smeldr_state_flows (
+			id          INTEGER PRIMARY KEY,
+			name        TEXT    NOT NULL UNIQUE,
+			type_name   TEXT,
+			description TEXT,
+			created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS smeldr_states (
+			id                 INTEGER PRIMARY KEY,
+			flow_id            INTEGER NOT NULL REFERENCES smeldr_state_flows(id),
+			name               TEXT    NOT NULL,
+			is_initial         BOOLEAN NOT NULL DEFAULT 0,
+			is_terminal        BOOLEAN NOT NULL DEFAULT 0,
+			suppresses_signals BOOLEAN NOT NULL DEFAULT 0,
+			UNIQUE(flow_id, name)
+		)`,
+		`CREATE TABLE IF NOT EXISTS smeldr_transitions (
+			id            INTEGER PRIMARY KEY,
+			flow_id       INTEGER NOT NULL REFERENCES smeldr_state_flows(id),
+			from_state    TEXT    NOT NULL,
+			to_state      TEXT    NOT NULL,
+			required_role TEXT,
+			UNIQUE(flow_id, from_state, to_state)
+		)`,
+		`CREATE TABLE IF NOT EXISTS smeldr_transition_triggers (
+			id             INTEGER PRIMARY KEY,
+			transition_id  INTEGER NOT NULL REFERENCES smeldr_transitions(id),
+			trigger_class  TEXT    NOT NULL CHECK(trigger_class IN ('sync', 'async')),
+			trigger_type   TEXT    NOT NULL,
+			config         TEXT    NOT NULL
+		)`,
+	}
+	for _, s := range stmts {
+		if _, err := db.ExecContext(ctx, s); err != nil {
+			return fmt.Errorf("smeldr: migrateStateFlows: %w", err)
+		}
+	}
+
+	// Seed the default flow — mirrors the compile-time enum.
+	if _, err := db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO smeldr_state_flows(name, type_name) VALUES ('default', NULL)`); err != nil {
+		return fmt.Errorf("smeldr: migrateStateFlows: seed flow: %w", err)
+	}
+	var flowID int64
+	if err := db.QueryRowContext(ctx,
+		`SELECT id FROM smeldr_state_flows WHERE name = 'default'`).Scan(&flowID); err != nil {
+		return fmt.Errorf("smeldr: migrateStateFlows: seed flow id: %w", err)
+	}
+
+	states := []struct {
+		name     string
+		initial  bool
+		terminal bool
+	}{
+		{"draft", true, false},
+		{"scheduled", false, false},
+		{"published", false, false},
+		{"archived", false, true},
+	}
+	for _, s := range states {
+		if _, err := db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO smeldr_states(flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES (?, ?, ?, ?, 0)`,
+			flowID, s.name, s.initial, s.terminal,
+		); err != nil {
+			return fmt.Errorf("smeldr: migrateStateFlows: seed state %s: %w", s.name, err)
+		}
+	}
+
+	transitions := [][2]string{
+		{"draft", "scheduled"},
+		{"draft", "published"},
+		{"scheduled", "published"},
+		{"published", "archived"},
+		{"draft", "archived"},
+	}
+	for _, t := range transitions {
+		if _, err := db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO smeldr_transitions(flow_id, from_state, to_state) VALUES (?, ?, ?)`,
+			flowID, t[0], t[1],
+		); err != nil {
+			return fmt.Errorf("smeldr: migrateStateFlows: seed transition %s→%s: %w", t[0], t[1], err)
+		}
+	}
+	return nil
+}
+
 // migrateLegacyTableNames renames any forge_* tables that still exist in the
 // database to their smeldr_* equivalents. It is called from [New] once at
 // startup when [Config.DB] is non-nil.

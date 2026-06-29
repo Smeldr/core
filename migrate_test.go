@@ -38,6 +38,85 @@ func TestMigrateLegacyTableNames_destinationExists(t *testing.T) {
 	}
 }
 
+// TestMigrateStateFlows verifies that migrateStateFlows is idempotent and seeds
+// the default flow with the correct states and transitions.
+func TestMigrateStateFlows(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+
+	// Run twice — must be idempotent.
+	for i := range 2 {
+		if err := migrateStateFlows(ctx, db); err != nil {
+			t.Fatalf("run %d: migrateStateFlows: %v", i+1, err)
+		}
+	}
+
+	// Default flow exists with type_name NULL.
+	var flowID int64
+	var typeName *string
+	if err := db.QueryRowContext(ctx,
+		`SELECT id, type_name FROM smeldr_state_flows WHERE name = 'default'`,
+	).Scan(&flowID, &typeName); err != nil {
+		t.Fatalf("default flow not found: %v", err)
+	}
+	if typeName != nil {
+		t.Errorf("default flow type_name: want NULL, got %q", *typeName)
+	}
+
+	// Exactly 4 states.
+	var stateCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_states WHERE flow_id = ?`, flowID,
+	).Scan(&stateCount); err != nil {
+		t.Fatalf("count states: %v", err)
+	}
+	if stateCount != 4 {
+		t.Errorf("state count: want 4, got %d", stateCount)
+	}
+
+	// draft is_initial=1, archived is_terminal=1.
+	checkState := func(name string, wantInitial, wantTerminal bool) {
+		t.Helper()
+		var initial, terminal bool
+		if err := db.QueryRowContext(ctx,
+			`SELECT is_initial, is_terminal FROM smeldr_states WHERE flow_id = ? AND name = ?`,
+			flowID, name,
+		).Scan(&initial, &terminal); err != nil {
+			t.Errorf("state %q not found: %v", name, err)
+			return
+		}
+		if initial != wantInitial {
+			t.Errorf("state %q is_initial: want %v, got %v", name, wantInitial, initial)
+		}
+		if terminal != wantTerminal {
+			t.Errorf("state %q is_terminal: want %v, got %v", name, wantTerminal, terminal)
+		}
+	}
+	checkState("draft", true, false)
+	checkState("scheduled", false, false)
+	checkState("published", false, false)
+	checkState("archived", false, true)
+
+	// Exactly 5 transitions.
+	var txCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_transitions WHERE flow_id = ?`, flowID,
+	).Scan(&txCount); err != nil {
+		t.Fatalf("count transitions: %v", err)
+	}
+	if txCount != 5 {
+		t.Errorf("transition count: want 5, got %d", txCount)
+	}
+
+	// smeldr_transition_triggers table exists (even if empty).
+	var triggerCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_transition_triggers`,
+	).Scan(&triggerCount); err != nil {
+		t.Fatalf("smeldr_transition_triggers table missing: %v", err)
+	}
+}
+
 // TestMigrateLegacyTableNames_sourceOnly verifies the normal migration path:
 // when only the source (forge_*) table exists, it is renamed to smeldr_*.
 func TestMigrateLegacyTableNames_sourceOnly(t *testing.T) {

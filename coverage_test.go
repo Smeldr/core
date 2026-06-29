@@ -724,10 +724,12 @@ func TestApp_ServeBlocks_nilDB(t *testing.T) {
 }
 
 func TestApp_ServeBlocks_createTablesError(t *testing.T) {
+	// errExecDB always fails — ensures CreateBlockTables returns an error
+	// regardless of any prior migration calls in New().
 	app := New(Config{
 		BaseURL: "https://example.com",
 		Secret:  []byte("testsecret16chars"),
-		DB:      &failOnNthExecDB{failAt: 1},
+		DB:      &errExecDB{},
 	})
 	_, err := app.ServeBlocks(t.TempDir())
 	if err == nil {

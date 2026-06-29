@@ -218,9 +218,9 @@ committed               — pilot: commit done, context updated
 ```
 
 Rules:
+- **after sending a signal that requires a response, start a Monitor watching the file**
 - seq starts at 1 per task, increments by 1 per write
 - file contains latest signal only (overwrite, not append)
-- after sending a signal that requires a response, start a Monitor watching the file
 - never stage or commit signal files
 - read signal file at session start before NEXT.md
 

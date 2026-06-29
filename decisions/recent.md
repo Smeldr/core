@@ -172,6 +172,16 @@ FilterTags is defined as Type: "array" in schemas.go. The previous assertion `.(
 
 ---
 
+## A174 — T23 Step 1: Custom State Flows schema and default flow seed
+
+**Date:** 2026-06-29
+**Status:** Agreed
+**Level:** 2
+
+Add migrateStateFlows() to migrate.go: creates smeldr_state_flows, smeldr_states, smeldr_transitions, smeldr_transition_triggers using CREATE TABLE IF NOT EXISTS. Seeds the default flow (draft/scheduled/published/archived) via INSERT OR IGNORE with an id-lookup for idempotency. Called from New() alongside migrateLegacyTableNames(). No exported Go symbols in this step. Prerequisite for T23 Steps 2–9 (RegisterFlow, transition validation, MCP tools, suppresses_signals, async triggers).
+
+---
+
 ## A171 — Wire 6 relation MCP tools in smeldr/mcp (mcp v1.23.0, 2026-06-25)
 
 **Context:** RelationStore.MCPAssertRelation and five sibling methods were added to core in A162/A163 (core v1.42.5–v1.42.6) but were never wired as MCP tools in the smeldr/mcp package. Content Relations docs (content-relations-mcp.md) carried a NOTE warning against publication until this wiring shipped.

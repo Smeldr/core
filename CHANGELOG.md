@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.43.3] — 2026-06-29
+
+### Added
+- State-flow schema: `smeldr_state_flows`, `smeldr_states`, `smeldr_transitions`,
+  `smeldr_transition_triggers` tables created automatically at startup via
+  `migrateStateFlows()`. The default flow (draft → scheduled → published → archived)
+  is seeded idempotently. Prerequisite for T23 Steps 2–9. (T23 Step 1, A174)
+
+---
+
 ## [1.43.2] — 2026-06-29
 
 ### Fixed
