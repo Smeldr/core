@@ -162,6 +162,16 @@ Archived 2026-06-23: A151–A157 → phase9-archive.md
 
 ---
 
+## A173 — Fix FilterTags type assertion in serveblocks.go (T108)
+
+**Date:** 2026-06-29
+**Status:** Agreed
+**Level:** 1
+
+FilterTags is defined as Type: "array" in schemas.go. The previous assertion `.(string)` always silently failed, making the "not yet supported" slog.Warn dead code. Fixed to `.([]any)` with a `len(tags) > 0` guard. Correctness only — FilterTags SQL filtering remains out of scope for this fix.
+
+---
+
 ## A171 — Wire 6 relation MCP tools in smeldr/mcp (mcp v1.23.0, 2026-06-25)
 
 **Context:** RelationStore.MCPAssertRelation and five sibling methods were added to core in A162/A163 (core v1.42.5–v1.42.6) but were never wired as MCP tools in the smeldr/mcp package. Content Relations docs (content-relations-mcp.md) carried a NOTE warning against publication until this wiring shipped.

@@ -23,6 +23,15 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.43.2] — 2026-06-29
+
+### Fixed
+- `serveblocks`: corrected `FilterTags` type assertion from `.(string)` to `.([]any)`.
+  `FilterTags` is defined as `Type: "array"` in schemas.go; the previous assertion always
+  silently failed, making the "not yet supported" warning dead code. (T108, A173)
+
+---
+
 ## [1.43.1] — 2026-06-21
 
 ### Added

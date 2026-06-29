@@ -315,7 +315,7 @@ func (r *BlockRenderer) renderBlock(ctx context.Context, id string, blocks map[s
 		} else if desc.Fetch == nil {
 			slog.Warn("serveblocks: content_list ContentType has no Fetch", "content_type", ct, "id", id)
 		} else {
-			if ft, _ := data["FilterTags"].(string); ft != "" {
+			if tags, ok := data["FilterTags"].([]any); ok && len(tags) > 0 {
 				slog.Warn("serveblocks: content_list FilterTags not yet supported, ignoring", "content_type", ct, "id", id)
 			}
 			if items, err := desc.Fetch(ctx, contentListOpts(data)); err == nil {
