@@ -1,7 +1,6 @@
 # Smeldr — Agent Instructions
 
-This is the Smeldr project — a Go web framework designed for how you
-actually think. Zero dependencies. AI-first. Production-ready by default.
+This is the Smeldr project — a Go AI-Native content backend. Zero dependencies. AI-first. Production-ready by default.
 
 ## New chat session — start here
 
