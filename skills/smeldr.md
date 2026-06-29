@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or pilot agent.
 
-Current versions: smeldr.dev/core v1.43.1 · smeldr.dev/mcp v1.23.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.1 · smeldr.dev/social v0.9.0 · smeldr.dev/agent v0.6.0 · smeldr.dev/core/pgx v0.1.2
+Current versions: smeldr.dev/core v1.44.0 · smeldr.dev/mcp v1.23.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.1 · smeldr.dev/social v0.9.0 · smeldr.dev/agent v0.6.0 · smeldr.dev/core/pgx v0.1.2
 
 ---
 
@@ -258,6 +258,39 @@ recent N), `since` (RFC3339). Route is absent (404) unless `CaptureLogs` was cal
 - **Zero-config** — when no custom handler is set, capture forwards to a stderr text
   handler (wrapping slog's built-in handler would deadlock via the log package).
 - **No MCP tool** by design — use `smeldr-cli logs` (calls `/_logs` over HTTP).
+
+---
+
+## Custom state flows (v1.44.0+)
+
+Call `app.RegisterFlow(smeldr.StateFlow{...})` at startup (after `smeldr.New`) to
+register a data-driven state machine for a content type. Idempotent — safe to call
+on every restart.
+
+```go
+err := app.RegisterFlow(smeldr.StateFlow{
+    Name:     "agent-job",
+    TypeName: "AgentJob",  // Go type name — maps to "agent_jobs" table
+    States: []smeldr.State{
+        {Name: "draft",     IsInitial: true},
+        {Name: "published"},
+        {Name: "paused",    SuppressesSignals: true},
+        {Name: "archived",  IsTerminal: true},
+    },
+    Transitions: []smeldr.Transition{
+        {From: "draft",     To: "published"},
+        {From: "published", To: "paused"},
+        {From: "paused",    To: "published"},
+        {From: "published", To: "archived", RequiredRole: "Editor"},
+    },
+})
+```
+
+- `IsInitial` — entry point for new items (exactly one per flow)
+- `IsTerminal` — no outbound transitions (e.g. "archived")
+- `SuppressesSignals` — After* hooks do not fire for items in this state
+- `RequiredRole` — empty = any authenticated role; set to `"Editor"` etc. to gate a transition
+- Requires `Config.DB`. On unknown existing item states, returns error — treat like a failed migration.
 
 ---
 

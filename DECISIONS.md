@@ -48,6 +48,7 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 | # | Title | File |
 |---|-------|------|
+| A175 | T23 Step 2: App.RegisterFlow(StateFlow) error + exported types StateFlow, State, Transition in state.go. INSERT OR IGNORE + SELECT id idempotency. validateFlowItems (unexported) SQLite-only unknown-state validation. 12 tests in state_test.go. v1.44.0. | [recent.md](decisions/recent.md) |
 | A174 | T23 Step 1: add smeldr_state_flows, smeldr_states, smeldr_transitions, smeldr_transition_triggers tables via migrateStateFlows() called from New(). Seed default flow (draft/scheduled/published/archived) idempotently. No exported Go symbols. Prerequisite for T23 Steps 2–9. | [recent.md](decisions/recent.md) |
 | A173 | Fix FilterTags type assertion in serveblocks.go from .(string) to .([]any) with len > 0 guard. .(string) always silently failed on the array-typed field, making the "not yet supported" warning dead code. Correctness fix only — FilterTags SQL filtering remains out of scope. (T108) | [recent.md](decisions/recent.md) |
 | A171 | Wire 6 relation MCP tools in smeldr/mcp (assert_relation, propose_relation, get_relations, preview_impact, upsert_relation_kind, list_relation_kinds). Gated by App.RelationStore() != nil; no new ServerOption. Roles: Author/Editor/Admin per tool. Output uses snake_case map helpers. mcp v1.23.0. | [recent.md](decisions/recent.md) |

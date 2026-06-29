@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.44.0] — 2026-06-29
+
+### Added
+- `StateFlow`, `State`, `Transition` types and `App.RegisterFlow(flow StateFlow) error`
+  method for custom state-machine registration. Flows are idempotently upserted at startup
+  via INSERT OR IGNORE. (T23 Step 2, A175)
+- `validateFlowItems` (unexported) SQLite-only validation: checks that all existing items
+  of a given type are in states defined by their flow; returns detailed error listing unknown
+  states for operator remediation before startup. (T23 Step 2, A175)
+
+---
+
 ## [1.43.3] — 2026-06-29
 
 ### Added

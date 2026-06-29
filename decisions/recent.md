@@ -189,3 +189,13 @@ Add migrateStateFlows() to migrate.go: creates smeldr_state_flows, smeldr_states
 **Decision:** New `relation_tools.go` in smeldr/mcp. `Server` gains a `relationStore *smeldr.RelationStore` field set in `New()` via `app.RelationStore()`. Gate: all six tools are registered only when `relationStore != nil` (i.e. `app.Relations(store)` was called) — no new `ServerOption` required. Tool dispatch added to `handleToolsCall` before module-scoped authorisation; tool definitions added to `handleToolsList`. Roles: Author (assert_relation, propose_relation, get_relations, list_relation_kinds), Editor (preview_impact), Admin (upsert_relation_kind). Output uses `relationEdgeMap`/`relationKindMap` helpers for snake_case keys, since `RelationEdge` and `RelationKindDef` have `db:` tags only. go.mod: `smeldr.dev/core` v1.42.9 → v1.43.1. 16 tests in `relation_tools_test.go`. mcp v1.22.1 → v1.23.0.
 
 ---
+
+## A175 — T23 Step 2: RegisterFlow and state-flow types (v1.44.0, 2026-06-29)
+
+**Date:** 2026-06-29
+**Status:** Agreed
+**Level:** 2
+
+New file `state.go` exports `StateFlow`, `State`, `Transition` types. `StateFlow` has Name, TypeName, Description, States []State, Transitions []Transition. `State` has Name, IsInitial, IsTerminal, SuppressesSignals. `Transition` has From, To, RequiredRole (empty means no role required; stored as SQL NULL). `App.RegisterFlow(flow StateFlow) error` validates Name/TypeName non-empty and DB non-nil, then INSERT OR IGNORE into smeldr_state_flows + SELECT id (last_insert_rowid() returns 0 on an ignored insert), then INSERT OR IGNORE for each State into smeldr_states and each Transition into smeldr_transitions. Calls `validateFlowItems` before returning. `validateFlowItems` probes sqlite_master (returns nil for non-SQLite), derives table name via camelToSnake + "s" (e.g. "AgentJob" → "agent_jobs"), checks table existence, then SELECT DISTINCT status NOT IN (placeholders) from that table — returns error naming unknown states if any exist. 12 tests in `state_test.go` cover happy path, idempotency, unknown-state error, nil DB, empty Name/TypeName, RequiredRole storage, valid-states no-error, and all exec/query error paths. Coverage: 96.0%.
+
+---
