@@ -409,8 +409,8 @@ func TestGuessMIMEType(t *testing.T) {
 		{"/img/logo.webp", "image/webp"},
 		{"/img/icon.svg", "image/svg+xml"},
 		{"/img/photo.jpg", "image/jpeg"},
-		{"/img/unknown.bmp", "image/jpeg"}, // default
-		{"/img/photo.PNG", "image/png"},    // case-insensitive
+		{"/img/unknown.bmp", "image/jpeg"},  // default
+		{"/img/photo.PNG", "image/png"},     // case-insensitive
 		{"/img/photo.png?v=2", "image/png"}, // query stripped
 	}
 	for _, tc := range cases {

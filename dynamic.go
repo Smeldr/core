@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -178,9 +179,13 @@ func (r *DynamicTypeRepo) UpdateFields(ctx context.Context, id string, patch map
 
 // SetStatus transitions the node to the given status. When transitioning to
 // Published and PublishedAt is zero, it is set to the current UTC time.
+// The transition is validated against the registered flow before the update is applied.
 func (r *DynamicTypeRepo) SetStatus(ctx context.Context, id string, status Status) error {
 	node, err := r.GetByID(ctx, id)
 	if err != nil {
+		return err
+	}
+	if err := validateTransition(ctx, r.db, r.typeName, string(node.Status), string(status)); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -685,17 +690,18 @@ func newSetStatusHandler(a *App, auth AuthFunc) http.Handler {
 			WriteError(w, r, ErrBadRequest)
 			return
 		}
-		st := Status(body.Status)
-		switch st {
-		case Draft, Published, Archived, Scheduled:
-		default:
+		if body.Status == "" {
 			WriteError(w, r, ErrBadRequest)
 			return
 		}
+		st := Status(body.Status)
 		if err := repo.SetStatus(r.Context(), id, st); err != nil {
-			if err == ErrNotFound {
+			switch {
+			case errors.Is(err, ErrNotFound):
 				WriteError(w, r, ErrNotFound)
-			} else {
+			case errors.Is(err, ErrConflict):
+				WriteError(w, r, err)
+			default:
 				slog.WarnContext(r.Context(), "smeldr: set_content_status", "id", id, "err", err)
 				WriteError(w, r, ErrInternal)
 			}

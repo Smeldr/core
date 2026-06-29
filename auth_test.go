@@ -1153,14 +1153,14 @@ type errRowConn struct{}
 
 func (c *errRowConn) Connect(_ context.Context) (driver.Conn, error) { return c, nil }
 func (c *errRowConn) Driver() driver.Driver                          { return dummyDriver{} }
-func (c *errRowConn) Prepare(_ string) (driver.Stmt, error)         { return c, nil }
+func (c *errRowConn) Prepare(_ string) (driver.Stmt, error)          { return c, nil }
 func (c *errRowConn) Close() error                                   { return nil }
-func (c *errRowConn) Begin() (driver.Tx, error)                     { return nil, nil }
+func (c *errRowConn) Begin() (driver.Tx, error)                      { return nil, nil }
 func (c *errRowConn) NumInput() int                                  { return -1 }
-func (c *errRowConn) Exec(_ []driver.Value) (driver.Result, error)  { return nil, nil }
-func (c *errRowConn) Query(_ []driver.Value) (driver.Rows, error)   { return c, nil }
-func (c *errRowConn) Columns() []string                             { return []string{"v"} }
-func (c *errRowConn) Next(_ []driver.Value) error                   { return errors.New("scan error") }
+func (c *errRowConn) Exec(_ []driver.Value) (driver.Result, error)   { return nil, nil }
+func (c *errRowConn) Query(_ []driver.Value) (driver.Rows, error)    { return c, nil }
+func (c *errRowConn) Columns() []string                              { return []string{"v"} }
+func (c *errRowConn) Next(_ []driver.Value) error                    { return errors.New("scan error") }
 
 // revokeRoleErrDB makes every QueryRowContext fail with a scan error.
 type revokeRoleErrDB struct{}

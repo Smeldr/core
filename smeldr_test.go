@@ -637,7 +637,7 @@ func TestApp_Handler_OGDefaults_absoluteURL(t *testing.T) {
 
 type mockAuditStore struct{}
 
-func (mockAuditStore) Append(_ context.Context, _ AuditRecord) error   { return nil }
+func (mockAuditStore) Append(_ context.Context, _ AuditRecord) error { return nil }
 func (mockAuditStore) List(_ context.Context, _ AuditFilter) ([]AuditRecord, error) {
 	return nil, nil
 }

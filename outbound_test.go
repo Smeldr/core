@@ -520,4 +520,3 @@ func TestEnqueueHTTPSValidation(t *testing.T) {
 		t.Errorf("Enqueue: unexpected error for https:// target: %v", err)
 	}
 }
-

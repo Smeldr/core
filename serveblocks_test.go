@@ -820,8 +820,8 @@ func TestContentListOpts_Defaults(t *testing.T) {
 
 func TestContentListOpts_SortField(t *testing.T) {
 	cases := []struct {
-		field   string
-		want    string
+		field string
+		want  string
 	}{
 		{"published_at", "PublishedAt"},
 		{"created_at", "CreatedAt"},

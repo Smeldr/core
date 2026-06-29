@@ -593,6 +593,9 @@ func (a *App) Content(v any, opts ...Option) {
 		if ps, ok := r.(interface{ setSecret([]byte) }); ok {
 			ps.setSecret(a.cfg.Secret)
 		}
+		if dbs, ok := r.(interface{ setDB(DB) }); ok {
+			dbs.setDB(a.cfg.DB)
+		}
 		if hk, ok := r.(interface {
 			setAfterHook(func(Context, Signal, afterHookMeta, any))
 		}); ok {

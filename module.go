@@ -491,6 +491,7 @@ type Module[T any] struct {
 	afterHook         func(Context, Signal, afterHookMeta, any)        // nil until wired by App; called async on delivery signals
 	syncSaveHook      func(context.Context, string, string, any) error // nil until wired by App.Relations; called sync after save
 	secret            []byte                                           // set by App.Content via setSecret; used for preview token validation
+	db                DB                                               // set by App.Content via setDB; used for transition validation
 	cacheInvalidators []func()                                         // extra invalidation callbacks wired by App.Route for aggregate routes
 	slugCheckers      []func(ctx context.Context, slug string) error   // collision checkers wired by App.Route for aggregate routes
 
@@ -717,6 +718,13 @@ func (m *Module[T]) setSyncSaveHook(fn func(context.Context, string, string, any
 // Called by [App.Content] for every registered module.
 func (m *Module[T]) setSecret(secret []byte) {
 	m.secret = secret
+}
+
+// setDB injects the application database into the module so that MCP status
+// transitions can be validated against the registered state flow.
+// Called by [App.Content] for every registered module.
+func (m *Module[T]) setDB(db DB) {
+	m.db = db
 }
 
 // collectStats implements [statsCollector]. It returns item counts per status
@@ -2206,6 +2214,9 @@ func (m *Module[T]) MCPPublish(ctx Context, slug string) error {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
+	if err := validateTransition(ctx, m.db, m.contentTypeName, string(prevStatus), string(Published)); err != nil {
+		return err
+	}
 	setNodeStatus(item, Published)
 	setNodeTime(item, "PublishedAt", time.Now().UTC())
 	if err := m.repo.Save(ctx, item); err != nil {
@@ -2225,6 +2236,9 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time) error {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
+	if err := validateTransition(ctx, m.db, m.contentTypeName, string(prevStatus), string(Scheduled)); err != nil {
+		return err
+	}
 	setNodeStatus(item, Scheduled)
 	atCopy := at
 	setNodeTimePtr(item, "ScheduledAt", &atCopy)
@@ -2244,6 +2258,9 @@ func (m *Module[T]) MCPArchive(ctx Context, slug string) error {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
+	if err := validateTransition(ctx, m.db, m.contentTypeName, string(prevStatus), string(Archived)); err != nil {
+		return err
+	}
 	setNodeStatus(item, Archived)
 	if err := m.repo.Save(ctx, item); err != nil {
 		return err

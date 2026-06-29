@@ -206,3 +206,52 @@ func validateFlowItems(ctx context.Context, db DB, flow StateFlow) error {
 	}
 	return nil
 }
+
+// validateTransition checks whether the transition from fromStatus to toStatus
+// is permitted for the given content type by its registered flow. Returns
+// ErrConflict when the transition is not allowed.
+//
+// Returns nil when:
+//   - db is nil (no DB configured)
+//   - the database is not SQLite (non-SQLite databases skip flow validation)
+//   - fromStatus == toStatus (identity transition — always allowed for idempotency)
+//   - no flow is registered for typeName and no default flow exists
+func validateTransition(ctx context.Context, db DB, typeName, fromStatus, toStatus string) error {
+	if db == nil {
+		return nil
+	}
+	// Probe SQLite — same guard as validateFlowItems.
+	var dummy int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
+		return nil
+	}
+	if fromStatus == toStatus {
+		return nil
+	}
+	// Look up custom flow for this type.
+	var flowID int64
+	err := db.QueryRowContext(ctx,
+		`SELECT id FROM smeldr_state_flows WHERE type_name = ? LIMIT 1`, typeName,
+	).Scan(&flowID)
+	if err != nil {
+		// Fall back to the default flow (type_name IS NULL, name = 'default').
+		err = db.QueryRowContext(ctx,
+			`SELECT id FROM smeldr_state_flows WHERE type_name IS NULL AND name = 'default' LIMIT 1`,
+		).Scan(&flowID)
+		if err != nil {
+			return nil // no flow registered — no validation
+		}
+	}
+	// Check whether the transition exists in smeldr_transitions.
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_transitions WHERE flow_id = ? AND from_state = ? AND to_state = ?`,
+		flowID, fromStatus, toStatus,
+	).Scan(&count); err != nil {
+		return nil // query failed — fail open rather than blocking all transitions
+	}
+	if count == 0 {
+		return fmt.Errorf("%w: transition %s→%s is not permitted for type %q", ErrConflict, fromStatus, toStatus, typeName)
+	}
+	return nil
+}

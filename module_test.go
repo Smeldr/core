@@ -1379,7 +1379,7 @@ func (r errorRepo[T]) FindBySlug(_ context.Context, _ string) (T, error) {
 func (r errorRepo[T]) FindAll(_ context.Context, _ ListOptions) ([]T, error) {
 	return nil, errRepoError
 }
-func (r errorRepo[T]) Save(_ context.Context, _ T) error    { return errRepoError }
+func (r errorRepo[T]) Save(_ context.Context, _ T) error        { return errRepoError }
 func (r errorRepo[T]) Delete(_ context.Context, _ string) error { return errRepoError }
 
 // savefailRepo wraps an inner repo; Save always returns errRepoError.
@@ -1844,7 +1844,7 @@ func (r errorStatusCounterRepo[T]) FindBySlug(_ context.Context, _ string) (T, e
 func (r errorStatusCounterRepo[T]) FindAll(_ context.Context, _ ListOptions) ([]T, error) {
 	return nil, errRepoError
 }
-func (r errorStatusCounterRepo[T]) Save(_ context.Context, _ T) error    { return errRepoError }
+func (r errorStatusCounterRepo[T]) Save(_ context.Context, _ T) error        { return errRepoError }
 func (r errorStatusCounterRepo[T]) Delete(_ context.Context, _ string) error { return errRepoError }
 func (r errorStatusCounterRepo[T]) countByStatus(_ context.Context) (map[Status]int, error) {
 	return nil, errRepoError

@@ -675,4 +675,3 @@ func TestCSRF_validToken_passes(t *testing.T) {
 		t.Errorf("CSRF valid token: got %d want %d", w.Code, http.StatusOK)
 	}
 }
-

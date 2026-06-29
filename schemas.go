@@ -39,7 +39,7 @@ type ContentTypeSchema struct {
 	ID        string          `db:"id"`
 	TypeName  string          `db:"type_name"`
 	Label     string          `db:"label"`
-	Kind      string          `db:"kind"`      // "block" | "content"; default "block"
+	Kind      string          `db:"kind"`       // "block" | "content"; default "block"
 	URLPrefix string          `db:"url_prefix"` // public URL prefix; empty = admin-only
 	Fields    json.RawMessage `db:"fields"`
 	CreatedAt time.Time       `db:"created_at"`

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // agentJobFlow is a reusable test fixture mirroring the AgentJob custom flow
@@ -365,4 +366,221 @@ func (d *flowIDDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Row
 func (d *flowIDDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
 	conn := &guardRowConn{val: int64(42)}
 	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+}
+
+// — validateTransition tests ——————————————————————————————————————————————————
+
+func TestValidateTransition_nilDB(t *testing.T) {
+	ctx := context.Background()
+	if err := validateTransition(ctx, nil, "Post", "draft", "published"); err != nil {
+		t.Errorf("nil db: want nil, got %v", err)
+	}
+}
+
+func TestValidateTransition_nonSQLite(t *testing.T) {
+	// failOnNthExecDB.QueryRowContext returns guardRowConn{noRow:true} → scan fails
+	// → sqlite_master probe returns error → validateTransition returns nil.
+	ctx := context.Background()
+	db := &failOnNthExecDB{failAt: 999} // exec never fails; query always returns no-row
+	if err := validateTransition(ctx, db, "Post", "draft", "published"); err != nil {
+		t.Errorf("non-SQLite: want nil, got %v", err)
+	}
+}
+
+func TestValidateTransition_identity(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	// Same from/to status is always allowed regardless of any registered flow.
+	if err := validateTransition(ctx, db, "Post", "published", "published"); err != nil {
+		t.Errorf("identity transition: want nil, got %v", err)
+	}
+}
+
+func TestValidateTransition_customFlow_valid(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(agentJobFlow); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	// draft→published is in agentJobFlow.
+	if err := validateTransition(ctx, db, "AgentJob", "draft", "published"); err != nil {
+		t.Errorf("valid custom-flow transition: want nil, got %v", err)
+	}
+}
+
+func TestValidateTransition_customFlow_invalid(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(agentJobFlow); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	// draft→archived is NOT in agentJobFlow.
+	err := validateTransition(ctx, db, "AgentJob", "draft", "archived")
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("invalid custom-flow transition: want ErrConflict, got %v", err)
+	}
+}
+
+func TestValidateTransition_defaultFlow_valid(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	// No custom flow registered for "GenericPost" → falls back to default flow.
+	// Default flow includes draft→published.
+	if err := validateTransition(ctx, db, "GenericPost", "draft", "published"); err != nil {
+		t.Errorf("valid default-flow transition: want nil, got %v", err)
+	}
+}
+
+func TestValidateTransition_defaultFlow_invalid(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	// No custom flow → falls back to default. archived→draft is not in default flow.
+	err := validateTransition(ctx, db, "GenericPost", "archived", "draft")
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("invalid default-flow transition: want ErrConflict, got %v", err)
+	}
+}
+
+func TestValidateTransition_noFlow(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	// Delete the default flow so no flow exists at all — validateTransition returns nil.
+	if _, err := db.ExecContext(ctx, `DELETE FROM smeldr_state_flows`); err != nil {
+		t.Fatalf("delete flows: %v", err)
+	}
+	if err := validateTransition(ctx, db, "GenericPost", "draft", "published"); err != nil {
+		t.Errorf("no flow: want nil, got %v", err)
+	}
+}
+
+func TestValidateTransition_countQueryError(t *testing.T) {
+	// transitFailDB returns a valid SQLite-probe result (count=0), a valid flowID (42)
+	// for the flow lookup, but fails the COUNT(*) FROM smeldr_transitions query.
+	// validateTransition must fail open (return nil) when the count query errors.
+	ctx := context.Background()
+	db := &transitFailDB{}
+	if err := validateTransition(ctx, db, "Post", "draft", "published"); err != nil {
+		t.Errorf("count query error: want nil (fail open), got %v", err)
+	}
+}
+
+// transitFailDB simulates a DB that passes the sqlite_master probe and flow lookup
+// but fails the smeldr_transitions COUNT query. It tracks query order by SQL prefix.
+type transitFailDB struct{}
+
+func (d *transitFailDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (d *transitFailDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, nil
+}
+func (d *transitFailDB) QueryRowContext(ctx context.Context, query string, _ ...any) *sql.Row {
+	if strings.HasPrefix(query, "SELECT COUNT(*) FROM sqlite_master") {
+		// sqlite_master probe — return count=0 to signal SQLite.
+		conn := &guardRowConn{val: int64(0)}
+		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+	}
+	if strings.HasPrefix(query, "SELECT id FROM smeldr_state_flows") {
+		// Flow lookup — return a valid flowID so validation proceeds.
+		conn := &guardRowConn{val: int64(1)}
+		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+	}
+	// All other queries (smeldr_transitions COUNT) — return no row → scan error.
+	conn := &guardRowConn{noRow: true}
+	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+}
+
+// — Module[T] integration tests for validateTransition ————————————————————————
+
+// restrictedFlow registers a flow for "testPost" that only permits published→archived.
+// This causes MCPPublish (draft→published) and MCPSchedule (draft→scheduled) to fail.
+func restrictedFlow(t *testing.T, db DB) {
+	t.Helper()
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	flow := StateFlow{
+		Name:     "restricted",
+		TypeName: "testPost",
+		States:   []State{{Name: "published"}, {Name: "archived", IsTerminal: true}},
+		Transitions: []Transition{
+			{From: "published", To: "archived"},
+		},
+	}
+	if err := app.RegisterFlow(flow); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+}
+
+func TestMCPPublish_invalidTransition(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	restrictedFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	ctx := NewTestContext(editorUser())
+	err := m.MCPPublish(ctx, p.Slug)
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("MCPPublish on invalid transition: want ErrConflict, got %v", err)
+	}
+}
+
+func TestMCPArchive_invalidTransition(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	restrictedFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	ctx := NewTestContext(editorUser())
+	err := m.MCPArchive(ctx, p.Slug)
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("MCPArchive on invalid transition: want ErrConflict, got %v", err)
+	}
+}
+
+func TestMCPSchedule_invalidTransition(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	restrictedFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	ctx := NewTestContext(editorUser())
+	err := m.MCPSchedule(ctx, p.Slug, time.Now().Add(time.Hour))
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("MCPSchedule on invalid transition: want ErrConflict, got %v", err)
+	}
 }

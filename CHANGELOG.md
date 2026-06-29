@@ -23,6 +23,30 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.44.1] — 2026-06-29
+
+### Changed
+- `DynamicTypeRepo.SetStatus` now validates the requested transition against the registered
+  state flow before writing. Custom flow states (e.g. `"paused"`, `"queued"`) are accepted
+  when permitted by the flow; disallowed transitions return `ErrConflict` (409). Types
+  without a custom flow fall back to the built-in default flow. (T23 Step 3, A176)
+- `newSetStatusHandler` (`POST /_content/{type}/{id}/status`): hardcoded
+  `Draft/Published/Archived/Scheduled` enum guard removed. An empty `status` field still
+  returns 400; disallowed transitions now return 409 instead of 400. (T23 Step 3, A176)
+- `MCPPublish`, `MCPArchive`, `MCPSchedule`: each now calls `validateTransition` before
+  updating item status. Returns `ErrConflict` when the transition is not permitted by the
+  registered flow. Identity transitions (already in the target state) are always allowed
+  to preserve MCP idempotency. (T23 Step 3, A176)
+
+### Internal
+- `validateTransition` (unexported, `state.go`): checks `(flow_id, from_state, to_state)`
+  in `smeldr_transitions`; falls back to default flow; nil DB and non-SQLite return nil
+  (no-op). (T23 Step 3, A176)
+- `Module[T]` gains unexported `db DB` field and `setDB(DB)` method; wired by
+  `App.Content` via the same type-assertion pattern as `setSecret`. (T23 Step 3, A176)
+
+---
+
 ## [1.44.0] — 2026-06-29
 
 ### Added

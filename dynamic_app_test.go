@@ -707,19 +707,38 @@ func TestAdminSetStatus_HappyPath(t *testing.T) {
 }
 
 func TestAdminSetStatus_InvalidStatus(t *testing.T) {
-	app := newDynApp(t)
-	app.DefineContentType(t.Context(), recipeSchema())
-	repo, _ := app.DynamicContentRepo("recipe")
-	node, _ := repo.CreateDraft(t.Context(), map[string]any{"Title": "X"})
+	// An unrecognised status (not in the default flow) is now rejected with 409
+	// by validateTransition inside SetStatus. Empty status is still 400.
+	t.Run("unknown_status_conflict", func(t *testing.T) {
+		app := newDynApp(t)
+		app.DefineContentType(t.Context(), recipeSchema())
+		repo, _ := app.DynamicContentRepo("recipe")
+		node, _ := repo.CreateDraft(t.Context(), map[string]any{"Title": "X"})
 
-	handler := dynHandler(t, app)
-	auth := bearerToken(t, smeldr.Editor)
+		handler := dynHandler(t, app)
+		auth := bearerToken(t, smeldr.Editor)
 
-	w := dynPost(handler, fmt.Sprintf("/_content/recipe/%s/status", node.ID),
-		map[string]any{"status": "wontfix"}, auth)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("invalid status = %d, want 400", w.Code)
-	}
+		w := dynPost(handler, fmt.Sprintf("/_content/recipe/%s/status", node.ID),
+			map[string]any{"status": "wontfix"}, auth)
+		if w.Code != http.StatusConflict {
+			t.Errorf("unknown status = %d, want 409", w.Code)
+		}
+	})
+	t.Run("empty_status_bad_request", func(t *testing.T) {
+		app := newDynApp(t)
+		app.DefineContentType(t.Context(), recipeSchema())
+		repo, _ := app.DynamicContentRepo("recipe")
+		node, _ := repo.CreateDraft(t.Context(), map[string]any{"Title": "X"})
+
+		handler := dynHandler(t, app)
+		auth := bearerToken(t, smeldr.Editor)
+
+		w := dynPost(handler, fmt.Sprintf("/_content/recipe/%s/status", node.ID),
+			map[string]any{"status": ""}, auth)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("empty status = %d, want 400", w.Code)
+		}
+	})
 }
 
 func TestAdminSetStatus_NotFound(t *testing.T) {

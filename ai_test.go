@@ -574,7 +574,7 @@ type testMarkdownablePost struct {
 }
 
 func (p *testMarkdownablePost) Markdown() string { return p.Body }
-func (p *testMarkdownablePost) Head() Head        { return Head{Title: p.Title} }
+func (p *testMarkdownablePost) Head() Head       { return Head{Title: p.Title} }
 
 func TestRenderAIDoc_nonMarkdownable(t *testing.T) {
 	// Non-Markdownable item → JSON marshalled body.

@@ -199,3 +199,19 @@ Add migrateStateFlows() to migrate.go: creates smeldr_state_flows, smeldr_states
 New file `state.go` exports `StateFlow`, `State`, `Transition` types. `StateFlow` has Name, TypeName, Description, States []State, Transitions []Transition. `State` has Name, IsInitial, IsTerminal, SuppressesSignals. `Transition` has From, To, RequiredRole (empty means no role required; stored as SQL NULL). `App.RegisterFlow(flow StateFlow) error` validates Name/TypeName non-empty and DB non-nil, then INSERT OR IGNORE into smeldr_state_flows + SELECT id (last_insert_rowid() returns 0 on an ignored insert), then INSERT OR IGNORE for each State into smeldr_states and each Transition into smeldr_transitions. Calls `validateFlowItems` before returning. `validateFlowItems` probes sqlite_master (returns nil for non-SQLite), derives table name via camelToSnake + "s" (e.g. "AgentJob" → "agent_jobs"), checks table existence, then SELECT DISTINCT status NOT IN (placeholders) from that table — returns error naming unknown states if any exist. 12 tests in `state_test.go` cover happy path, idempotency, unknown-state error, nil DB, empty Name/TypeName, RequiredRole storage, valid-states no-error, and all exec/query error paths. Coverage: 96.0%.
 
 ---
+
+## A176 — T23 Step 3: Transition Validation (v1.44.1, 2026-06-29)
+
+**Date:** 2026-06-29
+**Status:** Agreed
+**Level:** 1
+
+`validateTransition(ctx context.Context, db DB, typeName, fromStatus, toStatus string) error` added (unexported) to `state.go`. Algorithm: nil db → nil; sqlite_master probe fails → nil (non-SQLite, same guard as validateFlowItems); fromStatus==toStatus → nil (identity transition — preserves MCP idempotency); SELECT flow by type_name → fallback to type_name IS NULL AND name='default' → nil if neither found (no flow registered); SELECT COUNT(*) FROM smeldr_transitions WHERE flow_id=? AND from_state=? AND to_state=? → ErrConflict (409) when count=0; count query error → nil (fail open).
+
+`DynamicTypeRepo.SetStatus` (dynamic.go): calls `validateTransition` after `GetByID` — one DB read total (GetByID was already required to read PublishedAt). `newSetStatusHandler`: hardcoded enum switch removed; empty status → 400 ErrBadRequest; ErrConflict from SetStatus → WriteError passes wrapped error via errors.Is chain → 409 response.
+
+`Module[T]` (module.go): unexported `db DB` field + `setDB(DB)` method (same wiring pattern as `secret`/`setSecret`). `MCPPublish`, `MCPArchive`, `MCPSchedule` each call `validateTransition(ctx, m.db, m.contentTypeName, string(prevStatus), string(targetStatus))` before `setNodeStatus`. When db is nil (no DB configured) validation is silently skipped. `smeldr.go` `App.Content`: type-assertion wire `if dbs, ok := r.(interface{ setDB(DB) }); ok { dbs.setDB(a.cfg.DB) }` alongside the existing `setSecret` wire.
+
+12 new tests in `state_test.go`: 8 `TestValidateTransition_*` unit tests (nilDB, nonSQLite, identity, customFlow_valid, customFlow_invalid, defaultFlow_valid, defaultFlow_invalid, noFlow) + 1 `TestValidateTransition_countQueryError` (mock fail-open) + 3 `TestMCPPublish/Archive/Schedule_invalidTransition` integration tests (real SQLite with restricted flow). 1 updated test in `dynamic_app_test.go`: `TestAdminSetStatus_InvalidStatus` now uses sub-tests — unknown status → 409 (was 400); empty status → 400. Coverage: 96.0%.
+
+---
