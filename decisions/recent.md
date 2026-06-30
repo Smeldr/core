@@ -281,3 +281,17 @@ Design note: one JOIN query (not two sequential queries like validateTransition)
 10 new tests in `state_test.go`: `TestFireAsyncTriggers_nilDB`, `TestFireAsyncTriggers_nonSQLite`, `TestFireAsyncTriggers_noTriggers`, `TestFireAsyncTriggers_syncTrigger_skipped`, `TestFireAsyncTriggers_asyncTrigger_dispatched`, `TestFireAsyncTriggers_queryError`, `TestFireAsyncTriggers_scanError` (driver mock: 1-column rows, scan expects 2 → scan error path), `TestFireAsyncTriggers_rowsError` (driver mock: Next() returns non-EOF error → rows.Err() path), `TestSetStatus_firesAsyncTrigger`. Coverage: 96.0%.
 
 ---
+
+## A181 — T23 Step 8: AgentJob state flow registration in smeldr/agent (v0.6.1, 2026-06-30)
+
+**Date:** 2026-06-30
+**Status:** Agreed
+**Level:** 1
+
+`Module.Register` in `flow/module.go` (`smeldr.dev/agent`) gains an `app.RegisterFlow` call at the start of the function, before `app.Content(m.mod)`. The flow registered is `"agent-job"` for `TypeName: "AgentJob"` with four states — `draft` (initial), `published`, `paused` (`SuppressesSignals: true`), `archived` (terminal) — and five transitions: draft→published, published↔paused, published→archived, paused→archived. `SuppressesSignals: true` on `paused` means that After* hooks are suppressed while an AgentJob is paused, preserving its position without restarting it.
+
+`RegisterFlow` is fail-open on nil DB and non-SQLite (returns nil silently). A genuine error (e.g., duplicate name conflict) is logged via `slog.Error("smeldr-agent: RegisterFlow failed", "error", err)` and does not block startup. No new tests required — `RegisterFlow` is fully tested in smeldr.dev/core; existing `flow/` tests remain green with the new call (nil-DB path is no-op).
+
+`go.mod`: `smeldr.dev/core v1.26.0 → v1.44.3`. `go` directive: `1.26.3 → 1.26.4` (required by core v1.44.3).
+
+---
