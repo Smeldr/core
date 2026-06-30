@@ -1,9 +1,13 @@
 package smeldr
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"io"
+	"log/slog"
 	"strconv"
 	"strings"
 	"testing"
@@ -716,6 +720,33 @@ func (d *suppressFailDB) QueryRowContext(ctx context.Context, query string, _ ..
 	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
 }
 
+func TestSuppressesSignals_bothFlowsFail(t *testing.T) {
+	// suppressBothFlowsFailDB: probe succeeds, but BOTH flow lookups return no-row
+	// → default-flow fallback also fails → false (line 286 path in suppressesSignals).
+	ctx := context.Background()
+	db := &suppressBothFlowsFailDB{}
+	if suppressesSignals(ctx, db, "Post", "published") {
+		t.Error("both flows fail: want false (fail open), got true")
+	}
+}
+
+// suppressBothFlowsFailDB: sqlite_master probe succeeds; all smeldr_state_flows
+// queries return no-row, so both the custom and default flow lookups fail.
+type suppressBothFlowsFailDB struct{}
+
+func (d *suppressBothFlowsFailDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (d *suppressBothFlowsFailDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, nil
+}
+func (d *suppressBothFlowsFailDB) QueryRowContext(ctx context.Context, query string, _ ...any) *sql.Row {
+	if strings.HasPrefix(query, "SELECT COUNT(*) FROM sqlite_master") {
+		return sql.OpenDB(&guardRowConn{val: int64(0)}).QueryRowContext(ctx, "SELECT v")
+	}
+	return sql.OpenDB(&guardRowConn{noRow: true}).QueryRowContext(ctx, "SELECT v")
+}
+
 // — notifyAfter suppression integration tests ——————————————————————————————————
 
 // suppressedFlow registers a flow for "testPost" where "published" has
@@ -786,5 +817,279 @@ func TestNotifyAfter_unsuppressedState_hooksFire(t *testing.T) {
 		// ok — hook fired as expected
 	case <-time.After(2 * time.Second):
 		t.Error("afterHook was not called; want fired because draft does not suppress signals")
+	}
+}
+
+// — fireAsyncTriggers unit tests ——————————————————————————————————————————————
+
+// setupTriggerFlow registers a flow for "testPost" (draft→published) and inserts
+// a trigger row for that transition. Returns the trigger row ID.
+func setupTriggerFlow(t *testing.T, db DB, triggerClass, triggerType string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "trigger-test",
+		TypeName: "testPost",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published"},
+		},
+		Transitions: []Transition{{From: "draft", To: "published"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	var transID int64
+	if err := db.QueryRowContext(ctx, `
+		SELECT t.id FROM smeldr_transitions t
+		JOIN smeldr_state_flows f ON t.flow_id = f.id
+		WHERE f.type_name = 'testPost' AND t.from_state = 'draft' AND t.to_state = 'published'
+	`).Scan(&transID); err != nil {
+		t.Fatalf("get transition id: %v", err)
+	}
+	res, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_transition_triggers (transition_id, trigger_class, trigger_type, config) VALUES (?, ?, ?, ?)`,
+		transID, triggerClass, triggerType, `{}`,
+	)
+	if err != nil {
+		t.Fatalf("insert trigger: %v", err)
+	}
+	id, _ := res.LastInsertId()
+	return id
+}
+
+func TestFireAsyncTriggers_nilDB(t *testing.T) {
+	// Must not panic and return immediately.
+	fireAsyncTriggers(context.Background(), nil, "testPost", "draft", "published")
+}
+
+func TestFireAsyncTriggers_nonSQLite(t *testing.T) {
+	// failOnNthExecDB returns no-row on QueryRowContext → sqlite_master probe fails → return.
+	db := &failOnNthExecDB{failAt: 999}
+	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
+}
+
+func TestFireAsyncTriggers_noTriggers(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	// Flow registered but no trigger rows — must return without launching goroutines.
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:        "no-trigger",
+		TypeName:    "testPost",
+		States:      []State{{Name: "draft", IsInitial: true}, {Name: "published"}},
+		Transitions: []Transition{{From: "draft", To: "published"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	fireAsyncTriggers(ctx, db, "testPost", "draft", "published")
+}
+
+func TestFireAsyncTriggers_syncTrigger_skipped(t *testing.T) {
+	db := newSQLiteDB(t)
+	setupTriggerFlow(t, db, "sync", "create-signal")
+
+	prev := slog.Default()
+	t.Cleanup(func() { restoreDefaultLogging(prev) })
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
+	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
+	time.Sleep(30 * time.Millisecond)
+
+	if strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
+		t.Error("sync trigger should not be dispatched, but slog shows a dispatch message")
+	}
+}
+
+func TestFireAsyncTriggers_asyncTrigger_dispatched(t *testing.T) {
+	db := newSQLiteDB(t)
+	setupTriggerFlow(t, db, "async", "create-signal")
+
+	prev := slog.Default()
+	t.Cleanup(func() { restoreDefaultLogging(prev) })
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
+	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
+	time.Sleep(50 * time.Millisecond)
+
+	if !strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
+		t.Error("async trigger: want slog.Info dispatch message, got none")
+	}
+	if !strings.Contains(buf.String(), "create-signal") {
+		t.Error("async trigger: want trigger_type=create-signal in log, missing")
+	}
+}
+
+func TestFireAsyncTriggers_queryError(t *testing.T) {
+	// triggerQueryFailDB: probe succeeds, QueryContext returns an error → fail-open.
+	db := &triggerQueryFailDB{}
+	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
+}
+
+// triggerQueryFailDB: sqlite_master probe succeeds; QueryContext returns an error.
+type triggerQueryFailDB struct{}
+
+func (d *triggerQueryFailDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (d *triggerQueryFailDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, errors.New("query error")
+}
+func (d *triggerQueryFailDB) QueryRowContext(ctx context.Context, query string, _ ...any) *sql.Row {
+	if strings.HasPrefix(query, "SELECT COUNT(*) FROM sqlite_master") {
+		conn := &guardRowConn{val: int64(0)}
+		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+	}
+	conn := &guardRowConn{noRow: true}
+	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+}
+
+func TestFireAsyncTriggers_scanError(t *testing.T) {
+	// triggerScanErrDB: probe succeeds; rows return 1 column but Scan expects 2 — scan error path.
+	db := &triggerScanErrDB{}
+	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
+}
+
+func TestFireAsyncTriggers_rowsError(t *testing.T) {
+	// triggerRowsErrDB: probe succeeds; driver.Rows.Next returns non-EOF error — rows.Err() path.
+	db := &triggerRowsErrDB{}
+	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
+}
+
+// triggerScanErrDB: probe succeeds; QueryContext returns rows with 1 column while
+// fireAsyncTriggers scans into 2 destinations — triggers the rows.Scan error path.
+type triggerScanErrDB struct{}
+
+func (d *triggerScanErrDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (d *triggerScanErrDB) QueryContext(ctx context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return sql.OpenDB(&scanErrConnector{}).QueryContext(ctx, "SELECT v")
+}
+func (d *triggerScanErrDB) QueryRowContext(ctx context.Context, query string, _ ...any) *sql.Row {
+	if strings.HasPrefix(query, "SELECT COUNT(*) FROM sqlite_master") {
+		return sql.OpenDB(&guardRowConn{val: int64(0)}).QueryRowContext(ctx, "SELECT v")
+	}
+	return sql.OpenDB(&guardRowConn{noRow: true}).QueryRowContext(ctx, "SELECT v")
+}
+
+// scanErrConnector returns a driver connection whose rows have one column.
+type scanErrConnector struct{}
+
+func (c *scanErrConnector) Connect(_ context.Context) (driver.Conn, error) {
+	return &scanErrConn{}, nil
+}
+func (c *scanErrConnector) Driver() driver.Driver { return dummyDriver{} }
+
+type scanErrConn struct{}
+
+func (c *scanErrConn) Prepare(_ string) (driver.Stmt, error) { return &scanErrStmt{}, nil }
+func (c *scanErrConn) Close() error                          { return nil }
+func (c *scanErrConn) Begin() (driver.Tx, error)             { return nil, nil }
+
+type scanErrStmt struct{}
+
+func (s *scanErrStmt) Close() error                                 { return nil }
+func (s *scanErrStmt) NumInput() int                                { return -1 }
+func (s *scanErrStmt) Exec(_ []driver.Value) (driver.Result, error) { return nil, nil }
+func (s *scanErrStmt) Query(_ []driver.Value) (driver.Rows, error)  { return &scanErrRows{}, nil }
+
+// scanErrRows returns one row but Columns() advertises only 1 column;
+// Scan(&triggerType, &config) with 2 destinations fails.
+type scanErrRows struct{ done bool }
+
+func (r *scanErrRows) Columns() []string { return []string{"v"} }
+func (r *scanErrRows) Close() error      { return nil }
+func (r *scanErrRows) Next(dest []driver.Value) error {
+	if r.done {
+		return io.EOF
+	}
+	r.done = true
+	dest[0] = "trigger-type"
+	return nil
+}
+
+// triggerRowsErrDB: probe succeeds; QueryContext returns rows whose Next() returns a
+// non-EOF error, so rows.Next() returns false and rows.Err() returns the error.
+type triggerRowsErrDB struct{}
+
+func (d *triggerRowsErrDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (d *triggerRowsErrDB) QueryContext(ctx context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return sql.OpenDB(&rowsErrConnector{}).QueryContext(ctx, "SELECT v1, v2")
+}
+func (d *triggerRowsErrDB) QueryRowContext(ctx context.Context, query string, _ ...any) *sql.Row {
+	if strings.HasPrefix(query, "SELECT COUNT(*) FROM sqlite_master") {
+		return sql.OpenDB(&guardRowConn{val: int64(0)}).QueryRowContext(ctx, "SELECT v")
+	}
+	return sql.OpenDB(&guardRowConn{noRow: true}).QueryRowContext(ctx, "SELECT v")
+}
+
+// rowsErrConnector returns a driver whose rows.Next() yields a non-EOF error.
+type rowsErrConnector struct{}
+
+func (c *rowsErrConnector) Connect(_ context.Context) (driver.Conn, error) {
+	return &rowsErrDriverConn{}, nil
+}
+func (c *rowsErrConnector) Driver() driver.Driver { return dummyDriver{} }
+
+type rowsErrDriverConn struct{}
+
+func (c *rowsErrDriverConn) Prepare(_ string) (driver.Stmt, error) { return &rowsErrStmt{}, nil }
+func (c *rowsErrDriverConn) Close() error                          { return nil }
+func (c *rowsErrDriverConn) Begin() (driver.Tx, error)             { return nil, nil }
+
+type rowsErrStmt struct{}
+
+func (s *rowsErrStmt) Close() error                                 { return nil }
+func (s *rowsErrStmt) NumInput() int                                { return -1 }
+func (s *rowsErrStmt) Exec(_ []driver.Value) (driver.Result, error) { return nil, nil }
+func (s *rowsErrStmt) Query(_ []driver.Value) (driver.Rows, error)  { return &rowsErrDriverRows{}, nil }
+
+type rowsErrDriverRows struct{}
+
+func (r *rowsErrDriverRows) Columns() []string { return []string{"v1", "v2"} }
+func (r *rowsErrDriverRows) Close() error      { return nil }
+func (r *rowsErrDriverRows) Next(_ []driver.Value) error {
+	return errors.New("rows iteration error")
+}
+
+// — SetStatus integration test for fireAsyncTriggers ———————————————————————
+
+func TestSetStatus_firesAsyncTrigger(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := CreateBlockTables(db); err != nil {
+		t.Fatalf("CreateBlockTables: %v", err)
+	}
+	setupTriggerFlow(t, db, "async", "create-signal")
+
+	repo := &DynamicTypeRepo{db: db, typeName: "testPost"}
+	node, err := repo.CreateDraft(ctx, map[string]any{"title": "Trigger Test"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+
+	prev := slog.Default()
+	t.Cleanup(func() { restoreDefaultLogging(prev) })
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
+	if err := repo.SetStatus(ctx, node.ID, Published); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	if !strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
+		t.Errorf("SetStatus: want async trigger dispatch log, got:\n%s", buf.String())
 	}
 }

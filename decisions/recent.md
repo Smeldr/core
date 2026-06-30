@@ -265,3 +265,19 @@ Three unexported helpers added to `state_tools.go`: `parseStates([]any) ([]smeld
 9 new tests in `state_test.go`. 7 unit tests for `suppressesSignals`: `TestSuppressesSignals_nilDB`, `TestSuppressesSignals_nonSQLite`, `TestSuppressesSignals_noFlow`, `TestSuppressesSignals_falseWhenNotSet`, `TestSuppressesSignals_trueWhenSet`, `TestSuppressesSignals_defaultFlowFallback`, `TestSuppressesSignals_scanError`. 2 integration tests for `notifyAfter` suppression: `TestNotifyAfter_suppressedState_hooksSkipped` (registers custom flow with suppresses_signals=true, fires signal, verifies afterHook was not called), `TestNotifyAfter_unsuppressedState_hooksFire` (same flow, state=false for draft, verifies hook fires). Coverage: 96.0%.
 
 ---
+
+## A180 — T23 Step 7: fireAsyncTriggers dispatch in state.go + SetStatus wire (dynamic.go) (v1.44.3, 2026-06-30)
+
+**Date:** 2026-06-30
+**Status:** Agreed
+**Level:** 1
+
+`fireAsyncTriggers(ctx context.Context, db DB, typeName, fromState, toState string)` added (unexported) to `state.go`. Algorithm: nil db → return; sqlite_master probe fails → return (non-SQLite, fail-open guard); one JOIN query on `smeldr_transition_triggers`, `smeldr_transitions`, `smeldr_state_flows` for `trigger_class='async'` AND matching from_state/to_state AND `(f.type_name=? OR (f.type_name IS NULL AND f.name='default'))`; scan error → return (fail-open, slog.Warn); rows.Err → return (fail-open, slog.Warn); for each matched trigger row, dispatch goroutine with panic recovery (slog.Error on panic); unknown trigger_type → slog.Warn (concrete handlers deferred to Steps 10+). All error paths are fail-open — the transition in SetStatus always succeeds.
+
+Design note: one JOIN query (not two sequential queries like validateTransition) because the result is a collection, not a scalar. The OR in the WHERE clause resolves custom-flow vs default-flow in the same round-trip.
+
+`DynamicTypeRepo.SetStatus` (dynamic.go) tail changed from `return err` to: check `err != nil` → return; call `fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(status))`; return nil. `node.Status` is the FROM state captured by `GetByID` at the top of `SetStatus`.
+
+10 new tests in `state_test.go`: `TestFireAsyncTriggers_nilDB`, `TestFireAsyncTriggers_nonSQLite`, `TestFireAsyncTriggers_noTriggers`, `TestFireAsyncTriggers_syncTrigger_skipped`, `TestFireAsyncTriggers_asyncTrigger_dispatched`, `TestFireAsyncTriggers_queryError`, `TestFireAsyncTriggers_scanError` (driver mock: 1-column rows, scan expects 2 → scan error path), `TestFireAsyncTriggers_rowsError` (driver mock: Next() returns non-EOF error → rows.Err() path), `TestSetStatus_firesAsyncTrigger`. Coverage: 96.0%.
+
+---

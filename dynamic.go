@@ -196,7 +196,11 @@ func (r *DynamicTypeRepo) SetStatus(ctx context.Context, id string, status Statu
 	_, err = r.db.ExecContext(ctx,
 		"UPDATE smeldr_dynamic_content SET status = $1, published_at = $2, updated_at = $3 WHERE id = $4 AND type_name = $5",
 		string(status), publishedAt, now, id, r.typeName)
-	return err
+	if err != nil {
+		return err
+	}
+	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(status))
+	return nil
 }
 
 // — slug helpers ——————————————————————————————————————————————————————————————

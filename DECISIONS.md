@@ -48,6 +48,7 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 | # | Title | File |
 |---|-------|------|
+| A180 | T23 Step 7: fireAsyncTriggers(ctx, db, typeName, fromState, toState) in state.go. One JOIN query on smeldr_transition_triggers/transitions/flows for trigger_class='async'. Goroutine per trigger with panic recovery. Unknown trigger_types log slog.Warn. DynamicTypeRepo.SetStatus calls it after successful UPDATE (dynamic.go). Fail-open on all error paths. 10 new tests in state_test.go (including scan-error and rows.Err driver mocks). core v1.44.3. | [recent.md](decisions/recent.md) |
 | A179 | T23 Step 6: suppressesSignals(ctx, db, typeName, statusName) bool in state.go — pattern matches validateTransition: nil DB → false; custom flow fallback → default; scan error → false (fail-open). notifyAfter early-return guard suppresses all After* signals + afterHook when state.suppresses_signals=true. 9 new tests in state_test.go. core v1.44.2. | [recent.md](decisions/recent.md) |
 | A178 | T23 Step 5: define_state_flow MCP tool (Admin) in state_tools.go. Calls App.RegisterFlow; type_name required. Three-tier role switch in handleToolsCall (Admin/Editor/Author). parseStates/parseTransitions/boolField helpers. mcp v1.24.1. | [recent.md](decisions/recent.md) |
 | A177 | T23 Step 4: three state flow MCP tools in smeldr/mcp (transition_item, get_valid_transitions, list_items_by_state). ErrConflict → -32001. core v1.44.1, mcp v1.24.0. | [recent.md](decisions/recent.md) |

@@ -3,6 +3,7 @@ package smeldr
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -294,4 +295,76 @@ func suppressesSignals(ctx context.Context, db DB, typeName, statusName string) 
 		return false // state not found or query failed — fail open
 	}
 	return suppresses
+}
+
+// fireAsyncTriggers queries smeldr_transition_triggers for async trigger rows
+// matching the given (typeName, fromState, toState) transition and dispatches
+// each in a goroutine. Panics inside goroutines are recovered and logged.
+// Fails silently on DB error — the transition itself always succeeds.
+// Called by DynamicTypeRepo.SetStatus after a successful status UPDATE.
+func fireAsyncTriggers(ctx context.Context, db DB, typeName, fromState, toState string) {
+	if db == nil {
+		return
+	}
+	var dummy int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
+		return // not SQLite — skip
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT tt.trigger_type, tt.config
+		FROM smeldr_transition_triggers tt
+		JOIN smeldr_transitions t ON tt.transition_id = t.id
+		JOIN smeldr_state_flows f ON t.flow_id = f.id
+		WHERE tt.trigger_class = 'async'
+		  AND t.from_state = ?
+		  AND t.to_state   = ?
+		  AND (f.type_name = ? OR (f.type_name IS NULL AND f.name = 'default'))
+	`, fromState, toState, typeName)
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: fireAsyncTriggers query failed",
+			"type_name", typeName, "error", err)
+		return
+	}
+	defer rows.Close()
+
+	type trigRow struct{ triggerType, config string }
+	var triggers []trigRow
+	for rows.Next() {
+		var tr trigRow
+		if err := rows.Scan(&tr.triggerType, &tr.config); err != nil {
+			slog.WarnContext(ctx, "smeldr: fireAsyncTriggers scan failed", "error", err)
+			return
+		}
+		triggers = append(triggers, tr)
+	}
+	if err := rows.Err(); err != nil {
+		slog.WarnContext(ctx, "smeldr: fireAsyncTriggers rows error", "error", err)
+		return
+	}
+
+	for _, tr := range triggers {
+		tr := tr
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.ErrorContext(ctx, "smeldr: fireAsyncTriggers panic",
+						"panic", r, "trigger_type", tr.triggerType)
+				}
+			}()
+			slog.InfoContext(ctx, "smeldr: fireAsyncTriggers dispatch",
+				"trigger_type", tr.triggerType,
+				"type_name", typeName,
+				"from_state", fromState,
+				"to_state", toState,
+				"config", tr.config,
+			)
+			switch tr.triggerType {
+			// Concrete handlers added in Steps 10+ (create-signal, relation-cascade, schedule-eval).
+			default:
+				slog.WarnContext(ctx, "smeldr: fireAsyncTriggers unknown trigger_type",
+					"trigger_type", tr.triggerType,
+				)
+			}
+		}()
+	}
 }

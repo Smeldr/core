@@ -23,6 +23,19 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.44.3] — 2026-06-30
+
+### Internal
+- `fireAsyncTriggers(ctx context.Context, db DB, typeName, fromState, toState string)` (unexported, `state.go`):
+  queries `smeldr_transition_triggers` (one JOIN with `smeldr_transitions` + `smeldr_state_flows`) for
+  `trigger_class='async'` rows matching the transition. Dispatches each trigger in a goroutine with
+  panic recovery. Unknown `trigger_type` values log `slog.Warn` — concrete handlers come in Steps 10+.
+  Fail-open on all error paths (query error, scan error, rows.Err). (T23 Step 7, A180)
+- `DynamicTypeRepo.SetStatus` (`dynamic.go`): calls `fireAsyncTriggers` after a successful `ExecContext`.
+  FROM state is `node.Status` captured by `GetByID` before the update. (T23 Step 7, A180)
+
+---
+
 ## [1.44.2] — 2026-06-30
 
 ### Changed
