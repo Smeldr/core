@@ -327,3 +327,39 @@ Dependents: `smeldr/agent v0.6.2` (flow/module.go, flow/agent_job.go, flow/agent
 All tests pass. Coverage: core 96.0%.
 
 ---
+
+## A184 — Fix data race in state_test.go (v1.45.1)
+
+**Status:** Agreed
+**Date:** 2026-06-30
+**Scope:** test-only fix — no production code changed
+
+**Problem:** `go test -race ./...` on GitHub Actions (run #28463386642) failed with a DATA RACE in
+`TestFireAsyncTriggers_asyncTrigger_dispatched`. Root cause: `fireAsyncTriggers` spawns a goroutine
+that calls `slog.WarnContext`, which writes to the slog handler's `bytes.Buffer`. The test goroutine
+reads `buf.String()` after a `time.Sleep(50ms)` — but `bytes.Buffer` is not goroutine-safe and
+`time.Sleep` provides no happens-before edge. The race detector correctly flagged concurrent access:
+
+```
+Read at state_test.go:923 buf.String() — test goroutine
+Write at state.go:364 slog.WarnContext → TextHandler → buf.Write — fireAsyncTriggers goroutine
+```
+
+**Fix:** Introduced `type safeBuf struct` in `state_test.go` — a `bytes.Buffer` wrapped with
+`sync.Mutex` implementing `io.Writer` and a `String()` method. Replaced `var buf bytes.Buffer`
+with `var buf safeBuf` in three test functions:
+
+- `TestFireAsyncTriggers_syncTrigger_skipped`
+- `TestFireAsyncTriggers_asyncTrigger_dispatched`
+- `TestDynamicTypeRepo_SetStatus_fireAsyncTriggers`
+
+`sync` added to imports. No change to production code.
+
+**Why no production fix:** The race is in the test harness, not in `fireAsyncTriggers`. The
+`time.Sleep` approach is retained (it gives the goroutine time to run and log); only the shared
+buffer is made safe. A channel-based approach would also work but requires more structural change
+to the test.
+
+Coverage: 96.0%. core v1.45.1.
+
+---

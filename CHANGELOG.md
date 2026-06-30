@@ -23,6 +23,17 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.45.1] — 2026-06-30
+
+### Fixed
+- Race condition in `state_test.go` under `go test -race`: `TestFireAsyncTriggers_asyncTrigger_dispatched`
+  and `TestDynamicTypeRepo_SetStatus_fireAsyncTriggers` used a bare `bytes.Buffer` as the slog
+  handler target while `fireAsyncTriggers` wrote to it concurrently from a spawned goroutine.
+  Replaced with a mutex-protected `safeBuf` wrapper in three affected test functions. No
+  production code changed. (A184)
+
+---
+
 ## [1.45.0] — 2026-06-30
 
 ### Added

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -897,7 +898,7 @@ func TestFireAsyncTriggers_syncTrigger_skipped(t *testing.T) {
 
 	prev := slog.Default()
 	t.Cleanup(func() { restoreDefaultLogging(prev) })
-	var buf bytes.Buffer
+	var buf safeBuf
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
 	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
@@ -914,7 +915,7 @@ func TestFireAsyncTriggers_asyncTrigger_dispatched(t *testing.T) {
 
 	prev := slog.Default()
 	t.Cleanup(func() { restoreDefaultLogging(prev) })
-	var buf bytes.Buffer
+	var buf safeBuf
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
 	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
@@ -1081,7 +1082,7 @@ func TestSetStatus_firesAsyncTrigger(t *testing.T) {
 
 	prev := slog.Default()
 	t.Cleanup(func() { restoreDefaultLogging(prev) })
-	var buf bytes.Buffer
+	var buf safeBuf
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
 	if err := repo.SetStatus(ctx, node.ID, Published); err != nil {
@@ -1092,4 +1093,24 @@ func TestSetStatus_firesAsyncTrigger(t *testing.T) {
 	if !strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
 		t.Errorf("SetStatus: want async trigger dispatch log, got:\n%s", buf.String())
 	}
+}
+
+// safeBuf is a goroutine-safe bytes.Buffer for slog handlers in tests that spawn goroutines.
+// bytes.Buffer is not safe for concurrent use; the race detector flags slog writes from
+// async goroutines against reads in the test goroutine.
+type safeBuf struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *safeBuf) Write(p []byte) (n int, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *safeBuf) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
