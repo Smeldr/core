@@ -73,7 +73,7 @@ Smeldr has six concepts. Learn them once, apply them everywhere.
 ```
 Node      →  the base every content type embeds
 Module    →  one content type, fully wired
-Signal    →  a hook that fires when something changes
+LifecycleEvent  →  a hook that fires when something changes
 Head      →  all metadata for a page (SEO + social + AI)
 Cookie    →  a declared, typed, compliance-aware browser cookie
 Role      →  a position in the access hierarchy
@@ -2395,7 +2395,7 @@ type SignalEvent struct {
 ### `App.OnSignal`
 
 ```go
-func (a *App) OnSignal(sig Signal, h func(context.Context, SignalEvent) error) *App
+func (a *App) OnSignal(sig LifecycleEvent, h func(context.Context, SignalEvent) error) *App
 ```
 
 Registers `h` to fire whenever `sig` is dispatched. Returns `*App` for chaining.
@@ -2543,7 +2543,7 @@ an empty title field.
 ### `AfterSchedule` signal
 
 ```go
-const AfterSchedule Signal = "after_schedule"
+const AfterSchedule LifecycleEvent = "after_schedule"
 ```
 
 Fires after a node transitions to `Scheduled` status via `MCPSchedule`.
@@ -2699,8 +2699,8 @@ Prints a tab-aligned table to stdout. Requires `SMELDR_TOKEN` (or legacy `FORGE_
 
 ### Which signals are recorded
 
-| Signal | Recorded |
-|--------|----------|
+| LifecycleEvent | Recorded |
+|----------------|----------|
 | `AfterPublish` | ✅ |
 | `AfterSchedule` | ✅ |
 | `AfterArchive` | ✅ |
@@ -3283,3 +3283,71 @@ bootstrapping a database without going through `App`.
 Dynamic content types serve JSON by default. For HTML rendering in a standalone
 site, implement templates in your application using the JSON API as the data
 source. Cloud rendering is outside core scope (A156).
+
+---
+
+## Orchestration types
+
+`orchestration.go` (T23 Step 10, A183) — four content types for the architect/pilot protocol.
+
+### `CreateOrchestrationTables`
+
+```go
+func CreateOrchestrationTables(db DB) error
+```
+
+Creates `smeldr_signals`, `smeldr_tasks`, `smeldr_decisions`, `smeldr_amendments` tables
+if they do not already exist. Call once at application startup before `RegisterOrchestrationTypes`.
+
+### `RegisterOrchestrationTypes`
+
+```go
+func RegisterOrchestrationTypes(app *App, db DB)
+```
+
+Registers the four orchestration content types with their custom state flows and MCP
+read+write tools. Fail-open: if `db` is nil, flow registration errors are logged and
+startup continues. Call after `CreateOrchestrationTables` and before `App.Run`.
+
+```go
+smeldr.CreateOrchestrationTables(db)
+smeldr.RegisterOrchestrationTypes(app, db)
+```
+
+### Content types
+
+| Type | Table | State flow | Key fields |
+|------|-------|------------|------------|
+| `Signal` | `smeldr_signals` | signal-protocol (4 states) | sender, receiver, signal_type, message, task_ref, sequence |
+| `Task` | `smeldr_tasks` | architect-task (9 states) | task_id, priority, band, size, description, note_ref |
+| `Decision` | `smeldr_decisions` | governance-decision (5 states) | decision_number, scope, body, next_eval_at, eval_note |
+| `Amendment` | `smeldr_amendments` | amendment-lifecycle (6 states) | amendment_number, amendment_type, version, commit_hash, pilot, summary |
+
+All four types embed `Node` and receive auto-generated MCP tools (`create_*`, `get_*`,
+`list_*`, `update_*`, `publish_*`, `archive_*`, `delete_*`) via `MCP(MCPRead, MCPWrite)`.
+
+### `LifecycleEvent` (renamed from `Signal`)
+
+```go
+type LifecycleEvent string
+```
+
+Identifies a content lifecycle event. Previously named `Signal`; renamed in A183 to free
+the name `Signal` for orchestration use. All constants retain their names:
+
+```go
+const (
+    BeforeCreate   LifecycleEvent = "before_create"
+    AfterCreate    LifecycleEvent = "after_create"
+    BeforeUpdate   LifecycleEvent = "before_update"
+    AfterUpdate    LifecycleEvent = "after_update"
+    BeforeDelete   LifecycleEvent = "before_delete"
+    AfterDelete    LifecycleEvent = "after_delete"
+    AfterPublish   LifecycleEvent = "after_publish"
+    AfterUnpublish LifecycleEvent = "after_unpublish"
+    AfterArchive   LifecycleEvent = "after_archive"
+    AfterSchedule  LifecycleEvent = "after_schedule"
+    SitemapRegenerate     LifecycleEvent = "sitemap_regenerate"
+    AfterRelationCascade  LifecycleEvent = "relation.cascade"
+)
+```

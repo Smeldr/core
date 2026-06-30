@@ -309,3 +309,21 @@ Design note: one JOIN query (not two sequential queries like validateTransition)
 `go.mod`: `smeldr.dev/core v1.26.0 → v1.44.3`. `go` directive: `1.26.3 → 1.26.4` (required by core v1.44.3).
 
 ---
+
+## A183 - T23 Step 10: LifecycleEvent rename + orchestration types (core v1.45.0, 2026-06-30)
+
+**Date:** 2026-06-30
+**Status:** Agreed
+**Level:** 2 (exported type rename, new exported types and functions, cross-repo change)
+
+`type Signal string` in `signals.go` renamed to `type LifecycleEvent string`. The eleven constants (BeforeCreate, AfterCreate, BeforeUpdate, AfterUpdate, BeforeDelete, AfterDelete, AfterPublish, AfterUnpublish, AfterArchive, AfterSchedule, SitemapRegenerate, AfterRelationCascade) keep their names - only the type annotation changes. All core function signatures updated: `On[T]`, `OnSignal`, `AddSignalListener`, `notifyAfter`, `setAfterHook`, `dispatchBus`, `emitSignal`, `signalToEventSuffix`, `buildEventName`, `buildWebhookPayload`, `webhookDispatch`. `AuditRecord.Signal` field type changed to `LifecycleEvent`. Frees the name `Signal` for orchestration use.
+
+New file `orchestration.go` (package smeldr) adds four content types: `Signal` (protocol message: sender, receiver, signal_type, message, task_ref, sequence), `Task` (work item: task_id, priority, band, size, description, note_ref), `Decision` (ratified decision: decision_number, scope, body, next_eval_at, eval_note), `Amendment` (changeset: amendment_number, amendment_type, version, commit_hash, pilot, summary). All embed `Node`.
+
+`CreateOrchestrationTables(db DB) error` creates tables smeldr_signals, smeldr_tasks, smeldr_decisions, smeldr_amendments. `RegisterOrchestrationTypes(app *App, db DB)` registers all four types with custom state flows and MCP(MCPRead, MCPWrite); fail-open on nil DB. Four private flow helpers: orchSignalFlow (4 states), orchTaskFlow (9 states), orchDecisionFlow (5 states), orchAmendmentFlow (6 states).
+
+Dependents: `smeldr/agent v0.6.2` (flow/module.go, flow/agent_job.go, flow/agent_job_test.go: smeldr.Signal -> smeldr.LifecycleEvent; core dep v1.44.3 -> v1.45.0). `smeldr/social v0.9.2` (route.go, router.go, export_test.go: same rename; core dep -> v1.45.0). `smeldr/mcp v1.24.2` (mcp.go: same rename; core dep v1.44.1 -> v1.45.0).
+
+All tests pass. Coverage: core 96.0%.
+
+---

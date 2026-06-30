@@ -7,58 +7,58 @@ import (
 	"time"
 )
 
-// Signal identifies a lifecycle event fired by a content module.
+// LifecycleEvent identifies a lifecycle event fired by a content module.
 // Handlers are registered with [On] and receive the content value as their
 // concrete type T — no type assertion required.
-type Signal string
+type LifecycleEvent string
 
 // Lifecycle signals fired by content modules.
 const (
 	// BeforeCreate fires before a new content item is persisted.
 	// Return an error to abort the operation.
-	BeforeCreate Signal = "before_create"
+	BeforeCreate LifecycleEvent = "before_create"
 
 	// AfterCreate fires after a new content item has been persisted.
 	// Runs asynchronously — errors and panics are logged, never returned.
-	AfterCreate Signal = "after_create"
+	AfterCreate LifecycleEvent = "after_create"
 
 	// BeforeUpdate fires before an existing content item is updated.
 	// Return an error to abort the operation.
-	BeforeUpdate Signal = "before_update"
+	BeforeUpdate LifecycleEvent = "before_update"
 
 	// AfterUpdate fires after a content item has been updated.
 	// Runs asynchronously — errors and panics are logged, never returned.
-	AfterUpdate Signal = "after_update"
+	AfterUpdate LifecycleEvent = "after_update"
 
 	// BeforeDelete fires before a content item is deleted.
 	// Return an error to abort the operation.
-	BeforeDelete Signal = "before_delete"
+	BeforeDelete LifecycleEvent = "before_delete"
 
 	// AfterDelete fires after a content item has been deleted.
 	// Runs asynchronously — errors and panics are logged, never returned.
-	AfterDelete Signal = "after_delete"
+	AfterDelete LifecycleEvent = "after_delete"
 
 	// AfterPublish fires after a content item transitions to Published.
 	// Runs asynchronously — triggers sitemap and feed regeneration.
-	AfterPublish Signal = "after_publish"
+	AfterPublish LifecycleEvent = "after_publish"
 
 	// AfterUnpublish fires after a content item is moved out of Published status.
 	// Runs asynchronously — triggers sitemap and feed regeneration.
-	AfterUnpublish Signal = "after_unpublish"
+	AfterUnpublish LifecycleEvent = "after_unpublish"
 
 	// AfterArchive fires after a content item transitions to Archived.
 	// Runs asynchronously — triggers sitemap and feed regeneration.
-	AfterArchive Signal = "after_archive"
+	AfterArchive LifecycleEvent = "after_archive"
 
 	// AfterSchedule fires after a content item transitions to Scheduled status.
 	// It fires in addition to AfterUpdate — not instead of it. Runs
 	// asynchronously — errors and panics are logged, never returned.
-	AfterSchedule Signal = "after_schedule"
+	AfterSchedule LifecycleEvent = "after_schedule"
 
 	// SitemapRegenerate is fired internally after AfterPublish, AfterUnpublish,
 	// AfterArchive, and AfterDelete. It is debounced to coalesce burst changes
 	// into a single sitemap and feed rebuild.
-	SitemapRegenerate Signal = "sitemap_regenerate"
+	SitemapRegenerate LifecycleEvent = "sitemap_regenerate"
 
 	// AfterRelationCascade fires when a content item's relation premise changes —
 	// i.e., a target item it references has been published, archived, deleted, or
@@ -72,7 +72,7 @@ const (
 	//     not a lifecycle state string.
 	//   - ActorID holds the NodeID of the changed target item (for traceability),
 	//     not a human actor ID.
-	AfterRelationCascade Signal = "relation.cascade"
+	AfterRelationCascade LifecycleEvent = "relation.cascade"
 )
 
 // signalHandler is the internal, type-erased handler signature used by
@@ -84,7 +84,7 @@ type signalHandler func(Context, any) error
 // signal name and one type-erased handler. Module wiring (module.go)
 // accumulates these options into per-signal handler slices.
 type signalOption struct {
-	signal  Signal
+	signal  LifecycleEvent
 	handler signalHandler
 }
 
@@ -101,7 +101,7 @@ func (signalOption) isOption() {}
 //	    p.Author = ctx.User().Name
 //	    return nil
 //	})
-func On[T any](signal Signal, h func(Context, T) error) Option {
+func On[T any](signal LifecycleEvent, h func(Context, T) error) Option {
 	return signalOption{
 		signal: signal,
 		handler: func(ctx Context, payload any) error {
@@ -254,7 +254,7 @@ type afterHookMeta struct {
 
 // buildSignalEvent constructs a [SignalEvent] from the parameters available
 // in the wireSignalBus closure. Called once per signal dispatch.
-func buildSignalEvent(ctx Context, _ Signal, meta afterHookMeta, item any, baseURL string) SignalEvent {
+func buildSignalEvent(ctx Context, _ LifecycleEvent, meta afterHookMeta, item any, baseURL string) SignalEvent {
 	n := extractNode(item)
 	slug := n.Slug
 	title := ""

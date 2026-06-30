@@ -83,7 +83,7 @@ func TestApp_WebhookStore_nilWhenNotConfigured(t *testing.T) {
 func TestApp_AddSignalListener(t *testing.T) {
 	app := New(Config{BaseURL: "https://example.com", Secret: []byte("test-secret-key!1234567890abcde")})
 	before := len(app.signalListeners)
-	app.AddSignalListener(func(Signal, string, any) {})
+	app.AddSignalListener(func(LifecycleEvent, string, any) {})
 	if got := len(app.signalListeners); got != before+1 {
 		t.Errorf("signalListeners len: got %d, want %d", got, before+1)
 	}

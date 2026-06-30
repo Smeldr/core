@@ -445,6 +445,22 @@ These tools are available when `App.Config().DB` is non-nil (any app with a data
 - `get_valid_transitions` queries `smeldr_state_flows` directly for the custom flow registered for `type_name`, falling back to the default flow if none is registered
 - The default flow (draft → scheduled/published/archived, scheduled → published, published → archived) is always present when a DB is configured
 
-### Connection setup
+### Orchestration content types (A183)
+
+Four built-in types for the architect/pilot protocol. Call `RegisterOrchestrationTypes(app, db)` at startup — after `CreateOrchestrationTables(db)` — to activate them. All four types are registered with `MCP(MCPRead, MCPWrite)`, so MCP tools are generated automatically.
+
+| Type | Table | Initial state | Purpose |
+|------|-------|---------------|---------|
+| `Signal` | `smeldr_signals` | `pending` | Protocol message between a pilot and the architect |
+| `Task` | `smeldr_tasks` | `backlog` | Work item in the task state machine |
+| `Decision` | `smeldr_decisions` | `proposed` | Architectural decision with a re-evaluation cycle |
+| `Amendment` | `smeldr_amendments` | `scoped` | Committed changeset linking a Task to its implementation |
+
+Each type embeds `Node` and receives the standard auto-generated MCP tools (`create_signal`, `get_signal`, `list_signals`, `update_signal`, `publish_signal`, `archive_signal`, `delete_signal`, and the equivalent for `task`, `decision`, `amendment`).
+
+**`LifecycleEvent` (renamed from `Signal` in A183)**
+
+The Go type `smeldr.Signal` was renamed to `smeldr.LifecycleEvent` to free the `Signal` name for the orchestration content type above. All constant names are unchanged (`AfterCreate`, `AfterPublish`, etc.). If you have code that references `smeldr.Signal` as a type (not a constant), update it to `smeldr.LifecycleEvent`.
+## Connection setup
 
 See the smeldr.dev/mcp README for Claude Desktop, Cursor, and SSE configuration.

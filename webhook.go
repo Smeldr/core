@@ -250,7 +250,7 @@ func (s *WebhookStore) EndpointsForEvent(ctx context.Context, event string) ([]W
 // signalToEventSuffix maps a Signal constant to its webhook event suffix.
 // Returns ("", false) for signals that are not delivered as webhook events
 // (BeforeCreate, BeforeUpdate, BeforeDelete, SitemapRegenerate).
-func signalToEventSuffix(sig Signal) (string, bool) {
+func signalToEventSuffix(sig LifecycleEvent) (string, bool) {
 	switch sig {
 	case AfterCreate:
 		return "created", true
@@ -275,7 +275,7 @@ func signalToEventSuffix(sig Signal) (string, bool) {
 // Returns ("", false) when sig does not map to a delivery event.
 //
 // Example: buildEventName("Post", AfterPublish) → ("post.published", true).
-func buildEventName(typeName string, sig Signal) (string, bool) {
+func buildEventName(typeName string, sig LifecycleEvent) (string, bool) {
 	suffix, ok := signalToEventSuffix(sig)
 	if !ok {
 		return "", false
@@ -287,7 +287,7 @@ func buildEventName(typeName string, sig Signal) (string, bool) {
 // given content item and signal. The data object includes type, id, and slug
 // from the embedded Node; the title field is added when item implements
 // [Titled].
-func buildWebhookPayload(typeName string, item any, sig Signal) ([]byte, error) {
+func buildWebhookPayload(typeName string, item any, sig LifecycleEvent) ([]byte, error) {
 	eventName, ok := buildEventName(typeName, sig)
 	if !ok {
 		return nil, fmt.Errorf("smeldr: signal %q is not a webhook delivery event", sig)
@@ -319,7 +319,7 @@ func buildWebhookPayload(typeName string, item any, sig Signal) ([]byte, error) 
 // for each active endpoint subscribed to the event. Errors during payload
 // build or endpoint lookup are logged but not returned, because the bus logs
 // handler errors at Warn level; returning nil avoids double-logging.
-func webhookDispatch(ctx context.Context, ev SignalEvent, sig Signal, store *WebhookStore, pool *workerPool) error {
+func webhookDispatch(ctx context.Context, ev SignalEvent, sig LifecycleEvent, store *WebhookStore, pool *workerPool) error {
 	eventName, ok := buildEventName(ev.Type, sig)
 	if !ok {
 		return nil

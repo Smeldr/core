@@ -169,7 +169,7 @@ func TestAuditStore_EmptyResult(t *testing.T) {
 	}
 }
 
-// --- App.Audit() signal wiring tests ---
+// --- App.Audit() LifecycleEvent wiring tests ---
 
 func TestAppAudit_SubscribedSignalsFire(t *testing.T) {
 	store := &fakeAuditStore{}
@@ -181,8 +181,8 @@ func TestAppAudit_SubscribedSignalsFire(t *testing.T) {
 
 	ctx := NewTestContext(User{ID: "u1", Roles: []Role{Editor}})
 
-	// dispatchBus is synchronous; call it directly with each subscribed signal.
-	for _, sig := range []Signal{AfterPublish, AfterSchedule, AfterArchive, AfterDelete} {
+	// dispatchBus is synchronous; call it directly with each subscribed LifecycleEvent.
+	for _, sig := range []LifecycleEvent{AfterPublish, AfterSchedule, AfterArchive, AfterDelete} {
 		ev := SignalEvent{
 			Type:          "Post",
 			Slug:          "hello",
@@ -195,7 +195,7 @@ func TestAppAudit_SubscribedSignalsFire(t *testing.T) {
 	}
 
 	if len(store.appended) != 4 {
-		t.Errorf("appended %d records, want 4 (one per subscribed signal)", len(store.appended))
+		t.Errorf("appended %d records, want 4 (one per subscribed LifecycleEvent)", len(store.appended))
 	}
 	for _, r := range store.appended {
 		if r.ID == "" {
@@ -219,7 +219,7 @@ func TestAppAudit_UnsubscribedSignalsNotRecorded(t *testing.T) {
 	app.Audit(store)
 
 	ctx := NewTestContext(User{})
-	for _, sig := range []Signal{AfterCreate, AfterUpdate} {
+	for _, sig := range []LifecycleEvent{AfterCreate, AfterUpdate} {
 		ev := SignalEvent{Type: "Post", Slug: "s", Timestamp: time.Now()}
 		app.dispatchBus(ctx, ev, sig)
 	}

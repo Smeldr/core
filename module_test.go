@@ -537,7 +537,7 @@ func TestModuleCacheInvalidatedOnCreate(t *testing.T) {
 	}
 }
 
-// — Signal tests ——————————————————————————————————————————————————————————
+// — LifecycleEvent tests ——————————————————————————————————————————————————————————
 
 func TestModuleSignalBeforeCreateAborts(t *testing.T) {
 	repo := NewMemoryRepo[*testPost]()
@@ -1864,7 +1864,7 @@ func TestCollectStats_countByStatusError(t *testing.T) {
 func TestNotifyAfter_panicRecovery(t *testing.T) {
 	m := newTestModule(NewMemoryRepo[*testPost]())
 	panicked := make(chan struct{})
-	m.setAfterHook(func(_ Context, _ Signal, _ afterHookMeta, _ any) {
+	m.setAfterHook(func(_ Context, _ LifecycleEvent, _ afterHookMeta, _ any) {
 		close(panicked)
 		panic("test panic from afterHook")
 	})

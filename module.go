@@ -443,7 +443,7 @@ type Module[T any] struct {
 	readRole     Role
 	writeRole    Role
 	deleteRole   Role
-	signals      map[Signal][]signalHandler
+	signals      map[LifecycleEvent][]signalHandler
 	cache        *CacheStore // nil when no Cache option was given
 	middlewares  []func(http.Handler) http.Handler
 	neg          contentNegotiator
@@ -487,13 +487,13 @@ type Module[T any] struct {
 	navTree       *NavTree       // non-nil when App.NavTree is active; set by App.Handler via setNavTree
 	pageMetaStore *PageMetaStore // nil until App.PageMeta is called; injected by App.Handler push loop
 
-	contentTypeName   string                                           // unqualified type name; set by NewModule
-	afterHook         func(Context, Signal, afterHookMeta, any)        // nil until wired by App; called async on delivery signals
-	syncSaveHook      func(context.Context, string, string, any) error // nil until wired by App.Relations; called sync after save
-	secret            []byte                                           // set by App.Content via setSecret; used for preview token validation
-	db                DB                                               // set by App.Content via setDB; used for transition validation
-	cacheInvalidators []func()                                         // extra invalidation callbacks wired by App.Route for aggregate routes
-	slugCheckers      []func(ctx context.Context, slug string) error   // collision checkers wired by App.Route for aggregate routes
+	contentTypeName   string                                            // unqualified type name; set by NewModule
+	afterHook         func(Context, LifecycleEvent, afterHookMeta, any) // nil until wired by App; called async on delivery signals
+	syncSaveHook      func(context.Context, string, string, any) error  // nil until wired by App.Relations; called sync after save
+	secret            []byte                                            // set by App.Content via setSecret; used for preview token validation
+	db                DB                                                // set by App.Content via setDB; used for transition validation
+	cacheInvalidators []func()                                          // extra invalidation callbacks wired by App.Route for aggregate routes
+	slugCheckers      []func(ctx context.Context, slug string) error    // collision checkers wired by App.Route for aggregate routes
 
 	stopCh chan struct{} // closed by Stop() to terminate the cache sweep goroutine
 }
@@ -539,7 +539,7 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 		readRole:        Guest,
 		writeRole:       Author,
 		deleteRole:      Editor,
-		signals:         make(map[Signal][]signalHandler),
+		signals:         make(map[LifecycleEvent][]signalHandler),
 		proto:           t,
 		contentTypeName: typeName,
 	}
@@ -702,7 +702,7 @@ func (m *Module[T]) Stop() {
 
 // setAfterHook registers the function that is called asynchronously after each
 // delivery signal. App.Content uses this to wire the signal bus into every module.
-func (m *Module[T]) setAfterHook(fn func(Context, Signal, afterHookMeta, any)) {
+func (m *Module[T]) setAfterHook(fn func(Context, LifecycleEvent, afterHookMeta, any)) {
 	m.afterHook = fn
 }
 
@@ -812,7 +812,7 @@ func snapshotItem(item any) any {
 // A snapshot of item is taken before any goroutine is spawned so that
 // concurrent lifecycle transitions on the same pointer cannot race with the
 // signal handlers. Panics in the afterHook are recovered and logged.
-func (m *Module[T]) notifyAfter(ctx Context, sig Signal, prevState string, item any) {
+func (m *Module[T]) notifyAfter(ctx Context, sig LifecycleEvent, prevState string, item any) {
 	if suppressesSignals(ctx, m.db, m.contentTypeName, string(nodeStatusOf(item))) {
 		return
 	}

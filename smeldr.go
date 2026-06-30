@@ -299,13 +299,13 @@ type App struct {
 	logRing        *logRing // non-nil when App.CaptureLogs() was called; backs GET /_logs
 	logsHandlerReg bool     // true once GET /_logs is registered
 
-	webhookStore    *WebhookStore               // non-nil when App.Webhooks() was called
-	webhookPool     *workerPool                 // non-nil when App.Webhooks() was called
-	signalListeners []func(Signal, string, any) // registered via AddSignalListener
+	webhookStore    *WebhookStore                       // non-nil when App.Webhooks() was called
+	webhookPool     *workerPool                         // non-nil when App.Webhooks() was called
+	signalListeners []func(LifecycleEvent, string, any) // registered via AddSignalListener
 	busMu           sync.RWMutex
-	busHandlers     map[Signal][]func(context.Context, SignalEvent) error // registered via OnSignal
+	busHandlers     map[LifecycleEvent][]func(context.Context, SignalEvent) error // registered via OnSignal
 	hookableModules []interface {
-		setAfterHook(func(Context, Signal, afterHookMeta, any))
+		setAfterHook(func(Context, LifecycleEvent, afterHookMeta, any))
 	} // modules whose afterHook is wired at Run time
 
 	routeReg []routeEntry // in-memory route registry; populated by App.Route and app.Content
@@ -597,7 +597,7 @@ func (a *App) Content(v any, opts ...Option) {
 			dbs.setDB(a.cfg.DB)
 		}
 		if hk, ok := r.(interface {
-			setAfterHook(func(Context, Signal, afterHookMeta, any))
+			setAfterHook(func(Context, LifecycleEvent, afterHookMeta, any))
 		}); ok {
 			a.hookableModules = append(a.hookableModules, hk)
 		}
@@ -744,7 +744,7 @@ func (a *App) Webhooks(store *WebhookStore) *App {
 
 	// Register webhook delivery as signal bus subscribers so that every
 	// content lifecycle event enqueues delivery jobs.
-	for _, sig := range []Signal{
+	for _, sig := range []LifecycleEvent{
 		AfterCreate, AfterUpdate, AfterPublish, AfterUnpublish,
 		AfterSchedule, AfterArchive, AfterDelete,
 	} {
@@ -938,7 +938,7 @@ func (a *App) SweepStructural(ctx context.Context) (flagged, skipped int, err er
 // See [NewAuditStore] for the required DDL.
 func (a *App) Audit(store AuditStore) *App {
 	a.auditStore = store
-	for _, sig := range []Signal{AfterPublish, AfterSchedule, AfterArchive, AfterDelete} {
+	for _, sig := range []LifecycleEvent{AfterPublish, AfterSchedule, AfterArchive, AfterDelete} {
 		s := sig
 		a.OnSignal(s, func(ctx context.Context, ev SignalEvent) error {
 			r := AuditRecord{
@@ -997,7 +997,7 @@ func (a *App) WebhookPool() WebhookJobQueue {
 // AddSignalListener is the low-level hook used by forge-mcp to implement
 // resource subscription notifications. Application code can also use it to
 // build custom event pipelines.
-func (a *App) AddSignalListener(fn func(Signal, string, any)) {
+func (a *App) AddSignalListener(fn func(LifecycleEvent, string, any)) {
 	a.signalListeners = append(a.signalListeners, fn)
 }
 
@@ -1015,11 +1015,11 @@ func (a *App) AddSignalListener(fn func(Signal, string, any)) {
 //	app.OnSignal(smeldr.AfterPublish, func(ctx context.Context, ev smeldr.SignalEvent) error {
 //	    return myQueue.Enqueue(ctx, ev)
 //	})
-func (a *App) OnSignal(sig Signal, h func(context.Context, SignalEvent) error) *App {
+func (a *App) OnSignal(sig LifecycleEvent, h func(context.Context, SignalEvent) error) *App {
 	a.busMu.Lock()
 	defer a.busMu.Unlock()
 	if a.busHandlers == nil {
-		a.busHandlers = make(map[Signal][]func(context.Context, SignalEvent) error)
+		a.busHandlers = make(map[LifecycleEvent][]func(context.Context, SignalEvent) error)
 	}
 	a.busHandlers[sig] = append(a.busHandlers[sig], h)
 	return a
@@ -1030,7 +1030,7 @@ func (a *App) OnSignal(sig Signal, h func(context.Context, SignalEvent) error) *
 // Each handler runs with a fresh context derived from context.WithoutCancel(ctx)
 // and a 100 ms timeout so that client disconnects do not abort delivery.
 // Handler errors are logged; nothing is returned or propagated.
-func (a *App) dispatchBus(ctx context.Context, ev SignalEvent, sig Signal) {
+func (a *App) dispatchBus(ctx context.Context, ev SignalEvent, sig LifecycleEvent) {
 	a.busMu.RLock()
 	handlers := a.busHandlers[sig]
 	a.busMu.RUnlock()
@@ -1054,7 +1054,7 @@ func (a *App) dispatchBus(ctx context.Context, ev SignalEvent, sig Signal) {
 // is called directly from inside an existing signal handler goroutine — it is
 // safe to call from cascade handlers and other OnSignal subscribers.
 // Each sub-handler runs with a 100 ms timeout via dispatchBus.
-func (a *App) emitSignal(ctx context.Context, sig Signal, ev SignalEvent) {
+func (a *App) emitSignal(ctx context.Context, sig LifecycleEvent, ev SignalEvent) {
 	a.dispatchBus(ctx, ev, sig)
 }
 
@@ -1073,7 +1073,7 @@ func (a *App) wireSignalBus() {
 	app := a
 	listeners := a.signalListeners
 
-	fn := func(ctx Context, sig Signal, meta afterHookMeta, item any) {
+	fn := func(ctx Context, sig LifecycleEvent, meta afterHookMeta, item any) {
 		ev := buildSignalEvent(ctx, sig, meta, item, app.cfg.BaseURL)
 		app.dispatchBus(ctx, ev, sig)
 		for _, l := range listeners {

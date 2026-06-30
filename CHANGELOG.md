@@ -23,6 +23,22 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.45.0] — 2026-06-30
+
+### Added
+- Orchestration content types in `orchestration.go` (T23 Step 10, A183):
+  - `Signal` — protocol message (sender, receiver, signal_type, message, task_ref, sequence)
+  - `Task` — work item (task_id, priority, band, size, description, note_ref)
+  - `Decision` — ratified architectural decision (decision_number, scope, body, next_eval_at, eval_note)
+  - `Amendment` — committed changeset (amendment_number, amendment_type, version, commit_hash, pilot, summary)
+- `CreateOrchestrationTables(db DB) error` — creates `smeldr_signals`, `smeldr_tasks`, `smeldr_decisions`, `smeldr_amendments` tables.
+- `RegisterOrchestrationTypes(app *App, db DB)` — registers all four orchestration content types with custom state flows and MCP read+write tools. Fail-open on nil DB. Flows: signal-protocol (4 states, 4 transitions), architect-task (9 states, 9 transitions), governance-decision (5 states, 7 transitions), amendment-lifecycle (6 states, 6 transitions).
+
+### Changed
+- `type Signal string` renamed to `type LifecycleEvent string` in `signals.go` (A183). Signal constants retain their names (BeforeCreate, AfterCreate, BeforeUpdate, AfterUpdate, BeforeDelete, AfterDelete, AfterPublish, AfterUnpublish, AfterArchive, AfterSchedule, SitemapRegenerate, AfterRelationCascade); only the type annotation changes. Updated signatures: `On[T]`, `OnSignal`, `AddSignalListener`, `dispatchBus`, `emitSignal`, `notifyAfter`, `setAfterHook`, `signalToEventSuffix`, `buildEventName`, `buildWebhookPayload`, `webhookDispatch`. `AuditRecord.Signal` field type changed to `LifecycleEvent`.
+
+---
+
 ## [1.44.3] — 2026-06-30
 
 ### Internal

@@ -251,11 +251,11 @@ func TestIsPrivateIP(t *testing.T) {
 	}
 }
 
-// TestBuildEventName covers the signal-to-event-name mapping.
+// TestBuildEventName covers the LifecycleEvent-to-event-name mapping.
 func TestBuildEventName(t *testing.T) {
 	tests := []struct {
 		typeName string
-		sig      Signal
+		sig      LifecycleEvent
 		want     string
 		ok       bool
 	}{
@@ -347,7 +347,7 @@ func TestBuildWebhookPayload(t *testing.T) {
 		t.Errorf("Title for non-Titled type should be empty, got %q", ed2.Title)
 	}
 
-	// Non-delivery signal should return error.
+	// Non-delivery LifecycleEvent should return error.
 	_, err = buildWebhookPayload("Post", item, BeforeCreate)
 	if err == nil {
 		t.Fatal("buildWebhookPayload with BeforeCreate should return error")
@@ -472,7 +472,7 @@ func TestWebhookDispatch_signalNotDeliverable(t *testing.T) {
 	store := NewWebhookStore(nil, []byte("k"))
 	pool := newWorkerPool(nil, store, realClock{}, 1)
 	ev := SignalEvent{Type: "Post"}
-	// BeforeCreate is not a delivery signal — dispatched returns nil immediately.
+	// BeforeCreate is not a delivery LifecycleEvent — dispatched returns nil immediately.
 	if err := webhookDispatch(context.Background(), ev, BeforeCreate, store, pool); err != nil {
 		t.Errorf("expected nil, got %v", err)
 	}

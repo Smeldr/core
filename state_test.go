@@ -500,7 +500,7 @@ func (d *transitFailDB) QueryContext(_ context.Context, _ string, _ ...any) (*sq
 }
 func (d *transitFailDB) QueryRowContext(ctx context.Context, query string, _ ...any) *sql.Row {
 	if strings.HasPrefix(query, "SELECT COUNT(*) FROM sqlite_master") {
-		// sqlite_master probe — return count=0 to signal SQLite.
+		// sqlite_master probe — return count=0 to LifecycleEvent SQLite.
 		conn := &guardRowConn{val: int64(0)}
 		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
 	}
@@ -780,7 +780,7 @@ func TestNotifyAfter_suppressedState_hooksSkipped(t *testing.T) {
 	m.setDB(sqlDB)
 
 	hookCalled := make(chan struct{}, 1)
-	m.setAfterHook(func(_ Context, _ Signal, _ afterHookMeta, _ any) {
+	m.setAfterHook(func(_ Context, _ LifecycleEvent, _ afterHookMeta, _ any) {
 		hookCalled <- struct{}{}
 	})
 
@@ -804,7 +804,7 @@ func TestNotifyAfter_unsuppressedState_hooksFire(t *testing.T) {
 	m.setDB(sqlDB)
 
 	hookCalled := make(chan struct{}, 1)
-	m.setAfterHook(func(_ Context, _ Signal, _ afterHookMeta, _ any) {
+	m.setAfterHook(func(_ Context, _ LifecycleEvent, _ afterHookMeta, _ any) {
 		hookCalled <- struct{}{}
 	})
 
@@ -893,7 +893,7 @@ func TestFireAsyncTriggers_noTriggers(t *testing.T) {
 
 func TestFireAsyncTriggers_syncTrigger_skipped(t *testing.T) {
 	db := newSQLiteDB(t)
-	setupTriggerFlow(t, db, "sync", "create-signal")
+	setupTriggerFlow(t, db, "sync", "create-LifecycleEvent")
 
 	prev := slog.Default()
 	t.Cleanup(func() { restoreDefaultLogging(prev) })
@@ -910,7 +910,7 @@ func TestFireAsyncTriggers_syncTrigger_skipped(t *testing.T) {
 
 func TestFireAsyncTriggers_asyncTrigger_dispatched(t *testing.T) {
 	db := newSQLiteDB(t)
-	setupTriggerFlow(t, db, "async", "create-signal")
+	setupTriggerFlow(t, db, "async", "create-LifecycleEvent")
 
 	prev := slog.Default()
 	t.Cleanup(func() { restoreDefaultLogging(prev) })
@@ -923,8 +923,8 @@ func TestFireAsyncTriggers_asyncTrigger_dispatched(t *testing.T) {
 	if !strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
 		t.Error("async trigger: want slog.Info dispatch message, got none")
 	}
-	if !strings.Contains(buf.String(), "create-signal") {
-		t.Error("async trigger: want trigger_type=create-signal in log, missing")
+	if !strings.Contains(buf.String(), "create-LifecycleEvent") {
+		t.Error("async trigger: want trigger_type=create-LifecycleEvent in log, missing")
 	}
 }
 
@@ -1071,7 +1071,7 @@ func TestSetStatus_firesAsyncTrigger(t *testing.T) {
 	if err := CreateBlockTables(db); err != nil {
 		t.Fatalf("CreateBlockTables: %v", err)
 	}
-	setupTriggerFlow(t, db, "async", "create-signal")
+	setupTriggerFlow(t, db, "async", "create-LifecycleEvent")
 
 	repo := &DynamicTypeRepo{db: db, typeName: "testPost"}
 	node, err := repo.CreateDraft(ctx, map[string]any{"title": "Trigger Test"})

@@ -2,20 +2,20 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.42.0 (A157) + smeldr.dev/mcp v1.22.0 + smeldr.dev/cli v0.15.0 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.0 + smeldr.dev/agent v0.5.1 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
+Last updated: v1.45.0 (A183) + smeldr.dev/mcp v1.24.2 + smeldr.dev/cli v0.15.1 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.2 + smeldr.dev/agent v0.6.2 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.42.0 | Stable |
-| `smeldr.dev/mcp` | v1.22.0 | Stable |
-| `smeldr.dev/oauth` | v0.1.5 | Beta |
-| `smeldr.dev/core/pgx` | v0.1.0 | Beta |
-| `smeldr.dev/media` | v1.3.0 | Beta |
-| `smeldr.dev/cli` | v0.12.0 | Beta |
-| `smeldr.dev/social` | v0.7.4 | Experimental |
-| `smeldr.dev/agent` | v0.5.1 | Experimental |
+| `smeldr.dev/core` | v1.45.0 | Stable |
+| `smeldr.dev/mcp` | v1.24.2 | Stable |
+| `smeldr.dev/oauth` | v0.3.0 | Beta |
+| `smeldr.dev/core/pgx` | v0.1.2 | Beta |
+| `smeldr.dev/media` | v1.6.0 | Beta |
+| `smeldr.dev/cli` | v0.15.1 | Beta |
+| `smeldr.dev/social` | v0.9.2 | Experimental |
+| `smeldr.dev/agent` | v0.6.2 | Experimental |
 
 **Stable** — API will not break without a deprecation notice.  
 **Beta** — Functional and tested; API may change in minor releases.  
@@ -249,3 +249,13 @@ MCP resource subscriptions (Beta):
 - Content negotiation — agents receive an AI-optimised format, not raw HTML
 - Go codebase designed to be readable and extensible by AI agents
 - `smeldr.Verb(Noun)` naming throughout — no abbreviations, no clever names
+
+## Orchestration types — Experimental
+
+- `Signal` content type — protocol message between pilots and the architect (signal-protocol flow: pending -> read -> acknowledged/expired)
+- `Task` content type — work item in the architect/pilot state machine (architect-task flow: backlog -> active -> ... -> done/deferred)
+- `Decision` content type — ratified architectural decision with re-evaluation cycle (governance-decision flow: proposed -> ratified -> ... -> superseded/archived)
+- `Amendment` content type — committed changeset linking a Task to its code implementation (amendment-lifecycle flow: scoped -> in-progress -> commit-ready -> committed -> merged/rejected)
+- `CreateOrchestrationTables(db DB) error` — creates all four DB tables
+- `RegisterOrchestrationTypes(app *App, db DB)` — registers all four types with state flows and MCP(MCPRead, MCPWrite); fail-open on nil DB
+- All four types embed `Node` and receive full MCP tool generation (create, get, list, update, publish, archive, delete)
