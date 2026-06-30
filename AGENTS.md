@@ -437,6 +437,8 @@ These tools are available when `App.Config().DB` is non-nil (any app with a data
 | `transition_item` | Editor | Move a dynamic content item to a new state. Params: `type_name`, `slug`, `to_state`. Validated against the registered flow; returns -32001 if the transition is not permitted. |
 | `get_valid_transitions` | Author | List legal target states for the item's current state. Params: `type_name`, `slug`. Falls back to the default flow when no custom flow is registered. Returns `{current_state, valid_transitions: []}`. |
 | `list_items_by_state` | Author | List all items of a dynamic content type in the given state. Params: `type_name`, `state`. Returns `{type_name, state, items, count}`. |
+| `create_signal` | Author | Insert a protocol signal into smeldr_signals with status "pending". Params: `sender`, `receiver`, `signal_type` (required); `task_ref`, `message`, `sequence` (optional). Returns `{id, slug, status}`. Requires smeldr_signals table (call `CreateOrchestrationTables` first). (A185) |
+| `list_signals` | Author | List signals from smeldr_signals by receiver and status. Params: `receiver` (required), `state` (optional, default "pending"). Returns `{signals, count}` ordered by created_at ascending. Fail-open when smeldr_signals table is absent — returns empty list. (A185) |
 
 **State flow rules:**
 - `define_state_flow` calls `App.RegisterFlow` which uses INSERT OR IGNORE — re-running with the same name/type_name is safe; existing state and transition rows are preserved

@@ -363,3 +363,25 @@ to the test.
 Coverage: 96.0%. core v1.45.1.
 
 ---
+
+## A185 — T23 Step 11: Signal MCP Tools in smeldr/mcp (v1.25.0, 2026-06-30)
+
+**Date:** 2026-06-30
+**Status:** Agreed
+**Level:** 1
+
+New file `signal_tools.go` in smeldr/mcp adds two MCP tools that give agents direct read/write access to the `smeldr_signals` table. Follows Option A (direct DB access), consistent with the pattern established in `state_tools.go`.
+
+**`create_signal`:** Required params: sender, receiver, signal_type. Optional: task_ref, message, sequence (int). Inserts into smeldr_signals with status="pending". id=smeldr.NewID(); slug=signalSlug(sender, signalType, id) — e.g. "core-plan-ready-01936b4f" (base from GenerateSlug + first 8 chars of id). DB exec failure → -32603 + slog.Error. Returns {id, slug, status}.
+
+**`list_signals`:** Required: receiver. Optional: state (default "pending"). SELECT from smeldr_signals WHERE receiver=? AND status=? ORDER BY created_at ASC. Fail-open: "no such table" error → slog.Warn + empty list (not error). Returns {signals: [], count: N}. Scan uses string for created_at/updated_at (SQLite stores TIMESTAMPTZ as text).
+
+**tool.go wiring:** New dispatch block between state tools and dynamic content tools. Guard: `s.app.Config().DB != nil && isSignalTool(p.Name)`. Both tools: s.authorise(ctx) (Author role). Uses existing coalesceArgs/stringArg/stringArgOr/intArgOr helpers.
+
+**Helpers:** isSignalTool(name) bool — switch on "create_signal"/"list_signals". signalSlug(sender, signalType, id) string — GenerateSlug(sender+"-"+signalType) + "-" + id[:8]. handleToolsList: appends signalToolDefs() in same DB-gated block as stateToolDefs().
+
+**Tests:** newSignalServer(t) calls smeldr.CreateOrchestrationTables(db) after newDynamicServer. newSignalServerNoDB(t) for missing-table scenarios. 16 test functions covering happy paths, missing params (-32602), role rejection (-32001), table-missing (fail-open for list, -32603 for create), signalSlug unit tests, unknown-name fallthrough.
+
+go.mod: smeldr.dev/core v1.45.0 → v1.45.1. Coverage: 96.0%. mcp v1.25.0.
+
+---

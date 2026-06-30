@@ -48,6 +48,7 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 | # | Title | File |
 |---|-------|------|
+| A185 | T23 Step 11: add create_signal and list_signals MCP tools to smeldr/mcp (v1.25.0). signal_tools.go with direct DB access to smeldr_signals table (Option A); create_signal inserts with status=pending; list_signals fail-open on missing table; both Author role, gated on DB != nil; core dep v1.45.0 → v1.45.1. | [recent.md](decisions/recent.md) |
 | A184 | Fix data race in state_test.go under go test -race: replace bare bytes.Buffer slog handler target with mutex-protected safeBuf in TestFireAsyncTriggers_asyncTrigger_dispatched, TestFireAsyncTriggers_syncTrigger_skipped, and TestDynamicTypeRepo_SetStatus_fireAsyncTriggers. No production code change. core v1.45.1. | [recent.md](decisions/recent.md) |
 | A183 | T23 Step 10: Rename `type Signal string` -> `type LifecycleEvent string` in signals.go (all signatures updated); add four orchestration content types (Signal, Task, Decision, Amendment) in orchestration.go; core v1.45.0; dep-bump agent v0.6.2, social v0.9.2, mcp v1.24.2. | [recent.md](decisions/recent.md) |
 | A182 | T23 Step 9: ScheduledPost delivery flow registration in smeldr/social (v0.9.1). Social.Register in social.go calls app.RegisterFlow with ScheduledPost flow (7 states, 10 transitions: draft→scheduled→queued→delivered/partial/failed, partial/failed→queued retry, terminal→archived). log/slog import added. Fail-open. go.mod: core v1.26.0 → v1.44.3. social v0.9.1. | [recent.md](decisions/recent.md) |

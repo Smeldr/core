@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or pilot agent.
 
-Current versions: smeldr.dev/core v1.45.0 · smeldr.dev/mcp v1.24.2 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.1 · smeldr.dev/social v0.9.2 · smeldr.dev/agent v0.6.2 · smeldr.dev/core/pgx v0.1.2
+Current versions: smeldr.dev/core v1.45.1 · smeldr.dev/mcp v1.25.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.1 · smeldr.dev/social v0.9.2 · smeldr.dev/agent v0.6.2 · smeldr.dev/core/pgx v0.1.2
 
 ---
 
@@ -325,6 +325,8 @@ Tools are named from the type in lower_snake_case.
 | `transition_item` | Editor | Move a dynamic content item to a new state; validates against registered flow (ErrConflict → -32001). Gate: `App.Config().DB != nil`. |
 | `get_valid_transitions` | Author | List legal target states for the item's current state; falls back to default flow. Gate: `App.Config().DB != nil`. |
 | `list_items_by_state` | Author | List items of a dynamic content type in a given state. Gate: `App.Config().DB != nil`. |
+| `create_signal` | Author | Insert a signal into smeldr_signals with status=pending. Args: `sender`, `receiver`, `signal_type` (required); `task_ref`, `message`, `sequence` (optional). Requires `CreateOrchestrationTables`. Gate: `App.Config().DB != nil`. |
+| `list_signals` | Author | List signals by receiver+state (default "pending"). Fail-open on missing table. Gate: `App.Config().DB != nil`. |
 
 Block system (T32, enabled with `mcp.WithBlocks()`; blocks addressed by ID, not slug):
 
