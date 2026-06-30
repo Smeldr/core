@@ -48,6 +48,7 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 | # | Title | File |
 |---|-------|------|
+| A179 | T23 Step 6: suppressesSignals(ctx, db, typeName, statusName) bool in state.go — pattern matches validateTransition: nil DB → false; custom flow fallback → default; scan error → false (fail-open). notifyAfter early-return guard suppresses all After* signals + afterHook when state.suppresses_signals=true. 9 new tests in state_test.go. core v1.44.2. | [recent.md](decisions/recent.md) |
 | A178 | T23 Step 5: define_state_flow MCP tool (Admin) in state_tools.go. Calls App.RegisterFlow; type_name required. Three-tier role switch in handleToolsCall (Admin/Editor/Author). parseStates/parseTransitions/boolField helpers. mcp v1.24.1. | [recent.md](decisions/recent.md) |
 | A177 | T23 Step 4: three state flow MCP tools in smeldr/mcp (transition_item, get_valid_transitions, list_items_by_state). ErrConflict → -32001. core v1.44.1, mcp v1.24.0. | [recent.md](decisions/recent.md) |
 | A176 | T23 Step 3: validateTransition (unexported) in state.go — checks smeldr_transitions for permitted flow edges; ErrConflict (409) on disallowed; identity + nil DB + non-SQLite → nil. DynamicTypeRepo.SetStatus: calls validateTransition after GetByID; newSetStatusHandler: enum switch removed (empty→400, disallowed→409). Module[T] db DB + setDB; MCPPublish/Archive/Schedule call validateTransition before status change. App.Content: setDB wire. 12 new tests + 1 updated. Coverage 96.0%. v1.44.1. | [recent.md](decisions/recent.md) |

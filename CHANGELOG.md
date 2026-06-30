@@ -23,6 +23,26 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.44.2] — 2026-06-30
+
+### Changed
+- `notifyAfter` now suppresses all After* signals (AfterPublish, AfterArchive, AfterSchedule,
+  AfterUpdate, AfterCreate, AfterDelete, AfterUnpublish, AfterRelationCascade) and the
+  afterHook when an item's current state has `suppresses_signals=true` in its registered
+  state flow. Identity transitions and items without a custom flow fall back to default flow
+  rules; nil DB or non-SQLite queries return false (allow signals). (T23 Step 6, A179)
+
+### Internal
+- `suppressesSignals(ctx context.Context, db DB, typeName, statusName string) bool` (unexported, `state.go`):
+  checks `smeldr_states.suppresses_signals` for the item's current status in its registered
+  flow. Same pattern as `validateTransition`: nil DB → false; sqlite_master probe fails →
+  false (non-SQLite, fail-open); custom flow lookup → default flow fallback → false if no
+  flow found; scan error → false (fail-open). (T23 Step 6, A179)
+- Early-return guard in `notifyAfter` (`module.go`): `if suppressesSignals(ctx, m.db, m.contentTypeName, string(nodeStatusOf(item))) { return }`
+  inserted before signal snapshot and dispatch. (T23 Step 6, A179)
+
+---
+
 ## [1.44.1] — 2026-06-29
 
 ### Changed

@@ -251,3 +251,17 @@ Three unexported helpers added to `state_tools.go`: `parseStates([]any) ([]smeld
 11 new tests in `state_tools_test.go`. `TestStateTool_ToolsList_DBSet` and `TestIsStateTool` updated to include `define_state_flow`. Coverage: 96.1%.
 
 ---
+
+## A179 — T23 Step 6: suppressesSignals hook gate (v1.44.2, 2026-06-30)
+
+**Date:** 2026-06-30
+**Status:** Agreed
+**Level:** 1
+
+`suppressesSignals(ctx context.Context, db DB, typeName, statusName string) bool` added (unexported) to `state.go`. Algorithm mirrors `validateTransition`: nil db → false; sqlite_master probe fails → false (non-SQLite, same fail-open guard); SELECT flow by type_name → fallback to type_name IS NULL AND name='default' → false if neither found (no flow registered); SELECT suppresses_signals FROM smeldr_states WHERE flow_id=? AND name=? → scan error → false (fail-open). Returns the stored bool.
+
+`notifyAfter` in `module.go` gains an early-return guard: `if suppressesSignals(ctx, m.db, m.contentTypeName, string(nodeStatusOf(item))) { return }` inserted before `snap := snapshotItem(item)`. When an item's current state has `suppresses_signals=true` in the registered flow, all After* signals (AfterPublish, AfterArchive, AfterSchedule, AfterUpdate, AfterCreate, AfterDelete, AfterUnpublish, AfterRelationCascade) and the afterHook are suppressed — the function returns immediately. Items without a custom flow use default flow rules; nil DB evaluates to false (signals fire).
+
+9 new tests in `state_test.go`. 7 unit tests for `suppressesSignals`: `TestSuppressesSignals_nilDB`, `TestSuppressesSignals_nonSQLite`, `TestSuppressesSignals_noFlow`, `TestSuppressesSignals_falseWhenNotSet`, `TestSuppressesSignals_trueWhenSet`, `TestSuppressesSignals_defaultFlowFallback`, `TestSuppressesSignals_scanError`. 2 integration tests for `notifyAfter` suppression: `TestNotifyAfter_suppressedState_hooksSkipped` (registers custom flow with suppresses_signals=true, fires signal, verifies afterHook was not called), `TestNotifyAfter_unsuppressedState_hooksFire` (same flow, state=false for draft, verifies hook fires). Coverage: 96.0%.
+
+---

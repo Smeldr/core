@@ -813,6 +813,9 @@ func snapshotItem(item any) any {
 // concurrent lifecycle transitions on the same pointer cannot race with the
 // signal handlers. Panics in the afterHook are recovered and logged.
 func (m *Module[T]) notifyAfter(ctx Context, sig Signal, prevState string, item any) {
+	if suppressesSignals(ctx, m.db, m.contentTypeName, string(nodeStatusOf(item))) {
+		return
+	}
 	snap := snapshotItem(item)
 	dispatchAfter(ctx, m.signals[sig], snap)
 	if m.afterHook != nil {

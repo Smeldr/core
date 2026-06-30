@@ -584,3 +584,207 @@ func TestMCPSchedule_invalidTransition(t *testing.T) {
 		t.Errorf("MCPSchedule on invalid transition: want ErrConflict, got %v", err)
 	}
 }
+
+// — suppressesSignals unit tests ——————————————————————————————————————————————
+
+func TestSuppressesSignals_nilDB(t *testing.T) {
+	ctx := context.Background()
+	if suppressesSignals(ctx, nil, "Post", "published") {
+		t.Error("nil db: want false, got true")
+	}
+}
+
+func TestSuppressesSignals_nonSQLite(t *testing.T) {
+	// failOnNthExecDB with failAt=999 leaves exec intact but QueryRowContext
+	// always returns a no-row result → sqlite_master probe scan fails → false.
+	ctx := context.Background()
+	db := &failOnNthExecDB{failAt: 999}
+	if suppressesSignals(ctx, db, "Post", "published") {
+		t.Error("non-SQLite: want false, got true")
+	}
+}
+
+func TestSuppressesSignals_noFlow(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	// No flow registered — suppressesSignals must return false.
+	if suppressesSignals(ctx, db, "UnknownType", "published") {
+		t.Error("no flow: want false, got true")
+	}
+}
+
+func TestSuppressesSignals_falseWhenNotSet(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:        "no-suppress",
+		TypeName:    "testPost",
+		States:      []State{{Name: "draft", IsInitial: true}, {Name: "published"}},
+		Transitions: []Transition{{From: "draft", To: "published"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	if suppressesSignals(ctx, db, "testPost", "published") {
+		t.Error("suppresses_signals=false: want false, got true")
+	}
+}
+
+func TestSuppressesSignals_trueWhenSet(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "suppress-test",
+		TypeName: "testPost",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published", SuppressesSignals: true},
+		},
+		Transitions: []Transition{{From: "draft", To: "published"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	if !suppressesSignals(ctx, db, "testPost", "published") {
+		t.Error("suppresses_signals=true: want true, got false")
+	}
+}
+
+func TestSuppressesSignals_defaultFlowFallback(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	// migrateStateFlows already seeds a default flow (name='default', type_name IS NULL).
+	// Get its ID and insert a state with suppresses_signals=true.
+	var flowID int64
+	if err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_state_flows WHERE name = 'default' AND type_name IS NULL`).Scan(&flowID); err != nil {
+		t.Fatalf("get default flow id: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_states (flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES (?, 'quarantined', 0, 0, 1)`,
+		flowID,
+	); err != nil {
+		t.Fatalf("insert state: %v", err)
+	}
+	// "UnknownType" has no custom flow → falls back to the default flow → quarantined suppresses.
+	if !suppressesSignals(ctx, db, "UnknownType", "quarantined") {
+		t.Error("default flow fallback: want true for quarantined with suppresses_signals=1, got false")
+	}
+}
+
+func TestSuppressesSignals_scanError(t *testing.T) {
+	// suppressFailDB: probe succeeds, flow lookup succeeds, smeldr_states query returns no-row.
+	ctx := context.Background()
+	db := &suppressFailDB{}
+	if suppressesSignals(ctx, db, "Post", "published") {
+		t.Error("states scan error: want false (fail open), got true")
+	}
+}
+
+// suppressFailDB simulates a DB that passes the sqlite_master probe and flow
+// lookup but fails the smeldr_states query (no-row → scan error).
+type suppressFailDB struct{}
+
+func (d *suppressFailDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (d *suppressFailDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, nil
+}
+func (d *suppressFailDB) QueryRowContext(ctx context.Context, query string, _ ...any) *sql.Row {
+	if strings.HasPrefix(query, "SELECT COUNT(*) FROM sqlite_master") {
+		conn := &guardRowConn{val: int64(0)}
+		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+	}
+	if strings.HasPrefix(query, "SELECT id FROM smeldr_state_flows") {
+		conn := &guardRowConn{val: int64(1)}
+		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+	}
+	// smeldr_states query — return no-row to trigger scan error.
+	conn := &guardRowConn{noRow: true}
+	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+}
+
+// — notifyAfter suppression integration tests ——————————————————————————————————
+
+// suppressedFlow registers a flow for "testPost" where "published" has
+// suppresses_signals=true. "draft" does not suppress signals.
+func suppressedFlow(t *testing.T, db DB) {
+	t.Helper()
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "suppressed",
+		TypeName: "testPost",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published", SuppressesSignals: true},
+		},
+		Transitions: []Transition{{From: "draft", To: "published"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+}
+
+func TestNotifyAfter_suppressedState_hooksSkipped(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	suppressedFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	hookCalled := make(chan struct{}, 1)
+	m.setAfterHook(func(_ Context, _ Signal, _ afterHookMeta, _ any) {
+		hookCalled <- struct{}{}
+	})
+
+	p := &testPost{Node: Node{ID: NewID(), Slug: "s", Status: Published}}
+	m.notifyAfter(NewTestContext(User{}), AfterPublish, "draft", p)
+
+	select {
+	case <-hookCalled:
+		t.Error("afterHook was called; want suppressed because published has suppresses_signals=true")
+	case <-time.After(30 * time.Millisecond):
+		// ok — hook was not called
+	}
+}
+
+func TestNotifyAfter_unsuppressedState_hooksFire(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	suppressedFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	hookCalled := make(chan struct{}, 1)
+	m.setAfterHook(func(_ Context, _ Signal, _ afterHookMeta, _ any) {
+		hookCalled <- struct{}{}
+	})
+
+	// Item is in "draft" state — suppresses_signals=false for draft → hook must fire.
+	p := &testPost{Node: Node{ID: NewID(), Slug: "s", Status: Draft}}
+	m.notifyAfter(NewTestContext(User{}), AfterUpdate, "", p)
+
+	select {
+	case <-hookCalled:
+		// ok — hook fired as expected
+	case <-time.After(2 * time.Second):
+		t.Error("afterHook was not called; want fired because draft does not suppress signals")
+	}
+}

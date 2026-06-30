@@ -255,3 +255,43 @@ func validateTransition(ctx context.Context, db DB, typeName, fromStatus, toStat
 	}
 	return nil
 }
+
+// suppressesSignals reports whether the given state in the type's registered
+// flow has suppresses_signals=true. Returns false on any error (fail-open).
+// Called by notifyAfter to gate After* event dispatch.
+//
+// Fail-open cases (returns false):
+//   - db is nil (no DB configured)
+//   - the database is not SQLite (sqlite_master probe fails)
+//   - no flow is registered for typeName and no default flow exists
+//   - the state is not found in the flow or any query fails
+func suppressesSignals(ctx context.Context, db DB, typeName, statusName string) bool {
+	if db == nil {
+		return false
+	}
+	var dummy int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
+		return false
+	}
+	var flowID int64
+	err := db.QueryRowContext(ctx,
+		`SELECT id FROM smeldr_state_flows WHERE type_name = ? LIMIT 1`, typeName,
+	).Scan(&flowID)
+	if err != nil {
+		// Fall back to the default flow (type_name IS NULL, name = 'default').
+		err = db.QueryRowContext(ctx,
+			`SELECT id FROM smeldr_state_flows WHERE type_name IS NULL AND name = 'default' LIMIT 1`,
+		).Scan(&flowID)
+		if err != nil {
+			return false // no flow registered — signals fire normally
+		}
+	}
+	var suppresses bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT suppresses_signals FROM smeldr_states WHERE flow_id = ? AND name = ?`,
+		flowID, statusName,
+	).Scan(&suppresses); err != nil {
+		return false // state not found or query failed — fail open
+	}
+	return suppresses
+}
