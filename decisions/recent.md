@@ -295,3 +295,17 @@ Design note: one JOIN query (not two sequential queries like validateTransition)
 `go.mod`: `smeldr.dev/core v1.26.0 → v1.44.3`. `go` directive: `1.26.3 → 1.26.4` (required by core v1.44.3).
 
 ---
+
+## A182 — T23 Step 9: ScheduledPost delivery flow registration in smeldr/social (v0.9.1, 2026-06-30)
+
+**Date:** 2026-06-30
+**Status:** Agreed
+**Level:** 1
+
+`Social.Register` in `social.go` (`smeldr.dev/social`) gains an `app.RegisterFlow` call at the start of the function, before `app.Handle(...)` route registrations. `log/slog` import added (was absent). The flow registered is `"scheduled-post"` for `TypeName: "ScheduledPost"` with seven states — `draft` (initial), `scheduled`, `queued`, `delivered` (terminal), `partial`, `failed`, `archived` (terminal) — and ten transitions: draft→scheduled, scheduled→queued, queued→delivered/partial/failed, partial→queued (retry), failed→queued (retry), delivered/partial/failed→archived.
+
+`RegisterFlow` is fail-open on nil DB and non-SQLite (returns nil silently). A genuine error is logged via `slog.Error("smeldr-social: RegisterFlow failed", "error", err)` and does not block startup. No new tests required — `RegisterFlow` is fully tested in smeldr.dev/core; all existing social tests remain green.
+
+`go.mod`: `smeldr.dev/core v1.26.0 → v1.44.3`. `go` directive: `1.26.3 → 1.26.4` (required by core v1.44.3).
+
+---
