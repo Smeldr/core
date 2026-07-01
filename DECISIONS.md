@@ -64,16 +64,16 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 | A173 | Fix FilterTags type assertion in serveblocks.go from .(string) to .([]any) with len > 0 guard. .(string) always silently failed on the array-typed field, making the "not yet supported" warning dead code. Correctness fix only — FilterTags SQL filtering remains out of scope. (T108) | [recent.md](decisions/recent.md) |
 | A171 | Wire 6 relation MCP tools in smeldr/mcp (assert_relation, propose_relation, get_relations, preview_impact, upsert_relation_kind, list_relation_kinds). Gated by App.RelationStore() != nil; no new ServerOption. Roles: Author/Editor/Admin per tool. Output uses snake_case map helpers. mcp v1.23.0. | [recent.md](decisions/recent.md) |
 | A170 | docs(cleanup): archive A151–A157, migrate CLAUDE.md, backfill A167–A169 | [recent.md](decisions/recent.md) |
-| A169 | T106: slug collision check + dynamic route registration | [recent.md](decisions/recent.md) |
-| A168 | T106: Listable, Serves[T], Aggregate, App.Route | [recent.md](decisions/recent.md) |
-| A167 | T106: smeldr_routes table + redirect migration | [recent.md](decisions/recent.md) |
-| A165 | T06 step 7: Layer 3a structural sweep | [recent.md](decisions/recent.md) |
-| A163 | T06 step 6: MCP relation kind tools | [recent.md](decisions/recent.md) |
-| A162 | T06 step 5: MCP relation tools | [recent.md](decisions/recent.md) |
-| A161 | T06 step 4: Layer 2 reactive cascade signal | [recent.md](decisions/recent.md) |
-| A160 | T06 step 3: Layer 1 save-path relation recompute | [recent.md](decisions/recent.md) |
-| A159 | T06 step 2: relation schema + stores | [recent.md](decisions/recent.md) |
-| A158 | Node.Rev optimistic-concurrency token | [recent.md](decisions/recent.md) |
+| A169 | T106: slug collision check + dynamic route registration | [phase10-archive.md](decisions/phase10-archive.md) |
+| A168 | T106: Listable, Serves[T], Aggregate, App.Route | [phase10-archive.md](decisions/phase10-archive.md) |
+| A167 | T106: smeldr_routes table + redirect migration | [phase10-archive.md](decisions/phase10-archive.md) |
+| A165 | T06 step 7: Layer 3a structural sweep | [phase10-archive.md](decisions/phase10-archive.md) |
+| A163 | T06 step 6: MCP relation kind tools | [phase10-archive.md](decisions/phase10-archive.md) |
+| A162 | T06 step 5: MCP relation tools | [phase10-archive.md](decisions/phase10-archive.md) |
+| A161 | T06 step 4: Layer 2 reactive cascade signal | [phase10-archive.md](decisions/phase10-archive.md) |
+| A160 | T06 step 3: Layer 1 save-path relation recompute | [phase10-archive.md](decisions/phase10-archive.md) |
+| A159 | T06 step 2: relation schema + stores | [phase10-archive.md](decisions/phase10-archive.md) |
+| A158 | Node.Rev optimistic-concurrency token | [phase10-archive.md](decisions/phase10-archive.md) |
 
 ### Core — [decisions/core.md](decisions/core.md)
 
