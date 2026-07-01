@@ -887,13 +887,13 @@ func setupTriggerFlow(t *testing.T, db DB, triggerClass, triggerType string) int
 
 func TestFireAsyncTriggers_nilDB(t *testing.T) {
 	// Must not panic and return immediately.
-	fireAsyncTriggers(context.Background(), nil, "testPost", "draft", "published")
+	fireAsyncTriggers(context.Background(), nil, "testPost", "draft", "published", "")
 }
 
 func TestFireAsyncTriggers_nonSQLite(t *testing.T) {
 	// failOnNthExecDB returns no-row on QueryRowContext → sqlite_master probe fails → return.
 	db := &failOnNthExecDB{failAt: 999}
-	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
+	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published", "")
 }
 
 func TestFireAsyncTriggers_noTriggers(t *testing.T) {
@@ -912,7 +912,7 @@ func TestFireAsyncTriggers_noTriggers(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RegisterFlow: %v", err)
 	}
-	fireAsyncTriggers(ctx, db, "testPost", "draft", "published")
+	fireAsyncTriggers(ctx, db, "testPost", "draft", "published", "")
 }
 
 func TestFireAsyncTriggers_syncTrigger_skipped(t *testing.T) {
@@ -924,7 +924,7 @@ func TestFireAsyncTriggers_syncTrigger_skipped(t *testing.T) {
 	var buf safeBuf
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
-	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
+	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published", "")
 	time.Sleep(30 * time.Millisecond)
 
 	if strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
@@ -941,7 +941,7 @@ func TestFireAsyncTriggers_asyncTrigger_dispatched(t *testing.T) {
 	var buf safeBuf
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
-	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
+	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published", "")
 	time.Sleep(50 * time.Millisecond)
 
 	if !strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
@@ -955,7 +955,7 @@ func TestFireAsyncTriggers_asyncTrigger_dispatched(t *testing.T) {
 func TestFireAsyncTriggers_queryError(t *testing.T) {
 	// triggerQueryFailDB: probe succeeds, QueryContext returns an error → fail-open.
 	db := &triggerQueryFailDB{}
-	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
+	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published", "")
 }
 
 // triggerQueryFailDB: sqlite_master probe succeeds; QueryContext returns an error.
@@ -979,13 +979,13 @@ func (d *triggerQueryFailDB) QueryRowContext(ctx context.Context, query string, 
 func TestFireAsyncTriggers_scanError(t *testing.T) {
 	// triggerScanErrDB: probe succeeds; rows return 1 column but Scan expects 2 — scan error path.
 	db := &triggerScanErrDB{}
-	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
+	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published", "")
 }
 
 func TestFireAsyncTriggers_rowsError(t *testing.T) {
 	// triggerRowsErrDB: probe succeeds; driver.Rows.Next returns non-EOF error — rows.Err() path.
 	db := &triggerRowsErrDB{}
-	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published")
+	fireAsyncTriggers(context.Background(), db, "testPost", "draft", "published", "")
 }
 
 // triggerScanErrDB: probe succeeds; QueryContext returns rows with 1 column while
@@ -1849,4 +1849,574 @@ func (r *zeroColRows) Next(dest []driver.Value) error {
 	}
 	r.done = true
 	return nil
+}
+
+// ——— RegisterFlow — Triggers (TransitionTrigger) ——————————————————————————
+
+func TestRegisterFlow_withTrigger(t *testing.T) {
+	db := newMigratedDB(t)
+	app := &App{cfg: Config{DB: db}}
+	flow := StateFlow{
+		Name:     "trigger-flow",
+		TypeName: "TriggerItem",
+		States:   []State{{Name: "draft", IsInitial: true}, {Name: "published"}},
+		Transitions: []Transition{
+			{From: "draft", To: "published"},
+		},
+		Triggers: []TransitionTrigger{
+			{
+				FromState:    "draft",
+				ToState:      "published",
+				TriggerClass: "async",
+				TriggerType:  "schedule-eval",
+				Config:       `{"eval_field":"next_eval_at","to_state":"pending"}`,
+			},
+		},
+	}
+	if err := app.RegisterFlow(flow); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	// Verify the trigger row exists.
+	var count int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM smeldr_transition_triggers WHERE trigger_type = 'schedule-eval'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("SELECT: %v", err)
+	}
+	if count == 0 {
+		t.Error("expected trigger row in smeldr_transition_triggers, got 0")
+	}
+}
+
+func TestRegisterFlow_triggerTransitionNotFound(t *testing.T) {
+	db := newMigratedDB(t)
+	app := &App{cfg: Config{DB: db}}
+	flow := StateFlow{
+		Name:     "bad-trigger-flow",
+		TypeName: "BadTriggerItem",
+		States:   []State{{Name: "draft", IsInitial: true}, {Name: "published"}},
+		Transitions: []Transition{
+			{From: "draft", To: "published"},
+		},
+		Triggers: []TransitionTrigger{
+			{
+				FromState:    "published", // no transition from published→archived
+				ToState:      "archived",
+				TriggerClass: "async",
+				TriggerType:  "schedule-eval",
+				Config:       `{}`,
+			},
+		},
+	}
+	err := app.RegisterFlow(flow)
+	if err == nil {
+		t.Error("expected error for trigger referencing non-existent transition, got nil")
+	}
+}
+
+func TestRegisterFlow_triggerIdempotent(t *testing.T) {
+	db := newMigratedDB(t)
+	app := &App{cfg: Config{DB: db}}
+	flow := StateFlow{
+		Name:     "idem-trigger-flow",
+		TypeName: "IdemTriggerItem",
+		States:   []State{{Name: "draft", IsInitial: true}, {Name: "published"}},
+		Transitions: []Transition{
+			{From: "draft", To: "published"},
+		},
+		Triggers: []TransitionTrigger{
+			{
+				FromState:    "draft",
+				ToState:      "published",
+				TriggerClass: "async",
+				TriggerType:  "schedule-eval",
+				Config:       `{}`,
+			},
+		},
+	}
+	if err := app.RegisterFlow(flow); err != nil {
+		t.Fatalf("first RegisterFlow: %v", err)
+	}
+	// Second call must be a no-op — INSERT OR IGNORE.
+	if err := app.RegisterFlow(flow); err != nil {
+		t.Fatalf("second RegisterFlow (idempotent): %v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM smeldr_transition_triggers WHERE trigger_type = 'schedule-eval'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("SELECT: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("idempotent: expected 1 trigger row, got %d", count)
+	}
+}
+
+// ——— fireAsyncTriggers — schedule-eval handler ——————————————————————————
+
+func setupEvalQueueFlow(t *testing.T, db *sql.DB) (typeName, itemID string) {
+	t.Helper()
+	ctx := context.Background()
+	typeName = "EvalItem"
+	// camelToSnake("EvalItem")+"s" = "eval_items"
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS eval_items (id TEXT PRIMARY KEY, status TEXT NOT NULL, next_eval_at DATETIME, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create eval_items: %v", err)
+	}
+	itemID = NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO eval_items (id, status, next_eval_at) VALUES (?, 'ratified', datetime('now', '+1 day'))`, itemID,
+	); err != nil {
+		t.Fatalf("insert eval_items: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "eval-flow",
+		TypeName: typeName,
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "ratified"},
+			{Name: "pending-re-evaluation"},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "ratified"},
+			{From: "ratified", To: "pending-re-evaluation"},
+		},
+		Triggers: []TransitionTrigger{
+			{
+				FromState:    "draft",
+				ToState:      "ratified",
+				TriggerClass: "async",
+				TriggerType:  "schedule-eval",
+				Config:       `{"eval_field":"next_eval_at","to_state":"pending-re-evaluation"}`,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	return typeName, itemID
+}
+
+func TestFireAsyncTriggers_scheduleEval_happy(t *testing.T) {
+	db := newMigratedDB(t)
+	typeName, itemID := setupEvalQueueFlow(t, db)
+
+	fireAsyncTriggers(context.Background(), db, typeName, "draft", "ratified", itemID)
+	time.Sleep(50 * time.Millisecond)
+
+	var count int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM smeldr_eval_queue WHERE item_id = ?`, itemID,
+	).Scan(&count); err != nil {
+		t.Fatalf("SELECT smeldr_eval_queue: %v", err)
+	}
+	if count == 0 {
+		t.Error("schedule-eval: expected row in smeldr_eval_queue, got 0")
+	}
+}
+
+func TestFireAsyncTriggers_scheduleEval_badConfig(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	// Register a trigger with an invalid JSON config.
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:        "bad-cfg-flow",
+		TypeName:    "BadCfgItem",
+		States:      []State{{Name: "a", IsInitial: true}, {Name: "b"}},
+		Transitions: []Transition{{From: "a", To: "b"}},
+		Triggers: []TransitionTrigger{
+			{FromState: "a", ToState: "b", TriggerClass: "async", TriggerType: "schedule-eval", Config: `not-json`},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	prev := slog.Default()
+	t.Cleanup(func() { restoreDefaultLogging(prev) })
+	var buf safeBuf
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	fireAsyncTriggers(ctx, db, "BadCfgItem", "a", "b", "some-id")
+	time.Sleep(50 * time.Millisecond)
+
+	if !strings.Contains(buf.String(), "bad config") {
+		t.Errorf("bad config: expected 'bad config' in log, got:\n%s", buf.String())
+	}
+}
+
+func TestFireAsyncTriggers_scheduleEval_noItemID(t *testing.T) {
+	db := newMigratedDB(t)
+	typeName, _ := setupEvalQueueFlow(t, db)
+
+	prev := slog.Default()
+	t.Cleanup(func() { restoreDefaultLogging(prev) })
+	var buf safeBuf
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	fireAsyncTriggers(context.Background(), db, typeName, "draft", "ratified", "")
+	time.Sleep(50 * time.Millisecond)
+
+	if !strings.Contains(buf.String(), "no itemID") {
+		t.Errorf("no itemID: expected 'no itemID' in log, got:\n%s", buf.String())
+	}
+}
+
+func TestFireAsyncTriggers_scheduleEval_emptyEvalField(t *testing.T) {
+	// Item has next_eval_at = NULL → sql.NullTime.Valid = false → warn and return.
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS null_eval_items (id TEXT PRIMARY KEY, status TEXT, next_eval_at DATETIME)`,
+	); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	itemID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO null_eval_items (id, status, next_eval_at) VALUES (?, 'draft', NULL)`, itemID,
+	); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:        "null-eval-flow",
+		TypeName:    "NullEvalItem",
+		States:      []State{{Name: "draft", IsInitial: true}, {Name: "ratified"}},
+		Transitions: []Transition{{From: "draft", To: "ratified"}},
+		Triggers: []TransitionTrigger{
+			{FromState: "draft", ToState: "ratified", TriggerClass: "async", TriggerType: "schedule-eval",
+				Config: `{"eval_field":"next_eval_at","to_state":"pending"}`},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	prev := slog.Default()
+	t.Cleanup(func() { restoreDefaultLogging(prev) })
+	var buf safeBuf
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	fireAsyncTriggers(ctx, db, "NullEvalItem", "draft", "ratified", itemID)
+	time.Sleep(50 * time.Millisecond)
+
+	if !strings.Contains(buf.String(), "eval_field unreadable or empty") {
+		t.Errorf("null eval: expected 'eval_field unreadable or empty' in log, got:\n%s", buf.String())
+	}
+}
+
+// ——— resolveItemTable ——————————————————————————————————————————————————————
+
+func TestResolveItemTable_smeldrPrefixMatch(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	// camelToSnake("Decision")+"s" = "decisions"; smeldr_decisions should match first.
+	if _, err := db.ExecContext(ctx, `CREATE TABLE smeldr_decisions (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got := resolveItemTable(ctx, db, "Decision")
+	if got != "smeldr_decisions" {
+		t.Errorf("smeldr prefix: got %q, want %q", got, "smeldr_decisions")
+	}
+}
+
+func TestResolveItemTable_snakeMatch(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	// camelToSnake("BlogPost")+"s" = "blog_posts"; no smeldr_blog_posts → snake match.
+	if _, err := db.ExecContext(ctx, `CREATE TABLE blog_posts (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got := resolveItemTable(ctx, db, "BlogPost")
+	if got != "blog_posts" {
+		t.Errorf("snake match: got %q, want %q", got, "blog_posts")
+	}
+}
+
+func TestResolveItemTable_fallback(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	// No matching table → fallback to smeldr_dynamic_content.
+	got := resolveItemTable(ctx, db, "UnknownType")
+	if got != "smeldr_dynamic_content" {
+		t.Errorf("fallback: got %q, want %q", got, "smeldr_dynamic_content")
+	}
+}
+
+// ——— DrainEvalQueue ———————————————————————————————————————————————————————
+
+func TestDrainEvalQueue_nilDB(t *testing.T) {
+	app := &App{cfg: Config{DB: nil}}
+	triggered, skipped, err := app.DrainEvalQueue(context.Background())
+	if err != nil {
+		t.Fatalf("nil DB: expected nil error, got %v", err)
+	}
+	if triggered != 0 || skipped != 0 {
+		t.Errorf("nil DB: expected (0,0), got (%d,%d)", triggered, skipped)
+	}
+}
+
+func TestDrainEvalQueue_noTable(t *testing.T) {
+	// Fresh SQLite with no tables → "no such table" → fail-open.
+	db := newSQLiteDB(t)
+	app := &App{cfg: Config{DB: db}}
+	triggered, skipped, err := app.DrainEvalQueue(context.Background())
+	if err != nil {
+		t.Fatalf("no table: expected nil (fail-open), got %v", err)
+	}
+	if triggered != 0 || skipped != 0 {
+		t.Errorf("no table: expected (0,0), got (%d,%d)", triggered, skipped)
+	}
+}
+
+func TestDrainEvalQueue_happy(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	// Create the target table.
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE eval_items (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create eval_items: %v", err)
+	}
+	itemID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO eval_items (id, status) VALUES (?, 'ratified')`, itemID,
+	); err != nil {
+		t.Fatalf("insert item: %v", err)
+	}
+	qID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'EvalItem', ?, 'pending-re-evaluation', datetime('now', '-1 second'))`,
+		qID, itemID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	app := &App{cfg: Config{DB: db}}
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 1 || skipped != 0 {
+		t.Errorf("happy: expected (1,0), got (%d,%d)", triggered, skipped)
+	}
+
+	// Item must have new status.
+	var status string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM eval_items WHERE id = ?`, itemID).Scan(&status); err != nil {
+		t.Fatalf("SELECT status: %v", err)
+	}
+	if status != "pending-re-evaluation" {
+		t.Errorf("happy: item status = %q, want %q", status, "pending-re-evaluation")
+	}
+	// Queue row must be deleted.
+	var qCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_eval_queue`).Scan(&qCount); err != nil {
+		t.Fatalf("SELECT queue: %v", err)
+	}
+	if qCount != 0 {
+		t.Errorf("happy: queue row not deleted, count=%d", qCount)
+	}
+}
+
+func TestDrainEvalQueue_notDueYet(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	// Queue row with eval_at in the future → not drained.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'EvalItem', 'item1', 'pending', datetime('now', '+1 hour'))`,
+		NewID(),
+	); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 0 || skipped != 0 {
+		t.Errorf("not due: expected (0,0), got (%d,%d)", triggered, skipped)
+	}
+}
+
+func TestDrainEvalQueue_transitionFail(t *testing.T) {
+	// Queue row due now but target table missing → UPDATE fails → skipped++, row deleted.
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	qID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'MissingType', 'item-x', 'active', datetime('now', '-1 second'))`,
+		qID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 0 || skipped != 1 {
+		t.Errorf("transition fail: expected (0,1), got (%d,%d)", triggered, skipped)
+	}
+	// Row must still be deleted.
+	var qCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_eval_queue WHERE id = ?`, qID).Scan(&qCount); err != nil {
+		t.Fatalf("SELECT: %v", err)
+	}
+	if qCount != 0 {
+		t.Errorf("transition fail: queue row not deleted, count=%d", qCount)
+	}
+}
+
+func TestDrainEvalQueue_selectFail(t *testing.T) {
+	// QueryContext returns a non-"no such table" error → returns error (not fail-open).
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	wrapped := &evalQueueQueryFailDB{DB: db}
+	app := &App{cfg: Config{DB: wrapped}}
+	_, _, err := app.DrainEvalQueue(ctx)
+	if err == nil {
+		t.Error("selectFail: expected error from QueryContext, got nil")
+	}
+}
+
+// evalQueueQueryFailDB: makes the first QueryContext (after migration) fail with a
+// non-"no such table" error to exercise the DrainEvalQueue SELECT error path.
+type evalQueueQueryFailDB struct {
+	DB
+	n int
+}
+
+func (d *evalQueueQueryFailDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	d.n++
+	if d.n == 1 {
+		return nil, errors.New("simulated select error")
+	}
+	return d.DB.QueryContext(ctx, q, args...)
+}
+
+func TestDrainEvalQueue_rowsError(t *testing.T) {
+	// QueryContext returns rows whose Next produces a driver error → rows.Err() path.
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	wrapped := &evalQueueRowsErrDB{DB: db}
+	app := &App{cfg: Config{DB: wrapped}}
+	_, _, err := app.DrainEvalQueue(ctx)
+	if err == nil {
+		t.Error("rowsError: expected error from rows.Err(), got nil")
+	}
+}
+
+// evalQueueRowsErrDB: first QueryContext returns rows that produce an iteration error.
+type evalQueueRowsErrDB struct {
+	DB
+	n int
+}
+
+func (d *evalQueueRowsErrDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	d.n++
+	if d.n == 1 {
+		return sql.OpenDB(&rowsErrConnector{}).QueryContext(ctx, "SELECT v1, v2, v3, v4")
+	}
+	return d.DB.QueryContext(ctx, q, args...)
+}
+
+func TestDrainEvalQueue_scanFail(t *testing.T) {
+	// Rows with wrong column count → scan fails → skipped++.
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	// Insert a queue row so QueryContext returns at least one row before we swap.
+	qID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'T', 'i', 's', datetime('now', '-1 second'))`,
+		qID,
+	); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	wrapped := &evalQueueScanFailDB{DB: db}
+	app := &App{cfg: Config{DB: wrapped}}
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("scanFail: unexpected error: %v", err)
+	}
+	// scan failed → skipped++ (row still deleted)
+	if triggered != 0 || skipped != 1 {
+		t.Errorf("scanFail: expected (0,1), got (%d,%d)", triggered, skipped)
+	}
+}
+
+// evalQueueScanFailDB: first QueryContext returns rows with too few columns so Scan fails.
+type evalQueueScanFailDB struct {
+	DB
+	n int
+}
+
+func (d *evalQueueScanFailDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	d.n++
+	if d.n == 1 {
+		// Return 1-column rows; DrainEvalQueue scans 4 columns → scan error.
+		return sql.OpenDB(&scanErrConnector{}).QueryContext(ctx, "SELECT v")
+	}
+	return d.DB.QueryContext(ctx, q, args...)
+}
+
+func TestRegisterFlow_checkTriggerQueryFail(t *testing.T) {
+	// The SELECT COUNT(*) for idempotency check fails → returns error.
+	db := newMigratedDB(t)
+	app := &App{cfg: Config{DB: &triggerCheckFailDB{DB: db}}}
+	err := app.RegisterFlow(StateFlow{
+		Name:        "check-fail-flow",
+		TypeName:    "CheckFailItem",
+		States:      []State{{Name: "a", IsInitial: true}, {Name: "b"}},
+		Transitions: []Transition{{From: "a", To: "b"}},
+		Triggers: []TransitionTrigger{
+			{FromState: "a", ToState: "b", TriggerClass: "async", TriggerType: "schedule-eval", Config: `{}`},
+		},
+	})
+	if err == nil {
+		t.Error("checkTriggerQueryFail: expected error, got nil")
+	}
+}
+
+// triggerCheckFailDB: wraps a real DB; makes the QueryRowContext call for
+// `SELECT COUNT(*) FROM smeldr_transition_triggers` fail by returning no row.
+type triggerCheckFailDB struct {
+	DB
+	n int
+}
+
+func (d *triggerCheckFailDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	if strings.Contains(q, "smeldr_transition_triggers") {
+		// Return a row that errors on Scan.
+		sdb, _ := sql.Open("sqlite", ":memory:")
+		return sdb.QueryRowContext(ctx, "SELECT 1 FROM no_table_xyz")
+	}
+	return d.DB.QueryRowContext(ctx, q, args...)
+}
+
+func TestFireAsyncTriggers_scheduleEval_insertFail(t *testing.T) {
+	// schedule-eval handler: eval_at is set but INSERT into smeldr_eval_queue fails → warn, fail-open.
+	db := newMigratedDB(t)
+	typeName, itemID := setupEvalQueueFlow(t, db)
+	wrapped := &evalQueueInsertFailDB{DB: db}
+
+	prev := slog.Default()
+	t.Cleanup(func() { restoreDefaultLogging(prev) })
+	var buf safeBuf
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	fireAsyncTriggers(context.Background(), wrapped, typeName, "draft", "ratified", itemID)
+	time.Sleep(50 * time.Millisecond)
+
+	if !strings.Contains(buf.String(), "INSERT failed") {
+		t.Errorf("insertFail: expected 'INSERT failed' in log, got:\n%s", buf.String())
+	}
+}
+
+// evalQueueInsertFailDB: forwards everything except ExecContext for smeldr_eval_queue inserts.
+type evalQueueInsertFailDB struct{ DB }
+
+func (d *evalQueueInsertFailDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	if strings.Contains(q, "smeldr_eval_queue") {
+		return nil, errors.New("simulated INSERT fail")
+	}
+	return d.DB.ExecContext(ctx, q, args...)
 }

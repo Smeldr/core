@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or pilot agent.
 
-Current versions: smeldr.dev/core v1.46.0 · smeldr.dev/mcp v1.25.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.1 · smeldr.dev/social v0.9.2 · smeldr.dev/agent v0.6.2 · smeldr.dev/core/pgx v0.1.2
+Current versions: smeldr.dev/core v1.47.0 · smeldr.dev/mcp v1.25.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.1 · smeldr.dev/social v0.9.2 · smeldr.dev/agent v0.7.0 · smeldr.dev/core/pgx v0.1.2
 
 ---
 
@@ -315,6 +315,38 @@ err := app.RegisterFlow(smeldr.StateFlow{
 - `ConflictReject` — `MCPPublish`/`SetStatus` returns `ErrConflict` (409) when another item is already in `ActiveState`
 - `ConflictSupersede` — transitions all conflicting items to `"superseded"` before the new item enters `ActiveState`
 - Zero value = no enforcement. Both policies fail-open: DB errors never block a transition.
+
+**Decision freshness (v1.47.0+, A187):** Wire scheduled state transitions via `TransitionTrigger`.
+
+```go
+err := app.RegisterFlow(smeldr.StateFlow{
+    Name:     "governance-decision",
+    TypeName: "Decision",
+    States: []smeldr.State{
+        {Name: "proposed", IsInitial: true},
+        {Name: "ratified"},
+        {Name: "pending-re-evaluation"},
+    },
+    Transitions: []smeldr.Transition{
+        {From: "proposed", To: "ratified"},
+        {From: "ratified", To: "pending-re-evaluation"},
+        {From: "pending-re-evaluation", To: "ratified"},
+    },
+    Triggers: []smeldr.TransitionTrigger{
+        {
+            FromState:    "proposed",
+            ToState:      "ratified",
+            TriggerClass: "async",
+            TriggerType:  "schedule-eval",
+            Config:       `{"eval_field":"next_eval_at","to_state":"pending-re-evaluation"}`,
+        },
+    },
+})
+```
+
+- `schedule-eval` reads `eval_field` from the item row and inserts a timed entry in `smeldr_eval_queue`
+- `App.DrainEvalQueue(ctx)` transitions due items; call via `agent.NewEvalQueueScheduler("", "UTC", app)` for automatic drain
+- Fail-open: nil DB, missing table, and empty `eval_field` are all silently skipped
 
 ---
 

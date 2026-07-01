@@ -44,6 +44,15 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 			trigger_type   TEXT    NOT NULL,
 			config         TEXT    NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS smeldr_eval_queue (
+			id         TEXT    PRIMARY KEY,
+			type_name  TEXT    NOT NULL,
+			item_id    TEXT    NOT NULL,
+			to_state   TEXT    NOT NULL,
+			eval_at    DATETIME NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(type_name, item_id, to_state)
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.ExecContext(ctx, s); err != nil {

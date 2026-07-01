@@ -3377,6 +3377,56 @@ var ErrConflict = smeldr.NewError(409, "conflict", "conflict with existing activ
 
 Returned by `MCPPublish`, `MCPSchedule`, and `DynamicTypeRepo.SetStatus` when `ConflictReject` is active and a conflicting item exists.
 
+### `TransitionTrigger` (A187)
+
+```go
+type TransitionTrigger struct {
+    FromState    string
+    ToState      string
+    TriggerClass string // "async"
+    TriggerType  string // "schedule-eval"
+    Config       string // JSON config string
+}
+```
+
+Declared in `StateFlow.Triggers []TransitionTrigger`. Persisted by `App.RegisterFlow` to `smeldr_transition_triggers` (idempotent — skipped if a trigger of the same type already exists for the transition).
+
+The only supported `TriggerType` in v1.47.0 is `"schedule-eval"`. Config JSON: `{"eval_field":"<column>","to_state":"<target>"}`.
+
+### `App.DrainEvalQueue` (A187)
+
+```go
+func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err error)
+```
+
+Drains due rows from `smeldr_eval_queue` (where `eval_at <= now`). For each row:
+
+1. Resolves the item's table via `resolveItemTable` (probes `sqlite_master` for `smeldr_<snake>s`, then `<snake>s`, then falls back to `smeldr_dynamic_content`).
+2. Applies a direct `UPDATE … SET status = ?, updated_at = ?` on the item.
+3. Deletes the queue row regardless of UPDATE success.
+
+Returns `triggered` (successful updates) and `skipped` (UPDATE failed or table not found). Fail-open: nil DB and missing table return `(0, 0, nil)`.
+
+Wire with `agent.NewEvalQueueScheduler("", "UTC", app)` for automatic drain on a cron schedule.
+
+### `smeldr_eval_queue` table
+
+Created by `migrateStateFlows()` — no manual call needed.
+
+```sql
+CREATE TABLE IF NOT EXISTS smeldr_eval_queue (
+    id         TEXT     PRIMARY KEY,
+    type_name  TEXT     NOT NULL,
+    item_id    TEXT     NOT NULL,
+    to_state   TEXT     NOT NULL,
+    eval_at    DATETIME NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(type_name, item_id, to_state)
+)
+```
+
+The `UNIQUE` constraint prevents duplicate queue entries for the same item+transition.
+
 ---
 
 ## Orchestration types

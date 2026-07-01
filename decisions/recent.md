@@ -304,3 +304,53 @@ Current call sites pass `rs = nil` (Module[T] does not carry a RelationStore). T
 Coverage: 96.0%. core v1.46.0.
 
 ---
+
+## A187 — T23 Step 13: schedule-eval trigger type + DrainEvalQueue (core v1.47.0, 2026-07-01)
+
+**Date:** 2026-07-01
+**Status:** Agreed
+**Level:** 2 (new exported types, cross-module signature change, new public method, cross-repo change)
+
+### Decision
+
+Implement the `schedule-eval` async trigger type and background drain loop for periodic state re-evaluation. Two components: (1) a persistent eval queue (`smeldr_eval_queue`) with metadata for deferred transitions, and (2) a public `DrainEvalQueue` method that processes due rows.
+
+### Implementation
+
+**state.go:**
+
+- `TransitionTrigger` exported type: `FromState, ToState, TriggerClass, TriggerType string; Config string` — declared in `StateFlow.Triggers []TransitionTrigger` and persisted by `RegisterFlow` to `smeldr_transition_triggers` (idempotent via SELECT COUNT check before INSERT).
+- `fireAsyncTriggers` signature extended: added `itemID string` parameter — required for `schedule-eval` triggers to identify the affected item.
+- New `schedule-eval` case in `fireAsyncTriggers` dispatch: reads `eval_field` from trigger Config (JSON), queries the affected item's row via `resolveItemTable`, reads the evaluation timestamp from the named column, INSERTs into `smeldr_eval_queue`. Fail-open: all errors log `slog.Warn` and do not block the original transition.
+- `resolveItemTable(ctx, db, typeName) string` — probes `sqlite_master` for `smeldr_<snake>s` (e.g. `smeldr_decisions`), then `<snake>s`, then falls back to `smeldr_dynamic_content`. Returns `""` on probe failure.
+- `isNoSuchTable(err error) bool` — checks whether a DB error contains "no such table".
+- `App.DrainEvalQueue(ctx context.Context) (triggered, skipped int, err error)` — SELECT due rows from `smeldr_eval_queue WHERE eval_at <= now`. For each row: direct SQL UPDATE on the resolved table, increment `triggered` on success or `skipped` on failure. DELETE each row regardless of UPDATE outcome. Fail-open on nil DB and missing table.
+
+**migrate.go:**
+
+- `smeldr_eval_queue` table added to `migrateStateFlows()` stmts: `id TEXT PRIMARY KEY, type_name TEXT NOT NULL, item_id TEXT NOT NULL, to_state TEXT NOT NULL, eval_at DATETIME NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(type_name, item_id, to_state)`.
+
+**dynamic.go:**
+
+- `DynamicTypeRepo.SetStatus` call to `fireAsyncTriggers` extended: passes item `id` as `itemID` parameter.
+
+**orchestration.go:**
+
+- `orchDecisionFlow()` wired with two `TransitionTrigger` entries:
+  - `proposed → ratified`, class=`async`, type=`schedule-eval`, config `{"eval_field":"next_eval_at","to_state":"pending-re-evaluation"}`
+  - `pending-re-evaluation → ratified`, same config — restarts the freshness cycle on every re-evaluation
+
+**smeldr.dev/agent (sweep.go):**
+
+- `NewEvalQueueScheduler(schedule, timezone string, app interface{DrainEvalQueue(ctx) (int, int, error)}) (*SweepScheduler, error)` — wraps `DrainEvalQueue` as a `SweepFunc` for the background loop. Default schedule: `"*/5 * * * *"`. Uses inline interface to avoid importing smeldr in sweep.go. agent v0.7.0.
+
+### Consequences
+
+- `fireAsyncTriggers` signature change: all call sites in `module.go` and `dynamic.go` updated to pass `itemID`.
+- No existing behaviour changes — unknown `trigger_type` values log `slog.Warn` and skip.
+- `DrainEvalQueue` is opt-in: call `agent.NewEvalQueueScheduler` or invoke manually.
+- All DB errors are fail-open — eval queue is best-effort, not a hard requirement.
+
+Coverage: 96.0%. core v1.47.0 · agent v0.7.0.
+
+---

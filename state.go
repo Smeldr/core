@@ -2,6 +2,8 @@ package smeldr
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -79,6 +81,10 @@ type StateFlow struct {
 	// ConflictPolicy controls what happens when a transition would create a
 	// second item in [StateFlow.ActiveState]. The zero value disables enforcement.
 	ConflictPolicy ConflictPolicy
+
+	// Triggers declares async/sync trigger handlers on individual transitions.
+	// Persisted to smeldr_transition_triggers by [App.RegisterFlow].
+	Triggers []TransitionTrigger
 }
 
 // State is a node in a [StateFlow].
@@ -110,6 +116,25 @@ type Transition struct {
 	// RequiredRole is the minimum role that may perform this transition.
 	// An empty string means any authenticated role may perform it.
 	RequiredRole string
+}
+
+// TransitionTrigger registers an async or sync handler on a state transition.
+// Declared in [StateFlow.Triggers] and persisted by [App.RegisterFlow].
+type TransitionTrigger struct {
+	// FromState is the source state the trigger activates on (e.g. "proposed").
+	FromState string
+
+	// ToState is the target state the trigger activates on (e.g. "ratified").
+	ToState string
+
+	// TriggerClass is "sync" or "async".
+	TriggerClass string
+
+	// TriggerType identifies the handler (e.g. "schedule-eval").
+	TriggerType string
+
+	// Config is a JSON string consumed by the trigger handler.
+	Config string
 }
 
 // RegisterFlow upserts a custom state flow into the database at startup.
@@ -180,6 +205,38 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 			flowID, t.From, t.To, roleArg,
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: upsert transition %s→%s: %w", flow.Name, t.From, t.To, err)
+		}
+	}
+
+	// Persist transition triggers.
+	for _, tr := range flow.Triggers {
+		var transitionID int64
+		if err := db.QueryRowContext(ctx,
+			`SELECT id FROM smeldr_transitions WHERE flow_id = ? AND from_state = ? AND to_state = ?`,
+			flowID, tr.FromState, tr.ToState,
+		).Scan(&transitionID); err != nil {
+			return fmt.Errorf("smeldr: RegisterFlow %q: trigger %s→%s: transition not found: %w",
+				flow.Name, tr.FromState, tr.ToState, err)
+		}
+		// Idempotency: skip INSERT when a trigger of this type already exists
+		// for the transition (smeldr_transition_triggers has no UNIQUE constraint).
+		var existingCount int
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM smeldr_transition_triggers WHERE transition_id = ? AND trigger_type = ?`,
+			transitionID, tr.TriggerType,
+		).Scan(&existingCount); err != nil {
+			return fmt.Errorf("smeldr: RegisterFlow %q: check trigger %s→%s: %w",
+				flow.Name, tr.FromState, tr.ToState, err)
+		}
+		if existingCount > 0 {
+			continue
+		}
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO smeldr_transition_triggers(transition_id, trigger_class, trigger_type, config) VALUES (?, ?, ?, ?)`,
+			transitionID, tr.TriggerClass, tr.TriggerType, tr.Config,
+		); err != nil {
+			return fmt.Errorf("smeldr: RegisterFlow %q: insert trigger %s→%s %s: %w",
+				flow.Name, tr.FromState, tr.ToState, tr.TriggerType, err)
 		}
 	}
 
@@ -473,6 +530,101 @@ func conflictSupersede(ctx context.Context, db DB, rs *RelationStore, typeName, 
 	return nil
 }
 
+// resolveItemTable returns the DB table name that stores items of typeName.
+// It probes sqlite_master in order: smeldr_<snake>s (orchestration types),
+// <snake>s (static module types), then falls back to smeldr_dynamic_content.
+func resolveItemTable(ctx context.Context, db DB, typeName string) string {
+	snake := camelToSnake(typeName) + "s"
+	for _, candidate := range []string{"smeldr_" + snake, snake} {
+		var n int
+		if db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", candidate,
+		).Scan(&n) == nil && n > 0 {
+			return candidate
+		}
+	}
+	return "smeldr_dynamic_content"
+}
+
+// isNoSuchTable reports whether err is a SQLite "no such table" error.
+func isNoSuchTable(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "no such table")
+}
+
+// DrainEvalQueue transitions items whose scheduled evaluation time has arrived.
+// It selects all rows from smeldr_eval_queue WHERE eval_at <= now, applies a
+// direct status UPDATE to each item, then deletes the queue row regardless of
+// whether the UPDATE succeeded (failed transitions are not re-queued — they
+// are logged and counted as skipped).
+//
+// Returns the number of items transitioned (triggered) and items skipped due
+// to errors. Returns (0, 0, nil) when Config.DB is nil or the table does not
+// yet exist (fail-open).
+func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err error) {
+	db := a.cfg.DB
+	if db == nil {
+		return 0, 0, nil
+	}
+
+	type queueRow struct {
+		id       string
+		typeName string
+		itemID   string
+		toState  string
+	}
+
+	rows, queryErr := db.QueryContext(ctx,
+		`SELECT id, type_name, item_id, to_state FROM smeldr_eval_queue WHERE eval_at <= ?`,
+		time.Now().UTC(),
+	)
+	if isNoSuchTable(queryErr) {
+		return 0, 0, nil
+	}
+	if queryErr != nil {
+		return 0, 0, fmt.Errorf("smeldr: DrainEvalQueue: query: %w", queryErr)
+	}
+	defer rows.Close()
+
+	var pending []queueRow
+	for rows.Next() {
+		var r queueRow
+		if err := rows.Scan(&r.id, &r.typeName, &r.itemID, &r.toState); err != nil {
+			slog.WarnContext(ctx, "smeldr: DrainEvalQueue: scan", "error", err)
+			skipped++
+			continue
+		}
+		pending = append(pending, r)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return 0, skipped, fmt.Errorf("smeldr: DrainEvalQueue: rows: %w", rowsErr)
+	}
+	rows.Close()
+
+	now := time.Now().UTC()
+	for _, r := range pending {
+		table := resolveItemTable(ctx, db, r.typeName)
+		_, updateErr := db.ExecContext(ctx,
+			"UPDATE "+quoteIdent(table)+" SET status = ?, updated_at = ? WHERE id = ?",
+			r.toState, now, r.itemID,
+		)
+		if updateErr != nil {
+			slog.WarnContext(ctx, "smeldr: DrainEvalQueue: UPDATE failed",
+				"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "error", updateErr)
+			skipped++
+		} else {
+			triggered++
+		}
+		// Always delete from queue — failed transitions are not re-queued.
+		if _, delErr := db.ExecContext(ctx,
+			`DELETE FROM smeldr_eval_queue WHERE id = ?`, r.id,
+		); delErr != nil {
+			slog.WarnContext(ctx, "smeldr: DrainEvalQueue: DELETE failed",
+				"queue_id", r.id, "error", delErr)
+		}
+	}
+	return triggered, skipped, nil
+}
+
 // conflictIDs returns the IDs of all items of typeName in activeState.
 func conflictIDs(ctx context.Context, db DB, typeName, activeState, table string, isDynamic bool) ([]string, error) {
 	var query string
@@ -506,7 +658,7 @@ func conflictIDs(ctx context.Context, db DB, typeName, activeState, table string
 // each in a goroutine. Panics inside goroutines are recovered and logged.
 // Fails silently on DB error — the transition itself always succeeds.
 // Called by DynamicTypeRepo.SetStatus after a successful status UPDATE.
-func fireAsyncTriggers(ctx context.Context, db DB, typeName, fromState, toState string) {
+func fireAsyncTriggers(ctx context.Context, db DB, typeName, fromState, toState, itemID string) {
 	if db == nil {
 		return
 	}
@@ -563,7 +715,37 @@ func fireAsyncTriggers(ctx context.Context, db DB, typeName, fromState, toState 
 				"config", tr.config,
 			)
 			switch tr.triggerType {
-			// Concrete handlers added in Steps 10+ (create-signal, relation-cascade, schedule-eval).
+			case "schedule-eval":
+				var cfg struct {
+					EvalField string `json:"eval_field"`
+					ToState   string `json:"to_state"`
+				}
+				if err := json.Unmarshal([]byte(tr.config), &cfg); err != nil || cfg.EvalField == "" || cfg.ToState == "" {
+					slog.WarnContext(ctx, "smeldr: schedule-eval: bad config", "config", tr.config)
+					return
+				}
+				if itemID == "" {
+					slog.WarnContext(ctx, "smeldr: schedule-eval: no itemID",
+						"type_name", typeName, "from_state", fromState, "to_state", toState)
+					return
+				}
+				table := resolveItemTable(ctx, db, typeName)
+				var evalAt sql.NullTime
+				if err := db.QueryRowContext(ctx,
+					"SELECT "+cfg.EvalField+" FROM "+quoteIdent(table)+" WHERE id = ?", itemID,
+				).Scan(&evalAt); err != nil || !evalAt.Valid || evalAt.Time.IsZero() {
+					slog.WarnContext(ctx, "smeldr: schedule-eval: eval_field unreadable or empty",
+						"item_id", itemID, "eval_field", cfg.EvalField)
+					return
+				}
+				if _, err := db.ExecContext(ctx,
+					`INSERT OR IGNORE INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at)
+					 VALUES (?, ?, ?, ?, ?)`,
+					NewID(), typeName, itemID, cfg.ToState, evalAt.Time.UTC(),
+				); err != nil {
+					slog.WarnContext(ctx, "smeldr: schedule-eval: INSERT failed",
+						"item_id", itemID, "error", err)
+				}
 			default:
 				slog.WarnContext(ctx, "smeldr: fireAsyncTriggers unknown trigger_type",
 					"trigger_type", tr.triggerType,

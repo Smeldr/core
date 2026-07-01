@@ -23,6 +23,34 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.47.0] — 2026-07-01
+
+### Added
+- **State flow transitions** — new `TransitionTrigger` type to model state machine transitions:
+  - Struct fields: `FromState`, `ToState`, `TriggerClass`, `TriggerType`, `Config`
+  - `StateFlow.Triggers []TransitionTrigger` persisted via `App.RegisterFlow` to `smeldr_transition_triggers` table (T23 Step 13, A187)
+- **Async evaluation queue** — new `smeldr_eval_queue` table to schedule deferred state evaluations:
+  - Columns: `id`, `type_name`, `item_id`, `to_state`, `eval_at`, `created_at`
+  - Unique constraint on `type_name + item_id + to_state`
+- **`App.DrainEvalQueue(ctx context.Context) (triggered, skipped int, err error)`** — drain and apply due evaluations:
+  - Reads from `smeldr_eval_queue` where `eval_at <= now`
+  - Applies direct UPDATE to target item row; deletes queue entry regardless of success
+  - Fail-open on nil DB and missing table
+- **`schedule-eval` trigger type** — new async transition handler in state flows:
+  - Reads `eval_field` from item row and INSERTs into `smeldr_eval_queue` with computed `to_state`
+  - Enables deferred state transitions (e.g., schedule re-evaluation at a future time)
+- **Orchestration decision flow wired** — `orchDecisionFlow()` now includes two `schedule-eval` triggers:
+  - `proposed → ratified` and `pending-re-evaluation → ratified` with `eval_field: next_eval_at`
+
+### Changed
+- **`fireAsyncTriggers` signature** — added `itemID string` parameter to support queue insertion
+
+### Internal
+- **`resolveItemTable(ctx, db, typeName) string`** — probes sqlite_master for `smeldr_<snake>s` table, falls back to `<snake>s`, then `smeldr_dynamic_content`
+- **`isNoSuchTable(err) bool`** — helper to distinguish table-not-found errors in async handlers
+
+---
+
 ## [1.46.0] — 2026-07-01
 
 ### Added

@@ -27,6 +27,7 @@ Revisions to existing decisions require a new entry that supersedes the original
 | `decisions/phase7-archive.md` | Archive: A136–A138 | No |
 | `decisions/phase8-archive.md` | Archive: A139–A150 | No |
 | `decisions/phase9-archive.md` | Archive: A151–A157 | No |
+| `decisions/phase10-archive.md` | Archive: A158–A169 | No |
 | `decisions/auth.md` | Archive: D25, A66, D26, A83 | No |
 | `decisions/content-api.md` | Archive: D27, A67, A74, A75, A77 | No |
 | `decisions/docs.md` | Archive: D28, A69–A72, A76, A84–A86 | No |
@@ -48,6 +49,7 @@ names via NEXT.md. Corepilot never archives autonomously. Non-Decisions go to
 
 | # | Title | File |
 |---|-------|------|
+| A187 | T23 Step 13: schedule-eval trigger type + DrainEvalQueue (v1.47.0). New exported type TransitionTrigger (FromState, ToState, TriggerClass, TriggerType, Config) persisted by App.RegisterFlow to smeldr_transition_triggers. New table smeldr_eval_queue (id, type_name, item_id, to_state, eval_at, created_at; UNIQUE on type_name+item_id+to_state) with idempotent migration. fireAsyncTriggers extended with itemID; schedule-eval case reads eval_field, INSERTs into smeldr_eval_queue (fail-open). Helper functions resolveItemTable, isNoSuchTable. App.DrainEvalQueue(ctx) (triggered, skipped int, err error) for direct table update + delete; fail-open on nil DB and missing table. orchDecisionFlow wired with two TransitionTriggers (proposed→ratified AND pending-re-evaluation→ratified). smeldr.dev/agent: NewEvalQueueScheduler with default schedule "*/5 * * * *". core v1.47.0. | [recent.md](decisions/recent.md) |
 | A186 | T23 Step 12: ConflictPolicy enforcement on StateFlow (v1.46.0). Two optional StateFlow fields (ActiveState string, ConflictPolicy) declare the state where uniqueness applies and how to handle violations. ConflictReject returns ErrConflict; ConflictSupersede transitions conflicting items to "superseded" + optional "supersedes" relation. Both fail-open. Wired into MCPPublish/MCPSchedule/MCPArchive and DynamicTypeRepo.SetStatus. core v1.46.0. | [recent.md](decisions/recent.md) |
 | A185 | T23 Step 11: add create_signal and list_signals MCP tools to smeldr/mcp (v1.25.0). signal_tools.go with direct DB access to smeldr_signals table (Option A); create_signal inserts with status=pending; list_signals fail-open on missing table; both Author role, gated on DB != nil; core dep v1.45.0 → v1.45.1. | [recent.md](decisions/recent.md) |
 | A184 | Fix data race in state_test.go under go test -race: replace bare bytes.Buffer slog handler target with mutex-protected safeBuf in TestFireAsyncTriggers_asyncTrigger_dispatched, TestFireAsyncTriggers_syncTrigger_skipped, and TestDynamicTypeRepo_SetStatus_fireAsyncTriggers. No production code change. core v1.45.1. | [recent.md](decisions/recent.md) |

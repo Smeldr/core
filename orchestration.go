@@ -263,6 +263,22 @@ func orchDecisionFlow() StateFlow {
 			{From: "ratified", To: "superseded"},
 			{From: "superseded", To: "archived"},
 		},
+		Triggers: []TransitionTrigger{
+			{
+				FromState:    "proposed",
+				ToState:      "ratified",
+				TriggerClass: "async",
+				TriggerType:  "schedule-eval",
+				Config:       `{"eval_field":"next_eval_at","to_state":"pending-re-evaluation"}`,
+			},
+			{
+				FromState:    "pending-re-evaluation",
+				ToState:      "ratified",
+				TriggerClass: "async",
+				TriggerType:  "schedule-eval",
+				Config:       `{"eval_field":"next_eval_at","to_state":"pending-re-evaluation"}`,
+			},
+		},
 	}
 }
 

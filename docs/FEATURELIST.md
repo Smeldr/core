@@ -2,20 +2,20 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.46.0 (A186) + smeldr.dev/mcp v1.24.2 + smeldr.dev/cli v0.15.1 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.2 + smeldr.dev/agent v0.6.2 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
+Last updated: v1.47.0 (A187) + smeldr.dev/mcp v1.24.2 + smeldr.dev/cli v0.15.1 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.2 + smeldr.dev/agent v0.7.0 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.46.0 | Stable |
+| `smeldr.dev/core` | v1.47.0 | Stable |
 | `smeldr.dev/mcp` | v1.24.2 | Stable |
 | `smeldr.dev/oauth` | v0.3.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.1.2 | Beta |
 | `smeldr.dev/media` | v1.6.0 | Beta |
 | `smeldr.dev/cli` | v0.15.1 | Beta |
 | `smeldr.dev/social` | v0.9.2 | Experimental |
-| `smeldr.dev/agent` | v0.6.2 | Experimental |
+| `smeldr.dev/agent` | v0.7.0 | Experimental |
 
 **Stable** — API will not break without a deprecation notice.  
 **Beta** — Functional and tested; API may change in minor releases.  
@@ -262,6 +262,12 @@ MCP resource subscriptions (Beta):
   - Both policies fail-open: DB errors return nil and never block a transition
 - State flow enforced automatically in `MCPPublish`, `MCPSchedule`, `MCPArchive`, and `DynamicTypeRepo.SetStatus`
 - `define_state_flow` MCP tool — registers a flow including `active_state` and `conflict_policy` params (Admin role)
+- `TransitionTrigger` struct — `FromState`, `ToState`, `TriggerClass`, `TriggerType`, `Config`; declared in `StateFlow.Triggers`
+- `StateFlow.Triggers []TransitionTrigger` — async trigger handlers persisted to `smeldr_transition_triggers` by `RegisterFlow`; idempotent
+- `schedule-eval` trigger type — on transition, reads `eval_field` from item row and inserts into `smeldr_eval_queue` for later drain
+- `smeldr_eval_queue` table — queues timed state transitions; `UNIQUE(type_name, item_id, to_state)` prevents duplicate entries
+- `App.DrainEvalQueue(ctx) (triggered, skipped int, err error)` — drains due rows: UPDATE item status, DELETE queue row; fail-open on nil DB and missing table (A187)
+- `orchDecisionFlow` wired with two `schedule-eval` triggers on `proposed→ratified` and `pending-re-evaluation→ratified`
 
 ## Orchestration types — Experimental
 

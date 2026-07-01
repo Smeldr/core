@@ -202,7 +202,7 @@ func (r *DynamicTypeRepo) SetStatus(ctx context.Context, id string, status Statu
 	if err != nil {
 		return err
 	}
-	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(status))
+	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(status), id)
 	return nil
 }
 
