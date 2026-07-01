@@ -2380,7 +2380,6 @@ func TestRegisterFlow_checkTriggerQueryFail(t *testing.T) {
 // `SELECT COUNT(*) FROM smeldr_transition_triggers` fail by returning no row.
 type triggerCheckFailDB struct {
 	DB
-	n int
 }
 
 func (d *triggerCheckFailDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
