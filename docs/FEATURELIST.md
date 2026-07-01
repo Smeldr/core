@@ -2,13 +2,13 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.45.0 (A183) + smeldr.dev/mcp v1.24.2 + smeldr.dev/cli v0.15.1 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.2 + smeldr.dev/agent v0.6.2 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
+Last updated: v1.46.0 (A186) + smeldr.dev/mcp v1.24.2 + smeldr.dev/cli v0.15.1 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.2 + smeldr.dev/agent v0.6.2 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.45.0 | Stable |
+| `smeldr.dev/core` | v1.46.0 | Stable |
 | `smeldr.dev/mcp` | v1.24.2 | Stable |
 | `smeldr.dev/oauth` | v0.3.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.1.2 | Beta |
@@ -249,6 +249,19 @@ MCP resource subscriptions (Beta):
 - Content negotiation — agents receive an AI-optimised format, not raw HTML
 - Go codebase designed to be readable and extensible by AI agents
 - `smeldr.Verb(Noun)` naming throughout — no abbreviations, no clever names
+
+## State flows — Stable
+
+- `App.RegisterFlow(StateFlow) error` — registers or updates a custom state machine for a content type; idempotent; persists to `smeldr_state_flows`/`smeldr_flow_states`/`smeldr_flow_transitions`
+- `StateFlow` struct — `Name`, `TypeName`, `States`, `Transitions`, `ActiveState`, `ConflictPolicy`
+- `State` struct — `Name`, `IsInitial`, `IsTerminal`, `SuppressesSignals`
+- `Transition` struct — `From`, `To`, `RequiredRole`
+- `ConflictPolicy` type — opt-in uniqueness enforcement at a designated `ActiveState` (A186)
+  - `ConflictReject` (`"reject"`) — returns `ErrConflict` (409) when another item is already in `ActiveState`
+  - `ConflictSupersede` (`"supersede"`) — transitions conflicting items to `"superseded"` before the new item enters `ActiveState`
+  - Both policies fail-open: DB errors return nil and never block a transition
+- State flow enforced automatically in `MCPPublish`, `MCPSchedule`, `MCPArchive`, and `DynamicTypeRepo.SetStatus`
+- `define_state_flow` MCP tool — registers a flow including `active_state` and `conflict_policy` params (Admin role)
 
 ## Orchestration types — Experimental
 

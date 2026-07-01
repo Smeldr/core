@@ -3286,6 +3286,99 @@ source. Cloud rendering is outside core scope (A156).
 
 ---
 
+## State flows
+
+Custom state machines for content types. Defined in `state.go`.
+
+### `StateFlow`
+
+```go
+type StateFlow struct {
+    Name          string
+    TypeName      string
+    Description   string
+    States        []State
+    Transitions   []Transition
+    ActiveState   string       // optional: state where uniqueness is enforced (A186)
+    ConflictPolicy ConflictPolicy // optional: how to handle conflicts (A186)
+}
+```
+
+### `State`
+
+```go
+type State struct {
+    Name              string
+    IsInitial         bool
+    IsTerminal        bool
+    SuppressesSignals bool
+}
+```
+
+### `Transition`
+
+```go
+type Transition struct {
+    From         string
+    To           string
+    RequiredRole string // empty = any authenticated role
+}
+```
+
+### `App.RegisterFlow`
+
+```go
+func (a *App) RegisterFlow(flow StateFlow) error
+```
+
+Registers a state flow for a content type. Idempotent — safe to call on every startup. The flow is stored in `smeldr_state_flows`; states in `smeldr_flow_states`; transitions in `smeldr_flow_transitions`. `ActiveState` and `ConflictPolicy` are updated on every call.
+
+### `ConflictPolicy` (A186)
+
+```go
+type ConflictPolicy string
+
+const (
+    ConflictReject    ConflictPolicy = "reject"
+    ConflictSupersede ConflictPolicy = "supersede"
+)
+```
+
+Optional field on `StateFlow`. When `ActiveState` is set and an item transitions to that state:
+
+- `ConflictReject` — returns `ErrConflict` if any item of the same type is already in `ActiveState`.
+- `ConflictSupersede` — transitions conflicting items to `"superseded"` before the new item reaches `ActiveState`.
+
+Zero value (empty string) means no enforcement. Both policies fail-open: DB errors return nil so the transition is never blocked by a hiccup in the conflict check.
+
+```go
+app.RegisterFlow(smeldr.StateFlow{
+    Name:           "article-flow",
+    TypeName:       "Article",
+    ActiveState:    "published",
+    ConflictPolicy: smeldr.ConflictReject,
+    States: []smeldr.State{
+        {Name: "draft", IsInitial: true},
+        {Name: "published"},
+        {Name: "archived", IsTerminal: true},
+    },
+    Transitions: []smeldr.Transition{
+        {From: "draft", To: "published"},
+        {From: "published", To: "archived"},
+    },
+})
+```
+
+### `ErrConflict`
+
+```go
+var ErrConflict = smeldr.NewError(409, "conflict", "conflict with existing active item")
+```
+
+Returned by `MCPPublish`, `MCPSchedule`, and `DynamicTypeRepo.SetStatus` when `ConflictReject` is active and a conflicting item exists.
+
+---
+
 ## Orchestration types
 
 `orchestration.go` (T23 Step 10, A183) — four content types for the architect/pilot protocol.

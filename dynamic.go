@@ -188,6 +188,9 @@ func (r *DynamicTypeRepo) SetStatus(ctx context.Context, id string, status Statu
 	if err := validateTransition(ctx, r.db, r.typeName, string(node.Status), string(status)); err != nil {
 		return err
 	}
+	if err := applyConflictPolicy(ctx, r.db, nil, r.typeName, string(status), id); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	publishedAt := node.PublishedAt
 	if status == Published && publishedAt.IsZero() {

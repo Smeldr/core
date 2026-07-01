@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or pilot agent.
 
-Current versions: smeldr.dev/core v1.45.1 · smeldr.dev/mcp v1.25.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.1 · smeldr.dev/social v0.9.2 · smeldr.dev/agent v0.6.2 · smeldr.dev/core/pgx v0.1.2
+Current versions: smeldr.dev/core v1.46.0 · smeldr.dev/mcp v1.25.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.1 · smeldr.dev/social v0.9.2 · smeldr.dev/agent v0.6.2 · smeldr.dev/core/pgx v0.1.2
 
 ---
 
@@ -291,6 +291,30 @@ err := app.RegisterFlow(smeldr.StateFlow{
 - `SuppressesSignals` — After* hooks do not fire for items in this state
 - `RequiredRole` — stored in `smeldr_transitions` for future per-transition role enforcement (not yet enforced; planned for a later T23 step)
 - Requires `Config.DB`. On unknown existing item states, returns error — treat like a failed migration.
+
+**ConflictPolicy (v1.46.0+, A186):** Opt-in uniqueness enforcement at a designated state.
+
+```go
+err := app.RegisterFlow(smeldr.StateFlow{
+    Name:           "article-flow",
+    TypeName:       "Article",
+    ActiveState:    "published",
+    ConflictPolicy: smeldr.ConflictReject, // or smeldr.ConflictSupersede
+    States: []smeldr.State{
+        {Name: "draft", IsInitial: true},
+        {Name: "published"},
+        {Name: "archived", IsTerminal: true},
+    },
+    Transitions: []smeldr.Transition{
+        {From: "draft", To: "published"},
+        {From: "published", To: "archived"},
+    },
+})
+```
+
+- `ConflictReject` — `MCPPublish`/`SetStatus` returns `ErrConflict` (409) when another item is already in `ActiveState`
+- `ConflictSupersede` — transitions all conflicting items to `"superseded"` before the new item enters `ActiveState`
+- Zero value = no enforcement. Both policies fail-open: DB errors never block a transition.
 
 ---
 

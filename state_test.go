@@ -292,10 +292,33 @@ func TestRegisterFlow_insertFlowError(t *testing.T) {
 	}
 }
 
+func TestRegisterFlow_readFlowIDError(t *testing.T) {
+	// queryFailDB: ExecContext returns (nil, nil) so INSERT OR IGNORE succeeds,
+	// but QueryRowContext always fails → flow ID SELECT returns scan error → line 149-151.
+	app := &App{cfg: Config{DB: &queryFailDB{}}}
+	err := app.RegisterFlow(StateFlow{
+		Name:     "test-flow",
+		TypeName: "TestType",
+		States:   []State{{Name: "draft", IsInitial: true}},
+	})
+	if err == nil {
+		t.Fatal("expected error on flow ID read failure")
+	}
+}
+
+func TestRegisterFlow_updateConflictPolicyError(t *testing.T) {
+	// failAt=2: INSERT flow (call 1) succeeds, UPDATE conflict_policy (call 2) fails.
+	app := &App{cfg: Config{DB: &flowIDDB{failAt: 2}}}
+	err := app.RegisterFlow(agentJobFlow)
+	if err == nil {
+		t.Fatal("RegisterFlow should return error when conflict policy UPDATE fails")
+	}
+}
+
 func TestRegisterFlow_insertStateError(t *testing.T) {
 	// flowIDDB returns flowID=42 for QueryRowContext and fails ExecContext on call N.
-	// failAt=2: INSERT flow (call 1) succeeds, INSERT first state (call 2) fails.
-	app := &App{cfg: Config{DB: &flowIDDB{failAt: 2}}}
+	// failAt=3: INSERT flow (1), UPDATE conflict_policy (2) succeed, INSERT first state (3) fails.
+	app := &App{cfg: Config{DB: &flowIDDB{failAt: 3}}}
 	err := app.RegisterFlow(agentJobFlow)
 	if err == nil {
 		t.Fatal("RegisterFlow should return error when state INSERT fails")
@@ -303,8 +326,8 @@ func TestRegisterFlow_insertStateError(t *testing.T) {
 }
 
 func TestRegisterFlow_insertTransitionError(t *testing.T) {
-	// failAt=6: INSERT flow (1) + 4 state INSERTs (2-5) succeed, first transition INSERT (6) fails.
-	app := &App{cfg: Config{DB: &flowIDDB{failAt: 6}}}
+	// failAt=7: INSERT flow (1), UPDATE (2), 4 state INSERTs (3-6), first transition INSERT (7) fails.
+	app := &App{cfg: Config{DB: &flowIDDB{failAt: 7}}}
 	err := app.RegisterFlow(agentJobFlow)
 	if err == nil {
 		t.Fatal("RegisterFlow should return error when transition INSERT fails")
@@ -1113,4 +1136,717 @@ func (b *safeBuf) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+// ——— helpers for ConflictPolicy tests ————————————————————————————————————————
+
+// newMigratedDB creates a SQLite DB with migrateStateFlows applied.
+func newMigratedDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db := newSQLiteDB(t)
+	if err := migrateStateFlows(context.Background(), db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	return db
+}
+
+// registerConflictFlow registers a flow with the given ConflictPolicy and
+// ActiveState. Creates the typed table (type_items) if it does not exist.
+func registerConflictFlow(t *testing.T, db *sql.DB, policy ConflictPolicy) {
+	t.Helper()
+	ctx := context.Background()
+	// camelToSnake("ConflictType")+"s" = "conflict_types"
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS conflict_types (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create conflict_types: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:           "conflict-flow",
+		TypeName:       "ConflictType",
+		ActiveState:    "published",
+		ConflictPolicy: policy,
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published"},
+			{Name: "superseded"},
+			{Name: "archived", IsTerminal: true},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "published"},
+			{From: "published", To: "superseded"},
+			{From: "published", To: "archived"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+}
+
+// insertConflictItem inserts a row into conflict_types with the given status.
+func insertConflictItem(t *testing.T, db *sql.DB, id, status string) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO conflict_types (id, status) VALUES (?, ?)`, id, status,
+	); err != nil {
+		t.Fatalf("insertConflictItem: %v", err)
+	}
+}
+
+// ——— migrateStateFlowConflictColumns ————————————————————————————————————————
+
+func TestMigrateStateFlowConflictColumns_addsColumns(t *testing.T) {
+	// Simulate a pre-v1.46.0 DB: create smeldr_state_flows WITHOUT the new columns,
+	// then call migrateStateFlowConflictColumns directly.
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_state_flows (
+			id INTEGER PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			type_name TEXT,
+			description TEXT,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+	); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if err := migrateStateFlowConflictColumns(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlowConflictColumns: %v", err)
+	}
+	// Verify both columns present.
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_state_flows)")
+	if err != nil {
+		t.Fatalf("PRAGMA: %v", err)
+	}
+	defer rows.Close()
+	found := map[string]bool{}
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt *string
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			continue
+		}
+		found[name] = true
+	}
+	if !found["active_state"] {
+		t.Error("active_state column missing after migration")
+	}
+	if !found["conflict_policy"] {
+		t.Error("conflict_policy column missing after migration")
+	}
+}
+
+func TestMigrateStateFlowConflictColumns_idempotent(t *testing.T) {
+	db := newMigratedDB(t) // migrateStateFlows already adds the columns
+	ctx := context.Background()
+	// Second call should be a no-op.
+	if err := migrateStateFlowConflictColumns(ctx, db); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+}
+
+func TestMigrateStateFlowConflictColumns_nonSQLite(t *testing.T) {
+	// A DB whose QueryContext always fails simulates a non-SQLite driver.
+	db := &queryFailDB{}
+	if err := migrateStateFlowConflictColumns(context.Background(), db); err != nil {
+		t.Fatalf("non-SQLite: expected nil, got %v", err)
+	}
+}
+
+func TestMigrateStateFlowConflictColumns_alterFail(t *testing.T) {
+	// Empty SQLite DB with no tables: PRAGMA returns empty rows (no error),
+	// both columns absent, then ALTER TABLE fails (no such table) → returns error.
+	db := newSQLiteDB(t)
+	err := migrateStateFlowConflictColumns(context.Background(), db)
+	if err == nil {
+		t.Error("expected error when ALTER TABLE has no target table, got nil")
+	}
+}
+
+func TestMigrateStateFlowConflictColumns_alterConflictPolicyFail(t *testing.T) {
+	// Table with active_state already present but without conflict_policy.
+	// conflictExecFailDB makes ExecContext fail → ALTER for conflict_policy fails → line 139-141.
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_state_flows (
+			id INTEGER PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			type_name TEXT,
+			description TEXT,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			active_state TEXT NOT NULL DEFAULT ''
+		)`,
+	); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	// Wrap: PRAGMA (QueryContext) goes through real DB; ALTER (ExecContext) always fails.
+	wrapped := &conflictExecFailDB{DB: db}
+	err := migrateStateFlowConflictColumns(ctx, wrapped)
+	if err == nil {
+		t.Error("expected error when ALTER TABLE conflict_policy fails, got nil")
+	}
+}
+
+// queryFailDB fails every QueryContext (simulates non-SQLite for PRAGMA tests).
+type queryFailDB struct{}
+
+func (d *queryFailDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (d *queryFailDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, errors.New("not SQLite")
+}
+func (d *queryFailDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
+	row := (*sql.Row)(nil)
+	_ = row
+	// Return a *sql.Row that always returns an error by querying a non-existent table.
+	db, _ := sql.Open("sqlite", ":memory:")
+	if db != nil {
+		r := db.QueryRowContext(ctx, "SELECT 1 FROM nonexistent_table_xyzzy")
+		return r
+	}
+	return nil
+}
+
+// ——— RegisterFlow — ConflictPolicy persistence ——————————————————————————————
+
+func TestRegisterFlow_conflictPolicyStored(t *testing.T) {
+	db := newMigratedDB(t)
+	app := &App{cfg: Config{DB: db}}
+	flow := StateFlow{
+		Name:           "cp-flow",
+		TypeName:       "CPItem",
+		ActiveState:    "published",
+		ConflictPolicy: ConflictReject,
+		States:         []State{{Name: "draft", IsInitial: true}, {Name: "published"}},
+		Transitions:    []Transition{{From: "draft", To: "published"}},
+	}
+	if err := app.RegisterFlow(flow); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	var activeState, conflictPolicy string
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT active_state, conflict_policy FROM smeldr_state_flows WHERE name = ?`, "cp-flow",
+	).Scan(&activeState, &conflictPolicy); err != nil {
+		t.Fatalf("SELECT: %v", err)
+	}
+	if activeState != "published" {
+		t.Errorf("active_state: got %q, want %q", activeState, "published")
+	}
+	if conflictPolicy != string(ConflictReject) {
+		t.Errorf("conflict_policy: got %q, want %q", conflictPolicy, ConflictReject)
+	}
+}
+
+// ——— applyConflictPolicy — guard paths ————————————————————————————————————
+
+func TestApplyConflictPolicy_nilDB(t *testing.T) {
+	if err := applyConflictPolicy(context.Background(), nil, nil, "T", "published", "id1"); err != nil {
+		t.Errorf("nil DB: expected nil, got %v", err)
+	}
+}
+
+func TestApplyConflictPolicy_noFlow(t *testing.T) {
+	db := newMigratedDB(t)
+	// No flow registered for "UnknownType" — should return nil.
+	if err := applyConflictPolicy(context.Background(), db, nil, "UnknownType", "published", "id1"); err != nil {
+		t.Errorf("no flow: expected nil, got %v", err)
+	}
+}
+
+func TestApplyConflictPolicy_emptyActiveState(t *testing.T) {
+	db := newMigratedDB(t)
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "no-active-flow",
+		TypeName: "NoActiveType",
+		States:   []State{{Name: "draft", IsInitial: true}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	// ActiveState="" → no enforcement.
+	if err := applyConflictPolicy(context.Background(), db, nil, "NoActiveType", "draft", "id1"); err != nil {
+		t.Errorf("empty active_state: expected nil, got %v", err)
+	}
+}
+
+func TestApplyConflictPolicy_toStateNotActiveState(t *testing.T) {
+	db := newMigratedDB(t)
+	registerConflictFlow(t, db, ConflictReject)
+	// Transitioning to "archived", not to "published" (the active state).
+	if err := applyConflictPolicy(context.Background(), db, nil, "ConflictType", "archived", "id1"); err != nil {
+		t.Errorf("toState != activeState: expected nil, got %v", err)
+	}
+}
+
+// ——— ConflictReject ————————————————————————————————————————————————————————
+
+func TestApplyConflictPolicy_reject_noConflict(t *testing.T) {
+	db := newMigratedDB(t)
+	registerConflictFlow(t, db, ConflictReject)
+	// No items in "published" state → no conflict.
+	if err := applyConflictPolicy(context.Background(), db, nil, "ConflictType", "published", "new-id"); err != nil {
+		t.Errorf("no conflict: expected nil, got %v", err)
+	}
+}
+
+func TestApplyConflictPolicy_reject_conflict(t *testing.T) {
+	db := newMigratedDB(t)
+	registerConflictFlow(t, db, ConflictReject)
+	insertConflictItem(t, db, "existing", "published")
+	err := applyConflictPolicy(context.Background(), db, nil, "ConflictType", "published", "new-id")
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("conflict: expected ErrConflict, got %v", err)
+	}
+}
+
+func TestApplyConflictPolicy_reject_dbError(t *testing.T) {
+	// Mock DB whose QueryContext fails — simulates DB error on COUNT query.
+	// The PRAGMA probe must succeed first (SQLite identity check).
+	db := newMigratedDB(t)
+	registerConflictFlow(t, db, ConflictReject)
+	// Use a wrapped DB that fails QueryContext after the sqlite_master probe.
+	wrapped := &countFailAfterProbeDB{DB: db}
+	if err := applyConflictPolicy(context.Background(), wrapped, nil, "ConflictType", "published", "id1"); err != nil {
+		t.Errorf("db error: expected nil (fail-open), got %v", err)
+	}
+}
+
+// countFailAfterProbeDB wraps a real DB and makes QueryContext fail on calls
+// after the sqlite_master probe (i.e. on actual content queries).
+type countFailAfterProbeDB struct {
+	DB     DB
+	probed bool
+}
+
+func (d *countFailAfterProbeDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	return d.DB.ExecContext(ctx, q, args...)
+}
+func (d *countFailAfterProbeDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	return d.DB.QueryRowContext(ctx, q, args...)
+}
+func (d *countFailAfterProbeDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	if !d.probed {
+		d.probed = true
+		return d.DB.QueryContext(ctx, q, args...)
+	}
+	return nil, errors.New("simulated count query error")
+}
+
+// ——— ConflictSupersede ——————————————————————————————————————————————————————
+
+func TestApplyConflictPolicy_supersede_noConflict(t *testing.T) {
+	db := newMigratedDB(t)
+	registerConflictFlow(t, db, ConflictSupersede)
+	// No items in "published" → supersede is a no-op.
+	if err := applyConflictPolicy(context.Background(), db, nil, "ConflictType", "published", "new-id"); err != nil {
+		t.Errorf("no conflict: expected nil, got %v", err)
+	}
+}
+
+func TestApplyConflictPolicy_supersede_happyPath(t *testing.T) {
+	db := newMigratedDB(t)
+	registerConflictFlow(t, db, ConflictSupersede)
+	insertConflictItem(t, db, "old-item", "published")
+
+	if err := applyConflictPolicy(context.Background(), db, nil, "ConflictType", "published", "new-id"); err != nil {
+		t.Fatalf("supersede: unexpected error: %v", err)
+	}
+
+	var status string
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT status FROM conflict_types WHERE id = ?`, "old-item",
+	).Scan(&status); err != nil {
+		t.Fatalf("SELECT: %v", err)
+	}
+	if status != "superseded" {
+		t.Errorf("supersede: old item status = %q, want %q", status, "superseded")
+	}
+}
+
+func TestApplyConflictPolicy_supersede_noSupersededTransition(t *testing.T) {
+	// Register a flow with ConflictSupersede but WITHOUT a published→superseded transition.
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS no_super_types (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:           "no-super-flow",
+		TypeName:       "NoSuperType",
+		ActiveState:    "published",
+		ConflictPolicy: ConflictSupersede,
+		States:         []State{{Name: "draft", IsInitial: true}, {Name: "published"}},
+		Transitions:    []Transition{{From: "draft", To: "published"}},
+		// Note: no published→superseded transition.
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	// No items in published → fallback to reject, but count=0 → nil.
+	if err := applyConflictPolicy(ctx, db, nil, "NoSuperType", "published", "id1"); err != nil {
+		t.Errorf("no super transition, no conflict: expected nil, got %v", err)
+	}
+}
+
+func TestApplyConflictPolicy_supersede_noSupersededTransition_conflict(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS no_super_types (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:           "no-super-flow",
+		TypeName:       "NoSuperType",
+		ActiveState:    "published",
+		ConflictPolicy: ConflictSupersede,
+		States:         []State{{Name: "draft", IsInitial: true}, {Name: "published"}},
+		Transitions:    []Transition{{From: "draft", To: "published"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	// Insert a conflicting item.
+	if _, err := db.ExecContext(ctx, `INSERT INTO no_super_types (id, status) VALUES ('old', 'published')`); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	// No superseded transition → falls back to reject → ErrConflict.
+	err := applyConflictPolicy(ctx, db, nil, "NoSuperType", "published", "id1")
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("fallback to reject: expected ErrConflict, got %v", err)
+	}
+}
+
+func TestApplyConflictPolicy_supersede_nilRelationStore(t *testing.T) {
+	db := newMigratedDB(t)
+	registerConflictFlow(t, db, ConflictSupersede)
+	insertConflictItem(t, db, "old", "published")
+	// nil RelationStore → no panic, item still superseded.
+	if err := applyConflictPolicy(context.Background(), db, nil, "ConflictType", "published", "new"); err != nil {
+		t.Fatalf("nil rs: unexpected error: %v", err)
+	}
+	var status string
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT status FROM conflict_types WHERE id = ?`, "old",
+	).Scan(&status); err != nil {
+		t.Fatalf("SELECT: %v", err)
+	}
+	if status != "superseded" {
+		t.Errorf("nil rs: old item status = %q, want %q", status, "superseded")
+	}
+}
+
+// ——— Dynamic content path —————————————————————————————————————————————————
+
+func TestApplyConflictPolicy_dynamic_reject(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	// Create dynamic content table.
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS smeldr_dynamic_content (id TEXT PRIMARY KEY, type_name TEXT NOT NULL, status TEXT NOT NULL, published_at DATETIME, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, slug TEXT)`,
+	); err != nil {
+		t.Fatalf("create smeldr_dynamic_content: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	// Register flow for a type whose typed table does NOT exist → falls back to smeldr_dynamic_content.
+	if err := app.RegisterFlow(StateFlow{
+		Name:           "dyn-reject-flow",
+		TypeName:       "DynRejectType",
+		ActiveState:    "published",
+		ConflictPolicy: ConflictReject,
+		States:         []State{{Name: "draft", IsInitial: true}, {Name: "published"}},
+		Transitions:    []Transition{{From: "draft", To: "published"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	// Insert a conflicting dynamic item.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_dynamic_content (id, type_name, status, updated_at, slug) VALUES ('dyn1', 'DynRejectType', 'published', CURRENT_TIMESTAMP, 'dyn1')`,
+	); err != nil {
+		t.Fatalf("insert dynamic: %v", err)
+	}
+	err := applyConflictPolicy(ctx, db, nil, "DynRejectType", "published", "new-dyn")
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("dynamic reject: expected ErrConflict, got %v", err)
+	}
+}
+
+func TestApplyConflictPolicy_dynamic_supersede(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS smeldr_dynamic_content (id TEXT PRIMARY KEY, type_name TEXT NOT NULL, status TEXT NOT NULL, published_at DATETIME, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, slug TEXT)`,
+	); err != nil {
+		t.Fatalf("create smeldr_dynamic_content: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:           "dyn-super-flow",
+		TypeName:       "DynSuperType",
+		ActiveState:    "published",
+		ConflictPolicy: ConflictSupersede,
+		States:         []State{{Name: "draft", IsInitial: true}, {Name: "published"}, {Name: "superseded"}},
+		Transitions: []Transition{
+			{From: "draft", To: "published"},
+			{From: "published", To: "superseded"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_dynamic_content (id, type_name, status, updated_at, slug) VALUES ('dyn-old', 'DynSuperType', 'published', CURRENT_TIMESTAMP, 'dyn-old')`,
+	); err != nil {
+		t.Fatalf("insert dynamic: %v", err)
+	}
+	if err := applyConflictPolicy(ctx, db, nil, "DynSuperType", "published", "dyn-new"); err != nil {
+		t.Fatalf("dynamic supersede: unexpected error: %v", err)
+	}
+	var status string
+	if err := db.QueryRowContext(ctx,
+		`SELECT status FROM smeldr_dynamic_content WHERE id = ?`, "dyn-old",
+	).Scan(&status); err != nil {
+		t.Fatalf("SELECT: %v", err)
+	}
+	if status != "superseded" {
+		t.Errorf("dynamic supersede: old item status = %q, want %q", status, "superseded")
+	}
+}
+
+// ——— applyConflictPolicy — non-SQLite path ————————————————————————————————
+
+func TestApplyConflictPolicy_nonSQLite(t *testing.T) {
+	// queryFailDB: QueryRowContext queries a nonexistent table → scan returns error
+	// → sqlite_master probe fails → return nil (not SQLite).
+	if err := applyConflictPolicy(context.Background(), &queryFailDB{}, nil, "T", "published", "id1"); err != nil {
+		t.Errorf("non-SQLite: expected nil, got %v", err)
+	}
+}
+
+func TestApplyConflictPolicy_unknownPolicy(t *testing.T) {
+	// Insert a flow with a non-standard conflict_policy string ("custom-policy").
+	// The switch in applyConflictPolicy has no matching case → falls to default return nil (line 406).
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_state_flows (name, type_name, active_state, conflict_policy)
+		 VALUES ('unknown-policy-flow', 'UnknownPolicyType', 'published', 'custom-policy')`,
+	); err != nil {
+		t.Fatalf("insert flow: %v", err)
+	}
+	if err := applyConflictPolicy(ctx, db, nil, "UnknownPolicyType", "published", "id1"); err != nil {
+		t.Errorf("unknown policy: expected nil, got %v", err)
+	}
+}
+
+// ——— applyConflictPolicy — ConflictSupersede flowID fail path ———————————
+
+func TestApplyConflictPolicy_flowIDFail(t *testing.T) {
+	// The 4th QueryRowContext call inside applyConflictPolicy (ConflictSupersede branch)
+	// is the flowID lookup. Fail it to exercise the fail-open path at line 393-394.
+	db := newMigratedDB(t)
+	registerConflictFlow(t, db, ConflictSupersede)
+	insertConflictItem(t, db, "existing", "published")
+	wrapped := &nthQueryRowFailDB{DB: db, fail: 4}
+	err := applyConflictPolicy(context.Background(), wrapped, nil, "ConflictType", "published", "new-id")
+	if err != nil {
+		t.Errorf("flowID fail: expected nil (fail-open), got %v", err)
+	}
+}
+
+// nthQueryRowFailDB wraps a real DB and makes the nth QueryRowContext call return
+// a scan error (by querying a nonexistent table on a fresh in-memory SQLite).
+type nthQueryRowFailDB struct {
+	DB   DB
+	n    int
+	fail int // 1-indexed
+}
+
+func (d *nthQueryRowFailDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	return d.DB.ExecContext(ctx, q, args...)
+}
+func (d *nthQueryRowFailDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	return d.DB.QueryContext(ctx, q, args...)
+}
+func (d *nthQueryRowFailDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	d.n++
+	if d.n == d.fail {
+		sdb, _ := sql.Open("sqlite", ":memory:")
+		return sdb.QueryRowContext(ctx, "SELECT 1 FROM no_table_nthfail_xyz")
+	}
+	return d.DB.QueryRowContext(ctx, q, args...)
+}
+
+// ——— conflictRejectCheck — error path ————————————————————————————————————
+
+func TestConflictRejectCheck_queryFail(t *testing.T) {
+	// queryFailDB: QueryRowContext fails → err != nil → return nil (fail-open).
+	err := conflictRejectCheck(context.Background(), &queryFailDB{}, "T", "published", "ts", false)
+	if err != nil {
+		t.Errorf("expected nil (fail-open on COUNT query error), got %v", err)
+	}
+}
+
+// ——— conflictSupersede — error paths ——————————————————————————————————————
+
+func TestConflictSupersede_conflictIDsFail(t *testing.T) {
+	// queryFailDB: QueryContext fails → conflictIDs returns error → return nil (fail-open).
+	err := conflictSupersede(context.Background(), &queryFailDB{}, nil, "T", "published", "new1", "ts", false)
+	if err != nil {
+		t.Errorf("expected nil (fail-open on conflictIDs error), got %v", err)
+	}
+}
+
+func TestConflictSupersede_updateFail(t *testing.T) {
+	// conflictExecFailDB: ExecContext always fails → UPDATE warns + continues → return nil.
+	db := newMigratedDB(t)
+	registerConflictFlow(t, db, ConflictSupersede)
+	insertConflictItem(t, db, "old-upd", "published")
+	wrapped := &conflictExecFailDB{DB: db}
+	err := conflictSupersede(context.Background(), wrapped, nil, "ConflictType", "published", "new-upd", "conflict_types", false)
+	if err != nil {
+		t.Errorf("expected nil (fail-open on UPDATE error), got %v", err)
+	}
+}
+
+// conflictExecFailDB wraps a real DB and makes every ExecContext call fail.
+type conflictExecFailDB struct{ DB }
+
+func (d *conflictExecFailDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, errors.New("exec fail")
+}
+
+func TestConflictSupersede_rsNonNilAssertFail(t *testing.T) {
+	// RelationStore with no kinds registered → Assert returns "unknown relation kind" →
+	// warn + continue (fail-open). Item is still superseded by the UPDATE.
+	db := newMigratedDB(t)
+	registerConflictFlow(t, db, ConflictSupersede)
+	insertConflictItem(t, db, "old-rs", "published")
+	if err := CreateRelationTables(db); err != nil {
+		t.Fatalf("CreateRelationTables: %v", err)
+	}
+	rs, err := NewRelationStore(db)
+	if err != nil {
+		t.Fatalf("NewRelationStore: %v", err)
+	}
+	if err := conflictSupersede(context.Background(), db, rs, "ConflictType", "published", "new-rs", "conflict_types", false); err != nil {
+		t.Errorf("expected nil (fail-open on Assert error), got %v", err)
+	}
+	var status string
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT status FROM conflict_types WHERE id = ?`, "old-rs",
+	).Scan(&status); err != nil {
+		t.Fatalf("SELECT status: %v", err)
+	}
+	if status != "superseded" {
+		t.Errorf("rs Assert fail: old item status = %q, want superseded", status)
+	}
+}
+
+// ——— validateFlowItems — non-SQLite and error paths ——————————————————————
+
+func TestValidateFlowItems_nonSQLite(t *testing.T) {
+	// queryFailDB: QueryRowContext always errors → sqlite_master probe fails → return nil.
+	flow := StateFlow{Name: "test", TypeName: "TestType"}
+	if err := validateFlowItems(context.Background(), &queryFailDB{}, flow); err != nil {
+		t.Errorf("non-SQLite: expected nil, got %v", err)
+	}
+}
+
+func TestValidateFlowItems_queryContextFail(t *testing.T) {
+	// Set up a DB with the conflict_types table (so tableCount=1 and we reach QueryContext).
+	// Then wrap it to make QueryContext always fail → returns error (line 226).
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE conflict_types (id TEXT PRIMARY KEY, status TEXT NOT NULL)`,
+	); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	wrapped := &alwaysFailQueryContextDB{DB: db}
+	flow := StateFlow{
+		Name:     "test-flow",
+		TypeName: "ConflictType",
+		States:   []State{{Name: "draft", IsInitial: true}, {Name: "published"}},
+	}
+	err := validateFlowItems(ctx, wrapped, flow)
+	if err == nil {
+		t.Error("expected error from QueryContext fail in validateFlowItems, got nil")
+	}
+}
+
+// alwaysFailQueryContextDB wraps a real DB and makes every QueryContext call fail.
+// QueryRowContext is delegated to the real DB so probes succeed.
+type alwaysFailQueryContextDB struct{ DB }
+
+func (d *alwaysFailQueryContextDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, errors.New("query context fail")
+}
+
+// ——— conflictIDs — scan error path ————————————————————————————————————————
+
+func TestConflictIDs_scanError(t *testing.T) {
+	// zeroColScanDB: QueryContext returns rows with 0 columns; Scan into &id (1 dest)
+	// fails → slog.WarnContext + continue → returns (nil, nil).
+	ids, err := conflictIDs(context.Background(), &zeroColQueryDB{}, "T", "published", "ts", false)
+	if err != nil {
+		t.Errorf("expected nil err (scan error is logged and skipped), got %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("expected empty ids slice, got %v", ids)
+	}
+}
+
+// zeroColQueryDB: QueryContext returns rows with 0 columns so rows.Scan(&id) fails.
+type zeroColQueryDB struct{}
+
+func (d *zeroColQueryDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (d *zeroColQueryDB) QueryContext(ctx context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return sql.OpenDB(&zeroColConnector{}).QueryContext(ctx, "SELECT")
+}
+func (d *zeroColQueryDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
+	return sql.OpenDB(&guardRowConn{noRow: true}).QueryRowContext(ctx, "SELECT v")
+}
+
+// zeroColConnector returns driver rows with 0 columns; Scan into any destination fails.
+type zeroColConnector struct{}
+
+func (c *zeroColConnector) Connect(_ context.Context) (driver.Conn, error) {
+	return &zeroColConn{}, nil
+}
+func (c *zeroColConnector) Driver() driver.Driver { return dummyDriver{} }
+
+type zeroColConn struct{}
+
+func (c *zeroColConn) Prepare(_ string) (driver.Stmt, error) { return &zeroColStmt{}, nil }
+func (c *zeroColConn) Close() error                          { return nil }
+func (c *zeroColConn) Begin() (driver.Tx, error)             { return nil, nil }
+
+type zeroColStmt struct{}
+
+func (s *zeroColStmt) Close() error                                 { return nil }
+func (s *zeroColStmt) NumInput() int                                { return -1 }
+func (s *zeroColStmt) Exec(_ []driver.Value) (driver.Result, error) { return nil, nil }
+func (s *zeroColStmt) Query(_ []driver.Value) (driver.Rows, error)  { return &zeroColRows{}, nil }
+
+// zeroColRows returns one row with no columns; rows.Scan(&anything) fails with
+// "expected 0 destination arguments in Scan, not N".
+type zeroColRows struct{ done bool }
+
+func (r *zeroColRows) Columns() []string { return []string{} }
+func (r *zeroColRows) Close() error      { return nil }
+func (r *zeroColRows) Next(dest []driver.Value) error {
+	if r.done {
+		return io.EOF
+	}
+	r.done = true
+	return nil
 }

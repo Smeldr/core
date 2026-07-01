@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.46.0] — 2026-07-01
+
+### Added
+- ConflictPolicy enforcement on StateFlow (T23 Step 12, A186):
+  - `ConflictPolicy` type with `ConflictReject` and `ConflictSupersede` constants
+  - `StateFlow.ActiveState` and `StateFlow.ConflictPolicy` optional fields
+  - `migrateStateFlowConflictColumns`: adds `active_state`/`conflict_policy` columns on boot (idempotent)
+  - `RegisterFlow`: persists `ActiveState` and `ConflictPolicy` via UPDATE after INSERT OR IGNORE
+  - `applyConflictPolicy` (unexported): ConflictReject returns ErrConflict; ConflictSupersede transitions
+    conflicting items to "superseded" + optional "supersedes" relation; all DB errors fail-open
+  - Wired into `Module[T]` (MCPPublish/MCPSchedule/MCPArchive) and `DynamicTypeRepo.SetStatus`
+
+---
+
 ## [1.45.1] — 2026-06-30
 
 ### Fixed

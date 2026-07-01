@@ -96,6 +96,50 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 			return fmt.Errorf("smeldr: migrateStateFlows: seed transition %s→%s: %w", t[0], t[1], err)
 		}
 	}
+	return migrateStateFlowConflictColumns(ctx, db)
+}
+
+// migrateStateFlowConflictColumns adds the active_state and conflict_policy
+// columns to smeldr_state_flows when they are absent. Idempotent — safe to
+// call on every boot. A no-op on non-SQLite databases (PRAGMA not supported).
+func migrateStateFlowConflictColumns(ctx context.Context, db DB) error {
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_state_flows)")
+	if err != nil {
+		return nil // non-SQLite — assume schema is current
+	}
+	defer rows.Close()
+	var hasActiveState, hasConflictPolicy bool
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt *string
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			continue
+		}
+		switch name {
+		case "active_state":
+			hasActiveState = true
+		case "conflict_policy":
+			hasConflictPolicy = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !hasActiveState {
+		if _, err := db.ExecContext(ctx,
+			`ALTER TABLE smeldr_state_flows ADD COLUMN active_state TEXT NOT NULL DEFAULT ''`,
+		); err != nil {
+			return fmt.Errorf("smeldr: migrateStateFlowConflictColumns: active_state: %w", err)
+		}
+	}
+	if !hasConflictPolicy {
+		if _, err := db.ExecContext(ctx,
+			`ALTER TABLE smeldr_state_flows ADD COLUMN conflict_policy TEXT NOT NULL DEFAULT ''`,
+		); err != nil {
+			return fmt.Errorf("smeldr: migrateStateFlowConflictColumns: conflict_policy: %w", err)
+		}
+	}
 	return nil
 }
 

@@ -385,3 +385,57 @@ New file `signal_tools.go` in smeldr/mcp adds two MCP tools that give agents dir
 go.mod: smeldr.dev/core v1.45.0 → v1.45.1. Coverage: 96.0%. mcp v1.25.0.
 
 ---
+
+## A186 — T23 Step 12: ConflictPolicy enforcement on StateFlow (v1.46.0)
+
+**Date:** 2026-07-01
+**Status:** Committed
+**Version:** core v1.46.0
+
+### Decision
+
+Add opt-in conflict enforcement to `StateFlow`. Two new exported fields — `ActiveState string` and `ConflictPolicy ConflictPolicy` — declare the state where a uniqueness invariant applies and how to handle violations. Zero value means no enforcement.
+
+`ConflictPolicy` is `type ConflictPolicy string` with two constants:
+- `ConflictReject = "reject"` — return `ErrConflict` if any item is already in `ActiveState`
+- `ConflictSupersede = "supersede"` — transition conflicting items to "superseded" and optionally assert a "supersedes" relation via `RelationStore`
+
+Both policies are opt-in and fail-open: any DB error returns nil (transition proceeds).
+
+### Implementation
+
+**state.go:**
+- `ConflictPolicy` type + `ConflictReject`/`ConflictSupersede` constants
+- `StateFlow.ActiveState` + `StateFlow.ConflictPolicy` optional fields (zero value = no enforcement)
+- `applyConflictPolicy(ctx, db, rs, typeName, toState, newItemID) error` — entry point: probe SQLite, look up flow by typeName, check toState==ActiveState, dispatch to reject or supersede logic; auto-detects static table (`camelToSnake(typeName)+"s"`) vs dynamic content table
+- `conflictRejectCheck` — COUNT query; ErrConflict when count > 0; fail-open on DB error
+- `conflictSupersede` — collects conflicting IDs via `conflictIDs`, UPDATE each to "superseded", optionally assert "supersedes" relation; all item-level errors are warn+continue
+- `conflictIDs` — builds SELECT id query for static or dynamic table; returns []string
+
+**migrate.go:**
+- `migrateStateFlowConflictColumns(ctx, db) error` — PRAGMA-probe adds `active_state` + `conflict_policy` TEXT NOT NULL DEFAULT '' columns to `smeldr_state_flows`; called from `migrateStateFlows`; idempotent; fail-open on non-SQLite
+
+**RegisterFlow update:**
+- UPDATE persists `ActiveState` and `ConflictPolicy` after INSERT OR IGNORE + SELECT id; runs on every RegisterFlow call so re-registration updates the policy
+
+**module.go:** `MCPPublish`, `MCPSchedule`, `MCPArchive` call `applyConflictPolicy` after `validateTransition`
+**dynamic.go:** `DynamicTypeRepo.SetStatus` calls `applyConflictPolicy` after `validateTransition`
+
+### Why fail-open?
+
+DB errors in the conflict check should not block legitimate transitions — the conflict invariant is a best-effort guarantee, not a hard write lock. A net-split or momentary DB hiccup should not prevent content from being published.
+
+### RelationStore wiring
+
+Current call sites pass `rs = nil` (Module[T] does not carry a RelationStore). The `conflictSupersede` function checks `rs != nil && newItemID != ""` before asserting the relation. This is intentional: the feature is usable without relations, and RelationStore can be wired in later via a dedicated amendment.
+
+### Consequences
+
+- No existing behavior changes — `ActiveState` and `ConflictPolicy` default to "".
+- No exported symbol removed or renamed.
+- `example_test.go`: no existing Example broken.
+- All DB errors are fail-open — coverage gate still 96.0%.
+
+Coverage: 96.0%. core v1.46.0.
+
+---

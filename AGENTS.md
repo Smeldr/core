@@ -433,7 +433,7 @@ These tools are available when `App.Config().DB` is non-nil (any app with a data
 
 | Tool | Role | Description |
 |------|------|-------------|
-| `define_state_flow` | Admin | Register or update a state flow. Params: `name`, `type_name` (required), `states` (array of `{name, is_initial?, is_terminal?, suppresses_signals?}`), `transitions` (array of `{from, to, required_role?}`). Idempotent — safe to re-run. Returns `{name, type_name, state_count, transition_count}`. |
+| `define_state_flow` | Admin | Register or update a state flow. Params: `name`, `type_name` (required), `states` (array of `{name, is_initial?, is_terminal?, suppresses_signals?}`), `transitions` (array of `{from, to, required_role?}`), `active_state` (optional string), `conflict_policy` (optional: `"reject"` or `"supersede"`). Idempotent — safe to re-run. Returns `{name, type_name, state_count, transition_count}`. (A186) |
 | `transition_item` | Editor | Move a dynamic content item to a new state. Params: `type_name`, `slug`, `to_state`. Validated against the registered flow; returns -32001 if the transition is not permitted. |
 | `get_valid_transitions` | Author | List legal target states for the item's current state. Params: `type_name`, `slug`. Falls back to the default flow when no custom flow is registered. Returns `{current_state, valid_transitions: []}`. |
 | `list_items_by_state` | Author | List all items of a dynamic content type in the given state. Params: `type_name`, `state`. Returns `{type_name, state, items, count}`. |
@@ -441,7 +441,8 @@ These tools are available when `App.Config().DB` is non-nil (any app with a data
 | `list_signals` | Author | List signals from smeldr_signals by receiver and status. Params: `receiver` (required), `state` (optional, default "pending"). Returns `{signals, count}` ordered by created_at ascending. Fail-open when smeldr_signals table is absent — returns empty list. (A185) |
 
 **State flow rules:**
-- `define_state_flow` calls `App.RegisterFlow` which uses INSERT OR IGNORE — re-running with the same name/type_name is safe; existing state and transition rows are preserved
+- `define_state_flow` calls `App.RegisterFlow` which uses INSERT OR IGNORE — re-running with the same name/type_name is safe; existing state and transition rows are preserved; `active_state` and `conflict_policy` are updated on every call
+- `conflict_policy`: `"reject"` returns `ErrConflict` (-32603) when another item is already in `active_state`; `"supersede"` transitions conflicting items to "superseded" before proceeding; both policies fail-open on DB error (transition is not blocked)
 - `type_name` is required for `define_state_flow` (the default flow is seeded at startup, not via MCP)
 - `transition_item` calls `DynamicTypeRepo.SetStatus` which runs `validateTransition` internally — the same validation used by all status-change paths in the HTTP layer
 - `get_valid_transitions` queries `smeldr_state_flows` directly for the custom flow registered for `type_name`, falling back to the default flow if none is registered

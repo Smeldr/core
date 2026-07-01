@@ -2220,6 +2220,9 @@ func (m *Module[T]) MCPPublish(ctx Context, slug string) error {
 	if err := validateTransition(ctx, m.db, m.contentTypeName, string(prevStatus), string(Published)); err != nil {
 		return err
 	}
+	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Published), nodeIDOf(item)); err != nil {
+		return err
+	}
 	setNodeStatus(item, Published)
 	setNodeTime(item, "PublishedAt", time.Now().UTC())
 	if err := m.repo.Save(ctx, item); err != nil {
@@ -2242,6 +2245,9 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time) error {
 	if err := validateTransition(ctx, m.db, m.contentTypeName, string(prevStatus), string(Scheduled)); err != nil {
 		return err
 	}
+	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Scheduled), nodeIDOf(item)); err != nil {
+		return err
+	}
 	setNodeStatus(item, Scheduled)
 	atCopy := at
 	setNodeTimePtr(item, "ScheduledAt", &atCopy)
@@ -2262,6 +2268,9 @@ func (m *Module[T]) MCPArchive(ctx Context, slug string) error {
 	}
 	prevStatus := nodeStatusOf(item)
 	if err := validateTransition(ctx, m.db, m.contentTypeName, string(prevStatus), string(Archived)); err != nil {
+		return err
+	}
+	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Archived), nodeIDOf(item)); err != nil {
 		return err
 	}
 	setNodeStatus(item, Archived)
