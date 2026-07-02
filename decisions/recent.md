@@ -403,3 +403,53 @@ Three exported constants define scope semantics for role grants:
 Coverage: 96.0%. core v1.48.0.
 
 ---
+
+## A189 — T49 Step 2: RoleStore + App.Governance() (v1.49.0)
+
+**Date:** 2026-07-02  
+**Status:** Implemented  
+**Level:** 2
+
+### Decision
+
+`governance.go` extended with the full authorization query layer for T49.
+
+**New exported types:**
+
+- `RoleDefinition` struct: `Name string`, `Operations []string`, `ScopeMode ScopeMode`, `ScopeRelationKind string`, `ScopeDirection string`, `TrustLevel int`, `AllowSelfApproval bool`
+- `RoleGrant` struct: `ID string`, `TokenID string`, `RoleName string`, `ScopeStatic []string`, `ScopeAnchorID string`, `CreatedAt time.Time`
+- `AuthTarget` struct: `TypeName string`, `ID string`, `Slug string` — `Slug` is display/logging only; authorization comparisons use `ID`
+
+**New type: `RoleStore`**
+
+`NewRoleStore(db DB) *RoleStore` — wraps the DB handle for all role operations.
+
+Methods:
+- `DefineRole(ctx, RoleDefinition) error` — upsert role by name (INSERT OR IGNORE + UPDATE, two statements — preserves `created_at`); rejects `TrustLevel == 1` (semantics deferred to a future spike — only 0 and 2 are accepted); `json.Marshal([]string)` is infallible and the error path is unreachable
+- `Grant(ctx, RoleGrant) (string, error)` — bind token to role with optional scope anchor or static patterns; global-scope grants (nil anchor) use `WHERE NOT EXISTS` guard (SQLite allows multiple NULLs in UNIQUE columns, so `INSERT OR IGNORE` would silently duplicate)
+- `Revoke(ctx, grantID string) error` — delete grant row; no-op on unknown ID
+- `ListGrants(ctx, tokenID string) ([]RoleGrant, error)` — returns all grants for the token; empty tokenID returns all grants across all tokens
+- `Authorized(ctx, tokenID, op string, target AuthTarget) (bool, error)` — evaluates scope modes:
+  - `ScopeGlobal` — matches immediately if op is in the role's operations
+  - `ScopeStatic` — matches `target.TypeName+":"+target.ID` exactly, or `target.TypeName+":*"` wildcard; uses `ID`, not `Slug` (slug is not stable identity after T30/A125 renames)
+  - `ScopeDynamic` — one-hop `smeldr_relations` query with predicate `edge_class='asserted' AND (invalid_at IS NULL OR invalid_at > now)` — prevents inferred (unconfirmed) relations from granting scope (privilege-escalation fix from design review §5.3)
+  - `pendingErr` pattern: dynamic-scope query errors accumulate and are only surfaced if no grant matched
+  - Pre-collects all grant rows into `[]authorizedGrant` before closing cursor, then calls `relationExists` — avoids SQLite nested-connection deadlock (only one active statement per connection)
+
+**App wiring:**
+
+- `App.Governance(store *RoleStore) error` — validates `store.db == a.cfg.DB` (mismatch guard: strict bar given authorization blast radius); calls `migrateGovernance`; stores reference in `App.governance`
+- `App.RoleStore() *RoleStore` — returns wired store or nil
+- `smeldr.go`: `governance *RoleStore` field added to `App`
+
+### Consequences
+
+- All three scope modes queryable via `RoleStore.Authorized`; inferred relations cannot escalate scope (design review fix §5.3)
+- Static scope uses `ID` not `Slug`; `AuthTarget.Slug` stays for display/logging only (design review fix §5.2)
+- `App.Governance` validates DB identity at wiring time (design review fix §9)
+- `TrustLevel == 1` rejected at `DefineRole` time (design review fix §6)
+- Zero change to request routing, MCP tools, or authentication until Step 3
+
+Coverage: 96.0%. core v1.49.0.
+
+---

@@ -23,6 +23,25 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.49.0] — 2026-07-02
+
+### Added
+- **Role-based authorization** (`governance.go`, T49 Step 2, A189):
+  - `RoleDefinition` struct: `Name`, `Operations`, `ScopeMode`, `ScopeRelationKind`, `ScopeDirection`, `TrustLevel`, `AllowSelfApproval`
+  - `RoleGrant` struct: `ID`, `TokenID`, `RoleName`, `ScopeStatic`, `ScopeAnchorID`, `CreatedAt`
+  - `AuthTarget` struct: `TypeName`, `ID`, `Slug` (`Slug` is display/logging only — not used in authorization comparisons)
+  - `RoleStore` struct and `NewRoleStore(db DB)` constructor
+  - `RoleStore.DefineRole(ctx, RoleDefinition)` — upsert role by name; rejects `TrustLevel == 1` (semantics undefined until future spike)
+  - `RoleStore.Grant(ctx, RoleGrant)` — bind token to role with scope data (static list or dynamic anchor); `WHERE NOT EXISTS` guard prevents NULL-anchor duplicates
+  - `RoleStore.Revoke(ctx, grantID)` — delete grant by ID (idempotent)
+  - `RoleStore.ListGrants(ctx, tokenID)` — list all grants for a token (empty `tokenID` = all grants)
+  - `RoleStore.Authorized(ctx, tokenID, op, AuthTarget) (bool, error)` — evaluates three scope modes: `ScopeGlobal` (always matches), `ScopeStatic` (`TypeName+":"+ID` and `TypeName+":*"` wildcards), `ScopeDynamic` (one-hop `smeldr_relations` query filtered to `edge_class='asserted'` and `invalid_at IS NULL OR invalid_at > now`); pre-collects all grant rows before closing cursor (avoids SQLite nested-connection deadlock)
+  - `App.Governance(store *RoleStore) error` — wires store; validates `store.db == cfg.DB`; runs `migrateGovernance`
+  - `App.RoleStore() *RoleStore` — accessor for the wired store
+  - `App.governance *RoleStore` field added to `smeldr.go`
+
+---
+
 ## [1.48.0] — 2026-07-02
 
 ### Added

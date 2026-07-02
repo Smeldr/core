@@ -3,8 +3,11 @@ package smeldr
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -18,7 +21,7 @@ type ScopeMode string
 const (
 	// ScopeGlobal applies the grant to every item regardless of type or slug.
 	ScopeGlobal ScopeMode = "global"
-	// ScopeStatic restricts the grant to an explicit list of "type:slug" patterns.
+	// ScopeStatic restricts the grant to an explicit list of "type:id" patterns.
 	ScopeStatic ScopeMode = "static"
 	// ScopeDynamic restricts the grant to items reachable in one hop from an
 	// anchor item via a named relation kind and direction.
@@ -326,4 +329,449 @@ func migrateTokenGrants(ctx context.Context, db DB) error {
 		}
 	}
 	return nil
+}
+
+// RoleDefinition describes a named set of operations and scope shape that may be
+// granted to a token via [RoleStore.Grant]. Roles are upserted by name via
+// [RoleStore.DefineRole]; the three default roles (author/editor/admin) are
+// seeded by [migrateGovernance] and may be redefined by operators.
+type RoleDefinition struct {
+	// Name is the unique role identifier, e.g. "author", "reviewer", "ai-agent".
+	// Required — DefineRole returns an error when empty.
+	Name string
+	// Operations is the list of full-word operation words this role permits,
+	// e.g. ["create", "read", "manage"]. Stored as a JSON array in smeldr_roles.
+	Operations []string
+	// ScopeMode controls how grants of this role are scoped. Defaults to
+	// [ScopeGlobal] when the zero value is passed.
+	ScopeMode ScopeMode
+	// ScopeRelationKind is the relation kind used for one-hop scope resolution
+	// when ScopeMode is [ScopeDynamic]. Empty for global/static modes.
+	ScopeRelationKind string
+	// ScopeDirection is "outgoing", "incoming", or "both" when ScopeMode is
+	// [ScopeDynamic]. Empty for global/static modes.
+	ScopeDirection string
+	// TrustLevel is 0 (direct execute), 1 (auto-verify), or 2 (plan required).
+	// Default 0.
+	TrustLevel int
+	// AllowSelfApproval permits the grant's proposer to also review/approve their
+	// own Plans. Only meaningful when TrustLevel is 2. Default false.
+	AllowSelfApproval bool
+}
+
+// RoleGrant records a token's binding to a role with concrete scope data.
+// The ID field is empty when passed to [RoleStore.Grant]; it is populated when
+// returned by [RoleStore.ListGrants].
+type RoleGrant struct {
+	// ID is the grant's primary key. Empty on input to Grant.
+	ID string
+	// TokenID is the token this grant is bound to. Required.
+	TokenID string
+	// RoleName is the role's unique name. Resolved to role_id internally. Required.
+	RoleName string
+	// ScopeStatic is the list of "type:id" or "type:*" patterns for static scope.
+	// Matched against target.TypeName+":"+target.ID. Only used when the role's
+	// ScopeMode is [ScopeStatic].
+	ScopeStatic []string
+	// ScopeAnchorID is the anchor item's ID for dynamic scope.
+	// Only used when the role's ScopeMode is [ScopeDynamic].
+	ScopeAnchorID string
+	// CreatedAt is the RFC3339 creation timestamp. Populated by ListGrants.
+	CreatedAt string
+}
+
+// AuthTarget identifies the content item being acted on in an [RoleStore.Authorized]
+// check. TypeName and ID are used for static-scope pattern matching ("type:id" or
+// "type:*"); ID is also used for dynamic-scope relation queries. All fields are
+// optional — pass zero values for operations that have no specific target (e.g.
+// "administer"). Slug is retained on the struct for display and logging only — it
+// is not used in any authorization comparison (slugs are not stable identity).
+type AuthTarget struct {
+	// TypeName is the content type name, e.g. "post", "essay".
+	TypeName string
+	// Slug is for display and logging only. Not used in authorization comparisons.
+	Slug string
+	// ID is the item's primary key. Used for static-scope pattern matching
+	// ("type:id" / "type:*") and for dynamic-scope relation queries.
+	ID string
+}
+
+// RoleStore provides role management and authorization checks backed by the
+// smeldr_roles, smeldr_role_grants, and smeldr_tool_policies tables from
+// [migrateGovernance]. Obtain one via [NewRoleStore] and wire it into the
+// application with [App.Governance].
+type RoleStore struct {
+	db DB
+}
+
+// NewRoleStore returns a new [RoleStore] backed by db.
+func NewRoleStore(db DB) *RoleStore {
+	return &RoleStore{db: db}
+}
+
+// DefineRole creates or updates a role template by name. If a role with the
+// given name already exists its mutable fields (operations, scope, trust level,
+// and self-approval flag) are updated; the row's ID and created_at remain
+// unchanged. Idempotent for concurrent calls on distinct names.
+//
+// Returns an error when role.Name is empty or any DB statement fails.
+func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
+	if role.Name == "" {
+		return fmt.Errorf("smeldr: DefineRole: role.Name must not be empty")
+	}
+	if role.TrustLevel == 1 {
+		return fmt.Errorf("smeldr: DefineRole: trust_level 1 is not yet defined — use 0 (direct) or 2 (plan required)")
+	}
+	ops := role.Operations
+	if ops == nil {
+		ops = []string{}
+	}
+	opsJSON, _ := json.Marshal(ops) // []string marshal never fails
+	scopeMode := role.ScopeMode
+	if scopeMode == "" {
+		scopeMode = ScopeGlobal
+	}
+	selfApproval := 0
+	if role.AllowSelfApproval {
+		selfApproval = 1
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO smeldr_roles
+			(id, name, operations, scope_mode, scope_relation_kind, scope_direction,
+			 trust_level, allow_self_approval, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		NewID(), role.Name, string(opsJSON), string(scopeMode),
+		role.ScopeRelationKind, role.ScopeDirection,
+		role.TrustLevel, selfApproval, now, now,
+	); err != nil {
+		return fmt.Errorf("smeldr: DefineRole: insert %q: %w", role.Name, err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE smeldr_roles
+			SET operations=?, scope_mode=?, scope_relation_kind=?, scope_direction=?,
+			    trust_level=?, allow_self_approval=?, updated_at=?
+			WHERE name=?`,
+		string(opsJSON), string(scopeMode), role.ScopeRelationKind, role.ScopeDirection,
+		role.TrustLevel, selfApproval, now, role.Name,
+	); err != nil {
+		return fmt.Errorf("smeldr: DefineRole: update %q: %w", role.Name, err)
+	}
+	return nil
+}
+
+// Grant binds a token to a role with concrete scope data and returns the grant ID.
+// If an identical grant already exists (same token, role, and anchor) the existing
+// grant ID is returned without inserting a duplicate. The WHERE NOT EXISTS guard
+// is required because SQLite allows multiple NULL values in a UNIQUE constraint,
+// making INSERT OR IGNORE unreliable for global-scope (null anchor) grants.
+//
+// Returns an error when grant.TokenID or grant.RoleName is empty, the named role
+// does not exist, or any DB operation fails.
+func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) {
+	if grant.TokenID == "" {
+		return "", fmt.Errorf("smeldr: Grant: TokenID must not be empty")
+	}
+	if grant.RoleName == "" {
+		return "", fmt.Errorf("smeldr: Grant: RoleName must not be empty")
+	}
+	var roleID string
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT id FROM smeldr_roles WHERE name = ?`, grant.RoleName,
+	).Scan(&roleID); err == sql.ErrNoRows {
+		return "", fmt.Errorf("smeldr: Grant: role %q: %w", grant.RoleName, ErrNotFound)
+	} else if err != nil {
+		return "", fmt.Errorf("smeldr: Grant: lookup role %q: %w", grant.RoleName, err)
+	}
+
+	scopeStatic := grant.ScopeStatic
+	if scopeStatic == nil {
+		scopeStatic = []string{}
+	}
+	staticJSON, _ := json.Marshal(scopeStatic) // []string marshal never fails
+	var anchorID *string
+	if grant.ScopeAnchorID != "" {
+		anchorID = &grant.ScopeAnchorID
+	}
+	newID := NewID()
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO smeldr_role_grants (id, token_id, role_id, scope_static, scope_anchor_id, created_at)
+			SELECT ?, ?, ?, ?, ?, ?
+			WHERE NOT EXISTS (
+				SELECT 1 FROM smeldr_role_grants
+				WHERE token_id = ? AND role_id = ?
+				  AND (scope_anchor_id IS ? OR (scope_anchor_id IS NULL AND ? IS NULL))
+			)`,
+		newID, grant.TokenID, roleID, string(staticJSON), anchorID, now,
+		grant.TokenID, roleID, anchorID, anchorID,
+	); err != nil {
+		return "", fmt.Errorf("smeldr: Grant: insert: %w", err)
+	}
+
+	// Re-query to find the canonical grant ID (new or pre-existing).
+	var grantID string
+	if anchorID != nil {
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT id FROM smeldr_role_grants WHERE token_id=? AND role_id=? AND scope_anchor_id=?`,
+			grant.TokenID, roleID, *anchorID,
+		).Scan(&grantID); err != nil {
+			return "", fmt.Errorf("smeldr: Grant: resolve grant id: %w", err)
+		}
+	} else {
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT id FROM smeldr_role_grants WHERE token_id=? AND role_id=? AND scope_anchor_id IS NULL`,
+			grant.TokenID, roleID,
+		).Scan(&grantID); err != nil {
+			return "", fmt.Errorf("smeldr: Grant: resolve grant id: %w", err)
+		}
+	}
+	return grantID, nil
+}
+
+// Revoke removes the grant identified by grantID. It is not an error if the
+// grant does not exist — the call is idempotent with respect to absence.
+// Returns an error when grantID is empty or the DELETE fails.
+func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
+	if grantID == "" {
+		return fmt.Errorf("smeldr: Revoke: grantID must not be empty")
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM smeldr_role_grants WHERE id = ?`, grantID,
+	); err != nil {
+		return fmt.Errorf("smeldr: Revoke: %w", err)
+	}
+	return nil
+}
+
+// ListGrants returns the grants bound to the given token. If tokenID is empty,
+// all grants in the store are returned. Each [RoleGrant] in the result has its
+// ID, TokenID, RoleName, ScopeStatic, ScopeAnchorID, and CreatedAt populated.
+func (s *RoleStore) ListGrants(ctx context.Context, tokenID string) ([]RoleGrant, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if tokenID != "" {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT g.id, r.name, g.token_id, g.scope_static, g.scope_anchor_id, g.created_at
+				FROM smeldr_role_grants g
+				JOIN smeldr_roles r ON r.id = g.role_id
+				WHERE g.token_id = ?`, tokenID)
+	} else {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT g.id, r.name, g.token_id, g.scope_static, g.scope_anchor_id, g.created_at
+				FROM smeldr_role_grants g
+				JOIN smeldr_roles r ON r.id = g.role_id`)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("smeldr: ListGrants: query: %w", err)
+	}
+	defer rows.Close()
+
+	var out []RoleGrant
+	for rows.Next() {
+		var g RoleGrant
+		var staticJSON string
+		var anchorID sql.NullString
+		if err := rows.Scan(&g.ID, &g.RoleName, &g.TokenID, &staticJSON, &anchorID, &g.CreatedAt); err != nil {
+			return nil, fmt.Errorf("smeldr: ListGrants: scan: %w", err)
+		}
+		if err := json.Unmarshal([]byte(staticJSON), &g.ScopeStatic); err != nil {
+			return nil, fmt.Errorf("smeldr: ListGrants: unmarshal scope_static: %w", err)
+		}
+		if anchorID.Valid {
+			g.ScopeAnchorID = anchorID.String
+		}
+		out = append(out, g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("smeldr: ListGrants: rows: %w", err)
+	}
+	return out, nil
+}
+
+// authorizedGrant is the per-row data scanned from the grants+roles join.
+type authorizedGrant struct {
+	staticJSON string
+	anchorID   sql.NullString
+	opsJSON    string
+	scopeMode  string
+	relKind    sql.NullString
+	relDir     sql.NullString
+}
+
+// Authorized reports whether the token identified by tokenID holds a grant that
+// permits the given operation on target. It checks all three scope modes:
+//
+//   - [ScopeGlobal]: always matches when the operation is in the role's list.
+//   - [ScopeStatic]: matches when target.TypeName+":"+target.ID matches a
+//     pattern in the grant's scope_static list ("type:*" is a wildcard).
+//   - [ScopeDynamic]: matches when target.ID is one hop from the grant's
+//     scope_anchor_id via the role's relation kind and direction. Only asserted,
+//     non-invalidated edges are considered.
+//
+// For operations with no specific target (e.g. "administer"), pass a zero
+// AuthTarget — only global-scope grants can authorize those.
+//
+// A transient dynamic-scope query error does not abort the check: remaining
+// grants continue to be evaluated, and the error is surfaced only if no other
+// grant authorizes the request.
+func (s *RoleStore) Authorized(ctx context.Context, tokenID, op string, target AuthTarget) (bool, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT g.scope_static, g.scope_anchor_id, r.operations,
+		        r.scope_mode, r.scope_relation_kind, r.scope_direction
+		   FROM smeldr_role_grants g
+		   JOIN smeldr_roles r ON r.id = g.role_id
+		  WHERE g.token_id = ?`, tokenID)
+	if err != nil {
+		return false, fmt.Errorf("smeldr: Authorized: query grants: %w", err)
+	}
+
+	// Collect all grant rows before closing — SQLite allows only one active
+	// statement per connection, so relationExists must not be called while rows
+	// is still open.
+	var grants []authorizedGrant
+	for rows.Next() {
+		var g authorizedGrant
+		if err := rows.Scan(&g.staticJSON, &g.anchorID, &g.opsJSON, &g.scopeMode, &g.relKind, &g.relDir); err != nil {
+			rows.Close()
+			return false, fmt.Errorf("smeldr: Authorized: scan: %w", err)
+		}
+		grants = append(grants, g)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return false, fmt.Errorf("smeldr: Authorized: rows: %w", err)
+	}
+	rows.Close()
+
+	var pendingErr error
+	for _, g := range grants {
+		var ops []string
+		if err := json.Unmarshal([]byte(g.opsJSON), &ops); err != nil {
+			continue // malformed operations — skip, do not block
+		}
+		if !slices.Contains(ops, op) {
+			continue
+		}
+
+		switch ScopeMode(g.scopeMode) {
+		case ScopeGlobal:
+			return true, nil
+
+		case ScopeStatic:
+			var patterns []string
+			if err := json.Unmarshal([]byte(g.staticJSON), &patterns); err != nil {
+				continue // malformed static list — skip
+			}
+			key := target.TypeName + ":" + target.ID
+			for _, p := range patterns {
+				if p == key {
+					return true, nil
+				}
+				// "type:*" wildcard — matches any id of that type
+				if strings.HasSuffix(p, ":*") {
+					prefix := strings.TrimSuffix(p, ":*")
+					if prefix == target.TypeName {
+						return true, nil
+					}
+				}
+			}
+
+		case ScopeDynamic:
+			if !g.anchorID.Valid || g.anchorID.String == "" || target.ID == "" {
+				continue // can't resolve without both ends
+			}
+			matched, err := s.relationExists(ctx, g.relKind.String, g.relDir.String, target.ID, g.anchorID.String)
+			if err != nil {
+				pendingErr = err
+				continue // don't abort — check remaining grants
+			}
+			if matched {
+				return true, nil
+			}
+		}
+	}
+	if pendingErr != nil {
+		return false, fmt.Errorf("smeldr: Authorized: dynamic scope: %w", pendingErr)
+	}
+	return false, nil
+}
+
+// relationExists checks whether an active, asserted one-hop relation exists
+// between itemID and anchorID via the given relation kind and direction.
+//
+//   - "incoming": itemID has a relation pointing TO anchorID (item is source, anchor is target)
+//   - "outgoing": anchorID points TO itemID (anchor is source, item is target)
+//   - "both": either direction
+//
+// Only asserted edges (edge_class='asserted') that have not been invalidated
+// (invalid_at IS NULL OR invalid_at > now) are considered — reusing the same
+// "active edge" predicate applied by [RelationStore.SweepStructural].
+func (s *RoleStore) relationExists(ctx context.Context, kind, direction, itemID, anchorID string) (bool, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	checkIncoming := direction == "incoming" || direction == "both"
+	checkOutgoing := direction == "outgoing" || direction == "both"
+
+	if checkIncoming {
+		var n int
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT 1 FROM smeldr_relations
+				WHERE source_id=? AND target_id=? AND relation_kind=?
+				  AND edge_class='asserted'
+				  AND (invalid_at IS NULL OR invalid_at > ?)
+				LIMIT 1`,
+			itemID, anchorID, kind, now,
+		).Scan(&n); err == nil {
+			return true, nil
+		} else if err != sql.ErrNoRows {
+			return false, fmt.Errorf("smeldr: relationExists incoming: %w", err)
+		}
+	}
+	if checkOutgoing {
+		var n int
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT 1 FROM smeldr_relations
+				WHERE source_id=? AND target_id=? AND relation_kind=?
+				  AND edge_class='asserted'
+				  AND (invalid_at IS NULL OR invalid_at > ?)
+				LIMIT 1`,
+			anchorID, itemID, kind, now,
+		).Scan(&n); err == nil {
+			return true, nil
+		} else if err != sql.ErrNoRows {
+			return false, fmt.Errorf("smeldr: relationExists outgoing: %w", err)
+		}
+	}
+	return false, nil
+}
+
+// Governance wires store as the role-based authorization store for this
+// application. It calls [migrateGovernance] to ensure the three governance
+// tables exist, then stores the [RoleStore] for later retrieval via
+// [App.RoleStore]. Calling Governance multiple times replaces the store
+// (last write wins, consistent with [App.Relations] and [App.Audit]).
+//
+// An app that never calls Governance sees zero behaviour change — no tables are
+// touched and no authorization checks are performed.
+func (a *App) Governance(store *RoleStore) error {
+	if store == nil {
+		return fmt.Errorf("smeldr: Governance: store must not be nil")
+	}
+	if store.db != a.cfg.DB {
+		return fmt.Errorf("smeldr: Governance: store.db does not match the app's DB — pass the same DB instance to NewRoleStore and Config.DB")
+	}
+	if err := migrateGovernance(context.Background(), a.cfg.DB); err != nil {
+		return fmt.Errorf("smeldr: Governance: %w", err)
+	}
+	a.governance = store
+	return nil
+}
+
+// RoleStore returns the [RoleStore] wired via [App.Governance], or nil if
+// [App.Governance] has not been called.
+func (a *App) RoleStore() *RoleStore {
+	return a.governance
 }
