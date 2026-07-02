@@ -23,6 +23,21 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.48.0] — 2026-07-02
+
+### Added
+- **Governance schema** (`governance.go`, T49 Step 1, A188):
+  - `ScopeMode` type with `ScopeGlobal`, `ScopeStatic`, `ScopeDynamic` constants
+  - `smeldr_roles` table: named role templates with full-word operations JSON array, scope mode, trust level, and self-approval flag
+  - `smeldr_role_grants` table: binds a token to a role with concrete scope data (static list or dynamic anchor); unique guard via `WHERE NOT EXISTS` (SQLite `NULL`-in-`UNIQUE` makes `INSERT OR IGNORE` unsafe for global-scope grants)
+  - `smeldr_tool_policies` table: maps each MCP tool name to a required operation word; zero behaviour change on day one
+  - Default roles seeded: `author` (`["create","read","update","publish","archive"]`), `editor` (+`delete`, `manage`), `admin` (+`delete`, `manage`, `administer`, `review`, `approve`, `define-type`, `define-flow`, `define-relation-kind`); all `scope_mode='global'`, `trust_level=0`
+  - Operation vocabulary: `manage` (Editor-tier operational tools: composition, transitions, nav CRUD, redirect CRUD, dynamic content), `administer` (Admin-only infra: tokens, webhooks, page-meta); `approve`/`review` reserved for the Plan governance loop (§6)
+  - `migrateTokenGrants`: migrates existing `smeldr_tokens.role` values into `smeldr_role_grants` (global scope); fail-open when `smeldr_tokens` is absent
+  - `migrateGovernance` is **not** called from `New()` — opt-in via `App.Governance()` (T49 Step 2)
+
+---
+
 ## [1.47.0] — 2026-07-01
 
 ### Added

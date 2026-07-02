@@ -354,3 +354,52 @@ Implement the `schedule-eval` async trigger type and background drain loop for p
 Coverage: 96.0%. core v1.47.0 · agent v0.7.0.
 
 ---
+
+## A188 — T49 Step 1: Governance schema (v1.48.0)
+
+**Date:** 2026-07-02  
+**Status:** Implemented  
+**Level:** 2
+
+### Decision
+
+New file `governance.go` introduces `migrateGovernance(ctx, db)`: creates three new tables (smeldr_roles, smeldr_role_grants, smeldr_tool_policies) with two indexes, seeds default roles and tool policies, and migrates existing token role strings to grants. Not wired into `New()` — opt-in via `App.Governance()` in Step 2.
+
+**New type: `ScopeMode`**
+
+Three exported constants define scope semantics for role grants:
+- `ScopeGlobal` — role applies across all content (no anchor)
+- `ScopeStatic` — role scoped to specific static content (e.g. by page ID)
+- `ScopeDynamic` — role scoped by relation type (e.g. "can edit all Tasks related to Project X")
+
+**New tables:**
+
+- `smeldr_roles` (id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, operations TEXT NOT NULL [JSON array], scope_mode TEXT, scope_relation_kind TEXT, scope_direction TEXT, trust_level INTEGER DEFAULT 0, allow_self_approval INTEGER DEFAULT 0, created_at TIMESTAMP, updated_at TIMESTAMP)
+- `smeldr_role_grants` (id TEXT PRIMARY KEY, token_id TEXT NOT NULL [FK smeldr_tokens], role_id TEXT NOT NULL [FK smeldr_roles], scope_static JSON, scope_anchor_id TEXT, created_at TIMESTAMP; UNIQUE (token_id, role_id, scope_anchor_id) via WHERE NOT EXISTS guard to handle NULL anchor_id correctly)
+- `smeldr_tool_policies` (id TEXT PRIMARY KEY, tool_name TEXT UNIQUE NOT NULL, required_op TEXT NOT NULL, created_at TIMESTAMP)
+
+**Indexes:**
+
+- `idx_role_grants_token` on (token_id)
+- `idx_role_grants_role_anchor` on (role_id, scope_anchor_id)
+
+**Seeding:**
+
+- `seedDefaultRoles()` — creates three global-scope roles:
+  - author: ["create", "read", "update", "publish", "archive"]
+  - editor: [+delete, manage]
+  - admin: [+delete, manage, administer, review, approve, define-type, define-flow, define-relation-kind]
+  All use `scope_mode='global'`, `trust_level=0`, idempotent via `INSERT OR IGNORE`
+- `seedToolPolicies()` — one row per built-in MCP tool; operation vocabulary: `manage` (Editor-tier operational tools — composition, `transition_item`, `preview_impact`, nav CRUD, redirect CRUD, dynamic-content Editor tools), `administer` (Admin-only infrastructure — tokens, webhooks, page-meta); `approve`/`review` reserved for the Plan governance loop (§6) and must NOT gate generic Admin infrastructure; no behaviour change on day one (tool enforcement added in Step 2)
+- `migrateTokenGrants()` — reads existing smeldr_tokens rows with non-null `role` field, looks up matching role by name, and inserts grant rows via `WHERE NOT EXISTS` (not `INSERT OR IGNORE`, since SQLite allows multiple NULLs in UNIQUE columns); fail-open if smeldr_tokens missing (logs warning, continues)
+
+### Consequences
+
+- `ScopeMode`, `ScopeGlobal`, `ScopeStatic`, `ScopeDynamic` are new exported symbols; no change to existing `App` API or request paths
+- `migrateGovernance` is testable standalone and called by `App.Governance()` in Step 2
+- 22 new tests in `governance_test.go` cover schema creation, default role seeding, tool policy seeding, token grant migration, edge cases (missing smeldr_tokens table, null role), and all DB error paths (fail-open)
+- Zero impact on any MCP tool output, content routing, or authentication until Step 2
+
+Coverage: 96.0%. core v1.48.0.
+
+---
