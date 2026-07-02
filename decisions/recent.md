@@ -453,3 +453,36 @@ Methods:
 Coverage: 96.0%. core v1.49.0.
 
 ---
+
+## A190 — T49 Step 2.5: Governance mutation audit trail (2026-07-02)
+
+**Context:** T49 Step 2 (A189) shipped `DefineRole`/`Grant`/`Revoke` — functions that mutate authority itself (which roles exist, who holds them, over what scope). Changing them with no record violates Article I ("authority never changes silently"). Step 3 (MCP tool enforcement) would make these tables load-bearing. This step closes the audit gap before enforcement goes live.
+
+**Decision:** Opt-in governance mutation audit trail. New types:
+- `GovernanceAuditRecord` — captures actor, action ("define_role" | "grant" | "revoke"), target kind/ID, before/after JSON, and timestamp
+- `GovernanceAuditStore` interface (`Append`) — write-only for this step; query/list comes in Step 7
+- `sqlGovernanceAuditStore` + `NewGovernanceAuditStore(db) GovernanceAuditStore` — SQL implementation
+- `CreateGovernanceAuditTable(db) error` — creates `smeldr_governance_audit` + `idx_governance_audit_actor`; opt-in, NOT called by `migrateGovernance` (same discipline as `smeldr_audit_log`)
+- `RoleStore.WithAudit(actorTokenID string, log GovernanceAuditStore) *RoleStore` — shallow-copy pattern; existing call sites (`NewRoleStore(db)` + direct method calls) are unchanged
+
+**Mutation recording:**
+- `DefineRole`: SELECT before-state (existing role or `{}`), INSERT OR IGNORE + UPDATE, resolve role ID, `Append`
+- `Grant`: INSERT WHERE NOT EXISTS, resolve grant ID, `Append` (before always `{}`)
+- `Revoke`: SELECT before-state, DELETE, `Append` (after always `{}`)
+
+**Fail-closed on Append error:** If `Append` fails, the mutation method returns an error — but the DB has no transaction primitive (`DB` interface: QueryContext/ExecContext/QueryRowContext only, no BeginTx). The mutation already took effect. Fail-closed is still correct over fail-open: an authority change with no audit record is a silent change (Article I violation). Callers that receive an error should verify current state before assuming rollback; `DefineRole` and `Grant` are idempotent on retry, `Revoke` is idempotent by nature.
+
+**Rejected alternatives:**
+- Extending DB interface with BeginTx for real atomicity: out of scope for this step; would affect every DB consumer in the codebase
+- Fail-open (log + continue): would mean the authority structure changed silently when Append fails — exact problem this step exists to close
+
+**Consequences:**
+- 5 new exported symbols: `GovernanceAuditRecord`, `GovernanceAuditStore`, `NewGovernanceAuditStore`, `CreateGovernanceAuditTable`, `RoleStore.WithAudit`
+- New unexported fields on `RoleStore`: `actorTokenID string`, `auditStore GovernanceAuditStore`
+- Apps that never call `WithAudit` see zero behaviour change
+- `set_tool_policy` audit is out of scope for this step (Step 7/8)
+- 15 new tests; coverage 96.0%
+
+Coverage: 96.0%. core v1.50.0.
+
+---

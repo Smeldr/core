@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // execFailDB wraps a real DB and fails ExecContext when the query contains a
@@ -1719,5 +1720,370 @@ func TestAuthorized_Dynamic_AssertedOnly(t *testing.T) {
 	}
 	if ok {
 		t.Error("expected false: inferred relation must not satisfy dynamic scope")
+	}
+}
+
+// --- GovernanceAuditStore and WithAudit tests ---
+
+// failAppendAuditStore is a GovernanceAuditStore whose Append always fails.
+// Used to exercise the fail-closed audit error paths in DefineRole/Grant/Revoke.
+type failAppendAuditStore struct{}
+
+func (f *failAppendAuditStore) Append(_ context.Context, _ GovernanceAuditRecord) error {
+	return errors.New("simulated audit append failure")
+}
+
+// setupGovernanceAuditDB creates a DB with governance tables + audit table and
+// returns the DB, an unwired RoleStore, and a wired GovernanceAuditStore.
+func setupGovernanceAuditDB(t *testing.T) (*sql.DB, *RoleStore, GovernanceAuditStore) {
+	t.Helper()
+	db := setupGovernanceDB(t)
+	if err := CreateGovernanceAuditTable(db); err != nil {
+		t.Fatalf("CreateGovernanceAuditTable: %v", err)
+	}
+	return db, NewRoleStore(db), NewGovernanceAuditStore(db)
+}
+
+func TestCreateGovernanceAuditTable_Idempotent(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	for i := range 2 {
+		if err := CreateGovernanceAuditTable(db); err != nil {
+			t.Fatalf("run %d: CreateGovernanceAuditTable: %v", i+1, err)
+		}
+	}
+	var n int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='smeldr_governance_audit'`,
+	).Scan(&n); err != nil || n == 0 {
+		t.Error("table smeldr_governance_audit not found after CreateGovernanceAuditTable")
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_governance_audit_actor'`,
+	).Scan(&n); err != nil || n == 0 {
+		t.Error("index idx_governance_audit_actor not found after CreateGovernanceAuditTable")
+	}
+}
+
+func TestCreateGovernanceAuditTable_ExecError(t *testing.T) {
+	t.Run("create_table", func(t *testing.T) {
+		wrapped := &execFailDB{DB: newSQLiteDB(t), failOn: "smeldr_governance_audit"}
+		if err := CreateGovernanceAuditTable(wrapped); err == nil {
+			t.Fatal("expected error from CREATE TABLE failure, got nil")
+		}
+	})
+	t.Run("create_index", func(t *testing.T) {
+		wrapped := &execFailDB{DB: newSQLiteDB(t), failOn: "idx_governance_audit_actor"}
+		if err := CreateGovernanceAuditTable(wrapped); err == nil {
+			t.Fatal("expected error from CREATE INDEX failure, got nil")
+		}
+	})
+}
+
+func TestGovernanceAuditStore_Append(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateGovernanceAuditTable(db); err != nil {
+		t.Fatalf("CreateGovernanceAuditTable: %v", err)
+	}
+	store := NewGovernanceAuditStore(db)
+	ctx := context.Background()
+	rec := GovernanceAuditRecord{
+		ID:           NewID(),
+		ActorTokenID: "tok-1",
+		Action:       "define_role",
+		TargetKind:   "role",
+		TargetID:     "role-id-1",
+		Before:       "{}",
+		After:        `{"name":"reviewer"}`,
+		CreatedAt:    time.Now().UTC(),
+	}
+	if err := store.Append(ctx, rec); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_governance_audit WHERE id=?`, rec.ID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 audit row, got %d", count)
+	}
+}
+
+func TestGovernanceAuditStore_AppendError(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateGovernanceAuditTable(db); err != nil {
+		t.Fatalf("CreateGovernanceAuditTable: %v", err)
+	}
+	wrapped := &execFailDB{DB: db, failOn: "INSERT INTO smeldr_governance_audit"}
+	store := NewGovernanceAuditStore(wrapped)
+	err := store.Append(context.Background(), GovernanceAuditRecord{
+		ID: NewID(), ActorTokenID: "tok", Action: "grant",
+		TargetKind: "grant", TargetID: "g1", CreatedAt: time.Now(),
+	})
+	if err == nil {
+		t.Fatal("expected error from INSERT failure, got nil")
+	}
+}
+
+func TestWithAudit_DefineRole_NewRole(t *testing.T) {
+	db, store, auditStore := setupGovernanceAuditDB(t)
+	actor := "tok-actor"
+	audited := store.WithAudit(actor, auditStore)
+	ctx := context.Background()
+
+	if err := audited.DefineRole(ctx, RoleDefinition{
+		Name: "reviewer", Operations: []string{"review"}, ScopeMode: ScopeGlobal,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+
+	var action, targetKind, before, actorID string
+	if err := db.QueryRowContext(ctx,
+		`SELECT action, target_kind, before_json, actor_token_id
+		   FROM smeldr_governance_audit ORDER BY created_at DESC LIMIT 1`,
+	).Scan(&action, &targetKind, &before, &actorID); err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	if action != "define_role" {
+		t.Errorf("action: want define_role, got %q", action)
+	}
+	if targetKind != "role" {
+		t.Errorf("target_kind: want role, got %q", targetKind)
+	}
+	if before != "{}" {
+		t.Errorf("before: want {}, got %q", before)
+	}
+	if actorID != actor {
+		t.Errorf("actor_token_id: want %q, got %q", actor, actorID)
+	}
+}
+
+func TestWithAudit_DefineRole_UpdateRole(t *testing.T) {
+	db, store, auditStore := setupGovernanceAuditDB(t)
+	actor := "tok-actor"
+	audited := store.WithAudit(actor, auditStore)
+	ctx := context.Background()
+
+	if err := audited.DefineRole(ctx, RoleDefinition{
+		Name: "reviewer", Operations: []string{"review"}, ScopeMode: ScopeGlobal,
+	}); err != nil {
+		t.Fatalf("first DefineRole: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM smeldr_governance_audit`); err != nil {
+		t.Fatalf("truncate audit: %v", err)
+	}
+	if err := audited.DefineRole(ctx, RoleDefinition{
+		Name: "reviewer", Operations: []string{"review", "approve"}, ScopeMode: ScopeGlobal,
+	}); err != nil {
+		t.Fatalf("second DefineRole: %v", err)
+	}
+
+	var before string
+	if err := db.QueryRowContext(ctx,
+		`SELECT before_json FROM smeldr_governance_audit LIMIT 1`,
+	).Scan(&before); err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	if before == "{}" {
+		t.Error("before_json for update should contain existing role data, not {}")
+	}
+	if !strings.Contains(before, "reviewer") {
+		t.Errorf("before_json should contain role name, got %q", before)
+	}
+}
+
+func TestWithAudit_DefineRole_BeforeSelectError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	if err := CreateGovernanceAuditTable(db); err != nil {
+		t.Fatalf("CreateGovernanceAuditTable: %v", err)
+	}
+	wrapped := &govQueryRowFailDB{DB: db, failOn: "FROM smeldr_roles WHERE name"}
+	store := NewRoleStore(wrapped).WithAudit("actor", NewGovernanceAuditStore(db))
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "x", Operations: []string{"read"},
+	}); err == nil {
+		t.Fatal("expected error from before-state SELECT failure, got nil")
+	}
+}
+
+func TestWithAudit_DefineRole_AppendError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	store := NewRoleStore(db).WithAudit("actor", &failAppendAuditStore{})
+
+	err := store.DefineRole(ctx, RoleDefinition{Name: "reviewer", Operations: []string{"review"}})
+	if err == nil {
+		t.Fatal("expected error from Append failure, got nil")
+	}
+	// The mutation must be persisted despite the Append failure (non-atomic audit).
+	var count int
+	if err2 := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_roles WHERE name='reviewer'`,
+	).Scan(&count); err2 != nil {
+		t.Fatalf("query: %v", err2)
+	}
+	if count != 1 {
+		t.Error("role row must be persisted even though DefineRole returned an error (non-atomic audit)")
+	}
+}
+
+func TestWithAudit_DefineRole_NoAudit(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db) // nil auditStore — no audit table needed
+	ctx := context.Background()
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "reviewer", Operations: []string{"review"},
+	}); err != nil {
+		t.Fatalf("DefineRole without audit: %v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_roles WHERE name='reviewer'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 1 {
+		t.Error("expected role to be defined")
+	}
+}
+
+func TestWithAudit_DefineRole_ResolveIDError(t *testing.T) {
+	// Covers the resolve-id error path: before-state returns ErrNoRows (new role),
+	// INSERT/UPDATE succeed, then the post-insert SELECT id FROM smeldr_roles fails.
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	if err := CreateGovernanceAuditTable(db); err != nil {
+		t.Fatalf("CreateGovernanceAuditTable: %v", err)
+	}
+	// The before-state query selects many columns; the resolve-ID query selects
+	// only "id FROM smeldr_roles". The failOn string matches only the latter.
+	wrapped := &govQueryRowFailDB{DB: db, failOn: "SELECT id FROM smeldr_roles WHERE name"}
+	store := NewRoleStore(wrapped).WithAudit("actor", NewGovernanceAuditStore(db))
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "reviewer", Operations: []string{"review"},
+	}); err == nil {
+		t.Fatal("expected error from resolve-ID query failure, got nil")
+	}
+}
+
+func TestWithAudit_Grant_Recorded(t *testing.T) {
+	db, store, auditStore := setupGovernanceAuditDB(t)
+	actor := "tok-actor"
+	audited := store.WithAudit(actor, auditStore)
+	ctx := context.Background()
+	tokenID := NewID()
+
+	grantID, err := audited.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	var action, targetKind, targetID, before string
+	if err := db.QueryRowContext(ctx,
+		`SELECT action, target_kind, target_id, before_json
+		   FROM smeldr_governance_audit LIMIT 1`,
+	).Scan(&action, &targetKind, &targetID, &before); err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	if action != "grant" {
+		t.Errorf("action: want grant, got %q", action)
+	}
+	if targetKind != "grant" {
+		t.Errorf("target_kind: want grant, got %q", targetKind)
+	}
+	if targetID != grantID {
+		t.Errorf("target_id: want %q, got %q", grantID, targetID)
+	}
+	if before != "{}" {
+		t.Errorf("before: want {}, got %q", before)
+	}
+}
+
+func TestWithAudit_Grant_AppendError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	store := NewRoleStore(db).WithAudit("actor", &failAppendAuditStore{})
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: NewID(), RoleName: "author"}); err == nil {
+		t.Fatal("expected error from Append failure, got nil")
+	}
+}
+
+// TestWithAudit_Revoke_Recorded verifies the full before/after audit record for
+// Revoke. Uses a grant with ScopeAnchorID to cover the eanch.Valid branch in
+// the before-state scan, and the anchorID != nil branch in Grant's audit.
+func TestWithAudit_Revoke_Recorded(t *testing.T) {
+	db, store, auditStore := setupGovernanceAuditDB(t)
+	actor := "tok-actor"
+	audited := store.WithAudit(actor, auditStore)
+	ctx := context.Background()
+	tokenID := NewID()
+	anchorID := NewID()
+
+	grantID, err := audited.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "author", ScopeAnchorID: anchorID,
+	})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM smeldr_governance_audit`); err != nil {
+		t.Fatalf("truncate audit: %v", err)
+	}
+
+	if err := audited.Revoke(ctx, grantID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	var action, before, after string
+	if err := db.QueryRowContext(ctx,
+		`SELECT action, before_json, after_json FROM smeldr_governance_audit LIMIT 1`,
+	).Scan(&action, &before, &after); err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	if action != "revoke" {
+		t.Errorf("action: want revoke, got %q", action)
+	}
+	if before == "{}" {
+		t.Error("before_json for revoke should contain grant data, not {}")
+	}
+	if !strings.Contains(before, anchorID) {
+		t.Errorf("before_json should contain anchor ID %q, got %q", anchorID, before)
+	}
+	if after != "{}" {
+		t.Errorf("after: want {}, got %q", after)
+	}
+}
+
+func TestWithAudit_Revoke_BeforeSelectError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	if err := CreateGovernanceAuditTable(db); err != nil {
+		t.Fatalf("CreateGovernanceAuditTable: %v", err)
+	}
+	// Create a real grant using an unwrapped store.
+	grantID, err := NewRoleStore(db).Grant(ctx, RoleGrant{TokenID: NewID(), RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	// Fail the before-state SELECT on smeldr_role_grants.
+	wrapped := &govQueryRowFailDB{DB: db, failOn: "FROM smeldr_role_grants WHERE id"}
+	store := NewRoleStore(wrapped).WithAudit("actor", NewGovernanceAuditStore(db))
+	if err := store.Revoke(ctx, grantID); err == nil {
+		t.Fatal("expected error from before-state SELECT failure, got nil")
+	}
+}
+
+func TestWithAudit_Revoke_AppendError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	grantID, err := NewRoleStore(db).Grant(ctx, RoleGrant{TokenID: NewID(), RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	store := NewRoleStore(db).WithAudit("actor", &failAppendAuditStore{})
+	if err := store.Revoke(ctx, grantID); err == nil {
+		t.Fatal("expected error from Append failure, got nil")
 	}
 }

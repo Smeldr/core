@@ -396,17 +396,124 @@ type AuthTarget struct {
 	ID string
 }
 
+// GovernanceAuditRecord captures a single governance mutation — a role
+// definition or grant change — with the actor, before/after state, and
+// timestamp. Produced by [RoleStore.WithAudit] and written via
+// [GovernanceAuditStore.Append].
+type GovernanceAuditRecord struct {
+	// ID is a UUID uniquely identifying this audit record.
+	ID string
+	// ActorTokenID is the token that initiated the mutation.
+	ActorTokenID string
+	// Action is the mutation kind: "define_role", "grant", or "revoke".
+	Action string
+	// TargetKind is the kind of object affected: "role" or "grant".
+	TargetKind string
+	// TargetID is the role ID or grant ID that was affected.
+	TargetID string
+	// Before is a JSON object representing the state before the mutation;
+	// "{}" when the object did not previously exist.
+	Before string
+	// After is a JSON object representing the state after the mutation;
+	// "{}" when the object was deleted.
+	After string
+	// CreatedAt is when this record was written.
+	CreatedAt time.Time
+}
+
+// GovernanceAuditStore receives governance mutation audit records. The
+// standard SQL-backed implementation is returned by [NewGovernanceAuditStore]
+// after calling [CreateGovernanceAuditTable]. Applications may supply their
+// own implementation (e.g. writing to a remote log service).
+type GovernanceAuditStore interface {
+	Append(ctx context.Context, r GovernanceAuditRecord) error
+}
+
+type sqlGovernanceAuditStore struct {
+	db DB
+}
+
+// CreateGovernanceAuditTable creates the smeldr_governance_audit table and
+// its actor index in db. The function is idempotent — safe to call on every
+// startup. Call it before [NewGovernanceAuditStore].
+func CreateGovernanceAuditTable(db DB) error {
+	if _, err := db.ExecContext(context.Background(),
+		`CREATE TABLE IF NOT EXISTS smeldr_governance_audit (
+			id             TEXT NOT NULL PRIMARY KEY,
+			actor_token_id TEXT NOT NULL,
+			action         TEXT NOT NULL,
+			target_kind    TEXT NOT NULL,
+			target_id      TEXT NOT NULL,
+			before_json    TEXT NOT NULL DEFAULT '{}',
+			after_json     TEXT NOT NULL DEFAULT '{}',
+			created_at     DATETIME NOT NULL
+		)`,
+	); err != nil {
+		return fmt.Errorf("smeldr: CreateGovernanceAuditTable: %w", err)
+	}
+	if _, err := db.ExecContext(context.Background(),
+		`CREATE INDEX IF NOT EXISTS idx_governance_audit_actor
+			ON smeldr_governance_audit(actor_token_id)`,
+	); err != nil {
+		return fmt.Errorf("smeldr: CreateGovernanceAuditTable: index: %w", err)
+	}
+	return nil
+}
+
+// NewGovernanceAuditStore returns a [GovernanceAuditStore] backed by db.
+// Call [CreateGovernanceAuditTable] before using the returned store.
+func NewGovernanceAuditStore(db DB) GovernanceAuditStore {
+	return &sqlGovernanceAuditStore{db: db}
+}
+
+func (s *sqlGovernanceAuditStore) Append(ctx context.Context, r GovernanceAuditRecord) error {
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO smeldr_governance_audit
+			(id, actor_token_id, action, target_kind, target_id, before_json, after_json, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.ActorTokenID, r.Action, r.TargetKind, r.TargetID, r.Before, r.After,
+		r.CreatedAt.UTC().Format(time.RFC3339),
+	); err != nil {
+		return fmt.Errorf("smeldr: GovernanceAuditStore.Append: %w", err)
+	}
+	return nil
+}
+
 // RoleStore provides role management and authorization checks backed by the
 // smeldr_roles, smeldr_role_grants, and smeldr_tool_policies tables from
 // [migrateGovernance]. Obtain one via [NewRoleStore] and wire it into the
 // application with [App.Governance].
 type RoleStore struct {
-	db DB
+	db           DB
+	actorTokenID string               // "" unless WithAudit called
+	auditStore   GovernanceAuditStore // nil unless WithAudit called
 }
 
 // NewRoleStore returns a new [RoleStore] backed by db.
 func NewRoleStore(db DB) *RoleStore {
 	return &RoleStore{db: db}
+}
+
+// WithAudit returns a shallow copy of s configured to record every governance
+// mutation (DefineRole, Grant, Revoke) to log, attributed to actorTokenID.
+//
+// When audit is wired, each mutation method reads the previous state, performs
+// the mutation, then calls log.Append with a [GovernanceAuditRecord]. If
+// Append returns an error, the mutation method surfaces that error — but the
+// underlying DB operations are not transactional: the mutation (INSERT, UPDATE,
+// or DELETE) may have already taken effect before Append was called. An error
+// return means "the mutation may have already taken effect; the audit record
+// failed to write — verify current state before assuming the operation was
+// rolled back." Callers can safely retry DefineRole and Grant (both are
+// idempotent) and Revoke (idempotent by nature).
+//
+// Call sites that do not use WithAudit receive a store with nil auditStore
+// and see zero behaviour change.
+func (s *RoleStore) WithAudit(actorTokenID string, log GovernanceAuditStore) *RoleStore {
+	cp := *s
+	cp.actorTokenID = actorTokenID
+	cp.auditStore = log
+	return &cp
 }
 
 // DefineRole creates or updates a role template by name. If a role with the
@@ -436,6 +543,40 @@ func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
 		selfApproval = 1
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	var (
+		beforeJSON = "{}"
+		targetID   string
+	)
+	if s.auditStore != nil {
+		var (
+			existingID           string
+			existingName         string
+			existingOps          string
+			existingScope        string
+			existingTrust        int
+			existingSelfApproval int
+		)
+		err := s.db.QueryRowContext(ctx,
+			`SELECT id, name, operations, scope_mode, trust_level, allow_self_approval
+			   FROM smeldr_roles WHERE name = ?`, role.Name,
+		).Scan(&existingID, &existingName, &existingOps, &existingScope, &existingTrust, &existingSelfApproval)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("smeldr: DefineRole: audit before-state: %w", err)
+		}
+		if err == nil {
+			b, _ := json.Marshal(map[string]any{
+				"id": existingID, "name": existingName,
+				"operations":          json.RawMessage([]byte(existingOps)),
+				"scope_mode":          existingScope,
+				"trust_level":         existingTrust,
+				"allow_self_approval": existingSelfApproval,
+			})
+			beforeJSON = string(b)
+			targetID = existingID
+		}
+	}
+
 	if _, err := s.db.ExecContext(ctx,
 		`INSERT OR IGNORE INTO smeldr_roles
 			(id, name, operations, scope_mode, scope_relation_kind, scope_direction,
@@ -456,6 +597,35 @@ func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
 		role.TrustLevel, selfApproval, now, role.Name,
 	); err != nil {
 		return fmt.Errorf("smeldr: DefineRole: update %q: %w", role.Name, err)
+	}
+	if s.auditStore != nil {
+		if targetID == "" {
+			if err := s.db.QueryRowContext(ctx,
+				`SELECT id FROM smeldr_roles WHERE name = ?`, role.Name,
+			).Scan(&targetID); err != nil {
+				return fmt.Errorf("smeldr: DefineRole: audit resolve id: %w", err)
+			}
+		}
+		afterJSON, _ := json.Marshal(map[string]any{
+			"id": targetID, "name": role.Name,
+			"operations":          json.RawMessage([]byte(string(opsJSON))),
+			"scope_mode":          string(scopeMode),
+			"trust_level":         role.TrustLevel,
+			"allow_self_approval": selfApproval,
+		})
+		rec := GovernanceAuditRecord{
+			ID:           NewID(),
+			ActorTokenID: s.actorTokenID,
+			Action:       "define_role",
+			TargetKind:   "role",
+			TargetID:     targetID,
+			Before:       beforeJSON,
+			After:        string(afterJSON),
+			CreatedAt:    time.Now().UTC(),
+		}
+		if err := s.auditStore.Append(ctx, rec); err != nil {
+			return fmt.Errorf("smeldr: DefineRole: audit: %w", err)
+		}
 	}
 	return nil
 }
@@ -527,6 +697,32 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 			return "", fmt.Errorf("smeldr: Grant: resolve grant id: %w", err)
 		}
 	}
+	if s.auditStore != nil {
+		var anchorVal any
+		if anchorID != nil {
+			anchorVal = *anchorID
+		}
+		afterJSON, _ := json.Marshal(map[string]any{
+			"id":              grantID,
+			"token_id":        grant.TokenID,
+			"role_id":         roleID,
+			"scope_static":    json.RawMessage([]byte(string(staticJSON))),
+			"scope_anchor_id": anchorVal,
+		})
+		rec := GovernanceAuditRecord{
+			ID:           NewID(),
+			ActorTokenID: s.actorTokenID,
+			Action:       "grant",
+			TargetKind:   "grant",
+			TargetID:     grantID,
+			Before:       "{}",
+			After:        string(afterJSON),
+			CreatedAt:    time.Now().UTC(),
+		}
+		if err := s.auditStore.Append(ctx, rec); err != nil {
+			return "", fmt.Errorf("smeldr: Grant: audit: %w", err)
+		}
+	}
 	return grantID, nil
 }
 
@@ -537,10 +733,56 @@ func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
 	if grantID == "" {
 		return fmt.Errorf("smeldr: Revoke: grantID must not be empty")
 	}
+	beforeJSON := "{}"
+	if s.auditStore != nil {
+		var (
+			eid     string
+			etok    string
+			erol    string
+			eanch   sql.NullString
+			estatic string
+		)
+		err := s.db.QueryRowContext(ctx,
+			`SELECT id, token_id, role_id, scope_anchor_id, scope_static
+			   FROM smeldr_role_grants WHERE id = ?`, grantID,
+		).Scan(&eid, &etok, &erol, &eanch, &estatic)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("smeldr: Revoke: audit before-state: %w", err)
+		}
+		if err == nil {
+			var anchorVal any
+			if eanch.Valid {
+				anchorVal = eanch.String
+			}
+			b, _ := json.Marshal(map[string]any{
+				"id":              eid,
+				"token_id":        etok,
+				"role_id":         erol,
+				"scope_anchor_id": anchorVal,
+				"scope_static":    json.RawMessage([]byte(estatic)),
+			})
+			beforeJSON = string(b)
+		}
+	}
 	if _, err := s.db.ExecContext(ctx,
 		`DELETE FROM smeldr_role_grants WHERE id = ?`, grantID,
 	); err != nil {
 		return fmt.Errorf("smeldr: Revoke: %w", err)
+	}
+	if s.auditStore != nil {
+		rec := GovernanceAuditRecord{
+			ID:           NewID(),
+			ActorTokenID: s.actorTokenID,
+			Action:       "revoke",
+			TargetKind:   "grant",
+			TargetID:     grantID,
+			Before:       beforeJSON,
+			After:        "{}",
+			CreatedAt:    time.Now().UTC(),
+		}
+		if err := s.auditStore.Append(ctx, rec); err != nil {
+			return fmt.Errorf("smeldr: Revoke: audit: %w", err)
+		}
 	}
 	return nil
 }

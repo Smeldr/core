@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.50.0] — 2026-07-02
+
+### Added
+- **Governance mutation audit trail** (`governance.go`, T49 Step 2.5, A190):
+  - `GovernanceAuditRecord` struct: `ID`, `ActorTokenID`, `Action` ("define_role" | "grant" | "revoke"), `TargetKind` ("role" | "grant"), `TargetID`, `Before` (JSON), `After` (JSON), `CreatedAt`
+  - `GovernanceAuditStore` interface: `Append(ctx, GovernanceAuditRecord) error`
+  - `NewGovernanceAuditStore(db DB) GovernanceAuditStore` — SQL-backed implementation
+  - `CreateGovernanceAuditTable(db DB) error` — creates `smeldr_governance_audit` table + `idx_governance_audit_actor` index; opt-in (not called by `App.Governance`)
+  - `RoleStore.WithAudit(actorTokenID string, log GovernanceAuditStore) *RoleStore` — returns shallow copy with audit wired to the given actor and store
+  - `DefineRole`, `Grant`, `Revoke` capture before-state JSON, run the mutation, then call `log.Append` with a `GovernanceAuditRecord`; fail-closed on Append error
+  - **Non-atomic semantics:** the underlying DB has no transaction primitive; if `Append` fails after the mutation succeeds, the error return means "the mutation may have already taken effect — verify current state before retrying." `DefineRole` and `Grant` are idempotent on retry; `Revoke` is idempotent by nature.
+
+---
+
 ## [1.49.0] — 2026-07-02
 
 ### Added
