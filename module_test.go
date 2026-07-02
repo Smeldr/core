@@ -2078,6 +2078,202 @@ func TestRegister_feedStore_nil_returns500(t *testing.T) {
 	}
 }
 
+// — Governance integration tests ——————————————————————————————————————————
+
+// govTestUser returns a User with the given ID and Author role, suitable for
+// governance tests that grant by tokenID matching ctx.User().ID.
+func govTestUser(id string) User { return User{ID: id, Name: "Alice", Roles: []Role{Author}} }
+
+// govModule sets up a Module backed by MemoryRepo with a live RoleStore
+// wired via setRoleStore. Returns the module and the store.
+func govModule(t *testing.T) (*Module[*testPost], *RoleStore) {
+	t.Helper()
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	m := newTestModule(NewMemoryRepo[*testPost]())
+	m.setRoleStore(store)
+	return m, store
+}
+
+// govGrant grants roleName to tokenID in store, failing the test on error.
+func govGrant(t *testing.T, store *RoleStore, tokenID, roleName string) {
+	t.Helper()
+	if _, err := store.Grant(context.Background(), RoleGrant{TokenID: tokenID, RoleName: roleName}); err != nil {
+		t.Fatalf("govGrant(%q, %q): %v", tokenID, roleName, err)
+	}
+}
+
+// canReadDrafts — Branch 1: no RoleStore → legacy HasRole(Author) check.
+func TestModule_canReadDrafts_NoStore_AuthorAllowed(t *testing.T) {
+	m := newTestModule(NewMemoryRepo[*testPost]())
+	ctx := NewTestContext(authorUser())
+	if !m.canReadDrafts(ctx) {
+		t.Error("expected canReadDrafts=true for Author without governance")
+	}
+}
+
+func TestModule_canReadDrafts_NoStore_GuestDenied(t *testing.T) {
+	m := newTestModule(NewMemoryRepo[*testPost]())
+	ctx := NewTestContext(GuestUser)
+	if m.canReadDrafts(ctx) {
+		t.Error("expected canReadDrafts=false for Guest without governance")
+	}
+}
+
+// canReadDrafts — Branch 2: governance wired, no actor ID → deny.
+func TestModule_canReadDrafts_StoreWired_NoActorID(t *testing.T) {
+	m, _ := govModule(t)
+	ctx := NewTestContext(GuestUser) // ID == ""
+	if m.canReadDrafts(ctx) {
+		t.Error("expected canReadDrafts=false for unauthenticated user when governance is wired")
+	}
+}
+
+// canReadDrafts — Branch 3a: governance wired, user has grant → allow.
+func TestModule_canReadDrafts_StoreWired_Authorized(t *testing.T) {
+	m, store := govModule(t)
+	const uid = "tok-author-read"
+	govGrant(t, store, uid, "author") // author has "read"
+	ctx := NewTestContext(govTestUser(uid))
+	if !m.canReadDrafts(ctx) {
+		t.Error("expected canReadDrafts=true for user with read grant when governance is wired")
+	}
+}
+
+// canReadDrafts — Branch 3b: governance wired, user has no grant → deny.
+func TestModule_canReadDrafts_StoreWired_Denied(t *testing.T) {
+	m, _ := govModule(t)
+	ctx := NewTestContext(govTestUser("no-grants-user"))
+	if m.canReadDrafts(ctx) {
+		t.Error("expected canReadDrafts=false for user with no grants when governance is wired")
+	}
+}
+
+// canReadDrafts — Branch 3c: governance wired, DB error → fail-closed.
+func TestModule_canReadDrafts_StoreWired_ErrorFailClosed(t *testing.T) {
+	db := setupGovernanceDB(t)
+	// Authorized uses QueryContext for grants — wrap that to simulate a DB error.
+	wrapped := &govQueryFailDB{DB: db, failOn: "FROM smeldr_role_grants"}
+	store := NewRoleStore(wrapped)
+	m := newTestModule(NewMemoryRepo[*testPost]())
+	m.setRoleStore(store)
+	const uid = "tok-fail"
+	// Grant exists in real DB but wrapped DB errors on the lookup.
+	if _, err := NewRoleStore(db).Grant(context.Background(), RoleGrant{TokenID: uid, RoleName: "author"}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	ctx := NewTestContext(govTestUser(uid))
+	if m.canReadDrafts(ctx) {
+		t.Error("expected canReadDrafts=false (fail-closed) when Authorized returns error")
+	}
+}
+
+// checkWriteOp — Branch 2: governance wired, no actor ID → deny.
+func TestModule_checkWriteOp_StoreWired_NoActorID(t *testing.T) {
+	m, _ := govModule(t)
+	ctx := NewTestContext(GuestUser) // ID == ""
+	if m.checkWriteOp(ctx, "create", Author) {
+		t.Error("expected checkWriteOp=false for unauthenticated user when governance is wired")
+	}
+}
+
+// checkWriteOp — Branch 3: governance wired, user has grant → allow.
+func TestModule_checkWriteOp_StoreWired_Authorized(t *testing.T) {
+	m, store := govModule(t)
+	const uid = "tok-author-write"
+	govGrant(t, store, uid, "author") // author has "create"
+	ctx := NewTestContext(govTestUser(uid))
+	if !m.checkWriteOp(ctx, "create", Author) {
+		t.Error("expected checkWriteOp=true for user with create grant when governance is wired")
+	}
+}
+
+// checkWriteOp — Branch 3: governance wired, user has no grant → deny.
+func TestModule_checkWriteOp_StoreWired_Denied(t *testing.T) {
+	m, _ := govModule(t)
+	ctx := NewTestContext(govTestUser("no-grants-user"))
+	if m.checkWriteOp(ctx, "create", Author) {
+		t.Error("expected checkWriteOp=false for user with no grants when governance is wired")
+	}
+}
+
+// checkWriteOp — DB error path → fail-closed.
+func TestModule_checkWriteOp_StoreWired_ErrorFailClosed(t *testing.T) {
+	db := setupGovernanceDB(t)
+	// Authorized uses QueryContext for grants — wrap that to simulate a DB error.
+	wrapped := &govQueryFailDB{DB: db, failOn: "FROM smeldr_role_grants"}
+	store := NewRoleStore(wrapped)
+	m := newTestModule(NewMemoryRepo[*testPost]())
+	m.setRoleStore(store)
+	const uid = "tok-fail-write"
+	if _, err := NewRoleStore(db).Grant(context.Background(), RoleGrant{TokenID: uid, RoleName: "author"}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	ctx := NewTestContext(govTestUser(uid))
+	if m.checkWriteOp(ctx, "create", Author) {
+		t.Error("expected checkWriteOp=false (fail-closed) when Authorized returns error")
+	}
+}
+
+// isVisible — Published items are always visible regardless of governance.
+func TestModule_isVisible_Published_AlwaysVisible(t *testing.T) {
+	m, _ := govModule(t)
+	// GuestUser has no grants — but published items must still be visible.
+	ctx := NewTestContext(GuestUser)
+	item := &testPost{Node: Node{Status: Published}}
+	if !m.isVisible(ctx, item) {
+		t.Error("expected isVisible=true for published item regardless of governance")
+	}
+}
+
+// createHandler — governance wired, unauthenticated → 403.
+func TestModule_createHandler_GovernanceWired_NoActorID(t *testing.T) {
+	m, _ := govModule(t)
+	body, _ := json.Marshal(map[string]string{"Title": "Hello"})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/testposts", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	// No user injected → GuestUser (ID=="").
+	m.createHandler(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d; want 403 when governance wired and actor ID is empty", w.Code)
+	}
+}
+
+// createHandler — governance wired, authorized user → 201.
+func TestModule_createHandler_GovernanceWired_Authorized(t *testing.T) {
+	m, store := govModule(t)
+	const uid = "tok-create-ok"
+	govGrant(t, store, uid, "author")
+	body, _ := json.Marshal(map[string]string{"Title": "Hello"})
+	w := httptest.NewRecorder()
+	r := withUser(
+		httptest.NewRequest(http.MethodPost, "/testposts", bytes.NewReader(body)),
+		govTestUser(uid),
+	)
+	r.Header.Set("Content-Type", "application/json")
+	m.createHandler(w, r)
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d; want 201 when governance wired and user has create grant", w.Code)
+	}
+}
+
+// createHandler — governance wired, no grant → 403.
+func TestModule_createHandler_GovernanceWired_Denied(t *testing.T) {
+	m, _ := govModule(t)
+	body, _ := json.Marshal(map[string]string{"Title": "Hello"})
+	w := httptest.NewRecorder()
+	r := withUser(
+		httptest.NewRequest(http.MethodPost, "/testposts", bytes.NewReader(body)),
+		govTestUser("no-grants-user"),
+	)
+	r.Header.Set("Content-Type", "application/json")
+	m.createHandler(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d; want 403 when governance wired and user has no grant", w.Code)
+	}
+}
+
 // — Register with module-level middleware ——————————————————————————————————
 
 func TestRegister_withMiddleware_wrapsHandlers(t *testing.T) {

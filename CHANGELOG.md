@@ -23,6 +23,23 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.51.0] — 2026-07-02
+
+### Added
+- **Governance module role gate + ToolPolicy** (`governance.go`, `module.go`, `smeldr.go`, T49 Step 3, A191):
+  - `RoleStore.ToolPolicy(ctx context.Context, toolName string) (requiredOp string, found bool, err error)` — exact-match lookup in `smeldr_tool_policies`; returns `found=false, err=nil` when no row (avoids `ErrNoRows` leak); returns `found=true, requiredOp, nil` on hit; returns `found=false, "", err` on DB error
+  - Seam between core and `smeldr.dev/mcp`: the MCP server calls `ToolPolicy` to resolve each tool's required operation before calling `RoleStore.Authorized`
+  - Prefix-pattern fallback for runtime-defined content types (T104) deferred to Step 8
+  - `Module[T].roleStore *RoleStore` field injected from `App.Handler()` via `setRoleStore(*RoleStore)`
+  - `Module[T].canReadDrafts(ctx Context) bool` — 3-branch: `roleStore == nil` → legacy `ctx.User().HasRole(Author)`; `roleStore != nil && ctx.User().ID == ""` → deny; `roleStore != nil && ID != ""` → `RoleStore.Authorized(ctx, ID, "read", AuthTarget{TypeName})` (fail-closed §5.5 on error)
+  - `Module[T].checkWriteOp(ctx Context, op string, legacyRole Role) bool` — same 3-branch pattern
+  - `Module[T].isVisible(ctx Context, item any) bool` — converted from standalone function to Module method; Published items always visible; Draft delegates to `canReadDrafts`
+  - All 4 `isVisible` call sites, 2 list-handler status-filter sites, and 3 write/delete gate sites updated to use new helpers
+  - `App.governanceModules []interface{ setRoleStore(*RoleStore) }` — modules register at `App.Content()` time; `App.Handler()` injects the `RoleStore` into all registered modules
+  - 20 new tests (3 `TestRoleStore_ToolPolicy_*` + 17 `TestModule_canReadDrafts_*` / `TestModule_checkWriteOp_*` / `TestModule_isVisible_*` / `TestModule_createHandler_GovernanceWired_*`); coverage 96.0%
+
+---
+
 ## [1.50.0] — 2026-07-02
 
 ### Added

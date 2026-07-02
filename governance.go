@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -1016,4 +1017,27 @@ func (a *App) Governance(store *RoleStore) error {
 // [App.Governance] has not been called.
 func (a *App) RoleStore() *RoleStore {
 	return a.governance
+}
+
+// ToolPolicy returns the required operation string for toolName from
+// smeldr_tool_policies. Returns found=false when no exact-match row exists.
+//
+// This is an exact-match lookup only. The prefix-pattern fallback for
+// runtime-defined content types (T104) is Step 8 — not this method.
+//
+// ToolPolicy is the seam between core and smeldr.dev/mcp: the MCP server
+// calls ToolPolicy to resolve each tool's required operation before calling
+// [RoleStore.Authorized].
+func (s *RoleStore) ToolPolicy(ctx context.Context, toolName string) (requiredOp string, found bool, err error) {
+	var op string
+	err = s.db.QueryRowContext(ctx,
+		`SELECT required_op FROM smeldr_tool_policies WHERE tool_name = ?`, toolName,
+	).Scan(&op)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("smeldr: RoleStore.ToolPolicy: %w", err)
+	}
+	return op, true, nil
 }

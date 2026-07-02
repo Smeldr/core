@@ -313,3 +313,58 @@ Coverage: 96.0%. core v1.49.0.
 Coverage: 96.0%. core v1.50.0.
 
 ---
+
+## A191 — T49 Step 3: Wire Authorized into module role gate + ToolPolicy (v1.51.0)
+
+**Date:** 2026-07-02
+**Status:** Agreed
+**Files:** `governance.go`, `module.go`, `smeldr.go`, `governance_test.go`, `module_test.go`
+
+**Context:**
+T49 Step 3 wires the governance `RoleStore` into `Module[T]`'s role-check call sites (Path A from governance-model.md §7) and exposes `RoleStore.ToolPolicy` as the seam between core and `smeldr.dev/mcp` for per-tool authorization enforcement.
+
+**Decision:**
+
+Three-branch fail-closed architecture (§5.5): when a role-gate method is called, check the state of `Module.roleStore`:
+
+1. `roleStore == nil` — governance not wired; use legacy role-based check (`ctx.User().HasRole(legacyRole)`)
+2. `roleStore != nil && ctx.User().ID == ""` — unauthenticated request; deny immediately (no legacy fallback)
+3. `roleStore != nil && ctx.User().ID != ""` — authenticated; call `RoleStore.Authorized(ctx, ID, op, target)` with fail-closed error semantics (error → false, never fall back to legacy)
+
+Applied to four gate-points:
+
+- `Module[T].canReadDrafts(ctx Context) bool` — gates draft visibility in list filters and single-item reads
+- `Module[T].checkWriteOp(ctx Context, op string, legacyRole Role) bool` — gates create/update/delete operations
+- `Module[T].isVisible(ctx Context, item any) bool` — converted from standalone `isVisible(item any, user User) bool` to a method; Published items are always visible; Draft visibility delegates to `canReadDrafts`
+- All call sites updated: 4 `isVisible` checks, 2 list-handler status-filter branches, 3 write/delete enforcement points
+
+**New exported method:**
+
+- `RoleStore.ToolPolicy(ctx, toolName) (requiredOp string, found bool, err error)` — exact-match lookup in `smeldr_tool_policies` table
+  - `found=false, nil` when no row matches (avoids leaking `ErrNoRows` to caller)
+  - `found=true, requiredOp, nil` when match found
+  - `found=false, "", err` on DB error (fail-closed: caller must deny on error, not assume "no policy")
+  - Seam between core and `smeldr.dev/mcp`: the MCP server calls `ToolPolicy` to resolve tool permissions before invoking the actual tool
+
+**Module injection and wiring:**
+
+- `Module[T]` gains `roleStore *RoleStore` field and `setRoleStore(*RoleStore)` method
+- `App` gains `governanceModules []interface{ setRoleStore(*RoleStore) }` slice; modules register themselves at `App.Content()` time (same pattern as `navTree` registration)
+- `App.Handler()` injects the `RoleStore` (if wired via `App.Governance()`) into all registered modules before returning the HTTP handler
+
+**Deferred:**
+
+- Prefix-pattern fallback for runtime-defined content types (T104) deferred to Step 8
+- Item-level scope (slug→ID resolution for static/dynamic grants) deferred; `AuthTarget` is used at type-level only; documented via TODO comments
+
+**Consequences:**
+- 1 new exported method: `RoleStore.ToolPolicy`
+- 4 new unexported members on `Module[T]`: `roleStore` field, `setRoleStore`, `canReadDrafts`, `checkWriteOp`; `isVisible` converted from package-level func to method
+- New unexported App field: `governanceModules`
+- Apps without governance wired see zero behaviour change (nil `roleStore` → legacy checks pass through)
+- Apps with governance wired: unauthenticated requests (`ID == ""`) are denied; Authorized errors → deny; no legacy fallback after governance is wired
+- 20 new tests; coverage 96.0%
+
+Coverage: 96.0%. core v1.51.0.
+
+---

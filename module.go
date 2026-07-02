@@ -492,6 +492,7 @@ type Module[T any] struct {
 	syncSaveHook      func(context.Context, string, string, any) error  // nil until wired by App.Relations; called sync after save
 	secret            []byte                                            // set by App.Content via setSecret; used for preview token validation
 	db                DB                                                // set by App.Content via setDB; used for transition validation
+	roleStore         *RoleStore                                        // nil unless App.Governance is wired; set by App.Handler via setRoleStore
 	cacheInvalidators []func()                                          // extra invalidation callbacks wired by App.Route for aggregate routes
 	slugCheckers      []func(ctx context.Context, slug string) error    // collision checkers wired by App.Route for aggregate routes
 
@@ -725,6 +726,13 @@ func (m *Module[T]) setSecret(secret []byte) {
 // Called by [App.Content] for every registered module.
 func (m *Module[T]) setDB(db DB) {
 	m.db = db
+}
+
+// setRoleStore injects the application [RoleStore] into the module so that
+// request handlers can call [RoleStore.Authorized] for fine-grained governance
+// checks. Called by [App.Handler] when [App.Governance] has been wired.
+func (m *Module[T]) setRoleStore(store *RoleStore) {
+	m.roleStore = store
 }
 
 // collectStats implements [statsCollector]. It returns item counts per status
@@ -1103,7 +1111,7 @@ func (m *Module[T]) aiDocHandler(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	if !isVisible(item, ctx.User()) {
+	if !m.isVisible(ctx, item) {
 		WriteError(w, r, ErrNotFound)
 		return
 	}
@@ -1318,13 +1326,70 @@ func (m *Module[T]) writeContentCached(w http.ResponseWriter, r *http.Request, c
 
 // — Lifecycle helper ——————————————————————————————————————————————————————
 
+// canReadDrafts reports whether the calling user may see non-published content
+// in this module. When governance is wired it calls [RoleStore.Authorized] with
+// op="read" and fails closed on any error (§5.5). When governance is not wired
+// it falls back to the legacy role-level check [User.HasRole](Author).
+//
+// Three explicit branches — not a single &&-guard — so that "governance wired
+// but no actor ID" (unauthenticated request) is always denied regardless of
+// any future change to [User.HasRole] behaviour for the zero-value User.
+func (m *Module[T]) canReadDrafts(ctx Context) bool {
+	if m.roleStore == nil {
+		// Governance not wired — legacy role-level check.
+		return ctx.User().HasRole(Author)
+	}
+	if ctx.User().ID == "" {
+		// Governance is wired but the request is unauthenticated — no grants possible.
+		return false
+	}
+	// TODO(T49-scope): AuthTarget has no item ID here — the read gate applies at
+	// the content-type level. Static/dynamic scope grants that reference a specific
+	// item ID won't apply until slug→ID resolution is added.
+	ok, err := m.roleStore.Authorized(ctx, ctx.User().ID, "read",
+		AuthTarget{TypeName: m.contentTypeName})
+	if err != nil {
+		return false // fail-closed §5.5
+	}
+	return ok
+}
+
+// checkWriteOp reports whether the calling user may perform op on this module.
+// When governance is wired it calls [RoleStore.Authorized] and fails closed on
+// any error (§5.5). When governance is not wired it falls back to the legacy
+// [User.HasRole](legacyRole) check unchanged.
+//
+// Three explicit branches — not a single &&-guard — so that "governance wired
+// but no actor ID" (unauthenticated request) is always denied regardless of
+// any future change to [User.HasRole] behaviour for the zero-value User.
+func (m *Module[T]) checkWriteOp(ctx Context, op string, legacyRole Role) bool {
+	if m.roleStore == nil {
+		// Governance not wired — legacy role-level check.
+		return ctx.User().HasRole(legacyRole)
+	}
+	if ctx.User().ID == "" {
+		// Governance is wired but the request is unauthenticated — no grants possible.
+		return false
+	}
+	// TODO(T49-scope): AuthTarget has no item ID — operation is checked at the
+	// content-type level. Scoped grants (static/dynamic) that reference a specific
+	// item ID won't apply until slug→ID resolution is added.
+	ok, err := m.roleStore.Authorized(ctx, ctx.User().ID, op,
+		AuthTarget{TypeName: m.contentTypeName})
+	if err != nil {
+		return false // fail-closed §5.5
+	}
+	return ok
+}
+
 // isVisible reports whether item should be visible to the calling user.
-// Guests see only Published content. Authors and above see all statuses.
-func isVisible(item any, user User) bool {
+// Published content is always visible. For non-published content the
+// decision delegates to [canReadDrafts].
+func (m *Module[T]) isVisible(ctx Context, item any) bool {
 	if nodeStatusOf(item) == Published {
 		return true
 	}
-	return user.HasRole(Author)
+	return m.canReadDrafts(ctx)
 }
 
 // — rebuild + debounce helpers ————————————————————————————————————————————
@@ -1496,9 +1561,9 @@ func (m *Module[T]) listHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Lifecycle filter: push status constraint into the repository query.
-	// Guests see only Published; Authors and above see all statuses.
+	// Guests see only Published; Authors and above (or governance-authorized) see all statuses.
 	var statuses []Status
-	if !ctx.User().HasRole(Author) {
+	if !m.canReadDrafts(ctx) {
 		statuses = []Status{Published}
 	}
 	items, err := m.repo.FindAll(ctx, ListOptions{Status: statuses})
@@ -1562,7 +1627,7 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Lifecycle enforcement: non-Published → 404 for Guest.
 	// 404 is intentional — do not leak the existence of non-public content.
-	if !isVisible(item, ctx.User()) {
+	if !m.isVisible(ctx, item) {
 		WriteError(w, r, ErrNotFound)
 		return
 	}
@@ -1621,9 +1686,9 @@ func (m *Module[T]) singleInstanceHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Lifecycle filter: Guests see only Published; Authors and above see all statuses.
+	// Lifecycle filter: Guests see only Published; Authors and above (or governance-authorized) see all statuses.
 	var statuses []Status
-	if !ctx.User().HasRole(Author) {
+	if !m.canReadDrafts(ctx) {
 		statuses = []Status{Published}
 	}
 	items, err := m.repo.FindAll(ctx, ListOptions{Status: statuses})
@@ -1648,7 +1713,7 @@ func (m *Module[T]) singleInstanceHandler(w http.ResponseWriter, r *http.Request
 func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := ContextFrom(w, r)
 
-	if !ctx.User().HasRole(m.writeRole) {
+	if !m.checkWriteOp(ctx, "create", m.writeRole) {
 		WriteError(w, r, ErrForbidden)
 		return
 	}
@@ -1733,7 +1798,7 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := ContextFrom(w, r)
 
-	if !ctx.User().HasRole(m.writeRole) {
+	if !m.checkWriteOp(ctx, "update", m.writeRole) {
 		WriteError(w, r, ErrForbidden)
 		return
 	}
@@ -1834,7 +1899,7 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 func (m *Module[T]) deleteHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := ContextFrom(w, r)
 
-	if !ctx.User().HasRole(m.deleteRole) {
+	if !m.checkWriteOp(ctx, "delete", m.deleteRole) {
 		WriteError(w, r, ErrForbidden)
 		return
 	}
@@ -2335,7 +2400,7 @@ func (m *Module[T]) findAndServe(w http.ResponseWriter, r *http.Request, slug st
 		}
 	}
 
-	if !isVisible(item, ctx.User()) {
+	if !m.isVisible(ctx, item) {
 		return false
 	}
 	ct := m.neg.negotiate(r)
@@ -2359,7 +2424,7 @@ func (m *Module[T]) findAndServeAIDoc(w http.ResponseWriter, r *http.Request, sl
 	if err != nil {
 		return false
 	}
-	if !isVisible(item, ctx.User()) {
+	if !m.isVisible(ctx, item) {
 		return false
 	}
 	head := m.resolveHead(ctx, item)

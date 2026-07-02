@@ -296,7 +296,8 @@ type App struct {
 	auditStore      AuditStore // non-nil when App.Audit() was called
 	auditHandlerReg bool       // true once GET /_audit is registered
 
-	governance *RoleStore // non-nil when App.Governance() was called
+	governance        *RoleStore                              // non-nil when App.Governance() was called
+	governanceModules []interface{ setRoleStore(*RoleStore) } // modules that receive the RoleStore at Handler() time
 
 	logRing        *logRing // non-nil when App.CaptureLogs() was called; backs GET /_logs
 	logsHandlerReg bool     // true once GET /_logs is registered
@@ -597,6 +598,9 @@ func (a *App) Content(v any, opts ...Option) {
 		}
 		if dbs, ok := r.(interface{ setDB(DB) }); ok {
 			dbs.setDB(a.cfg.DB)
+		}
+		if rs, ok := r.(interface{ setRoleStore(*RoleStore) }); ok {
+			a.governanceModules = append(a.governanceModules, rs)
 		}
 		if hk, ok := r.(interface {
 			setAfterHook(func(Context, LifecycleEvent, afterHookMeta, any))
@@ -1325,6 +1329,11 @@ func (a *App) Handler() http.Handler {
 	if a.syncSaveHook != nil {
 		for _, m := range a.syncHookModules {
 			m.setSyncSaveHook(a.syncSaveHook)
+		}
+	}
+	if a.governance != nil {
+		for _, m := range a.governanceModules {
+			m.setRoleStore(a.governance)
 		}
 	}
 	// A34: trigger a one-shot startup rebuild of all derived content (sitemap,

@@ -2087,3 +2087,42 @@ func TestWithAudit_Revoke_AppendError(t *testing.T) {
 		t.Fatal("expected error from Append failure, got nil")
 	}
 }
+
+// --- ToolPolicy tests ---
+
+func TestRoleStore_ToolPolicy_Hit(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	op, found, err := store.ToolPolicy(context.Background(), "create_post")
+	if err != nil {
+		t.Fatalf("ToolPolicy: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true for seeded tool create_post")
+	}
+	if op == "" {
+		t.Error("expected non-empty requiredOp for create_post")
+	}
+}
+
+func TestRoleStore_ToolPolicy_NotFound(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	op, found, err := store.ToolPolicy(context.Background(), "no_such_tool_xyz")
+	if err != nil {
+		t.Fatalf("ToolPolicy: %v", err)
+	}
+	if found {
+		t.Errorf("expected found=false for unknown tool, got op=%q", op)
+	}
+}
+
+func TestRoleStore_ToolPolicy_QueryError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	wrapped := &govQueryRowFailDB{DB: db, failOn: "FROM smeldr_tool_policies"}
+	store := NewRoleStore(wrapped)
+	_, _, err := store.ToolPolicy(context.Background(), "create_post")
+	if err == nil {
+		t.Fatal("expected error from QueryRowContext failure, got nil")
+	}
+}

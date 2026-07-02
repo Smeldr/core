@@ -96,6 +96,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-06-30 | A183 (v1.45.0, T23 Step 10): `type Signal string` renamed to `type LifecycleEvent string` in `signals.go` — frees `Signal` as a content-type name. All constant names unchanged (AfterCreate, AfterPublish, etc.). All function signatures updated across `signals.go`, `audit.go`, `module.go`, `smeldr.go`, `webhook.go`, and 5 test files. `orchestration.go` (new): `Signal`, `Task`, `Decision`, `Amendment` content types (all embed `Node`); `CreateOrchestrationTables(db DB) error` creates 4 SQLite tables (`smeldr_signals`, `smeldr_tasks`, `smeldr_decisions`, `smeldr_amendments`); `RegisterOrchestrationTypes(app *App, db DB)` registers all 4 types with `MCP(MCPRead, MCPWrite)` and 4 custom state flows (fail-open on nil DB); 4 unexported flow builders (`orchSignalFlow` 4 states, `orchTaskFlow` 9 states, `orchDecisionFlow` 5 states, `orchAmendmentFlow` 6 states). 8 tests in `orchestration_test.go`. `smeldr.dev/agent` v0.6.2, `smeldr.dev/social` v0.9.2, `smeldr.dev/mcp` v1.24.2: `smeldr.Signal` → `smeldr.LifecycleEvent` in all consumer files. Coverage: 96.0%. |
 | 2026-06-29 | A176 (v1.44.1, T23 Step 3): `validateTransition` (unexported) added to `state.go` — checks (flow_id, from_state, to_state) in `smeldr_transitions`; falls back to default flow when no custom flow registered; returns `ErrConflict` (409) on disallowed transition; identity transitions (from==to) always pass; nil DB and non-SQLite return nil. `dynamic.go` `DynamicTypeRepo.SetStatus`: calls `validateTransition` after `GetByID`, one DB read; `newSetStatusHandler`: enum switch removed — empty status → 400, disallowed transition → 409 via `errors.Is(ErrConflict)`. `module.go` `Module[T]`: `db DB` (unexported) + `setDB(DB)` — same wiring pattern as `setSecret`; `MCPPublish`/`MCPArchive`/`MCPSchedule` each call `validateTransition` before `setNodeStatus`. `smeldr.go` `App.Content`: type-assertion wire for `setDB`. 12 new tests in `state_test.go`; 1 updated test in `dynamic_app_test.go`. Coverage: 96.0%. |
 | 2026-06-29 | A175 (v1.44.0, T23 Step 2): `state.go` (new) — `StateFlow`, `State`, `Transition` exported types defining a data-driven state machine for a content type; `App.RegisterFlow(StateFlow) error` — idempotent upsert of flow/states/transitions via INSERT OR IGNORE + SELECT id pattern (consistent with `migrateStateFlows`); `validateFlowItems` (unexported) — SQLite-only unknown-state validation: queries sqlite_master for table existence, then `SELECT DISTINCT status NOT IN (...)` against the type's table, returns error listing unknown states or nil when DB is not SQLite or table does not yet exist. 12 tests in `state_test.go`. |
+| 2026-07-02 | A191 (v1.51.0, T49 Step 3): `governance.go` — `RoleStore.ToolPolicy(ctx, toolName) (requiredOp, found, err)` exact-match lookup in `smeldr_tool_policies`; seam between core and smeldr.dev/mcp. `module.go` — `roleStore *RoleStore` field + `setRoleStore(*RoleStore)` wired from App.Handler(); `canReadDrafts(ctx)` 3-branch (nil store → legacy HasRole(Author); store+no ID → deny; store+ID → Authorized); `checkWriteOp(ctx, op, legacyRole)` same 3-branch; `isVisible` converted from standalone func to `(m *Module[T]) isVisible(ctx, item)` method; all role-check call sites updated; §5.5 fail-closed on Authorized error. `smeldr.go` — `governanceModules []interface{setRoleStore(*RoleStore)}` field on App; `App.Content` registers modules; `App.Handler` injects RoleStore into all modules. |
 | 2026-07-02 | A190 (v1.50.0, T49 Step 2.5): `governance.go` — `GovernanceAuditRecord` exported struct (ID, ActorTokenID, Action, TargetKind, TargetID, Before, After JSON strings, CreatedAt); `GovernanceAuditStore` interface (`Append(ctx, GovernanceAuditRecord) error`); `sqlGovernanceAuditStore` + `NewGovernanceAuditStore(db) GovernanceAuditStore`; `CreateGovernanceAuditTable(db) error` — creates `smeldr_governance_audit` + `idx_governance_audit_actor` (opt-in, NOT in migrateGovernance); `RoleStore.WithAudit(actorTokenID string, log GovernanceAuditStore) *RoleStore` — shallow copy with audit wired; `DefineRole`/`Grant`/`Revoke` query before-state, run mutation, then call `auditStore.Append`; fail-closed on Append error (non-atomic — mutation already took effect; callers should verify state on error). 15 new tests; coverage 96.0%. |
 | 2026-07-02 | A189 (v1.49.0, T49 Step 2): `governance.go` extended — `RoleDefinition`, `RoleGrant`, `AuthTarget` exported structs; `RoleStore` + `NewRoleStore(db)`: `DefineRole` (upsert; rejects trust_level=1), `Grant` (WHERE NOT EXISTS for NULL anchor), `Revoke`, `ListGrants`, `Authorized` (pre-collects rows before processing to avoid SQLite nested-connection deadlock; dynamic scope filters `edge_class='asserted' AND (invalid_at IS NULL OR invalid_at > now)`; static scope matches `TypeName+":"+ID` — not slug); `App.Governance(store)` validates `store.db == cfg.DB` then runs `migrateGovernance`; `App.RoleStore()` accessor. `smeldr.go`: `governance *RoleStore` field on `App`. 55 tests; coverage 96.0%. |
 | 2026-07-02 | A188 (v1.48.0, T49 Step 1): `governance.go` (new) — `ScopeMode` type (`ScopeGlobal`/`ScopeStatic`/`ScopeDynamic` constants); `migrateGovernance(ctx, db)` — creates `smeldr_roles`, `smeldr_role_grants`, `smeldr_tool_policies` tables + two indexes (`idx_role_grants_token`, `idx_role_grants_role_anchor`); `seedDefaultRoles` (author/editor/admin, full-word operations JSON arrays, scope_mode='global', trust_level=0); `seedToolPolicies` (one row per built-in MCP tool → required_op word, zero behaviour change); `migrateTokenGrants` (SELECT smeldr_tokens, lookup role, INSERT via WHERE NOT EXISTS guard — SQLite NULL-in-UNIQUE makes INSERT OR IGNORE unreliable for global-scope grants); fail-open in `migrateGovernance` when smeldr_tokens absent. NOT wired into `New()` — opt-in via `App.Governance()` (T49 Step 2). |
@@ -183,7 +184,12 @@ smeldr.dev/
 │                     RoleStore.WithAudit(actorTokenID, log) returns shallow copy with audit wired;
 │                     DefineRole/Grant/Revoke record before/after JSON to GovernanceAuditStore when wired;
 │                     fail-closed on Append error (non-atomic — mutation may have already taken effect);
-│                     (T49 Step 2.5, A190)
+│                     (T49 Step 2.5, A190);
+│                     RoleStore.ToolPolicy(ctx, toolName) (requiredOp string, found bool, err error) —
+│                     exact-match lookup in smeldr_tool_policies; found=false when no row (ErrNoRows);
+│                     seam between core and smeldr.dev/mcp: MCP server calls ToolPolicy then Authorized;
+│                     prefix-pattern fallback for runtime-defined content types deferred to T104 Step 8;
+│                     (T49 Step 3, A191)
 ├── auth.go           AuthFunc interface, BearerHMAC, CookieSession, BasicAuth, AnyAuth, SignToken,
 │                     VerifyBearerToken(r, secret, store *TokenStore);
 │                     TokenRecord, TokenStore, NewTokenStore (Amendment A66);
@@ -202,7 +208,16 @@ smeldr.dev/
                       contextFunc, singleInstance, standalone, apiOnly fields;
                       stoppable interface, stopCh field (Amendment A39);
                       debounce callback uses NewBackgroundContext (Amendment A41);
-                      contextFuncOption, ContextFunc (Amendment A65)
+                      contextFuncOption, ContextFunc (Amendment A65);
+                      db DB field + setDB(DB) wired from App.Content (Amendment A176);
+                      roleStore *RoleStore field + setRoleStore(*RoleStore) wired from App.Handler;
+                      canReadDrafts(ctx) — 3-branch: nil store→legacy HasRole(Author),
+                        store+no-ID→deny, store+ID→Authorized (fail-closed §5.5 on error);
+                      checkWriteOp(ctx, op, legacyRole) — same 3-branch pattern;
+                      isVisible(ctx, item) Module method (was standalone func) — Published always
+                        visible, Draft delegates to canReadDrafts; all 4 call sites updated;
+                      all write/delete gates use checkWriteOp; list-handler status filter uses
+                        canReadDrafts; (T49 Step 3, A191)
 │                     (Markdownable migrated to ai.go — Amendment A11)
 ├── forge.go          Config, MustConfig, New, App (Use/Content/Handle/Run/Handler/SEO),
 │                     Registrator, SEOOption, seoState (robots/ogDefaults/appSchema), httpsRedirect,
@@ -234,7 +249,11 @@ smeldr.dev/
                       dispatch in Handler() (Amendment A101);
                       App.PageMeta(*PageMetaStore) *App, pageMetaStore field,
                       App.GetPageMeta(ctx, path) Head,
-                      setPageMetaStore push loop in Handler() (Amendment A157)
+                      setPageMetaStore push loop in Handler() (Amendment A157);
+                      governanceModules []interface{setRoleStore(*RoleStore)} field;
+                      App.Content registers modules via interface assertion;
+                      App.Handler injects governance.RoleStore into all modules after
+                        navTree/syncHook injection loops (A191, T49 Step 3)
 └── head.go           Head (Title, Description, Author, Published, Modified, Image, Type,
                       Canonical, Tags, Breadcrumbs, Alternates, Social, NoIndex),
                       Image, Breadcrumb, Alternate, Headable, HeadFunc[T], ListHeadFunc[T],
