@@ -368,3 +368,45 @@ Applied to four gate-points:
 Coverage: 96.0%. core v1.51.0.
 
 ---
+
+## A192 — T49 Step 4 (MCP half): unified authoriseTool in smeldr.dev/mcp (v1.26.0)
+
+**Status:** Done  
+**Date:** 2026-07-03  
+**Repo:** smeldr.dev/mcp
+
+**Problem:** `mcp/tool.go` had three hardcoded role-check helpers (`authorise`, `authoriseEditor`,
+`authoriseAdmin`) scattered across ~22 call sites in `handleToolsCall`. These had no knowledge of
+the governance model introduced in A188–A191.
+
+**Decision:** Introduce `authoriseTool(ctx smeldr.Context, toolName string, legacyRole smeldr.Role,
+rs *smeldr.RoleStore) *jsonRPCError` as the single authorisation seam in `smeldr.dev/mcp`.
+Three-branch pattern (§5.5):
+
+1. `rs == nil` — legacy path: `smeldr.HasRole(ctx.User().Roles, legacyRole)`. Exact current
+   behaviour for deployments without governance.
+2. `rs` wired, `ctx.User().ID == ""` — deny (unauthenticated request).
+3. `rs` wired, token ID present — `rs.ToolPolicy(ctx, toolName)` then
+   `rs.Authorized(ctx, ctx.User().ID, requiredOp, smeldr.AuthTarget{})`. Both fail closed on
+   error. `ToolPolicy` not-found also denies (unrecognised tool = no known requirement).
+
+`rs` is passed as a parameter rather than fetched inside the function so test code can inject a
+custom `*smeldr.RoleStore` backed by a failing DB without modifying App internals.
+`handleToolsCall` fetches `rs := s.app.RoleStore()` once at the top of the function.
+
+`found=false` from `ToolPolicy` → deny. Rationale: an unrecognised tool has no known
+authorisation requirement; granting access would mean governance has no coverage of it. The T104
+Step 8 prefix-pattern fallback for runtime-generated tool names is explicitly deferred.
+
+**Removed:** `authorise`, `authoriseEditor`, `authoriseAdmin` — dead after all 22 call sites replaced.
+
+**Consequences:**
+- No behavioural change for any deployment without governance (`rs == nil` path is identical to
+  the removed methods).
+- All 22 call sites in `handleToolsCall` updated uniformly.
+- 8 new tests (`tool_gov_test.go`) covering all paths of `authoriseTool`.
+- `smeldr.dev/core` dep bumped from v1.45.1 to v1.51.0.
+
+Coverage: 96.0%. mcp v1.26.0.
+
+---
