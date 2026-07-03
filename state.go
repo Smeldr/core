@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -307,12 +308,33 @@ func validateFlowItems(ctx context.Context, db DB, flow StateFlow) error {
 // is permitted for the given content type by its registered flow. Returns
 // ErrConflict when the transition is not allowed.
 //
+// validateTransition checks that the transition fromStatus→toStatus is permitted
+// for typeName by the registered state flow. When governance is wired and the
+// transition row carries a required_role, the actor must hold a grant to that role.
+//
+// Two distinct failure zones:
+//
+//   - FAIL-OPEN (structural): DB unavailable, no flow registered, or any error
+//     on the structural queries → returns nil (allow). This preserves backwards
+//     compatibility for deployments without a registered flow.
+//
+//   - FAIL-CLOSED (authorization): the transition exists and carries a
+//     required_role, governance is wired, and the actor's grants are evaluated.
+//     Any DB error during the grant check returns [ErrForbidden] (deny).
+//
+// The actorID parameter carries the token ID of the actor initiating the transition.
+// When actorID is empty the required_role check is skipped — this applies to any
+// caller that does not carry a user in context: system-initiated paths (e.g. batch
+// migrations, test code with plain context.Context, or background jobs that do not
+// pass a smeldr.Context). Only callers that explicitly provide an actorID are
+// subject to governance enforcement.
+//
 // Returns nil when:
 //   - db is nil (no DB configured)
 //   - the database is not SQLite (non-SQLite databases skip flow validation)
 //   - fromStatus == toStatus (identity transition — always allowed for idempotency)
 //   - no flow is registered for typeName and no default flow exists
-func validateTransition(ctx context.Context, db DB, typeName, fromStatus, toStatus string) error {
+func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, typeName, fromStatus, toStatus string) error {
 	if db == nil {
 		return nil
 	}
@@ -338,16 +360,41 @@ func validateTransition(ctx context.Context, db DB, typeName, fromStatus, toStat
 			return nil // no flow registered — no validation
 		}
 	}
-	// Check whether the transition exists in smeldr_transitions.
-	var count int
-	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM smeldr_transitions WHERE flow_id = ? AND from_state = ? AND to_state = ?`,
+
+	// ── FAIL-OPEN structural boundary ────────────────────────────────────────
+	// Fetch the transition row. required_role may be NULL (no gate) or a role name.
+	var requiredRole sql.NullString
+	err = db.QueryRowContext(ctx,
+		`SELECT required_role FROM smeldr_transitions WHERE flow_id = ? AND from_state = ? AND to_state = ?`,
 		flowID, fromStatus, toStatus,
-	).Scan(&count); err != nil {
+	).Scan(&requiredRole)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: transition %s→%s is not permitted for type %q", ErrConflict, fromStatus, toStatus, typeName)
+	}
+	if err != nil {
 		return nil // query failed — fail open rather than blocking all transitions
 	}
-	if count == 0 {
-		return fmt.Errorf("%w: transition %s→%s is not permitted for type %q", ErrConflict, fromStatus, toStatus, typeName)
+
+	// ── FAIL-CLOSED authorization boundary ───────────────────────────────────
+	if !requiredRole.Valid || requiredRole.String == "" {
+		return nil // no role gate on this transition
+	}
+	if rs == nil {
+		return nil // governance not wired — skip required_role check
+	}
+	if actorID == "" {
+		// Any caller without an actor in context (system paths, plain
+		// context.Context, background jobs) is treated as pre-authorized.
+		return nil
+	}
+	ok, err := rs.RoleGranted(ctx, actorID, requiredRole.String, AuthTarget{})
+	if err != nil {
+		return fmt.Errorf("%w: transition %s→%s requires role %q: %s",
+			ErrForbidden, fromStatus, toStatus, requiredRole.String, err)
+	}
+	if !ok {
+		return fmt.Errorf("%w: transition %s→%s requires role %q",
+			ErrForbidden, fromStatus, toStatus, requiredRole.String)
 	}
 	return nil
 }

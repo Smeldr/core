@@ -137,14 +137,19 @@ smeldr.dev/
 ├── state.go          StateFlow, State, Transition — data-driven state machine types;
 │                     ConflictPolicy type (ConflictReject, ConflictSupersede constants);
 │                     StateFlow.ActiveState + StateFlow.ConflictPolicy optional fields;
+│                     Transition.RequiredRole string — optional role name gate;
 │                     App.RegisterFlow(StateFlow) error — idempotent upsert (INSERT OR
 │                     IGNORE + SELECT id + UPDATE conflict fields); validateFlowItems
 │                     (unexported) — SQLite-only unknown-state check; validateTransition
-│                     (unexported) — checks (flow_id, from, to); applyConflictPolicy
+│                     (ctx, db, rs *RoleStore, actorID, typeName, from, to) — dual-zone:
+│                     fail-open zone (structural: nil DB, non-SQLite, no flow, query error);
+│                     fail-closed zone (authorization: required_role set, rs wired,
+│                     actorID non-empty → RoleGranted; error or !ok → ErrForbidden;
+│                     rs==nil or actorID=="" → skip check, allow); applyConflictPolicy
 │                     (unexported) — ConflictReject/ConflictSupersede enforcement after
 │                     validateTransition; conflictRejectCheck, conflictSupersede,
 │                     conflictIDs (unexported helpers); all DB errors fail-open
-│                     (Amendments A175, A176, A186, T23)
+│                     (Amendments A175, A176, A186, T23, A193)
 ├── audit.go          AuditRecord, AuditFilter, AuditStore interface, NewAuditStore(DB), CreateAuditTable(DB),
 │                     newAuditHandler (unexported); GET /_audit mounted by App.Handler() (Amendment A97)
 ├── blocks.go          DynamicNode (embeds Node; TypeName, Fields json.RawMessage) + Head(),
@@ -189,7 +194,16 @@ smeldr.dev/
 │                     exact-match lookup in smeldr_tool_policies; found=false when no row (ErrNoRows);
 │                     seam between core and smeldr.dev/mcp: MCP server calls ToolPolicy then Authorized;
 │                     prefix-pattern fallback for runtime-defined content types deferred to T104 Step 8;
-│                     (T49 Step 3, A191)
+│                     (T49 Step 3, A191);
+│                     RoleStore.RoleGranted(ctx, tokenID, roleName, target) (bool, error) — Path B:
+│                     name-based role lookup (vs Authorized's Path A operation-word lookup);
+│                     same three scope modes (global/static/dynamic) and fail-closed §5.5 semantics;
+│                     used by validateTransition to gate Transition.RequiredRole;
+│                     DynamicTypeRepo.rs *RoleStore field + WithGovernance(rs *RoleStore) *DynamicTypeRepo
+│                     shallow-copy method — wires governance into DynamicTypeRepo.SetStatus;
+│                     SetStatus extracts actorID via local smeldrCtxAccessor interface (User() User);
+│                     plain context.Context callers get actorID="" → skip check;
+│                     (T49 Step 4, A193)
 ├── auth.go           AuthFunc interface, BearerHMAC, CookieSession, BasicAuth, AnyAuth, SignToken,
 │                     VerifyBearerToken(r, secret, store *TokenStore);
 │                     TokenRecord, TokenStore, NewTokenStore (Amendment A66);

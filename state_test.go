@@ -400,7 +400,7 @@ func (d *flowIDDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql
 
 func TestValidateTransition_nilDB(t *testing.T) {
 	ctx := context.Background()
-	if err := validateTransition(ctx, nil, "Post", "draft", "published"); err != nil {
+	if err := validateTransition(ctx, nil, nil, "", "Post", "draft", "published"); err != nil {
 		t.Errorf("nil db: want nil, got %v", err)
 	}
 }
@@ -410,7 +410,7 @@ func TestValidateTransition_nonSQLite(t *testing.T) {
 	// → sqlite_master probe returns error → validateTransition returns nil.
 	ctx := context.Background()
 	db := &failOnNthExecDB{failAt: 999} // exec never fails; query always returns no-row
-	if err := validateTransition(ctx, db, "Post", "draft", "published"); err != nil {
+	if err := validateTransition(ctx, db, nil, "", "Post", "draft", "published"); err != nil {
 		t.Errorf("non-SQLite: want nil, got %v", err)
 	}
 }
@@ -422,7 +422,7 @@ func TestValidateTransition_identity(t *testing.T) {
 		t.Fatalf("migrateStateFlows: %v", err)
 	}
 	// Same from/to status is always allowed regardless of any registered flow.
-	if err := validateTransition(ctx, db, "Post", "published", "published"); err != nil {
+	if err := validateTransition(ctx, db, nil, "", "Post", "published", "published"); err != nil {
 		t.Errorf("identity transition: want nil, got %v", err)
 	}
 }
@@ -438,7 +438,7 @@ func TestValidateTransition_customFlow_valid(t *testing.T) {
 		t.Fatalf("RegisterFlow: %v", err)
 	}
 	// draft→published is in agentJobFlow.
-	if err := validateTransition(ctx, db, "AgentJob", "draft", "published"); err != nil {
+	if err := validateTransition(ctx, db, nil, "", "AgentJob", "draft", "published"); err != nil {
 		t.Errorf("valid custom-flow transition: want nil, got %v", err)
 	}
 }
@@ -454,7 +454,7 @@ func TestValidateTransition_customFlow_invalid(t *testing.T) {
 		t.Fatalf("RegisterFlow: %v", err)
 	}
 	// draft→archived is NOT in agentJobFlow.
-	err := validateTransition(ctx, db, "AgentJob", "draft", "archived")
+	err := validateTransition(ctx, db, nil, "", "AgentJob", "draft", "archived")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("invalid custom-flow transition: want ErrConflict, got %v", err)
 	}
@@ -468,7 +468,7 @@ func TestValidateTransition_defaultFlow_valid(t *testing.T) {
 	}
 	// No custom flow registered for "GenericPost" → falls back to default flow.
 	// Default flow includes draft→published.
-	if err := validateTransition(ctx, db, "GenericPost", "draft", "published"); err != nil {
+	if err := validateTransition(ctx, db, nil, "", "GenericPost", "draft", "published"); err != nil {
 		t.Errorf("valid default-flow transition: want nil, got %v", err)
 	}
 }
@@ -480,7 +480,7 @@ func TestValidateTransition_defaultFlow_invalid(t *testing.T) {
 		t.Fatalf("migrateStateFlows: %v", err)
 	}
 	// No custom flow → falls back to default. archived→draft is not in default flow.
-	err := validateTransition(ctx, db, "GenericPost", "archived", "draft")
+	err := validateTransition(ctx, db, nil, "", "GenericPost", "archived", "draft")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("invalid default-flow transition: want ErrConflict, got %v", err)
 	}
@@ -496,24 +496,26 @@ func TestValidateTransition_noFlow(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `DELETE FROM smeldr_state_flows`); err != nil {
 		t.Fatalf("delete flows: %v", err)
 	}
-	if err := validateTransition(ctx, db, "GenericPost", "draft", "published"); err != nil {
+	if err := validateTransition(ctx, db, nil, "", "GenericPost", "draft", "published"); err != nil {
 		t.Errorf("no flow: want nil, got %v", err)
 	}
 }
 
-func TestValidateTransition_countQueryError(t *testing.T) {
-	// transitFailDB returns a valid SQLite-probe result (count=0), a valid flowID (42)
-	// for the flow lookup, but fails the COUNT(*) FROM smeldr_transitions query.
-	// validateTransition must fail open (return nil) when the count query errors.
+func TestValidateTransition_transitionQueryError(t *testing.T) {
+	// transitFailDB returns a valid SQLite-probe result (count=0) and a valid flowID,
+	// but fails the SELECT required_role FROM smeldr_transitions query with a real error
+	// (not sql.ErrNoRows — that would mean "transition not found" → ErrConflict).
+	// validateTransition must fail open (return nil) when the transitions query errors.
 	ctx := context.Background()
 	db := &transitFailDB{}
-	if err := validateTransition(ctx, db, "Post", "draft", "published"); err != nil {
-		t.Errorf("count query error: want nil (fail open), got %v", err)
+	if err := validateTransition(ctx, db, nil, "", "Post", "draft", "published"); err != nil {
+		t.Errorf("transitions query error: want nil (fail open), got %v", err)
 	}
 }
 
 // transitFailDB simulates a DB that passes the sqlite_master probe and flow lookup
-// but fails the smeldr_transitions COUNT query. It tracks query order by SQL prefix.
+// but fails the smeldr_transitions SELECT required_role query with a real non-ErrNoRows
+// error, exercising the fail-open path in validateTransition.
 type transitFailDB struct{}
 
 func (d *transitFailDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
@@ -524,7 +526,7 @@ func (d *transitFailDB) QueryContext(_ context.Context, _ string, _ ...any) (*sq
 }
 func (d *transitFailDB) QueryRowContext(ctx context.Context, query string, _ ...any) *sql.Row {
 	if strings.HasPrefix(query, "SELECT COUNT(*) FROM sqlite_master") {
-		// sqlite_master probe — return count=0 to LifecycleEvent SQLite.
+		// sqlite_master probe — return count=0 to signal SQLite.
 		conn := &guardRowConn{val: int64(0)}
 		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
 	}
@@ -533,9 +535,31 @@ func (d *transitFailDB) QueryRowContext(ctx context.Context, query string, _ ...
 		conn := &guardRowConn{val: int64(1)}
 		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
 	}
-	// All other queries (smeldr_transitions COUNT) — return no row → scan error.
-	conn := &guardRowConn{noRow: true}
-	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+	// SELECT required_role FROM smeldr_transitions — return a real driver error
+	// (not ErrNoRows, which would mean "transition not found" → ErrConflict).
+	return sql.OpenDB(&queryErrConnector{err: errors.New("simulated transitions query error")}).QueryRowContext(ctx, "SELECT v")
+}
+
+// queryErrConnector is a sql.Connector whose Prepare-time query always returns an
+// error, causing sql.Row.Scan to return that error (not sql.ErrNoRows).
+type queryErrConnector struct{ err error }
+
+func (c *queryErrConnector) Connect(_ context.Context) (driver.Conn, error) {
+	return &queryErrDriverConn{err: c.err}, nil
+}
+func (c *queryErrConnector) Driver() driver.Driver { return dummyDriver{} }
+
+type queryErrDriverConn struct{ err error }
+
+func (c *queryErrDriverConn) Prepare(_ string) (driver.Stmt, error) { return c, nil }
+func (c *queryErrDriverConn) Close() error                          { return nil }
+func (c *queryErrDriverConn) Begin() (driver.Tx, error)             { return nil, nil }
+func (c *queryErrDriverConn) NumInput() int                         { return -1 }
+func (c *queryErrDriverConn) Exec(_ []driver.Value) (driver.Result, error) {
+	return nil, nil
+}
+func (c *queryErrDriverConn) Query(_ []driver.Value) (driver.Rows, error) {
+	return nil, c.err
 }
 
 // — Module[T] integration tests for validateTransition ————————————————————————
@@ -2418,4 +2442,147 @@ func (d *evalQueueInsertFailDB) ExecContext(ctx context.Context, q string, args 
 		return nil, errors.New("simulated INSERT fail")
 	}
 	return d.DB.ExecContext(ctx, q, args...)
+}
+
+// — validateTransition required_role tests ————————————————————————————————————
+
+// setupGovStateDB creates a SQLite DB with governance tables, state flow tables,
+// and a "GovPost" flow where draft→published requires the "editor" role.
+func setupGovStateDB(t *testing.T) (*sql.DB, *RoleStore) {
+	t.Helper()
+	db := setupGovernanceDB(t) // governance tables + seeded default roles
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "govpost-flow",
+		TypeName: "GovPost",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published"},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "published", RequiredRole: "editor"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	return db, NewRoleStore(db)
+}
+
+func TestValidateTransition_RequiredRole_NilRS(t *testing.T) {
+	db, _ := setupGovStateDB(t)
+	if err := validateTransition(context.Background(), db, nil, "tok", "GovPost", "draft", "published"); err != nil {
+		t.Errorf("nil RoleStore: want nil, got %v", err)
+	}
+}
+
+func TestValidateTransition_RequiredRole_EmptyActor(t *testing.T) {
+	db, rs := setupGovStateDB(t)
+	if err := validateTransition(context.Background(), db, rs, "", "GovPost", "draft", "published"); err != nil {
+		t.Errorf("empty actorID (system path): want nil, got %v", err)
+	}
+}
+
+func TestValidateTransition_RequiredRole_Granted(t *testing.T) {
+	db, rs := setupGovStateDB(t)
+	tokenID := setupTokenWithRole(t, db, rs, "editor")
+	if err := validateTransition(context.Background(), db, rs, tokenID, "GovPost", "draft", "published"); err != nil {
+		t.Errorf("authorized editor: want nil, got %v", err)
+	}
+}
+
+func TestValidateTransition_RequiredRole_NotGranted(t *testing.T) {
+	db, rs := setupGovStateDB(t)
+	tokenID := setupTokenWithRole(t, db, rs, "author") // author does not have editor role
+	err := validateTransition(context.Background(), db, rs, tokenID, "GovPost", "draft", "published")
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("unauthorized actor: want ErrForbidden, got %v", err)
+	}
+}
+
+func TestValidateTransition_RequiredRole_GrantCheckError(t *testing.T) {
+	db, _ := setupGovStateDB(t)
+	// Structural queries go through real db; grants query goes through wrapped db (fails).
+	wrapped := &govQueryFailDB{DB: db, failOn: "FROM smeldr_role_grants g"}
+	rs := NewRoleStore(wrapped)
+	err := validateTransition(context.Background(), db, rs, "tok", "GovPost", "draft", "published")
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("grant query error: want ErrForbidden (fail-closed), got %v", err)
+	}
+}
+
+// — DynamicTypeRepo.WithGovernance + SetStatus tests ——————————————————————————
+
+// setupGovStateBlockDB extends setupGovStateDB with block tables for DynamicTypeRepo
+// and a "govrecipe" flow where draft→published requires the "editor" role.
+func setupGovStateBlockDB(t *testing.T) (*sql.DB, *RoleStore) {
+	t.Helper()
+	db, rs := setupGovStateDB(t)
+	if err := CreateBlockTables(db); err != nil {
+		t.Fatalf("CreateBlockTables: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "govrecipe-flow",
+		TypeName: "govrecipe",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published"},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "published", RequiredRole: "editor"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow (govrecipe): %v", err)
+	}
+	return db, rs
+}
+
+// TestDynamicTypeRepo_WithGovernance_PlainCtx verifies that a plain context.Context
+// (no User) bypasses the required_role check — system-initiated paths are pre-authorized.
+func TestDynamicTypeRepo_WithGovernance_PlainCtx(t *testing.T) {
+	db, rs := setupGovStateBlockDB(t)
+	repo := NewDynamicTypeRepo(db, "govrecipe", nil).WithGovernance(rs)
+	node, err := repo.CreateDraft(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	if err := repo.SetStatus(context.Background(), node.ID, Published); err != nil {
+		t.Errorf("plain ctx (system path): want nil, got %v", err)
+	}
+}
+
+// TestDynamicTypeRepo_WithGovernance_Authorized verifies that an actor holding the
+// required "editor" role may perform the transition.
+func TestDynamicTypeRepo_WithGovernance_Authorized(t *testing.T) {
+	db, rs := setupGovStateBlockDB(t)
+	tokenID := setupTokenWithRole(t, db, rs, "editor")
+	repo := NewDynamicTypeRepo(db, "govrecipe", nil).WithGovernance(rs)
+	node, err := repo.CreateDraft(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	ctx := NewTestContext(User{ID: tokenID})
+	if err := repo.SetStatus(ctx, node.ID, Published); err != nil {
+		t.Errorf("authorized editor: want nil, got %v", err)
+	}
+}
+
+// TestDynamicTypeRepo_WithGovernance_Forbidden verifies that an actor lacking the
+// required role receives ErrForbidden when performing a gated transition.
+func TestDynamicTypeRepo_WithGovernance_Forbidden(t *testing.T) {
+	db, rs := setupGovStateBlockDB(t)
+	tokenID := setupTokenWithRole(t, db, rs, "author") // author does not satisfy "editor"
+	repo := NewDynamicTypeRepo(db, "govrecipe", nil).WithGovernance(rs)
+	node, err := repo.CreateDraft(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	ctx := NewTestContext(User{ID: tokenID})
+	if err := repo.SetStatus(ctx, node.ID, Published); !errors.Is(err, ErrForbidden) {
+		t.Errorf("unauthorized actor: want ErrForbidden, got %v", err)
+	}
 }

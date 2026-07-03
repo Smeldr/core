@@ -21,12 +21,26 @@ type DynamicTypeRepo struct {
 	db       DB
 	typeName string
 	schema   *ContentTypeSchema // used for title-Role slug generation; may be nil
+	rs       *RoleStore         // nil unless WithGovernance was called
 }
 
 // NewDynamicTypeRepo returns a DynamicTypeRepo bound to the given type name.
 // schema may be nil; when non-nil its title-Role field drives auto-slug generation.
 func NewDynamicTypeRepo(db DB, typeName string, schema *ContentTypeSchema) *DynamicTypeRepo {
 	return &DynamicTypeRepo{db: db, typeName: typeName, schema: schema}
+}
+
+// WithGovernance returns a shallow copy of r configured to enforce required_role
+// checks on [DynamicTypeRepo.SetStatus]. Pass nil to obtain a copy without
+// governance enforcement (identical to the default state).
+//
+// When the caller does not provide a smeldr.Context (e.g. system-initiated code
+// using a plain context.Context), the actorID is empty and the required_role
+// check is skipped, matching the behaviour of any other non-authenticated caller.
+func (r *DynamicTypeRepo) WithGovernance(rs *RoleStore) *DynamicTypeRepo {
+	cp := *r
+	cp.rs = rs
+	return &cp
 }
 
 // CreateDraft inserts a new DynamicNode with status Draft. The slug is derived
@@ -180,12 +194,26 @@ func (r *DynamicTypeRepo) UpdateFields(ctx context.Context, id string, patch map
 // SetStatus transitions the node to the given status. When transitioning to
 // Published and PublishedAt is zero, it is set to the current UTC time.
 // The transition is validated against the registered flow before the update is applied.
+//
+// When [WithGovernance] has been called and the transition carries a required_role,
+// the actor's token ID is extracted from ctx if it implements the smeldr.Context
+// interface. Callers that pass a plain context.Context (system-initiated paths)
+// get an empty actorID, which skips the required_role check.
 func (r *DynamicTypeRepo) SetStatus(ctx context.Context, id string, status Status) error {
 	node, err := r.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := validateTransition(ctx, r.db, r.typeName, string(node.Status), string(status)); err != nil {
+	// Extract actor ID if ctx carries a smeldr.Context (MCP request path).
+	// Plain context.Context (system-initiated paths) → actorID "" → skip required_role.
+	type smeldrCtxAccessor interface {
+		User() User
+	}
+	actorID := ""
+	if sc, ok := ctx.(smeldrCtxAccessor); ok {
+		actorID = sc.User().ID
+	}
+	if err := validateTransition(ctx, r.db, r.rs, actorID, r.typeName, string(node.Status), string(status)); err != nil {
 		return err
 	}
 	if err := applyConflictPolicy(ctx, r.db, nil, r.typeName, string(status), id); err != nil {

@@ -2126,3 +2126,318 @@ func TestRoleStore_ToolPolicy_QueryError(t *testing.T) {
 		t.Fatal("expected error from QueryRowContext failure, got nil")
 	}
 }
+
+// --- RoleGranted tests ---
+
+func TestRoleGranted_GlobalScope_Pass(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	// "editor" is seeded as a global-scope role by migrateGovernance.
+	tokenID := setupTokenWithRole(t, db, store, "editor")
+	ok, err := store.RoleGranted(context.Background(), tokenID, "editor", AuthTarget{})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if !ok {
+		t.Error("expected true for global-scope editor role grant")
+	}
+}
+
+func TestRoleGranted_NoGrant(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ok, err := store.RoleGranted(context.Background(), NewID(), "editor", AuthTarget{})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if ok {
+		t.Error("expected false for token with no grants")
+	}
+}
+
+func TestRoleGranted_WrongRoleName(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	// Token holds "author" grant — checking for "editor" must return false.
+	tokenID := setupTokenWithRole(t, db, store, "author")
+	ok, err := store.RoleGranted(context.Background(), tokenID, "editor", AuthTarget{})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if ok {
+		t.Error("expected false: token has 'author' grant, not 'editor'")
+	}
+}
+
+func TestRoleGranted_StaticScope_Pass(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	itemID := NewID()
+
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "post-author", Operations: []string{"update"}, ScopeMode: ScopeStatic,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "post-author",
+		ScopeStatic: []string{"post:" + itemID},
+	}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	ok, err := store.RoleGranted(ctx, tokenID, "post-author", AuthTarget{TypeName: "post", ID: itemID})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if !ok {
+		t.Error("expected true: exact static scope match")
+	}
+}
+
+func TestRoleGranted_StaticScope_Miss(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	allowedID := NewID()
+
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "post-reviewer", Operations: []string{"update"}, ScopeMode: ScopeStatic,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "post-reviewer",
+		ScopeStatic: []string{"post:" + allowedID},
+	}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	// Different item ID — should not match.
+	ok, err := store.RoleGranted(ctx, tokenID, "post-reviewer", AuthTarget{TypeName: "post", ID: NewID()})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if ok {
+		t.Error("expected false: item ID does not match static scope")
+	}
+}
+
+func TestRoleGranted_QueryError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	wrapped := &govQueryFailDB{DB: db, failOn: "FROM smeldr_role_grants g"}
+	store := NewRoleStore(wrapped)
+	if _, err := store.RoleGranted(ctx, NewID(), "editor", AuthTarget{}); err == nil {
+		t.Fatal("expected error from failing grants query")
+	}
+}
+
+func TestRoleGranted_StaticScope_Wildcard(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "post-wildcard", Operations: []string{"update"}, ScopeMode: ScopeStatic,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "post-wildcard",
+		ScopeStatic: []string{"post:*"},
+	}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	// Any post ID should match the wildcard.
+	ok, err := store.RoleGranted(ctx, tokenID, "post-wildcard", AuthTarget{TypeName: "post", ID: NewID()})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if !ok {
+		t.Error("expected true for wildcard static match")
+	}
+	// Different type — should not match.
+	ok2, err := store.RoleGranted(ctx, tokenID, "post-wildcard", AuthTarget{TypeName: "essay", ID: NewID()})
+	if err != nil {
+		t.Fatalf("RoleGranted (type mismatch): %v", err)
+	}
+	if ok2 {
+		t.Error("expected false: wildcard type mismatch")
+	}
+}
+
+func TestRoleGranted_Dynamic_Pass(t *testing.T) {
+	db := setupGovernanceDB(t)
+	setupRelationsTable(t, db)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	anchorID := NewID()
+	itemID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_relations
+			(id, source_id, target_id, relation_kind, edge_class, attributes, created_at, updated_at)
+			VALUES (?, ?, ?, 'part-of', 'asserted', '{}', datetime('now'), datetime('now'))`,
+		NewID(), itemID, anchorID,
+	); err != nil {
+		t.Fatalf("insert relation: %v", err)
+	}
+
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "section-owner", Operations: []string{"update"},
+		ScopeMode: ScopeDynamic, ScopeRelationKind: "part-of", ScopeDirection: "incoming",
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "section-owner", ScopeAnchorID: anchorID,
+	}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	ok, err := store.RoleGranted(ctx, tokenID, "section-owner", AuthTarget{ID: itemID})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if !ok {
+		t.Error("expected true: item has incoming part-of to anchor")
+	}
+}
+
+func TestRoleGranted_Dynamic_Miss(t *testing.T) {
+	db := setupGovernanceDB(t)
+	setupRelationsTable(t, db)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	anchorID := NewID()
+
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "area-owner", Operations: []string{"update"},
+		ScopeMode: ScopeDynamic, ScopeRelationKind: "part-of", ScopeDirection: "incoming",
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "area-owner", ScopeAnchorID: anchorID,
+	}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	// Item has no relation to anchor — should not match.
+	ok, err := store.RoleGranted(ctx, tokenID, "area-owner", AuthTarget{ID: NewID()})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if ok {
+		t.Error("expected false: no relation between item and anchor")
+	}
+}
+
+func TestRoleGranted_Dynamic_EmptyTarget(t *testing.T) {
+	db := setupGovernanceDB(t)
+	setupRelationsTable(t, db)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	anchorID := NewID()
+
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "node-owner", Operations: []string{"update"},
+		ScopeMode: ScopeDynamic, ScopeRelationKind: "part-of", ScopeDirection: "incoming",
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "node-owner", ScopeAnchorID: anchorID,
+	}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	// Empty target.ID — dynamic scope cannot resolve, should be false, nil.
+	ok, err := store.RoleGranted(ctx, tokenID, "node-owner", AuthTarget{})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if ok {
+		t.Error("expected false when target.ID is empty")
+	}
+}
+
+func TestRoleGranted_Dynamic_PendingError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	setupRelationsTable(t, db)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	anchorID := NewID()
+
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "pend-err-role", Operations: []string{"update"},
+		ScopeMode: ScopeDynamic, ScopeRelationKind: "part-of", ScopeDirection: "incoming",
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "pend-err-role", ScopeAnchorID: anchorID,
+	}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	// Wrap DB so smeldr_relations query fails — pendingErr is surfaced.
+	wrapped := &govQueryRowFailDB{DB: db, failOn: "FROM smeldr_relations"}
+	storeWrapped := NewRoleStore(wrapped)
+
+	ok, err := storeWrapped.RoleGranted(ctx, tokenID, "pend-err-role", AuthTarget{ID: NewID()})
+	if err == nil {
+		t.Fatal("expected error when dynamic relation query fails")
+	}
+	if ok {
+		t.Error("expected false")
+	}
+}
+
+func TestRoleGranted_StaticScope_MalformedJSON(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "bad-static", Operations: []string{"update"}, ScopeMode: ScopeStatic,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	grantID, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "bad-static",
+		ScopeStatic: []string{"post:abc"},
+	})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	// Corrupt scope_static to invalid JSON.
+	if _, err := db.ExecContext(ctx,
+		`UPDATE smeldr_role_grants SET scope_static = 'NOT JSON' WHERE id = ?`, grantID,
+	); err != nil {
+		t.Fatalf("corrupt scope_static: %v", err)
+	}
+
+	// Malformed row is skipped (continue) — returns false, nil.
+	ok, err := store.RoleGranted(ctx, tokenID, "bad-static", AuthTarget{TypeName: "post", ID: "abc"})
+	if err != nil {
+		t.Fatalf("RoleGranted with malformed JSON: %v", err)
+	}
+	if ok {
+		t.Error("expected false: malformed scope_static skipped")
+	}
+}

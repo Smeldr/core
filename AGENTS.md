@@ -445,6 +445,7 @@ These tools are available when `App.Config().DB` is non-nil (any app with a data
 - `conflict_policy`: `"reject"` returns `ErrConflict` (-32603) when another item is already in `active_state`; `"supersede"` transitions conflicting items to "superseded" before proceeding; both policies fail-open on DB error (transition is not blocked)
 - `type_name` is required for `define_state_flow` (the default flow is seeded at startup, not via MCP)
 - `transition_item` calls `DynamicTypeRepo.SetStatus` which runs `validateTransition` internally — the same validation used by all status-change paths in the HTTP layer
+- `required_role` on a transition is enforced when `App.Governance` is wired: the actor's token must hold a grant to that exact role name; fail-closed on error → -32001; when governance is not wired the field is stored but not enforced
 - `get_valid_transitions` queries `smeldr_state_flows` directly for the custom flow registered for `type_name`, falling back to the default flow if none is registered
 - The default flow (draft → scheduled/published/archived, scheduled → published, published → archived) is always present when a DB is configured
 

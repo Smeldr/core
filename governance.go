@@ -835,7 +835,8 @@ func (s *RoleStore) ListGrants(ctx context.Context, tokenID string) ([]RoleGrant
 	return out, nil
 }
 
-// authorizedGrant is the per-row data scanned from the grants+roles join.
+// authorizedGrant is the per-row data scanned from the grants+roles join for
+// [RoleStore.Authorized] (Path A — operation-word lookup).
 type authorizedGrant struct {
 	staticJSON string
 	anchorID   sql.NullString
@@ -939,6 +940,108 @@ func (s *RoleStore) Authorized(ctx context.Context, tokenID, op string, target A
 	}
 	if pendingErr != nil {
 		return false, fmt.Errorf("smeldr: Authorized: dynamic scope: %w", pendingErr)
+	}
+	return false, nil
+}
+
+// roleNameGrant is the per-row data scanned from the grants+roles join for
+// [RoleStore.RoleGranted] (Path B — role-name lookup). Unlike [authorizedGrant]
+// it does not include the operations JSON column because the name filter in
+// the query is the authorization signal, not the operations array.
+type roleNameGrant struct {
+	staticJSON string
+	anchorID   sql.NullString
+	scopeMode  string
+	relKind    sql.NullString
+	relDir     sql.NullString
+}
+
+// RoleGranted reports whether the token identified by tokenID holds a grant to
+// the role with the exact name roleName, with scope covering target.
+//
+// This is Path B from T49 §7: named-role gates on arbitrary custom transitions.
+// [Authorized] (Path A) checks operation words; RoleGranted checks role names.
+// Both paths terminate in the same two tables (smeldr_roles, smeldr_role_grants)
+// with two different lookup keys — one authority model, two entry points.
+//
+// The scope logic is identical to [Authorized]: global grants always match;
+// static grants match when target.TypeName+":"+target.ID fits a pattern in
+// scope_static; dynamic grants match when target.ID is one hop from the grant's
+// scope_anchor_id via the role's relation kind and direction. Pass a zero
+// [AuthTarget] for operations with no specific target (e.g. transition gates
+// that are global in scope; item-level scope is deferred).
+//
+// Returns (false, nil) when the token holds no matching grant.
+// Returns (false, err) on any DB error — fail-closed per §5.5.
+func (s *RoleStore) RoleGranted(ctx context.Context, tokenID, roleName string, target AuthTarget) (bool, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT g.scope_static, g.scope_anchor_id, r.scope_mode, r.scope_relation_kind, r.scope_direction
+		   FROM smeldr_role_grants g
+		   JOIN smeldr_roles r ON r.id = g.role_id
+		  WHERE g.token_id = ? AND r.name = ?`, tokenID, roleName)
+	if err != nil {
+		return false, fmt.Errorf("smeldr: RoleGranted: query grants: %w", err)
+	}
+
+	// Collect all rows before closing — SQLite allows only one active
+	// statement per connection, so relationExists must not be called while rows
+	// is still open.
+	var grants []roleNameGrant
+	for rows.Next() {
+		var g roleNameGrant
+		if err := rows.Scan(&g.staticJSON, &g.anchorID, &g.scopeMode, &g.relKind, &g.relDir); err != nil {
+			rows.Close()
+			return false, fmt.Errorf("smeldr: RoleGranted: scan: %w", err)
+		}
+		grants = append(grants, g)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return false, fmt.Errorf("smeldr: RoleGranted: rows: %w", err)
+	}
+	rows.Close()
+
+	var pendingErr error
+	for _, g := range grants {
+		switch ScopeMode(g.scopeMode) {
+		case ScopeGlobal:
+			return true, nil
+
+		case ScopeStatic:
+			var patterns []string
+			if err := json.Unmarshal([]byte(g.staticJSON), &patterns); err != nil {
+				continue // malformed static list — skip
+			}
+			key := target.TypeName + ":" + target.ID
+			for _, p := range patterns {
+				if p == key {
+					return true, nil
+				}
+				// "type:*" wildcard — matches any id of that type
+				if strings.HasSuffix(p, ":*") {
+					prefix := strings.TrimSuffix(p, ":*")
+					if prefix == target.TypeName {
+						return true, nil
+					}
+				}
+			}
+
+		case ScopeDynamic:
+			if !g.anchorID.Valid || g.anchorID.String == "" || target.ID == "" {
+				continue // can't resolve without both ends
+			}
+			matched, err := s.relationExists(ctx, g.relKind.String, g.relDir.String, target.ID, g.anchorID.String)
+			if err != nil {
+				pendingErr = err
+				continue // don't abort — check remaining grants
+			}
+			if matched {
+				return true, nil
+			}
+		}
+	}
+	if pendingErr != nil {
+		return false, fmt.Errorf("smeldr: RoleGranted: dynamic scope: %w", pendingErr)
 	}
 	return false, nil
 }

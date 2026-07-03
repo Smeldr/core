@@ -410,3 +410,47 @@ Step 8 prefix-pattern fallback for runtime-generated tool names is explicitly de
 Coverage: 96.0%. mcp v1.26.0.
 
 ---
+
+## A193 — T49 Step 4 (core half): RoleGranted name-based lookup + required_role resolution in validateTransition (v1.52.0)
+
+**Status:** Done  
+**Date:** 2026-07-03  
+**Repo:** smeldr/core
+
+**Problem:** `validateTransition` in `state.go` fetched transition existence but could not enforce `required_role` — the field was stored in `smeldr_transitions` but never checked. `DynamicTypeRepo.SetStatus` had no way to wire governance. `Module[T]` call sites (`MCPPublish`, `MCPSchedule`, `MCPArchive`) did not pass actor identity to `validateTransition`. `App.DrainEvalQueue` (T23 Step 13, A187) transitions items via the same machinery without a human actor behind the call — a system-initiated, timer-driven path that must remain exempted from `required_role` enforcement while permitting enforcement for request-initiated operations.
+
+**Decision:** Introduce `RoleStore.RoleGranted(ctx context.Context, tokenID, roleName string, target AuthTarget) (bool, error)` as the name-based counterpart to `Authorized` (Path B named-role lookup, §7 governance-model.md). One JOIN query on `smeldr_role_grants g JOIN smeldr_roles r ON r.id = g.role_id WHERE g.token_id = ? AND r.name = ?`. Pre-collects rows before closing cursor (SQLite single-statement constraint). Evaluates three scope modes (global/static/dynamic) identically to `Authorized`: `ScopeGlobal` always matches; `ScopeStatic` matches `TypeName+":"+ID` exact and `TypeName+":*"` wildcard; `ScopeDynamic` checks one-hop relation via `relationExists`. Returns `(false, err)` on any DB error (fail-closed §5.5). Added to `governance.go`.
+
+Extend `validateTransition` signature: `(ctx context.Context, db DB, rs *RoleStore, actorID, typeName, from, to string) error`. Two-zone pattern (§5.5):
+
+**Zone 1: Structural check (fail-open).** Query `smeldr_transitions` for existence. Nil DB, non-SQLite, no custom flow registered, or query error → `nil` (unchanged from today). This is the "does this transition even exist" question — governance is irrelevant here.
+
+**Zone 2: Authorization check (fail-closed).** Entered only when `required_role` is non-NULL and non-empty:
+- `rs == nil` → `nil` (governance not wired; `required_role` value ignored)
+- `actorID == ""` → `nil` (system-initiated path, pre-authorized — skip check)
+- `rs != nil` && `actorID != ""` → call `rs.RoleGranted(ctx, actorID, required_role, AuthTarget{TypeName: typeName, ID: item_id})`. If error → `ErrForbidden` (fail-closed). If `!ok` → `ErrForbidden`. If `ok` → `nil`.
+
+The `actorID == ""` guard distinguishes system-initiated paths (`DrainEvalQueue`, background jobs, test code with plain `context.Context`) from request-initiated ones (`Module[T].MCPPublish` etc.). System paths were never actor-initiated; their authorization decision already happened when the trigger was registered. Request paths require a live actor identity.
+
+Updated `validateTransition` location: `state.go`.
+
+Wire governance into `DynamicTypeRepo`: add `rs *RoleStore` field + `WithGovernance(rs *RoleStore) *DynamicTypeRepo` shallow-copy method (returns new `DynamicTypeRepo` with `rs` set). `SetStatus` extracts `actorID` via local `smeldrCtxAccessor` interface (`User() User`). Plain `context.Context` callers get `actorID=""` (system path, skip check). Updated in `dynamic.go`.
+
+Update three `Module[T]` call sites in `module.go`:
+- `MCPPublish`: pass `m.roleStore, ctx.User().ID` to `validateTransition`
+- `MCPSchedule`: pass `m.roleStore, ctx.User().ID` to `validateTransition`
+- `MCPArchive`: pass `m.roleStore, ctx.User().ID` to `validateTransition`
+
+**Consequences:**
+- `ErrForbidden` maps to `-32001` in `smeldr.dev/mcp` (confirmed via `errors.Is` unwrap in `errorFor()`).
+- `DrainEvalQueue` is architecturally exempt: does direct SQL UPDATEs, never calls `validateTransition` (no change to current flow).
+- `actorID == ""` guard covers all system-initiated paths — no special handling needed for `DrainEvalQueue` or test code using plain `context.Context`. No cross-file changes required.
+- No behavioural change for any deployment without `App.Governance` wired (`rs == nil` path → skip check).
+- Structural zone (does transition exist?) stays fail-open — identical to today.
+- Authorization zone (can this actor trigger it?) is fail-closed — distinct from structural check, documented with code comments.
+- `RoleGranted` query shares the same scope-evaluation logic as `Authorized` — no duplicate reasoning.
+- `smeldr.dev/mcp` changes in A192 already handle `ErrForbidden` via `errors.Is(err, smeldr.ErrForbidden)`.
+- 20 new tests: 12 for `RoleGranted` (global/static/wildcard/dynamic pass, miss, empty-target, pending-error, malformed-JSON, query-error), 5 for `validateTransition` required_role paths (nil-RS, empty-actor, granted, not-granted, grant-check-error), 3 for `DynamicTypeRepo.WithGovernance`+`SetStatus` (plain-ctx, authorized, forbidden).
+- Coverage: 96.0%. core v1.52.0.
+
+---

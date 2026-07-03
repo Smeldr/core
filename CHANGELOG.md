@@ -23,6 +23,19 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.52.0] — 2026-07-03
+
+### Added
+- **Governance role-based transitions + DynamicTypeRepo authorization** (`governance.go`, `state.go`, `module.go`, `dynamic.go`, T49 Step 4 core, A193):
+  - `RoleStore.RoleGranted(ctx context.Context, tokenID, roleName string, target AuthTarget) (bool, error)` — Path B named-role lookup (vs `Authorized`'s Path A operation-word lookup); evaluates same three scope modes (`ScopeGlobal`, `ScopeStatic`, `ScopeDynamic`); pre-collects rows before closing cursor (SQLite single-statement constraint); fail-closed §5.5 on any DB error
+  - `validateTransition(ctx, db DB, rs *RoleStore, actorID, typeName, from, to string) error` — signature extended with `*RoleStore` and `actorID`; adds fail-closed authorization zone: `required_role` NULL/empty → nil (no gate); `rs == nil` → nil (governance not wired); `actorID == ""` → nil (system path); `RoleGranted` error → `ErrForbidden`; `!ok` → `ErrForbidden`; structural zone unchanged
+  - `Module[T].MCPPublish/MCPSchedule/MCPArchive` — pass `m.roleStore, ctx.User().ID` to `validateTransition`
+  - `DynamicTypeRepo.WithGovernance(rs *RoleStore) *DynamicTypeRepo` — returns shallow copy with `rs` field set; wires governance into `DynamicTypeRepo.SetStatus`
+  - `DynamicTypeRepo.SetStatus` — extracts actorID via local `smeldrCtxAccessor` interface; passes to `validateTransition`
+  - 20 new tests (`RoleGranted`: 12 paths including global/static/wildcard/dynamic/error/malformed; `validateTransition required_role`: 5 paths; `DynamicTypeRepo.WithGovernance`: 3 paths); coverage 96.0%
+
+---
+
 ## [1.51.0] — 2026-07-02
 
 ### Added
