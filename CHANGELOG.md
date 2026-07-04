@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.52.2] — 2026-07-04
+
+### Fixed
+- `governance.go`, `migrate.go` DDL: replace `DATETIME` type with `TIMESTAMP` in created_at and updated_at columns. Postgres has no DATETIME type; SQLite accepts TIMESTAMP with identical NUMERIC type affinity. Affects: `smeldr_roles` (created_at, updated_at), `smeldr_role_grants` (created_at), `smeldr_tool_policies` (created_at), `smeldr_governance_audit` (created_at), `smeldr_state_flows` (created_at), `smeldr_eval_queue` (eval_at, created_at).
+- `pgx/go.mod`: bump `smeldr.dev/core` dependency from v1.38.0 to v1.52.1 — module was created against stale core version and never updated.
+- `pgx/state_governance_integration_test.go`: fix field names in `smeldr.State` struct literals: `Initial` → `IsInitial`, `Terminal` → `IsTerminal` (correct for v1.52.1).
+
+### Internal
+- `.github/workflows/ci.yml`: add `go mod edit -replace smeldr.dev/core=../` step before integration tests in the pgx job, ensuring CI always tests pgx against the local core code of the same commit. Eliminates version-lag chicken-and-egg where Postgres DDL changes could not be verified until after merge.
+
+---
+
 ## [1.52.1] — 2026-07-04
 
 ### Changed

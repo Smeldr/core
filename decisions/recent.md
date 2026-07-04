@@ -497,3 +497,26 @@ Convert all SQLite-only SQL constructs in `state.go`, `governance.go`, `migrate.
 - Coverage: 96.0%. core v1.52.1.
 
 ---
+
+## A195 — Postgres portability: DATETIME → TIMESTAMP in DDL + pgx CI replace step (v1.52.2)
+
+**Status:** Accepted  
+**Date:** 2026-07-04
+
+### What
+
+Replace `DATETIME` with `TIMESTAMP` in all production DDL on the Postgres integration test path: `governance.go` (5 columns in 4 tables: `smeldr_roles`.created_at, `smeldr_roles`.updated_at, `smeldr_role_grants`.created_at, `smeldr_tool_policies`.created_at, `smeldr_governance_audit`.created_at) and `migrate.go` (3 columns in 2 tables: `smeldr_state_flows`.created_at, `smeldr_eval_queue`.eval_at, `smeldr_eval_queue`.created_at). Fix `pgx/go.mod` dependency mismatch (v1.38.0 → v1.52.1, bringing alignment with core v1.52.1). Correct `smeldr.State` field names in pgx integration test (`Initial` → `IsInitial`, `Terminal` → `IsTerminal`). Add `go mod edit -replace smeldr.dev/core=../` step to the `Test (pgx integration)` job in `.github/workflows/ci.yml` so CI always tests pgx against the local core code of the same commit.
+
+### Why
+
+`DATETIME` is a SQLite/MySQL type keyword; Postgres requires `TIMESTAMP`. SQLite accepts `TIMESTAMP` identically via type affinity rules (both resolve to NUMERIC) — no semantic change to existing databases. The `pgx/go.mod` was created against core v1.38.0 and never bumped to track v1.52.1's governance and state-flow schemas. Without the CI replace step, the integration job downloads the published core version from the module proxy even when a PR modifies core's DDL — making it impossible to verify DDL changes against Postgres before merging. This is the first concrete fix under T117 (Postgres DDL portability); `INTEGER PRIMARY KEY` vs `BIGSERIAL` and remaining `DATETIME` occurrences in `blocks.go`, `relations.go`, `routes.go`, `schemas.go`, `site_config.go` remain open under T117.
+
+### Consequences
+
+- Production DDL now uses `TIMESTAMP` in governance and state-flow tables. Existing SQLite databases unaffected (type affinity makes DATETIME and TIMESTAMP equivalent; no schema migration needed).
+- All existing unit tests pass unchanged (they use SQLite).
+- CI integration job now tests pgx against local core consistently — no more version lag between PR code and tested dependency.
+- Remaining DATETIME occurrences in five production files tracked under T117.
+- v1.52.2, no API change.
+
+---
