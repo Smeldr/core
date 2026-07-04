@@ -14,11 +14,13 @@ import (
 func migrateStateFlows(ctx context.Context, db DB) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS smeldr_state_flows (
-			id          TEXT NOT NULL PRIMARY KEY,
-			name        TEXT    NOT NULL UNIQUE,
-			type_name   TEXT,
-			description TEXT,
-			created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+			id              TEXT NOT NULL PRIMARY KEY,
+			name            TEXT NOT NULL UNIQUE,
+			type_name       TEXT,
+			description     TEXT,
+			active_state    TEXT NOT NULL DEFAULT '',
+			conflict_policy TEXT NOT NULL DEFAULT '',
+			created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_states (
 			id                 TEXT NOT NULL PRIMARY KEY,
