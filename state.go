@@ -164,12 +164,12 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	// Upsert the flow row — INSERT does nothing when flow already exists;
 	// SELECT id reads the canonical ID regardless of whether the row was new.
 	if _, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_state_flows(name, type_name, description) VALUES ($1, $2, $3) ON CONFLICT (name) DO NOTHING`,
-		flow.Name, flow.TypeName, flow.Description,
+		`INSERT INTO smeldr_state_flows(id, name, type_name, description) VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO NOTHING`,
+		NewID(), flow.Name, flow.TypeName, flow.Description,
 	); err != nil {
 		return fmt.Errorf("smeldr: RegisterFlow %q: upsert flow: %w", flow.Name, err)
 	}
-	var flowID int64
+	var flowID string
 	if err := db.QueryRowContext(ctx,
 		`SELECT id FROM smeldr_state_flows WHERE name = $1`, flow.Name,
 	).Scan(&flowID); err != nil {
@@ -188,8 +188,8 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	// Upsert states.
 	for _, s := range flow.States {
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_states(flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (flow_id, name) DO NOTHING`,
-			flowID, s.Name, s.IsInitial, s.IsTerminal, s.SuppressesSignals,
+			`INSERT INTO smeldr_states(id, flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (flow_id, name) DO NOTHING`,
+			NewID(), flowID, s.Name, s.IsInitial, s.IsTerminal, s.SuppressesSignals,
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: upsert state %q: %w", flow.Name, s.Name, err)
 		}
@@ -202,8 +202,8 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 			roleArg = t.RequiredRole
 		}
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_transitions(flow_id, from_state, to_state, required_role) VALUES ($1, $2, $3, $4) ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`,
-			flowID, t.From, t.To, roleArg,
+			`INSERT INTO smeldr_transitions(id, flow_id, from_state, to_state, required_role) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`,
+			NewID(), flowID, t.From, t.To, roleArg,
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: upsert transition %s→%s: %w", flow.Name, t.From, t.To, err)
 		}
@@ -211,7 +211,7 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 
 	// Persist transition triggers.
 	for _, tr := range flow.Triggers {
-		var transitionID int64
+		var transitionID string
 		if err := db.QueryRowContext(ctx,
 			`SELECT id FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = $3`,
 			flowID, tr.FromState, tr.ToState,
@@ -233,8 +233,8 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 			continue
 		}
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_transition_triggers(transition_id, trigger_class, trigger_type, config) VALUES ($1, $2, $3, $4)`,
-			transitionID, tr.TriggerClass, tr.TriggerType, tr.Config,
+			`INSERT INTO smeldr_transition_triggers(id, transition_id, trigger_class, trigger_type, config) VALUES ($1, $2, $3, $4, $5)`,
+			NewID(), transitionID, tr.TriggerClass, tr.TriggerType, tr.Config,
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: insert trigger %s→%s %s: %w",
 				flow.Name, tr.FromState, tr.ToState, tr.TriggerType, err)
@@ -347,7 +347,7 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 		return nil
 	}
 	// Look up custom flow for this type.
-	var flowID int64
+	var flowID string
 	err := db.QueryRowContext(ctx,
 		`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
 	).Scan(&flowID)
@@ -416,7 +416,7 @@ func suppressesSignals(ctx context.Context, db DB, typeName, statusName string) 
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
 		return false
 	}
-	var flowID int64
+	var flowID string
 	err := db.QueryRowContext(ctx,
 		`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
 	).Scan(&flowID)
@@ -491,7 +491,7 @@ func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, typeName
 
 	case ConflictSupersede:
 		// Check whether activeState → superseded transition exists.
-		var flowID int64
+		var flowID string
 		if err := db.QueryRowContext(ctx,
 			`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
 		).Scan(&flowID); err != nil {

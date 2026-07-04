@@ -14,32 +14,34 @@ import (
 func migrateStateFlows(ctx context.Context, db DB) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS smeldr_state_flows (
-			id          INTEGER PRIMARY KEY,
-			name        TEXT    NOT NULL UNIQUE,
-			type_name   TEXT,
-			description TEXT,
-			created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			id              TEXT NOT NULL PRIMARY KEY,
+			name            TEXT NOT NULL UNIQUE,
+			type_name       TEXT,
+			description     TEXT,
+			active_state    TEXT NOT NULL DEFAULT '',
+			conflict_policy TEXT NOT NULL DEFAULT '',
+			created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_states (
-			id                 INTEGER PRIMARY KEY,
-			flow_id            INTEGER NOT NULL REFERENCES smeldr_state_flows(id),
+			id                 TEXT NOT NULL PRIMARY KEY,
+			flow_id            TEXT NOT NULL REFERENCES smeldr_state_flows(id),
 			name               TEXT    NOT NULL,
-			is_initial         BOOLEAN NOT NULL DEFAULT 0,
-			is_terminal        BOOLEAN NOT NULL DEFAULT 0,
-			suppresses_signals BOOLEAN NOT NULL DEFAULT 0,
+			is_initial         BOOLEAN NOT NULL DEFAULT FALSE,
+			is_terminal        BOOLEAN NOT NULL DEFAULT FALSE,
+			suppresses_signals BOOLEAN NOT NULL DEFAULT FALSE,
 			UNIQUE(flow_id, name)
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_transitions (
-			id            INTEGER PRIMARY KEY,
-			flow_id       INTEGER NOT NULL REFERENCES smeldr_state_flows(id),
+			id            TEXT NOT NULL PRIMARY KEY,
+			flow_id       TEXT NOT NULL REFERENCES smeldr_state_flows(id),
 			from_state    TEXT    NOT NULL,
 			to_state      TEXT    NOT NULL,
 			required_role TEXT,
 			UNIQUE(flow_id, from_state, to_state)
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_transition_triggers (
-			id             INTEGER PRIMARY KEY,
-			transition_id  INTEGER NOT NULL REFERENCES smeldr_transitions(id),
+			id             TEXT NOT NULL PRIMARY KEY,
+			transition_id  TEXT NOT NULL REFERENCES smeldr_transitions(id),
 			trigger_class  TEXT    NOT NULL CHECK(trigger_class IN ('sync', 'async')),
 			trigger_type   TEXT    NOT NULL,
 			config         TEXT    NOT NULL
@@ -49,8 +51,8 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 			type_name  TEXT    NOT NULL,
 			item_id    TEXT    NOT NULL,
 			to_state   TEXT    NOT NULL,
-			eval_at    DATETIME NOT NULL,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			eval_at    TIMESTAMP NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(type_name, item_id, to_state)
 		)`,
 	}
@@ -62,10 +64,11 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 
 	// Seed the default flow — mirrors the compile-time enum.
 	if _, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_state_flows(name, type_name) VALUES ('default', NULL) ON CONFLICT (name) DO NOTHING`); err != nil {
+		`INSERT INTO smeldr_state_flows(id, name, type_name) VALUES ($1, 'default', NULL) ON CONFLICT (name) DO NOTHING`,
+		NewID()); err != nil {
 		return fmt.Errorf("smeldr: migrateStateFlows: seed flow: %w", err)
 	}
-	var flowID int64
+	var flowID string
 	if err := db.QueryRowContext(ctx,
 		`SELECT id FROM smeldr_state_flows WHERE name = 'default'`).Scan(&flowID); err != nil {
 		return fmt.Errorf("smeldr: migrateStateFlows: seed flow id: %w", err)
@@ -83,8 +86,8 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 	}
 	for _, s := range states {
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_states(flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES ($1, $2, $3, $4, 0) ON CONFLICT (flow_id, name) DO NOTHING`,
-			flowID, s.name, s.initial, s.terminal,
+			`INSERT INTO smeldr_states(id, flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES ($1, $2, $3, $4, $5, FALSE) ON CONFLICT (flow_id, name) DO NOTHING`,
+			NewID(), flowID, s.name, s.initial, s.terminal,
 		); err != nil {
 			return fmt.Errorf("smeldr: migrateStateFlows: seed state %s: %w", s.name, err)
 		}
@@ -99,8 +102,8 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 	}
 	for _, t := range transitions {
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_transitions(flow_id, from_state, to_state) VALUES ($1, $2, $3) ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`,
-			flowID, t[0], t[1],
+			`INSERT INTO smeldr_transitions(id, flow_id, from_state, to_state) VALUES ($1, $2, $3, $4) ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`,
+			NewID(), flowID, t[0], t[1],
 		); err != nil {
 			return fmt.Errorf("smeldr: migrateStateFlows: seed transition %s→%s: %w", t[0], t[1], err)
 		}

@@ -23,6 +23,22 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.52.2] — 2026-07-04
+
+### Fixed
+- `governance.go`, `migrate.go` DDL: replace `DATETIME` with `TIMESTAMP` in 8 columns across 6 tables (`smeldr_roles` created_at/updated_at, `smeldr_role_grants` created_at, `smeldr_tool_policies` created_at, `smeldr_governance_audit` created_at, `smeldr_state_flows` created_at, `smeldr_eval_queue` eval_at/created_at). Postgres has no `DATETIME` type; SQLite accepts `TIMESTAMP` with identical NUMERIC affinity.
+- `migrate.go` DDL: `BOOLEAN NOT NULL DEFAULT 0` → `DEFAULT FALSE` on `is_initial`, `is_terminal`, `suppresses_signals` in `smeldr_states`. Postgres rejects integer literals as boolean defaults.
+- `migrate.go` DDL: `INTEGER PRIMARY KEY` → `TEXT NOT NULL PRIMARY KEY` on all four state-flow tables (`smeldr_state_flows`, `smeldr_states`, `smeldr_transitions`, `smeldr_transition_triggers`); FK columns updated to `TEXT NOT NULL`. SQLite's `INTEGER PRIMARY KEY` is a rowid alias (auto-increment); Postgres `INTEGER PRIMARY KEY` is not. All INSERTs now supply explicit `NewID()` values. `flowID`/`transitionID` scan types changed from `int64` to `string` throughout `state.go`, `migrate.go`, `state_test.go`, `migrate_test.go`.
+- `migrate.go` DDL: `active_state` and `conflict_policy` columns included in the initial `CREATE TABLE` for `smeldr_state_flows`. Previously added only by `migrateStateFlowConflictColumns` via `PRAGMA table_info` (SQLite-only); on Postgres the PRAGMA probe fails and the columns were never created.
+- `governance.go` DDL: removed `REFERENCES smeldr_tokens(id)` FK from `smeldr_role_grants.token_id`. Auth is opt-in; `smeldr_tokens` may not exist when `App.Governance()` is called. Postgres enforces FK targets at `CREATE TABLE` time; SQLite ignores them by default.
+- `pgx/go.mod`: bump `smeldr.dev/core` dependency from v1.38.0 to v1.52.1 — module was created against a stale core version.
+- `pgx/state_governance_integration_test.go`: fix `smeldr.State` field names `Initial` → `IsInitial`, `Terminal` → `IsTerminal`.
+
+### Internal
+- `.github/workflows/ci.yml`: add `go mod edit -replace smeldr.dev/core=../` step before integration tests in the pgx job, ensuring CI always tests pgx against the local core code of the same commit. Permanently eliminates the version-lag chicken-and-egg problem.
+
+---
+
 ## [1.52.1] — 2026-07-04
 
 ### Changed

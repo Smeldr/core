@@ -82,6 +82,10 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Wire local core for integration tests
+        working-directory: pgx
+        run: go mod edit -replace smeldr.dev/core=../
+
       - name: Run pgx integration tests
         working-directory: pgx
         env:

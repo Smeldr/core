@@ -497,3 +497,33 @@ Convert all SQLite-only SQL constructs in `state.go`, `governance.go`, `migrate.
 - Coverage: 96.0%. core v1.52.1.
 
 ---
+
+## A195 — Postgres portability: DATETIME → TIMESTAMP in DDL + pgx CI replace step (v1.52.2)
+
+**Status:** Accepted  
+**Date:** 2026-07-04
+
+### What
+
+Five classes of Postgres DDL portability fix, all exposed by the first green run of the pgx Postgres integration test:
+
+1. **DATETIME → TIMESTAMP** in 8 columns across 6 tables (`governance.go` + `migrate.go`).
+2. **BOOLEAN DEFAULT 0 → DEFAULT FALSE** on `is_initial`, `is_terminal`, `suppresses_signals` in `smeldr_states` (`migrate.go`).
+3. **INTEGER PRIMARY KEY → TEXT NOT NULL PRIMARY KEY** on all four state-flow tables (`smeldr_state_flows`, `smeldr_states`, `smeldr_transitions`, `smeldr_transition_triggers`). FK columns (`flow_id`, `transition_id`) changed to `TEXT NOT NULL`. All INSERTs now supply explicit `NewID()` values; `flowID`/`transitionID` scan types changed from `int64` to `string` throughout `state.go`, `migrate.go`, `state_test.go`, `migrate_test.go`.
+4. **active_state / conflict_policy included in initial DDL** for `smeldr_state_flows`. Previously added only by `migrateStateFlowConflictColumns` via `PRAGMA table_info` (SQLite-only); on Postgres the probe returns an error and the columns were never created.
+5. **FK `REFERENCES smeldr_tokens(id)` removed** from `smeldr_role_grants.token_id`. Auth is opt-in; `smeldr_tokens` may not exist when `App.Governance()` is called. Postgres enforces FK targets at CREATE TABLE time.
+
+Also: `pgx/go.mod` bump v1.38.0 → v1.52.1; `smeldr.State` field name correction (`Initial` → `IsInitial`, `Terminal` → `IsTerminal`) in pgx integration test; `go mod edit -replace smeldr.dev/core=../` CI step added to permanently close the version-lag chicken-and-egg.
+
+### Why
+
+Each fix addresses a specific Postgres/SQLite divergence: DATETIME is a SQLite/MySQL type; Postgres requires TIMESTAMP. BOOLEAN DEFAULT 0 is rejected by Postgres (type mismatch). INTEGER PRIMARY KEY is a rowid alias in SQLite (auto-increment) but is not auto-increment in Postgres. PRAGMA is SQLite-only DDL introspection. Postgres enforces FK targets at table creation time. All five patterns were safe on SQLite and silent; all five break on Postgres. This is the first batch of concrete fixes under T117 (Postgres DDL portability). Remaining: DATETIME in `blocks.go`, `relations.go`, `routes.go`, `schemas.go`, `site_config.go`; `sqlite_master` probes; `MigrateRedirectsToRoutes`.
+
+### Consequences
+
+- Production DDL is now Postgres-compatible for all governance and state-flow tables.
+- Existing SQLite databases unaffected: TIMESTAMP has identical NUMERIC affinity, DEFAULT FALSE is equivalent to DEFAULT 0, TEXT PKs store strings, and the missing ALTER TABLE columns are handled by `migrateStateFlowConflictColumns` on older databases.
+- CI integration job tests pgx against local core on every PR — version lag permanently closed.
+- No API change. v1.52.2.
+
+---

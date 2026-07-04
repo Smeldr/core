@@ -58,9 +58,9 @@ func TestIntegration_Postgres_StateFlows(t *testing.T) {
 		Name:     "pg-review",
 		TypeName: "article",
 		States: []smeldr.State{
-			{Name: "draft", Initial: true},
+			{Name: "draft", IsInitial: true},
 			{Name: "review"},
-			{Name: "approved", Terminal: true},
+			{Name: "approved", IsTerminal: true},
 		},
 		Transitions: []smeldr.Transition{
 			{From: "draft", To: "review"},

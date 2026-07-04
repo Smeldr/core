@@ -52,7 +52,7 @@ func TestMigrateStateFlows(t *testing.T) {
 	}
 
 	// Default flow exists with type_name NULL.
-	var flowID int64
+	var flowID string
 	var typeName *string
 	if err := db.QueryRowContext(ctx,
 		`SELECT id, type_name FROM smeldr_state_flows WHERE name = 'default'`,
