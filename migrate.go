@@ -18,7 +18,7 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 			name        TEXT    NOT NULL UNIQUE,
 			type_name   TEXT,
 			description TEXT,
-			created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_states (
 			id                 INTEGER PRIMARY KEY,
@@ -49,8 +49,8 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 			type_name  TEXT    NOT NULL,
 			item_id    TEXT    NOT NULL,
 			to_state   TEXT    NOT NULL,
-			eval_at    DATETIME NOT NULL,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			eval_at    TIMESTAMP NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(type_name, item_id, to_state)
 		)`,
 	}

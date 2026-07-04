@@ -51,8 +51,8 @@ func migrateGovernance(ctx context.Context, db DB) error {
 			scope_direction     TEXT,
 			trust_level         INTEGER NOT NULL DEFAULT 0,
 			allow_self_approval INTEGER NOT NULL DEFAULT 0,
-			created_at          DATETIME NOT NULL,
-			updated_at          DATETIME NOT NULL
+			created_at          TIMESTAMP NOT NULL,
+			updated_at          TIMESTAMP NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_role_grants (
 			id              TEXT NOT NULL PRIMARY KEY,
@@ -60,7 +60,7 @@ func migrateGovernance(ctx context.Context, db DB) error {
 			role_id         TEXT NOT NULL REFERENCES smeldr_roles(id),
 			scope_static    TEXT NOT NULL DEFAULT '[]',
 			scope_anchor_id TEXT,
-			created_at      DATETIME NOT NULL
+			created_at      TIMESTAMP NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_role_grants_token
 			ON smeldr_role_grants(token_id)`,
@@ -70,7 +70,7 @@ func migrateGovernance(ctx context.Context, db DB) error {
 			id          TEXT NOT NULL PRIMARY KEY,
 			tool_name   TEXT NOT NULL UNIQUE,
 			required_op TEXT NOT NULL,
-			created_at  DATETIME NOT NULL
+			created_at  TIMESTAMP NOT NULL
 		)`,
 	}
 	for _, s := range stmts {
@@ -449,7 +449,7 @@ func CreateGovernanceAuditTable(db DB) error {
 			target_id      TEXT NOT NULL,
 			before_json    TEXT NOT NULL DEFAULT '{}',
 			after_json     TEXT NOT NULL DEFAULT '{}',
-			created_at     DATETIME NOT NULL
+			created_at     TIMESTAMP NOT NULL
 		)`,
 	); err != nil {
 		return fmt.Errorf("smeldr: CreateGovernanceAuditTable: %w", err)
