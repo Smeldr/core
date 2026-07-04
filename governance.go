@@ -56,7 +56,7 @@ func migrateGovernance(ctx context.Context, db DB) error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_role_grants (
 			id              TEXT NOT NULL PRIMARY KEY,
-			token_id        TEXT NOT NULL REFERENCES smeldr_tokens(id),
+			token_id        TEXT NOT NULL,
 			role_id         TEXT NOT NULL REFERENCES smeldr_roles(id),
 			scope_static    TEXT NOT NULL DEFAULT '[]',
 			scope_anchor_id TEXT,

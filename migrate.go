@@ -24,9 +24,9 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 			id                 INTEGER PRIMARY KEY,
 			flow_id            INTEGER NOT NULL REFERENCES smeldr_state_flows(id),
 			name               TEXT    NOT NULL,
-			is_initial         BOOLEAN NOT NULL DEFAULT 0,
-			is_terminal        BOOLEAN NOT NULL DEFAULT 0,
-			suppresses_signals BOOLEAN NOT NULL DEFAULT 0,
+			is_initial         BOOLEAN NOT NULL DEFAULT FALSE,
+			is_terminal        BOOLEAN NOT NULL DEFAULT FALSE,
+			suppresses_signals BOOLEAN NOT NULL DEFAULT FALSE,
 			UNIQUE(flow_id, name)
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_transitions (
