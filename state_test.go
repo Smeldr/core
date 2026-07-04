@@ -48,7 +48,7 @@ func TestRegisterFlow_happyPath(t *testing.T) {
 	}
 
 	// Flow row exists with correct type_name.
-	var flowID int64
+	var flowID string
 	var typeName string
 	if err := db.QueryRowContext(ctx,
 		`SELECT id, type_name FROM smeldr_state_flows WHERE name = 'agent-job'`,
@@ -107,7 +107,7 @@ func TestRegisterFlow_idempotent(t *testing.T) {
 		}
 	}
 
-	var flowID int64
+	var flowID string
 	if err := db.QueryRowContext(ctx,
 		`SELECT id FROM smeldr_state_flows WHERE name = 'agent-job'`,
 	).Scan(&flowID); err != nil {
@@ -228,7 +228,7 @@ func TestRegisterFlow_withRequiredRole(t *testing.T) {
 	}
 
 	// Verify required_role was stored as non-NULL.
-	var flowID int64
+	var flowID string
 	if err := db.QueryRowContext(ctx,
 		`SELECT id FROM smeldr_state_flows WHERE name = 'governed-flow'`,
 	).Scan(&flowID); err != nil {
@@ -719,13 +719,13 @@ func TestSuppressesSignals_defaultFlowFallback(t *testing.T) {
 	}
 	// migrateStateFlows already seeds a default flow (name='default', type_name IS NULL).
 	// Get its ID and insert a state with suppresses_signals=true.
-	var flowID int64
+	var flowID string
 	if err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_state_flows WHERE name = 'default' AND type_name IS NULL`).Scan(&flowID); err != nil {
 		t.Fatalf("get default flow id: %v", err)
 	}
 	if _, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_states (flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES (?, 'quarantined', 0, 0, 1)`,
-		flowID,
+		`INSERT INTO smeldr_states (id, flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES (?, ?, 'quarantined', FALSE, FALSE, TRUE)`,
+		NewID(), flowID,
 	); err != nil {
 		t.Fatalf("insert state: %v", err)
 	}
@@ -872,7 +872,7 @@ func TestNotifyAfter_unsuppressedState_hooksFire(t *testing.T) {
 
 // setupTriggerFlow registers a flow for "testPost" (draft→published) and inserts
 // a trigger row for that transition. Returns the trigger row ID.
-func setupTriggerFlow(t *testing.T, db DB, triggerClass, triggerType string) int64 {
+func setupTriggerFlow(t *testing.T, db DB, triggerClass, triggerType string) {
 	t.Helper()
 	ctx := context.Background()
 	if err := migrateStateFlows(ctx, db); err != nil {
@@ -890,7 +890,7 @@ func setupTriggerFlow(t *testing.T, db DB, triggerClass, triggerType string) int
 	}); err != nil {
 		t.Fatalf("RegisterFlow: %v", err)
 	}
-	var transID int64
+	var transID string
 	if err := db.QueryRowContext(ctx, `
 		SELECT t.id FROM smeldr_transitions t
 		JOIN smeldr_state_flows f ON t.flow_id = f.id
@@ -898,15 +898,12 @@ func setupTriggerFlow(t *testing.T, db DB, triggerClass, triggerType string) int
 	`).Scan(&transID); err != nil {
 		t.Fatalf("get transition id: %v", err)
 	}
-	res, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_transition_triggers (transition_id, trigger_class, trigger_type, config) VALUES (?, ?, ?, ?)`,
-		transID, triggerClass, triggerType, `{}`,
-	)
-	if err != nil {
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_transition_triggers (id, transition_id, trigger_class, trigger_type, config) VALUES (?, ?, ?, ?, ?)`,
+		NewID(), transID, triggerClass, triggerType, `{}`,
+	); err != nil {
 		t.Fatalf("insert trigger: %v", err)
 	}
-	id, _ := res.LastInsertId()
-	return id
 }
 
 func TestFireAsyncTriggers_nilDB(t *testing.T) {
@@ -1659,8 +1656,9 @@ func TestApplyConflictPolicy_unknownPolicy(t *testing.T) {
 	db := newMigratedDB(t)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_state_flows (name, type_name, active_state, conflict_policy)
-		 VALUES ('unknown-policy-flow', 'UnknownPolicyType', 'published', 'custom-policy')`,
+		`INSERT INTO smeldr_state_flows (id, name, type_name, active_state, conflict_policy)
+		 VALUES (?, 'unknown-policy-flow', 'UnknownPolicyType', 'published', 'custom-policy')`,
+		NewID(),
 	); err != nil {
 		t.Fatalf("insert flow: %v", err)
 	}
