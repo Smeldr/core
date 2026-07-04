@@ -234,3 +234,41 @@ Each fix addresses a specific Postgres/SQLite divergence: DATETIME is a SQLite/M
 - No API change. v1.52.2.
 
 ---
+
+## A196 — T113: HTTP/MCP AuthTarget asymmetry fix in smeldr.dev/mcp (v1.26.1)
+
+**Status:** Done  
+**Date:** 2026-07-04  
+**Repo:** smeldr.dev/mcp
+
+### What
+
+The MCP authorization gate (`authoriseTool` in `tool.go`) passed `smeldr.AuthTarget{}` (empty TypeName) to `RoleStore.Authorized` for all tools. The HTTP gate (`canReadDrafts` / `checkWriteOp` in `module.go`) passes `AuthTarget{TypeName: m.contentTypeName}`. A `ScopeStatic` grant scoped to a type (e.g., `"Post:*"`) matches the HTTP gate but is denied by the MCP gate for the identical token and operation — governance behaves inconsistently by transport.
+
+### Why
+
+Inconsistent authorization across HTTP and MCP transports undermines the security model. Role enforcement must be deterministic: the same grant and operation must succeed or fail identically regardless of whether the request enters via HTTP or MCP.
+
+### Consequences
+
+Added `target smeldr.AuthTarget` as the last parameter to `authoriseTool`. The caller is responsible for supplying the correct target:
+
+- **Infrastructure tools** (tokens, nav, webhooks, preview, upload, redirect, page meta, relation, state, signal, dynamic content, block/node/composition/schema/typed tools): pass `smeldr.AuthTarget{}`. These tools have no per-content-type scope — global grants apply, type-scoped grants correctly don't.
+
+- **Module-scoped tools** (create, update, publish, schedule, archive, delete, list, get for registered `Module[T]` types): pass `AuthTarget{TypeName: typeName}` where `typeName = m.MCPMeta().TypeName`. Special cases:
+  - **Baseline check restructured:** TypeName resolved via `m.MCPMeta().TypeName` BEFORE the auth call. Previously `authoriseTool` was called before `parseToolName`/`moduleForType`.
+  - **`case "delete"` escalation:** passes `AuthTarget{TypeName: typeName}` (same variable from restructured baseline).
+  - **`case "list"` escalation:** passes `AuthTarget{TypeName: lm.MCPMeta().TypeName}` — `typeSnake` is plural (e.g., "posts") so `moduleForType` returns nil; must use `lm` from `moduleForAdminList`.
+  - **`case "get"` escalation:** passes `AuthTarget{TypeName: gm.MCPMeta().TypeName}`.
+
+`AuthTarget.ID` is not populated (same limitation as the HTTP gate). Slug→ID resolution deferred, documented via `TODO(T49-scope)` comment.
+
+- 23 call sites updated (4 module-scoped with TypeName, 19 static with `AuthTarget{}`).
+- 1 new test `TestAuthoriseTool_TypeScoped_ParityWithHTTP` with two sub-cases (create/delete) using custom `ScopeMode: ScopeStatic` role definitions.
+- 8 existing `authoriseTool` tests updated to pass `smeldr.AuthTarget{}` (behaviour unchanged — global grants work with any target).
+- Pre-existing coverage at 95.3% (unchanged; `TestStateTool_GetValidTransitions` failures are pre-existing from a separate defect, not introduced by this fix).
+- No exported symbols changed. No core package changes. Level 1 amendment.
+
+Coverage: 95.3% (pre-existing). mcp v1.26.1.
+
+---
