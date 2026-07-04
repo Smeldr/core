@@ -418,8 +418,8 @@ func (a *App) loadDynamicTypes(ctx context.Context) {
 }
 
 // insertDynamicRoutes writes list and item rows for a dynamic content type into
-// smeldr_routes. Uses INSERT OR IGNORE so it is safe to call on every restart
-// (idempotent). No-op when prefix is empty or DB is nil.
+// smeldr_routes. Uses INSERT ... ON CONFLICT DO NOTHING so it is safe to call
+// on every restart (idempotent). No-op when prefix is empty or DB is nil.
 func insertDynamicRoutes(ctx context.Context, db DB, typeName, prefix string) {
 	if prefix == "" || db == nil {
 		return
@@ -427,11 +427,12 @@ func insertDynamicRoutes(ctx context.Context, db DB, typeName, prefix string) {
 	typeNames, _ := json.Marshal([]string{typeName})
 	now := time.Now().UTC()
 	db.ExecContext(ctx, //nolint:errcheck
-		`INSERT OR IGNORE INTO smeldr_routes
+		`INSERT INTO smeldr_routes
 		    (id, path_pattern, route_type, view, type_names, created_at, updated_at)
 		 VALUES
-		    (?,  ?,            'content',  'list', ?,          ?,          ?),
-		    (?,  ?,            'content',  'item', ?,          ?,          ?)`,
+		    ($1, $2,           'content',  'list', $3,        $4,         $5),
+		    ($6, $7,           'content',  'item', $8,        $9,         $10)
+		 ON CONFLICT (path_pattern) DO NOTHING`,
 		NewID(), prefix, string(typeNames), now, now,
 		NewID(), prefix+"/{slug}", string(typeNames), now, now,
 	)

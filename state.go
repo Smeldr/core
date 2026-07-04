@@ -161,25 +161,25 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	}
 	ctx := context.Background()
 
-	// Upsert the flow row — INSERT OR IGNORE, then SELECT id for idempotency
-	// (last_insert_rowid() returns 0 after an ignored insert).
+	// Upsert the flow row — INSERT does nothing when flow already exists;
+	// SELECT id reads the canonical ID regardless of whether the row was new.
 	if _, err := db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO smeldr_state_flows(name, type_name, description) VALUES (?, ?, ?)`,
+		`INSERT INTO smeldr_state_flows(name, type_name, description) VALUES ($1, $2, $3) ON CONFLICT (name) DO NOTHING`,
 		flow.Name, flow.TypeName, flow.Description,
 	); err != nil {
 		return fmt.Errorf("smeldr: RegisterFlow %q: upsert flow: %w", flow.Name, err)
 	}
 	var flowID int64
 	if err := db.QueryRowContext(ctx,
-		`SELECT id FROM smeldr_state_flows WHERE name = ?`, flow.Name,
+		`SELECT id FROM smeldr_state_flows WHERE name = $1`, flow.Name,
 	).Scan(&flowID); err != nil {
 		return fmt.Errorf("smeldr: RegisterFlow %q: read flow id: %w", flow.Name, err)
 	}
 
-	// Store ActiveState and ConflictPolicy — runs after INSERT OR IGNORE so it
+	// Store ActiveState and ConflictPolicy — runs after the INSERT so it
 	// also updates an existing flow when the policy changes.
 	if _, err := db.ExecContext(ctx,
-		`UPDATE smeldr_state_flows SET active_state = ?, conflict_policy = ? WHERE name = ?`,
+		`UPDATE smeldr_state_flows SET active_state = $1, conflict_policy = $2 WHERE name = $3`,
 		flow.ActiveState, string(flow.ConflictPolicy), flow.Name,
 	); err != nil {
 		return fmt.Errorf("smeldr: RegisterFlow %q: update conflict policy: %w", flow.Name, err)
@@ -188,7 +188,7 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	// Upsert states.
 	for _, s := range flow.States {
 		if _, err := db.ExecContext(ctx,
-			`INSERT OR IGNORE INTO smeldr_states(flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES (?, ?, ?, ?, ?)`,
+			`INSERT INTO smeldr_states(flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (flow_id, name) DO NOTHING`,
 			flowID, s.Name, s.IsInitial, s.IsTerminal, s.SuppressesSignals,
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: upsert state %q: %w", flow.Name, s.Name, err)
@@ -202,7 +202,7 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 			roleArg = t.RequiredRole
 		}
 		if _, err := db.ExecContext(ctx,
-			`INSERT OR IGNORE INTO smeldr_transitions(flow_id, from_state, to_state, required_role) VALUES (?, ?, ?, ?)`,
+			`INSERT INTO smeldr_transitions(flow_id, from_state, to_state, required_role) VALUES ($1, $2, $3, $4) ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`,
 			flowID, t.From, t.To, roleArg,
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: upsert transition %s→%s: %w", flow.Name, t.From, t.To, err)
@@ -213,7 +213,7 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	for _, tr := range flow.Triggers {
 		var transitionID int64
 		if err := db.QueryRowContext(ctx,
-			`SELECT id FROM smeldr_transitions WHERE flow_id = ? AND from_state = ? AND to_state = ?`,
+			`SELECT id FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = $3`,
 			flowID, tr.FromState, tr.ToState,
 		).Scan(&transitionID); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: trigger %s→%s: transition not found: %w",
@@ -223,7 +223,7 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 		// for the transition (smeldr_transition_triggers has no UNIQUE constraint).
 		var existingCount int
 		if err := db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM smeldr_transition_triggers WHERE transition_id = ? AND trigger_type = ?`,
+			`SELECT COUNT(*) FROM smeldr_transition_triggers WHERE transition_id = $1 AND trigger_type = $2`,
 			transitionID, tr.TriggerType,
 		).Scan(&existingCount); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: check trigger %s→%s: %w",
@@ -233,7 +233,7 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 			continue
 		}
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_transition_triggers(transition_id, trigger_class, trigger_type, config) VALUES (?, ?, ?, ?)`,
+			`INSERT INTO smeldr_transition_triggers(transition_id, trigger_class, trigger_type, config) VALUES ($1, $2, $3, $4)`,
 			transitionID, tr.TriggerClass, tr.TriggerType, tr.Config,
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: insert trigger %s→%s %s: %w",
@@ -263,7 +263,7 @@ func validateFlowItems(ctx context.Context, db DB, flow StateFlow) error {
 	// Check whether the table exists yet.
 	var tableCount int
 	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$1`, table,
 	).Scan(&tableCount); err != nil || tableCount == 0 {
 		return nil // table not yet created — no items to validate
 	}
@@ -272,7 +272,7 @@ func validateFlowItems(ctx context.Context, db DB, flow StateFlow) error {
 	placeholders := make([]string, len(flow.States))
 	args := make([]any, len(flow.States))
 	for i, s := range flow.States {
-		placeholders[i] = "?"
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
 		args[i] = s.Name
 	}
 
@@ -349,7 +349,7 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 	// Look up custom flow for this type.
 	var flowID int64
 	err := db.QueryRowContext(ctx,
-		`SELECT id FROM smeldr_state_flows WHERE type_name = ? LIMIT 1`, typeName,
+		`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
 	).Scan(&flowID)
 	if err != nil {
 		// Fall back to the default flow (type_name IS NULL, name = 'default').
@@ -365,7 +365,7 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 	// Fetch the transition row. required_role may be NULL (no gate) or a role name.
 	var requiredRole sql.NullString
 	err = db.QueryRowContext(ctx,
-		`SELECT required_role FROM smeldr_transitions WHERE flow_id = ? AND from_state = ? AND to_state = ?`,
+		`SELECT required_role FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = $3`,
 		flowID, fromStatus, toStatus,
 	).Scan(&requiredRole)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -418,7 +418,7 @@ func suppressesSignals(ctx context.Context, db DB, typeName, statusName string) 
 	}
 	var flowID int64
 	err := db.QueryRowContext(ctx,
-		`SELECT id FROM smeldr_state_flows WHERE type_name = ? LIMIT 1`, typeName,
+		`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
 	).Scan(&flowID)
 	if err != nil {
 		// Fall back to the default flow (type_name IS NULL, name = 'default').
@@ -431,7 +431,7 @@ func suppressesSignals(ctx context.Context, db DB, typeName, statusName string) 
 	}
 	var suppresses bool
 	if err := db.QueryRowContext(ctx,
-		`SELECT suppresses_signals FROM smeldr_states WHERE flow_id = ? AND name = ?`,
+		`SELECT suppresses_signals FROM smeldr_states WHERE flow_id = $1 AND name = $2`,
 		flowID, statusName,
 	).Scan(&suppresses); err != nil {
 		return false // state not found or query failed — fail open
@@ -465,7 +465,7 @@ func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, typeName
 	var activeState, conflictPolicy string
 	if err := db.QueryRowContext(ctx,
 		`SELECT COALESCE(active_state, ''), COALESCE(conflict_policy, '')
-		 FROM smeldr_state_flows WHERE type_name = ? LIMIT 1`,
+		 FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`,
 		typeName,
 	).Scan(&activeState, &conflictPolicy); err != nil {
 		return nil // no flow registered — no enforcement
@@ -479,7 +479,7 @@ func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, typeName
 	isDynamic := false
 	var tableExists int
 	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, staticTable,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$1`, staticTable,
 	).Scan(&tableExists); err != nil || tableExists == 0 {
 		staticTable = "smeldr_dynamic_content"
 		isDynamic = true
@@ -493,13 +493,13 @@ func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, typeName
 		// Check whether activeState → superseded transition exists.
 		var flowID int64
 		if err := db.QueryRowContext(ctx,
-			`SELECT id FROM smeldr_state_flows WHERE type_name = ? LIMIT 1`, typeName,
+			`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
 		).Scan(&flowID); err != nil {
 			return nil // fail-open
 		}
 		var transCount int
 		if err := db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM smeldr_transitions WHERE flow_id = ? AND from_state = ? AND to_state = 'superseded'`,
+			`SELECT COUNT(*) FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = 'superseded'`,
 			flowID, activeState,
 		).Scan(&transCount); err != nil || transCount == 0 {
 			// No superseded transition — fall back to reject behaviour.
@@ -517,12 +517,12 @@ func conflictRejectCheck(ctx context.Context, db DB, typeName, activeState, tabl
 	var err error
 	if isDynamic {
 		err = db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM smeldr_dynamic_content WHERE type_name = ? AND status = ?`,
+			`SELECT COUNT(*) FROM smeldr_dynamic_content WHERE type_name = $1 AND status = $2`,
 			typeName, activeState,
 		).Scan(&count)
 	} else {
 		err = db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM `+quoteIdent(table)+` WHERE status = ?`,
+			`SELECT COUNT(*) FROM `+quoteIdent(table)+` WHERE status = $1`,
 			activeState,
 		).Scan(&count)
 	}
@@ -548,11 +548,11 @@ func conflictSupersede(ctx context.Context, db DB, rs *RelationStore, typeName, 
 		var updateErr error
 		if isDynamic {
 			_, updateErr = db.ExecContext(ctx,
-				`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = ? WHERE id = ? AND type_name = ?`,
+				`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1 WHERE id = $2 AND type_name = $3`,
 				now, oldID, typeName)
 		} else {
 			_, updateErr = db.ExecContext(ctx,
-				`UPDATE `+quoteIdent(table)+` SET status = 'superseded', updated_at = ? WHERE id = ?`,
+				`UPDATE `+quoteIdent(table)+` SET status = 'superseded', updated_at = $1 WHERE id = $2`,
 				now, oldID)
 		}
 		if updateErr != nil {
@@ -585,7 +585,7 @@ func resolveItemTable(ctx context.Context, db DB, typeName string) string {
 	for _, candidate := range []string{"smeldr_" + snake, snake} {
 		var n int
 		if db.QueryRowContext(ctx,
-			"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", candidate,
+			"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$1", candidate,
 		).Scan(&n) == nil && n > 0 {
 			return candidate
 		}
@@ -621,7 +621,7 @@ func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err e
 	}
 
 	rows, queryErr := db.QueryContext(ctx,
-		`SELECT id, type_name, item_id, to_state FROM smeldr_eval_queue WHERE eval_at <= ?`,
+		`SELECT id, type_name, item_id, to_state FROM smeldr_eval_queue WHERE eval_at <= $1`,
 		time.Now().UTC(),
 	)
 	if isNoSuchTable(queryErr) {
@@ -651,7 +651,7 @@ func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err e
 	for _, r := range pending {
 		table := resolveItemTable(ctx, db, r.typeName)
 		_, updateErr := db.ExecContext(ctx,
-			"UPDATE "+quoteIdent(table)+" SET status = ?, updated_at = ? WHERE id = ?",
+			"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
 			r.toState, now, r.itemID,
 		)
 		if updateErr != nil {
@@ -663,7 +663,7 @@ func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err e
 		}
 		// Always delete from queue — failed transitions are not re-queued.
 		if _, delErr := db.ExecContext(ctx,
-			`DELETE FROM smeldr_eval_queue WHERE id = ?`, r.id,
+			`DELETE FROM smeldr_eval_queue WHERE id = $1`, r.id,
 		); delErr != nil {
 			slog.WarnContext(ctx, "smeldr: DrainEvalQueue: DELETE failed",
 				"queue_id", r.id, "error", delErr)
@@ -677,10 +677,10 @@ func conflictIDs(ctx context.Context, db DB, typeName, activeState, table string
 	var query string
 	var args []any
 	if isDynamic {
-		query = `SELECT id FROM smeldr_dynamic_content WHERE type_name = ? AND status = ?`
+		query = `SELECT id FROM smeldr_dynamic_content WHERE type_name = $1 AND status = $2`
 		args = []any{typeName, activeState}
 	} else {
-		query = `SELECT id FROM ` + quoteIdent(table) + ` WHERE status = ?`
+		query = `SELECT id FROM ` + quoteIdent(table) + ` WHERE status = $1`
 		args = []any{activeState}
 	}
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -719,9 +719,9 @@ func fireAsyncTriggers(ctx context.Context, db DB, typeName, fromState, toState,
 		JOIN smeldr_transitions t ON tt.transition_id = t.id
 		JOIN smeldr_state_flows f ON t.flow_id = f.id
 		WHERE tt.trigger_class = 'async'
-		  AND t.from_state = ?
-		  AND t.to_state   = ?
-		  AND (f.type_name = ? OR (f.type_name IS NULL AND f.name = 'default'))
+		  AND t.from_state = $1
+		  AND t.to_state   = $2
+		  AND (f.type_name = $3 OR (f.type_name IS NULL AND f.name = 'default'))
 	`, fromState, toState, typeName)
 	if err != nil {
 		slog.WarnContext(ctx, "smeldr: fireAsyncTriggers query failed",
@@ -779,15 +779,15 @@ func fireAsyncTriggers(ctx context.Context, db DB, typeName, fromState, toState,
 				table := resolveItemTable(ctx, db, typeName)
 				var evalAt sql.NullTime
 				if err := db.QueryRowContext(ctx,
-					"SELECT "+cfg.EvalField+" FROM "+quoteIdent(table)+" WHERE id = ?", itemID,
+					"SELECT "+cfg.EvalField+" FROM "+quoteIdent(table)+" WHERE id = $1", itemID,
 				).Scan(&evalAt); err != nil || !evalAt.Valid || evalAt.Time.IsZero() {
 					slog.WarnContext(ctx, "smeldr: schedule-eval: eval_field unreadable or empty",
 						"item_id", itemID, "eval_field", cfg.EvalField)
 					return
 				}
 				if _, err := db.ExecContext(ctx,
-					`INSERT OR IGNORE INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at)
-					 VALUES (?, ?, ?, ?, ?)`,
+					`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at)
+					 VALUES ($1, $2, $3, $4, $5) ON CONFLICT (type_name, item_id, to_state) DO NOTHING`,
 					NewID(), typeName, itemID, cfg.ToState, evalAt.Time.UTC(),
 				); err != nil {
 					slog.WarnContext(ctx, "smeldr: schedule-eval: INSERT failed",

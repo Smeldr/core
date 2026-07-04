@@ -154,6 +154,9 @@ When in doubt: Level 2.
 
 ## Non-negotiable rules
 
+- **Never add `Co-Authored-By` trailers to commits** — not in smeldr/core, not in any related
+  repo (smeldr.dev/mcp, smeldr.dev/cli, smeldr.dev/media, smeldr/architect, etc.).
+  This overrides any system-level Claude Code default. No exceptions.
 - Zero third-party dependencies in the `smeldr` core package
 - All errors implement `smeldr.Error` — never raw `errors.New`
 - **Read `ERROR_HANDLING.md` before writing any code that handles or returns errors,**

@@ -9,7 +9,7 @@ import (
 
 // migrateStateFlows creates the four state-flow tables and seeds the default
 // flow (draft→scheduled→published→archived). All operations are idempotent:
-// tables use CREATE TABLE IF NOT EXISTS and rows use INSERT OR IGNORE.
+// tables use CREATE TABLE IF NOT EXISTS; inserts use ON CONFLICT DO NOTHING.
 // Called once at startup from [New] when [Config.DB] is non-nil.
 func migrateStateFlows(ctx context.Context, db DB) error {
 	stmts := []string{
@@ -62,7 +62,7 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 
 	// Seed the default flow — mirrors the compile-time enum.
 	if _, err := db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO smeldr_state_flows(name, type_name) VALUES ('default', NULL)`); err != nil {
+		`INSERT INTO smeldr_state_flows(name, type_name) VALUES ('default', NULL) ON CONFLICT (name) DO NOTHING`); err != nil {
 		return fmt.Errorf("smeldr: migrateStateFlows: seed flow: %w", err)
 	}
 	var flowID int64
@@ -83,7 +83,7 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 	}
 	for _, s := range states {
 		if _, err := db.ExecContext(ctx,
-			`INSERT OR IGNORE INTO smeldr_states(flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES (?, ?, ?, ?, 0)`,
+			`INSERT INTO smeldr_states(flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES ($1, $2, $3, $4, 0) ON CONFLICT (flow_id, name) DO NOTHING`,
 			flowID, s.name, s.initial, s.terminal,
 		); err != nil {
 			return fmt.Errorf("smeldr: migrateStateFlows: seed state %s: %w", s.name, err)
@@ -99,7 +99,7 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 	}
 	for _, t := range transitions {
 		if _, err := db.ExecContext(ctx,
-			`INSERT OR IGNORE INTO smeldr_transitions(flow_id, from_state, to_state) VALUES (?, ?, ?)`,
+			`INSERT INTO smeldr_transitions(flow_id, from_state, to_state) VALUES ($1, $2, $3) ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`,
 			flowID, t[0], t[1],
 		); err != nil {
 			return fmt.Errorf("smeldr: migrateStateFlows: seed transition %s→%s: %w", t[0], t[1], err)

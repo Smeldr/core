@@ -35,8 +35,8 @@ const (
 // The function is not called from [New] automatically — it is opt-in. [App.Governance]
 // (added in T49 Step 2) is the entry point that calls it at startup.
 //
-// All DDL statements use CREATE TABLE IF NOT EXISTS and INSERT OR IGNORE so the
-// function is safe to call on every boot (idempotent).
+// All DDL statements use CREATE TABLE IF NOT EXISTS; inserts use ON CONFLICT DO NOTHING
+// for idempotency so the function is safe to call on every boot.
 func migrateGovernance(ctx context.Context, db DB) error {
 	if db == nil {
 		return fmt.Errorf("smeldr: migrateGovernance: db is nil")
@@ -95,7 +95,7 @@ func migrateGovernance(ctx context.Context, db DB) error {
 }
 
 // seedDefaultRoles inserts the three built-in role templates. Idempotent via
-// INSERT OR IGNORE on the UNIQUE name column.
+// ON CONFLICT (name) DO NOTHING on the UNIQUE name column.
 func seedDefaultRoles(ctx context.Context, db DB) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	roles := []struct {
@@ -117,9 +117,10 @@ func seedDefaultRoles(ctx context.Context, db DB) error {
 	}
 	for _, r := range roles {
 		if _, err := db.ExecContext(ctx,
-			`INSERT OR IGNORE INTO smeldr_roles
+			`INSERT INTO smeldr_roles
 				(id, name, operations, scope_mode, trust_level, allow_self_approval, created_at, updated_at)
-				VALUES (?, ?, ?, 'global', 0, 0, ?, ?)`,
+				VALUES ($1, $2, $3, 'global', 0, 0, $4, $5)
+				ON CONFLICT (name) DO NOTHING`,
 			NewID(), r.name, r.operations, now, now,
 		); err != nil {
 			return fmt.Errorf("smeldr: seedDefaultRoles: %s: %w", r.name, err)
@@ -129,8 +130,8 @@ func seedDefaultRoles(ctx context.Context, db DB) error {
 }
 
 // seedToolPolicies inserts one row per built-in MCP tool, mapping each tool to
-// the operation word that controls access. Idempotent via INSERT OR IGNORE on
-// the UNIQUE tool_name column.
+// the operation word that controls access. Idempotent via ON CONFLICT (tool_name)
+// DO NOTHING on the UNIQUE tool_name column.
 //
 // The required_op values mirror today's hardcoded role gates — zero behaviour
 // change on day one. Operators may alter rows later to regrant access.
@@ -261,8 +262,8 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 
 	for _, p := range policies {
 		if _, err := db.ExecContext(ctx,
-			`INSERT OR IGNORE INTO smeldr_tool_policies (id, tool_name, required_op, created_at)
-				VALUES (?, ?, ?, ?)`,
+			`INSERT INTO smeldr_tool_policies (id, tool_name, required_op, created_at)
+				VALUES ($1, $2, $3, $4) ON CONFLICT (tool_name) DO NOTHING`,
 			NewID(), p.tool, p.op, now,
 		); err != nil {
 			return fmt.Errorf("smeldr: seedToolPolicies: %s: %w", p.tool, err)
@@ -306,7 +307,7 @@ func migrateTokenGrants(ctx context.Context, db DB) error {
 	for _, t := range tokens {
 		var roleID string
 		err := db.QueryRowContext(ctx,
-			`SELECT id FROM smeldr_roles WHERE name = ?`, t.role,
+			`SELECT id FROM smeldr_roles WHERE name = $1`, t.role,
 		).Scan(&roleID)
 		if err == sql.ErrNoRows {
 			continue // unknown role — no grant
@@ -315,14 +316,15 @@ func migrateTokenGrants(ctx context.Context, db DB) error {
 			return fmt.Errorf("smeldr: migrateTokenGrants: lookup role %q: %w", t.role, err)
 		}
 
-		// WHERE NOT EXISTS guard: SQLite's UNIQUE constraint allows multiple NULLs,
-		// so INSERT OR IGNORE would not prevent duplicate (token_id, role_id, NULL) rows.
+		// WHERE NOT EXISTS guard: NULL values in UNIQUE constraints are treated as
+		// distinct by SQLite, so ON CONFLICT would not prevent duplicate
+		// (token_id, role_id, NULL) rows. IS NOT DISTINCT FROM handles NULL portably.
 		if _, err := db.ExecContext(ctx,
 			`INSERT INTO smeldr_role_grants (id, token_id, role_id, scope_static, scope_anchor_id, created_at)
-				SELECT ?, ?, ?, '[]', NULL, ?
+				SELECT $1, $2, $3, '[]', NULL, $4
 				WHERE NOT EXISTS (
 					SELECT 1 FROM smeldr_role_grants
-					WHERE token_id = ? AND role_id = ? AND scope_anchor_id IS NULL
+					WHERE token_id = $5 AND role_id = $6 AND scope_anchor_id IS NULL
 				)`,
 			NewID(), t.id, roleID, now, t.id, roleID,
 		); err != nil {
@@ -471,7 +473,7 @@ func (s *sqlGovernanceAuditStore) Append(ctx context.Context, r GovernanceAuditR
 	if _, err := s.db.ExecContext(ctx,
 		`INSERT INTO smeldr_governance_audit
 			(id, actor_token_id, action, target_kind, target_id, before_json, after_json, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		r.ID, r.ActorTokenID, r.Action, r.TargetKind, r.TargetID, r.Before, r.After,
 		r.CreatedAt.UTC().Format(time.RFC3339),
 	); err != nil {
@@ -560,7 +562,7 @@ func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
 		)
 		err := s.db.QueryRowContext(ctx,
 			`SELECT id, name, operations, scope_mode, trust_level, allow_self_approval
-			   FROM smeldr_roles WHERE name = ?`, role.Name,
+			   FROM smeldr_roles WHERE name = $1`, role.Name,
 		).Scan(&existingID, &existingName, &existingOps, &existingScope, &existingTrust, &existingSelfApproval)
 		if err != nil && err != sql.ErrNoRows {
 			return fmt.Errorf("smeldr: DefineRole: audit before-state: %w", err)
@@ -579,30 +581,28 @@ func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
 	}
 
 	if _, err := s.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO smeldr_roles
+		`INSERT INTO smeldr_roles
 			(id, name, operations, scope_mode, scope_relation_kind, scope_direction,
 			 trust_level, allow_self_approval, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			ON CONFLICT (name) DO UPDATE SET
+			  operations=EXCLUDED.operations,
+			  scope_mode=EXCLUDED.scope_mode,
+			  scope_relation_kind=EXCLUDED.scope_relation_kind,
+			  scope_direction=EXCLUDED.scope_direction,
+			  trust_level=EXCLUDED.trust_level,
+			  allow_self_approval=EXCLUDED.allow_self_approval,
+			  updated_at=EXCLUDED.updated_at`,
 		NewID(), role.Name, string(opsJSON), string(scopeMode),
 		role.ScopeRelationKind, role.ScopeDirection,
 		role.TrustLevel, selfApproval, now, now,
 	); err != nil {
-		return fmt.Errorf("smeldr: DefineRole: insert %q: %w", role.Name, err)
-	}
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE smeldr_roles
-			SET operations=?, scope_mode=?, scope_relation_kind=?, scope_direction=?,
-			    trust_level=?, allow_self_approval=?, updated_at=?
-			WHERE name=?`,
-		string(opsJSON), string(scopeMode), role.ScopeRelationKind, role.ScopeDirection,
-		role.TrustLevel, selfApproval, now, role.Name,
-	); err != nil {
-		return fmt.Errorf("smeldr: DefineRole: update %q: %w", role.Name, err)
+		return fmt.Errorf("smeldr: DefineRole: upsert %q: %w", role.Name, err)
 	}
 	if s.auditStore != nil {
 		if targetID == "" {
 			if err := s.db.QueryRowContext(ctx,
-				`SELECT id FROM smeldr_roles WHERE name = ?`, role.Name,
+				`SELECT id FROM smeldr_roles WHERE name = $1`, role.Name,
 			).Scan(&targetID); err != nil {
 				return fmt.Errorf("smeldr: DefineRole: audit resolve id: %w", err)
 			}
@@ -648,7 +648,7 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 	}
 	var roleID string
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT id FROM smeldr_roles WHERE name = ?`, grant.RoleName,
+		`SELECT id FROM smeldr_roles WHERE name = $1`, grant.RoleName,
 	).Scan(&roleID); err == sql.ErrNoRows {
 		return "", fmt.Errorf("smeldr: Grant: role %q: %w", grant.RoleName, ErrNotFound)
 	} else if err != nil {
@@ -669,14 +669,14 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 
 	if _, err := s.db.ExecContext(ctx,
 		`INSERT INTO smeldr_role_grants (id, token_id, role_id, scope_static, scope_anchor_id, created_at)
-			SELECT ?, ?, ?, ?, ?, ?
+			SELECT $1, $2, $3, $4, $5, $6
 			WHERE NOT EXISTS (
 				SELECT 1 FROM smeldr_role_grants
-				WHERE token_id = ? AND role_id = ?
-				  AND (scope_anchor_id IS ? OR (scope_anchor_id IS NULL AND ? IS NULL))
+				WHERE token_id = $7 AND role_id = $8
+				  AND scope_anchor_id IS NOT DISTINCT FROM $9
 			)`,
 		newID, grant.TokenID, roleID, string(staticJSON), anchorID, now,
-		grant.TokenID, roleID, anchorID, anchorID,
+		grant.TokenID, roleID, anchorID,
 	); err != nil {
 		return "", fmt.Errorf("smeldr: Grant: insert: %w", err)
 	}
@@ -685,14 +685,14 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 	var grantID string
 	if anchorID != nil {
 		if err := s.db.QueryRowContext(ctx,
-			`SELECT id FROM smeldr_role_grants WHERE token_id=? AND role_id=? AND scope_anchor_id=?`,
+			`SELECT id FROM smeldr_role_grants WHERE token_id=$1 AND role_id=$2 AND scope_anchor_id=$3`,
 			grant.TokenID, roleID, *anchorID,
 		).Scan(&grantID); err != nil {
 			return "", fmt.Errorf("smeldr: Grant: resolve grant id: %w", err)
 		}
 	} else {
 		if err := s.db.QueryRowContext(ctx,
-			`SELECT id FROM smeldr_role_grants WHERE token_id=? AND role_id=? AND scope_anchor_id IS NULL`,
+			`SELECT id FROM smeldr_role_grants WHERE token_id=$1 AND role_id=$2 AND scope_anchor_id IS NULL`,
 			grant.TokenID, roleID,
 		).Scan(&grantID); err != nil {
 			return "", fmt.Errorf("smeldr: Grant: resolve grant id: %w", err)
@@ -745,7 +745,7 @@ func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
 		)
 		err := s.db.QueryRowContext(ctx,
 			`SELECT id, token_id, role_id, scope_anchor_id, scope_static
-			   FROM smeldr_role_grants WHERE id = ?`, grantID,
+			   FROM smeldr_role_grants WHERE id = $1`, grantID,
 		).Scan(&eid, &etok, &erol, &eanch, &estatic)
 		if err != nil && err != sql.ErrNoRows {
 			return fmt.Errorf("smeldr: Revoke: audit before-state: %w", err)
@@ -766,7 +766,7 @@ func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
 		}
 	}
 	if _, err := s.db.ExecContext(ctx,
-		`DELETE FROM smeldr_role_grants WHERE id = ?`, grantID,
+		`DELETE FROM smeldr_role_grants WHERE id = $1`, grantID,
 	); err != nil {
 		return fmt.Errorf("smeldr: Revoke: %w", err)
 	}
@@ -801,7 +801,7 @@ func (s *RoleStore) ListGrants(ctx context.Context, tokenID string) ([]RoleGrant
 			`SELECT g.id, r.name, g.token_id, g.scope_static, g.scope_anchor_id, g.created_at
 				FROM smeldr_role_grants g
 				JOIN smeldr_roles r ON r.id = g.role_id
-				WHERE g.token_id = ?`, tokenID)
+				WHERE g.token_id = $1`, tokenID)
 	} else {
 		rows, err = s.db.QueryContext(ctx,
 			`SELECT g.id, r.name, g.token_id, g.scope_static, g.scope_anchor_id, g.created_at
@@ -868,7 +868,7 @@ func (s *RoleStore) Authorized(ctx context.Context, tokenID, op string, target A
 		        r.scope_mode, r.scope_relation_kind, r.scope_direction
 		   FROM smeldr_role_grants g
 		   JOIN smeldr_roles r ON r.id = g.role_id
-		  WHERE g.token_id = ?`, tokenID)
+		  WHERE g.token_id = $1`, tokenID)
 	if err != nil {
 		return false, fmt.Errorf("smeldr: Authorized: query grants: %w", err)
 	}
@@ -978,7 +978,7 @@ func (s *RoleStore) RoleGranted(ctx context.Context, tokenID, roleName string, t
 		`SELECT g.scope_static, g.scope_anchor_id, r.scope_mode, r.scope_relation_kind, r.scope_direction
 		   FROM smeldr_role_grants g
 		   JOIN smeldr_roles r ON r.id = g.role_id
-		  WHERE g.token_id = ? AND r.name = ?`, tokenID, roleName)
+		  WHERE g.token_id = $1 AND r.name = $2`, tokenID, roleName)
 	if err != nil {
 		return false, fmt.Errorf("smeldr: RoleGranted: query grants: %w", err)
 	}
@@ -1065,9 +1065,9 @@ func (s *RoleStore) relationExists(ctx context.Context, kind, direction, itemID,
 		var n int
 		if err := s.db.QueryRowContext(ctx,
 			`SELECT 1 FROM smeldr_relations
-				WHERE source_id=? AND target_id=? AND relation_kind=?
+				WHERE source_id=$1 AND target_id=$2 AND relation_kind=$3
 				  AND edge_class='asserted'
-				  AND (invalid_at IS NULL OR invalid_at > ?)
+				  AND (invalid_at IS NULL OR invalid_at > $4)
 				LIMIT 1`,
 			itemID, anchorID, kind, now,
 		).Scan(&n); err == nil {
@@ -1080,9 +1080,9 @@ func (s *RoleStore) relationExists(ctx context.Context, kind, direction, itemID,
 		var n int
 		if err := s.db.QueryRowContext(ctx,
 			`SELECT 1 FROM smeldr_relations
-				WHERE source_id=? AND target_id=? AND relation_kind=?
+				WHERE source_id=$1 AND target_id=$2 AND relation_kind=$3
 				  AND edge_class='asserted'
-				  AND (invalid_at IS NULL OR invalid_at > ?)
+				  AND (invalid_at IS NULL OR invalid_at > $4)
 				LIMIT 1`,
 			anchorID, itemID, kind, now,
 		).Scan(&n); err == nil {
@@ -1134,7 +1134,7 @@ func (a *App) RoleStore() *RoleStore {
 func (s *RoleStore) ToolPolicy(ctx context.Context, toolName string) (requiredOp string, found bool, err error) {
 	var op string
 	err = s.db.QueryRowContext(ctx,
-		`SELECT required_op FROM smeldr_tool_policies WHERE tool_name = ?`, toolName,
+		`SELECT required_op FROM smeldr_tool_policies WHERE tool_name = $1`, toolName,
 	).Scan(&op)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil

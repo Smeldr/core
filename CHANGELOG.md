@@ -23,6 +23,23 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.52.1] — 2026-07-04
+
+### Changed
+- **Postgres portability** — All `?` SQL placeholders converted to `$N` positional parameters across `state.go`, `governance.go`, `migrate.go`, and `dynamic.go`, matching the portable convention used in `relations.go`, `redirects.go`, `schemas.go`, and `storage.go`.
+- All `INSERT OR IGNORE` statements replaced with `INSERT … ON CONFLICT (column) DO NOTHING` with explicit conflict columns, and `DefineRole`'s two-step INSERT/UPDATE sequence collapsed to a single UPSERT (`INSERT … ON CONFLICT (name) DO UPDATE SET …`) to eliminate race window; `id` and `created_at` are INSERT-only (excluded from `DO UPDATE SET`).
+- `Grant`'s `IS ?` NULL comparison (SQLite-only) replaced with `IS NOT DISTINCT FROM $N` — portable across SQLite ≥ 3.39.0 and all Postgres versions; also removes duplicate `anchorID` argument.
+
+### Added
+- **Postgres integration tests** — New `integration_core_test.go` (`//go:build integration`, `package smeldr`) boots `smeldr.App` against real Postgres 16 via `database/sql` + `pgx/v5/stdlib`, covering `migrateStateFlows`, `RegisterFlow`, `migrateGovernance`, `DefineRole`, `Grant`, `Authorized`, `RoleGranted`, and `ToolPolicy`; skips when `DATABASE_URL` is unset.
+- CI `.github/workflows/ci.yml` integration job extended with new step running `go test -v -tags integration ./...` from repo root alongside the existing pgx step.
+- Direct dependency: `github.com/jackc/pgx/v5 v5.9.2` (stdlib driver for integration tests).
+
+### Fixed
+- `governance_test.go` `execFailDB` matchers updated from `"INSERT OR IGNORE INTO smeldr_roles/smeldr_tool_policies"` to `"INSERT INTO smeldr_roles/smeldr_tool_policies"` to match new SQL; `TestDefineRole_UpdateError` removed (second ExecContext path no longer exists after UPSERT consolidation); `TestGrant_ResolveIDError_WithAnchor` failOn updated `"scope_anchor_id=?"` → `"scope_anchor_id=$3"`.
+
+---
+
 ## [1.52.0] — 2026-07-03
 
 ### Added

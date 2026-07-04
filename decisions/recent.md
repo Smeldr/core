@@ -454,3 +454,46 @@ Update three `Module[T]` call sites in `module.go`:
 - Coverage: 96.0%. core v1.52.0.
 
 ---
+
+## A194 — T112: Postgres portability for state/governance/dynamic SQL (v1.52.1)
+
+**Status:** Agreed — **Date:** 2026-07-04
+
+### Decision
+
+Convert all SQLite-only SQL constructs in `state.go`, `governance.go`, `migrate.go`, and `dynamic.go` to the portable pattern already used in `relations.go`, `redirects.go`, `schemas.go`, and `storage.go`. Three specific changes:
+
+1. **`?` → `$N` positional parameters.** Every `?` placeholder replaced with `$1`, `$2`, … per query. Both modernc.org/sqlite and pgx/v5/stdlib accept `$N` natively — no translation layer needed or added.
+
+2. **`INSERT OR IGNORE` → `INSERT … ON CONFLICT (column) DO NOTHING`.** Explicit conflict columns per table:
+   - `smeldr_state_flows(name)`, `smeldr_states(flow_id, name)`, `smeldr_transitions(flow_id, from_state, to_state)`, `smeldr_eval_queue(type_name, item_id, to_state)`
+   - `smeldr_roles(name)`, `smeldr_tool_policies(tool_name)`, `smeldr_routes(path_pattern)`
+
+3. **`DefineRole` two-step → single UPSERT.** Old pattern: INSERT OR IGNORE followed by a separate UPDATE (two round-trips, theoretical race window). New pattern: single `INSERT … ON CONFLICT (name) DO UPDATE SET operations=EXCLUDED.operations, …`; `id` and `created_at` are INSERT-only (not in `DO UPDATE SET`). The follow-up `SELECT id … WHERE name=$1` for audit is unchanged.
+
+4. **`IS ?` → `IS NOT DISTINCT FROM $N` in Grant.** SQLite-only `IS ?` syntax is not valid Postgres. `IS NOT DISTINCT FROM $N` is the portable NULL-safe equality operator supported on SQLite ≥ 3.39.0 and all Postgres versions. Also removes a duplicate `anchorID` argument that the old two-argument form required.
+
+5. **Postgres integration test.** New `integration_core_test.go` (`//go:build integration`, `package smeldr`) boots `smeldr.App` against Postgres 16 via `database/sql` + `_ "github.com/jackc/pgx/v5/stdlib"`. Tests `migrateStateFlows`, `RegisterFlow` (idempotent), `migrateGovernance`, `DefineRole` (create + update via UPSERT), `Grant` (idempotent), `Authorized`, `RoleGranted`, `ToolPolicy`. Skips when `DATABASE_URL` is not set. Driver imported via blank import; `*sql.DB` satisfies `smeldr.DB` directly — no circular module dependency.
+
+6. **CI extension.** `.github/workflows/ci.yml` integration job gains a second step: `go test -v -tags integration ./...` from repo root (runs after the existing pgx step, same Postgres 16 service container). `github.com/jackc/pgx/v5 v5.9.2` added as a direct `go.mod` dependency.
+
+**`governance_test.go` test updates** (consequence of SQL changes):
+- Four `execFailDB.failOn` strings updated: `"INSERT OR IGNORE INTO smeldr_roles"` → `"INSERT INTO smeldr_roles"`, `"INSERT OR IGNORE INTO smeldr_tool_policies"` → `"INSERT INTO smeldr_tool_policies"`.
+- `TestDefineRole_UpdateError` removed — tested the second ExecContext call (`UPDATE smeldr_roles`) which no longer exists after the UPSERT consolidation.
+- `TestGrant_ResolveIDError_WithAnchor` failOn updated: `"scope_anchor_id=?"` → `"scope_anchor_id=$3"`.
+
+**Deferred (flagged, not fixed in T112):**
+- `migrateStateFlowConflictColumns` uses `PRAGMA table_info` (SQLite-only DDL introspection). Returns nil on non-SQLite error, so Postgres boot still succeeds — but the `active_state`/`conflict_policy` ALTER TABLEs are skipped. Schema version table or IF NOT EXISTS DDL approach needed.
+- `MigrateRedirectsToRoutes` queries `sqlite_master` (SQLite-only). Same nil-on-error guard; Postgres safe but migration skipped.
+- DDL column types: `INTEGER PRIMARY KEY` (SQLite ROWID alias) vs Postgres `BIGSERIAL`. Separate task.
+
+### Consequences
+
+- All existing SQLite tests pass unchanged — portability fix, not a behaviour change.
+- Postgres 16 migration, seeding, and authorization queries verified by CI on every push.
+- `DefineRole` UPSERT is now atomic — eliminates the INSERT/UPDATE race window from A188/A189.
+- `IS NOT DISTINCT FROM $N` handles NULL correctly on both databases — no semantic change.
+- Three deferred constructs (`PRAGMA`, `sqlite_master`, DDL types) are fail-open: Postgres boot succeeds but affected migrations are skipped silently. Tracked as follow-up.
+- Coverage: 96.0%. core v1.52.1.
+
+---

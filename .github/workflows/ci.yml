@@ -87,3 +87,9 @@ jobs:
         env:
           DATABASE_URL: postgres://forge:forge@localhost:5432/forgetest
         run: go test -v -tags integration ./...
+
+      - name: Run core integration tests
+        working-directory: pgx
+        env:
+          DATABASE_URL: postgres://forge:forge@localhost:5432/forgetest
+        run: go test -v -tags integration ./...

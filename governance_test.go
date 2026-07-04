@@ -454,7 +454,7 @@ func TestMigrateGovernance_SeedRolesError(t *testing.T) {
 
 	// Drop roles so INSERT is not an ignore but wrapping makes ExecContext fail.
 	// Use a wrapper that fails only INSERT (not CREATE TABLE IF NOT EXISTS which is a no-op now).
-	wrapped := &execFailDB{DB: db, failOn: "INSERT OR IGNORE INTO smeldr_roles"}
+	wrapped := &execFailDB{DB: db, failOn: "INSERT INTO smeldr_roles"}
 	if err := migrateGovernance(ctx, wrapped); err == nil {
 		t.Fatal("expected error when seedDefaultRoles INSERT fails, got nil")
 	}
@@ -472,7 +472,7 @@ func TestMigrateGovernance_SeedToolPoliciesError(t *testing.T) {
 		t.Fatalf("first migrateGovernance: %v", err)
 	}
 
-	wrapped := &execFailDB{DB: db, failOn: "INSERT OR IGNORE INTO smeldr_tool_policies"}
+	wrapped := &execFailDB{DB: db, failOn: "INSERT INTO smeldr_tool_policies"}
 	if err := migrateGovernance(ctx, wrapped); err == nil {
 		t.Fatal("expected error when seedToolPolicies INSERT fails, got nil")
 	}
@@ -491,7 +491,7 @@ func TestSeedDefaultRoles_ExecError(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	wrapped := &execFailDB{DB: db, failOn: "INSERT OR IGNORE INTO smeldr_roles"}
+	wrapped := &execFailDB{DB: db, failOn: "INSERT INTO smeldr_roles"}
 	if err := seedDefaultRoles(ctx, wrapped); err == nil {
 		t.Fatal("expected error from seedDefaultRoles when ExecContext fails, got nil")
 	}
@@ -699,20 +699,10 @@ func TestDefineRole_EmptyName(t *testing.T) {
 func TestDefineRole_InsertError(t *testing.T) {
 	db := setupGovernanceDB(t)
 	ctx := context.Background()
-	wrapped := &execFailDB{DB: db, failOn: "INSERT OR IGNORE INTO smeldr_roles"}
+	wrapped := &execFailDB{DB: db, failOn: "INSERT INTO smeldr_roles"}
 	store := NewRoleStore(wrapped)
 	if err := store.DefineRole(ctx, RoleDefinition{Name: "x", Operations: []string{"read"}}); err == nil {
-		t.Fatal("expected error from failing INSERT, got nil")
-	}
-}
-
-func TestDefineRole_UpdateError(t *testing.T) {
-	db := setupGovernanceDB(t)
-	ctx := context.Background()
-	wrapped := &execFailDB{DB: db, failOn: "UPDATE smeldr_roles"}
-	store := NewRoleStore(wrapped)
-	if err := store.DefineRole(ctx, RoleDefinition{Name: "x", Operations: []string{"read"}}); err == nil {
-		t.Fatal("expected error from failing UPDATE, got nil")
+		t.Fatal("expected error from failing UPSERT, got nil")
 	}
 }
 
@@ -1548,7 +1538,7 @@ func TestGrant_ResolveIDError_WithAnchor(t *testing.T) {
 		t.Fatalf("DefineRole: %v", err)
 	}
 	// Fail the SELECT that resolves the grant id by anchor (scope_anchor_id=?).
-	wrapped := &govQueryRowFailDB{DB: db, failOn: "scope_anchor_id=?"}
+	wrapped := &govQueryRowFailDB{DB: db, failOn: "scope_anchor_id=$3"}
 	store := NewRoleStore(wrapped)
 	_, err := store.Grant(ctx, RoleGrant{
 		TokenID: NewID(), RoleName: "dyn-role2", ScopeAnchorID: NewID(),
