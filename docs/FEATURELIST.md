@@ -2,14 +2,14 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.52.2 (A197) + smeldr.dev/mcp v1.26.1 + smeldr.dev/cli v0.15.1 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.2 + smeldr.dev/agent v0.7.1 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
+Last updated: v1.53.0 (A199) + smeldr.dev/mcp v1.27.0 + smeldr.dev/cli v0.15.1 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.2 + smeldr.dev/agent v0.7.1 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.52.2 | Stable |
-| `smeldr.dev/mcp` | v1.26.1 | Stable |
+| `smeldr.dev/core` | v1.53.0 | Stable |
+| `smeldr.dev/mcp` | v1.27.0 | Stable |
 | `smeldr.dev/oauth` | v0.3.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.1.2 | Beta |
 | `smeldr.dev/media` | v1.6.0 | Beta |
@@ -276,6 +276,9 @@ MCP resource subscriptions (Beta):
 - `Task` content type — work item in the architect/pilot state machine (architect-task flow: backlog -> active -> ... -> done/deferred)
 - `Decision` content type — ratified architectural decision with re-evaluation cycle (governance-decision flow: proposed -> ratified -> ... -> superseded/archived)
 - `Amendment` content type — committed changeset linking a Task to its code implementation (amendment-lifecycle flow: scoped -> in-progress -> commit-ready -> committed -> merged/rejected)
-- `CreateOrchestrationTables(db DB) error` — creates all four DB tables
-- `RegisterOrchestrationTypes(app *App, db DB)` — registers all four types with state flows and MCP(MCPRead, MCPWrite); fail-open on nil DB
-- All four types embed `Node` and receive full MCP tool generation (create, get, list, update, publish, archive, delete)
+- `Goal` content type — work goal with priority, band, and size; linked to Decisions and Tasks via the relation graph (goal-lifecycle flow: parked -> open -> in-progress -> done/deferred)
+- `CreateOrchestrationTables(db DB) error` — creates all five DB tables
+- `RegisterOrchestrationTypes(app *App, db DB)` — registers all five types with state flows and MCP(MCPRead, MCPWrite); fail-open on nil DB
+- All five types embed `Node` and receive full MCP tool generation (create, get, list, update, publish, archive, delete)
+- `QueryGoalContext(ctx, db, rs, goalID)` — assembles `GoalContext` (goal + linked Decisions, Tasks, Goals) via bidirectional relation-graph query; fail-open on nil RelationStore
+- `get_goal_context` MCP tool (smeldr.dev/mcp v1.27.0) — agent-callable query returning `{goal, linked_decisions, linked_tasks, linked_goals}` for a given GoalID

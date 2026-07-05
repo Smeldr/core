@@ -3431,7 +3431,7 @@ The `UNIQUE` constraint prevents duplicate queue entries for the same item+trans
 
 ## Orchestration types
 
-`orchestration.go` (T23 Step 10, A183) — four content types for the architect/pilot protocol.
+`orchestration.go` — five content types for the architect/pilot protocol plus context-packet query.
 
 ### `CreateOrchestrationTables`
 
@@ -3439,7 +3439,7 @@ The `UNIQUE` constraint prevents duplicate queue entries for the same item+trans
 func CreateOrchestrationTables(db DB) error
 ```
 
-Creates `smeldr_signals`, `smeldr_tasks`, `smeldr_decisions`, `smeldr_amendments` tables
+Creates `smeldr_signals`, `smeldr_tasks`, `smeldr_decisions`, `smeldr_amendments`, and `smeldr_goals` tables
 if they do not already exist. Call once at application startup before `RegisterOrchestrationTypes`.
 
 ### `RegisterOrchestrationTypes`
@@ -3448,7 +3448,7 @@ if they do not already exist. Call once at application startup before `RegisterO
 func RegisterOrchestrationTypes(app *App, db DB)
 ```
 
-Registers the four orchestration content types with their custom state flows and MCP
+Registers the five orchestration content types with their custom state flows and MCP
 read+write tools. Fail-open: if `db` is nil, flow registration errors are logged and
 startup continues. Call after `CreateOrchestrationTables` and before `App.Run`.
 
@@ -3465,9 +3465,29 @@ smeldr.RegisterOrchestrationTypes(app, db)
 | `Task` | `smeldr_tasks` | architect-task (9 states) | task_id, priority, band, size, description, note_ref |
 | `Decision` | `smeldr_decisions` | governance-decision (5 states) | decision_number, scope, body, next_eval_at, eval_note |
 | `Amendment` | `smeldr_amendments` | amendment-lifecycle (6 states) | amendment_number, amendment_type, version, commit_hash, pilot, summary |
+| `Goal` | `smeldr_goals` | goal-lifecycle (4 states) | goal_id, priority, band, size, description |
 
-All four types embed `Node` and receive auto-generated MCP tools (`create_*`, `get_*`,
+All five types embed `Node` and receive auto-generated MCP tools (`create_*`, `get_*`,
 `list_*`, `update_*`, `publish_*`, `archive_*`, `delete_*`) via `MCP(MCPRead, MCPWrite)`.
+
+### `GoalContext` and `QueryGoalContext`
+
+```go
+type GoalContext struct {
+    Goal            *Goal
+    LinkedDecisions []Decision
+    LinkedTasks     []Task
+    LinkedGoals     []Goal
+}
+
+func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID string) (*GoalContext, error)
+```
+
+`QueryGoalContext` assembles a full context packet for the goal whose `GoalID` field matches `goalID` (e.g. `"T114"`). It queries both the source and target sides of the relation graph and collects linked Decisions, Tasks, and Goals. Deduplicates by edge ID. Skips Goal→Goal self-links. Warns and continues on missing linked items (fail-open per item).
+
+Returns `ErrNotFound` when no matching goal exists. When `rs` is nil, returns the goal with empty slices (fail-open).
+
+The `get_goal_context` MCP tool in `smeldr.dev/mcp` exposes this function as an agent-callable operation (see smeldr.dev/mcp documentation).
 
 ### `LifecycleEvent` (renamed from `Signal`)
 

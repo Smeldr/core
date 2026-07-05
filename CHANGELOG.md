@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.53.0] — 2026-07-05
+
+### Added
+- `orchestration.go`: `Goal` struct (GoalID, Priority, Band, Size, Description fields, embeds Node). `GoalContext` struct (Goal + LinkedDecisions + LinkedTasks + LinkedGoals). `QueryGoalContext(ctx, DB, *RelationStore, goalID)` — bidirectional edge traversal, deduplication, fail-open on nil RelationStore. `orchGoalFlow` — 4 states, 5 transitions, parked→open allowed. `CreateOrchestrationTables` extended with `smeldr_goals` DDL. `RegisterOrchestrationTypes` extended to 5th type + flow. (A198, T114 Step 1)
+- `storage.go`: `timeScanner` (sql.Scanner for time.Time, handles string/[]byte/int64/nil/time.Time sources). `scanDest` wrapper applied in `Query[T]` and `Seq` scan loops — fixes round-trip queries on draft items where published_at is stored as a Go string by SQLite. (A200)
+
+---
+
 ## [1.52.2] — 2026-07-04
 
 ### Fixed

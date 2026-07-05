@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -237,6 +238,85 @@ func TestMigrateNodeRevColumn_Idempotent(t *testing.T) {
 	if err := MigrateNodeRevColumn(db, "idempotent_rev_test"); err != nil {
 		t.Errorf("second call: %v", err)
 	}
+}
+
+// TestTimeScanner covers the SQL-scanner wrapper for time.Time destinations.
+func TestTimeScanner(t *testing.T) {
+	ref := time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	t.Run("time.Time_src", func(t *testing.T) {
+		var dst time.Time
+		ts := timeScanner{dst: &dst}
+		if err := ts.Scan(ref); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if !dst.Equal(ref) {
+			t.Errorf("dst = %v, want %v", dst, ref)
+		}
+	})
+
+	t.Run("RFC3339Nano_string", func(t *testing.T) {
+		var dst time.Time
+		ts := timeScanner{dst: &dst}
+		if err := ts.Scan(ref.Format(time.RFC3339Nano)); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if !dst.Equal(ref) {
+			t.Errorf("dst = %v, want %v", dst, ref)
+		}
+	})
+
+	t.Run("bytes_src", func(t *testing.T) {
+		var dst time.Time
+		ts := timeScanner{dst: &dst}
+		if err := ts.Scan([]byte(ref.Format(time.RFC3339Nano))); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if !dst.Equal(ref) {
+			t.Errorf("dst = %v, want %v", dst, ref)
+		}
+	})
+
+	t.Run("int64_unix_src", func(t *testing.T) {
+		var dst time.Time
+		ts := timeScanner{dst: &dst}
+		unix := ref.Unix()
+		if err := ts.Scan(unix); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if !dst.Equal(ref) {
+			t.Errorf("dst = %v, want %v", dst, ref)
+		}
+	})
+
+	t.Run("nil_src_zero_time", func(t *testing.T) {
+		var dst time.Time
+		ts := timeScanner{dst: &dst}
+		if err := ts.Scan(nil); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if !dst.IsZero() {
+			t.Errorf("dst = %v, want zero", dst)
+		}
+	})
+
+	t.Run("unparseable_string_error", func(t *testing.T) {
+		var dst time.Time
+		ts := timeScanner{dst: &dst}
+		err := ts.Scan("not-a-date")
+		if err == nil {
+			t.Error("Scan: expected error, got nil")
+		}
+	})
+
+	t.Run("unsupported_type_error", func(t *testing.T) {
+		var dst time.Time
+		ts := timeScanner{dst: &dst}
+		err := ts.Scan(3.14)
+		if err == nil {
+			t.Error("Scan: expected error for float64 src, got nil")
+		}
+	})
 }
 
 func TestMemoryRepo_Save_RevIncrement(t *testing.T) {

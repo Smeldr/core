@@ -129,12 +129,16 @@ smeldr.dev/
 │                     dispatchBefore(), dispatchAfter(), debouncer, debouncer.Stop() (Amendment A39);
 │                     SignalEvent{Type, Slug, Title, URL, Timestamp, PreviousState, ActorRole, ActorID},
 │                     afterHookMeta (unexported), buildSignalEvent (unexported) (Amendment A94)
-├── orchestration.go  Signal, Task, Decision, Amendment content types embedding Node;
-│                     CreateOrchestrationTables(DB) error;
-│                     RegisterOrchestrationTypes(*App, DB) — fail-open, registers 4 types + flows;
-│                     orchSignalFlow, orchTaskFlow, orchDecisionFlow, orchAmendmentFlow (unexported)
-│                     (Amendment A183, T23 Step 10)
-├── storage.go        DB interface, Query[T], QueryOne[T], Repository[T], MemoryRepo[T], ListOptions
+├── orchestration.go  Signal, Task, Decision, Amendment, Goal content types embedding Node;
+│                     GoalContext struct (Goal + LinkedDecisions + LinkedTasks + LinkedGoals);
+│                     QueryGoalContext(ctx, DB, *RelationStore, goalID) (*GoalContext, error);
+│                     CreateOrchestrationTables(DB) error — creates 5 tables incl. smeldr_goals;
+│                     RegisterOrchestrationTypes(*App, DB) — fail-open, registers 5 types + flows;
+│                     orchSignalFlow, orchTaskFlow, orchDecisionFlow, orchAmendmentFlow, orchGoalFlow (unexported)
+│                     (Amendment A183, T23 Step 10; Goal type: A198, T114 Step 1)
+├── storage.go        DB interface, Query[T], QueryOne[T], Repository[T], MemoryRepo[T], ListOptions;
+│                     timeScanner (unexported) — sql.Scanner for time.Time fields, handles SQLite
+│                     string format; scanDest (unexported) — wraps *time.Time destinations (A200)
 ├── state.go          StateFlow, State, Transition — data-driven state machine types;
 │                     ConflictPolicy type (ConflictReject, ConflictSupersede constants);
 │                     StateFlow.ActiveState + StateFlow.ConflictPolicy optional fields;

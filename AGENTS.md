@@ -486,6 +486,7 @@ These tools are available when `App.Config().DB` is non-nil (any app with a data
 | `list_items_by_state` | Author | List all items of a dynamic content type in the given state. Params: `type_name`, `state`. Returns `{type_name, state, items, count}`. |
 | `create_signal` | Author | Insert a protocol signal into smeldr_signals with status "pending". Params: `sender`, `receiver`, `signal_type` (required); `task_ref`, `message`, `sequence` (optional). Returns `{id, slug, status}`. Requires smeldr_signals table (call `CreateOrchestrationTables` first). (A185) |
 | `list_signals` | Author | List signals from smeldr_signals by receiver and status. Params: `receiver` (required), `state` (optional, default "pending"). Returns `{signals, count}` ordered by created_at ascending. Fail-open when smeldr_signals table is absent — returns empty list. (A185) |
+| `get_goal_context` | Author | Retrieve a goal and all items linked to it via the relation graph (Decisions, Tasks, other Goals). Params: `goal_id` (required, e.g. `"T114"`). Returns `{goal, linked_decisions, linked_tasks, linked_goals}`. Returns -32001 when goal does not exist. Requires smeldr_goals table (call `CreateOrchestrationTables` first). (A199) |
 
 **State flow rules:**
 - `define_state_flow` calls `App.RegisterFlow` which uses INSERT OR IGNORE — re-running with the same name/type_name is safe; existing state and transition rows are preserved; `active_state` and `conflict_policy` are updated on every call

@@ -8,6 +8,133 @@ import (
 	"time"
 )
 
+// Goal is an orchestration content type representing a work goal — a unit of
+// intentional work that can be linked to Decisions and Tasks via the relation
+// graph. It models the TODO-table rows in ARCHITECT_TODO.md as live Smeldr items.
+type Goal struct {
+	Node
+	// GoalID is the canonical identifier (e.g. "T114").
+	GoalID string `json:"goal_id" db:"goal_id"`
+	// Priority is the scheduling priority. Lower values are higher priority.
+	Priority int `json:"priority"`
+	// Band groups goals by work band (e.g. "P0", "P1", "P2", "P3").
+	Band string `json:"band"`
+	// Size is the effort estimate (e.g. "S", "M", "L", "XL").
+	Size string `json:"size"`
+	// Description is the full goal specification in Markdown.
+	Description string `json:"description" smeldr_format:"markdown"`
+}
+
+// GoalContext is the assembled context for a single [Goal] — the goal itself
+// plus all items linked to it via the relation graph (Decisions, Tasks,
+// other Goals). Assembled by [QueryGoalContext] and used by the
+// get_goal_context MCP tool.
+type GoalContext struct {
+	Goal            *Goal
+	LinkedDecisions []Decision
+	LinkedTasks     []Task
+	LinkedGoals     []Goal
+}
+
+// QueryGoalContext assembles context for the goal whose GoalID field matches
+// goalID (e.g. "T114"). It queries both source and target sides of the
+// relation graph and appends each linked Decision, Task, or Goal.
+// Returns [ErrNotFound] when no goal with the given GoalID exists.
+// When rs is nil, returns the goal with empty relation slices (fail-open).
+func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID string) (*GoalContext, error) {
+	if goalID == "" {
+		return nil, ErrBadRequest
+	}
+	if db == nil {
+		return nil, ErrInternal
+	}
+
+	goal, err := QueryOne[*Goal](ctx, db,
+		`SELECT * FROM smeldr_goals WHERE goal_id = $1`, goalID)
+	if err != nil {
+		return nil, err
+	}
+
+	gc := &GoalContext{
+		Goal:            goal,
+		LinkedDecisions: []Decision{},
+		LinkedTasks:     []Task{},
+		LinkedGoals:     []Goal{},
+	}
+	if rs == nil {
+		return gc, nil
+	}
+
+	// Collect edges on both sides of the relation graph and deduplicate by ID.
+	type relRef struct {
+		typeName string
+		id       string
+	}
+	seen := map[string]bool{}
+	var refs []relRef
+
+	srcEdges, err := rs.GetBySource(ctx, "Goal", goal.ID, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range srcEdges {
+		if seen[e.ID] {
+			continue
+		}
+		seen[e.ID] = true
+		refs = append(refs, relRef{typeName: e.TargetType, id: e.TargetID})
+	}
+
+	tgtEdges, err := rs.GetByTarget(ctx, "Goal", goal.ID, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range tgtEdges {
+		if seen[e.ID] {
+			continue
+		}
+		seen[e.ID] = true
+		refs = append(refs, relRef{typeName: e.SourceType, id: e.SourceID})
+	}
+
+	for _, ref := range refs {
+		switch ref.typeName {
+		case "Decision":
+			d, err := QueryOne[*Decision](ctx, db,
+				`SELECT * FROM smeldr_decisions WHERE id = $1`, ref.id)
+			if err != nil {
+				slog.WarnContext(ctx, "smeldr: QueryGoalContext: skipping Decision",
+					"id", ref.id, "error", err)
+				continue
+			}
+			gc.LinkedDecisions = append(gc.LinkedDecisions, *d)
+		case "Task":
+			t, err := QueryOne[*Task](ctx, db,
+				`SELECT * FROM smeldr_tasks WHERE id = $1`, ref.id)
+			if err != nil {
+				slog.WarnContext(ctx, "smeldr: QueryGoalContext: skipping Task",
+					"id", ref.id, "error", err)
+				continue
+			}
+			gc.LinkedTasks = append(gc.LinkedTasks, *t)
+		case "Goal":
+			if ref.id == goal.ID {
+				continue // skip self-links
+			}
+			g, err := QueryOne[*Goal](ctx, db,
+				`SELECT * FROM smeldr_goals WHERE id = $1`, ref.id)
+			if err != nil {
+				slog.WarnContext(ctx, "smeldr: QueryGoalContext: skipping Goal",
+					"id", ref.id, "error", err)
+				continue
+			}
+			gc.LinkedGoals = append(gc.LinkedGoals, *g)
+		}
+	}
+
+	return gc, nil
+}
+
 // Signal is an orchestration content type representing a protocol message
 // between pilots and the architect. It models the file-based SIGNAL_CORE.md
 // / SIGNAL_SITE.md hand-off protocol as a persisted, state-managed record.
@@ -79,9 +206,9 @@ type Amendment struct {
 	Summary string `json:"summary"`
 }
 
-// CreateOrchestrationTables creates the four orchestration content tables
-// (smeldr_signals, smeldr_tasks, smeldr_decisions, smeldr_amendments) if
-// they do not already exist. Call once at application startup before
+// CreateOrchestrationTables creates the five orchestration content tables
+// (smeldr_signals, smeldr_tasks, smeldr_decisions, smeldr_amendments, smeldr_goals)
+// if they do not already exist. Call once at application startup before
 // [RegisterOrchestrationTypes].
 func CreateOrchestrationTables(db DB) error {
 	stmts := []string{
@@ -148,6 +275,21 @@ func CreateOrchestrationTables(db DB) error {
 			pilot            TEXT NOT NULL DEFAULT '',
 			summary          TEXT NOT NULL DEFAULT ''
 		)`,
+		`CREATE TABLE IF NOT EXISTS smeldr_goals (
+			id           TEXT PRIMARY KEY,
+			slug         TEXT NOT NULL UNIQUE,
+			status       TEXT NOT NULL DEFAULT 'draft',
+			published_at TIMESTAMPTZ,
+			scheduled_at TIMESTAMPTZ,
+			created_at   TIMESTAMPTZ NOT NULL,
+			updated_at   TIMESTAMPTZ NOT NULL,
+			rev          INTEGER NOT NULL DEFAULT 0,
+			goal_id      TEXT NOT NULL DEFAULT '',
+			priority     INTEGER NOT NULL DEFAULT 0,
+			band         TEXT NOT NULL DEFAULT '',
+			size         TEXT NOT NULL DEFAULT '',
+			description  TEXT NOT NULL DEFAULT ''
+		)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
@@ -157,17 +299,18 @@ func CreateOrchestrationTables(db DB) error {
 	return nil
 }
 
-// RegisterOrchestrationTypes registers the four orchestration content types
-// ([Signal], [Task], [Decision], [Amendment]) with the application and their
-// custom state flows. Call after [CreateOrchestrationTables] and before
-// [App.Run]. Flow registration errors are logged and do not block startup
-// (fail-open).
+// RegisterOrchestrationTypes registers the five orchestration content types
+// ([Signal], [Task], [Decision], [Amendment], [Goal]) with the application
+// and their custom state flows. Call after [CreateOrchestrationTables] and
+// before [App.Run]. Flow registration errors are logged and do not block
+// startup (fail-open).
 func RegisterOrchestrationTypes(app *App, db DB) {
 	flows := []StateFlow{
 		orchSignalFlow(),
 		orchTaskFlow(),
 		orchDecisionFlow(),
 		orchAmendmentFlow(),
+		orchGoalFlow(),
 	}
 	for _, f := range flows {
 		if err := app.RegisterFlow(f); err != nil {
@@ -186,6 +329,9 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 	))
 	app.Content(NewModule[*Amendment]((*Amendment)(nil),
 		At("/amendments"), Repo(NewSQLRepo[*Amendment](db)), MCP(MCPRead, MCPWrite),
+	))
+	app.Content(NewModule[*Goal]((*Goal)(nil),
+		At("/goals"), Repo(NewSQLRepo[*Goal](db)), MCP(MCPRead, MCPWrite),
 	))
 }
 
@@ -303,6 +449,29 @@ func orchAmendmentFlow() StateFlow {
 			{From: "committed", To: "merged"},
 			{From: "in-progress", To: "rejected"},
 			{From: "commit-ready", To: "rejected"},
+		},
+	}
+}
+
+// orchGoalFlow returns the state flow for [Goal] records.
+// Goals move from open through active work to done or parked; parked goals
+// can return to open when a concrete need materialises.
+func orchGoalFlow() StateFlow {
+	return StateFlow{
+		Name:     "goal-lifecycle",
+		TypeName: "Goal",
+		States: []State{
+			{Name: "open", IsInitial: true},
+			{Name: "in-progress"},
+			{Name: "done", IsTerminal: true},
+			{Name: "parked", IsTerminal: true},
+		},
+		Transitions: []Transition{
+			{From: "open", To: "in-progress"},
+			{From: "in-progress", To: "done"},
+			{From: "open", To: "parked"},
+			{From: "in-progress", To: "parked"},
+			{From: "parked", To: "open"},
 		},
 	}
 }

@@ -161,3 +161,98 @@ T114 (dogfood instance) and T118 (downloadable binary) both need a runnable gene
 Coverage: 96.0%. core v1.52.2.
 
 ---
+
+## A198 — T114 Step 1: Goal orchestration type + context-packet query
+
+**Status:** Done
+**Date:** 2026-07-05
+**Files changed:** `orchestration.go`, `orchestration_test.go`, `docs/ARCHITECTURE.md`
+
+### What
+
+Added `Goal` struct, embedding Node with fields: GoalID string, Priority int, Band string, Size string, Description string (smeldr_format:"markdown").
+
+Added `GoalContext` struct with fields: Goal *Goal, LinkedDecisions []Decision, LinkedTasks []Task, LinkedGoals []Goal.
+
+Added `QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID string) (*GoalContext, error)` — performs bidirectional edge query (GetBySource + GetByTarget), deduplicates results by edge ID, skips self-links, fails open (no error) when rs is nil, returns ErrBadRequest for empty goalID, ErrInternal for nil db, ErrNotFound when goal is missing, logs warn and continues when linked items cannot be fetched.
+
+Added `orchGoalFlow()` (unexported) implementing state machine: 4 states (open, in-progress, done, parked) with 5 transitions (open→in-progress, in-progress→done, open→parked, in-progress→parked, parked→open).
+
+Extended `CreateOrchestrationTables` with `smeldr_goals` DDL (5th orchestration table).
+
+Extended `RegisterOrchestrationTypes` to register Goal as 5th orchestration type + its flow.
+
+### Why
+
+Implements T114 dogfood conversion — models ARCHITECT_TODO.md rows as live Smeldr items queryable via the relation graph. State flow reflects real-world goal lifecycle; parked→open transition is necessary because goals can be un-parked. Relations are queried bidirectionally because assert_relation direction is convention-dependent; bidirectional query captures all edges regardless of assertion direction.
+
+### Consequences
+
+CreateOrchestrationTables now creates 5 tables (was 4). RegisterOrchestrationTypes now registers 5 flows (was 4). New `smeldr_goals` table with columns: goal_id, priority, band, size, description. QueryGoalContext is the primary read path for the get_goal_context MCP tool (Step 2). Added 11 new tests: TestGoalFlow_definition, TestQueryGoalContext (9 sub-cases), TestCreateOrchestrationTables_DBError.
+
+Coverage: 96.0%. core v1.53.0 (minor bump — new exported types and functions).
+
+---
+
+## A200 — storage.go time.Time scan fix for SQLite TIMESTAMPTZ columns
+
+**Status:** Done
+**Date:** 2026-07-05
+**Files changed:** `storage.go`, `storage_sqlite_test.go`
+
+### What
+
+Added `timeScanner` (unexported type, implements `sql.Scanner`) — handles source types: string (parses RFC3339Nano, RFC3339, or Go `.String()` format "2006-01-02 15:04:05 -0700 MST"), []byte (converts to string and parses), int64 (interprets as Unix seconds → time.Time), nil (→ zero time.Time), time.Time (direct assignment), unknown type (returns error).
+
+Added `scanDest` (unexported function) — wraps *time.Time addresses in timeScanner; returns all other pointer types unchanged. Applied `scanDest` in `Query[T]` and `Seq` scan loops, replacing direct `Addr().Interface()` for time.Time field destinations.
+
+### Why
+
+Go 1.26's database/sql `convertAssign` does not handle string→*time.Time conversion. modernc.org/sqlite v1.50.0 stores time.Time{} (zero time) as "0001-01-01 00:00:00 +0000 UTC" (Go's `.String()` format) in TIMESTAMPTZ TEXT columns. Round-trip queries on draft orchestration items (published_at = zero time) failed with "unsupported Scan, storing driver.Value type string into type *time.Time". This bug exists in all 4 pre-existing orchestration types but was only exposed by T114 Step 1, the first code path to execute a round-trip query on a draft orchestration item.
+
+### Consequences
+
+Round-trip queries on draft items (zero published_at) now succeed for all orchestration types (Signal, Task, Decision, Amendment, Goal). SQLRepo.FindByID and FindBySlug now correctly scan time.Time values for all item states. Added TestTimeScanner (7 sub-cases: time.Time source, RFC3339Nano string, bytes, int64, nil, unparseable string error, unsupported type error). No API change; no version bump beyond A198.
+
+Coverage: 96.0%. core v1.53.0.
+
+---
+
+## A199 — T114 Step 2: get_goal_context MCP tool (smeldr.dev/mcp v1.27.0)
+
+**Status:** Agreed — **Date:** 2026-07-05
+
+### Decision
+
+Add `get_goal_context` as an MCP tool in `smeldr.dev/mcp`. The tool retrieves a `GoalContext` for a given `goal_id` (e.g. `"T114"`) and returns it as structured JSON. Implemented in `orchestration_tools.go` following the `signal_tools.go` pattern: `orchestrationToolDefs()`, `isOrchestrationTool()`, `handleOrchestrationTool()`. Gated on `s.app.Config().DB != nil`. Requires Author role. Wired into `handleToolsList` and `handleToolsCall` in `tool.go`.
+
+**Files changed:** `orchestration_tools.go` (new), `orchestration_tools_test.go` (new), `tool.go`, `go.mod`, `CHANGELOG.md`
+**Date:** 2026-07-05
+
+### What
+
+New file `orchestration_tools.go` in `smeldr.dev/mcp`:
+
+- `orchestrationToolDefs() []mcpTool` — returns the `get_goal_context` tool definition with `goal_id` as the single required parameter.
+- `isOrchestrationTool(name string) bool` — predicate for dispatch.
+- `(s *Server) handleOrchestrationTool(ctx, name, args)` — extracts `goal_id`, calls `smeldr.QueryGoalContext(ctx, db, s.app.RelationStore(), goalID)`, returns `{goal, linked_decisions, linked_tasks, linked_goals}`. Maps errors via `errorFor` (-32001 for not-found, -32602 for missing param, -32603 for internal).
+
+`tool.go` updates:
+- `handleToolsList`: `orchestrationToolDefs()` appended inside the existing `s.app.Config().DB != nil` block.
+- `handleToolsCall`: dispatch block added after signal tool dispatch.
+
+8 tests in `orchestration_tools_test.go`: ToolsList_DBNil, ToolsList_DBSet, MissingGoalID, GoalNotFound, HappyPath, RoleRejection, IsOrchestrationTool, UnknownName.
+
+`go.mod`: `smeldr.dev/core` bumped from v1.51.0 to v1.53.0. go.sum will be regenerated against the real v1.53.0 tag after core is merged and tagged.
+
+### Why
+
+Completes T114's agent-facing half: an AI pilot can now query a goal's full context (linked Decisions, Tasks, and Goals) in a single MCP call, matching the `GoalContext` data structure introduced in A198. Follows the established signal_tools.go pattern to keep the dispatch layer consistent.
+
+### Consequences
+
+- `GOWORK=off go build ./...` in the mcp repo will fail until core v1.53.0 is tagged (go.sum does not yet have the hash for v1.53.0). Local builds work via go.work.
+- `smeldr.dev/mcp v1.27.0` — minor version bump (new tool, no breaking changes).
+- AGENTS.md updated with get_goal_context row.
+
+---

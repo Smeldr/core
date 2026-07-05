@@ -14,6 +14,51 @@ import (
 	"unicode"
 )
 
+// timeScanner wraps a *time.Time scan destination so it accepts the string
+// driver values that SQLite returns for TIMESTAMPTZ columns. Go 1.26's
+// database/sql convertAssign does not handle string→*time.Time natively.
+type timeScanner struct{ dst *time.Time }
+
+func (ts timeScanner) Scan(src any) error {
+	switch v := src.(type) {
+	case time.Time:
+		*ts.dst = v
+		return nil
+	case string:
+		for _, layout := range []string{
+			time.RFC3339Nano,
+			time.RFC3339,
+			"2006-01-02 15:04:05.999999999 -0700 MST",
+			"2006-01-02 15:04:05 -0700 MST",
+		} {
+			if t, err := time.Parse(layout, v); err == nil {
+				*ts.dst = t.UTC()
+				return nil
+			}
+		}
+		return fmt.Errorf("smeldr: cannot parse %q as time.Time", v)
+	case []byte:
+		return ts.Scan(string(v))
+	case int64:
+		*ts.dst = time.Unix(v, 0).UTC()
+		return nil
+	case nil:
+		*ts.dst = time.Time{}
+		return nil
+	}
+	return fmt.Errorf("smeldr: cannot scan %T into time.Time", src)
+}
+
+// scanDest returns the scan destination for a struct field. For time.Time
+// fields it wraps the address in a timeScanner so string values from SQLite
+// are parsed correctly.
+func scanDest(addr any) any {
+	if tp, ok := addr.(*time.Time); ok {
+		return timeScanner{dst: tp}
+	}
+	return addr
+}
+
 // DB is the database interface accepted by [NewSQLRepo], [NewTokenStore],
 // [NewAuditStore], and [NewWebhookStore]. It is satisfied by *sql.DB, *sql.Tx,
 // and forgepgx.Wrap(pool). Pass a concrete implementation — do not implement
@@ -158,7 +203,7 @@ func Query[T any](ctx context.Context, db DB, query string, args ...any) ([]T, e
 		targets := make([]any, len(cols))
 		for i, col := range cols {
 			if idx, ok := colIdx[col]; ok {
-				targets[i] = elem.FieldByIndex(idx).Addr().Interface()
+				targets[i] = scanDest(elem.FieldByIndex(idx).Addr().Interface())
 			} else {
 				var discard any
 				targets[i] = &discard
@@ -820,7 +865,7 @@ func (r *SQLRepo[T]) Seq(ctx context.Context, opts ListOptions) iter.Seq2[T, err
 			cp := reflect.New(r.elemType)
 			dests := make([]any, len(fields))
 			for i, f := range fields {
-				dests[i] = cp.Elem().FieldByIndex(f.index).Addr().Interface()
+				dests[i] = scanDest(cp.Elem().FieldByIndex(f.index).Addr().Interface())
 			}
 			if err := rows.Scan(dests...); err != nil {
 				var zero T
