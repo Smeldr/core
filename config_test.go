@@ -402,6 +402,40 @@ func TestLoadConfigFile_mediaMaxSize_invalid(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFile_noEqualsLine(t *testing.T) {
+	// A line with no "=" is silently skipped — covers "if idx < 0 { continue }".
+	path := writeConfig(t, "noequalsline\nbase_url = https://example.com\n")
+	cfg, err := loadConfigFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BaseURL != "https://example.com" {
+		t.Errorf("BaseURL: want %q, got %q", "https://example.com", cfg.BaseURL)
+	}
+}
+
+func TestLoadConfigFile_dev_invalid(t *testing.T) {
+	// "dev = maybe" hits the default branch — covers the dev-invalid-value error path.
+	path := writeConfig(t, "dev = maybe\n")
+	_, err := loadConfigFile(path)
+	if err == nil {
+		t.Fatal("expected error for invalid dev value, got nil")
+	}
+	if !strings.Contains(err.Error(), `"maybe"`) {
+		t.Errorf("error should mention invalid value; got: %s", err.Error())
+	}
+}
+
+func TestMergeFileConfig_mediaPath_fileApplied(t *testing.T) {
+	// goCfg.MediaPath is empty — covers "goCfg.MediaPath = fileCfg.MediaPath" assignment.
+	goCfg := Config{}
+	fileCfg := Config{MediaPath: "./from-file"}
+	result := mergeFileConfig(goCfg, fileCfg)
+	if result.MediaPath != "./from-file" {
+		t.Errorf("MediaPath: file should apply; got %q", result.MediaPath)
+	}
+}
+
 func TestMergeFileConfig_mediaPath_goCodeWins(t *testing.T) {
 	goCfg := Config{MediaPath: "./custom"}
 	fileCfg := Config{MediaPath: "./from-file"}

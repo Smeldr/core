@@ -570,6 +570,17 @@ func TestRealClientIP_remoteAddr_withPort(t *testing.T) {
 
 // — statusRecorder.Write and RequestLogger zero-status coverage ————————————
 
+func TestRequestLogger_HandlerWritesNothing(t *testing.T) {
+	// Handler calls neither WriteHeader nor Write.
+	// statusRecorder.status stays 0 → covers "if status == 0 { status = http.StatusOK }" in RequestLogger.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	mw := RequestLogger()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	mw(handler).ServeHTTP(w, req)
+	// Logging the zero-status path is sufficient; no assertion needed beyond not panicking.
+}
+
 func TestRequestLogger_handlerNoWriteHeader(t *testing.T) {
 	// Handler calls w.Write without WriteHeader first. Covers:
 	// - statusRecorder.Write "if s.status == 0" branch

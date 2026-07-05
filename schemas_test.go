@@ -264,7 +264,182 @@ func TestValidateBlockFields_InvalidFieldsJSON(t *testing.T) {
 	}
 }
 
-// schemaWith builds a ContentTypeSchema without touching the database.
+// — ValidateFields / ValidatePartialFields ————————————————————————————————————
+
+func TestValidateFields_NilSchema(t *testing.T) {
+	if got := smeldr.ValidateFields(nil, map[string]any{"x": "y"}); got != nil {
+		t.Fatalf("nil schema: want nil, got %v", got)
+	}
+}
+
+func TestValidateFields_UnknownField(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "title", Type: "string"}})
+	err := smeldr.ValidateFields(schema, map[string]any{"title": "hi", "extra": "oops"})
+	if err == nil {
+		t.Fatal("expected error for unknown field")
+	}
+}
+
+func TestValidateFields_MissingRequired(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "title", Type: "string", Required: true}})
+	err := smeldr.ValidateFields(schema, map[string]any{})
+	if err == nil {
+		t.Fatal("expected error for missing required field")
+	}
+}
+
+func TestValidateFields_TypeString_OK(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "title", Type: "string"}})
+	if err := smeldr.ValidateFields(schema, map[string]any{"title": "hello"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateFields_TypeString_Wrong(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "title", Type: "string"}})
+	err := smeldr.ValidateFields(schema, map[string]any{"title": 42.0})
+	if err == nil {
+		t.Fatal("expected type error for non-string value")
+	}
+}
+
+func TestValidateFields_TypeInteger_OK(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "count", Type: "integer"}})
+	// JSON numbers unmarshal as float64; whole-number floats must be accepted.
+	if err := smeldr.ValidateFields(schema, map[string]any{"count": float64(42)}); err != nil {
+		t.Fatalf("unexpected error for integer float64: %v", err)
+	}
+}
+
+func TestValidateFields_TypeInteger_Fractional(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "count", Type: "integer"}})
+	err := smeldr.ValidateFields(schema, map[string]any{"count": float64(42.5)})
+	if err == nil {
+		t.Fatal("expected error for non-integer float value")
+	}
+}
+
+func TestValidateFields_TypeInteger_StringRejected(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "count", Type: "integer"}})
+	err := smeldr.ValidateFields(schema, map[string]any{"count": "42"})
+	if err == nil {
+		t.Fatal("expected type error for string in integer field")
+	}
+}
+
+func TestValidateFields_TypeBoolean_OK(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "active", Type: "boolean"}})
+	if err := smeldr.ValidateFields(schema, map[string]any{"active": true}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateFields_TypeBoolean_Wrong(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "active", Type: "boolean"}})
+	err := smeldr.ValidateFields(schema, map[string]any{"active": "yes"})
+	if err == nil {
+		t.Fatal("expected type error for string in boolean field")
+	}
+}
+
+func TestValidateFields_TypeArray_OK(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "tags", Type: "array"}})
+	if err := smeldr.ValidateFields(schema, map[string]any{"tags": []any{"a", "b"}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateFields_TypeArray_Wrong(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "tags", Type: "array"}})
+	err := smeldr.ValidateFields(schema, map[string]any{"tags": "not-an-array"})
+	if err == nil {
+		t.Fatal("expected type error for string in array field")
+	}
+}
+
+func TestValidateFields_TypeObject_OK(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "meta", Type: "object"}})
+	if err := smeldr.ValidateFields(schema, map[string]any{"meta": map[string]any{"k": "v"}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateFields_TypeObject_Wrong(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "meta", Type: "object"}})
+	err := smeldr.ValidateFields(schema, map[string]any{"meta": "flat"})
+	if err == nil {
+		t.Fatal("expected type error for string in object field")
+	}
+}
+
+func TestValidateFields_TypeNumber_OK(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "price", Type: "number"}})
+	if err := smeldr.ValidateFields(schema, map[string]any{"price": float64(9.99)}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateFields_TypeNumber_Wrong(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "price", Type: "number"}})
+	err := smeldr.ValidateFields(schema, map[string]any{"price": "9.99"})
+	if err == nil {
+		t.Fatal("expected type error for string in number field")
+	}
+}
+
+func TestValidatePartialFields_NilSchema(t *testing.T) {
+	if got := smeldr.ValidatePartialFields(nil, map[string]any{"x": "y"}); got != nil {
+		t.Fatalf("nil schema: want nil, got %v", got)
+	}
+}
+
+func TestValidatePartialFields_MissingRequired_OK(t *testing.T) {
+	// Partial update: missing required field is acceptable.
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "title", Type: "string", Required: true}})
+	if err := smeldr.ValidatePartialFields(schema, map[string]any{}); err != nil {
+		t.Fatalf("partial update missing required should be OK: %v", err)
+	}
+}
+
+func TestValidatePartialFields_UnknownField(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "title", Type: "string"}})
+	err := smeldr.ValidatePartialFields(schema, map[string]any{"unknown": "x"})
+	if err == nil {
+		t.Fatal("expected error for unknown field in patch")
+	}
+}
+
+func TestValidatePartialFields_TypeMismatch(t *testing.T) {
+	schema := schemaWith(t, "item", []smeldr.SchemaField{{Name: "count", Type: "integer"}})
+	err := smeldr.ValidatePartialFields(schema, map[string]any{"count": "not-a-number"})
+	if err == nil {
+		t.Fatal("expected type error in partial patch")
+	}
+}
+
+func TestValidateFields_InvalidSchemaJSON(t *testing.T) {
+	schema := &smeldr.ContentTypeSchema{
+		ID:       "x",
+		TypeName: "bad",
+		Fields:   json.RawMessage(`{invalid}`),
+	}
+	if err := smeldr.ValidateFields(schema, map[string]any{"x": "y"}); err == nil {
+		t.Fatal("expected error for invalid schema JSON")
+	}
+}
+
+func TestValidatePartialFields_InvalidSchemaJSON(t *testing.T) {
+	schema := &smeldr.ContentTypeSchema{
+		ID:       "x",
+		TypeName: "bad",
+		Fields:   json.RawMessage(`{invalid}`),
+	}
+	if err := smeldr.ValidatePartialFields(schema, map[string]any{"x": "y"}); err == nil {
+		t.Fatal("expected error for invalid schema JSON")
+	}
+}
+
+// — schemaWith builds a ContentTypeSchema without touching the database.
 func schemaWith(t *testing.T, typeName string, fields []smeldr.SchemaField) *smeldr.ContentTypeSchema {
 	t.Helper()
 	raw, err := json.Marshal(fields)

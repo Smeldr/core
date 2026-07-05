@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAggregateListHandler_MergesItems(t *testing.T) {
@@ -134,5 +135,42 @@ func TestAggregateShowHandler_EmptySlug(t *testing.T) {
 
 	if w.Code == http.StatusOK {
 		t.Error("expected non-200 for empty slug")
+	}
+}
+
+func TestPublishedAtStr_Stringer(t *testing.T) {
+	// time.Time implements interface{ String() string } — covers the Stringer branch.
+	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	m := map[string]any{"PublishedAt": ts}
+	got := publishedAtStr(m)
+	if got != ts.String() {
+		t.Errorf("publishedAtStr(time.Time) = %q, want %q", got, ts.String())
+	}
+}
+
+func TestPublishedAtStr_NoKey(t *testing.T) {
+	// No PublishedAt key — covers the final return "".
+	m := map[string]any{"Slug": "foo"}
+	got := publishedAtStr(m)
+	if got != "" {
+		t.Errorf("publishedAtStr(no key) = %q, want empty", got)
+	}
+}
+
+func TestAggregateShowHandler_UpstreamError(t *testing.T) {
+	// Upstream returns error — covers the "if res.err != nil { continue }" branch
+	// in aggregateShowHandler, which falls through to ErrNotFound.
+	s1 := &mockListable{err: errors.New("db down")}
+	spec := RouteSpec{
+		view:  "aggregate-item",
+		specs: []*ServesSpec{{typeName: "a", listable: s1}},
+	}
+	h := aggregateRouteHandler(spec)
+	req := httptest.NewRequest(http.MethodGet, "/all/foo", nil)
+	req.SetPathValue("slug", "foo")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code == http.StatusOK {
+		t.Error("expected non-200 when upstream errors in show handler")
 	}
 }

@@ -3097,15 +3097,29 @@ exists.
 err := smeldr.ValidateFields(schema, fields)
 ```
 
-Validates `fields` (a `map[string]any`) against `schema`. Returns an error when:
-- A required field is missing or `null`.
-- A field's value type does not match the schema (`"string"`, `"integer"`, etc.).
-- A string field with `Format: "url"` contains a non-URL value (relative `/path`
-  strings are accepted as internal links).
-- Two schema fields share the same non-empty `Role`.
+Validates `fields` (a `map[string]any`) against `schema`. Returns a
+`*ValidationError` when:
+- An unknown field is present (not declared in the schema).
+- A required field is absent.
+- A field's value type does not match the schema (`"string"`, `"integer"`,
+  `"boolean"`, `"number"`).
 
-Unschematised types (schema is nil) are not validated — backwards-compatible.
-`ValidateBlockFields` is retained as an alias.
+Returns nil when `schema` is nil (no validation possible — backwards-compatible).
+Use on the create path where all required fields must be present. (A202)
+
+### `ValidatePartialFields` — partial field validation for updates
+
+```go
+err := smeldr.ValidatePartialFields(schema, patch)
+```
+
+Validates a `patch` map against `schema`. Unknown fields and type mismatches are
+rejected; absent required fields are **not** checked — the patch is partial and
+required fields may already be stored. Returns nil when `schema` is nil.
+Use on the update path (PATCH semantics). (A202)
+
+`ValidateBlockFields` is retained as an alias for the older `json.RawMessage`
+variant.
 
 ### `ContentTypeRegistry` and `TypeDescriptor`
 
@@ -3258,6 +3272,7 @@ item, err := repo.GetBySlug(ctx, "chocolate-cake")
 items, err := repo.List(ctx, smeldr.ListOptions{Status: "published", PerPage: 10})
 err = repo.UpdateFields(ctx, id, newFields)
 err = repo.SetStatus(ctx, id, "published")
+err = repo.ScheduleContent(ctx, id, time.Now().Add(48*time.Hour))
 ```
 
 **Database migration**

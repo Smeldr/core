@@ -46,7 +46,11 @@ func (r *DynamicTypeRepo) WithGovernance(rs *RoleStore) *DynamicTypeRepo {
 // CreateDraft inserts a new DynamicNode with status Draft. The slug is derived
 // from the field with Role "title"; collisions are resolved by appending -2, -3,
 // and so on. The node ID and timestamps are set automatically.
+// Returns a [*ValidationError] when the fields map does not conform to the schema.
 func (r *DynamicTypeRepo) CreateDraft(ctx context.Context, fields map[string]any) (*DynamicNode, error) {
+	if ve := ValidateFields(r.schema, fields); ve != nil {
+		return nil, ve
+	}
 	raw, err := json.Marshal(fields)
 	if err != nil {
 		return nil, fmt.Errorf("smeldr: CreateDraft marshal: %w", err)
@@ -167,7 +171,11 @@ func (r *DynamicTypeRepo) List(ctx context.Context, opts ListOptions) ([]map[str
 // UpdateFields merges patch onto the stored fields for the node with the given
 // ID. Keys present in patch overwrite their stored counterparts; absent keys
 // are preserved. UpdatedAt is set to the current UTC time.
+// Returns a [*ValidationError] when the patch contains unknown or mistyped fields.
 func (r *DynamicTypeRepo) UpdateFields(ctx context.Context, id string, patch map[string]any) error {
+	if ve := ValidatePartialFields(r.schema, patch); ve != nil {
+		return ve
+	}
 	node, err := r.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -231,6 +239,35 @@ func (r *DynamicTypeRepo) SetStatus(ctx context.Context, id string, status Statu
 		return err
 	}
 	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(status), id)
+	return nil
+}
+
+// ScheduleContent transitions the node to [Scheduled] status and records the
+// time at which the scheduler should publish it. The transition is validated
+// against the registered state flow (same as [SetStatus]).
+func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, scheduledAt time.Time) error {
+	node, err := r.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	type smeldrCtxAccessor interface {
+		User() User
+	}
+	actorID := ""
+	if sc, ok := ctx.(smeldrCtxAccessor); ok {
+		actorID = sc.User().ID
+	}
+	if err := validateTransition(ctx, r.db, r.rs, actorID, r.typeName, string(node.Status), string(Scheduled)); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	_, err = r.db.ExecContext(ctx,
+		"UPDATE smeldr_dynamic_content SET status = $1, scheduled_at = $2, updated_at = $3 WHERE id = $4 AND type_name = $5",
+		string(Scheduled), scheduledAt, now, id, r.typeName)
+	if err != nil {
+		return err
+	}
+	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(Scheduled), id)
 	return nil
 }
 
@@ -347,6 +384,10 @@ func (a *App) DefineContentType(ctx context.Context, schema *ContentTypeSchema) 
 			serveDynamicItem(w, r, appRef, desc, r.PathValue("slug"))
 		}))
 		insertDynamicRoutes(ctx, a.cfg.DB, schema.TypeName, prefix)
+		if a.llmsStore != nil {
+			a.llmsStore.registerCompact()
+			a.llmsStore.SetCompact(prefix, []LLMsEntry{})
+		}
 	}
 	return desc, nil
 }
@@ -365,7 +406,11 @@ func (a *App) DynamicContentRepo(typeName string) (*DynamicTypeRepo, error) {
 	if a.cfg.DB == nil {
 		return nil, fmt.Errorf("smeldr: DynamicContentRepo requires Config.DB")
 	}
-	return NewDynamicTypeRepo(a.cfg.DB, typeName, desc.Schema), nil
+	repo := NewDynamicTypeRepo(a.cfg.DB, typeName, desc.Schema)
+	if a.governance != nil {
+		repo = repo.WithGovernance(a.governance)
+	}
+	return repo, nil
 }
 
 // loadDynamicTypes queries smeldr_content_type_schemas for all kind='content'
@@ -413,6 +458,10 @@ func (a *App) loadDynamicTypes(ctx context.Context) {
 				serveDynamicItem(w, r, appRef, d, r.PathValue("slug"))
 			}))
 			insertDynamicRoutes(ctx, a.cfg.DB, schema.TypeName, prefix)
+			if a.llmsStore != nil {
+				a.llmsStore.registerCompact()
+				a.llmsStore.SetCompact(prefix, []LLMsEntry{})
+			}
 		}
 	}
 }
@@ -745,6 +794,7 @@ func newSetStatusHandler(a *App, auth AuthFunc) http.Handler {
 		}
 		writeDynamicJSON(w, map[string]any{"id": id, "status": body.Status})
 		go a.rebuildDynamicSitemap(context.Background(), desc)
+		go a.rebuildDynamicAIIndex(context.Background(), desc)
 	})
 }
 
@@ -786,6 +836,77 @@ func (a *App) rebuildDynamicSitemap(ctx context.Context, desc *TypeDescriptor) {
 		return
 	}
 	a.sitemapStore.Set(desc.Prefix+"/sitemap.xml", buf.Bytes())
+}
+
+// rebuildDynamicAIIndex regenerates the /llms.txt compact fragment for the
+// given content type. A no-op when the type has no URLPrefix or when the
+// llmsStore is nil. Called in a goroutine so it does not block responses.
+func (a *App) rebuildDynamicAIIndex(ctx context.Context, desc *TypeDescriptor) {
+	if desc.Prefix == "" || a.llmsStore == nil {
+		return
+	}
+	repo, err := a.DynamicContentRepo(desc.Name)
+	if err != nil {
+		return
+	}
+	items, err := repo.List(ctx, ListOptions{Status: []Status{Published}})
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: rebuildDynamicAIIndex", "type", desc.Name, "err", err)
+		return
+	}
+	baseURL := strings.TrimRight(a.cfg.BaseURL, "/")
+	entries := make([]LLMsEntry, 0, len(items))
+	for _, item := range items {
+		slug, _ := item["Slug"].(string)
+		if slug == "" {
+			continue
+		}
+		e := LLMsEntry{URL: baseURL + desc.Prefix + "/" + slug}
+		// Use the title-role field value as the entry Title; fall back to slug.
+		if desc.Schema != nil {
+			if fields, err := desc.Schema.ParseFields(); err == nil {
+				for _, f := range fields {
+					if f.Role == "title" {
+						if t, ok := item[f.Name].(string); ok && t != "" {
+							e.Title = t
+						}
+						break
+					}
+				}
+			}
+		}
+		if e.Title == "" {
+			e.Title = slug
+		}
+		// Use the description-role field value as the entry Summary when present.
+		if desc.Schema != nil {
+			if fields, err := desc.Schema.ParseFields(); err == nil {
+				for _, f := range fields {
+					if f.Role == "description" {
+						if s, ok := item[f.Name].(string); ok {
+							e.Summary = s
+						}
+						break
+					}
+				}
+			}
+		}
+		entries = append(entries, e)
+	}
+	a.llmsStore.SetCompact(desc.Prefix, entries)
+}
+
+// RefreshContentIndex rebuilds the sitemap fragment and /llms.txt compact
+// fragment for the named dynamic content type. A no-op when the type is not
+// registered, is not a content-kind type, or has an empty URLPrefix. Intended
+// to be called in a goroutine from MCP tool handlers after a status change.
+func (a *App) RefreshContentIndex(ctx context.Context, typeName string) {
+	desc := a.typeRegistry.Lookup(typeName)
+	if desc == nil || desc.Kind != "content" || desc.Prefix == "" {
+		return
+	}
+	a.rebuildDynamicSitemap(ctx, desc)
+	a.rebuildDynamicAIIndex(ctx, desc)
 }
 
 // nodeToMap converts a DynamicNode to a type-erased map for JSON responses.

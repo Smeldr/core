@@ -2,7 +2,7 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.53.0 (A199) + smeldr.dev/mcp v1.27.0 + smeldr.dev/cli v0.15.1 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.2 + smeldr.dev/agent v0.7.1 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
+Last updated: v1.54.0 (A202) + smeldr.dev/mcp v1.27.0 + smeldr.dev/cli v0.15.1 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.2 + smeldr.dev/agent v0.7.1 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
 
 ## Module stability
 
@@ -65,7 +65,8 @@ Labels are reviewed at every module minor or major version bump.
 - `ContentTypeRegistry` + `TypeDescriptor` + `App.TypeRegistry()` — concurrency-safe name/prefix registry; dual key-space (PascalCase compiled + snake_case runtime); `Register`, `RegisterPrefix`, `Lookup`, `LookupByPrefix`, `All`; auto-populated at `App.Content()` time (A151)
 - `ContentLister` interface — implemented by `Module[T]`; exposes `listPublished` as `TypeDescriptor.Fetch` for the ContentList block resolver (A152)
 - ContentList block resolver — `content_list` block injects `.Items` (type-erased `[]map[string]any`) from the content-type registry at render time; `Limit`/`Page` block fields map to `ListOptions`; graceful skip for unknown type, nil Fetch, or empty ContentType; `ContentType` field stores `type_name` (e.g. `"recipe"`) not the URL prefix (A152/A154)
-- `DynamicTypeRepo` — per-type CRUD repository for runtime-defined content types backed by `smeldr_dynamic_content`: `CreateDraft` (slug from title field, collision-safe), `GetBySlug`, `GetByID`, `List` (pagination, status filter, ordering), `UpdateFields` (PATCH semantics), `SetStatus` (draft/published/archived; sets `published_at` on publish) (A153)
+- `DynamicTypeRepo` — per-type CRUD repository for runtime-defined content types backed by `smeldr_dynamic_content`: `CreateDraft` (slug from title field, collision-safe; validates fields via `ValidateFields`), `GetBySlug`, `GetByID`, `List` (pagination, status filter, ordering), `UpdateFields` (PATCH semantics; validates patch via `ValidatePartialFields`), `SetStatus` (draft/published/archived; sets `published_at` on publish), `ScheduleContent` (state-flow-enforced scheduling) (A153, A202)
+- `ValidatePartialFields(schema, patch)` — validates a partial `map[string]any` for the update path; unknown fields and type mismatches rejected; absent required fields not checked (A202)
 - `App.DefineContentType(schema *ContentTypeSchema) (*TypeDescriptor, error)` — saves schema, registers `TypeDescriptor{Kind:"content"}`, and registers public routes at `schema.URLPrefix` when non-empty (A153/A154)
 - `App.DynamicContentRepo(typeName string) (*DynamicTypeRepo, error)` — returns a typed CRUD repo for a registered runtime-defined content type (A153)
 - `App.ServeDynamicContent() *App` — opt-in call that runs `MigrateURLPrefixColumn`, initialises the sitemap store, enables boot-time `loadDynamicTypes`, and registers 5 admin `/_content/{type}` endpoints (Editor+). Returns `*App` for chaining. Panics if `Config.DB` is nil. (A153/A154)

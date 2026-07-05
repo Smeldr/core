@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -419,6 +420,113 @@ func ValidateSchemaDef(schema *ContentTypeSchema) error {
 		}
 		if !knownRoles[f.Role] {
 			return fmt.Errorf("smeldr: schema field %q has unknown role %q (valid: title, description, og_image, body, summary)", f.Name, f.Role)
+		}
+	}
+	return nil
+}
+
+// ValidateFields validates a complete field map against a ContentTypeSchema.
+// Unknown fields, missing required fields, and type mismatches are all
+// rejected. Returns nil when schema is nil (no validation is possible).
+// Use for the create path where all required fields must be present.
+func ValidateFields(schema *ContentTypeSchema, fields map[string]any) *ValidationError {
+	if schema == nil {
+		return nil
+	}
+	schemaFields, err := schema.ParseFields()
+	if err != nil {
+		return Err("schema", "invalid schema: "+err.Error())
+	}
+	allowed := make(map[string]SchemaField, len(schemaFields))
+	for _, f := range schemaFields {
+		allowed[f.Name] = f
+	}
+	for k := range fields {
+		if _, ok := allowed[k]; !ok {
+			return Err(k, "unknown field")
+		}
+	}
+	for _, f := range schemaFields {
+		v, present := fields[f.Name]
+		if f.Required && !present {
+			return Err(f.Name, "required")
+		}
+		if present {
+			if ve := checkFieldType(f.Name, f.Type, v); ve != nil {
+				return ve
+			}
+		}
+	}
+	return nil
+}
+
+// ValidatePartialFields validates a patch map against a ContentTypeSchema.
+// Unknown fields and type mismatches are rejected; absent required fields
+// are not checked (the patch is partial — required fields may already be stored).
+// Returns nil when schema is nil (no validation is possible).
+// Use for the update path where only provided fields need to be validated.
+func ValidatePartialFields(schema *ContentTypeSchema, patch map[string]any) *ValidationError {
+	if schema == nil {
+		return nil
+	}
+	schemaFields, err := schema.ParseFields()
+	if err != nil {
+		return Err("schema", "invalid schema: "+err.Error())
+	}
+	allowed := make(map[string]SchemaField, len(schemaFields))
+	for _, f := range schemaFields {
+		allowed[f.Name] = f
+	}
+	for k, v := range patch {
+		sf, ok := allowed[k]
+		if !ok {
+			return Err(k, "unknown field")
+		}
+		if ve := checkFieldType(sf.Name, sf.Type, v); ve != nil {
+			return ve
+		}
+	}
+	return nil
+}
+
+// checkFieldType verifies that v matches the declared JSON Schema type.
+// JSON numbers always unmarshal as float64 in Go's any; integer fields
+// additionally require that the float64 value has no fractional part.
+func checkFieldType(name, typ string, v any) *ValidationError {
+	switch typ {
+	case "string":
+		if _, ok := v.(string); !ok {
+			return Err(name, "expected string")
+		}
+	case "integer":
+		switch n := v.(type) {
+		case float64:
+			if math.Trunc(n) != n {
+				return Err(name, "expected integer (got non-integer number)")
+			}
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			// all integer Go types are acceptable
+		default:
+			return Err(name, "expected integer")
+		}
+	case "number":
+		switch v.(type) {
+		case float64, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			// any numeric type is acceptable
+		default:
+			return Err(name, "expected number")
+		}
+	case "boolean":
+		if _, ok := v.(bool); !ok {
+			return Err(name, "expected boolean")
+		}
+	case "array":
+		if _, ok := v.([]any); !ok {
+			return Err(name, "expected array")
+		}
+	case "object":
+		if _, ok := v.(map[string]any); !ok {
+			return Err(name, "expected object")
 		}
 	}
 	return nil

@@ -48,3 +48,39 @@ The `int64` type mismatch was introduced when A195 changed `smeldr_state_flows.i
 - mcp v1.27.1 (patch — bugfix, no new API).
 
 ---
+
+## A202 — T122: T104 Phase B — ValidateFields / ValidatePartialFields / DynamicTypeRepo.ScheduleContent (core v1.54.0)
+
+**Status:** Done  
+**Date:** 2026-07-05  
+**Repo:** smeldr.dev/core
+
+### What
+
+1. **`ValidateFields(schema *ContentTypeSchema, fields map[string]any) *ValidationError`** in `schemas.go` — validates a complete field map on the create path. Rejects unknown fields, missing required fields, and type mismatches. Returns nil when schema is nil.
+
+2. **`ValidatePartialFields(schema *ContentTypeSchema, patch map[string]any) *ValidationError`** in `schemas.go` — validates a partial patch on the update path. Rejects unknown fields and type mismatches; absent required fields not checked. Returns nil when schema is nil.
+
+3. **`DynamicTypeRepo.ScheduleContent(ctx context.Context, id string, scheduledAt time.Time) error`** in `dynamic.go` — transitions item to Scheduled status with state-flow enforcement (same `validateTransition` used by `SetStatus`). Updates `scheduled_at` column. Fires async triggers.
+
+4. **CreateDraft and UpdateFields integration** — `CreateDraft` now calls `ValidateFields` before INSERT; `UpdateFields` calls `ValidatePartialFields` before PATCH.
+
+5. **AI index wiring for dynamic types** — `loadDynamicTypes` now wires `llmsStore` compact fragment for types with URLPrefix (AI index populated at boot for runtime-defined types). `rebuildDynamicAIIndex` regenerates the `/llms.txt` compact fragment after dynamic content changes.
+
+6. **`App.DynamicContentRepo` governance wiring** — `App.DynamicContentRepo(typeName)` now calls `repo.WithGovernance(a.governance)` when `app.governance != nil`. Previously the method returned a bare `*DynamicTypeRepo` without governance enforcement even when `App.Governance()` had been called. Required-role checks on `SetStatus` (and now `ScheduleContent`) are now automatically applied for callers going through the `App` accessor. Callers with a plain `context.Context` (non-authenticated paths) are unaffected — actorID is empty and the required_role check is skipped.
+
+7. Coverage raised to 96.1% (gate: 96.0%).
+
+### Why
+
+These were gaps from T104 Increment 2 (A153/A154) where `DynamicTypeRepo` accepted any `map[string]any` without validation against the registered schema, and had no `ScheduleContent` method (only `SetStatus`). The AI index was also not populated for dynamic types at boot time.
+
+### Consequences
+
+- `ValidateFields` and `ValidatePartialFields` are new exported symbols in `schemas.go`.
+- `DynamicTypeRepo.ScheduleContent` is a new exported method.
+- `DynamicTypeRepo.CreateDraft` and `UpdateFields` now return `*ValidationError` (a `smeldr.Error`) for invalid input — no signature change, but new error type in the result set.
+- No MCP tool changes. No new DB columns. No schema migration required.
+- Level 2 amendment (new exported symbols). core v1.54.0.
+
+---

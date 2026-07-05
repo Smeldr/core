@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 	smeldr "smeldr.dev/core"
@@ -88,7 +90,12 @@ func TestDynamicTypeRepo_CreateDraft_SlugCollision(t *testing.T) {
 
 func TestDynamicTypeRepo_CreateDraft_NoTitleField(t *testing.T) {
 	db := openDynDB(t)
-	schema := &smeldr.ContentTypeSchema{TypeName: "tag", Kind: "content", Fields: json.RawMessage(`[]`)}
+	// Schema declares a "name" field with no title role — slug should fall back to "item".
+	schema := &smeldr.ContentTypeSchema{
+		TypeName: "tag",
+		Kind:     "content",
+		Fields:   json.RawMessage(`[{"name":"name","type":"string"}]`),
+	}
 	repo := smeldr.NewDynamicTypeRepo(db, "tag", schema)
 
 	node, err := repo.CreateDraft(context.Background(), map[string]any{"name": "go"})
@@ -575,4 +582,449 @@ func TestMigrateSchemaKindColumn_Idempotent(t *testing.T) {
 	if err := smeldr.MigrateSchemaKindColumn(db); err != nil {
 		t.Errorf("MigrateSchemaKindColumn third call: %v", err)
 	}
+}
+
+// — ValidateFields integration (via DynamicTypeRepo) ——————————————————————————
+
+func TestCreateDraft_ValidateFields_UnknownField(t *testing.T) {
+	db := openDynDB(t)
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	_, err := repo.CreateDraft(context.Background(), map[string]any{
+		"Title":   "Pasta",
+		"unknown": "oops",
+	})
+	if err == nil {
+		t.Fatal("expected validation error for unknown field")
+	}
+}
+
+func TestCreateDraft_ValidateFields_MissingRequired(t *testing.T) {
+	db := openDynDB(t)
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	// recipeSchema has required "Title" field.
+	_, err := repo.CreateDraft(context.Background(), map[string]any{"Body": "content"})
+	if err == nil {
+		t.Fatal("expected validation error for missing required field")
+	}
+}
+
+func TestCreateDraft_ValidateFields_WrongType(t *testing.T) {
+	db := openDynDB(t)
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	// "Title" is string; pass an integer.
+	_, err := repo.CreateDraft(context.Background(), map[string]any{"Title": float64(42)})
+	if err == nil {
+		t.Fatal("expected validation error for wrong type on Title field")
+	}
+}
+
+func TestUpdateFields_ValidatePartialFields_UnknownField(t *testing.T) {
+	db := openDynDB(t)
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Pasta"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	err = repo.UpdateFields(context.Background(), node.ID, map[string]any{"unknown": "x"})
+	if err == nil {
+		t.Fatal("expected validation error for unknown field in patch")
+	}
+}
+
+func TestUpdateFields_ValidatePartialFields_MissingRequired_OK(t *testing.T) {
+	db := openDynDB(t)
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Pasta"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	// Partial update omitting required "Title" is OK — it's already stored.
+	if err := repo.UpdateFields(context.Background(), node.ID, map[string]any{"Body": "updated body"}); err != nil {
+		t.Fatalf("partial update missing required should succeed: %v", err)
+	}
+}
+
+// — DynamicTypeRepo.ScheduleContent ——————————————————————————————————————————
+
+func TestDynamicTypeRepo_ScheduleContent_HappyPath(t *testing.T) {
+	db := openDynDB(t)
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Pasta"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	scheduledAt := time.Now().UTC().Add(24 * time.Hour)
+	if err := repo.ScheduleContent(context.Background(), node.ID, scheduledAt); err != nil {
+		t.Fatalf("ScheduleContent: %v", err)
+	}
+	updated, err := repo.GetByID(context.Background(), node.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updated.Status != smeldr.Scheduled {
+		t.Errorf("status = %q, want %q", updated.Status, smeldr.Scheduled)
+	}
+}
+
+// — App.DynamicContentRepo WithGovernance wire ————————————————————————————————
+
+func TestDynamicContentRepo_WithGovernance_NilGovernance(t *testing.T) {
+	// When the app has no governance, DynamicContentRepo returns an unwired repo.
+	// Verified indirectly: CreateDraft succeeds without a RoleStore.
+	cfg := smeldr.Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("test-secret-minimum16bytes"),
+		DB:      openDynDB(t),
+	}
+	app := smeldr.New(cfg)
+	app.ServeDynamicContent()
+	ctx := context.Background()
+	schema := recipeSchema()
+	if _, err := app.DefineContentType(ctx, schema); err != nil {
+		t.Fatalf("DefineContentType: %v", err)
+	}
+	repo, err := app.DynamicContentRepo(schema.TypeName)
+	if err != nil {
+		t.Fatalf("DynamicContentRepo: %v", err)
+	}
+	if _, err := repo.CreateDraft(ctx, map[string]any{"Title": "Test"}); err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+}
+
+// — DynamicTypeRepo.ScheduleContent error paths ——————————————————————————————
+
+func TestDynamicTypeRepo_ScheduleContent_NotFound(t *testing.T) {
+	db := openDynDB(t)
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	err := repo.ScheduleContent(context.Background(), "no-such-id", time.Now().Add(time.Hour))
+	if err == nil {
+		t.Error("ScheduleContent with nonexistent ID: expected error, got nil")
+	}
+}
+
+// TestDynamicTypeRepo_ScheduleContent_WithSmeldrContext covers the actorID branch
+// inside ScheduleContent when the context implements smeldr.Context (User().ID is set).
+func TestDynamicTypeRepo_ScheduleContent_WithSmeldrContext(t *testing.T) {
+	db := openDynDB(t)
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Focaccia"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	ctx := smeldr.NewTestContext(smeldr.User{ID: "editor-1", Roles: []smeldr.Role{smeldr.Editor}})
+	if err := repo.ScheduleContent(ctx, node.ID, time.Now().UTC().Add(48*time.Hour)); err != nil {
+		t.Fatalf("ScheduleContent with TestContext: %v", err)
+	}
+	updated, err := repo.GetByID(context.Background(), node.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updated.Status != smeldr.Scheduled {
+		t.Errorf("status = %q, want scheduled", updated.Status)
+	}
+}
+
+// TestDynamicTypeRepo_SetStatus_WithSmeldrContext covers the actorID branch
+// inside SetStatus when ctx implements smeldr.Context.
+func TestDynamicTypeRepo_SetStatus_WithSmeldrContext(t *testing.T) {
+	db := openDynDB(t)
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Ciabatta"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	ctx := smeldr.NewTestContext(smeldr.User{ID: "editor-2", Roles: []smeldr.Role{smeldr.Editor}})
+	if err := repo.SetStatus(ctx, node.ID, smeldr.Published); err != nil {
+		t.Fatalf("SetStatus with TestContext: %v", err)
+	}
+	updated, err := repo.GetByID(context.Background(), node.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updated.Status != smeldr.Published {
+		t.Errorf("status = %q, want published", updated.Status)
+	}
+}
+
+// TestDynamicContentRepo_WithGovernance_Wired covers the governance wire branch
+// in DynamicContentRepo: when App.governance != nil, repo.WithGovernance is called.
+func TestDynamicContentRepo_WithGovernance_Wired(t *testing.T) {
+	db := openDynDB(t)
+	cfg := smeldr.Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("test-secret-minimum16bytes"),
+		DB:      db,
+	}
+	app := smeldr.New(cfg)
+	store := smeldr.NewRoleStore(db)
+	if err := app.Governance(store); err != nil {
+		t.Fatalf("Governance: %v", err)
+	}
+	app.ServeDynamicContent()
+
+	ctx := context.Background()
+	schema := recipeSchema()
+	if _, err := app.DefineContentType(ctx, schema); err != nil {
+		t.Fatalf("DefineContentType: %v", err)
+	}
+	repo, err := app.DynamicContentRepo(schema.TypeName)
+	if err != nil {
+		t.Fatalf("DynamicContentRepo with governance wired: %v", err)
+	}
+	// Verify the governed repo is functional.
+	if _, err := repo.CreateDraft(ctx, map[string]any{"Title": "Sourdough"}); err != nil {
+		t.Fatalf("CreateDraft via governed repo: %v", err)
+	}
+}
+
+// — App.RefreshContentIndex ———————————————————————————————————————————————————
+
+func TestRefreshContentIndex_UnknownType_NoOp(t *testing.T) {
+	cfg := smeldr.Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("test-secret-minimum16bytes"),
+		DB:      openDynDB(t),
+	}
+	app := smeldr.New(cfg)
+	// Should not panic for unknown type.
+	app.RefreshContentIndex(context.Background(), "nonexistent")
+}
+
+// TestRefreshContentIndex_NoPrefix_NoOp covers the early-return branch when the
+// registered type has an empty URLPrefix (admin-only type).
+func TestRefreshContentIndex_NoPrefix_NoOp(t *testing.T) {
+	db := openDynDB(t)
+	cfg := smeldr.Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("test-secret-minimum16bytes"),
+		DB:      db,
+	}
+	app := smeldr.New(cfg)
+	app.ServeDynamicContent()
+	ctx := context.Background()
+
+	// Admin-only type: no URLPrefix.
+	noPrefix := &smeldr.ContentTypeSchema{
+		TypeName: "internal_note",
+		Fields:   json.RawMessage(`[{"name":"Title","type":"string","required":true}]`),
+	}
+	if _, err := app.DefineContentType(ctx, noPrefix); err != nil {
+		t.Fatalf("DefineContentType: %v", err)
+	}
+	// Must not panic; early-returns because Prefix is empty.
+	app.RefreshContentIndex(ctx, "internal_note")
+}
+
+// dynAIContent is a minimal content type used to trigger llmsStore wiring
+// on an App via app.Content(smeldr.NewModule(..., smeldr.AIIndex(smeldr.LLMsTxt))).
+type dynAIContent struct {
+	smeldr.Node
+	Title string `smeldr:"required"`
+}
+
+// TestRefreshContentIndex_WithLLMsStore covers the full path of RefreshContentIndex
+// including rebuildDynamicAIIndex when llmsStore is wired. Uses a module with
+// AIIndex to trigger llmsStore initialisation on the App, then defines a
+// dynamic content type with a URL prefix and publishes an item so the rebuild
+// has a non-empty result to process.
+func TestRefreshContentIndex_WithLLMsStore(t *testing.T) {
+	db := openDynDB(t)
+	cfg := smeldr.Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("test-secret-minimum16bytes"),
+		DB:      db,
+	}
+	app := smeldr.New(cfg)
+
+	// Register a module with AIIndex so that App.llmsStore is initialised.
+	aiRepo := smeldr.NewMemoryRepo[*dynAIContent]()
+	m := smeldr.NewModule((*dynAIContent)(nil), smeldr.Repo(aiRepo), smeldr.AIIndex(smeldr.LLMsTxt))
+	app.Content(m)
+	app.ServeDynamicContent()
+
+	ctx := context.Background()
+	// Define a content type with URLPrefix and both title + description roles.
+	eventFields, _ := json.Marshal([]smeldr.SchemaField{
+		{Name: "Title", Type: "string", Required: true, Role: "title"},
+		{Name: "Summary", Type: "string", Role: "description"},
+	})
+	schema := &smeldr.ContentTypeSchema{
+		TypeName:  "tevent",
+		Label:     "Test Event",
+		URLPrefix: "/tevents",
+		Fields:    json.RawMessage(eventFields),
+	}
+	if _, err := app.DefineContentType(ctx, schema); err != nil {
+		t.Fatalf("DefineContentType: %v", err)
+	}
+
+	// Create and publish an item so the rebuild has real content to process.
+	repo, err := app.DynamicContentRepo("tevent")
+	if err != nil {
+		t.Fatalf("DynamicContentRepo: %v", err)
+	}
+	node, err := repo.CreateDraft(ctx, map[string]any{"Title": "Annual Gala", "Summary": "The big event"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	if err := repo.SetStatus(ctx, node.ID, smeldr.Published); err != nil {
+		t.Fatalf("SetStatus Published: %v", err)
+	}
+
+	// RefreshContentIndex must not panic and must cover the full rebuild path.
+	app.RefreshContentIndex(ctx, "tevent")
+
+	// Create a second item with empty Title so the title-fallback-to-slug branch
+	// in rebuildDynamicAIIndex is covered (e.Title == "" → e.Title = slug).
+	node2, err := repo.CreateDraft(ctx, map[string]any{"Title": "", "Summary": ""})
+	if err == nil {
+		if err2 := repo.SetStatus(ctx, node2.ID, smeldr.Published); err2 == nil {
+			app.RefreshContentIndex(ctx, "tevent")
+		}
+	}
+}
+
+// — ScheduleContent transition blocked ———————————————————————————————————————
+
+// TestDynamicTypeRepo_ScheduleContent_TransitionBlocked registers a custom flow
+// for "recipe" that only allows draft→published, blocking draft→scheduled.
+// ScheduleContent must return ErrConflict — covers the validateTransition error
+// return path in ScheduleContent (dynamic.go line 261).
+func TestDynamicTypeRepo_ScheduleContent_TransitionBlocked(t *testing.T) {
+	db := openDynDB(t)
+	cfg := smeldr.Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("test-secret-minimum16bytes"),
+		DB:      db,
+	}
+	app := smeldr.New(cfg)
+
+	if err := app.RegisterFlow(smeldr.StateFlow{
+		Name:     "recipe-no-sched",
+		TypeName: "recipe",
+		States: []smeldr.State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published", IsTerminal: true},
+		},
+		Transitions: []smeldr.Transition{
+			{From: "draft", To: "published"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Pasta"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+
+	err = repo.ScheduleContent(context.Background(), node.ID, time.Now().Add(time.Hour))
+	if err == nil {
+		t.Fatal("expected ErrConflict for blocked transition, got nil")
+	}
+	if !errors.Is(err, smeldr.ErrConflict) {
+		t.Errorf("expected ErrConflict, got %v", err)
+	}
+}
+
+// — loadDynamicTypes llmsStore branch ————————————————————————————————————————
+
+// TestLoadDynamicTypes_WithLLMsStore verifies that loadDynamicTypes (called from
+// Handler()) hits the llmsStore branch when a schema with URLPrefix is pre-saved
+// to DB before the App is created and a module with AIIndex has wired llmsStore.
+// Covers dynamic.go lines 461-464.
+func TestLoadDynamicTypes_WithLLMsStore(t *testing.T) {
+	db := openDynDB(t)
+	ctx := context.Background()
+
+	// Pre-save a schema with URLPrefix directly via SchemaStore — bypasses
+	// DefineContentType so the type is not in typeRegistry when loadDynamicTypes runs.
+	fields, _ := json.Marshal([]smeldr.SchemaField{
+		{Name: "Title", Type: "string", Required: true, Role: "title"},
+	})
+	schema := &smeldr.ContentTypeSchema{
+		TypeName:  "prearticle",
+		Label:     "Pre-Article",
+		URLPrefix: "/prearticles",
+		Kind:      "content",
+		Fields:    json.RawMessage(fields),
+	}
+	if err := smeldr.NewSchemaStore(db).Save(ctx, schema); err != nil {
+		t.Fatalf("Save schema: %v", err)
+	}
+
+	cfg := smeldr.Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("test-secret-minimum16bytes"),
+		DB:      db,
+	}
+	app := smeldr.New(cfg)
+
+	// Register a module with AIIndex — this sets a.llmsStore on the App.
+	aiRepo := smeldr.NewMemoryRepo[*dynAIContent]()
+	m := smeldr.NewModule((*dynAIContent)(nil), smeldr.Repo(aiRepo), smeldr.AIIndex(smeldr.LLMsTxt))
+	app.Content(m)
+	app.ServeDynamicContent()
+
+	// Handler() calls loadDynamicTypes which finds the pre-saved schema,
+	// registers it, and hits the llmsStore branch (a.llmsStore != nil).
+	_ = app.Handler()
+}
+
+// — rebuildDynamicSitemap and rebuildDynamicAIIndex empty-slug paths ——————————
+
+// TestRebuildIndex_EmptySlugItems inserts a published item with empty slug into
+// the DB and calls RefreshContentIndex. Both rebuildDynamicSitemap and
+// rebuildDynamicAIIndex encounter the item and execute "if slug == "" { continue }",
+// covering dynamic.go lines 821-822 and 861-862.
+func TestRebuildIndex_EmptySlugItems(t *testing.T) {
+	db := openDynDB(t)
+	ctx := context.Background()
+
+	cfg := smeldr.Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("test-secret-minimum16bytes"),
+		DB:      db,
+	}
+	app := smeldr.New(cfg)
+
+	// Wire llmsStore (needed by rebuildDynamicAIIndex).
+	aiRepo := smeldr.NewMemoryRepo[*dynAIContent]()
+	m := smeldr.NewModule((*dynAIContent)(nil), smeldr.Repo(aiRepo), smeldr.AIIndex(smeldr.LLMsTxt))
+	app.Content(m)
+
+	// ServeDynamicContent sets sitemapStore (needed by rebuildDynamicSitemap).
+	app.ServeDynamicContent()
+
+	schema := recipeSchema()
+	if _, err := app.DefineContentType(ctx, schema); err != nil {
+		t.Fatalf("DefineContentType: %v", err)
+	}
+
+	// Insert a published item with empty slug directly — CreateDraft always
+	// generates a slug, so raw SQL is required to exercise the slug=="" guard.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_dynamic_content
+		 (id, type_name, slug, status, fields, created_at, updated_at, published_at, scheduled_at, rev)
+		 VALUES ($1, 'recipe', '', 'published', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, 0)`,
+		smeldr.NewID(),
+	); err != nil {
+		t.Fatalf("insert empty-slug item: %v", err)
+	}
+
+	// RefreshContentIndex calls rebuildDynamicSitemap + rebuildDynamicAIIndex
+	// synchronously; both skip the empty-slug item via "if slug == "" { continue }".
+	app.RefreshContentIndex(ctx, "recipe")
 }

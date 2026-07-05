@@ -23,6 +23,17 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.54.0] — 2026-07-05
+
+### Added
+- `schemas.go`: `ValidateFields(schema *ContentTypeSchema, fields map[string]any) *ValidationError` — validates complete field set for create operations; rejects unknown fields, missing required fields, and type mismatches
+- `schemas.go`: `ValidatePartialFields(schema *ContentTypeSchema, patch map[string]any) *ValidationError` — validates partial field set for update operations; rejects unknown fields and type mismatches; permits absent required fields
+- `dynamic.go`: `DynamicTypeRepo.ScheduleContent(ctx context.Context, id string, scheduledAt time.Time) error` — transitions content to Scheduled status with state-flow enforcement; updates `scheduled_at` and fires async triggers
+- `dynamic.go`: field validation integrated into `DynamicTypeRepo.CreateDraft` (via `ValidateFields`) and `DynamicTypeRepo.UpdateFields` (via `ValidatePartialFields`)
+- `dynamic.go`: `llmsStore` compact fragment wiring for dynamic types with URLPrefix; `rebuildDynamicAIIndex` regenerates `/llms.txt` after dynamic content changes
+
+---
+
 ## [1.53.0] — 2026-07-05
 
 ### Added

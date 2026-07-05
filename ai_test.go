@@ -652,6 +652,35 @@ func TestRenderAIDoc_authorCreatedTags(t *testing.T) {
 	}
 }
 
+func TestRenderAIDoc_WithSummaryAndUpdatedAt(t *testing.T) {
+	// testAIPost.AISummary() returns Summary when non-empty — covers the
+	// "if s := as.AISummary(); s != "" { summary = s }" branch.
+	// Non-zero UpdatedAt covers the "if !n.UpdatedAt.IsZero()" branch.
+	item := &testAIPost{
+		Node:    Node{ID: "id-su", Slug: "summary-slug", Status: Published},
+		Title:   "Summary Post",
+		Body:    "body content",
+		Summary: "A hand-written summary.",
+	}
+	head := Head{Title: "Summary Post", Type: "article"}
+	n := Node{
+		ID:        "id-su",
+		Slug:      "summary-slug",
+		UpdatedAt: time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC),
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	renderAIDoc(w, r, head, n, item, false)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "A hand-written summary.") {
+		t.Errorf("body should contain custom AISummary:\n%s", body)
+	}
+	if !strings.Contains(body, "modified: 2026-03-15") {
+		t.Errorf("body should contain modified date:\n%s", body)
+	}
+}
+
 // TestAIDoc_gzip verifies that the /aidoc endpoint returns a gzip-compressed
 // response when Accept-Encoding: gzip is sent and the document body is large.
 func TestAIDoc_gzip(t *testing.T) {
