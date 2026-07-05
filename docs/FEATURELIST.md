@@ -2,20 +2,20 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.47.0 (A187) + smeldr.dev/mcp v1.24.2 + smeldr.dev/cli v0.15.1 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.2 + smeldr.dev/agent v0.7.0 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
+Last updated: v1.52.2 (A197) + smeldr.dev/mcp v1.26.1 + smeldr.dev/cli v0.15.1 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.2 + smeldr.dev/agent v0.7.1 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.47.0 | Stable |
-| `smeldr.dev/mcp` | v1.24.2 | Stable |
+| `smeldr.dev/core` | v1.52.2 | Stable |
+| `smeldr.dev/mcp` | v1.26.1 | Stable |
 | `smeldr.dev/oauth` | v0.3.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.1.2 | Beta |
 | `smeldr.dev/media` | v1.6.0 | Beta |
 | `smeldr.dev/cli` | v0.15.1 | Beta |
 | `smeldr.dev/social` | v0.9.2 | Experimental |
-| `smeldr.dev/agent` | v0.7.0 | Experimental |
+| `smeldr.dev/agent` | v0.7.1 | Experimental |
 
 **Stable** — API will not break without a deprecation notice.  
 **Beta** — Functional and tested; API may change in minor releases.  
@@ -171,6 +171,7 @@ MCP resource subscriptions (Beta):
 - Security headers — CSP, HSTS, X-Frame-Options, Referrer-Policy in one middleware call
 - Graceful shutdown — drains in-flight requests on SIGINT/SIGTERM
 - Signal bus — `app.OnSignal(Signal, handler)` registers subscribers for `AfterPublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete`; `SignalEvent` carries Type, Slug, Title, URL, Timestamp, PreviousState, ActorRole, ActorID; handlers run synchronously in the publish goroutine and must enqueue-and-return
+- Config-driven feature-toggle layer — `example/server/main.go` is a deployable reference binary with no hard-coded Go content types; all optional subsystems (governance, relations, dynamic content, blocks, media, social, tokens, webhooks, redirects, page meta, agents, OAuth) are gated by `ENABLE_*` environment variables; binary compiles and runs with only `SECRET` set; basis for T114 dogfood instance and T118 downloadable binary (A197)
 
 ## smeldr.dev/media — Beta
 

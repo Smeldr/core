@@ -255,6 +255,53 @@ newest-first). Query params: `level` (min, inclusive), `limit` (most recent N),
 `since` (RFC3339). Route is absent (404) unless `CaptureLogs` was called. There is no
 MCP tool for logs by design — the path must not depend on MCP. Use `smeldr-cli logs`.
 
+### Generic reference server (example/server)
+
+`example/server/main.go` is a deployable binary with no custom Go content types.
+All content types are defined at runtime via the `define_content_type` MCP tool.
+Optional subsystems are gated by environment variables — the binary compiles and
+runs with only `SECRET` set; every other feature is opt-in.
+
+**Run it:**
+
+```bash
+cd example/server
+SECRET=changeme go run .
+```
+
+**Environment variables:**
+
+| Variable | Required? | Description |
+|----------|-----------|-------------|
+| `SECRET` | yes | HMAC signing secret (min 32 bytes in production) |
+| `BASE_URL` | optional | canonical origin, e.g. `https://cms.example.com` |
+| `DATABASE_PATH` | optional | path to SQLite database (default: `smeldr.db`) |
+| `PORT` | optional | HTTP listen port (default: `8080`) |
+| `ADDR` | optional | full listen address (default: `127.0.0.1:PORT`) |
+| `ENABLE_TOKENS` | boolean | wire database-backed named token management |
+| `ENABLE_GOVERNANCE` | boolean | wire role-based access control |
+| `ENABLE_RELATIONS` | boolean | wire the relation graph store |
+| `ENABLE_DYNAMIC_CONTENT` | boolean | wire the runtime content type system |
+| `ENABLE_BLOCKS` | boolean | wire the block/composition system MCP tools |
+| `ENABLE_REDIRECTS` | boolean | wire database-backed redirect management |
+| `ENABLE_PAGE_META` | boolean | wire per-path SEO override store |
+| `ENABLE_MEDIA` | boolean | wire local media upload and management |
+| `ENABLE_SOCIAL` | boolean | wire Mastodon social publishing |
+| `ENABLE_WEBHOOKS` | boolean | wire outbound webhook delivery |
+| `ENABLE_AGENTS` | boolean | wire the agent job system |
+| `AGENT_MCP_URL` | when ENABLE_AGENTS | agent MCP endpoint (default: `http://127.0.0.1:PORT/mcp/message`) |
+| `AGENT_MCP_TOKEN` | when ENABLE_AGENTS | bearer token for agent MCP calls |
+| `OAUTH_ISSUER` | optional | enable OAuth 2.1; set to canonical issuer URL |
+| `OAUTH_DB_PATH` | when OAUTH_ISSUER | path to OAuth SQLite database (default: `./oauth.db`) |
+
+Boolean vars gate their subsystem: set the var to any non-empty value to enable it
+(`ENABLE_TOKENS=1`, `ENABLE_GOVERNANCE=true`, etc.).
+
+When writing your own `main.go`, use `example/server/main.go` as the reference for
+correct wiring order — some calls have load-bearing ordering constraints (e.g.
+`CreateRelationTables` before `NewRelationStore`; `agentMod.Register` before
+`mcp.New` so `AgentJob` appears in the MCP tool list).
+
 ### Key rules for code generation
 
 - Zero third-party dependencies in the `smeldr` core package

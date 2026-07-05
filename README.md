@@ -36,6 +36,22 @@ go run .
 # open http://localhost:8080
 ```
 
+### Generic server (no custom content types)
+
+`example/server` is a deployable binary with no hard-coded Go content types —
+define everything at runtime via MCP:
+
+```bash
+cd example/server
+SECRET=changeme go run .
+```
+
+Optional subsystems are gated by environment variables (`ENABLE_TOKENS`,
+`ENABLE_GOVERNANCE`, `ENABLE_RELATIONS`, `ENABLE_DYNAMIC_CONTENT`, `ENABLE_BLOCKS`,
+`ENABLE_MEDIA`, `ENABLE_SOCIAL`, `ENABLE_WEBHOOKS`, `ENABLE_AGENTS`, `OAUTH_ISSUER`).
+Set any to a non-empty value to enable that subsystem. See `example/server/main.go`
+for the full variable reference and wiring order.
+
 ## What Smeldr gives you
 
 **Content**

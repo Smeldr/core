@@ -272,3 +272,32 @@ Added `target smeldr.AuthTarget` as the last parameter to `authoriseTool`. The c
 Coverage: 95.3% (pre-existing). mcp v1.26.1.
 
 ---
+
+## A197 — T121: Config-driven feature-toggle layer (`example/server`)
+
+**Date:** 2026-07-04
+**Status:** Done
+**Files:** `example/server/main.go`, `example/server/go.mod`, `go.work`, `AGENTS.md`, `README.md`, `docs/FEATURELIST.md`
+
+### What
+
+Added `example/server/` — a standalone Go module (`module example/server`) with its own `go.mod` and `replace` directives for all smeldr.dev/* dependencies. Delivers a deployable binary with no hard-coded Go content types; all content types are defined at runtime via the `define_content_type` MCP tool. Optional subsystems are gated by `ENABLE_*` environment variables; the binary compiles and runs with only `SECRET` set. 11 boolean vars: `ENABLE_TOKENS`, `ENABLE_GOVERNANCE`, `ENABLE_RELATIONS`, `ENABLE_DYNAMIC_CONTENT`, `ENABLE_BLOCKS`, `ENABLE_MEDIA`, `ENABLE_SOCIAL`, `ENABLE_WEBHOOKS`, `ENABLE_REDIRECTS`, `ENABLE_PAGE_META`, `ENABLE_AGENTS`. Plus `OAUTH_ISSUER` and associated Mastodon/agent env vars.
+
+### Why
+
+T114 (dogfood instance) and T118 (downloadable binary) both need a runnable generic server. `example/blog/main.go` demonstrates a single-content-type pattern; `example/server/main.go` demonstrates the full subsystem composition pattern — it is both the pattern reference and the deployable artifact. Placing the binary in `example/server/` with its own `go.mod` avoids a circular dependency: `smeldr.dev/mcp` imports `smeldr.dev/core`, so a binary importing both cannot live inside `smeldr.dev/core`'s module. The pattern follows `example/blog/`, `example/docs/`, `example/api/`.
+
+### Consequences
+
+- 11 `ENABLE_*` boolean env vars + `OAUTH_ISSUER` gate their respective subsystems (set to any non-empty value to enable).
+- `migrateDB(db)` always creates `smeldr_tokens` and `smeldr_webhook_endpoints` tables unconditionally (idempotent `CREATE TABLE IF NOT EXISTS`); no DDL helper exists in core for these tables.
+- Wiring order is load-bearing: `CreateRelationTables` before `NewRelationStore`; `agentMod.Register` before `mcp.New` (so `AgentJob` appears in the MCP tool list).
+- `go.work` gains a `use ./example/server` entry (local workspace only; gitignored).
+- `AGENTS.md` gains a "Generic reference server (example/server)" section with full env-var table and wiring guidance.
+- `README.md` references `example/server` as the quickstart for a generic server.
+- `docs/FEATURELIST.md` "Operations" section gains a bullet for the config-driven feature-toggle layer.
+- No exported Go symbols changed. No core API change. No core version bump. Level 2 amendment.
+
+Coverage: 96.0%. core v1.52.2.
+
+---
