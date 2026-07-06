@@ -23,6 +23,7 @@
 //	ENABLE_RELATIONS      wire the relation graph store
 //	ENABLE_DYNAMIC_CONTENT wire the runtime content type system and schema store
 //	ENABLE_BLOCKS         wire the block/composition system MCP tools
+//	ENABLE_ORCHESTRATION  wire orchestration types (Signal, Task, Decision, Amendment, Goal)
 //	ENABLE_REDIRECTS      wire database-backed redirect management
 //	ENABLE_PAGE_META      wire per-path SEO override store
 //	ENABLE_MEDIA          wire local media upload and management
@@ -122,6 +123,13 @@ func main() {
 		if err := smeldr.CreateBlockTables(db); err != nil {
 			log.Fatalf("smeldr-server: create block tables: %v", err)
 		}
+	}
+
+	if os.Getenv("ENABLE_ORCHESTRATION") != "" {
+		if err := smeldr.CreateOrchestrationTables(db); err != nil {
+			log.Fatalf("smeldr-server: create orchestration tables: %v", err)
+		}
+		smeldr.RegisterOrchestrationTypes(app, db)
 	}
 
 	if os.Getenv("ENABLE_REDIRECTS") != "" {

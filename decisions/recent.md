@@ -84,3 +84,27 @@ These were gaps from T104 Increment 2 (A153/A154) where `DynamicTypeRepo` accept
 - Level 2 amendment (new exported symbols). core v1.54.0.
 
 ---
+
+## A203 — T124: ENABLE_ORCHESTRATION toggle in example/server
+
+**Status:** Done  
+**Date:** 2026-07-06  
+**Repo:** smeldr.dev/core
+
+### What
+
+Added `ENABLE_ORCHESTRATION` env-var toggle to `example/server/main.go`. When set, calls `smeldr.CreateOrchestrationTables(db)` then `smeldr.RegisterOrchestrationTypes(app, db)`. Slotted after the `ENABLE_BLOCKS` block — same table-create-then-register pattern as all other subsystem toggles.
+
+Added `ENABLE_ORCHESTRATION` row to the `AGENTS.md` env-var reference table.
+
+### Why
+
+`example/server` never called `RegisterOrchestrationTypes`, so Signal, Task, Decision, Amendment, and Goal had no MCP tools, no routes, and no tables on a running instance. This was the blocker for T114's dogfood data migration.
+
+### Consequences
+
+- No exported Go symbols changed. No core version bump. No tag.
+- `ENABLE_RELATIONS` is not a hard dependency: `QueryGoalContext` fails-open when `rs == nil` (returns goal with empty relation slices). Recommended alongside `ENABLE_ORCHESTRATION` for full `get_goal_context` traversal.
+- Level 1 amendment.
+
+---
