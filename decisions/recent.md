@@ -214,3 +214,33 @@ Cross-reference descriptions (Option 2) were rejected: passive, uncertain effect
 - Level 1 amendment.
 
 ---
+
+## A208 — T130: fix staticcheck CI findings in smeldr.dev/mcp
+
+**Status:** Done  
+**Date:** 2026-07-06  
+**Repo:** smeldr.dev/mcp
+
+### What was decided
+
+Fix three staticcheck findings that have kept CI red on main since T120:
+
+1. **U1000 — unused function:** Delete `unwrapEdges` helper from `relation_tools_test.go`. Remove its orphaned `encoding/json` import.
+2. **SA5011 — nil dereference:** Replace `t.Errorf` with `t.Fatalf` at `relation_tools_test.go:156` (guards `.Code` dereference; control flow falls through error calls).
+3. **SA5011 — nil dereference (two instances):** Replace `t.Error` with `t.Fatal` at `redirect_tools_test.go:211` and `redirect_tools_test.go:227` (same pattern — `.Code` access after error call without return guard).
+
+### Why
+
+- **U1000:** Dead code — no callers. Removal is safe and required for staticcheck to pass.
+- **SA5011:** Genuine latent bug. Both patterns called `t.Error`/`t.Errorf` without returning, allowing subsequent code to execute and dereference a potentially nil `.Code` field. Changing to `Fatal` correctly terminates the test on the unexpected nil.
+- **CI history:** The staticcheck step was added in T120 but was never run locally before push. Running locally would have caught all three before merge.
+
+### Consequences
+
+- CI staticcheck step goes green.
+- No production code changed.
+- No exported symbol added, removed, or changed.
+- No version bump required (test fix only).
+- Level 1 amendment — isolated to test files, no cross-file dependencies.
+
+---
