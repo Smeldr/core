@@ -364,6 +364,11 @@ For each registered content type, these tools are available:
 - `archive_{type}` — transitions to Archived
 - `delete_{type}` — permanent deletion
 
+**Tool discovery:** if you found one verb for a type (e.g. `update_essay`) but
+are unsure which other tools exist, call `list_type_tools({type_name: "essay"})`.
+It returns the complete list of tool names for that type. Always available;
+requires Author role.
+
 ### Block tools (when the server is started with `WithBlocks`)
 
 The block system stores all block types as generic nodes and composes them into

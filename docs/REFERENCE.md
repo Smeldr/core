@@ -1720,6 +1720,35 @@ Routes registered:
 
 The existing `Handler()` method is unchanged for non-Smeldr embeddings.
 
+### Discovery — `list_type_tools` (A207)
+
+With 150+ tools on a real deployment, AI clients that do semantic tool-search
+find tools by what they search for — not by what exists. An agent that discovers
+`update_essay` has no guaranteed path to `list_essays` or `get_essay`.
+
+`list_type_tools` closes this gap. Given any tool name for a compiled content
+type, an agent can look up all sibling tools in one call:
+
+```json
+// Request: list_type_tools({type_name: "essay"})
+// Response:
+{
+  "type_name": "essay",
+  "tools": [
+    "create_essay", "update_essay", "publish_essay",
+    "schedule_essay", "archive_essay",
+    "list_essays", "get_essay", "delete_essay"
+  ]
+}
+```
+
+| Tool | Role | Description |
+|------|------|-------------|
+| `list_type_tools` | Author | Returns all MCP tool names registered for a compiled content type. Input: `type_name` (snake_case, e.g. `"essay"`). For `SingleInstance` modules, `list_X` is absent. Returns not-found for unknown types. |
+
+Always present in `tools/list`. Response is derived live from the registered
+tools — cannot drift from the actual tool set.
+
 ### Block system tools — `WithBlocks` (T32)
 
 `mcp.New(app, mcp.WithBlocks())` exposes the block-system MCP tools.

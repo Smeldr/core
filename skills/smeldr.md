@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or pilot agent.
 
-Current versions: smeldr.dev/core v1.54.0 · smeldr.dev/mcp v1.27.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.1 · smeldr.dev/social v0.9.2 · smeldr.dev/agent v0.7.1 · smeldr.dev/core/pgx v0.1.2
+Current versions: smeldr.dev/core v1.54.1 · smeldr.dev/mcp v1.29.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.1 · smeldr.dev/social v0.9.2 · smeldr.dev/agent v0.7.1 · smeldr.dev/core/pgx v0.1.2
 
 ---
 
@@ -384,6 +384,7 @@ Tools are named from the type in lower_snake_case.
 | `create_signal` | Author | Insert a signal into smeldr_signals with status=pending. Args: `sender`, `receiver`, `signal_type` (required); `task_ref`, `message`, `sequence` (optional). Requires `CreateOrchestrationTables`. Gate: `App.Config().DB != nil`. |
 | `list_signals` | Author | List signals by receiver+state (default "pending"). Fail-open on missing table. Gate: `App.Config().DB != nil`. |
 | `get_goal_context` | Author | Retrieve a goal and all linked items (Decisions, Tasks, Goals) via the relation graph. Args: `goal_id` (required, e.g. `"T114"`). Returns `{goal, linked_decisions, linked_tasks, linked_goals}`. -32001 on not found. Gate: `App.Config().DB != nil`. smeldr.dev/mcp v1.27.0. |
+| `list_type_tools` | Author | Discovery meta-tool. Takes `type_name` (snake_case, e.g. `"essay"`) and returns all MCP tool names registered for that compiled content type. Use when you find one verb for a type and need to enumerate its siblings. Always present in tools/list. smeldr.dev/mcp v1.29.0. |
 
 Block system (T32, enabled with `mcp.WithBlocks()`; blocks addressed by ID, not slug):
 

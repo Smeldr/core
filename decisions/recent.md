@@ -179,3 +179,38 @@ Fixed `smeldr.App.Relations()` to call `CreateSchemaTable(a.cfg.DB)` (guarded fo
 - Level 1 amendment (single-file fix in `smeldr.go`).
 
 ---
+
+## A207 — T127: list_type_tools discoverability meta-tool (mcp v1.29.0)
+
+**Status:** Done  
+**Date:** 2026-07-06  
+**Repo:** smeldr.dev/mcp
+
+### What
+
+Added `list_type_tools` MCP tool to `smeldr.dev/mcp`. Takes `type_name` (snake_case, e.g. `"essay"`) and returns all tool names registered for that compiled content type. Response:
+
+```json
+{
+  "type_name": "essay",
+  "tools": ["create_essay", "update_essay", "publish_essay", "schedule_essay", "archive_essay", "list_essays", "get_essay", "delete_essay"]
+}
+```
+
+For `SingleInstance` modules, the `list_X` verb is absent (matching `mcpAdminReadToolDefs` behaviour). Requires Author role. Always appears in `tools/list`.
+
+Implementation: `mcp/discover.go` (new file — `discoverToolDef`, `isDiscoverTool`, `handleDiscoverTool`). Two edits to `mcp/tool.go`: `discoverToolDef()` appended unconditionally in `handleToolsList`; `isDiscoverTool` dispatch added in `handleToolsCall`. `handleDiscoverTool` derives its response live from `mcpToolDefs(m)` + `mcpAdminReadToolDefs(m)` — cannot drift from the actual registered tools.
+
+### Why
+
+Real incident (2026-07-06): ChatGPT on `smeldr.dev` (150+ tools) discovered `update_essay`/`schedule_essay` via semantic tool-search but concluded `list_essays`/`get_essay` didn't exist — they were never searched for. The server was correct; the gap was architectural: no primitive existed to enumerate all verbs for a given type once any one was found. `list_type_tools` closes this by analogy with `list_content_type_schemas` (which serves the same discovery purpose for dynamic types).
+
+Cross-reference descriptions (Option 2) were rejected: passive, uncertain effectiveness, coupled future verb additions to manual string maintenance.
+
+### Consequences
+
+- No exported Go symbol change in core. No core version bump.
+- mcp v1.29.0 (new public tool).
+- Level 1 amendment.
+
+---
