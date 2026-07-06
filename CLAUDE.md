@@ -143,6 +143,10 @@ Criteria: no functional change, no exported symbol touched, no behaviour changed
 **Level 1 — micro-amendment** (isolated change, no cross-file consequences)
 One A-entry in DECISIONS.md. No full milestone step required.
 Examples: dependency version bumps, single-file config, docs-only changes.
+For standalone modules (mcp, cli, media, etc.): a fix that changes consumer-observable
+behaviour (tool order, API response shape, route output) requires a patch version bump and
+tag even if no exported Go symbol changed. "No version bump" means "no consumer-visible
+behaviour changed" — not "no exported symbol changed."
 
 **Level 2 — standard amendment or milestone step** (full cycle)
 Requires architect involvement, DECISIONS.md entry with both index row and body,
@@ -700,7 +704,10 @@ date, a tagger, and a message, and appear as formal releases on GitHub.
 **When to tag:**
 - Every milestone that ships a version bump (`v0.x.0`) gets a tag
 - Patch releases (bug fixes, no API change) get a tag
-- Amendments alone do not get a tag unless they ship with a milestone
+- Amendments alone do not get a tag unless they ship with a milestone.
+  Exception: a standalone-module amendment (mcp, cli, media, etc.) that changes
+  consumer-observable behaviour gets a patch tag so downstream `go get` consumers
+  can receive the fix.
 
 **Standalone module tagging rule (non-negotiable):**
 smeldr.dev/mcp, smeldr.dev/cli, smeldr.dev/media, smeldr.dev/social,

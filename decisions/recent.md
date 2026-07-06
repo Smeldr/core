@@ -266,3 +266,27 @@ Real-world evidence 2026-07-06: OpenAI's MCP connector loaded only 103 of 148 to
 - No version bump required — Level 1 amendment.
 
 ---
+
+## A210 — T133: mcp v1.29.1 patch tag + CLAUDE.md Level 1 amendment classification fix
+
+**Status:** Done  
+**Date:** 2026-07-06  
+**Repos:** smeldr.dev/mcp, smeldr/core
+
+### What was decided
+
+1. **mcp v1.29.1 patch tag** — Tagged and released smeldr.dev/mcp v1.29.1 covering T130 (staticcheck fixes, no consumer impact) and T132 (discoverToolDef moved to position 0, consumer-observable). Although no exported Go symbol changed between v1.29.0 and v1.29.1, the tool ordering change is consumer-observable: MCP clients with tool-list caps now reliably receive `list_type_tools` (A207). Patch bump required.
+
+2. **CLAUDE.md classification clarification** — Two edits: (a) Level 1 examples now state that for standalone modules, a fix that changes consumer-observable behaviour requires a patch tag even if no exported symbol changed; "no version bump" means "no consumer-visible behaviour changed." (b) The "Amendments alone do not get a tag" when-to-tag rule gains an explicit exception for standalone-module amendments that change consumer-observable behaviour.
+
+### Why
+
+T132 was classified "no version bump" because no exported Go symbol changed. But the tool ordering change is directly observable to every MCP client — any client with a tool-list cap sees a different tool set on v1.29.0 vs v1.29.1. A consumer pinning v1.29.0 in go.mod cannot receive the fix via `go get` without a tag. The CLAUDE.md rule now uses "consumer-visible behaviour" as the gate, not "exported symbol changed."
+
+### Consequences
+
+- Consumers can `go get smeldr.dev/mcp@v1.29.1` to receive the tool-ordering fix.
+- CLAUDE.md process rule is unambiguous for future standalone-module amendments.
+- No core version bump. No core tag. Level 1 amendment.
+
+---
