@@ -244,3 +244,25 @@ Fix three staticcheck findings that have kept CI red on main since T120:
 - Level 1 amendment — isolated to test files, no cross-file dependencies.
 
 ---
+
+## A209 — T132: Move `discoverToolDef()` to first position in handleToolsList
+
+**Status:** Done  
+**Date:** 2026-07-06  
+**Repo:** smeldr.dev/mcp
+
+### What was decided
+
+The `discoverToolDef()` append in `handleToolsList()` (`mcp/tool.go`) was moved from its final position — after all per-module, infrastructure, and feature tool blocks — to the first position, immediately after `var tools []mcpTool` and before the per-module loop.
+
+### Why
+
+Real-world evidence 2026-07-06: OpenAI's MCP connector loaded only 103 of 148 tools from smeldr.dev, dropping ~45 from the tail. `list_type_tools` (A207) was among those never received, despite being in the server's response. Moving it to position 0 ensures it survives any client-side tail truncation.
+
+### Consequences
+
+- `list_type_tools` is now the first element in the tools array, ahead of all module-contributed tools.
+- No change to tool functionality, behaviour, or exported interfaces.
+- No version bump required — Level 1 amendment.
+
+---
