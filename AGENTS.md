@@ -298,6 +298,16 @@ SECRET=changeme go run .
 Boolean vars gate their subsystem: set the var to any non-empty value to enable it
 (`ENABLE_TOKENS=1`, `ENABLE_GOVERNANCE=true`, etc.).
 
+**Testing:**
+
+```bash
+# In-process unit tests (runs as part of go test ./...):
+cd example/server && go test ./...
+
+# Preflight test — builds and spawns the real binary, confirms /_health + /goals:
+cd example/server && go test -tags preflight -v -run TestPreflight .
+```
+
 When writing your own `main.go`, use `example/server/main.go` as the reference for
 correct wiring order — some calls have load-bearing ordering constraints (e.g.
 `CreateRelationTables` before `NewRelationStore`; `agentMod.Register` before

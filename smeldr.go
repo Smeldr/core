@@ -814,6 +814,11 @@ type SyncSaveHook func(ctx context.Context, typeName, id string, item any) error
 func (a *App) Relations(store *RelationStore) *App {
 	a.relationStore = store
 	a.schemaStore = NewSchemaStore(a.cfg.DB)
+	if a.cfg.DB != nil {
+		if err := CreateSchemaTable(a.cfg.DB); err != nil {
+			fmt.Fprintf(os.Stderr, "WARN smeldr: Relations: create schema table: %v\n", err)
+		}
+	}
 	ss := a.schemaStore
 	a.syncSaveHook = func(ctx context.Context, typeName, id string, item any) error {
 		schema, err := ss.FindByTypeName(ctx, typeName)

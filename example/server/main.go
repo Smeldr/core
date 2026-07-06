@@ -56,57 +56,112 @@ import (
 	"smeldr.dev/social"
 )
 
-func main() {
-	secret := requireEnv("SECRET")
-	baseURL := os.Getenv("BASE_URL")
-	dbPath := envOr("DATABASE_PATH", "smeldr.db")
+// ServerConfig holds all configuration derived from environment variables.
+// Construct it via [parseConfig] for production use, or set fields directly in tests.
+type ServerConfig struct {
+	Secret               string
+	BaseURL              string
+	Port                 string
+	Addr                 string
+	EnableTokens         bool
+	EnableGovernance     bool
+	EnableRelations      bool
+	EnableDynamicContent bool
+	EnableBlocks         bool
+	EnableOrchestration  bool
+	EnableRedirects      bool
+	EnablePageMeta       bool
+	EnableMedia          bool
+	MediaBackend         string
+	EnableSocial         bool
+	MastodonClientID     string
+	MastodonClientSecret string
+	MastodonInstanceURL  string
+	EnableWebhooks       bool
+	EnableAgents         bool
+	AgentMCPURL          string
+	AgentMCPToken        string
+	OAuthIssuer          string
+	OAuthDBPath          string
+}
+
+// ServerResult holds the live components returned by [buildApp].
+// Call StopAll when shutting down to stop all background goroutines.
+type ServerResult struct {
+	App        *smeldr.App
+	MCP        *mcp.Server
+	TokenStore *smeldr.TokenStore // nil when EnableTokens=false
+	StopAll    func()             // stops all background goroutines; safe to call multiple times
+}
+
+// parseConfig reads all server configuration from environment variables.
+func parseConfig() ServerConfig {
 	port := envOr("PORT", "8080")
-
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
-	if err != nil {
-		log.Fatalf("smeldr-server: open db: %v", err)
+	return ServerConfig{
+		Secret:               requireEnv("SECRET"),
+		BaseURL:              os.Getenv("BASE_URL"),
+		Port:                 port,
+		Addr:                 envOr("ADDR", "127.0.0.1:"+port),
+		EnableTokens:         os.Getenv("ENABLE_TOKENS") != "",
+		EnableGovernance:     os.Getenv("ENABLE_GOVERNANCE") != "",
+		EnableRelations:      os.Getenv("ENABLE_RELATIONS") != "",
+		EnableDynamicContent: os.Getenv("ENABLE_DYNAMIC_CONTENT") != "",
+		EnableBlocks:         os.Getenv("ENABLE_BLOCKS") != "",
+		EnableOrchestration:  os.Getenv("ENABLE_ORCHESTRATION") != "",
+		EnableRedirects:      os.Getenv("ENABLE_REDIRECTS") != "",
+		EnablePageMeta:       os.Getenv("ENABLE_PAGE_META") != "",
+		EnableMedia:          os.Getenv("ENABLE_MEDIA") != "",
+		MediaBackend:         envOr("MEDIA_STORE_BACKEND", "local"),
+		EnableSocial:         os.Getenv("ENABLE_SOCIAL") != "",
+		MastodonClientID:     os.Getenv("MASTODON_CLIENT_ID"),
+		MastodonClientSecret: os.Getenv("MASTODON_CLIENT_SECRET"),
+		MastodonInstanceURL:  os.Getenv("MASTODON_INSTANCE_URL"),
+		EnableWebhooks:       os.Getenv("ENABLE_WEBHOOKS") != "",
+		EnableAgents:         os.Getenv("ENABLE_AGENTS") != "",
+		AgentMCPURL:          envOr("AGENT_MCP_URL", "http://127.0.0.1:"+port+"/mcp/message"),
+		AgentMCPToken:        os.Getenv("AGENT_MCP_TOKEN"),
+		OAuthIssuer:          os.Getenv("OAUTH_ISSUER"),
+		OAuthDBPath:          envOr("OAUTH_DB_PATH", "./oauth.db"),
 	}
-	if err := db.Ping(); err != nil {
-		log.Fatalf("smeldr-server: ping db: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	defer db.Close()
+}
 
+// buildApp wires all enabled subsystems and returns the live server components.
+// It does not call app.Run — that remains the caller's responsibility.
+// All subsystem failures return an error instead of calling log.Fatalf.
+func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	if err := migrateDB(db); err != nil {
-		log.Fatalf("smeldr-server: migrate: %v", err)
+		return ServerResult{}, fmt.Errorf("migrate: %w", err)
 	}
 
-	// ENABLE_RELATIONS: tables must exist before NewRelationStore.
-	if os.Getenv("ENABLE_RELATIONS") != "" {
+	if cfg.EnableRelations {
 		if err := smeldr.CreateRelationTables(db); err != nil {
-			log.Fatalf("smeldr-server: create relation tables: %v", err)
+			return ServerResult{}, fmt.Errorf("create relation tables: %w", err)
 		}
 	}
 
-	// ENABLE_TOKENS: build TokenStore before Config so it wires into the App.
 	var tokenStore *smeldr.TokenStore
-	if os.Getenv("ENABLE_TOKENS") != "" {
-		tokenStore = smeldr.NewTokenStore(db, secret)
+	if cfg.EnableTokens {
+		tokenStore = smeldr.NewTokenStore(db, cfg.Secret)
 	}
 
 	app := smeldr.New(smeldr.Config{
-		BaseURL:    baseURL,
-		Secret:     []byte(secret),
+		BaseURL:    cfg.BaseURL,
+		Secret:     []byte(cfg.Secret),
 		DB:         db,
 		TokenStore: tokenStore,
 	})
 
-	if os.Getenv("ENABLE_GOVERNANCE") != "" {
+	if cfg.EnableGovernance {
 		store := smeldr.NewRoleStore(db)
 		if err := app.Governance(store); err != nil {
-			log.Fatalf("smeldr-server: governance: %v", err)
+			return ServerResult{}, fmt.Errorf("governance: %w", err)
 		}
 	}
 
-	if os.Getenv("ENABLE_RELATIONS") != "" {
+	if cfg.EnableRelations {
 		store, err := smeldr.NewRelationStore(db)
 		if err != nil {
-			log.Fatalf("smeldr-server: relation store: %v", err)
+			return ServerResult{}, fmt.Errorf("relation store: %w", err)
 		}
 		app.Relations(store)
 	}
@@ -114,33 +169,33 @@ func main() {
 	// Early Handler call initialises the nav tree and probes smeldr_tokens.
 	app.Handler()
 
-	if os.Getenv("ENABLE_DYNAMIC_CONTENT") != "" {
+	if cfg.EnableDynamicContent {
 		app.ServeDynamicContent()
 	}
 
-	if os.Getenv("ENABLE_BLOCKS") != "" {
+	if cfg.EnableBlocks {
 		// ServeDynamicContent also calls CreateBlockTables; this is idempotent.
 		if err := smeldr.CreateBlockTables(db); err != nil {
-			log.Fatalf("smeldr-server: create block tables: %v", err)
+			return ServerResult{}, fmt.Errorf("create block tables: %w", err)
 		}
 	}
 
-	if os.Getenv("ENABLE_ORCHESTRATION") != "" {
+	if cfg.EnableOrchestration {
 		if err := smeldr.CreateOrchestrationTables(db); err != nil {
-			log.Fatalf("smeldr-server: create orchestration tables: %v", err)
+			return ServerResult{}, fmt.Errorf("create orchestration tables: %w", err)
 		}
 		smeldr.RegisterOrchestrationTypes(app, db)
 	}
 
-	if os.Getenv("ENABLE_REDIRECTS") != "" {
+	if cfg.EnableRedirects {
 		if err := app.Redirects(db); err != nil {
-			log.Fatalf("smeldr-server: redirects: %v", err)
+			return ServerResult{}, fmt.Errorf("redirects: %w", err)
 		}
 	}
 
-	if os.Getenv("ENABLE_PAGE_META") != "" {
+	if cfg.EnablePageMeta {
 		if err := smeldr.CreatePageMetaTable(db); err != nil {
-			log.Fatalf("smeldr-server: page meta table: %v", err)
+			return ServerResult{}, fmt.Errorf("page meta table: %w", err)
 		}
 		app.PageMeta(smeldr.NewPageMetaStore(db))
 	}
@@ -148,23 +203,23 @@ func main() {
 	var stopFuncs []func()
 	var mcpOptions []mcp.ServerOption
 
-	if os.Getenv("ENABLE_MEDIA") != "" {
-		if backend := envOr("MEDIA_STORE_BACKEND", "local"); backend != "local" {
-			log.Fatalf("smeldr-server: unsupported MEDIA_STORE_BACKEND %q (only \"local\" is supported)", backend)
+	if cfg.EnableMedia {
+		if cfg.MediaBackend != "local" {
+			return ServerResult{}, fmt.Errorf("unsupported MEDIA_STORE_BACKEND %q (only \"local\" is supported)", cfg.MediaBackend)
 		}
 		store := media.NewLocalMediaStore(app)
 		mediaSrv := media.Register(app, store)
 		mcpOptions = append(mcpOptions, mcp.WithModule(mediaSrv))
 	}
 
-	if os.Getenv("ENABLE_SOCIAL") != "" {
+	if cfg.EnableSocial {
 		srv := social.New(db, social.Config{
-			Secret: []byte(secret),
+			Secret: []byte(cfg.Secret),
 			Mastodon: social.MastodonConfig{
-				ClientID:     os.Getenv("MASTODON_CLIENT_ID"),
-				ClientSecret: os.Getenv("MASTODON_CLIENT_SECRET"),
-				InstanceURL:  os.Getenv("MASTODON_INSTANCE_URL"),
-				RedirectURL:  baseURL + "/oauth/mastodon/callback",
+				ClientID:     cfg.MastodonClientID,
+				ClientSecret: cfg.MastodonClientSecret,
+				InstanceURL:  cfg.MastodonInstanceURL,
+				RedirectURL:  cfg.BaseURL + "/oauth/mastodon/callback",
 			},
 		})
 		srv.Register(app)
@@ -177,49 +232,47 @@ func main() {
 		)
 	}
 
-	if os.Getenv("ENABLE_WEBHOOKS") != "" {
-		app.Webhooks(smeldr.NewWebhookStore(db, []byte(secret)))
+	if cfg.EnableWebhooks {
+		app.Webhooks(smeldr.NewWebhookStore(db, []byte(cfg.Secret)))
 	}
 
 	// ENABLE_AGENTS must register before mcp.New so AgentJob appears in MCP tools.
-	if os.Getenv("ENABLE_AGENTS") != "" {
+	if cfg.EnableAgents {
 		agentMod := agentflow.New(db, agentflow.Config{
-			MCPURL:         envOr("AGENT_MCP_URL", "http://127.0.0.1:"+port+"/mcp/message"),
-			MCPToken:       os.Getenv("AGENT_MCP_TOKEN"),
+			MCPURL:         cfg.AgentMCPURL,
+			MCPToken:       cfg.AgentMCPToken,
 			StreamableHTTP: true,
 		})
 		agentMod.Register(app)
 		stopFuncs = append(stopFuncs, agentMod.Stop)
 	}
 
-	// OAUTH_ISSUER: existing pattern, unchanged from site-dev.
-	if oauthIssuer := os.Getenv("OAUTH_ISSUER"); oauthIssuer != "" {
-		oauthDBPath := envOr("OAUTH_DB_PATH", "./oauth.db")
-		oauthStore, err := oauth.NewSQLiteStore(oauthDBPath)
+	if cfg.OAuthIssuer != "" {
+		oauthStore, err := oauth.NewSQLiteStore(cfg.OAuthDBPath)
 		if err != nil {
-			log.Fatalf("smeldr-server: oauth store: %v", err)
+			return ServerResult{}, fmt.Errorf("oauth store: %w", err)
 		}
-		defer oauthStore.Close()
+		stopFuncs = append(stopFuncs, func() { oauthStore.Close() }) //nolint:errcheck
 		oauthSrv := oauth.New(oauth.Config{
-			Issuer: oauthIssuer,
+			Issuer: cfg.OAuthIssuer,
 			VerifyBearer: func(token string) bool {
 				if tokenStore == nil {
 					return false
 				}
-				_, ok := smeldr.VerifyTokenString(token, []byte(secret), tokenStore)
+				_, ok := smeldr.VerifyTokenString(token, []byte(cfg.Secret), tokenStore)
 				return ok
 			},
 		}, oauthStore)
 		mcpOptions = append(mcpOptions, mcp.WithOAuth(oauthSrv), mcp.WithForgeFallback())
 	}
 
-	if os.Getenv("ENABLE_DYNAMIC_CONTENT") != "" {
+	if cfg.EnableDynamicContent {
 		mcpOptions = append(mcpOptions, mcp.WithDynamicContent())
 	}
-	if os.Getenv("ENABLE_BLOCKS") != "" {
+	if cfg.EnableBlocks {
 		mcpOptions = append(mcpOptions, mcp.WithBlocks())
 	}
-	if os.Getenv("ENABLE_PAGE_META") != "" {
+	if cfg.EnablePageMeta {
 		mcpOptions = append(mcpOptions, mcp.WithPageMeta(db))
 	}
 
@@ -228,15 +281,41 @@ func main() {
 
 	app.Health()
 
-	defer func() {
+	stopAll := func() {
 		for _, stop := range stopFuncs {
 			stop()
 		}
-	}()
+	}
 
-	addr := envOr("ADDR", "127.0.0.1:"+port)
-	log.Printf("smeldr-server: listening on %s", addr)
-	if err := app.Run(addr); err != nil {
+	return ServerResult{
+		App:        app,
+		MCP:        mcpSrv,
+		TokenStore: tokenStore,
+		StopAll:    stopAll,
+	}, nil
+}
+
+func main() {
+	cfg := parseConfig()
+	dbPath := envOr("DATABASE_PATH", "smeldr.db")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
+	if err != nil {
+		log.Fatalf("smeldr-server: open db: %v", err)
+	}
+	if err := db.Ping(); err != nil {
+		log.Fatalf("smeldr-server: ping db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	defer db.Close()
+
+	result, err := buildApp(cfg, db)
+	if err != nil {
+		log.Fatalf("smeldr-server: %v", err)
+	}
+	defer result.StopAll()
+
+	log.Printf("smeldr-server: listening on %s", cfg.Addr)
+	if err := result.App.Run(cfg.Addr); err != nil {
 		log.Fatalf("smeldr-server: %v", err)
 	}
 }

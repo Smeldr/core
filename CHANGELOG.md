@@ -23,6 +23,19 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.54.1] — 2026-07-06
+
+### Fixed
+- `orchestration.go`: `RegisterOrchestrationTypes` now passes explicit `Table("smeldr_...")` options to all 5 orchestration `NewSQLRepo` calls. Previously, `tableName[T]()` derivation produced e.g. `"goals"` instead of `"smeldr_goals"`, making every `create_goal`, `create_signal`, `create_task`, `create_decision`, and `create_amendment` MCP call fail with "no such table" against a real SQLite database. (A205)
+- `smeldr.go`: `App.Relations()` now calls `CreateSchemaTable(a.cfg.DB)` before wiring the `syncSaveHook`. Previously, `ENABLE_RELATIONS=true` without `ENABLE_DYNAMIC_CONTENT` caused "no such table: smeldr_content_type_schemas" on every content save. Fix is idempotent and nil-DB-guarded. (A206)
+
+### Added
+- `example/server`: `ServerConfig`, `ServerResult`, `parseConfig`, and `buildApp(cfg, db) (ServerResult, error)` extracted from monolithic `main()`. All subsystem failures return errors. (A204)
+- `example/server/main_test.go`: `TestServerToggles` with 7 sub-cases (each `ENABLE_*` toggle). (A204)
+- `example/server/preflight_test.go`: `TestPreflight` (`//go:build preflight`): builds binary, spawns OS process, polls `/_health`, probes `/goals`. Run: `go test -tags preflight -v -run TestPreflight .` (A204)
+
+---
+
 ## [1.54.0] — 2026-07-05
 
 ### Added

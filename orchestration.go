@@ -319,19 +319,19 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 		}
 	}
 	app.Content(NewModule[*Signal]((*Signal)(nil),
-		At("/signals"), Repo(NewSQLRepo[*Signal](db)), MCP(MCPRead, MCPWrite),
+		At("/signals"), Repo(NewSQLRepo[*Signal](db, Table("smeldr_signals"))), MCP(MCPRead, MCPWrite),
 	))
 	app.Content(NewModule[*Task]((*Task)(nil),
-		At("/tasks"), Repo(NewSQLRepo[*Task](db)), MCP(MCPRead, MCPWrite),
+		At("/tasks"), Repo(NewSQLRepo[*Task](db, Table("smeldr_tasks"))), MCP(MCPRead, MCPWrite),
 	))
 	app.Content(NewModule[*Decision]((*Decision)(nil),
-		At("/decisions"), Repo(NewSQLRepo[*Decision](db)), MCP(MCPRead, MCPWrite),
+		At("/decisions"), Repo(NewSQLRepo[*Decision](db, Table("smeldr_decisions"))), MCP(MCPRead, MCPWrite),
 	))
 	app.Content(NewModule[*Amendment]((*Amendment)(nil),
-		At("/amendments"), Repo(NewSQLRepo[*Amendment](db)), MCP(MCPRead, MCPWrite),
+		At("/amendments"), Repo(NewSQLRepo[*Amendment](db, Table("smeldr_amendments"))), MCP(MCPRead, MCPWrite),
 	))
 	app.Content(NewModule[*Goal]((*Goal)(nil),
-		At("/goals"), Repo(NewSQLRepo[*Goal](db)), MCP(MCPRead, MCPWrite),
+		At("/goals"), Repo(NewSQLRepo[*Goal](db, Table("smeldr_goals"))), MCP(MCPRead, MCPWrite),
 	))
 }
 

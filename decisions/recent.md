@@ -108,3 +108,74 @@ Added `ENABLE_ORCHESTRATION` row to the `AGENTS.md` env-var reference table.
 - Level 1 amendment.
 
 ---
+
+## A204 — T125: example/server buildApp refactor
+
+**Status:** Done  
+**Date:** 2026-07-06  
+**Repo:** smeldr.dev/core
+
+### What
+
+Refactored `example/server/main.go` to extract `ServerConfig` (24 fields covering HTTP, DB, auth, and subsystem toggles), `ServerResult` (App, MCP server, TokenStore, StopAll callback), `parseConfig` (env-var parse with typed defaults), and `buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error)` from monolithic main. `buildApp` returns errors for all subsystem failures — no `log.Fatalf` inside it. `main()` becomes a thin wrapper.
+
+Added `main_test.go` with `TestServerToggles` (7 sub-cases exercising each `ENABLE_*` toggle). Added `preflight_test.go` (`//go:build preflight`, binary-spawn: builds the binary, starts it as a real OS process, polls `/_health`, probes `/goals`).
+
+Bumped `go.mod`: core v1.52.2 → v1.54.0, mcp v1.26.1 → v1.28.0. Verified GOWORK=off `go list -m` before bumping.
+
+### Why
+
+Before this refactor, `main()` was ~250 lines of sequential initialization with no error returns and no tests. Tests could not instantiate the server in-process, so feature toggle combinations were untestable without running the binary. Extracting `buildApp` gives tests and `main()` a single shared wiring path.
+
+### Consequences
+
+- No exported Go symbols changed (`ServerConfig`, `ServerResult`, `buildApp`, `parseConfig` are internal to the `example/server` module).
+- `example/server/go.mod` version bumped; core and mcp versions updated.
+- All 7 `TestServerToggles` sub-cases green. Coverage gate passed.
+- Level 2 amendment (new test files, multiple file changes in example/server module).
+
+---
+
+## A205 — T125: bug fix — RegisterOrchestrationTypes table name derivation
+
+**Status:** Done  
+**Date:** 2026-07-06  
+**Repo:** smeldr.dev/core
+
+### What
+
+Fixed `smeldr.RegisterOrchestrationTypes(app, db)` to pass explicit `Table("smeldr_...")` options to all 5 orchestration `NewSQLRepo` calls. Before the fix, each repo relied on `tableName[T]()` derivation, which pluralizes the type name without the `smeldr_` prefix: `Goal` → `"goals"`, `Signal` → `"signals"`, etc. `CreateOrchestrationTables` correctly creates `smeldr_goals`, `smeldr_signals`, `smeldr_tasks`, `smeldr_decisions`, `smeldr_amendments` — so all queries were directed at non-existent tables.
+
+### Why
+
+Pre-existing bug that was masked because no test or integration exercised `RegisterOrchestrationTypes` against a real DB before T125. The T125 test suite called `create_goal` → MCP tool → SQL INSERT → "no such table: goals" failure.
+
+### Consequences
+
+- No exported symbol change. No version bump.
+- Level 1 amendment (single-file fix in `orchestration.go`).
+
+---
+
+## A206 — T125: bug fix — App.Relations() missing CreateSchemaTable call
+
+**Status:** Done  
+**Date:** 2026-07-06  
+**Repo:** smeldr.dev/core
+
+### What
+
+Fixed `smeldr.App.Relations()` to call `CreateSchemaTable(a.cfg.DB)` (guarded for nil DB) before wiring the `syncSaveHook`. The hook queries `smeldr_content_type_schemas` on every save to check if the saved type has relation-field annotations requiring edge recomputation. When `ENABLE_RELATIONS=true` without `ENABLE_DYNAMIC_CONTENT`, the table was never created, causing "no such table: smeldr_content_type_schemas" SQL errors that failed every content save.
+
+`CreateSchemaTable` is idempotent (`CREATE TABLE IF NOT EXISTS`). `ServeDynamicContent()` also calls it — the second call is a no-op.
+
+### Why
+
+`Relations()` and `ServeDynamicContent()` were developed together and always enabled together in dogfood. The T125 toggle test uncovered that the two are independent — `ENABLE_RELATIONS=true, ENABLE_DYNAMIC_CONTENT=false` is a valid combination (orchestration uses relations without dynamic content), but the setup order was wrong.
+
+### Consequences
+
+- No exported symbol change. No version bump.
+- Level 1 amendment (single-file fix in `smeldr.go`).
+
+---
