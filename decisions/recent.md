@@ -290,3 +290,35 @@ T132 was classified "no version bump" because no exported Go symbol changed. But
 - No core version bump. No core tag. Level 1 amendment.
 
 ---
+
+## A211 — T137: Social REST API (smeldr.dev/social v0.10.0) and CLI REST switch (smeldr.dev/cli v0.15.2)
+
+**Status:** Done  
+**Date:** 2026-07-09  
+**Repos:** smeldr.dev/social, smeldr.dev/cli
+
+### What was decided
+
+1. **Social REST API (smeldr.dev/social v0.10.0)** — Implemented 5 REST endpoints in `Social.Register()` (new file: `post_http.go`):
+   - `POST   /social/posts` — create a ScheduledPost
+   - `GET    /social/posts` — list ScheduledPosts (optional `?status=` filter)
+   - `GET    /social/posts/{id}` — get one ScheduledPost
+   - `PUT    /social/posts/{id}` — patch-merge update (only JSON keys present in body are applied; avoids requiring clients to re-send scheduler-managed fields)
+   - `DELETE /social/posts/{id}` — delete (204 No Content)
+
+   All endpoints require Bearer token validation via `smeldr.VerifyBearerToken(r, s.cfg.Secret, s.tokens)`. `Social.tokens *smeldr.TokenStore` internal field added and initialised in `New()` with `smeldr.NewTokenStore(db, string(cfg.Secret))`. Comprehensive test coverage: `post_http_test.go` (24 tests covering all endpoints and error paths). `export_test.go` updated with `PostHandlerForTest()` for white-box test access.
+
+2. **CLI REST switch (smeldr.dev/cli v0.15.2)** — Switched 7 `runSocialPost*` functions from `mcpCall()` to `request()` against `SMELDR_URL` REST endpoints. `SMELDR_MCP_URL` no longer required for post commands (still required for credential/schedule/platform commands). Help text updated to document the split. `cliVersion` bumped to `"0.15.2"`.
+
+### Why
+
+`social/README.md` has always documented these 5 REST endpoints, but they were never implemented — operators and CLI could only manage posts via MCP, which requires the MCP server running. REST enables direct Bearer-token access and lets `smeldr-cli social post` commands work against the Smeldr HTTP API directly without MCP infrastructure.
+
+### Consequences
+
+- New HTTP surface on smeldr.dev/social: 5 REST routes with Bearer auth. `Social.tokens` remains internal — no change to the public `Social` struct interface.
+- `Social.Register()` now registers 5 additional routes (behaviour change).
+- CLI post commands now require `SMELDR_URL` + `SMELDR_TOKEN`; `SMELDR_MCP_URL` no longer needed for post operations.
+- social v0.10.0 (minor bump — new HTTP surface). cli v0.15.2 (patch bump — behaviour change, no new commands).
+
+---
