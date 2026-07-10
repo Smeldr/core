@@ -108,3 +108,36 @@ T132 was classified "no version bump" because no exported Go symbol changed. But
 - No exported symbols added or removed.
 
 ---
+
+## A213 — Go 1.26.5 Toolchain Bump (T138)
+
+**Status:** Done
+**Date:** 2026-07-10
+**Repos:** smeldr/core, smeldr.dev/mcp, smeldr.dev/cli, smeldr.dev/agent, smeldr.dev/social, smeldr.dev/media, smeldr.dev/oauth
+
+### What was decided
+
+1. Bumped the `go` directive in `go.mod` to `1.26.5` in all 7 repos:
+   - core: go 1.26.4 → go 1.26.5 (go.mod + go.work)
+   - mcp: go 1.26.4 → go 1.26.5 (go.mod + go.work)
+   - cli: go 1.26.4 → go 1.26.5 (go.mod only)
+   - agent: go 1.26.4 → go 1.26.5 (go.mod only)
+   - social: go 1.26.4 → go 1.26.5 (go.mod only)
+   - media: go 1.26.3 → go 1.26.5 (go.mod + go.work)
+   - oauth: go 1.26.3 → go 1.26.5 (go.mod only)
+2. Also bumped go.work files in core, mcp, and media repos (which each have one).
+3. No exported symbols changed. No consumer-visible behaviour changes.
+4. No version bumps in any module's go.mod. No tags required.
+
+### Why
+
+GO-2026-5856: Encrypted Client Hello (ECH) privacy leak in crypto/tls affects all Go 1.26.x before 1.26.5. CI on core and mcp has been red since A211 because govulncheck flags this vulnerability. Fix: go 1.26.5 (also fixed in go 1.25.12 and go 1.27.0-rc.2). GOTOOLCHAIN=auto fetches 1.26.5 automatically on all platforms once go.mod declares it.
+
+### Consequences
+
+- CI govulncheck will be green on core and mcp after push.
+- No exported symbols changed. No consumer-visible behaviour changes.
+- No version bumps. No tags. Level 1 amendment — metadata-only change.
+- `go build ./...` and `go test ./...` green in all 7 repos locally.
+
+---
