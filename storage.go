@@ -829,6 +829,8 @@ func MigrateNodeRevColumn(db DB, table string) error {
 	return err
 }
 
+func (r *SQLRepo[T]) tableName() string { return r.table }
+
 // Seq returns a lazy iterator that streams rows from the database one at a
 // time, yielding each item that matches the status filter in opts (or all
 // items when opts.Status is empty). Iteration stops early if the caller

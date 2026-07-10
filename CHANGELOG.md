@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.54.2] — 2026-07-10
+
+### Fixed
+- `module.go`: `Module[T].setDB` now calls `MigrateNodeRevColumn` automatically when the underlying repository is a `*SQLRepo[T]`. Closes the latent gap that caused the 2026-07-07 production emergency patch — no operator action required; idempotent on every boot. Custom repositories (not `*SQLRepo[T]`) are unaffected. (A212)
+
+---
+
 ## [1.54.1] — 2026-07-06
 
 ### Fixed

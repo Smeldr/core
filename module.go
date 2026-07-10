@@ -724,8 +724,18 @@ func (m *Module[T]) setSecret(secret []byte) {
 // setDB injects the application database into the module so that MCP status
 // transitions can be validated against the registered state flow.
 // Called by [App.Content] for every registered module.
+// If the underlying repository is a [SQLRepo], setDB also runs
+// [MigrateNodeRevColumn] automatically so no operator action is required.
 func (m *Module[T]) setDB(db DB) {
 	m.db = db
+	if db == nil {
+		return
+	}
+	if tn, ok := m.repo.(interface{ tableName() string }); ok {
+		if err := MigrateNodeRevColumn(db, tn.tableName()); err != nil {
+			slog.Warn("smeldr: MigrateNodeRevColumn", "table", tn.tableName(), "err", err)
+		}
+	}
 }
 
 // setRoleStore injects the application [RoleStore] into the module so that

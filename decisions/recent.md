@@ -322,3 +322,32 @@ T132 was classified "no version bump" because no exported Go symbol changed. But
 - social v0.10.0 (minor bump — new HTTP surface). cli v0.15.2 (patch bump — behaviour change, no new commands).
 
 ---
+
+## A212 — AutoMigrate NodeRevColumn in Module.setDB (T136)
+
+**Status:** Done
+**Date:** 2026-07-10
+**Repo:** smeldr/core
+
+### What was decided
+
+1. `Module[T].setDB` now calls `MigrateNodeRevColumn(db, tn.tableName())` automatically when `m.repo` implements an unexported `tableName() string` interface. Only `*SQLRepo[T]` implements this interface.
+2. `SQLRepo[T]` gains an unexported method `tableName() string { return r.table }`.
+3. nil-DB guard: if `db == nil`, the migration is skipped (no panic).
+4. Error strategy: `slog.Warn` and continue (same precedent as `MigrateSchemaKindColumn` in `smeldr.go`).
+5. Two new tests: `TestSetDB_AutoMigratesRevColumn` (verifies migration runs and Save succeeds after), `TestSetDB_SkipsMigrationForNonSQLRepo` (verifies MemoryRepo does not implement `tableName()`).
+6. Version: core v1.54.2 (patch).
+
+### Why
+
+`MigrateNodeRevColumn` existed and was tested since an earlier amendment but was never called by the framework. Operators were expected to call it manually. Nobody did — including the production smeldr.dev deployment — causing a 2026-07-07 outage that required a direct SSH emergency patch to the live SQLite database.
+
+### Consequences
+
+- `Module[T].setDB` calls `MigrateNodeRevColumn` at module registration time — new DB operation at startup.
+- Zero operator action required for new or existing deployments.
+- Custom repos (not `*SQLRepo[T]`) are unaffected.
+- `docs/ARCHITECTURE.md` unchanged (no new exported symbols).
+- No exported symbols added or removed.
+
+---

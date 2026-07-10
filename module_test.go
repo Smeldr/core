@@ -2296,3 +2296,49 @@ func TestRegister_withMiddleware_wrapsHandlers(t *testing.T) {
 		t.Error("middleware should have been called")
 	}
 }
+
+// — setDB auto-migration (A212) ———————————————————————————————————————————
+
+// TestSetDB_AutoMigratesRevColumn verifies that setDB automatically calls
+// MigrateNodeRevColumn for SQLRepo-backed modules, so a table created without
+// a rev column can be saved to immediately after App.Content wires the module.
+func TestSetDB_AutoMigratesRevColumn(t *testing.T) {
+	db := newSQLiteDB(t)
+	_, err := db.ExecContext(context.Background(), `
+		CREATE TABLE test_posts (
+			id           TEXT NOT NULL PRIMARY KEY,
+			slug         TEXT NOT NULL DEFAULT '',
+			status       TEXT NOT NULL DEFAULT 'draft',
+			created_at   DATETIME NOT NULL DEFAULT '',
+			updated_at   DATETIME NOT NULL DEFAULT '',
+			scheduled_at DATETIME,
+			published_at DATETIME,
+			title        TEXT NOT NULL DEFAULT '',
+			body         TEXT NOT NULL DEFAULT ''
+		)`)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	repo := NewSQLRepo[*testPost](db)
+	m := NewModule((*testPost)(nil), Repo(repo))
+	m.setDB(db)
+
+	item := &testPost{Node: Node{ID: "1", Slug: "hello", Status: Draft}}
+	if err := repo.Save(context.Background(), item); err != nil {
+		t.Errorf("Save after setDB migration: %v", err)
+	}
+}
+
+// TestSetDB_SkipsMigrationForNonSQLRepo verifies that setDB does not attempt
+// MigrateNodeRevColumn when the underlying repository is not a SQLRepo.
+// MemoryRepo must not implement the internal tableName() interface.
+func TestSetDB_SkipsMigrationForNonSQLRepo(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	if _, ok := any(repo).(interface{ tableName() string }); ok {
+		t.Fatal("MemoryRepo must not implement tableName(); migration would fire for in-memory repos")
+	}
+	db := newSQLiteDB(t)
+	m := NewModule((*testPost)(nil), Repo(repo))
+	m.setDB(db) // must not attempt migration (no tableName() on MemoryRepo)
+}
