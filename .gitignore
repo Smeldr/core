@@ -20,3 +20,11 @@ go.work
 go.work.sum
 Forge.code-workspace
 .claude/settings.json
+dogfood.db
+dogfood.db-wal
+dogfood.db-shm
+dogfood-token.txt
+dogfood-secret.txt
+.smeldr-cli.env
+server*.log
+example/server/seed_goals/
