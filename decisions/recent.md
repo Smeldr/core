@@ -141,3 +141,49 @@ GO-2026-5856: Encrypted Client Hello (ECH) privacy leak in crypto/tls affects al
 - `go build ./...` and `go test ./...` green in all 7 repos locally.
 
 ---
+
+## A214 — T145: Context Packet v1 — bounded orchestration context envelope
+
+**Status:** Done
+**Date:** 2026-07-11
+**Repos:** smeldr/core
+
+### What was decided
+
+New HTTP endpoint and context packet envelope (v1.0):
+
+**Exported types (7):**
+- `ContextPacket` — v1 bounded operational context JSON envelope
+- `PacketSource` — identifies the Smeldr instance that produced the packet
+- `PacketAnchor` — the focal orchestration item (type, id, slug, status, rev, url, fields)
+- `PacketBoundary` — how the packet was assembled (method, depth, omitted counts)
+- `PacketOmission` — per-type included/omitted item counts when cap exceeded
+- `PacketItem` — one linked content node in the packet
+- `PacketRelation` — one relation graph edge (both endpoints must be in packet)
+
+**Exported functions/methods (2):**
+- `BuildContextPacket(ctx, DB, *RelationStore, baseURL, sourceName, anchorType, anchorSlug string, depth int) (*ContextPacket, error)` — breadth-first traversal over all 5 anchor types (goal, decision, amendment, task, signal), depth 1–2, per-type cap 25 items, seenEdge + seenNode dedup (diamond-safe)
+- `App.ContextPacketHandler(rs *RelationStore, sourceName string)` — mounts `GET /packet/{type}/{slug}[?depth=]` unauthenticated HTTP endpoint
+
+**Key design decisions:**
+- Anchor always present (with Status, Rev, Fields); NOT duplicated in Items
+- Relations only emitted when both endpoints present (as Anchor or in Items)
+- Ghost links (nodeID with no DB row) silently skipped with slog.Warn
+- `QueryGoalContext` unchanged — backward compat preserved
+- No MCP tool (HTTP-only v1); no auth; snapshot only (generated_at timestamp)
+- `packet_version: "1.0"`, per-type cap: 25
+- Anchor and linked items are filtered to Published status only — matches the existing sitewide "non-Published content is never publicly visible" convention (`Module.isVisible`); a Draft anchor returns `ErrNotFound`, a Draft linked item is silently excluded (not counted in `Boundary.Omitted`)
+
+### Why
+
+M3 public demo (`T111`) requires a "Continue with your own AI" action — a hand-off that carries bounded, portable, provenance-carrying operational context to an isolated instance or external AI agent. Design settled through a Fable 5 research round. This is the first concrete implementation slice: HTTP-only v1, snapshot semantics, no authentication, no MCP tool yet.
+
+### Consequences
+
+- New public HTTP endpoint `GET /packet/{type}/{slug}[?depth=]` (unauthenticated; intended for isolated demo instance with public read access)
+- 7 new exported types, 1 new exported function (`BuildContextPacket`), 1 new `App` method (`ContextPacketHandler`)
+- v1.55.0 (additive, no breaking changes)
+- `QueryGoalContext` unchanged (backward compat)
+- Level 2 amendment (new exported symbols + new public HTTP route)
+
+---

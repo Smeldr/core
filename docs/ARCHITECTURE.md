@@ -138,6 +138,15 @@ smeldr.dev/
 │                     RegisterOrchestrationTypes(*App, DB) — fail-open, registers 5 types + flows;
 │                     orchSignalFlow, orchTaskFlow, orchDecisionFlow, orchAmendmentFlow, orchGoalFlow (unexported)
 │                     (Amendment A183, T23 Step 10; Goal type: A198, T114 Step 1)
+├── context_packet.go ContextPacket, PacketSource, PacketAnchor, PacketBoundary, PacketOmission,
+│                     PacketItem, PacketRelation exported types;
+│                     BuildContextPacket(ctx, DB, *RelationStore, baseURL, sourceName, anchorType,
+│                     anchorSlug string, depth int) (*ContextPacket, error) — breadth-first
+│                     traversal over all 5 orchestration anchor types, depth 1–2, per-type cap 25;
+│                     App.ContextPacketHandler(rs *RelationStore, sourceName string) — mounts
+│                     GET /packet/{type}/{slug}[?depth=] unauthenticated HTTP endpoint;
+│                     anchorTypeEntry, anchorTypeTable, packetFetchItem, packetFieldsFromItem,
+│                     packetItemURL (unexported) (Amendment A214, T145)
 ├── storage.go        DB interface, Query[T], QueryOne[T], Repository[T], MemoryRepo[T], ListOptions;
 │                     timeScanner (unexported) — sql.Scanner for time.Time fields, handles SQLite
 │                     string format; scanDest (unexported) — wraps *time.Time destinations (A200)

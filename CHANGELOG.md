@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.55.0] — 2026-07-11
+
+### Added
+- `context_packet.go`: `ContextPacket`, `PacketSource`, `PacketAnchor`, `PacketBoundary`, `PacketOmission`, `PacketItem`, `PacketRelation` — v1 bounded operational context JSON envelope types. (A214)
+- `BuildContextPacket(ctx, DB, *RelationStore, baseURL, sourceName, anchorType, anchorSlug string, depth int) (*ContextPacket, error)` — breadth-first traversal over all 5 orchestration anchor types (goal, decision, amendment, task, signal), depth 1–2, per-type cap 25 items, seenEdge + seenNode dedup (diamond-safe). (A214)
+- `App.ContextPacketHandler(rs *RelationStore, sourceName string)` — mounts `GET /packet/{type}/{slug}[?depth=]` unauthenticated HTTP endpoint returning a `ContextPacket` as JSON. (A214)
+- Published-only lifecycle contract: Draft/Archived anchor returns `ErrNotFound`; Draft/Archived linked items are silently excluded and not counted in `Boundary.Omitted`. (A214)
+
+---
+
 ## [1.54.2] — 2026-07-10
 
 ### Fixed

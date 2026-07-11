@@ -608,11 +608,11 @@ func TestQueryGoalContext(t *testing.T) {
 }
 
 // insertTestGoal inserts a minimal Goal row into smeldr_goals and returns its
-// node ID. Used only by TestQueryGoalContext.
+// node ID.
 func insertTestGoal(t *testing.T, db DB, goalID, band, size string) string {
 	t.Helper()
 	g := &Goal{
-		Node:     Node{ID: NewID(), Slug: GenerateSlug("goal-" + goalID), Status: Draft},
+		Node:     Node{ID: NewID(), Slug: GenerateSlug("goal-" + goalID), Status: Published},
 		GoalID:   goalID,
 		Priority: 1,
 		Band:     band,
@@ -626,11 +626,11 @@ func insertTestGoal(t *testing.T, db DB, goalID, band, size string) string {
 }
 
 // insertTestDecision inserts a minimal Decision row into smeldr_decisions and
-// returns its node ID. Used only by TestQueryGoalContext.
+// returns its node ID.
 func insertTestDecision(t *testing.T, db DB, decisionNumber string) string {
 	t.Helper()
 	d := &Decision{
-		Node:           Node{ID: NewID(), Slug: GenerateSlug("decision-" + decisionNumber), Status: Draft},
+		Node:           Node{ID: NewID(), Slug: GenerateSlug("decision-" + decisionNumber), Status: Published},
 		DecisionNumber: decisionNumber,
 		Scope:          "core",
 	}
@@ -642,11 +642,11 @@ func insertTestDecision(t *testing.T, db DB, decisionNumber string) string {
 }
 
 // insertTestTask inserts a minimal Task row into smeldr_tasks and returns its
-// node ID. Used only by TestQueryGoalContext.
+// node ID.
 func insertTestTask(t *testing.T, db DB, taskID string) string {
 	t.Helper()
 	tk := &Task{
-		Node:   Node{ID: NewID(), Slug: GenerateSlug("task-" + taskID), Status: Draft},
+		Node:   Node{ID: NewID(), Slug: GenerateSlug("task-" + taskID), Status: Published},
 		TaskID: taskID,
 	}
 	repo := NewSQLRepo[*Task](db, Table("smeldr_tasks"))
