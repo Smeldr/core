@@ -363,4 +363,34 @@ func TestServerToggles(t *testing.T) {
 			t.Error("set_page_meta missing from tools/list when ENABLE_PAGE_META=true")
 		}
 	})
+
+	t.Run("on/contextPacket", func(t *testing.T) {
+		// Both ENABLE_RELATIONS and ENABLE_ORCHESTRATION must be set for the
+		// packet endpoint to mount. Probe /packet/<bad-type>/x: a mounted handler
+		// returns 400 (ErrBadRequest for unknown type); the ServeMux returns 404
+		// if the route is not registered — so 400 proves the route is wired.
+		cfg := baseConfig()
+		cfg.EnableRelations = true
+		cfg.EnableOrchestration = true
+		cfg.InstanceName = "test"
+		ts := buildTestServer(t, cfg)
+
+		if got := getStatus(t, ts.URL, "", "/packet/bad-type/x"); got != http.StatusBadRequest {
+			t.Errorf("GET /packet/bad-type/x: got %d, want 400 (route must be mounted when both flags are set)", got)
+		}
+	})
+
+	t.Run("off/contextPacketWithoutRelations", func(t *testing.T) {
+		// Without ENABLE_RELATIONS the packet endpoint must not mount.
+		// Same probe returns 404 (ServeMux fallthrough) when not registered.
+		cfg := baseConfig()
+		cfg.EnableRelations = false
+		cfg.EnableOrchestration = true
+		cfg.InstanceName = "test"
+		ts := buildTestServer(t, cfg)
+
+		if got := getStatus(t, ts.URL, "", "/packet/bad-type/x"); got != http.StatusNotFound {
+			t.Errorf("GET /packet/bad-type/x: got %d, want 404 (route must not mount without ENABLE_RELATIONS)", got)
+		}
+	})
 }

@@ -24,6 +24,7 @@
 //	ENABLE_DYNAMIC_CONTENT wire the runtime content type system and schema store
 //	ENABLE_BLOCKS         wire the block/composition system MCP tools
 //	ENABLE_ORCHESTRATION  wire orchestration types (Signal, Task, Decision, Amendment, Goal)
+//	INSTANCE_NAME         source name embedded in Context Packet responses (default: smeldr-dogfood)
 //	ENABLE_REDIRECTS      wire database-backed redirect management
 //	ENABLE_PAGE_META      wire per-path SEO override store
 //	ENABLE_MEDIA          wire local media upload and management
@@ -83,6 +84,7 @@ type ServerConfig struct {
 	AgentMCPToken        string
 	OAuthIssuer          string
 	OAuthDBPath          string
+	InstanceName         string
 }
 
 // ServerResult holds the live components returned by [buildApp].
@@ -122,6 +124,7 @@ func parseConfig() ServerConfig {
 		AgentMCPToken:        os.Getenv("AGENT_MCP_TOKEN"),
 		OAuthIssuer:          os.Getenv("OAUTH_ISSUER"),
 		OAuthDBPath:          envOr("OAUTH_DB_PATH", "./oauth.db"),
+		InstanceName:         envOr("INSTANCE_NAME", "smeldr-dogfood"),
 	}
 }
 
@@ -131,12 +134,6 @@ func parseConfig() ServerConfig {
 func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	if err := migrateDB(db); err != nil {
 		return ServerResult{}, fmt.Errorf("migrate: %w", err)
-	}
-
-	if cfg.EnableRelations {
-		if err := smeldr.CreateRelationTables(db); err != nil {
-			return ServerResult{}, fmt.Errorf("create relation tables: %w", err)
-		}
 	}
 
 	var tokenStore *smeldr.TokenStore
@@ -158,11 +155,17 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 	}
 
+	var rs *smeldr.RelationStore
+
 	if cfg.EnableRelations {
+		if err := smeldr.CreateRelationTables(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create relation tables: %w", err)
+		}
 		store, err := smeldr.NewRelationStore(db)
 		if err != nil {
 			return ServerResult{}, fmt.Errorf("relation store: %w", err)
 		}
+		rs = store
 		app.Relations(store)
 	}
 
@@ -185,6 +188,10 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 			return ServerResult{}, fmt.Errorf("create orchestration tables: %w", err)
 		}
 		smeldr.RegisterOrchestrationTypes(app, db)
+	}
+
+	if cfg.EnableRelations && cfg.EnableOrchestration {
+		app.ContextPacketHandler(rs, cfg.InstanceName)
 	}
 
 	if cfg.EnableRedirects {

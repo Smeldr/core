@@ -284,6 +284,7 @@ SECRET=changeme go run .
 | `ENABLE_DYNAMIC_CONTENT` | boolean | wire the runtime content type system |
 | `ENABLE_BLOCKS` | boolean | wire the block/composition system MCP tools |
 | `ENABLE_ORCHESTRATION` | boolean | wire orchestration types (Signal, Task, Decision, Amendment, Goal); set `ENABLE_RELATIONS` for full `get_goal_context` traversal |
+| `INSTANCE_NAME` | optional | source name embedded in `GET /packet/{type}/{slug}` responses (default: `smeldr-dogfood`); requires both `ENABLE_RELATIONS` and `ENABLE_ORCHESTRATION` |
 | `ENABLE_REDIRECTS` | boolean | wire database-backed redirect management |
 | `ENABLE_PAGE_META` | boolean | wire per-path SEO override store |
 | `ENABLE_MEDIA` | boolean | wire local media upload and management |

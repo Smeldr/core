@@ -187,3 +187,29 @@ M3 public demo (`T111`) requires a "Continue with your own AI" action — a hand
 - Level 2 amendment (new exported symbols + new public HTTP route)
 
 ---
+
+## Amendment A215 — Wire ContextPacketHandler into example/server (T147 Part 1)
+
+**Date:** 2026-07-12
+**Status:** Done
+**Repo:** smeldr/core
+**Pilot:** corepilot
+**Level:** 1 (changes entirely within `example/server`; no exported core symbols)
+
+### What was decided
+
+Wire `App.ContextPacketHandler` into `example/server/main.go` so a locally-run instance can serve `GET /packet/{type}/{slug}[?depth=]`. Introduce `INSTANCE_NAME` env var for `PacketSource.Name`. Gate the handler on both `ENABLE_RELATIONS` and `ENABLE_ORCHESTRATION`.
+
+### Rationale
+
+`ContextPacketHandler` (A214) was implemented in core v1.55.0 but not wired into any running binary. Without wiring, the endpoint is unreachable from the dogfood instance. The handler requires a `*RelationStore` — meaningless without relation data — and orchestration types as anchor candidates, so both flags are required. A source name is needed for provenance in packet responses; `INSTANCE_NAME` follows the existing `ENABLE_*`/`BASE_URL` env var pattern.
+
+### Consequences
+
+- `GET /packet/{type}/{slug}[?depth=]` is now reachable on the dogfood instance when both flags are set
+- `ServerConfig.InstanceName string` added (25th field); `INSTANCE_NAME` env var (default: `"smeldr-dogfood"`)
+- Two separate `EnableRelations` blocks consolidated into one: `var rs *smeldr.RelationStore` hoisted; `CreateRelationTables` moved into the merged block (no behaviour change — DDL is idempotent)
+- `TestServerToggles`: 7 → 9 sub-cases (`on/contextPacket`, `off/contextPacketWithoutRelations`)
+- No exported core symbols changed; no version bump required
+
+---
