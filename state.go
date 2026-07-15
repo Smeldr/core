@@ -361,6 +361,18 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 		}
 	}
 
+	// Verify the target state exists in this flow before checking the transition
+	// edge. Produces a more specific error than "transition not permitted" when the
+	// caller supplies a state name that belongs to a different flow entirely.
+	var targetExists int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_states WHERE flow_id = $1 AND name = $2`,
+		flowID, toStatus,
+	).Scan(&targetExists); err == nil && targetExists == 0 {
+		return fmt.Errorf("%w: %q is not a valid target state for type %q",
+			ErrConflict, toStatus, typeName)
+	}
+
 	// ── FAIL-OPEN structural boundary ────────────────────────────────────────
 	// Fetch the transition row. required_role may be NULL (no gate) or a role name.
 	var requiredRole sql.NullString
@@ -395,6 +407,50 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 	if !ok {
 		return fmt.Errorf("%w: transition %s→%s requires role %q",
 			ErrForbidden, fromStatus, toStatus, requiredRole.String)
+	}
+	return nil
+}
+
+// validateInitialState checks whether statusName is a known state in the
+// registered flow for typeName. It is called at create time, before the item
+// is persisted, to prevent callers from storing arbitrary status strings.
+//
+// Fail-open cases (returns nil):
+//   - db is nil (no DB configured)
+//   - statusName is empty (caller omitted status — module defaults apply)
+//   - the database is not SQLite (sqlite_master probe fails)
+//   - no flow is registered for typeName and no default flow exists
+//   - the state membership query fails (structural DB error)
+func validateInitialState(ctx context.Context, db DB, typeName, statusName string) error {
+	if db == nil || statusName == "" {
+		return nil
+	}
+	var dummy int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
+		return nil
+	}
+	var flowID string
+	err := db.QueryRowContext(ctx,
+		`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
+	).Scan(&flowID)
+	if err != nil {
+		err = db.QueryRowContext(ctx,
+			`SELECT id FROM smeldr_state_flows WHERE type_name IS NULL AND name = 'default' LIMIT 1`,
+		).Scan(&flowID)
+		if err != nil {
+			return nil
+		}
+	}
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_states WHERE flow_id = $1 AND name = $2`,
+		flowID, statusName,
+	).Scan(&count); err != nil {
+		return nil // structural error — fail open
+	}
+	if count == 0 {
+		return fmt.Errorf("%w: %q is not a valid state in the registered flow for type %q",
+			ErrConflict, statusName, typeName)
 	}
 	return nil
 }

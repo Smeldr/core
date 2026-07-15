@@ -1763,6 +1763,12 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	if s := string(nodeStatusOf(item)); s != "" {
+		if err := validateInitialState(ctx, m.db, m.contentTypeName, s); err != nil {
+			WriteError(w, r, err)
+			return
+		}
+	}
 
 	// BeforeCreate hooks (synchronous — first error aborts).
 	if err := dispatchBefore(ctx, m.signals[BeforeCreate], item); err != nil {
@@ -2219,6 +2225,11 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	item := ptrToT[T](pv, m.proto)
 	if err := RunValidation(item); err != nil {
 		return nil, err
+	}
+	if s := string(nodeStatusOf(item)); s != "" {
+		if err := validateInitialState(ctx, m.db, m.contentTypeName, s); err != nil {
+			return nil, err
+		}
 	}
 	if err := m.repo.Save(ctx, item); err != nil {
 		return nil, err

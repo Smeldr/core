@@ -5,9 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -513,6 +516,29 @@ func TestValidateTransition_transitionQueryError(t *testing.T) {
 	}
 }
 
+func TestValidateTransition_unknownTargetState(t *testing.T) {
+	// "done" is not a state in agentJobFlow (draft/published/paused/archived).
+	// The new target-state pre-check must return ErrConflict with a message that
+	// identifies the target state as invalid, not merely that the transition edge
+	// is absent.
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(agentJobFlow); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	err := validateTransition(ctx, db, nil, "", "AgentJob", "draft", "done")
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("unknown target state: want ErrConflict, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "not a valid target state") {
+		t.Errorf("unknown target state: want 'not a valid target state' in message, got %q", err.Error())
+	}
+}
+
 // transitFailDB simulates a DB that passes the sqlite_master probe and flow lookup
 // but fails the smeldr_transitions SELECT required_role query with a real non-ErrNoRows
 // error, exercising the fail-open path in validateTransition.
@@ -560,6 +586,115 @@ func (c *queryErrDriverConn) Exec(_ []driver.Value) (driver.Result, error) {
 }
 func (c *queryErrDriverConn) Query(_ []driver.Value) (driver.Rows, error) {
 	return nil, c.err
+}
+
+// — validateInitialState tests ——————————————————————————————————————————————————
+
+func TestValidateInitialState_nilDB(t *testing.T) {
+	ctx := context.Background()
+	if err := validateInitialState(ctx, nil, "Post", "draft"); err != nil {
+		t.Errorf("nil db: want nil, got %v", err)
+	}
+}
+
+func TestValidateInitialState_emptyStatus(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := validateInitialState(ctx, db, "Post", ""); err != nil {
+		t.Errorf("empty status: want nil, got %v", err)
+	}
+}
+
+func TestValidateInitialState_nonSQLite(t *testing.T) {
+	// failOnNthExecDB.QueryRowContext returns guardRowConn{noRow:true} → scan fails
+	// → sqlite_master probe returns error → validateInitialState returns nil.
+	ctx := context.Background()
+	db := &failOnNthExecDB{failAt: 999}
+	if err := validateInitialState(ctx, db, "Post", "draft"); err != nil {
+		t.Errorf("non-SQLite: want nil, got %v", err)
+	}
+}
+
+func TestValidateInitialState_noFlow(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	// Delete the default flow so no flow exists — validateInitialState returns nil.
+	if _, err := db.ExecContext(ctx, `DELETE FROM smeldr_state_flows`); err != nil {
+		t.Fatalf("delete flows: %v", err)
+	}
+	if err := validateInitialState(ctx, db, "AgentJob", "draft"); err != nil {
+		t.Errorf("no flow: want nil, got %v", err)
+	}
+}
+
+func TestValidateInitialState_validState(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(agentJobFlow); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	// "draft" is a state in agentJobFlow.
+	if err := validateInitialState(ctx, db, "AgentJob", "draft"); err != nil {
+		t.Errorf("valid state: want nil, got %v", err)
+	}
+}
+
+func TestValidateInitialState_invalidState(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(agentJobFlow); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	// "done" is NOT a state in agentJobFlow (draft/published/paused/archived).
+	err := validateInitialState(ctx, db, "AgentJob", "done")
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("invalid state: want ErrConflict, got %v", err)
+	}
+}
+
+func TestValidateInitialState_stateQueryError(t *testing.T) {
+	// stateCountFailDB passes the sqlite_master probe and flow lookup but
+	// fails the smeldr_states COUNT query — validateInitialState must fail open.
+	ctx := context.Background()
+	db := &stateCountFailDB{}
+	if err := validateInitialState(ctx, db, "Post", "draft"); err != nil {
+		t.Errorf("state count query error: want nil (fail open), got %v", err)
+	}
+}
+
+// stateCountFailDB simulates a DB that passes the sqlite_master probe and flow
+// lookup but fails the SELECT COUNT(*) FROM smeldr_states query with a real error,
+// exercising the fail-open path in validateInitialState.
+type stateCountFailDB struct{}
+
+func (d *stateCountFailDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (d *stateCountFailDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, nil
+}
+func (d *stateCountFailDB) QueryRowContext(ctx context.Context, query string, _ ...any) *sql.Row {
+	if strings.Contains(query, "sqlite_master") {
+		// sqlite_master probe — return count=0 to signal SQLite.
+		return sql.OpenDB(&guardRowConn{val: int64(0)}).QueryRowContext(ctx, "SELECT v")
+	}
+	if strings.HasPrefix(query, "SELECT id FROM smeldr_state_flows") {
+		// Flow lookup — return a valid flowID so validation proceeds.
+		return sql.OpenDB(&guardRowConn{val: int64(1)}).QueryRowContext(ctx, "SELECT v")
+	}
+	// SELECT COUNT(*) FROM smeldr_states — return a real driver error.
+	return sql.OpenDB(&queryErrConnector{err: errors.New("simulated state count error")}).QueryRowContext(ctx, "SELECT v")
 }
 
 // — Module[T] integration tests for validateTransition ————————————————————————
@@ -634,6 +769,62 @@ func TestMCPSchedule_invalidTransition(t *testing.T) {
 	err := m.MCPSchedule(ctx, p.Slug, time.Now().Add(time.Hour))
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("MCPSchedule on invalid transition: want ErrConflict, got %v", err)
+	}
+}
+
+// — Module[T] integration tests for validateInitialState ————————————————————————
+
+func TestMCPCreate_invalidInitialState(t *testing.T) {
+	// restrictedFlow registers only "published" and "archived" states for "testPost".
+	// MCPCreate with an explicit status="done" must be rejected with ErrConflict.
+	sqlDB := newSQLiteDB(t)
+	restrictedFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	ctx := NewTestContext(editorUser())
+	_, err := m.MCPCreate(ctx, map[string]any{
+		"Title":  "Test",
+		"Status": "done",
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("MCPCreate with invalid initial state: want ErrConflict, got %v", err)
+	}
+	// Nothing should have been saved.
+	items, _ := mem.FindAll(context.Background(), ListOptions{})
+	if len(items) != 0 {
+		t.Errorf("repo count = %d; want 0 (aborted on invalid initial state)", len(items))
+	}
+}
+
+func TestCreateHandler_invalidInitialState(t *testing.T) {
+	// restrictedFlow registers only "published" and "archived" states for "testPost".
+	// POST with Status="done" must be rejected with 409 Conflict.
+	sqlDB := newSQLiteDB(t)
+	restrictedFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	body, _ := json.Marshal(map[string]string{"Title": "Test", "Status": "done"})
+	w := httptest.NewRecorder()
+	r := withUser(
+		httptest.NewRequest(http.MethodPost, "/testposts", bytes.NewReader(body)),
+		editorUser(),
+	)
+	r.Header.Set("Content-Type", "application/json")
+	m.createHandler(w, r)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("createHandler with invalid initial state: status = %d, want 409", w.Code)
+	}
+	// Nothing should have been saved.
+	items, _ := mem.FindAll(context.Background(), ListOptions{})
+	if len(items) != 0 {
+		t.Errorf("repo count = %d; want 0 (aborted on invalid initial state)", len(items))
 	}
 }
 

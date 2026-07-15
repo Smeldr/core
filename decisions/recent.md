@@ -213,3 +213,43 @@ Wire `App.ContextPacketHandler` into `example/server/main.go` so a locally-run i
 - No exported core symbols changed; no version bump required
 
 ---
+
+## Amendment A216 — T148: Orchestration create-time state validation
+
+**Date:** 2026-07-15
+**Status:** Done
+**Repo:** smeldr/core
+**Pilot:** corepilot
+**Level:** 1 (no exported Go symbols changed)
+
+### What was decided
+
+Two related state-flow enforcement gaps were closed:
+
+**Gap 1 — Create-time:** `createHandler` (HTTP POST) and `MCPCreate` (MCP) now call `validateInitialState` after `RunValidation`, before `repo.Save`. This rejects any `status` string that is not a registered state in the type's own flow (or the default flow). Previously, any string valid in *any* registered flow was accepted silently — root cause of the 14 "done"-status Amendments written by T147's data migration.
+
+**Gap 2 — Transition-time:** `validateTransition` gains a target-state pre-check that queries `smeldr_states` immediately after resolving the flow ID. If the target state does not exist in the flow, it returns a specific `ErrConflict` ("not a valid target state") before reaching the transition-edge lookup. This is more descriptive than the previous "transition not permitted" message, which did not distinguish "edge missing" from "state doesn't exist in this flow".
+
+**New unexported function:**
+`validateInitialState(ctx context.Context, db DB, typeName, statusName string) error`
+
+Fail-open in all structural error cases (nil DB, non-SQLite, missing flow, query error). Returns `ErrConflict` only when the state exists in no registered flow for the type.
+
+**10 new tests in `state_test.go`:**
+- `TestValidateInitialState_nilDB`, `_emptyStatus`, `_nonSQLite`, `_noFlow`, `_validState`, `_invalidState`, `_stateQueryError` (7 unit)
+- `TestValidateTransition_unknownTargetState` (1 unit, validates new pre-check message)
+- `TestMCPCreate_invalidInitialState`, `TestCreateHandler_invalidInitialState` (2 module integration)
+
+### Why
+
+An AI agent calling `create_amendment` with `status="done"` received no error and the item was stored with an invalid state — discovered only by re-querying. Given Smeldr's "deterministic, enforced state" guarantee, a silent success on invalid input is a product correctness gap. See T148 in ARCHITECT_TODO.md.
+
+### Consequences
+
+- `createHandler` and `MCPCreate` now reject invalid initial states with HTTP 409 / MCP ErrConflict
+- `validateTransition` returns a more specific error when the target state does not exist in the flow
+- No exported Go symbols added or changed
+- No version bump required (fail-open behaviour for existing correct callers is unchanged)
+- Level 1 amendment
+
+---
