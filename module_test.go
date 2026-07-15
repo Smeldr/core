@@ -1127,9 +1127,14 @@ func TestModule_updateHandler_badJSON(t *testing.T) {
 }
 
 func TestModule_updateHandler_unpublish(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	if err := migrateStateFlows(context.Background(), sqlDB); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
 	repo := NewMemoryRepo[*testPost]()
 	p := seedPost(t, repo, "Live Post", Published)
 	m := newTestModule(repo)
+	m.setDB(sqlDB)
 
 	update := map[string]any{"Title": p.Title, "Status": string(Draft)}
 	body, _ := json.Marshal(update)
@@ -1144,6 +1149,49 @@ func TestModule_updateHandler_unpublish(t *testing.T) {
 	saved, _ := repo.FindBySlug(context.Background(), p.Slug)
 	if nodeStatusOf(saved) != Draft {
 		t.Errorf("status = %q, want Draft after unpublish", nodeStatusOf(saved))
+	}
+}
+
+// TestUpdateHandler_validateTransition_invalidTarget verifies that PUT with a
+// target status not registered in the type's flow returns 409 Conflict.
+func TestUpdateHandler_validateTransition_invalidTarget(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	if err := migrateStateFlows(context.Background(), sqlDB); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	repo := NewMemoryRepo[*testPost]()
+	p := seedPost(t, repo, "Draft Post", Draft)
+	m := newTestModule(repo)
+	m.setDB(sqlDB)
+
+	update := map[string]any{"Title": p.Title, "Status": "done"}
+	body, _ := json.Marshal(update)
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/testposts/"+p.Slug, bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409 for unknown target state", w.Code)
+	}
+}
+
+// TestUpdateHandler_validateTransition_sameStatus verifies that a PUT that does
+// not change status skips validateTransition and succeeds without a DB.
+func TestUpdateHandler_validateTransition_sameStatus(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	p := seedPost(t, repo, "Draft Post", Draft)
+	m := newTestModule(repo)
+
+	update := map[string]any{"Title": "Updated Title", "Status": string(Draft)}
+	body, _ := json.Marshal(update)
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/testposts/"+p.Slug, bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for same-status PUT", w.Code)
 	}
 }
 

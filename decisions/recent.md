@@ -253,3 +253,41 @@ An AI agent calling `create_amendment` with `status="done"` received no error an
 - Level 1 amendment
 
 ---
+
+## Amendment A217 — T150: updateHandler state governance + published→draft default transition
+
+**Date:** 2026-07-15
+**Status:** Done
+**Repo:** smeldr/core
+**Pilot:** corepilot
+**Level:** 2 (route behaviour change; two files changed: migrate.go + module.go)
+
+### What was decided
+
+Two related governance gaps closed in one commit:
+
+**Fix 1 — `module.go` (`updateHandler`):** After `prevStatus` and `newStatus` are resolved, if they differ, the handler now calls `validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(newStatus))`. If an error is returned, `WriteError` is called and the handler returns. Fail-open semantics are preserved: nil DB, non-SQLite, missing flow, and structural query errors all return nil (continue); `ErrConflict` (unknown target state or missing edge) returns HTTP 409; `ErrForbidden` (RequiredRole denied) returns HTTP 403. No new imports required.
+
+**Fix 2 — `migrate.go` (`migrateStateFlows`):** Added `{"published", "draft"}` to the default flow's `transitions` slice as the sixth entry. The `ON CONFLICT (flow_id, from_state, to_state) DO NOTHING` insert makes this additive and idempotent for existing instances.
+
+**Updated and new tests (5 total):**
+- `TestModule_updateHandler_unpublish` — updated to use `newSQLiteDB(t)` + `migrateStateFlows` instead of running with `m.db == nil`
+- `TestUpdateHandler_validateTransition_invalidTarget` — PUT with `Status: "done"` (not in default flow) returns 409 Conflict
+- `TestUpdateHandler_validateTransition_sameStatus` — PUT with unchanged status skips validateTransition, succeeds without DB
+- `TestMigrateStateFlows` — transition count assertion updated 5→6; inline `published→draft` count assertion added (no separate function — folded into the existing test)
+
+### Why
+
+`updateHandler` (HTTP PUT /{prefix}/{slug}) decoded the request body into a fresh item and preserved only ID and Slug from the existing record — leaving Status free to be overwritten by any authenticated caller with update rights. This bypassed both `RequiredRole` governance (T49) and state-flow correctness in a single PUT request. The `published→draft` gap is independent: the unpublish path was silently reachable in production only when `m.db == nil` (fail-open), meaning `TestModule_updateHandler_unpublish` passed because it ran without a database.
+
+### Consequences
+
+- PUT /{prefix}/{slug} now enforces state governance when the status changes
+- Fail-open semantics (nil DB, no flow, structural errors) preserved — existing callers on no-DB setups are unaffected
+- `published→draft` transition now present in the default flow — unpublish path is explicitly supported
+- `TestModule_updateHandler_unpublish` now exercises `validateTransition` against a real DB — the test would have caught this gap on its own
+- No exported Go symbols added or changed
+- No version bump required (fail-open for existing correct callers unchanged)
+- Level 2 amendment
+
+---

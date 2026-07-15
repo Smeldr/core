@@ -99,6 +99,7 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 		{"scheduled", "published"},
 		{"published", "archived"},
 		{"draft", "archived"},
+		{"published", "draft"},
 	}
 	for _, t := range transitions {
 		if _, err := db.ExecContext(ctx,

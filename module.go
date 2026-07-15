@@ -1854,6 +1854,13 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	prevStatus := nodeStatusOf(existing)
 	newStatus := nodeStatusOf(item)
 
+	if prevStatus != newStatus {
+		if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(newStatus)); err != nil {
+			WriteError(w, r, err)
+			return
+		}
+	}
+
 	if err := dispatchBefore(ctx, m.signals[BeforeUpdate], item); err != nil {
 		WriteError(w, r, err)
 		return

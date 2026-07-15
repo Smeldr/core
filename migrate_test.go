@@ -104,8 +104,20 @@ func TestMigrateStateFlows(t *testing.T) {
 	).Scan(&txCount); err != nil {
 		t.Fatalf("count transitions: %v", err)
 	}
-	if txCount != 5 {
-		t.Errorf("transition count: want 5, got %d", txCount)
+	if txCount != 6 {
+		t.Errorf("transition count: want 6, got %d", txCount)
+	}
+
+	// published→draft edge exists (independent default-flow gap, fixed in A217).
+	var pubToDraftCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_transitions WHERE flow_id = ? AND from_state = 'published' AND to_state = 'draft'`,
+		flowID,
+	).Scan(&pubToDraftCount); err != nil {
+		t.Fatalf("query published→draft: %v", err)
+	}
+	if pubToDraftCount != 1 {
+		t.Errorf("published→draft transition: count = %d, want 1", pubToDraftCount)
 	}
 
 	// smeldr_transition_triggers table exists (even if empty).
