@@ -291,3 +291,66 @@ Two related governance gaps closed in one commit:
 - Level 2 amendment
 
 ---
+
+## A218 — Agent role rename: pilot → core-implementer (housekeeping + startup test)
+
+### What
+
+`core/CLAUDE.md`: every "Corepilot"/"corepilot" reference (12 lines) renamed to
+"core-implementer" — both the bare role name (e.g. "core-implementer owns all writes to
+`decisions/`") and path references to the session-context file, which moves in lockstep
+in `smeldr/architect` from `context/corepilot.md` to `context/core-implementer.md`
+(git mv, plus a fix to two stale rows in that file's version table — see Consequences).
+`smeldr/common/agent/skills/smeldr.md` role wording generalized ("developer or pilot
+agent" → "developer or agent"; "Pilots read this file" → "Agents read this file") since
+that file is shared across every agent, not just this one.
+
+**Scope addition (architect-approved, same session):** `CLAUDE.md`'s commit-approval
+language reconciled with its own Signal protocol section, which already defines
+`commit-ready` → `commit-approved` as the approval mechanism. Four passages that still
+described a chat-only "yes" flow were rewritten to route through the signal channel:
+the Step 6 pre-commit gate close, the "Rules for steps" close, the
+"Never push without explicit permission" section (retitled "Push follows commit
+approval"), and the verification-commands bullet in "### 3. Implement the step"
+(this fourth instance was caught by the architect on commit-feedback review and
+folded into this same commit). The section resolved a direct self-contradiction: it said
+"'Commit approved' is not push permission — always wait for 'push it'", while the
+Branching section said the opposite ("'Commit approved' means: squash to main now.
+Push follows immediately"). The Branching section's rule is correct and is now the
+only statement of it; the contradicting sentence was removed.
+
+Scope is role-naming and stale-reference correctness only. `DECISIONS.md`, `decisions/`,
+and CHANGELOG historical text are untouched — lineage stays as written under the old name.
+Other agents' own "pilot" naming (sitepilot, etc.) is out of scope; each agent renames
+itself at its own next session.
+
+### Why
+
+The "pilot" naming was retired project-wide (naming note 2026-07-15, executed in
+`smeldr/architect` files 2026-07-18). This session doubled as a protocol startup test —
+full session-start → plan → signal approval → implementation → close cycle exercised
+under the new name.
+
+### Consequences
+
+- No exported Go symbol touched, no runtime behaviour changed — pure instruction/doc text
+- Session-start protocol in `CLAUDE.md` now points at the renamed context file
+  (`context/core-implementer.md`); the file itself is renamed in the same task
+  (`smeldr/architect`, committed separately in that repo)
+- While correcting the file's known media-version typo (v1.0.0 → v1.6.0, called out in
+  the task itself), a startup-test verification pass against actual git tags found two
+  more rows wrong in the same table: cli listed as v0.19.0 (actual v0.15.2) and oauth
+  listed as v0.4.0 (actual v0.3.0) — both corrected in the same `smeldr/architect` commit
+- `smeldr/common/agent/skills/smeldr.md` version line and stale path references to the
+  renamed context file corrected in the same task, committed in `smeldr/common`
+- Classified Level 1 (not Level 0): the rename changes operative documentation across
+  three repos, and "when did the role names change" is a fact lineage should be able to
+  answer
+- `CLAUDE.md`'s commit-approval language now consistently routes through the
+  `commit-ready`/`commit-approved` signal pair instead of a chat-only "yes"; the
+  push-permission self-contradiction between the docs-workflow and Branching sections
+  is resolved in favor of the Branching section's rule
+
+Level 1 amendment.
+
+---

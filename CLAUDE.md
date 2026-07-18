@@ -8,7 +8,7 @@ Every new chat has no memory of previous sessions. Follow these steps
 at the start of every new chat, before doing anything else.
 
 **Step 1 — Read session context:**
-Read `C:\Users\peter\Documents\Code\Smeldr\architect\context\corepilot.md` (local file).
+Read `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md` (local file).
 This is your state from the previous session: current versions, latest
 amendment, active milestone and step, anything deferred.
 
@@ -31,12 +31,12 @@ If it exists:
 4. Wait for explicit approval before implementing anything.
 5. At commit time: delete both `NEXT.md` and `plans/core-next-plan.md`
    in the same commit as the implementation.
-6. After the commit: write `C:\Users\peter\Documents\Code\Smeldr\architect\context\corepilot.md`
+6. After the commit: write `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md`
    locally with the amendment number, then commit and push from that repo
    (see "After every commit" for the exact command sequence).
 
 **Step 4 — If no NEXT.md:**
-Report what you found in `context/corepilot.md` and ask the user what
+Report what you found in `context/core-implementer.md` and ask the user what
 to work on. Do not proceed autonomously.
 
 **Why this matters:**
@@ -56,7 +56,7 @@ file is the bridge between sessions. Always read it first.
      `smeldr/architect/plans/core-next-plan.md`. Do not write any code yet.
    - Wait for explicit approval. Do not implement anything until the user confirms the plan.
    - Stop here — do not proceed with steps 2–7.
-2. Read session context from `C:\Users\peter\Documents\Code\Smeldr\architect\context\corepilot.md`
+2. Read session context from `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md`
    (local file). This is your state from the previous session.
 3. Read `DECISIONS.md` — index table only. Body text lives in `decisions/core.md`
    (D1–D22, A19–A65, A88–A95), `decisions/recent.md` (current rolling window),
@@ -80,11 +80,11 @@ file is the bridge between sessions. Always read it first.
   always untracked. Do not use `git rm`; it will fail on an untracked file.
 - If `plans/core-next-plan.md` exists locally, delete it:
   `Remove-Item "C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md"`
-- Update session context: write `C:\Users\peter\Documents\Code\Smeldr\architect\context\corepilot.md`
+- Update session context: write `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md`
   locally. Record: current versions, latest amendment shipped,
   current milestone and step, what was deferred or blocked.
   Then commit and push from the smeldr/architect repo:
-  `cd C:\Users\peter\Documents\Code\Smeldr\architect ; git add context/corepilot.md ; git commit -m "chore(context): update corepilot after [sprint name]" ; git push`
+  `cd C:\Users\peter\Documents\Code\Smeldr\architect ; git add context/core-implementer.md ; git commit -m "chore(context): update core-implementer after [sprint name]" ; git push`
   Do NOT use GitHub MCP to update this file.
 
 ## DECISIONS.md file structure (CRITICAL)
@@ -111,7 +111,7 @@ The architect decides groupings and topic file names. Never archive autonomously
 Non-Decisions are exempt — they go to `nondecisions.md` directly and do not count
 toward the rolling window.
 
-**Corepilot owns all writes to `decisions/` and `DECISIONS.md`.**
+**core-implementer owns all writes to `decisions/` and `DECISIONS.md`.**
 These files must be edited locally via git — never via GitHub MCP API calls.
 The files are too large for `create_or_update_file` and `push_files` silently
 truncates them.
@@ -194,7 +194,7 @@ Communication with the architect uses a single file per agent in smeldr/architec
 This file is your signal channel — read it at session start, write to it after
 every meaningful state change.
 
-File: `C:\Users\peter\Documents\Code\Smeldr\architect\SIGNAL_CORE.md`   (corepilot)
+File: `C:\Users\peter\Documents\Code\Smeldr\architect\SIGNAL_CORE.md`   (core-implementer)
 File: `C:\Users\peter\Documents\Code\Smeldr\architect\SIGNAL_SITE.md`   (sitepilot)
 
 Format:
@@ -393,7 +393,7 @@ Every step — without exception — follows this exact sequence:
   command (`Get-Content`, `Select-String`, `Get-ChildItem`, `git diff`, `git log`,
   `git status`). Just run them. Do not narrate the process. Only surface results
   when they are unexpected (build failure, test failure, format diff). Commits
-  are the ONLY action that requires explicit user approval.**
+  are the only action that requires the architect's `commit-approved` signal.**
 - Read any file in the workspace automatically — no permission needed.
   Use PowerShell (`Get-Content`, `Select-String`, etc.) or the read_file tool
   to read `DECISIONS.md`, `docs/ARCHITECTURE.md`, milestone backlog
@@ -469,7 +469,7 @@ that both exist, then stage.
 
 ### 5. Update the backlog and session context
 - Mark the step `✅ Done` in the `Milestone{N}_BACKLOG.md` Progress table with the completion date.
-- Write `C:\Users\peter\Documents\Code\Smeldr\architect\context\corepilot.md` locally,
+- Write `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md` locally,
   then commit and push from that repo (see "After every commit" for the command sequence).
 - Never batch updates — update immediately after the step is verified.
 
@@ -522,10 +522,14 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
 
 "No changes needed" is only valid after explicitly reading each file and confirming it already reflects the shipped code. Never assume.
 
-After the gate is clear, write the commit message and present it to the user.
+After the gate is clear, write the commit message and signal `commit-ready` via
+`SIGNAL_CORE.md`, with the full commit message in the notes section. Start a Monitor
+on the signal file immediately after sending it.
 
-- Commits are the **only** action that requires explicit user approval. Build, vet, format, and test commands are executed autonomously.
-- **A "yes" answer to a review question is not commit approval.** The confirmation of a technical fact and the approval of a commit are two distinct acts. Never collapse them into one.
+- Commits require a `commit-approved` signal from the architect (see Signal protocol) —
+  never committed on `commit-ready` alone, and never on a chat answer to an unrelated
+  technical question. Build, vet, format, and test commands are executed autonomously.
+- **A "yes" answer to a review question is not commit approval.** The confirmation of a technical fact and the approval of a commit are two distinct acts — approval is specifically the `commit-approved` signal. Never collapse them into one.
 
 ### Commit message format
 
@@ -649,15 +653,17 @@ Wait for explicit approval before committing.
 
 **10. After commit**
 Update `smeldr/architect/plans/core-next-plan.md` if a plan file was created.
-Update `smeldr/architect/context/corepilot.md` and push from that repo.
+Update `smeldr/architect/context/core-implementer.md` and push from that repo.
 
-### Never push without explicit permission
+### Push follows commit approval
 
-Commits require explicit approval (a separate "yes" after the commit message is
-proposed — not implied by answering a technical question).
+Commit approval is the `commit-approved` signal from the architect on `SIGNAL_CORE.md`
+(see Signal protocol) — not a chat "yes", and not implied by answering an unrelated
+technical question.
 
-Pushes require a **separate** explicit instruction after the commit is made.
-"Commit approved" is not push permission. Always wait for "push it" or equivalent.
+Push is not a separate gate: for feature-branch work, `commit-approved` means squash
+to main and push immediately (see "Branching and commit timestamps"). For direct-commit
+work with no feature branch, push follows the commit in the same step.
 
 Write the plan for any docs task to:
 `C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md`
@@ -828,14 +834,14 @@ Smeldr uses one tier of planning documentation per active milestone:
 - Updated after every step: tick all checkboxes, mark step ✅ in Progress table
 
 Delivery history lives in `CHANGELOG.md`. Current state and active sprint are
-tracked in `context/corepilot.md` and `plans/core-next-plan.md` in smeldr/architect
+tracked in `context/core-implementer.md` and `plans/core-next-plan.md` in smeldr/architect
 (written locally — never committed to this repo mid-sprint).
 
 ### After completing a step
 
 1. Tick all sub-task checkboxes in `Milestone{N}_BACKLOG.md`
 2. Mark step ✅ Done in the `Milestone{N}_BACKLOG.md` Progress table
-3. Write `context/corepilot.md` and push from smeldr/architect
+3. Write `context/core-implementer.md` and push from smeldr/architect
 
 ### Structure of a milestone backlog file
 
@@ -876,8 +882,9 @@ internal planning history. `Milestone_BACKLOG_TEMPLATE.md` is never removed.
   If yes to any of the above, a new Decision or Amendment must be proposed and agreed
   upon before the next step begins. The step is not complete until this review is done.
 - **Every step ends with a commit.** After the architecture review, write a commit
-  message following the standard format and wait for user approval before committing.
-  Never commit without approval.
+  message following the standard format, signal `commit-ready` via `SIGNAL_CORE.md`
+  with the message in the notes, and wait for the `commit-approved` signal before
+  committing. Never commit without it.
   Add the following checkbox at the end of every step's verification block:
   ```
   - [ ] Review docs/ARCHITECTURE.md and DECISIONS.md — no new decisions required,
