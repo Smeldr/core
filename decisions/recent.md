@@ -354,3 +354,104 @@ under the new name.
 Level 1 amendment.
 
 ---
+
+## A219 — Reachability as a general platform primitive (T153)
+
+### What
+
+`reachability.go` (new file): `RelationStore.Reachability(ctx, anchorType, anchorID,
+kind, direction string, maxDepth int) (*Reachability, error)` — a general-purpose
+bounded breadth-first traversal of the relation graph outward from any anchor
+(type, id), reporting which items are found at each hop distance from 1 to `maxDepth`.
+Exported types: `ReachabilityItem` (Type, ID), `ReachabilityRing` (Depth, Items — a ring
+with zero items is a genuine reportable absence, not an error or an omission),
+`Reachability` (AnchorType, AnchorID, Kind, Direction, Rings). `MaxReachabilityDepth = 10`
+is a safety-ceiling constant, confirmed by the architect against real Pulse mockup
+readings (3-4 rings in practice; 10 gives generous headroom). Unexported helpers
+`reachabilityNode` and `reachabilityNeighbors` reuse `RelationStore.GetBySource`/
+`GetByTarget` — no new SQL, no new tables.
+
+### Why
+
+Found independently twice: once checking Pulse's "Reach" reading (concentric-rings
+metaphor — the boundary of an entered scope, each absence extending inward one ring per
+closure it holds open) against source, and again during the Design Package v1
+implementability review, which named "reachability" as one of six items in a closed
+derivation-grammar set (count, presence, absence, reachability, closure, elapsed time)
+that must be a deterministic platform capability, not a per-instrument interpretation.
+Two independent findings on the same gap. Verified against source before designing
+against it: `governance.go`'s `ScopeDynamic`/`relationExists` resolves exactly one hop
+(a boolean access check); `context_packet.go`'s `BuildContextPacket` does bounded
+depth-1–2 traversal, but hardcoded to 5 orchestration anchor types and shaped for a
+one-shot JSON export, not a general, repeatable, arbitrary-type graph-distance read.
+Neither is "walk the graph outward from an anchor, N hops, report structure or absence
+at each ring" as a reusable primitive — that gap is what this amendment closes.
+
+### Design decisions
+
+1. **Standalone primitive, not a `ScopeDynamic` extension.** `ScopeDynamic` needs a
+   boolean; Pulse's Reach needs ring-structured presence/absence data — a boolean is a
+   trivial derivative of ring data, not the reverse. Extending `governance.go`'s
+   fail-closed, security-critical `Authorized` path to carry a richer return shape it
+   doesn't need is scope creep into a sensitive file with its own review needs.
+   `governance.go` is untouched by this amendment. (A later amendment could have
+   `relationExists` call `Reachability(..., maxDepth=1)` to delete its own duplicated
+   one-hop SQL — deliberately not done here.)
+2. **New file, not an addition to `relations.go`.** Same precedent as
+   `context_packet.go`: a derived, read-only computation built on `*RelationStore`,
+   kept separate from the CRUD/store fundamentals.
+3. **Reuses `BuildContextPacket`'s proven frontier-expansion BFS shape**, generalized:
+   no hardcoded type table, arbitrary anchor type string, `seenNodes` dedup map
+   (standard BFS visited-once semantics — cycles and diamonds never cause a node to be
+   revisited or appear in more than one ring). Confirmed against `design/
+   content-relations.md` (T06's original spike): "no off-the-shelf bounded-traversal
+   pattern to copy" for SQLite, recursive CTEs explicitly rejected in favor of
+   iterative bounded traversal — this amendment follows that established guidance, not
+   a new pattern.
+4. **Every requested depth returns a ring, even after the frontier is exhausted.**
+   A ring with zero items is data, not an omission — matches "each absence extends
+   inward one ring" from the product framing this primitive exists to serve.
+5. **Go primitive only — no HTTP endpoint, no MCP tool.** Pulse (the only named
+   consumer) is Cloud-side and does not exist yet; it owns its own data-fetching layer
+   per `observation-system-host-contract.md`. Wiring a consumer-facing surface now would
+   be guessing at a shape this task has no mandate to decide.
+
+### Explicitly out of scope, by design
+
+- **Tension's dependency on this primitive** — the design packet's one available line
+  ("Tension is structural, never aged: an absence's depth is the number of closures it
+  holds open") does not by itself determine whether Tension needs graph-depth
+  traversal or a local count. This amendment does not presume an answer; the primitive
+  is general enough to serve either outcome if Tension later needs it.
+- **The full six-derivation closed set** (count, presence, absence, reachability,
+  closure, elapsed time) — count/presence/absence are already free today (plain SQL);
+  closure and elapsed time are unanalyzed. Formalizing a unified closed-set registry to
+  match the frontend's `DerivationName` union is materially larger than this task and
+  is tracked separately as `T156`.
+- **`ScopeDynamic` behaviour change** — see design decision 1.
+
+### Consequences
+
+- New exported symbols: `ReachabilityItem`, `ReachabilityRing`, `Reachability`,
+  `RelationStore.Reachability`, `MaxReachabilityDepth`. No existing exported symbol
+  changed or removed.
+- No new database tables, no schema migration — reads only, via the existing
+  `smeldr_relations` table through `GetBySource`/`GetByTarget`.
+- Per-hop query pattern is non-batched (two queries per frontier node per ring), the
+  same pattern `BuildContextPacket` already uses in production. A batched `IN()`-based
+  frontier query (same shape as `edges.go`'s `ContentEdgeStore.ChildrenOf`) was
+  considered and deliberately deferred — no existing batched-by-(type,id) query to
+  build on, and the real access pattern (dogfood-scale operational data) does not yet
+  justify the added complexity.
+- 15 tests in `reachability_test.go`: 4 error paths (empty anchor, invalid depth,
+  invalid direction, DB error — both the `GetBySource` and `GetByTarget` branches),
+  single-ring present/absent, multi-hop chain, empty-rings-continue-to-max-depth,
+  kind filtering, all three direction values, cycle safety, and a cross-type traversal
+  (proves the "general platform primitive" claim against `BuildContextPacket`'s
+  hardcoded 5-type limitation). 100% coverage on both new functions. Package coverage:
+  96.1%.
+- Level 2 amendment (new exported symbols, new platform capability).
+
+Level 2 amendment.
+
+---

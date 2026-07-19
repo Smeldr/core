@@ -23,6 +23,15 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.56.0] — 2026-07-19
+
+### Added
+- `reachability.go`: `ReachabilityItem`, `ReachabilityRing`, `Reachability` — general-purpose bounded reachability traversal result types. (A219)
+- `RelationStore.Reachability(ctx, anchorType, anchorID, kind, direction string, maxDepth int) (*Reachability, error)` — bounded breadth-first traversal of the relation graph outward from any anchor (type, id), reporting the items found at each hop distance from 1 to `maxDepth`. Not restricted to any fixed set of content types (contrast `BuildContextPacket`'s 5 orchestration types). A ring with zero items is a genuine reportable absence, not an error or omission. (A219)
+- `MaxReachabilityDepth = 10` — safety ceiling on `Reachability`'s `maxDepth` parameter. (A219)
+
+---
+
 ## [1.55.0] — 2026-07-11
 
 ### Added
