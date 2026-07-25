@@ -392,3 +392,47 @@ webhook alike) ran ~15-20 minutes behind the actual click, against Lettermint's
 message-lifecycle webhooks arriving within seconds. Worth weighing if anything in
 Smeldr's own use of this data were latency-sensitive — magic-link/org-invite delivery
 confirmation itself is not, so this is a minor factor, not a disqualifying one.
+
+### A caveat on the recommendation itself, raised by Peter: this used raw REST, not SDKs
+
+Worth being explicit about, since it affects how much weight to put on the findings
+above. Neither vendor was integrated via an official SDK in this spike — both were hit
+with raw `net/http` REST calls. That was a deliberate, but not neutral, choice.
+
+**Sweego: moot.** Confirmed directly (`learn.sweego.io/docs/sdk/sdk-intro`) — Sweego's
+only generated SDK is Python, via OpenAPI Generator. No Go SDK exists. Raw REST was the
+only option, not a comparison choice; Sweego's results above are representative of the
+real integration experience regardless.
+
+**Lettermint: a real choice, and it likely would have changed one finding.** Lettermint
+does ship an official Go SDK (`github.com/lettermint/lettermint-go`, fluent builder:
+`client.Email(ctx).From(...).To(...).Subject(...).Send()`). Had this spike used it
+instead of raw REST:
+
+- The `to`-must-be-an-array bug found here (via a real 422 from the raw API) would very
+  likely never have surfaced — the SDK's `.To(...)` method almost certainly handles that
+  shape internally. That specific friction point is an artifact of choosing raw HTTP,
+  not necessarily something a real Smeldr integration would hit.
+- The SDK is a real third-party dependency. Whether that's a cost depends entirely on
+  *where* a real integration would live — Smeldr's core package holds a hard
+  zero-dependency policy, but the project's own established pattern for optional vendor
+  integrations is a **separate standalone module** with its own `go.mod`
+  (`smeldr.dev/social`, `smeldr.dev/media`, `smeldr.dev/oauth` all do this). A future
+  `smeldr.dev/mailer`-shaped module following that same pattern could depend on
+  Lettermint's SDK without touching core's zero-dependency guarantee at all — this
+  spike's own zero-dep constraint was a fair *comparison* rule, not necessarily the
+  constraint a real integration would need to inherit.
+- If anything, the SDK's existence **strengthens** the AI-readability point already
+  made above, rather than weakening it: a future agent could read the SDK's own Go
+  source or godoc directly (`go doc`, pkg.go.dev) as a canonical, always-machine-readable
+  reference, sidestepping the JS-rendered-docs problem entirely — a path Sweego doesn't
+  have, having no Go SDK to read in the first place.
+- The compliance-hold issue would have been identical either way — that's an
+  account-state problem, unrelated to which client library talks to the API.
+
+Net effect on the recommendation: this nuance shifts it slightly *further* toward
+Lettermint, not away from it. Lettermint has two credible integration paths (raw REST,
+demonstrated working here; SDK, untested here but very likely smoother and possibly
+more AI-agent-friendly still). Sweego has exactly one (REST), and that one already
+showed real, standing friction (credential model, doc accessibility) that no SDK
+alternative exists to route around.
