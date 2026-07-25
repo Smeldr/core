@@ -383,6 +383,12 @@ same account carries the same restriction later, is genuinely unknown. This is t
 concrete operational risk weighing against Lettermint.
 
 Sweego had no equivalent manual gate — self-serve API key, working immediately once the
-credential-label mix-up was resolved. But the credential model and inaccessible docs
-caused real friction in practice, and its click-tracking capability could not be
-verified working at all within this spike's window.
+credential-label mix-up was resolved. Its click-tracking does work with a genuinely rich
+payload (real IP, user-agent, bot/proxy classification, correctly recovered destination
+URL) — the credential model and inaccessible docs are the real, standing friction
+points, not click-tracking reliability. The one substantiated knock against it here is
+speed, not correctness: Sweego's click/engagement pipeline (dashboard, logs, and
+webhook alike) ran ~15-20 minutes behind the actual click, against Lettermint's
+message-lifecycle webhooks arriving within seconds. Worth weighing if anything in
+Smeldr's own use of this data were latency-sensitive — magic-link/org-invite delivery
+confirmation itself is not, so this is a minor factor, not a disqualifying one.
