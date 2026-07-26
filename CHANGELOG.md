@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.57.1] — 2026-07-27
+
+### Fixed
+- `migrate.go`: `smeldr_transitions`'s `CREATE TABLE IF NOT EXISTS` statement now declares `required_reason BOOLEAN NOT NULL DEFAULT FALSE` directly. v1.57.0 added the column only via a SQLite-only ALTER-TABLE migration, so a fresh install against Postgres (or any non-SQLite engine) never got it, breaking `RegisterFlow` with "column required_reason does not exist". Caught by CI's pgx integration job. (A221)
+
+---
+
 ## [1.57.0] — 2026-07-27
 
 ### Added

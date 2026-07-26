@@ -400,3 +400,52 @@ deferred to a future task, not silently dropped.
 Level 2 amendment.
 
 ---
+
+## A221 — T149 hotfix: `required_reason` missing from fresh-install CREATE TABLE
+
+### What
+
+`migrate.go`'s `smeldr_transitions` `CREATE TABLE IF NOT EXISTS` statement now
+includes `required_reason BOOLEAN NOT NULL DEFAULT FALSE` directly, matching the
+existing precedent where `active_state`/`conflict_policy` are declared inline on
+`smeldr_state_flows`'s own CREATE TABLE, not only added via a follow-on migration.
+`migrateTransitionReasonColumn`'s godoc is updated to state its actual role: it
+upgrades a pre-existing SQLite database created before A220; it does nothing for a
+fresh install on any engine, since the column is now present from CREATE TABLE.
+
+### Why
+
+A220 (T149, merged as `aa67139`) added `required_reason` only via
+`migrateTransitionReasonColumn`, an idempotent `PRAGMA table_info` probe + `ALTER
+TABLE`, gated to silently no-op on any DB where the PRAGMA query itself errors —
+the same fail-open pattern `migrateStateFlowConflictColumns` already established
+for upgrading existing SQLite databases. That pattern is correct for an *upgrade*
+path, but `smeldr_transitions`'s CREATE TABLE statement itself was never updated to
+include the column — unlike `active_state`/`conflict_policy`, which are declared in
+both places. Consequence: a fresh Postgres install (`smeldr.New` against a real,
+empty Postgres database — exactly what the pgx integration test suite does) got a
+`smeldr_transitions` table with no `required_reason` column at all, and
+`migrateTransitionReasonColumn` silently treated the resulting PRAGMA query error as
+"non-SQLite, schema assumed current" — masking the real gap instead of catching it.
+
+Caught by CI's `Test (pgx integration)` job on the A220 push (`TestIntegration_
+Postgres_StateFlows` failed: `column "required_reason" of relation
+"smeldr_transitions" does not exist`), not locally — the standard `go test ./...`
+run from `core`'s own module never builds or exercises the separate `core/pgx`
+submodule, and its integration-tagged tests require a live Postgres instance CI
+wires in via `services:` + a temporary `go mod edit -replace`.
+
+### Consequences
+
+- No exported Go symbols changed.
+- Fresh installs on any DB engine (SQLite or Postgres) now get `required_reason`
+  from the CREATE TABLE statement itself; `migrateTransitionReasonColumn` continues
+  to serve pre-existing SQLite databases only, as originally intended.
+- No test changes needed — `TestMigrateTransitionReasonColumn_idempotent`'s own
+  existing comment (`newMigratedDB(t) // migrateStateFlows already adds the
+  column`) already assumed this exact behaviour; the bug was only in the CREATE
+  TABLE SQL, not in any test's expectations.
+- Patch release: v1.57.0 → v1.57.1. No API change.
+- Level 1 amendment.
+
+---

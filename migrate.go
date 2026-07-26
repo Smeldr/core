@@ -32,11 +32,12 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 			UNIQUE(flow_id, name)
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_transitions (
-			id            TEXT NOT NULL PRIMARY KEY,
-			flow_id       TEXT NOT NULL REFERENCES smeldr_state_flows(id),
-			from_state    TEXT    NOT NULL,
-			to_state      TEXT    NOT NULL,
-			required_role TEXT,
+			id              TEXT NOT NULL PRIMARY KEY,
+			flow_id         TEXT NOT NULL REFERENCES smeldr_state_flows(id),
+			from_state      TEXT    NOT NULL,
+			to_state        TEXT    NOT NULL,
+			required_role   TEXT,
+			required_reason BOOLEAN NOT NULL DEFAULT FALSE,
 			UNIQUE(flow_id, from_state, to_state)
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_transition_triggers (
@@ -116,8 +117,11 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 }
 
 // migrateTransitionReasonColumn adds the required_reason column to
-// smeldr_transitions when absent (T149). Idempotent — safe to call on every
-// boot. A no-op on non-SQLite databases (PRAGMA not supported), same precedent
+// smeldr_transitions on pre-existing SQLite databases that predate this
+// column (T149). Fresh installs on any DB engine already have the column via
+// the CREATE TABLE statement above; this only upgrades an existing SQLite
+// database created before A220. Idempotent — safe to call on every boot.
+// A no-op on non-SQLite databases (PRAGMA not supported), same precedent
 // as migrateStateFlowConflictColumns.
 func migrateTransitionReasonColumn(ctx context.Context, db DB) error {
 	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_transitions)")
@@ -142,7 +146,7 @@ func migrateTransitionReasonColumn(ctx context.Context, db DB) error {
 	}
 	if !hasRequiredReason {
 		if _, err := db.ExecContext(ctx,
-			`ALTER TABLE smeldr_transitions ADD COLUMN required_reason INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE smeldr_transitions ADD COLUMN required_reason BOOLEAN NOT NULL DEFAULT FALSE`,
 		); err != nil {
 			return fmt.Errorf("smeldr: migrateTransitionReasonColumn: required_reason: %w", err)
 		}
