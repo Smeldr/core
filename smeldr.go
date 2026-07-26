@@ -296,6 +296,8 @@ type App struct {
 	auditStore      AuditStore // non-nil when App.Audit() was called
 	auditHandlerReg bool       // true once GET /_audit is registered
 
+	provenanceStore ProvenanceStore // non-nil when App.Provenance() was called
+
 	governance        *RoleStore                              // non-nil when App.Governance() was called
 	governanceModules []interface{ setRoleStore(*RoleStore) } // modules that receive the RoleStore at Handler() time
 
@@ -1279,6 +1281,9 @@ func (a *App) Handler() http.Handler {
 				}
 			}
 		}
+	}
+	if a.provenanceStore != nil && a.relationStore != nil {
+		a.relationStore.setProvenanceStore(a.provenanceStore)
 	}
 	if a.auditStore != nil && !a.auditHandlerReg {
 		a.auditHandlerReg = true

@@ -106,6 +106,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-07-06 | A204/A205/A206 (T125): `example/server/` refactored — `ServerConfig` (24 env-var fields), `ServerResult` (App, MCP server, TokenStore, StopAll), `parseConfig`, and `buildApp(cfg, db) (ServerResult, error)` extracted from monolithic `main()`. `buildApp` returns errors for all subsystem failures (no `log.Fatalf` inside it). `main_test.go` added (package main, `TestServerToggles` 7 sub-cases: each ENABLE_* toggle verified in-process). `preflight_test.go` added (`//go:build preflight`; builds binary, spawns OS process, polls `/_health`, probes `/goals`). `go.mod` bumped: core v1.52.2→v1.54.0, mcp v1.26.1→v1.28.0. Bug fixes: A205 — `orchestration.go` `RegisterOrchestrationTypes` now passes explicit `Table("smeldr_...")` options to all 5 orchestration `NewSQLRepo` calls (derivation produced e.g. "goals" not "smeldr_goals"); A206 — `smeldr.go` `App.Relations()` now calls `CreateSchemaTable(a.cfg.DB)` (idempotent, nil-guarded) so `smeldr_content_type_schemas` exists before `syncSaveHook` fires, fixing "no such table" errors when `ENABLE_RELATIONS=true, ENABLE_DYNAMIC_CONTENT=false`. Coverage: 96.0%. |
 | 2026-07-12 | A215 (T147 Part 1): `example/server/` — `App.ContextPacketHandler` wired when both `ENABLE_RELATIONS` and `ENABLE_ORCHESTRATION` are set. `ServerConfig.InstanceName string` added (25th field); `INSTANCE_NAME` env var (default: `smeldr-dogfood`). Two `EnableRelations` blocks consolidated into one (hoisted `var rs *smeldr.RelationStore`; `CreateRelationTables` moved into the combined block). `TestServerToggles`: 7→9 sub-cases (`on/contextPacket`, `off/contextPacketWithoutRelations`). No exported core symbols changed. Level 1 amendment. |
 | 2026-07-19 | A219 (T153): Reachability as a general platform primitive. `reachability.go` (new) — `ReachabilityItem`, `ReachabilityRing`, `Reachability` exported types; `MaxReachabilityDepth = 10` constant; `RelationStore.Reachability(ctx, anchorType, anchorID, kind, direction string, maxDepth int) (*Reachability, error)` — bounded breadth-first traversal over the relation graph from any anchor type/id (not hardcoded to `context_packet.go`'s 5 orchestration types), one ring per hop 1..maxDepth, a ring with zero items is a genuine reportable absence, not an error or omission; `reachabilityNode`/`reachabilityNeighbors` unexported helpers reuse `RelationStore.GetBySource`/`GetByTarget`. Built as its own primitive rather than extending `governance.go`'s `ScopeDynamic`/`relationExists` — shape mismatch (ring data vs. boolean) and risk isolation from the fail-closed authorization path (design rationale in `decisions/recent.md`). 15 new tests in `reachability_test.go`, 100% coverage on both new functions. Coverage: 96.1%. Level 2 amendment. |
+| 2026-07-27 | A220 (T149): Transition provenance. `provenance.go` (new) — `ProvenanceRecord`, `ProvenanceFilter` exported types; `ProvenanceStore` interface; `NewProvenanceStore(DB)`; `CreateProvenanceTable(DB)`; `App.Provenance(store ProvenanceStore) *App` subscribes to the 7 completed-transition signals (`AfterCreate`, `AfterUpdate`, `AfterPublish`, `AfterUnpublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete`) via the existing signal bus and writes one `ProvenanceRecord` per event through `recordProvenance` (fail-open — logs and swallows store errors, mirroring `App.Audit`'s own discipline); `provenanceVerbFor`/`currentStatusOf`/`actorKindFor` unexported helpers. Purely additive: `AuditRecord`/`AuditStore`/`App.Audit`/`GET /_audit` are untouched — `smeldr_provenance` is a new, separate table, not a replacement (design doc's original "`ProvenanceRecord` replaces `AuditRecord`" framing was rejected in planning as a violation of the `CHANGELOG.md` v1.0.0 API stability promise; the 4 events `App.Audit` already covers now also get a `ProvenanceRecord` entry from the same call site — accepted as deliberate redundancy, not competing truths). `relations.go` — `RelationStore.provenanceStore` field + `setProvenanceStore`, wired from `App.Handler()` regardless of `App.Relations()`/`App.Provenance()` call order; `insertEdge` calls new `recordAssertProvenance`, which recovers the calling actor via a `ctx.(Context)` type assertion (same precedent as `relations.go`'s existing `txBeginner` assertion and `dynamic.go`'s `smeldrCtxAccessor`) — no signature change to `Assert`/`MCPAssertRelation`/`MCPProposeRelation`, no `smeldr.dev/mcp` changes required; `CreatedByJob` takes priority over a ctx-derived human actor. `state.go` — `Transition.RequiredReason bool` field; `validateTransition` gains a final `reason string` parameter (unexported function, no compatibility concern) and a new fail-closed check ahead of the existing `RequiredRole` check: `required_reason` set and `reason == ""` → `ErrBadRequest`. `migrate.go` — `migrateTransitionReasonColumn` adds `smeldr_transitions.required_reason` (idempotent `PRAGMA table_info` probe, same shape as `migrateStateFlowConflictColumns`). `dynamic.go` — `DynamicTypeRepo.SetStatus` refactored into a thin wrapper over new unexported `setStatus`; new `SetStatusWithReason(ctx, id, status, reason string) error` is the one concrete entry point in this task's scope that can satisfy a `RequiredReason` gate (added rather than changing `SetStatus`'s signature, preserving the stability promise). Known gap, flagged at commit time: `MCPPublish`/`MCPSchedule`/`MCPArchive`/`updateHandler` and the `smeldr.dev/mcp` `transition_item` tool still cannot supply a reason — full end-to-end `RequiredReason` reachability from MCP is deferred, not silently dropped. 30+ new tests across `provenance_test.go` (new), `relations_provenance_test.go` (new), `state_test.go`, `dynamic_test.go`; coverage 96.1%. Level 2 amendment. |
 
 ---
 
@@ -164,20 +165,28 @@ smeldr.dev/
 │                     ConflictPolicy type (ConflictReject, ConflictSupersede constants);
 │                     StateFlow.ActiveState + StateFlow.ConflictPolicy optional fields;
 │                     Transition.RequiredRole string — optional role name gate;
+│                     Transition.RequiredReason bool — optional per-transition reason gate (T149);
 │                     App.RegisterFlow(StateFlow) error — idempotent upsert (INSERT OR
 │                     IGNORE + SELECT id + UPDATE conflict fields); validateFlowItems
 │                     (unexported) — SQLite-only unknown-state check; validateTransition
-│                     (ctx, db, rs *RoleStore, actorID, typeName, from, to) — dual-zone:
+│                     (ctx, db, rs *RoleStore, actorID, typeName, from, to, reason) — dual-zone:
 │                     fail-open zone (structural: nil DB, non-SQLite, no flow, query error);
-│                     fail-closed zone (authorization: required_role set, rs wired,
+│                     fail-closed zones: required_reason (unconditional — ErrBadRequest when
+│                     required_reason=true and reason==""), then required_role (rs wired,
 │                     actorID non-empty → RoleGranted; error or !ok → ErrForbidden;
 │                     rs==nil or actorID=="" → skip check, allow); applyConflictPolicy
 │                     (unexported) — ConflictReject/ConflictSupersede enforcement after
 │                     validateTransition; conflictRejectCheck, conflictSupersede,
 │                     conflictIDs (unexported helpers); all DB errors fail-open
-│                     (Amendments A175, A176, A186, T23, A193)
+│                     (Amendments A175, A176, A186, T23, A193, A220)
 ├── audit.go          AuditRecord, AuditFilter, AuditStore interface, NewAuditStore(DB), CreateAuditTable(DB),
 │                     newAuditHandler (unexported); GET /_audit mounted by App.Handler() (Amendment A97)
+├── provenance.go     ProvenanceRecord, ProvenanceFilter, ProvenanceStore interface, NewProvenanceStore(DB),
+│                     CreateProvenanceTable(DB); App.Provenance(store) — subscribes to AfterCreate/
+│                     AfterUpdate/AfterPublish/AfterUnpublish/AfterSchedule/AfterArchive/AfterDelete via
+│                     the signal bus, writes one ProvenanceRecord per event (recordProvenance, fail-open);
+│                     provenanceVerbFor/currentStatusOf/actorKindFor (unexported); purely additive —
+│                     AuditRecord/App.Audit unchanged, no shared table (Amendment A220, T149)
 ├── blocks.go          DynamicNode (embeds Node; TypeName, Fields json.RawMessage) + Head(),
 │                     NewDynamicContentRepo(db) *SQLRepo[*DynamicNode] (binds smeldr_dynamic_content),
 │                     CreateBlockTables(db) — grouped idempotent creator: smeldr_dynamic_content +
@@ -185,7 +194,12 @@ smeldr.dev/
 ├── relations.go       RelationKindDef, RelationEdge (not Node-embedding), RelationKindRegistry,
 │                     RelationStore; CreateRelationTables(db), NewRelationStore(db),
 │                     ValidateRelationKindDef, UpsertKind, GetKind, ListKinds, Assert,
-│                     GetBySource, GetByTarget, Delete; App.Relations/RelationStore (Amendment A159, T06)
+│                     GetBySource, GetByTarget, Delete; App.Relations/RelationStore (Amendment A159, T06);
+│                     RelationStore.provenanceStore field + setProvenanceStore (unexported), wired at
+│                     App.Handler() time when both App.Relations and App.Provenance are configured;
+│                     insertEdge calls recordAssertProvenance (unexported) — recovers the actor via a
+│                     type assertion on ctx (ctx.(Context)), no signature change to Assert/
+│                     MCPAssertRelation/MCPProposeRelation, no smeldr.dev/mcp changes (Amendment A220, T149)
 ├── edges.go           ContentEdge, ContentEdgeStore, NewContentEdgeStore(db); AddChild/Children/
 │                     ChildrenOf (batch IN())/RemoveChild/Reorder (atomic CASE); scanEdges, edgeColumns;
 │                     one composition-edge table for page→block + collection→item (Amendment A116, T32)

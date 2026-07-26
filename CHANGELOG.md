@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.57.0] — 2026-07-27
+
+### Added
+- `provenance.go`: `ProvenanceRecord`, `ProvenanceFilter` — a subject-keyed (SubjectType+SubjectID), actor-attributed, immutable record of who did what to a governed subject, how, and optionally why. (A220)
+- `ProvenanceStore` interface (`Append`, `List`); `NewProvenanceStore(DB) ProvenanceStore`; `CreateProvenanceTable(DB) error` — new `smeldr_provenance` table, additive alongside `smeldr_audit_log`. (A220)
+- `App.Provenance(store ProvenanceStore) *App` — subscribes to the 7 completed-transition lifecycle events (`AfterCreate`, `AfterUpdate`, `AfterPublish`, `AfterUnpublish`, `AfterSchedule`, `AfterArchive`, `AfterDelete`) and writes one `ProvenanceRecord` per event; fail-open, matching `App.Audit`'s discipline. Purely additive — `AuditRecord`/`AuditStore`/`App.Audit`/`GET /_audit` are unchanged. (A220)
+- `RelationStore` now records a `ProvenanceRecord` for every asserted `RelationEdge`, recovering the calling actor via a `smeldr.Context` type assertion — no signature change to `Assert`/`MCPAssertRelation`/`MCPProposeRelation`. (A220)
+- `Transition.RequiredReason bool` — a transition can now require the caller to supply a non-empty reason; enforced fail-closed in `validateTransition` alongside the existing `RequiredRole` gate. (A220)
+- `DynamicTypeRepo.SetStatusWithReason(ctx, id, status, reason string) error` — `SetStatus` with a caller-supplied reason, the entry point that can satisfy a `RequiredReason` gate. `SetStatus` itself is unchanged. (A220)
+
+---
+
 ## [1.56.0] — 2026-07-19
 
 ### Added

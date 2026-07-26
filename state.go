@@ -117,6 +117,15 @@ type Transition struct {
 	// RequiredRole is the minimum role that may perform this transition.
 	// An empty string means any authenticated role may perform it.
 	RequiredRole string
+
+	// RequiredReason, when true, requires the caller to supply a non-empty
+	// reason for this specific transition (T149) — enforced at the same layer
+	// and in the same fail-closed manner as RequiredRole. False (the zero
+	// value) means no reason is required, matching every existing flow's
+	// behaviour unchanged. Per-Transition, not global: a Decision→superseded
+	// transition might require one; a Task todo→doing transition typically
+	// would not.
+	RequiredReason bool
 }
 
 // TransitionTrigger registers an async or sync handler on a state transition.
@@ -202,8 +211,8 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 			roleArg = t.RequiredRole
 		}
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_transitions(id, flow_id, from_state, to_state, required_role) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`,
-			NewID(), flowID, t.From, t.To, roleArg,
+			`INSERT INTO smeldr_transitions(id, flow_id, from_state, to_state, required_role, required_reason) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`,
+			NewID(), flowID, t.From, t.To, roleArg, t.RequiredReason,
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: upsert transition %s→%s: %w", flow.Name, t.From, t.To, err)
 		}
@@ -329,12 +338,19 @@ func validateFlowItems(ctx context.Context, db DB, flow StateFlow) error {
 // pass a smeldr.Context). Only callers that explicitly provide an actorID are
 // subject to governance enforcement.
 //
+// The reason parameter carries the caller-supplied rationale for this transition,
+// if any (T149). When the transition row carries required_reason=true and reason
+// is empty, the transition is rejected with [ErrBadRequest] — this check is
+// fail-closed and unconditional, unlike required_role's checks (it does not
+// depend on governance being wired or an actorID being present, since supplying
+// a reason is a caller-side fact, not an identity check).
+//
 // Returns nil when:
 //   - db is nil (no DB configured)
 //   - the database is not SQLite (non-SQLite databases skip flow validation)
 //   - fromStatus == toStatus (identity transition — always allowed for idempotency)
 //   - no flow is registered for typeName and no default flow exists
-func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, typeName, fromStatus, toStatus string) error {
+func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, typeName, fromStatus, toStatus, reason string) error {
 	if db == nil {
 		return nil
 	}
@@ -376,15 +392,23 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 	// ── FAIL-OPEN structural boundary ────────────────────────────────────────
 	// Fetch the transition row. required_role may be NULL (no gate) or a role name.
 	var requiredRole sql.NullString
+	var requiredReason bool
 	err = db.QueryRowContext(ctx,
-		`SELECT required_role FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = $3`,
+		`SELECT required_role, required_reason FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = $3`,
 		flowID, fromStatus, toStatus,
-	).Scan(&requiredRole)
+	).Scan(&requiredRole, &requiredReason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: transition %s→%s is not permitted for type %q", ErrConflict, fromStatus, toStatus, typeName)
 	}
 	if err != nil {
 		return nil // query failed — fail open rather than blocking all transitions
+	}
+
+	// ── FAIL-CLOSED: required_reason ─────────────────────────────────────────
+	// Unconditional — does not depend on governance or actorID, since "did the
+	// caller supply a reason" is a fact about the call itself, not an identity.
+	if requiredReason && reason == "" {
+		return fmt.Errorf("%w: transition %s→%s requires a reason", ErrBadRequest, fromStatus, toStatus)
 	}
 
 	// ── FAIL-CLOSED authorization boundary ───────────────────────────────────

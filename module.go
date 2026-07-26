@@ -1855,7 +1855,7 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	newStatus := nodeStatusOf(item)
 
 	if prevStatus != newStatus {
-		if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(newStatus)); err != nil {
+		if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(newStatus), ""); err != nil {
 			WriteError(w, r, err)
 			return
 		}
@@ -2310,7 +2310,7 @@ func (m *Module[T]) MCPPublish(ctx Context, slug string) error {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
-	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Published)); err != nil {
+	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Published), ""); err != nil {
 		return err
 	}
 	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Published), nodeIDOf(item)); err != nil {
@@ -2335,7 +2335,7 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time) error {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
-	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Scheduled)); err != nil {
+	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Scheduled), ""); err != nil {
 		return err
 	}
 	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Scheduled), nodeIDOf(item)); err != nil {
@@ -2360,7 +2360,7 @@ func (m *Module[T]) MCPArchive(ctx Context, slug string) error {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
-	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Archived)); err != nil {
+	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Archived), ""); err != nil {
 		return err
 	}
 	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Archived), nodeIDOf(item)); err != nil {

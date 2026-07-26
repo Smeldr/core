@@ -403,7 +403,7 @@ func (d *flowIDDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql
 
 func TestValidateTransition_nilDB(t *testing.T) {
 	ctx := context.Background()
-	if err := validateTransition(ctx, nil, nil, "", "Post", "draft", "published"); err != nil {
+	if err := validateTransition(ctx, nil, nil, "", "Post", "draft", "published", ""); err != nil {
 		t.Errorf("nil db: want nil, got %v", err)
 	}
 }
@@ -413,7 +413,7 @@ func TestValidateTransition_nonSQLite(t *testing.T) {
 	// → sqlite_master probe returns error → validateTransition returns nil.
 	ctx := context.Background()
 	db := &failOnNthExecDB{failAt: 999} // exec never fails; query always returns no-row
-	if err := validateTransition(ctx, db, nil, "", "Post", "draft", "published"); err != nil {
+	if err := validateTransition(ctx, db, nil, "", "Post", "draft", "published", ""); err != nil {
 		t.Errorf("non-SQLite: want nil, got %v", err)
 	}
 }
@@ -425,7 +425,7 @@ func TestValidateTransition_identity(t *testing.T) {
 		t.Fatalf("migrateStateFlows: %v", err)
 	}
 	// Same from/to status is always allowed regardless of any registered flow.
-	if err := validateTransition(ctx, db, nil, "", "Post", "published", "published"); err != nil {
+	if err := validateTransition(ctx, db, nil, "", "Post", "published", "published", ""); err != nil {
 		t.Errorf("identity transition: want nil, got %v", err)
 	}
 }
@@ -441,7 +441,7 @@ func TestValidateTransition_customFlow_valid(t *testing.T) {
 		t.Fatalf("RegisterFlow: %v", err)
 	}
 	// draft→published is in agentJobFlow.
-	if err := validateTransition(ctx, db, nil, "", "AgentJob", "draft", "published"); err != nil {
+	if err := validateTransition(ctx, db, nil, "", "AgentJob", "draft", "published", ""); err != nil {
 		t.Errorf("valid custom-flow transition: want nil, got %v", err)
 	}
 }
@@ -457,7 +457,7 @@ func TestValidateTransition_customFlow_invalid(t *testing.T) {
 		t.Fatalf("RegisterFlow: %v", err)
 	}
 	// draft→archived is NOT in agentJobFlow.
-	err := validateTransition(ctx, db, nil, "", "AgentJob", "draft", "archived")
+	err := validateTransition(ctx, db, nil, "", "AgentJob", "draft", "archived", "")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("invalid custom-flow transition: want ErrConflict, got %v", err)
 	}
@@ -471,7 +471,7 @@ func TestValidateTransition_defaultFlow_valid(t *testing.T) {
 	}
 	// No custom flow registered for "GenericPost" → falls back to default flow.
 	// Default flow includes draft→published.
-	if err := validateTransition(ctx, db, nil, "", "GenericPost", "draft", "published"); err != nil {
+	if err := validateTransition(ctx, db, nil, "", "GenericPost", "draft", "published", ""); err != nil {
 		t.Errorf("valid default-flow transition: want nil, got %v", err)
 	}
 }
@@ -483,9 +483,68 @@ func TestValidateTransition_defaultFlow_invalid(t *testing.T) {
 		t.Fatalf("migrateStateFlows: %v", err)
 	}
 	// No custom flow → falls back to default. archived→draft is not in default flow.
-	err := validateTransition(ctx, db, nil, "", "GenericPost", "archived", "draft")
+	err := validateTransition(ctx, db, nil, "", "GenericPost", "archived", "draft", "")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("invalid default-flow transition: want ErrConflict, got %v", err)
+	}
+}
+
+// — RequiredReason tests (T149) ————————————————————————————————————————————
+
+func setupReasonFlowDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "decision-flow",
+		TypeName: "Decision",
+		States: []State{
+			{Name: "ratified", IsInitial: true},
+			{Name: "superseded"},
+		},
+		Transitions: []Transition{
+			{From: "ratified", To: "superseded", RequiredReason: true},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	return db
+}
+
+func TestValidateTransition_RequiredReasonMissing(t *testing.T) {
+	db := setupReasonFlowDB(t)
+	err := validateTransition(context.Background(), db, nil, "", "Decision", "ratified", "superseded", "")
+	if !errors.Is(err, ErrBadRequest) {
+		t.Errorf("missing reason: want ErrBadRequest, got %v", err)
+	}
+}
+
+func TestValidateTransition_RequiredReasonSatisfied(t *testing.T) {
+	db := setupReasonFlowDB(t)
+	err := validateTransition(context.Background(), db, nil, "", "Decision", "ratified", "superseded", "no longer accurate")
+	if err != nil {
+		t.Errorf("reason supplied: want nil, got %v", err)
+	}
+}
+
+func TestValidateTransition_RequiredReasonZeroValue_NoOp(t *testing.T) {
+	// agentJobFlow's transitions have RequiredReason unset (zero value = false) —
+	// existing flows are completely unaffected, no reason needed.
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(agentJobFlow); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	if err := validateTransition(ctx, db, nil, "", "AgentJob", "draft", "published", ""); err != nil {
+		t.Errorf("RequiredReason zero value: want nil (no reason needed), got %v", err)
 	}
 }
 
@@ -499,7 +558,7 @@ func TestValidateTransition_noFlow(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `DELETE FROM smeldr_state_flows`); err != nil {
 		t.Fatalf("delete flows: %v", err)
 	}
-	if err := validateTransition(ctx, db, nil, "", "GenericPost", "draft", "published"); err != nil {
+	if err := validateTransition(ctx, db, nil, "", "GenericPost", "draft", "published", ""); err != nil {
 		t.Errorf("no flow: want nil, got %v", err)
 	}
 }
@@ -511,7 +570,7 @@ func TestValidateTransition_transitionQueryError(t *testing.T) {
 	// validateTransition must fail open (return nil) when the transitions query errors.
 	ctx := context.Background()
 	db := &transitFailDB{}
-	if err := validateTransition(ctx, db, nil, "", "Post", "draft", "published"); err != nil {
+	if err := validateTransition(ctx, db, nil, "", "Post", "draft", "published", ""); err != nil {
 		t.Errorf("transitions query error: want nil (fail open), got %v", err)
 	}
 }
@@ -530,7 +589,7 @@ func TestValidateTransition_unknownTargetState(t *testing.T) {
 	if err := app.RegisterFlow(agentJobFlow); err != nil {
 		t.Fatalf("RegisterFlow: %v", err)
 	}
-	err := validateTransition(ctx, db, nil, "", "AgentJob", "draft", "done")
+	err := validateTransition(ctx, db, nil, "", "AgentJob", "draft", "done", "")
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("unknown target state: want ErrConflict, got %v", err)
 	}
@@ -1406,6 +1465,73 @@ func insertConflictItem(t *testing.T, db *sql.DB, id, status string) {
 }
 
 // ——— migrateStateFlowConflictColumns ————————————————————————————————————————
+
+// — migrateTransitionReasonColumn tests (T149) ———————————————————————————————
+
+func TestMigrateTransitionReasonColumn_addsColumn(t *testing.T) {
+	// Simulate a pre-T149 DB: create smeldr_transitions WITHOUT required_reason,
+	// then call migrateTransitionReasonColumn directly.
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_transitions (
+			id INTEGER PRIMARY KEY,
+			flow_id TEXT NOT NULL,
+			from_state TEXT NOT NULL,
+			to_state TEXT NOT NULL,
+			required_role TEXT
+		)`,
+	); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if err := migrateTransitionReasonColumn(ctx, db); err != nil {
+		t.Fatalf("migrateTransitionReasonColumn: %v", err)
+	}
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_transitions)")
+	if err != nil {
+		t.Fatalf("PRAGMA: %v", err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt *string
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			continue
+		}
+		if name == "required_reason" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("required_reason column missing after migration")
+	}
+}
+
+func TestMigrateTransitionReasonColumn_idempotent(t *testing.T) {
+	db := newMigratedDB(t) // migrateStateFlows already adds the column
+	ctx := context.Background()
+	if err := migrateTransitionReasonColumn(ctx, db); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+}
+
+func TestMigrateTransitionReasonColumn_nonSQLite(t *testing.T) {
+	db := &queryFailDB{}
+	if err := migrateTransitionReasonColumn(context.Background(), db); err != nil {
+		t.Fatalf("non-SQLite: expected nil, got %v", err)
+	}
+}
+
+func TestMigrateTransitionReasonColumn_alterFail(t *testing.T) {
+	// Empty SQLite DB with no smeldr_transitions table: PRAGMA returns empty
+	// rows (no error), column absent, then ALTER TABLE fails (no such table).
+	db := newSQLiteDB(t)
+	if err := migrateTransitionReasonColumn(context.Background(), db); err == nil {
+		t.Error("expected error when ALTER TABLE has no target table, got nil")
+	}
+}
 
 func TestMigrateStateFlowConflictColumns_addsColumns(t *testing.T) {
 	// Simulate a pre-v1.46.0 DB: create smeldr_state_flows WITHOUT the new columns,
@@ -2663,14 +2789,14 @@ func setupGovStateDB(t *testing.T) (*sql.DB, *RoleStore) {
 
 func TestValidateTransition_RequiredRole_NilRS(t *testing.T) {
 	db, _ := setupGovStateDB(t)
-	if err := validateTransition(context.Background(), db, nil, "tok", "GovPost", "draft", "published"); err != nil {
+	if err := validateTransition(context.Background(), db, nil, "tok", "GovPost", "draft", "published", ""); err != nil {
 		t.Errorf("nil RoleStore: want nil, got %v", err)
 	}
 }
 
 func TestValidateTransition_RequiredRole_EmptyActor(t *testing.T) {
 	db, rs := setupGovStateDB(t)
-	if err := validateTransition(context.Background(), db, rs, "", "GovPost", "draft", "published"); err != nil {
+	if err := validateTransition(context.Background(), db, rs, "", "GovPost", "draft", "published", ""); err != nil {
 		t.Errorf("empty actorID (system path): want nil, got %v", err)
 	}
 }
@@ -2678,7 +2804,7 @@ func TestValidateTransition_RequiredRole_EmptyActor(t *testing.T) {
 func TestValidateTransition_RequiredRole_Granted(t *testing.T) {
 	db, rs := setupGovStateDB(t)
 	tokenID := setupTokenWithRole(t, db, rs, "editor")
-	if err := validateTransition(context.Background(), db, rs, tokenID, "GovPost", "draft", "published"); err != nil {
+	if err := validateTransition(context.Background(), db, rs, tokenID, "GovPost", "draft", "published", ""); err != nil {
 		t.Errorf("authorized editor: want nil, got %v", err)
 	}
 }
@@ -2686,7 +2812,7 @@ func TestValidateTransition_RequiredRole_Granted(t *testing.T) {
 func TestValidateTransition_RequiredRole_NotGranted(t *testing.T) {
 	db, rs := setupGovStateDB(t)
 	tokenID := setupTokenWithRole(t, db, rs, "author") // author does not have editor role
-	err := validateTransition(context.Background(), db, rs, tokenID, "GovPost", "draft", "published")
+	err := validateTransition(context.Background(), db, rs, tokenID, "GovPost", "draft", "published", "")
 	if !errors.Is(err, ErrForbidden) {
 		t.Errorf("unauthorized actor: want ErrForbidden, got %v", err)
 	}
@@ -2697,7 +2823,7 @@ func TestValidateTransition_RequiredRole_GrantCheckError(t *testing.T) {
 	// Structural queries go through real db; grants query goes through wrapped db (fails).
 	wrapped := &govQueryFailDB{DB: db, failOn: "FROM smeldr_role_grants g"}
 	rs := NewRoleStore(wrapped)
-	err := validateTransition(context.Background(), db, rs, "tok", "GovPost", "draft", "published")
+	err := validateTransition(context.Background(), db, rs, "tok", "GovPost", "draft", "published", "")
 	if !errors.Is(err, ErrForbidden) {
 		t.Errorf("grant query error: want ErrForbidden (fail-closed), got %v", err)
 	}

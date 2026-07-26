@@ -207,7 +207,25 @@ func (r *DynamicTypeRepo) UpdateFields(ctx context.Context, id string, patch map
 // the actor's token ID is extracted from ctx if it implements the smeldr.Context
 // interface. Callers that pass a plain context.Context (system-initiated paths)
 // get an empty actorID, which skips the required_role check.
+//
+// SetStatus supplies no reason — use [DynamicTypeRepo.SetStatusWithReason] for
+// transitions on a flow where [Transition.RequiredReason] is set (T149); those
+// are rejected here with [ErrBadRequest], same as any other caller with no way
+// to supply one.
 func (r *DynamicTypeRepo) SetStatus(ctx context.Context, id string, status Status) error {
+	return r.setStatus(ctx, id, status, "")
+}
+
+// SetStatusWithReason is [DynamicTypeRepo.SetStatus] with a caller-supplied
+// reason (T149) — the one concrete entry point in this task that can satisfy a
+// [Transition.RequiredReason] gate. Added as a new method rather than changing
+// SetStatus's signature, preserving the API stability promise for existing
+// callers of the unchanged method.
+func (r *DynamicTypeRepo) SetStatusWithReason(ctx context.Context, id string, status Status, reason string) error {
+	return r.setStatus(ctx, id, status, reason)
+}
+
+func (r *DynamicTypeRepo) setStatus(ctx context.Context, id string, status Status, reason string) error {
 	node, err := r.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -221,7 +239,7 @@ func (r *DynamicTypeRepo) SetStatus(ctx context.Context, id string, status Statu
 	if sc, ok := ctx.(smeldrCtxAccessor); ok {
 		actorID = sc.User().ID
 	}
-	if err := validateTransition(ctx, r.db, r.rs, actorID, r.typeName, string(node.Status), string(status)); err != nil {
+	if err := validateTransition(ctx, r.db, r.rs, actorID, r.typeName, string(node.Status), string(status), reason); err != nil {
 		return err
 	}
 	if err := applyConflictPolicy(ctx, r.db, nil, r.typeName, string(status), id); err != nil {
@@ -257,7 +275,7 @@ func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, schedu
 	if sc, ok := ctx.(smeldrCtxAccessor); ok {
 		actorID = sc.User().ID
 	}
-	if err := validateTransition(ctx, r.db, r.rs, actorID, r.typeName, string(node.Status), string(Scheduled)); err != nil {
+	if err := validateTransition(ctx, r.db, r.rs, actorID, r.typeName, string(node.Status), string(Scheduled), ""); err != nil {
 		return err
 	}
 	now := time.Now().UTC()

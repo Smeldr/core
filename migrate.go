@@ -109,7 +109,45 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 			return fmt.Errorf("smeldr: migrateStateFlows: seed transition %s→%s: %w", t[0], t[1], err)
 		}
 	}
-	return migrateStateFlowConflictColumns(ctx, db)
+	if err := migrateStateFlowConflictColumns(ctx, db); err != nil {
+		return err
+	}
+	return migrateTransitionReasonColumn(ctx, db)
+}
+
+// migrateTransitionReasonColumn adds the required_reason column to
+// smeldr_transitions when absent (T149). Idempotent — safe to call on every
+// boot. A no-op on non-SQLite databases (PRAGMA not supported), same precedent
+// as migrateStateFlowConflictColumns.
+func migrateTransitionReasonColumn(ctx context.Context, db DB) error {
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_transitions)")
+	if err != nil {
+		return nil // non-SQLite — assume schema is current
+	}
+	defer rows.Close()
+	var hasRequiredReason bool
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt *string
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			continue
+		}
+		if name == "required_reason" {
+			hasRequiredReason = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !hasRequiredReason {
+		if _, err := db.ExecContext(ctx,
+			`ALTER TABLE smeldr_transitions ADD COLUMN required_reason INTEGER NOT NULL DEFAULT 0`,
+		); err != nil {
+			return fmt.Errorf("smeldr: migrateTransitionReasonColumn: required_reason: %w", err)
+		}
+	}
+	return nil
 }
 
 // migrateStateFlowConflictColumns adds the active_state and conflict_policy

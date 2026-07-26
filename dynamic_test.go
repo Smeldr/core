@@ -939,6 +939,75 @@ func TestDynamicTypeRepo_ScheduleContent_TransitionBlocked(t *testing.T) {
 	}
 }
 
+// — SetStatusWithReason (T149) ————————————————————————————————————————————
+
+func setupRecipeReasonFlow(t *testing.T) (*sql.DB, *smeldr.DynamicTypeRepo) {
+	t.Helper()
+	db := openDynDB(t)
+	app := smeldr.New(smeldr.Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("test-secret-minimum16bytes"),
+		DB:      db,
+	})
+	if err := app.RegisterFlow(smeldr.StateFlow{
+		Name:     "recipe-reason",
+		TypeName: "recipe",
+		States: []smeldr.State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published"},
+			{Name: "archived", IsTerminal: true},
+		},
+		Transitions: []smeldr.Transition{
+			{From: "draft", To: "published"},
+			{From: "published", To: "archived", RequiredReason: true},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	return db, repo
+}
+
+func TestDynamicTypeRepo_SetStatus_RequiredReasonMissing(t *testing.T) {
+	_, repo := setupRecipeReasonFlow(t)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Pasta"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	if err := repo.SetStatus(context.Background(), node.ID, smeldr.Published); err != nil {
+		t.Fatalf("SetStatus to published: %v", err)
+	}
+
+	// published→archived requires a reason; SetStatus supplies none.
+	err = repo.SetStatus(context.Background(), node.ID, smeldr.Archived)
+	if !errors.Is(err, smeldr.ErrBadRequest) {
+		t.Errorf("SetStatus without reason on a RequiredReason transition: want ErrBadRequest, got %v", err)
+	}
+}
+
+func TestDynamicTypeRepo_SetStatusWithReason_Satisfied(t *testing.T) {
+	_, repo := setupRecipeReasonFlow(t)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Pasta"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	if err := repo.SetStatus(context.Background(), node.ID, smeldr.Published); err != nil {
+		t.Fatalf("SetStatus to published: %v", err)
+	}
+
+	if err := repo.SetStatusWithReason(context.Background(), node.ID, smeldr.Archived, "recipe deprecated"); err != nil {
+		t.Fatalf("SetStatusWithReason: %v", err)
+	}
+	got, err := repo.GetByID(context.Background(), node.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Status != smeldr.Archived {
+		t.Errorf("status = %q, want Archived", got.Status)
+	}
+}
+
 // — loadDynamicTypes llmsStore branch ————————————————————————————————————————
 
 // TestLoadDynamicTypes_WithLLMsStore verifies that loadDynamicTypes (called from

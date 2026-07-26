@@ -58,6 +58,18 @@ type RelationKindRegistry struct {
 type RelationStore struct {
 	db       DB
 	registry *RelationKindRegistry
+
+	// provenanceStore is non-nil when both App.Relations and App.Provenance are
+	// wired on the same App — injected at App.Handler() time regardless of call
+	// order (T149). Nil is a normal, fully-supported state: relation assertion
+	// works identically either way, simply without a provenance record.
+	provenanceStore ProvenanceStore
+}
+
+// setProvenanceStore wires store for provenance recording on future edge
+// assertions. Unexported — called from App.Handler(), not part of the public API.
+func (s *RelationStore) setProvenanceStore(store ProvenanceStore) {
+	s.provenanceStore = store
 }
 
 // Column order constants — scan order must match SELECT order exactly.
@@ -314,7 +326,41 @@ ON CONFLICT (id) DO UPDATE SET
 	if err != nil {
 		return RelationEdge{}, err
 	}
+
+	s.recordAssertProvenance(ctx, edge)
 	return edge, nil
+}
+
+// recordAssertProvenance records a ProvenanceRecord for a successfully asserted
+// edge (T149). Fail-open and best-effort in two independent ways: does nothing
+// if s.provenanceStore is nil (App.Provenance was never wired), and recovers the
+// actor only when ctx is a concrete smeldr.Context — Assert/MCPAssertRelation/
+// MCPProposeRelation are declared with plain context.Context (no .User()
+// accessor), but every real caller today (smeldr.dev/mcp's tool handlers, and
+// the one internal caller in applyConflictPolicy's supersede path) passes the
+// original smeldr.Context through unwrapped, so the type assertion recovers it
+// in practice without requiring any change to these methods' public signatures.
+// See design/transition-provenance.md §5.2 for the full reasoning.
+func (s *RelationStore) recordAssertProvenance(ctx context.Context, edge RelationEdge) {
+	if s.provenanceStore == nil {
+		return
+	}
+	var actorID string
+	if sc, ok := ctx.(Context); ok {
+		actorID = sc.User().ID
+	}
+	actorKind := actorKindFor(actorID)
+	if edge.CreatedByJob != nil && *edge.CreatedByJob != "" {
+		actorKind = "job"
+		actorID = *edge.CreatedByJob
+	}
+	recordProvenance(ctx, s.provenanceStore, ProvenanceRecord{
+		SubjectType: "RelationEdge",
+		SubjectID:   edge.ID,
+		Verb:        "assert",
+		ActorKind:   actorKind,
+		ActorID:     actorID,
+	})
 }
 
 // MCPAssertRelation manually asserts a typed edge between two content items.
