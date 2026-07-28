@@ -449,3 +449,108 @@ wires in via `services:` + a temporary `go mod edit -replace`.
 - Level 1 amendment.
 
 ---
+
+## A222 — Webhook/outbound TIMESTAMPTZ scan bug
+
+### What
+
+`webhook.go`'s `List` and `EndpointsForEvent`, and `outbound.go`'s `fetchDueJobs`,
+`ListJobsForEndpoint`, `ListDeliveryLogs`, and `DeliveryStats` all scanned columns
+documented and created as `TIMESTAMPTZ` (`created_at`, `next_retry_at`,
+`expires_at`, `attempted_at`) directly into `time.Time`/`*time.Time` destinations
+via plain `rows.Scan`/`row.Scan` calls. `modernc.org/sqlite`'s driver only
+auto-converts the exact column-type names `DATE`, `DATETIME`, and `TIMESTAMP` to
+`time.Time` on scan — `TIMESTAMPTZ` is not on that list, and the scan fails hard:
+
+```
+sql: Scan error on column index N, name "...": unsupported Scan, storing
+driver.Value type string into type *time.Time
+```
+
+`fetchDueJobs` is the core polling function the worker pool's background loop
+calls every cycle to find due webhook jobs. Against the actually-documented,
+required production DDL, outbound webhook delivery was completely non-functional
+— not a partial degradation.
+
+### Why undetected
+
+Every test table across `webhook_test.go` (5 occurrences), `outbound_test.go` (1
+shared helper), and `integration_full_test.go`'s G26–G29 cross-milestone groups
+(the most production-realistic tests in the suite — G26 literally calls
+`WebhookPool().ListJobsForEndpoint` after a real `MCPPublish`) declared these
+columns as `DATETIME` instead of the documented `TIMESTAMPTZ`. Confirmed:
+`modernc.org/sqlite`'s driver keys off the column's declared type name
+(decltype), not the stored value's actual string format — so this was a pure
+test/production DDL divergence masking a real, severe bug through 96%+ package
+coverage the whole time.
+
+### Fix
+
+1. **Non-nullable fields** (`List`, `EndpointsForEvent`, `fetchDueJobs`,
+   `ListJobsForEndpoint`, `ListDeliveryLogs`): wrapped each `*time.Time`
+   scan destination in `scanDest()` — `storage.go`'s existing `timeScanner`
+   (A200), already built for exactly this class of problem and already tested
+   (`storage_sqlite_test.go`, 7 cases). Reused, not duplicated.
+2. **Nullable field** (`DeliveryStats`'s `MAX(dl.attempted_at) *time.Time`
+   return — `scanDest`'s type assertion matches `*time.Time`, not `**time.Time`,
+   so it doesn't apply directly to a nullable-pointer return): scanned into a
+   `*string` first, matching `TokenStore.List`'s existing nullable-field shape
+   for its `RevokedAt`. **Deviation from the plan, with concrete evidence, not
+   silently decided:** the plan (and the architect's approval) called for
+   mirroring `TokenStore`'s exact parse — a bare `time.Parse(time.RFC3339, ...)`.
+   Implemented as specified, then verified with a new real round-trip test
+   (`TestWorkerPool_DeliveryStats_realAttempt`) rather than assumed — the test
+   failed. A throwaway debug test revealed why: `TokenStore.Create` explicitly
+   pre-formats its own writes with `.Format(time.RFC3339)` before insert, making
+   its own reader/writer contract self-consistent by construction.
+   `outbound.go`'s writes are never pre-formatted — they insert a raw Go
+   `time.Time` value, and the driver's own stringification produced
+   `"2026-07-28 17:58:07.7222132 +0000 UTC"` (Go's default `time.Time.String()`
+   shape), which a bare RFC3339 parse cannot read (no `T` separator) but which
+   `timeScanner`'s existing broader layout list already handles. Final fix:
+   `timeScanner{dst: &t}.Scan(*maxAtStr)`, calling the same already-tested
+   unexported method directly on the scanned string — not a new, generalized
+   `nullableTimeScanner` type (the architect's specific "don't build one for a
+   single use site" guidance is still honored; this reuses the one helper that
+   already exists rather than adding a second).
+3. **Root cause of the malformed string, fixed at the source, not papered
+   over on the read side:** `realClock.Now()` (`outbound.go`, the production
+   `Clock` implementation) and `webhookDispatch`'s local `now := time.Now()`
+   (`webhook.go`) both returned local, monotonic-clock-bearing `time.Time`
+   values — every other timestamp-generation site in this codebase already
+   calls `.UTC()` (`WebhookStore.Create`, `provenance.go`'s `recordProvenance`,
+   `TokenStore.Create`). `realClock.Now()` now returns `time.Now().UTC()` —
+   one source-of-truth fix, rather than patching every individual call site
+   that reads `p.clock.Now()`.
+4. **Test DDL and fixture corrections**, required, not optional (otherwise this
+   exact bug class regresses invisibly again): all `DATETIME` column
+   declarations in `webhook_test.go`, `outbound_test.go`, and
+   `integration_full_test.go`'s G26–G29 table helpers corrected to
+   `TIMESTAMPTZ`. Eight `datetime('now')` SQL-literal inserts (across
+   `webhook_test.go` and `integration_full_test.go`) replaced with a real
+   parameterized `time.Now().UTC()` value, matching how production code
+   actually writes these columns (it never uses SQLite's `datetime()` SQL
+   function). Six `newFakeClock(time.Now())` construction sites (across
+   `outbound_test.go` and `integration_full_test.go`'s G27–G29) corrected to
+   `.UTC()` for the same monotonic-clock reason as `realClock.Now()`.
+5. **New regression test**: `TestWorkerPool_DeliveryStats_realAttempt` exercises
+   the actual `Enqueue` → `fetchDueJobs` → `processJob` → `DeliveryStats` round
+   trip end-to-end — the only way to have caught the RFC3339-parse gap before
+   shipping, and the guard against this exact bug recurring in `DeliveryStats`
+   specifically.
+
+### Consequences
+
+- No exported Go symbols changed. `Clock` interface signature unchanged (only
+  `realClock`'s returned value changed, from local+monotonic to UTC).
+- Fixes a previously-undetected, severe production bug: outbound webhook
+  delivery was completely non-functional against any SQLite database following
+  the documented `TIMESTAMPTZ` DDL.
+- Test suite now genuinely exercises the documented production schema across
+  all three affected test files, closing the exact gap that let this ship
+  undetected through 96%+ coverage.
+- New test: `TestWorkerPool_DeliveryStats_realAttempt`. Coverage: 96.1%.
+- Patch release: v1.57.1 → v1.57.2. No API change.
+- Level 2 amendment (cross-file, production-critical behaviour fix).
+
+---

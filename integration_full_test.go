@@ -2537,8 +2537,8 @@ func TestFull_G25_WebhookStoreRoundtrip(t *testing.T) {
 	}
 	_, err = db.ExecContext(ctx,
 		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
-		 VALUES ($1,$2,$3,$4,1,datetime('now'))`,
-		ep.ID, string(evJSON), ep.TargetURL, enc,
+		 VALUES ($1,$2,$3,$4,1,$5)`,
+		ep.ID, string(evJSON), ep.TargetURL, enc, time.Now().UTC(),
 	)
 	if err != nil {
 		t.Fatalf("insert endpoint: %v", err)
@@ -2625,8 +2625,8 @@ func TestFull_G26_SignalEnqueue(t *testing.T) {
 	evJSON, _ := json.Marshal([]string{"g26post.published"})
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
-		 VALUES ('ep-g26',$1,'https://8.8.8.8/hook',$2,1,datetime('now'))`,
-		string(evJSON), enc,
+		 VALUES ('ep-g26',$1,'https://8.8.8.8/hook',$2,1,$3)`,
+		string(evJSON), enc, time.Now().UTC(),
 	)
 	if err != nil {
 		t.Fatalf("insert endpoint: %v", err)
@@ -2678,17 +2678,17 @@ func createG26Tables(t *testing.T, db DB) {
 		`CREATE TABLE IF NOT EXISTS smeldr_webhook_endpoints (
 			id TEXT PRIMARY KEY, events TEXT NOT NULL, target_url TEXT NOT NULL,
 			secret_enc TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT 1,
-			created_at DATETIME NOT NULL
+			created_at TIMESTAMPTZ NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_outbound_jobs (
 			id TEXT PRIMARY KEY, endpoint_id TEXT NOT NULL, target_url TEXT NOT NULL,
 			secret_enc TEXT NOT NULL, payload BLOB NOT NULL, event TEXT NOT NULL,
-			attempts INTEGER NOT NULL DEFAULT 0, next_retry_at DATETIME NOT NULL,
-			created_at DATETIME NOT NULL, expires_at DATETIME NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0, next_retry_at TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL,
 			status TEXT NOT NULL DEFAULT 'pending'
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_delivery_logs (
-			id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempted_at DATETIME NOT NULL,
+			id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempted_at TIMESTAMPTZ NOT NULL,
 			status_code INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
 			error TEXT NOT NULL DEFAULT ''
 		)`,
@@ -2707,7 +2707,7 @@ func createG26Tables(t *testing.T, db DB) {
 func TestFull_G27_RetryOnTransientFailure(t *testing.T) {
 	pool, store := outboundTestDB(t)
 
-	clock := newFakeClock(time.Now())
+	clock := newFakeClock(time.Now().UTC())
 	pool.clock = clock
 
 	var deliverCount int32
@@ -2724,7 +2724,7 @@ func TestFull_G27_RetryOnTransientFailure(t *testing.T) {
 	pool.Start(ctx)
 
 	enc, _ := store.encryptSecret([]byte("g27-secret"))
-	now := time.Now()
+	now := time.Now().UTC()
 	job := OutboundJob{
 		ID:          NewID(),
 		EndpointID:  "ep-g27",
@@ -2781,7 +2781,7 @@ func TestFull_G27_RetryOnTransientFailure(t *testing.T) {
 func TestFull_G28_DeadLetterAfterMaxAttempts(t *testing.T) {
 	pool, store := outboundTestDB(t)
 
-	clock := newFakeClock(time.Now())
+	clock := newFakeClock(time.Now().UTC())
 	pool.clock = clock
 	pool.deliver = func(_ context.Context, _ OutboundJob, _ []byte) error {
 		return &webhookHTTPError{statusCode: 500}
@@ -2792,7 +2792,7 @@ func TestFull_G28_DeadLetterAfterMaxAttempts(t *testing.T) {
 	pool.Start(ctx)
 
 	enc, _ := store.encryptSecret([]byte("g28-secret"))
-	now := time.Now()
+	now := time.Now().UTC()
 	job := OutboundJob{
 		ID:          NewID(),
 		EndpointID:  "ep-g28",
@@ -2845,7 +2845,7 @@ func TestFull_G28_DeadLetterAfterMaxAttempts(t *testing.T) {
 func TestFull_G29_CircuitBreakerOpens(t *testing.T) {
 	pool, store := outboundTestDB(t)
 
-	clock := newFakeClock(time.Now())
+	clock := newFakeClock(time.Now().UTC())
 	pool.clock = clock
 
 	var deliverCalls int32
@@ -2859,7 +2859,7 @@ func TestFull_G29_CircuitBreakerOpens(t *testing.T) {
 	pool.Start(ctx)
 
 	enc, _ := store.encryptSecret([]byte("g29-secret"))
-	now := time.Now()
+	now := time.Now().UTC()
 
 	// Enqueue 6 jobs - 5 to trip the circuit, 1 to verify it's now open.
 	const total = 6
@@ -2949,8 +2949,8 @@ func TestFull_G30_MCPScheduleWebhook(t *testing.T) {
 	evJSON, _ := json.Marshal([]string{"g30post.scheduled"})
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
-		 VALUES ('ep-g30',$1,'https://8.8.8.8/hook',$2,1,datetime('now'))`,
-		string(evJSON), enc,
+		 VALUES ('ep-g30',$1,'https://8.8.8.8/hook',$2,1,$3)`,
+		string(evJSON), enc, time.Now().UTC(),
 	)
 	if err != nil {
 		t.Fatalf("insert endpoint: %v", err)
@@ -3192,7 +3192,8 @@ func TestFull_G32_OnSignalAndWebhookCoexist(t *testing.T) {
 	evJSON, _ := json.Marshal([]string{"g32post.published"})
 	if _, err := db.ExecContext(ctx,
 		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at)
-		 VALUES ('ep-g32','`+string(evJSON)+`','https://8.8.8.8/hook','`+enc+`',1,datetime('now'))`,
+		 VALUES ('ep-g32','`+string(evJSON)+`','https://8.8.8.8/hook','`+enc+`',1,$1)`,
+		time.Now().UTC(),
 	); err != nil {
 		t.Fatalf("insert endpoint: %v", err)
 	}

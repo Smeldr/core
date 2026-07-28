@@ -30,7 +30,7 @@ type Clock interface {
 // time package.
 type realClock struct{}
 
-func (realClock) Now() time.Time                         { return time.Now() }
+func (realClock) Now() time.Time                         { return time.Now().UTC() }
 func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
 // OutboundDelivery is implemented by any engine that can queue outbound HTTP
@@ -241,7 +241,7 @@ func (p *workerPool) fetchDueJobs(ctx context.Context) ([]OutboundJob, error) {
 		if err := rows.Scan(
 			&j.ID, &j.EndpointID, &j.TargetURL, &j.SecretEnc,
 			&j.Payload, &j.Event, &j.Attempts,
-			&j.NextRetryAt, &j.CreatedAt, &j.ExpiresAt, &j.Status,
+			scanDest(&j.NextRetryAt), scanDest(&j.CreatedAt), scanDest(&j.ExpiresAt), &j.Status,
 		); err != nil {
 			return nil, err
 		}
@@ -375,7 +375,7 @@ func (p *workerPool) ListDeliveryLogs(ctx context.Context, jobID string) ([]Deli
 	var out []DeliveryLog
 	for rows.Next() {
 		var dl DeliveryLog
-		if err := rows.Scan(&dl.ID, &dl.JobID, &dl.AttemptedAt, &dl.StatusCode, &dl.DurationMS, &dl.Error); err != nil {
+		if err := rows.Scan(&dl.ID, &dl.JobID, scanDest(&dl.AttemptedAt), &dl.StatusCode, &dl.DurationMS, &dl.Error); err != nil {
 			return nil, err
 		}
 		out = append(out, dl)
@@ -402,7 +402,7 @@ func (p *workerPool) ListJobsForEndpoint(ctx context.Context, endpointID string)
 		if err := rows.Scan(
 			&j.ID, &j.EndpointID, &j.TargetURL, &j.SecretEnc,
 			&j.Payload, &j.Event, &j.Attempts,
-			&j.NextRetryAt, &j.CreatedAt, &j.ExpiresAt, &j.Status,
+			scanDest(&j.NextRetryAt), scanDest(&j.CreatedAt), scanDest(&j.ExpiresAt), &j.Status,
 		); err != nil {
 			return nil, err
 		}
@@ -427,11 +427,17 @@ func (p *workerPool) DeliveryStats(ctx context.Context, endpointID string) (tota
 		WHERE j.endpoint_id = $1`,
 		endpointID,
 	)
-	var maxAt *time.Time
-	if err = row.Scan(&total, &success, &failed, &maxAt); err != nil {
+	var maxAtStr *string
+	if err = row.Scan(&total, &success, &failed, &maxAtStr); err != nil {
 		return 0, 0, 0, nil, err
 	}
-	return total, success, failed, maxAt, nil
+	if maxAtStr != nil {
+		var t time.Time
+		if perr := (timeScanner{dst: &t}).Scan(*maxAtStr); perr == nil {
+			lastAttempt = &t
+		}
+	}
+	return total, success, failed, lastAttempt, nil
 }
 
 // circuitAllows returns true when the circuit for endpointID permits a delivery

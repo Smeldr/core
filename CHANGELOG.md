@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.57.2] — 2026-07-28
+
+### Fixed
+- `webhook.go`/`outbound.go`: `WebhookStore.List`, `WebhookStore.EndpointsForEvent`, and the worker pool's `fetchDueJobs` (the core delivery-loop poll), `ListJobsForEndpoint`, `ListDeliveryLogs`, and `DeliveryStats` all scanned `TIMESTAMPTZ`-documented columns directly into `time.Time`, which `modernc.org/sqlite`'s driver does not auto-convert (only `DATE`/`DATETIME`/`TIMESTAMP` are handled). Outbound webhook delivery was non-functional against any SQLite database following the documented DDL. All affected scans now use the existing `scanDest`/`timeScanner` helper (A200). `realClock.Now()` and `webhookDispatch`'s internal clock now return `.UTC()` time, matching the rest of the codebase and fixing the underlying malformed timestamp string. (A222)
+
+---
+
 ## [1.57.1] — 2026-07-27
 
 ### Fixed

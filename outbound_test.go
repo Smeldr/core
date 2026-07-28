@@ -46,8 +46,8 @@ func outboundTestDB(t *testing.T) (*workerPool, *WebhookStore) {
 		CREATE TABLE smeldr_outbound_jobs (
 			id TEXT PRIMARY KEY, endpoint_id TEXT NOT NULL, target_url TEXT NOT NULL,
 			secret_enc TEXT NOT NULL, payload BLOB NOT NULL, event TEXT NOT NULL,
-			attempts INTEGER NOT NULL DEFAULT 0, next_retry_at DATETIME NOT NULL,
-			created_at DATETIME NOT NULL, expires_at DATETIME NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0, next_retry_at TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL,
 			status TEXT NOT NULL DEFAULT 'pending'
 		)`)
 	if err != nil {
@@ -55,7 +55,7 @@ func outboundTestDB(t *testing.T) (*workerPool, *WebhookStore) {
 	}
 	_, err = db.ExecContext(ctx, `
 		CREATE TABLE smeldr_delivery_logs (
-			id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempted_at DATETIME NOT NULL,
+			id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempted_at TIMESTAMPTZ NOT NULL,
 			status_code INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
 			error TEXT NOT NULL DEFAULT ''
 		)`)
@@ -119,7 +119,7 @@ func TestBackoffDelay(t *testing.T) {
 func TestWorkerPool_EnqueueAndDeliver(t *testing.T) {
 	pool, store := outboundTestDB(t)
 	ctx := context.Background()
-	clk := newFakeClock(time.Now())
+	clk := newFakeClock(time.Now().UTC())
 	pool.clock = clk
 
 	var delivered int32
@@ -193,7 +193,7 @@ func TestWorkerPool_EnqueueAndDeliver(t *testing.T) {
 func TestWorkerPool_RetryOnFailure(t *testing.T) {
 	pool, store := outboundTestDB(t)
 	ctx := context.Background()
-	clk := newFakeClock(time.Now())
+	clk := newFakeClock(time.Now().UTC())
 	pool.clock = clk
 
 	callCount := 0
@@ -247,7 +247,7 @@ func TestWorkerPool_DeadLetter(t *testing.T) {
 	}
 
 	enc, _ := store.encryptSecret([]byte("s"))
-	now := time.Now()
+	now := time.Now().UTC()
 	rng := rand.New(rand.NewSource(1))
 
 	// Simulate a job already at maxAttempts-1 (6), so one more attempt → dead.
@@ -281,7 +281,7 @@ func TestWorkerPool_DeadLetter(t *testing.T) {
 
 // TestWorkerPool_CircuitBreaker verifies that consecutive failures open the circuit.
 func TestWorkerPool_CircuitBreaker(t *testing.T) {
-	clk := newFakeClock(time.Now())
+	clk := newFakeClock(time.Now().UTC())
 	pool := &workerPool{
 		clock:    clk,
 		circuits: make(map[string]*circuitState),
@@ -315,7 +315,7 @@ func TestWorkerPool_RetryDead(t *testing.T) {
 	ctx := context.Background()
 
 	enc, _ := store.encryptSecret([]byte("s"))
-	now := time.Now()
+	now := time.Now().UTC()
 	jobID := NewID()
 	_, _ = pool.db.ExecContext(ctx,
 		`INSERT INTO smeldr_outbound_jobs VALUES ($1,'ep','https://x.com',$2,'{}','ev',7,$3,$3,$4,'dead')`,
@@ -463,6 +463,62 @@ func TestWorkerPool_DeliveryStats_empty(t *testing.T) {
 	}
 }
 
+// TestWorkerPool_DeliveryStats_realAttempt is a regression test for the
+// TIMESTAMPTZ scan fix: it exercises DeliveryStats's MAX(dl.attempted_at)
+// nullable-string parse against a real delivery log written through the
+// actual Enqueue/processJob path (not a hand-crafted string), proving the
+// round trip works end-to-end rather than assuming it.
+func TestWorkerPool_DeliveryStats_realAttempt(t *testing.T) {
+	pool, store := outboundTestDB(t)
+	ctx := context.Background()
+	clk := newFakeClock(time.Now().UTC())
+	pool.clock = clk
+	pool.deliver = func(_ context.Context, _ OutboundJob, _ []byte) error { return nil }
+
+	enc, _ := store.encryptSecret([]byte("secret"))
+	now := clk.Now()
+	job := OutboundJob{
+		ID:          NewID(),
+		EndpointID:  "ep-stats",
+		TargetURL:   "https://example.com/hook",
+		SecretEnc:   enc,
+		Payload:     []byte(`{"event":"post.published"}`),
+		Event:       "post.published",
+		NextRetryAt: now,
+		CreatedAt:   now,
+		ExpiresAt:   now.Add(24 * time.Hour),
+		Status:      "pending",
+	}
+	if err := pool.Enqueue(ctx, job); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	jobs, err := pool.fetchDueJobs(ctx)
+	if err != nil {
+		t.Fatalf("fetchDueJobs: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("want 1 due job, got %d", len(jobs))
+	}
+	rng := rand.New(rand.NewSource(1))
+	if err := pool.processJob(ctx, jobs[0], rng); err != nil {
+		t.Fatalf("processJob: %v", err)
+	}
+
+	total, success, failed, last, err := pool.DeliveryStats(ctx, "ep-stats")
+	if err != nil {
+		t.Fatalf("DeliveryStats: %v", err)
+	}
+	if total != 1 || success != 1 || failed != 0 {
+		t.Errorf("got total=%d success=%d failed=%d, want 1/1/0", total, success, failed)
+	}
+	if last == nil {
+		t.Fatal("lastAttempt: want a parsed timestamp, got nil")
+	}
+	if diff := last.Sub(now); diff < -time.Minute || diff > time.Minute {
+		t.Errorf("lastAttempt: got %v, want within a minute of %v", last, now)
+	}
+}
+
 func TestNewWorkerPool_zeroWorkers_defaultsTen(t *testing.T) {
 	store := NewWebhookStore(nil, []byte("k"))
 	pool := newWorkerPool(nil, store, realClock{}, 0)
@@ -506,9 +562,9 @@ func TestEnqueueHTTPSValidation(t *testing.T) {
 		Payload:     []byte("{}"),
 		Event:       "test",
 		Attempts:    0,
-		NextRetryAt: time.Now(),
-		CreatedAt:   time.Now(),
-		ExpiresAt:   time.Now().Add(time.Hour),
+		NextRetryAt: time.Now().UTC(),
+		CreatedAt:   time.Now().UTC(),
+		ExpiresAt:   time.Now().UTC().Add(time.Hour),
 		Status:      "pending",
 	}
 	if err := pool.Enqueue(ctx, job); err == nil {

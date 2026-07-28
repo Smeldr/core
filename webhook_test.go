@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestWebhookStore_CreateAndList covers secret handling and List not leaking secrets.
@@ -20,7 +21,7 @@ func TestWebhookStore_CreateAndList(t *testing.T) {
 			target_url TEXT    NOT NULL,
 			secret_enc TEXT    NOT NULL,
 			active     BOOLEAN NOT NULL DEFAULT 1,
-			created_at DATETIME NOT NULL
+			created_at TIMESTAMPTZ NOT NULL
 		)`)
 	if err != nil {
 		t.Fatalf("create table: %v", err)
@@ -69,7 +70,7 @@ func TestWebhookStore_ListNeverLeaksSecret(t *testing.T) {
 			target_url TEXT    NOT NULL,
 			secret_enc TEXT    NOT NULL,
 			active     BOOLEAN NOT NULL DEFAULT 1,
-			created_at DATETIME NOT NULL
+			created_at TIMESTAMPTZ NOT NULL
 		)`)
 	if err != nil {
 		t.Fatalf("create table: %v", err)
@@ -85,8 +86,8 @@ func TestWebhookStore_ListNeverLeaksSecret(t *testing.T) {
 	evJSON, _ := json.Marshal(ep.Events)
 	enc, _ := store.encryptSecret([]byte("plain"))
 	_, err = db.ExecContext(ctx,
-		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1,$2,$3,$4,$5,datetime('now'))`,
-		ep.ID, string(evJSON), "https://example.com/hook", enc, 1,
+		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+		ep.ID, string(evJSON), "https://example.com/hook", enc, 1, time.Now().UTC(),
 	)
 	if err != nil {
 		t.Fatalf("insert: %v", err)
@@ -116,7 +117,7 @@ func TestWebhookStore_EndpointsForEvent(t *testing.T) {
 			target_url TEXT    NOT NULL,
 			secret_enc TEXT    NOT NULL,
 			active     BOOLEAN NOT NULL DEFAULT 1,
-			created_at DATETIME NOT NULL
+			created_at TIMESTAMPTZ NOT NULL
 		)`)
 	if err != nil {
 		t.Fatalf("create table: %v", err)
@@ -126,8 +127,8 @@ func TestWebhookStore_EndpointsForEvent(t *testing.T) {
 	insertEP := func(id, eventsJSON, enc string, active int) {
 		t.Helper()
 		_, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1,$2,$3,$4,$5,datetime('now'))`,
-			id, eventsJSON, "https://example.com/"+id, enc, active,
+			`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+			id, eventsJSON, "https://example.com/"+id, enc, active, time.Now().UTC(),
 		)
 		if err != nil {
 			t.Fatalf("insert %s: %v", id, err)
@@ -173,12 +174,13 @@ func TestWebhookStore_Delete(t *testing.T) {
 	_, _ = db.ExecContext(ctx, `
 		CREATE TABLE smeldr_webhook_endpoints (
 			id TEXT PRIMARY KEY, events TEXT NOT NULL, target_url TEXT NOT NULL,
-			secret_enc TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT 1, created_at DATETIME NOT NULL
+			secret_enc TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT 1, created_at TIMESTAMPTZ NOT NULL
 		)`)
 	store := NewWebhookStore(db, []byte("k"))
 	enc, _ := store.encryptSecret([]byte("s"))
 	_, _ = db.ExecContext(ctx,
-		`INSERT INTO smeldr_webhook_endpoints VALUES ('del-1','[]','https://x.com','`+enc+`',1,datetime('now'))`)
+		`INSERT INTO smeldr_webhook_endpoints VALUES ('del-1','[]','https://x.com','`+enc+`',1,$1)`,
+		time.Now().UTC())
 	if err := store.Delete(ctx, "del-1"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -367,7 +369,7 @@ func createWebhookEndpointsTable(t *testing.T, db interface {
 			target_url TEXT    NOT NULL,
 			secret_enc TEXT    NOT NULL,
 			active     BOOLEAN NOT NULL DEFAULT 1,
-			created_at DATETIME NOT NULL
+			created_at TIMESTAMPTZ NOT NULL
 		)`)
 	if err != nil {
 		t.Fatalf("create smeldr_webhook_endpoints: %v", err)
@@ -496,8 +498,8 @@ func TestWebhookDispatch_enqueueError(t *testing.T) {
 	enc, _ := store.encryptSecret([]byte("plain"))
 	eventsJSON := `["testpost.created"]`
 	_, _ = db.ExecContext(ctx,
-		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1,$2,$3,$4,$5,datetime('now'))`,
-		"ep-1", eventsJSON, "https://8.8.8.8/hook", enc, 1,
+		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+		"ep-1", eventsJSON, "https://8.8.8.8/hook", enc, 1, time.Now().UTC(),
 	)
 	// Pool uses errExecDB → Enqueue always fails (INSERT into smeldr_outbound_jobs errors).
 	pool := newWorkerPool(&errExecDB{}, store, realClock{}, 1)

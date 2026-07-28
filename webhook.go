@@ -190,7 +190,7 @@ func (s *WebhookStore) List(ctx context.Context) ([]WebhookEndpoint, error) {
 	for rows.Next() {
 		var ep WebhookEndpoint
 		var eventsJSON string
-		if err := rows.Scan(&ep.ID, &eventsJSON, &ep.TargetURL, &ep.Active, &ep.CreatedAt); err != nil {
+		if err := rows.Scan(&ep.ID, &eventsJSON, &ep.TargetURL, &ep.Active, scanDest(&ep.CreatedAt)); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(eventsJSON), &ep.Events)
@@ -231,7 +231,7 @@ func (s *WebhookStore) EndpointsForEvent(ctx context.Context, event string) ([]W
 	for rows.Next() {
 		var ep WebhookEndpoint
 		var eventsJSON string
-		if err := rows.Scan(&ep.ID, &eventsJSON, &ep.TargetURL, &ep.secretEnc, &ep.Active, &ep.CreatedAt); err != nil {
+		if err := rows.Scan(&ep.ID, &eventsJSON, &ep.TargetURL, &ep.secretEnc, &ep.Active, scanDest(&ep.CreatedAt)); err != nil {
 			return nil, err
 		}
 		var events []string
@@ -334,7 +334,7 @@ func webhookDispatch(ctx context.Context, ev SignalEvent, sig LifecycleEvent, st
 		slog.WarnContext(ctx, "webhook endpoints lookup failed", "error", err, "event", eventName)
 		return nil
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	for _, ep := range endpoints {
 		job := OutboundJob{
 			ID:          NewID(),
