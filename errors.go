@@ -11,7 +11,7 @@ import (
 	"sync"
 )
 
-// Error is implemented by all Forge errors. Callers should use errors.As to
+// Error is implemented by all Smeldr errors. Callers should use errors.As to
 // inspect the concrete type — never type-assert directly against a sentinel.
 type Error interface {
 	error

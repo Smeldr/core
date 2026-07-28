@@ -35,11 +35,11 @@ func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) 
 
 // OutboundDelivery is implemented by any engine that can queue outbound HTTP
 // requests for retry-backed delivery. It is the shared interface for
-// forge-social, audit trail, and other modules that need durable outbound HTTP
+// social, audit trail, and other modules that need durable outbound HTTP
 // without coupling to [WebhookStore] directly.
 //
 // The unexported [workerPool] satisfies OutboundDelivery.
-// [App.WebhookPool] returns the pool as a [WebhookJobQueue] for forge-mcp.
+// [App.WebhookPool] returns the pool as a [WebhookJobQueue] for mcp.
 type OutboundDelivery interface {
 	Enqueue(ctx context.Context, job OutboundJob) error
 }

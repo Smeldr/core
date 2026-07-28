@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestForgeDate_formatted(t *testing.T) {
+func TestSmeldrDate_formatted(t *testing.T) {
 	ts := time.Date(2026, 3, 5, 0, 0, 0, 0, time.UTC)
 	got := smeldrDate(ts)
 	want := "5 March 2026"
@@ -16,14 +16,14 @@ func TestForgeDate_formatted(t *testing.T) {
 	}
 }
 
-func TestForgeDate_zero(t *testing.T) {
+func TestSmeldrDate_zero(t *testing.T) {
 	got := smeldrDate(time.Time{})
 	if got != "" {
 		t.Errorf("smeldrDate(zero) = %q, want empty string", got)
 	}
 }
 
-func TestForgeMeta_withSchema(t *testing.T) {
+func TestSmeldrMeta_withSchema(t *testing.T) {
 	h := Head{Title: "Test Article", Type: Article}
 	got := string(smeldrMeta(h, nil))
 	if !strings.Contains(got, `<script type="application/ld+json">`) {
@@ -34,21 +34,21 @@ func TestForgeMeta_withSchema(t *testing.T) {
 	}
 }
 
-func TestForgeMeta_noSchema(t *testing.T) {
+func TestSmeldrMeta_noSchema(t *testing.T) {
 	got := string(smeldrMeta(Head{}, nil))
 	if got != "" {
 		t.Errorf("smeldrMeta(empty Head) = %q, want empty string", got)
 	}
 }
 
-func TestForgeMarkdown_heading(t *testing.T) {
+func TestSmeldrMarkdown_heading(t *testing.T) {
 	got := string(smeldrMarkdown("# Title"))
 	if got != "<h1>Title</h1>" {
 		t.Errorf("heading: got %q, want %q", got, "<h1>Title</h1>")
 	}
 }
 
-func TestForgeMarkdown_bold(t *testing.T) {
+func TestSmeldrMarkdown_bold(t *testing.T) {
 	got := string(smeldrMarkdown("**important**"))
 	want := "<p><strong>important</strong></p>"
 	if got != want {
@@ -56,7 +56,7 @@ func TestForgeMarkdown_bold(t *testing.T) {
 	}
 }
 
-func TestForgeMarkdown_link(t *testing.T) {
+func TestSmeldrMarkdown_link(t *testing.T) {
 	// renderMarkdown now supports [text](url) inline links.
 	got := string(smeldrMarkdown("[click here](https://example.com)"))
 	want := `<p><a href="https://example.com">click here</a></p>`
@@ -65,7 +65,7 @@ func TestForgeMarkdown_link(t *testing.T) {
 	}
 }
 
-func TestForgeMarkdown_list(t *testing.T) {
+func TestSmeldrMarkdown_list(t *testing.T) {
 	got := string(smeldrMarkdown("- alpha\n- beta"))
 	want := "<ul>\n<li>alpha</li>\n<li>beta</li>\n</ul>"
 	if got != want {
@@ -73,7 +73,7 @@ func TestForgeMarkdown_list(t *testing.T) {
 	}
 }
 
-func TestForgeMarkdown_paragraph(t *testing.T) {
+func TestSmeldrMarkdown_paragraph(t *testing.T) {
 	input := "first paragraph\n\nsecond paragraph"
 	got := string(smeldrMarkdown(input))
 	if !strings.Contains(got, "<p>first paragraph</p>") {
@@ -84,7 +84,7 @@ func TestForgeMarkdown_paragraph(t *testing.T) {
 	}
 }
 
-func TestForgeMarkdown_fencedCode(t *testing.T) {
+func TestSmeldrMarkdown_fencedCode(t *testing.T) {
 	input := "intro\n\n```go\nfmt.Println(\"hello\")\n```\n\noutro"
 	got := string(smeldrMarkdown(input))
 	if !strings.Contains(got, "<pre><code") {
@@ -104,7 +104,7 @@ func TestForgeMarkdown_fencedCode(t *testing.T) {
 	}
 }
 
-func TestForgeMarkdown_fencedCodeHTMLEscape(t *testing.T) {
+func TestSmeldrMarkdown_fencedCodeHTMLEscape(t *testing.T) {
 	input := "```\n<script>alert(1)</script>\n```"
 	got := string(smeldrMarkdown(input))
 	if strings.Contains(got, "<script>") {
@@ -115,7 +115,7 @@ func TestForgeMarkdown_fencedCodeHTMLEscape(t *testing.T) {
 	}
 }
 
-func TestForgeHTML(t *testing.T) {
+func TestSmeldrHTML(t *testing.T) {
 	t.Run("passthrough", func(t *testing.T) {
 		input := "<strong>bold</strong>"
 		got := smeldrHTML(input)
@@ -140,7 +140,7 @@ func TestForgeHTML(t *testing.T) {
 	})
 }
 
-func TestForgeExcerpt_pipeline(t *testing.T) {
+func TestSmeldrExcerpt_pipeline(t *testing.T) {
 	body := "The quick brown fox jumps over the lazy dog and then some more words follow here"
 	got := string(smeldrExcerpt(20, body))
 	if len([]rune(got)) > 25 { // 20 + "…" + some tolerance
@@ -151,7 +151,7 @@ func TestForgeExcerpt_pipeline(t *testing.T) {
 	}
 }
 
-func TestForgeCSRFToken_present(t *testing.T) {
+func TestSmeldrCSRFToken_present(t *testing.T) {
 	r2 := httptest.NewRequest("GET", "/", nil)
 	r2.Header.Set("Cookie", CSRFCookieName+"=test-token-abc")
 
@@ -167,7 +167,7 @@ func TestForgeCSRFToken_present(t *testing.T) {
 	}
 }
 
-func TestForgeCSRFToken_absent(t *testing.T) {
+func TestSmeldrCSRFToken_absent(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	got := smeldrCSRFToken(r)
 	if got != "" {
@@ -198,10 +198,10 @@ func TestTemplateFuncMap_keys(t *testing.T) {
 	}
 }
 
-// TestForgeLLMSEntries verifies that the smeldr_llms_entries template function
+// TestSmeldrLLMSEntries verifies that the smeldr_llms_entries template function
 // renders LLMsTemplateData into a markdown link list and returns empty for
 // unknown or nil inputs (exercises the smeldrLLMsEntries helper directly).
-func TestForgeLLMSEntries(t *testing.T) {
+func TestSmeldrLLMSEntries(t *testing.T) {
 	td := LLMsTemplateData{
 		Entries: []LLMsEntry{
 			{Title: "Post One", URL: "/posts/one", Summary: "A summary."},
@@ -259,7 +259,7 @@ var benchMarkdownBody = strings.Repeat(
 		"- Item one\n- Item two\n- Item three\n\n",
 	20) // ~500 words
 
-func BenchmarkForgeMarkdown(b *testing.B) {
+func BenchmarkSmeldrMarkdown(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_ = smeldrMarkdown(benchMarkdownBody)

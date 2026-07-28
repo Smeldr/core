@@ -1,6 +1,6 @@
 //go:build integration
 
-package forgepgx
+package pgx
 
 import (
 	"context"
@@ -27,7 +27,7 @@ func openSmeldrDB(t *testing.T) (smeldr.DB, func()) {
 }
 
 // TestIntegration_Postgres_StateFlows boots a smeldr.App backed by a real
-// Postgres 16 pool (via forgepgx.Wrap), exercises migrateStateFlows, and
+// Postgres 16 pool (via pgx.Wrap), exercises migrateStateFlows, and
 // registers a custom flow via App.RegisterFlow — verifying that all
 // state-flow SQL uses $N placeholders and ON CONFLICT … DO NOTHING syntax
 // accepted by Postgres.
@@ -91,7 +91,7 @@ func TestIntegration_Postgres_StateFlows(t *testing.T) {
 }
 
 // TestIntegration_Postgres_Governance boots a smeldr.App backed by a real
-// Postgres 16 pool (via forgepgx.Wrap), exercises migrateGovernance,
+// Postgres 16 pool (via pgx.Wrap), exercises migrateGovernance,
 // DefineRole, Grant, Authorized, RoleGranted, and ToolPolicy — verifying
 // that all governance SQL uses $N placeholders and that the UPSERT and
 // IS NOT DISTINCT FROM forms are accepted by Postgres.

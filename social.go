@@ -4,7 +4,7 @@ package smeldr
 
 // OGDefaults sets app-level Open Graph and Twitter Card fallback values.
 // Apply via [App.SEO]; values are merged into every page's [Head] by
-// forge:head when the content item does not supply its own.
+// smeldr:head when the content item does not supply its own.
 //
 //   - Image — fallback og:image when [Head.Image].URL is empty.
 //   - TwitterSite — twitter:site handle (e.g. "@mycompany"); always
@@ -56,7 +56,7 @@ func mergeOGDefaults(head Head, d *OGDefaults) Head {
 
 // — SocialFeature —————————————————————————————————————————————————————————
 
-// SocialFeature selects which social sharing meta tags forge:head emits for
+// SocialFeature selects which social sharing meta tags smeldr:head emits for
 // a module. Use the predefined constants [OpenGraph] and [TwitterCard].
 type SocialFeature int
 
@@ -77,7 +77,7 @@ type socialOption struct{ features []SocialFeature }
 func (socialOption) isOption() {}
 
 // Social returns an [Option] that documents which social sharing tag sets a
-// module emits. The forge:head partial always renders Open Graph and Twitter
+// module emits. The smeldr:head partial always renders Open Graph and Twitter
 // Card tags when [Head.Title] is non-empty — Social() is declarative metadata
 // that makes intent explicit at the call site.
 //

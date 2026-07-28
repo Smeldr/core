@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// execForgeHead parses and executes the smeldr:head partial with h as data.
+// execSmeldrHead parses and executes the smeldr:head partial with h as data.
 // The TemplateFuncMap is registered so smeldr_rfc3339 and other helpers resolve.
-func execForgeHead(t *testing.T, h Head) string {
+func execSmeldrHead(t *testing.T, h Head) string {
 	t.Helper()
 	tmpl, err := template.New("").Funcs(TemplateFuncMap()).Parse(smeldrHeadTmpl)
 	if err != nil {
@@ -44,7 +44,7 @@ func TestSocialOption(t *testing.T) {
 	}
 }
 
-func TestForgeHeadOGRendering(t *testing.T) {
+func TestSmeldrHeadOGRendering(t *testing.T) {
 	h := Head{
 		Title:       "Hello World",
 		Description: "A great post.",
@@ -55,7 +55,7 @@ func TestForgeHeadOGRendering(t *testing.T) {
 			Height: 630,
 		},
 	}
-	out := execForgeHead(t, h)
+	out := execSmeldrHead(t, h)
 
 	cases := []struct {
 		label string
@@ -80,7 +80,7 @@ func TestForgeHeadOGRendering(t *testing.T) {
 	}
 }
 
-func TestForgeHeadTwitterRendering(t *testing.T) {
+func TestSmeldrHeadTwitterRendering(t *testing.T) {
 	h := Head{
 		Title: "Hello World",
 		Social: SocialOverrides{
@@ -90,7 +90,7 @@ func TestForgeHeadTwitterRendering(t *testing.T) {
 			},
 		},
 	}
-	out := execForgeHead(t, h)
+	out := execSmeldrHead(t, h)
 
 	cases := []struct {
 		label string
@@ -109,14 +109,14 @@ func TestForgeHeadTwitterRendering(t *testing.T) {
 
 	// No image → twitter:card falls back to "summary".
 	t.Run("summary fallback no image", func(t *testing.T) {
-		out2 := execForgeHead(t, Head{Title: "No Image"})
+		out2 := execSmeldrHead(t, Head{Title: "No Image"})
 		if !strings.Contains(out2, `content="summary"`) {
 			t.Errorf("expected twitter:card=summary when no image, got:\n%s", out2)
 		}
 	})
 }
 
-func TestForgeHeadArticleMeta(t *testing.T) {
+func TestSmeldrHeadArticleMeta(t *testing.T) {
 	published := time.Date(2026, 1, 15, 9, 0, 0, 0, time.UTC)
 	h := Head{
 		Title:     "My Article",
@@ -125,7 +125,7 @@ func TestForgeHeadArticleMeta(t *testing.T) {
 		Published: published,
 		Tags:      []string{"go", "cms"},
 	}
-	out := execForgeHead(t, h)
+	out := execSmeldrHead(t, h)
 
 	cases := []struct {
 		label string
@@ -146,8 +146,8 @@ func TestForgeHeadArticleMeta(t *testing.T) {
 	}
 }
 
-func TestForgeHeadNoOGWithoutTitle(t *testing.T) {
-	out := execForgeHead(t, Head{})
+func TestSmeldrHeadNoOGWithoutTitle(t *testing.T) {
+	out := execSmeldrHead(t, Head{})
 
 	forbidden := []string{
 		`property="og:title"`,

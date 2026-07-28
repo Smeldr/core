@@ -143,7 +143,7 @@ func TestSchemaFor_Product(t *testing.T) {
 
 func TestSchemaFor_FAQPage(t *testing.T) {
 	content := &schemaFAQ{entries: []FAQEntry{
-		{Question: "What is Forge?", Answer: "A Go CMS framework."},
+		{Question: "What is Smeldr?", Answer: "A Go CMS framework."},
 		{Question: "Is it fast?", Answer: "Yes, zero dependencies."},
 	}}
 	head := Head{Type: FAQPage, Title: "FAQ"}
@@ -151,7 +151,7 @@ func TestSchemaFor_FAQPage(t *testing.T) {
 	if got == "" {
 		t.Fatal("SchemaFor FAQPage returned empty string")
 	}
-	if !strings.Contains(got, "What is Forge?") {
+	if !strings.Contains(got, "What is Smeldr?") {
 		t.Error("FAQ question not found in output")
 	}
 	if !strings.Contains(got, "A Go CMS framework.") {

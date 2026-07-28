@@ -217,7 +217,7 @@ func TestWriteError(t *testing.T) {
 			wantCode:   "not_found",
 		},
 		{
-			name:          "5xx_forge_error_suppresses_public_message",
+			name:          "5xx_error_suppresses_public_message",
 			err:           newSentinel(500, "custom_5xx", "custom five-hundred detail"),
 			wantStatus:    500,
 			wantCode:      "internal_error",

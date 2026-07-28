@@ -1,8 +1,8 @@
-// Package forge — benchmark suite for M5–M8 hot paths.
+// Package smeldr — benchmark suite for M5–M8 hot paths.
 //
 // These benchmarks complement the per-file benchmarks that already exist
 // for M1–M4 (node, storage, middleware, schema, sitemap, templatehelpers,
-// module, forge). Each benchmark here targets a code path introduced in
+// module, smeldr). Each benchmark here targets a code path introduced in
 // Milestone 5 (auth tokens, RSS feeds), 6 (cookie consent), 7 (redirects),
 // or 8 (scheduler tick). A template render benchmark (M4) is also included
 // here so that all hot-path benchmarks live in a single file.

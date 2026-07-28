@@ -77,7 +77,7 @@ func TestTemplatesOptional_missingDir(t *testing.T) {
 	}
 }
 
-func TestTemplates_forgeHeadRegistered(t *testing.T) {
+func TestTemplates_smeldrHeadRegistered(t *testing.T) {
 	dir := t.TempDir()
 	writeTplFile(t, dir, "list.html", `<p>list</p>`)
 	writeTplFile(t, dir, "show.html", `<p>show</p>`)
@@ -108,7 +108,7 @@ func TestTemplates_forgeHeadRegistered(t *testing.T) {
 
 func TestTemplates_noIndexMeta(t *testing.T) {
 	// Execute smeldrHeadTmpl directly — no module needed. FuncMap required
-	// because smeldr:head uses forge_rfc3339 for article:published_time.
+	// because smeldr:head uses smeldr_rfc3339 for article:published_time.
 	tpl := template.Must(template.New("test").Funcs(TemplateFuncMap()).Parse(smeldrHeadTmpl))
 	var buf bytes.Buffer
 	h := Head{Title: "Test Page", NoIndex: true}

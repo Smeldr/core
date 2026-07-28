@@ -1,8 +1,8 @@
 package smeldr
 
-// sitemap.go provides event-driven XML sitemap generation for Forge modules.
+// sitemap.go provides event-driven XML sitemap generation for Smeldr modules.
 // Each module with a [SitemapConfig] option owns a fragment sitemap
-// (e.g. /posts/sitemap.xml). Forge merges all fragments into /sitemap.xml
+// (e.g. /posts/sitemap.xml). Smeldr merges all fragments into /sitemap.xml
 // as a sitemap index. See Decision 9.
 
 import (
@@ -78,7 +78,7 @@ type SitemapPrioritiser interface {
 
 // SitemapNode is the type constraint for [SitemapEntries]. It is satisfied by
 // any pointer to a struct that embeds [Node] and implements [Headable].
-// All Forge content types that embed Node satisfy this constraint automatically
+// All Smeldr content types that embed Node satisfy this constraint automatically
 // after Amendment A2.
 type SitemapNode interface {
 	Headable
@@ -236,7 +236,7 @@ func WriteSitemapIndex(w io.Writer, fragmentURLs []string, lastMod time.Time) er
 
 // — SitemapStore ——————————————————————————————————————————————————————————
 
-// SitemapStore holds the latest generated sitemap fragments in memory. Forge
+// SitemapStore holds the latest generated sitemap fragments in memory. Smeldr
 // populates it automatically via the debouncer on every publish/unpublish
 // event. It is safe for concurrent use by multiple goroutines.
 type SitemapStore struct {

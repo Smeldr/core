@@ -8,12 +8,12 @@ type MCPOperation string
 
 const (
 	// MCPRead signals that this module should be exposed as a read-only MCP
-	// resource. The forge-mcp server will include it in resources/list and
+	// resource. The mcp server will include it in resources/list and
 	// resources/read responses. See [MCPModule].
 	MCPRead MCPOperation = "read"
 
 	// MCPWrite signals that this module should be exposed as a read+write MCP
-	// resource. The forge-mcp server will generate tools for create, update,
+	// resource. The mcp server will generate tools for create, update,
 	// publish, schedule, archive, and delete operations. See [MCPModule].
 	MCPWrite MCPOperation = "write"
 )
@@ -48,12 +48,12 @@ type MCPMeta struct {
 }
 
 // MCPField describes a single field in a content type's MCP schema, derived
-// automatically from the Go struct type and forge: struct tags.
+// automatically from the Go struct type and smeldr: struct tags.
 // Returned by [MCPModule.MCPSchema].
 //
 // The optional [MCPField.Format] and [MCPField.Description] fields are
 // populated from the smeldr_format and smeldr_description struct tags
-// respectively (Decision 27). Both are hints only — Forge performs no
+// respectively (Decision 27). Both are hints only — Smeldr performs no
 // validation based on either value.
 type MCPField struct {
 	Name        string // Go field name
@@ -68,7 +68,7 @@ type MCPField struct {
 }
 
 // MCPModule is implemented by any [Module][T] that has been registered with
-// [MCP]. forge-mcp reads this interface to build MCP resources and tools
+// [MCP]. mcp reads this interface to build MCP resources and tools
 // without accessing Module internals directly.
 //
 // All methods receive a [Context] carrying the authenticated user. Callers
@@ -87,7 +87,7 @@ type MCPModule interface {
 	// MCPGet returns the item with the given slug.
 	// MCPGet does not filter by lifecycle status — it returns the item
 	// regardless of status. Callers are responsible for enforcing lifecycle
-	// rules (e.g. forge-mcp checks that the item is Published before
+	// rules (e.g. mcp checks that the item is Published before
 	// including it in a resources/read response).
 	MCPGet(ctx Context, slug string) (any, error)
 	// MCPCreate creates a new item from the given fields map.

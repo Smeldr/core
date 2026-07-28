@@ -119,7 +119,7 @@ func TestRenderMarkdown(t *testing.T) {
 
 	t.Run("XSS in paragraph content", func(t *testing.T) {
 		// A standalone line starting with '<' is emitted verbatim (HTML passthrough).
-		// Forge is self-hosted; authors are trusted. This is intentional behaviour.
+		// Smeldr is self-hosted; authors are trusted. This is intentional behaviour.
 		got := string(renderMarkdown("<script>alert(1)</script>"))
 		if !containsUnescaped(got, "<script>alert(1)</script>") {
 			t.Errorf("expected verbatim passthrough, got: %q", got)

@@ -227,9 +227,9 @@ func TestCookieSessionValid(t *testing.T) {
 	tok := signedToken(t, user)
 
 	req, _ := http.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "forge_session", Value: tok})
+	req.AddCookie(&http.Cookie{Name: "smeldr_session", Value: tok})
 
-	fn := CookieSession("forge_session", testSecret)
+	fn := CookieSession("smeldr_session", testSecret)
 	got, ok := fn.authenticate(req)
 	if !ok {
 		t.Fatal("expected ok=true")
@@ -241,9 +241,9 @@ func TestCookieSessionValid(t *testing.T) {
 
 func TestCookieSessionInvalid(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "forge_session", Value: "not.avalid.token"})
+	req.AddCookie(&http.Cookie{Name: "smeldr_session", Value: "not.avalid.token"})
 
-	fn := CookieSession("forge_session", testSecret)
+	fn := CookieSession("smeldr_session", testSecret)
 	_, ok := fn.authenticate(req)
 	if ok {
 		t.Fatal("expected ok=false for invalid cookie value")
@@ -252,7 +252,7 @@ func TestCookieSessionInvalid(t *testing.T) {
 
 func TestCookieSessionNoCookie(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "/", nil)
-	fn := CookieSession("forge_session", testSecret)
+	fn := CookieSession("smeldr_session", testSecret)
 	_, ok := fn.authenticate(req)
 	if ok {
 		t.Fatal("expected ok=false for missing cookie")
@@ -260,7 +260,7 @@ func TestCookieSessionNoCookie(t *testing.T) {
 }
 
 func TestCookieSessionCSRFEnabled(t *testing.T) {
-	fn := CookieSession("forge_session", testSecret)
+	fn := CookieSession("smeldr_session", testSecret)
 	ca, ok := fn.(csrfAware)
 	if !ok {
 		t.Fatal("CookieSession must implement csrfAware")
@@ -271,7 +271,7 @@ func TestCookieSessionCSRFEnabled(t *testing.T) {
 }
 
 func TestCookieSessionWithoutCSRF(t *testing.T) {
-	fn := CookieSession("forge_session", testSecret, WithoutCSRF)
+	fn := CookieSession("smeldr_session", testSecret, WithoutCSRF)
 	ca, ok := fn.(csrfAware)
 	if !ok {
 		t.Fatal("CookieSession must implement csrfAware")
@@ -352,7 +352,7 @@ func TestAnyAuthFirstWins(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+tok)
 
 	// bearerHMAC succeeds; cookieSession would fail (no cookie).
-	fn := AnyAuth(BearerHMAC(testSecret), CookieSession("forge_session", testSecret))
+	fn := AnyAuth(BearerHMAC(testSecret), CookieSession("smeldr_session", testSecret))
 	got, ok := fn.authenticate(req)
 	if !ok {
 		t.Fatal("expected ok=true")
@@ -364,7 +364,7 @@ func TestAnyAuthFirstWins(t *testing.T) {
 
 func TestAnyAuthNoneMatch(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "/", nil) // no headers, no cookies
-	fn := AnyAuth(BearerHMAC(testSecret), CookieSession("forge_session", testSecret))
+	fn := AnyAuth(BearerHMAC(testSecret), CookieSession("smeldr_session", testSecret))
 	_, ok := fn.authenticate(req)
 	if ok {
 		t.Fatal("expected ok=false when no AuthFunc matches")
@@ -389,7 +389,7 @@ func TestAnyAuthForwardsWarn(t *testing.T) {
 
 func TestAnyAuthCSRFAware(t *testing.T) {
 	t.Run("CSRF enabled when CookieSession present", func(t *testing.T) {
-		fn := AnyAuth(BearerHMAC(testSecret), CookieSession("forge_session", testSecret))
+		fn := AnyAuth(BearerHMAC(testSecret), CookieSession("smeldr_session", testSecret))
 		ca, ok := fn.(csrfAware)
 		if !ok {
 			t.Fatal("AnyAuth must implement csrfAware")
@@ -409,7 +409,7 @@ func TestAnyAuthCSRFAware(t *testing.T) {
 		}
 	})
 	t.Run("CSRF disabled via WithoutCSRF", func(t *testing.T) {
-		fn := AnyAuth(CookieSession("forge_session", testSecret, WithoutCSRF))
+		fn := AnyAuth(CookieSession("smeldr_session", testSecret, WithoutCSRF))
 		ca := fn.(csrfAware)
 		if ca.csrfEnabled() {
 			t.Fatal("expected csrfEnabled()=false with WithoutCSRF")

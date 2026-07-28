@@ -420,7 +420,7 @@ func SchemaFor(head Head, content any) string {
 // — AppSchema —————————————————————————————————————————————————————————————
 
 // AppSchema registers app-level JSON-LD structured data emitted in every
-// page's <head> by forge:head. Use it to declare site-wide Organisation or
+// page's <head> by smeldr:head. Use it to declare site-wide Organisation or
 // WebSite metadata once rather than per content type.
 //
 // Apply via [App.SEO]:

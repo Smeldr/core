@@ -83,7 +83,7 @@ Supported `smeldr_format` values:
 | `markdown` | CommonMark/GFM markdown — also covers plain text |
 | `html` | Trusted raw HTML — caller is responsible for sanitisation |
 
-These tags are hints only. Forge performs no validation based on them.
+These tags are hints only. Smeldr performs no validation based on them.
 
 ### Wiring a module
 

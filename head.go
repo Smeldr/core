@@ -22,7 +22,7 @@ type Image struct {
 // — Alternate —————————————————————————————————————————————————————————————
 
 // Alternate is an hreflang entry for internationalised pages.
-// Reserved for v2 — Forge always generates an empty Alternates slice in v1.
+// Reserved for v2 — Smeldr always generates an empty Alternates slice in v1.
 type Alternate struct {
 	Locale string // BCP 47 language tag, e.g. "en-GB"
 	URL    string // absolute URL for this locale
@@ -93,7 +93,7 @@ type SocialOverrides struct {
 
 // Head carries all SEO and social metadata for a content page.
 // Define it on your content type via the Headable interface.
-// Forge uses the Head to populate HTML <head> tags, JSON-LD structured data,
+// Smeldr uses the Head to populate HTML <head> tags, JSON-LD structured data,
 // sitemaps, RSS feeds, and AI endpoints.
 //
 // All fields are optional: the zero value is safe and produces a minimal page header.
@@ -149,7 +149,7 @@ type ScriptTag struct {
 
 // HeadAssets is an [SEOOption] that injects static linked assets —
 // preconnect hints, stylesheets, link elements, and scripts — into the
-// forge:head partial on every page.
+// smeldr:head partial on every page.
 //
 // Apply it via [App.SEO]:
 //
@@ -183,9 +183,9 @@ func (h *HeadAssets) applySEO(s *seoState) { s.headAssets = h }
 
 // — PageHead ——————————————————————————————————————————————————————————————
 
-// PageHead holds the framework-owned fields that [forge:head] reads.
+// PageHead holds the framework-owned fields that [smeldr:head] reads.
 // Embed PageHead in any custom handler data struct to enable
-// {{template "forge:head" .}} without using [TemplateData].
+// {{template "smeldr:head" .}} without using [TemplateData].
 //
 // Example:
 //

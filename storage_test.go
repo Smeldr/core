@@ -54,45 +54,45 @@ func getLastQuery() string {
 	return q
 }
 
-// fakeExecResult is returned by forgeTestStmt.Exec.
+// fakeExecResult is returned by smeldrTestStmt.Exec.
 type fakeExecResult struct{ n int64 }
 
 func (r fakeExecResult) LastInsertId() (int64, error) { return 0, nil }
 func (r fakeExecResult) RowsAffected() (int64, error) { return r.n, nil }
 
-type forgeTestDriver struct{}
+type smeldrTestDriver struct{}
 
-func (forgeTestDriver) Open(_ string) (driver.Conn, error) {
-	return &forgeTestConn{}, nil
+func (smeldrTestDriver) Open(_ string) (driver.Conn, error) {
+	return &smeldrTestConn{}, nil
 }
 
-type forgeTestConn struct{}
+type smeldrTestConn struct{}
 
-func (forgeTestConn) Prepare(query string) (driver.Stmt, error) {
+func (smeldrTestConn) Prepare(query string) (driver.Stmt, error) {
 	fakeQueryMu.Lock()
 	fakeLastQuery = query
 	fakeQueryMu.Unlock()
-	return &forgeTestStmt{}, nil
+	return &smeldrTestStmt{}, nil
 }
-func (forgeTestConn) Close() error              { return nil }
-func (forgeTestConn) Begin() (driver.Tx, error) { return &forgeTestTx{}, nil }
+func (smeldrTestConn) Close() error              { return nil }
+func (smeldrTestConn) Begin() (driver.Tx, error) { return &smeldrTestTx{}, nil }
 
-type forgeTestTx struct{}
+type smeldrTestTx struct{}
 
-func (forgeTestTx) Commit() error   { return nil }
-func (forgeTestTx) Rollback() error { return nil }
+func (smeldrTestTx) Commit() error   { return nil }
+func (smeldrTestTx) Rollback() error { return nil }
 
-type forgeTestStmt struct{}
+type smeldrTestStmt struct{}
 
-func (forgeTestStmt) Close() error  { return nil }
-func (forgeTestStmt) NumInput() int { return -1 }
-func (forgeTestStmt) Exec(_ []driver.Value) (driver.Result, error) {
+func (smeldrTestStmt) Close() error  { return nil }
+func (smeldrTestStmt) NumInput() int { return -1 }
+func (smeldrTestStmt) Exec(_ []driver.Value) (driver.Result, error) {
 	fakeQueryMu.Lock()
 	n := fakeExecRows
 	fakeQueryMu.Unlock()
 	return fakeExecResult{n: n}, nil
 }
-func (forgeTestStmt) Query(_ []driver.Value) (driver.Rows, error) {
+func (smeldrTestStmt) Query(_ []driver.Value) (driver.Rows, error) {
 	fakeResultMu.Lock()
 	cols := append([]string(nil), fakeResultCols...)
 	rows := make([][]driver.Value, len(fakeResultRows))
@@ -100,18 +100,18 @@ func (forgeTestStmt) Query(_ []driver.Value) (driver.Rows, error) {
 		rows[i] = append([]driver.Value(nil), r...)
 	}
 	fakeResultMu.Unlock()
-	return &forgeTestRows{cols: cols, rows: rows}, nil
+	return &smeldrTestRows{cols: cols, rows: rows}, nil
 }
 
-type forgeTestRows struct {
+type smeldrTestRows struct {
 	cols []string
 	rows [][]driver.Value
 	pos  int
 }
 
-func (r *forgeTestRows) Columns() []string { return r.cols }
-func (r *forgeTestRows) Close() error      { return nil }
-func (r *forgeTestRows) Next(dest []driver.Value) error {
+func (r *smeldrTestRows) Columns() []string { return r.cols }
+func (r *smeldrTestRows) Close() error      { return nil }
+func (r *smeldrTestRows) Next(dest []driver.Value) error {
 	if r.pos >= len(r.rows) {
 		return io.EOF
 	}
@@ -122,12 +122,12 @@ func (r *forgeTestRows) Next(dest []driver.Value) error {
 
 // Register the fake driver once for the entire test binary.
 func init() {
-	sql.Register("forge_test", forgeTestDriver{})
+	sql.Register("smeldr_test", smeldrTestDriver{})
 }
 
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("forge_test", "")
+	db, err := sql.Open("smeldr_test", "")
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestMemoryRepoSaveUpdates(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func BenchmarkQueryScanCached(b *testing.B) {
-	db, _ := sql.Open("forge_test", "")
+	db, _ := sql.Open("smeldr_test", "")
 	defer db.Close()
 
 	setFakeResult(
@@ -479,7 +479,7 @@ func BenchmarkQueryScanCached(b *testing.B) {
 
 // BlogPost and PageContent are test-only types used to exercise SQLRepo[T]
 // table-name derivation and query generation. They live here in the test
-// binary only and are not exported from the forge package.
+// binary only and are not exported from the smeldr package.
 type BlogPost struct {
 	ID    string `db:"id"`
 	Title string `db:"title"`

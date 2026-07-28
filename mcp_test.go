@@ -92,7 +92,7 @@ func TestSnakeCase(t *testing.T) {
 }
 
 // TestMCPSchema verifies that MCPSchema derives the correct fields from a
-// content type's struct definition and forge: tags.
+// content type's struct definition and smeldr: tags.
 func TestMCPSchema(t *testing.T) {
 	// testPost has: Node (embedded), Title smeldr:"required", Body (no tag).
 	repo := NewMemoryRepo[*testPost]()

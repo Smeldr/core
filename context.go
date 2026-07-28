@@ -19,21 +19,21 @@ type User struct {
 	// Name is the display name. Empty for unauthenticated guests.
 	Name string
 
-	// Roles is the set of roles held by this user. Forge's hierarchical
+	// Roles is the set of roles held by this user. Smeldr's hierarchical
 	// permission checks ([HasRole], [IsRole]) operate on this slice.
 	Roles []Role
 }
 
 // GuestUser is the zero-value User representing an unauthenticated request.
-// Forge sets ctx.User() to GuestUser when no authentication middleware has
+// Smeldr sets ctx.User() to GuestUser when no authentication middleware has
 // identified the caller.
 var GuestUser = User{}
 
-// Context is the request-scoped value passed to every Forge hook and handler.
+// Context is the request-scoped value passed to every Smeldr hook and handler.
 // It embeds [context.Context] for full compatibility with stdlib and third-party
-// libraries, while exposing Forge-specific accessors without key-based lookups.
+// libraries, while exposing Smeldr-specific accessors without key-based lookups.
 //
-// smeldr.Context is always non-nil — Forge guarantees this before any user code
+// smeldr.Context is always non-nil — Smeldr guarantees this before any user code
 // is called. The internal implementation is [contextImpl] (unexported).
 // Use [ContextFrom] in production and [NewTestContext] in tests.
 type Context interface {
@@ -62,7 +62,7 @@ type Context interface {
 	Response() http.ResponseWriter
 }
 
-// contextKey is the unexported type used to store forge values in a
+// contextKey is the unexported type used to store smeldr values in a
 // context.Context without colliding with other packages' keys.
 type contextKey int
 

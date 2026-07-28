@@ -296,7 +296,7 @@ func TestBlog(t *testing.T) {
 	})
 
 	t.Run("auth/unauthenticatedWriteReturns403", func(t *testing.T) {
-		// Forge: anonymous requests are treated as Guest role (level 10).
+		// Smeldr: anonymous requests are treated as Guest role (level 10).
 		// Write requires Author (level 20), so the response is 403 Forbidden —
 		// not 401 Unauthorized, which would indicate an unknown identity.
 		payload := map[string]any{"Title": "Unauth Post", "Body": "Should be rejected by auth middleware."}
@@ -395,7 +395,7 @@ func TestBlog(t *testing.T) {
 		slug := mustPost(t, srvURL, authorToken, "LLMs Txt Test Post", "Content for the AI index test; must be long enough.")
 		mustPublish(t, srvURL, authorToken, slug)
 
-		// Forge: the AI index is rebuilt by a 2-second debouncer after each
+		// Smeldr: the AI index is rebuilt by a 2-second debouncer after each
 		// publish. Poll /llms.txt until the slug appears or the deadline passes.
 		deadline := time.Now().Add(5 * time.Second)
 		var body string
@@ -510,7 +510,7 @@ func TestBlogSignal(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBlogFullServer(t *testing.T) {
-	// Forge: buildFullTestServer pre-seeds a scheduled post into the DB before
+	// Smeldr: buildFullTestServer pre-seeds a scheduled post into the DB before
 	// the server starts. The scheduler's initial tick (inside app.Run) publishes
 	// it before ListenAndServe begins accepting requests, so the post is already
 	// Published by the time this test function receives control.

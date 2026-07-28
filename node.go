@@ -13,7 +13,7 @@ import (
 )
 
 // Status is the content lifecycle state. All content types embed [Node] and
-// therefore always carry a Status. Forge enforces lifecycle rules on all public
+// therefore always carry a Status. Smeldr enforces lifecycle rules on all public
 // endpoints — non-Published content is never publicly visible.
 type Status string
 
@@ -34,7 +34,7 @@ const (
 	Archived Status = "archived"
 )
 
-// Node is the base type embedded by every Forge content type. It carries the
+// Node is the base type embedded by every Smeldr content type. It carries the
 // stable UUID identity, the URL slug, and the full content lifecycle.
 //
 // Content types must embed Node as a value (not a pointer):
@@ -57,7 +57,7 @@ type Node struct {
 	// set explicitly. May be changed; the old URL should redirect.
 	Slug string
 
-	// Status is the lifecycle state. Forge enforces this on every public
+	// Status is the lifecycle state. Smeldr enforces this on every public
 	// endpoint. See Decision 14.
 	Status Status
 

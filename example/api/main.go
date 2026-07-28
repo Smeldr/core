@@ -1,4 +1,4 @@
-// Package main is a self-contained Forge JSON API — a Go resource curator —
+// Package main is a self-contained Smeldr JSON API — a Go resource curator —
 // demonstrating authentication, role-based authorisation, validation hooks,
 // and legacy URL redirects with no HTML templates.
 //
@@ -42,7 +42,7 @@ import (
 // validates incoming tokens) and smeldr.SignToken (which issued them).
 // In production read this from an environment variable or secrets store —
 // never hard-code it.
-const secret = "forge-api-example-secret-32bytes!"
+const secret = "smeldr-api-example-secret-32bytes!"
 
 // NOTE: tokens are hardcoded for demonstration only.
 // In production use smeldr.SignToken to issue signed HMAC tokens.
@@ -54,7 +54,7 @@ var (
 func init() {
 	var err error
 
-	// Forge: SignToken signs a User into a bearer token verified by BearerHMAC.
+	// Smeldr: SignToken signs a User into a bearer token verified by BearerHMAC.
 	// ttl=0 means the token never expires — set a finite duration in production.
 	editorToken, err = smeldr.SignToken(
 		smeldr.User{ID: "editor-1", Name: "Alice", Roles: []smeldr.Role{smeldr.Editor}},
@@ -85,7 +85,7 @@ type Resource struct {
 }
 
 // Head implements [smeldr.Headable] so Resource satisfies [smeldr.SitemapNode].
-// Forge calls Head() when building the sitemap fragment at /resources/sitemap.xml.
+// Smeldr calls Head() when building the sitemap fragment at /resources/sitemap.xml.
 // In HTML mode the Description field populates the <meta name="description"> tag.
 func (r *Resource) Head() smeldr.Head {
 	return smeldr.Head{
@@ -121,7 +121,7 @@ func runServer(withHTML bool) {
 	repo := smeldr.NewMemoryRepo[*Resource]()
 	seed(repo)
 
-	// Forge: BearerHMAC validates Authorization: Bearer <token> on every request.
+	// Smeldr: BearerHMAC validates Authorization: Bearer <token> on every request.
 	// It returns an AuthFunc — pair it with smeldr.Authenticate to populate
 	// Context.User() so module role checks (smeldr.Auth) evaluate correctly.
 	auth := smeldr.BearerHMAC(secret)
@@ -132,7 +132,7 @@ func runServer(withHTML bool) {
 		smeldr.At("/resources"),
 		smeldr.Repo(repo),
 
-		// Forge: Auth(Read(Guest), Write(Editor)) sets the minimum role for each
+		// Smeldr: Auth(Read(Guest), Write(Editor)) sets the minimum role for each
 		// operation class. Guest means no token required to read. Editor means
 		// a valid Editor-or-higher token is required to create or update.
 		smeldr.Auth(
@@ -140,7 +140,7 @@ func runServer(withHTML bool) {
 			smeldr.Write(smeldr.Editor), // POST /resources and PUT /resources/{slug} — Editor+
 		),
 
-		// Forge: BeforeCreate fires synchronously before the item is saved.
+		// Smeldr: BeforeCreate fires synchronously before the item is saved.
 		// Returning a non-nil error aborts the create and sends a 422 response.
 		// smeldr.Err creates a smeldr.ValidationError carrying a field-level message.
 		smeldr.On(smeldr.BeforeCreate, func(_ smeldr.Context, r *Resource) error {
@@ -150,20 +150,20 @@ func runServer(withHTML bool) {
 			return nil
 		}),
 
-		// Forge: SitemapConfig{} registers a sitemap fragment at /resources/sitemap.xml.
+		// Smeldr: SitemapConfig{} registers a sitemap fragment at /resources/sitemap.xml.
 		// The app-level sitemap index at /sitemap.xml aggregates all module fragments.
 		smeldr.SitemapConfig{},
 
-		// Forge: Feed(FeedConfig{}) registers an RSS 2.0 feed at /resources/feed.xml.
-		smeldr.Feed(smeldr.FeedConfig{Title: "Forge API — Resources", Description: "Curated Go community resources"}),
+		// Smeldr: Feed(FeedConfig{}) registers an RSS 2.0 feed at /resources/feed.xml.
+		smeldr.Feed(smeldr.FeedConfig{Title: "Smeldr API — Resources", Description: "Curated Go community resources"}),
 
-		// Forge: AIIndex registers AI discovery endpoints.
+		// Smeldr: AIIndex registers AI discovery endpoints.
 		//   /llms.txt          — compact content index (llmstxt.org format)
 		//   /llms-full.txt     — full markdown corpus (requires Markdownable)
 		smeldr.AIIndex(smeldr.LLMsTxt, smeldr.LLMsTxtFull),
 	}
 	if withHTML {
-		// Forge: Templates("templates") enables HTML rendering. Forge parses
+		// Smeldr: Templates("templates") enables HTML rendering. Smeldr parses
 		// templates/list.html (GET /resources) and templates/show.html
 		// (GET /resources/{slug}) at startup. The JSON API routes continue to
 		// work — clients sending Accept: application/json still get JSON.
@@ -176,7 +176,7 @@ func runServer(withHTML bool) {
 		Secret:  []byte(secret),
 	}))
 
-	// Forge: Authenticate(auth) runs BearerHMAC on every inbound request and
+	// Smeldr: Authenticate(auth) runs BearerHMAC on every inbound request and
 	// stores the User in the request context so Context.User() returns it.
 	// Without this middleware, ctx.User() always returns GuestUser and the
 	// write-role check in smeldr.Auth would never pass.
@@ -193,7 +193,7 @@ func runServer(withHTML bool) {
 		smeldr.RateLimit(100, time.Second),
 	)
 
-	// Forge: Redirects(From("/resources/go-spec"), "/resources/go-language-spec")
+	// Smeldr: Redirects(From("/resources/go-spec"), "/resources/go-language-spec")
 	// registers the 301 rule in the RedirectStore so it appears in the manifest
 	// at /.well-known/redirects.json. The explicit Handle below registers the same
 	// redirect as a fixed mux route so it takes priority over GET /resources/{slug}.
@@ -208,7 +208,7 @@ func runServer(withHTML bool) {
 	// Fixed-path patterns beat wildcard patterns in Go 1.22's mux.
 	app.Handle("GET /resources/go-spec", http.RedirectHandler("/resources/go-language-spec", http.StatusMovedPermanently))
 
-	// Forge: SEO(&RobotsConfig{Sitemaps: true}) registers GET /robots.txt and
+	// Smeldr: SEO(&RobotsConfig{Sitemaps: true}) registers GET /robots.txt and
 	// appends the sitemap index URL to its Sitemap: directives.
 	app.SEO(&smeldr.RobotsConfig{Sitemaps: true})
 
@@ -217,7 +217,7 @@ func runServer(withHTML bool) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Forge API Example</title>
+<head><meta charset="utf-8"><title>Smeldr API Example</title>
 <style>
 body{font-family:system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 24px;color:#1a1a1a}
 h1{font-size:1.8rem;margin-bottom:.25rem}p{color:#555;line-height:1.6}
@@ -230,8 +230,8 @@ footer a{color:#2563eb}
 </style>
 </head>
 <body>
-<h1>Forge API Example</h1>
-<p>A headless JSON API built with Forge. Demonstrates authentication, role-based authorisation, validation hooks, and legacy URL redirects.</p>
+<h1>Smeldr API Example</h1>
+<p>A headless JSON API built with Smeldr. Demonstrates authentication, role-based authorisation, validation hooks, and legacy URL redirects.</p>
 <h2>Read endpoints (public)</h2>
 <ul>
   <li><a href="/resources"><code>GET /resources</code></a> &#8212; list published resources</li>
@@ -265,7 +265,7 @@ footer a{color:#2563eb}
 	}))
 
 	if withHTML {
-		log.Println("Forge API (HTML mode) -- http://localhost:8082")
+		log.Println("Smeldr API (HTML mode) -- http://localhost:8082")
 		log.Println("")
 		log.Println("  HTML pages:")
 		log.Println("    http://localhost:8082/resources")
@@ -275,7 +275,7 @@ footer a{color:#2563eb}
 		log.Println("")
 		log.Println("  Editor token (Alice):", editorToken)
 	} else {
-		log.Println("Forge API -- http://localhost:8082")
+		log.Println("Smeldr API -- http://localhost:8082")
 		log.Println("")
 		log.Println("  Editor token (Alice):", editorToken)
 		log.Println("  Author token (Bob):  ", authorToken)

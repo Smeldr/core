@@ -265,7 +265,7 @@ func TestRunValidationMultiConstraint(t *testing.T) {
 	}
 }
 
-// TestRunValidationUnknownTagPanics verifies that an unrecognised forge tag
+// TestRunValidationUnknownTagPanics verifies that an unrecognised smeldr tag
 // key causes a panic on first use — fail-fast at startup.
 func TestRunValidationUnknownTagPanics(t *testing.T) {
 	type Bad struct {

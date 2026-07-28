@@ -427,7 +427,7 @@ func TestApp_RedirectStore(t *testing.T) {
 // ——————————————————————————————————————————————————————————————
 
 // TestApp_health_ok verifies that GET /_health returns 200 application/json
-// with a body containing "status":"ok" (A42) and a "forge" version key
+// with a body containing "status":"ok" (A42) and a "core" version key
 // sourced from build info (A58).
 func TestApp_health_ok(t *testing.T) {
 	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
@@ -449,9 +449,9 @@ func TestApp_health_ok(t *testing.T) {
 	}
 }
 
-// TestApp_health_forgeVersion verifies that GET /_health includes the
+// TestApp_health_coreVersion verifies that GET /_health includes the
 // "core" key populated from binary build info (Amendment A58, updated A104).
-func TestApp_health_forgeVersion(t *testing.T) {
+func TestApp_health_coreVersion(t *testing.T) {
 	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
 	app.Health()
 
@@ -469,7 +469,7 @@ func TestApp_health_forgeVersion(t *testing.T) {
 
 // TestApp_health_configVersion_notExposed verifies that Config.Version is NOT
 // included in the /_health JSON response (Amendment A58: app-level versioning
-// is no longer forge core's responsibility).
+// is no longer core's responsibility).
 func TestApp_health_configVersion_notExposed(t *testing.T) {
 	app := New(Config{
 		BaseURL: "https://example.com",

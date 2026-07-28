@@ -285,7 +285,7 @@ func (b *bearerAuthFn) authenticate(r *http.Request) (User, bool) {
 // Pass nil to skip database verification and use HMAC-only validation.
 //
 // This is the public counterpart to the unexported authenticate method on
-// [BearerHMAC] and is intended for use outside the forge package (e.g. forge-mcp
+// [BearerHMAC] and is intended for use outside the smeldr package (e.g. mcp's
 // SSE transport) where [AuthFunc] is not directly callable.
 func VerifyBearerToken(r *http.Request, secret []byte, store *TokenStore) (User, bool) {
 	hdr := r.Header.Get("Authorization")
@@ -321,8 +321,8 @@ func VerifyBearerToken(r *http.Request, secret []byte, store *TokenStore) (User,
 // smeldr_tokens table, and returns the authenticated [User] and true on success.
 //
 // Use VerifyTokenString when the caller already holds the raw token value —
-// for example, when a downstream server (forge-oauth) needs to validate a
-// Forge token without constructing a synthetic HTTP request. For regular HTTP
+// for example, when a downstream server (oauth) needs to validate a
+// Smeldr token without constructing a synthetic HTTP request. For regular HTTP
 // middleware, prefer [VerifyBearerToken] which extracts the token from the
 // Authorization header itself.
 //
@@ -379,7 +379,7 @@ type TokenRecord struct {
 // database table. Use [NewTokenStore] to create one; wire it into
 // [Config.TokenStore] to activate database-backed token verification.
 //
-// The smeldr_tokens table must exist before the application starts. Forge does
+// The smeldr_tokens table must exist before the application starts. Smeldr does
 // not create or migrate it automatically. Required DDL:
 //
 //	CREATE TABLE smeldr_tokens (
@@ -572,7 +572,7 @@ func (c *cookieAuthFn) csrfEnabled() bool {
 
 // — BasicAuth ——————————————————————————————————————————————————————————————
 
-const basicAuthWarn = `WARN  forge: BasicAuth is enabled in a non-development environment.
+const basicAuthWarn = `WARN  smeldr: BasicAuth is enabled in a non-development environment.
       BasicAuth sends credentials on every request and has no session management.
       Consider smeldr.BearerHMAC or smeldr.CookieSession for production use.`
 

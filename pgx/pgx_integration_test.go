@@ -1,6 +1,6 @@
 //go:build integration
 
-package forgepgx
+package pgx
 
 import (
 	"context"
@@ -35,21 +35,21 @@ func TestWrap_integration(t *testing.T) {
 
 	// Create a temporary table.
 	_, err = db.ExecContext(ctx,
-		`CREATE TEMP TABLE forgepgx_test (id TEXT PRIMARY KEY, name TEXT NOT NULL)`)
+		`CREATE TEMP TABLE smeldr_pgx_test (id TEXT PRIMARY KEY, name TEXT NOT NULL)`)
 	if err != nil {
 		t.Fatalf("ExecContext CREATE: %v", err)
 	}
 
 	// Insert a row.
 	_, err = db.ExecContext(ctx,
-		`INSERT INTO forgepgx_test (id, name) VALUES ($1, $2)`, "1", "hello")
+		`INSERT INTO smeldr_pgx_test (id, name) VALUES ($1, $2)`, "1", "hello")
 	if err != nil {
 		t.Fatalf("ExecContext INSERT: %v", err)
 	}
 
 	// QueryRowContext — single row.
 	var name string
-	r := db.QueryRowContext(ctx, `SELECT name FROM forgepgx_test WHERE id = $1`, "1")
+	r := db.QueryRowContext(ctx, `SELECT name FROM smeldr_pgx_test WHERE id = $1`, "1")
 	if err := r.Scan(&name); err != nil {
 		t.Fatalf("QueryRowContext Scan: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestWrap_integration(t *testing.T) {
 		ID   string
 		Name string
 	}
-	rows, err := smeldr.Query[testRow](ctx, db, `SELECT id, name FROM forgepgx_test`)
+	rows, err := smeldr.Query[testRow](ctx, db, `SELECT id, name FROM smeldr_pgx_test`)
 	if err != nil {
 		t.Fatalf("smeldr.Query: %v", err)
 	}
@@ -77,9 +77,9 @@ func TestWrap_integration(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Repository parity suite
 //
-// pgxParityItem mirrors parityItem from forge/storage_test.go. It cannot be
-// imported directly because pgx is a separate Go module and internal
-// packages are not accessible across module boundaries (Approach A).
+// pgxParityItem mirrors parityItem from storage_test.go (root core module).
+// It cannot be imported directly because pgx is a separate Go module and
+// internal packages are not accessible across module boundaries (Approach A).
 // ---------------------------------------------------------------------------
 
 // pgxParityItem is the content type used by the pgx parity suite.
@@ -90,10 +90,11 @@ type pgxParityItem struct {
 	Status string `db:"status"`
 }
 
-// runForgePgxRepoParity defines the behavioural contract for Repository[T]
+// runPgxRepoParity defines the behavioural contract for Repository[T]
 // and runs it against the provided repo. Mirrors runRepoParity in
-// forge/storage_test.go — both must stay in sync with the parity contract.
-func runForgePgxRepoParity(t *testing.T, repo smeldr.Repository[pgxParityItem]) {
+// storage_test.go (root core module) — both must stay in sync with the
+// parity contract.
+func runPgxRepoParity(t *testing.T, repo smeldr.Repository[pgxParityItem]) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -263,5 +264,5 @@ func TestRepoParity_pgx(t *testing.T) {
 	})
 
 	repo := smeldr.NewSQLRepo[pgxParityItem](db, smeldr.Table("parity_items"))
-	runForgePgxRepoParity(t, repo)
+	runPgxRepoParity(t, repo)
 }

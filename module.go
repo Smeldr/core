@@ -238,7 +238,7 @@ func (apiOnlyOption) isOption() {}
 // prefix is not a browsable URL.
 //
 // Use APIOnly for content types that are exclusively managed via MCP tools or
-// forge-cli and have no template or public HTML representation:
+// cli and have no template or public HTML representation:
 //
 //	smeldr.NewModule((*HomePage)(nil),
 //	    smeldr.At("/home-pages"),
@@ -249,7 +249,7 @@ func (apiOnlyOption) isOption() {}
 //
 // MCP tools are generated in full — the same as a regular module.
 // Mutation routes (POST, PUT, DELETE) and JSON GET routes are unchanged.
-// forge-cli works via the REST JSON API without any changes.
+// cli works via the REST JSON API without any changes.
 //
 // Cannot be combined with [SingleInstance] — they are logically incompatible
 // ([SingleInstance] serves HTML at GET /{prefix}; [APIOnly] forbids HTML).
@@ -1973,9 +1973,9 @@ func typeName(t reflect.Type) string {
 //	MCPPost  → mcp_post
 //	BlogID   → blog_id
 //
-// NOTE: This function is intentionally duplicated in forge-mcp/mcp.go.
+// NOTE: This function is intentionally duplicated in smeldr.dev/mcp's mcp.go.
 // The two packages cannot import each other, so each carries its own copy.
-// Any change to the algorithm here must be mirrored in forge-mcp/mcp.go, and vice versa.
+// Any change to the algorithm here must be mirrored there, and vice versa.
 func snakeCase(s string) string {
 	runes := []rune(s)
 	var b strings.Builder
@@ -2037,8 +2037,8 @@ func mcpJSONName(sf reflect.StructField) string {
 	return snakeCase(sf.Name)
 }
 
-// mcpParseForgeTag extracts constraint metadata from a forge: struct tag value.
-func mcpParseForgeTag(tag string) (required bool, minLen, maxLen int, enum []string) {
+// mcpParseSmeldrTag extracts constraint metadata from a smeldr: struct tag value.
+func mcpParseSmeldrTag(tag string) (required bool, minLen, maxLen int, enum []string) {
 	for _, part := range strings.Split(tag, ",") {
 		part = strings.TrimSpace(part)
 		switch {
@@ -2065,7 +2065,7 @@ func mcpStructField(sf reflect.StructField) MCPField {
 		Description: sf.Tag.Get("smeldr_description"),
 	}
 	if tag := sf.Tag.Get("smeldr"); tag != "" {
-		f.Required, f.MinLength, f.MaxLength, f.Enum = mcpParseForgeTag(tag)
+		f.Required, f.MinLength, f.MaxLength, f.Enum = mcpParseSmeldrTag(tag)
 	}
 	return f
 }
@@ -2085,7 +2085,7 @@ func (m *Module[T]) MCPMeta() MCPMeta {
 }
 
 // MCPSchema derives the field schema for this module's content type from Go
-// struct fields and forge: struct tags. The embedded smeldr.Node fields Slug,
+// struct fields and smeldr: struct tags. The embedded smeldr.Node fields Slug,
 // Status, PublishedAt, and ScheduledAt are included; ID, CreatedAt, and
 // UpdatedAt are omitted because they are managed by the framework.
 func (m *Module[T]) MCPSchema() []MCPField {

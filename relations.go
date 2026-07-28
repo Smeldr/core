@@ -456,7 +456,7 @@ func (s *RelationStore) MCPUpsertRelationKind(ctx context.Context, def RelationK
 }
 
 // MCPListRelationKinds returns all registered relation kinds sorted by type_name.
-// Thin wrapper over ListKinds so forge-mcp has a uniform MCPXxx naming convention.
+// Thin wrapper over ListKinds so mcp has a uniform MCPXxx naming convention.
 func (s *RelationStore) MCPListRelationKinds() []RelationKindDef {
 	return s.ListKinds()
 }

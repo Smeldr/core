@@ -1,5 +1,5 @@
-// Package main is a self-contained Forge documentation site — an example
-// application demonstrating Forge's AI-first content features:
+// Package main is a self-contained Smeldr documentation site — an example
+// application demonstrating Smeldr's AI-first content features:
 //
 //   - AIDoc per-item endpoints: /docs/{slug}/aidoc (token-efficient format)
 //   - /llms.txt compact content index for AI assistants
@@ -31,7 +31,7 @@ import (
 	"smeldr.dev/core"
 )
 
-// Doc is the content type for a Forge documentation page.
+// Doc is the content type for a Smeldr documentation page.
 // Embedding smeldr.Node provides ID, Slug, Status, and timestamp fields.
 type Doc struct {
 	smeldr.Node
@@ -43,18 +43,18 @@ type Doc struct {
 
 // Head implements smeldr.Headable.
 //
-// Forge: breadcrumbs are emitted as a JSON-LD BreadcrumbList in the page
+// Smeldr: breadcrumbs are emitted as a JSON-LD BreadcrumbList in the page
 // <head>, helping search engines understand the documentation hierarchy.
 // They also render as navigation links in the HTML template.
 func (d *Doc) Head() smeldr.Head {
 	return smeldr.Head{
-		Title:       d.Title + " — Forge Docs",
+		Title:       d.Title + " — Smeldr Docs",
 		Description: d.AISummary(),
-		Author:      "The Forge Team",
+		Author:      "The Smeldr Team",
 		Published:   d.PublishedAt,
 		Type:        "Article",
 		Breadcrumbs: smeldr.Crumbs(
-			smeldr.Crumb("Forge Docs", "/docs"),
+			smeldr.Crumb("Smeldr Docs", "/docs"),
 			smeldr.Crumb(d.Section, "/docs"),
 			smeldr.Crumb(d.Title, "/docs/"+d.Slug),
 		),
@@ -63,7 +63,7 @@ func (d *Doc) Head() smeldr.Head {
 
 // Markdown implements smeldr.Markdownable.
 //
-// Forge: when AIIndex(LLMsTxtFull) is set, Forge concatenates every
+// Smeldr: when AIIndex(LLMsTxtFull) is set, Smeldr concatenates every
 // Published item's Markdown() output into /llms-full.txt. This lets AI
 // assistants fetch the entire documentation corpus in a single request —
 // useful for RAG pipelines, code assistants, and offline AI tooling.
@@ -73,7 +73,7 @@ func (d *Doc) Markdown() string {
 
 // AISummary implements smeldr.AIDocSummary.
 //
-// Forge: the summary: field in AIDoc output comes from AISummary() when the
+// Smeldr: the summary: field in AIDoc output comes from AISummary() when the
 // content type implements this interface. It also populates the description
 // entry in /llms.txt compact format:
 //
@@ -90,32 +90,32 @@ func main() {
 		smeldr.At("/docs"),
 		smeldr.Repo(repo),
 
-		// Forge: AIIndex(LLMsTxt, LLMsTxtFull, AIDoc) enables three AI endpoints:
+		// Smeldr: AIIndex(LLMsTxt, LLMsTxtFull, AIDoc) enables three AI endpoints:
 		//   /llms.txt          — compact content index (llmstxt.org format)
 		//   /llms-full.txt     — full markdown corpus (requires Markdownable)
 		//   /docs/{slug}/aidoc — per-item token-efficient text (requires Markdownable)
 		// Each endpoint is served automatically; no route registration needed.
 		smeldr.AIIndex(smeldr.LLMsTxt, smeldr.LLMsTxtFull, smeldr.AIDoc),
 
-		// Forge: SitemapConfig{} opts this module into /docs/sitemap.xml and
+		// Smeldr: SitemapConfig{} opts this module into /docs/sitemap.xml and
 		// contributes an entry to the /sitemap.xml aggregate index.
 		smeldr.SitemapConfig{},
 
-		// Forge: Templates("templates") parses templates/list.html and
+		// Smeldr: Templates("templates") parses templates/list.html and
 		// templates/show.html at startup. Run() fails fast if either is missing.
 		smeldr.Templates("templates"),
 	)
 
 	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 		BaseURL: "http://localhost:8081",
-		// Forge: Secret is required for HMAC signing even when no auth is used,
+		// Smeldr: Secret is required for HMAC signing even when no auth is used,
 		// because CookieSession middleware (if added later) depends on it.
 		Secret: []byte("change-this-secret-in-production"),
 	}))
 
 	app.Content(m)
 
-	// Forge: RobotsConfig{AIScraper: AskFirst} emits the following in robots.txt:
+	// Smeldr: RobotsConfig{AIScraper: AskFirst} emits the following in robots.txt:
 	//
 	//   User-agent: GPTBot
 	//   Disallow: /
@@ -140,7 +140,7 @@ func main() {
 		}
 	}))
 
-	log.Println("Forge Docs — http://localhost:8081")
+	log.Println("Smeldr Docs — http://localhost:8081")
 	log.Println("  Home:      http://localhost:8081/")
 	log.Println("  Docs:      http://localhost:8081/docs")
 	log.Println("  llms.txt:  http://localhost:8081/llms.txt")
@@ -188,26 +188,26 @@ app.Content(posts)
 app.Run(":8080")
 ` + "```" + `
 
-Forge derives table names, URL prefixes, and LLMs entries automatically from
+Smeldr derives table names, URL prefixes, and LLMs entries automatically from
 your content types. The default behaviour is correct for most applications.`,
 			pubDays: 90,
 		},
 		{
-			slug:    "deploying-forge",
-			title:   "Deploying Forge",
+			slug:    "deploying-smeldr",
+			title:   "Deploying Smeldr",
 			section: "Guides",
-			body: `Forge compiles to a single static binary with no runtime dependencies.
+			body: `Smeldr compiles to a single static binary with no runtime dependencies.
 Deploy it like any Go application: copy the binary and any template files to
 your server and run it behind a reverse proxy such as Caddy or nginx.
 
-**PostgreSQL:** use the forge-pgx companion module to connect a pgx pool:
+**PostgreSQL:** use the pgx companion module to connect a pgx pool:
 
 ` + "```" + `go
 pool, _ := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
-cfg := smeldr.Config{DB: forgepgx.Wrap(pool), ...}
+cfg := smeldr.Config{DB: pgx.Wrap(pool), ...}
 ` + "```" + `
 
-**HTTPS redirect:** set Config.HTTPS to true and Forge will automatically
+**HTTPS redirect:** set Config.HTTPS to true and Smeldr will automatically
 redirect plain HTTP requests to HTTPS. The check honours the X-Forwarded-Proto
 header so it works correctly behind a TLS-terminating reverse proxy with no
 additional configuration.
@@ -231,8 +231,8 @@ together.
 ` + "```" + `go
 type Post struct {
     smeldr.Node
-    Title string ` + "`forge:\"required,min=3\"`" + `
-    Body  string ` + "`forge:\"required\"`" + `
+    Title string ` + "`smeldr:\"required,min=3\"`" + `
+    Body  string ` + "`smeldr:\"required\"`" + `
 }
 
 m := smeldr.NewModule[*Post](&Post{},
@@ -241,7 +241,7 @@ m := smeldr.NewModule[*Post](&Post{},
 )
 ` + "```" + `
 
-Forge registers the following routes automatically: GET /posts (list),
+Smeldr registers the following routes automatically: GET /posts (list),
 GET /posts/{slug} (show), POST /posts (create), PUT /posts/{slug} (update),
 DELETE /posts/{slug} (delete). Role checks, caching, middleware, sitemaps,
 feeds, and AI indexing are all opt-in via additional options.
@@ -255,9 +255,9 @@ markdown (requires Markdownable).`,
 			slug:    "content-lifecycle",
 			title:   "Content Lifecycle",
 			section: "Reference",
-			body: `Every Forge content item moves through four lifecycle states encoded in
+			body: `Every Smeldr content item moves through four lifecycle states encoded in
 smeldr.Status: Draft, Scheduled, Published, Archived. The state is stored in
-the Node.Status field and enforced by Forge on every public endpoint.
+the Node.Status field and enforced by Smeldr on every public endpoint.
 
 **Draft:** stored but invisible. GET /posts/{slug} returns 404. Excluded from
 sitemaps, feeds, and AI indexes.
@@ -274,7 +274,7 @@ indexes. The item's URL continues to resolve (GET /posts/{slug} returns 200)
 so existing links remain valid, but it is hidden from discovery paths.
 
 Transitions are enforced at the framework level. Application code sets
-Status; Forge enforces the rules. The AfterPublish signal fires on every
+Status; Smeldr enforces the rules. The AfterPublish signal fires on every
 Draft→Published or Scheduled→Published transition.`,
 			pubDays: 75,
 		},
@@ -282,10 +282,10 @@ Draft→Published or Scheduled→Published transition.`,
 			slug:    "seo-and-sitemaps",
 			title:   "SEO and Sitemaps",
 			section: "Reference",
-			body: `Forge generates sitemaps, robots.txt, and HTML meta tags automatically when
+			body: `Smeldr generates sitemaps, robots.txt, and HTML meta tags automatically when
 you configure the relevant options. No separate SEO plugin required.
 
-**Sitemaps:** pass SitemapConfig{} as a module option. Forge registers a
+**Sitemaps:** pass SitemapConfig{} as a module option. Smeldr registers a
 per-module fragment at /{prefix}/sitemap.xml and an aggregate index at
 /sitemap.xml. Sitemaps regenerate on every publish event.
 
@@ -294,7 +294,7 @@ append the sitemap URL automatically. Set AIScraper to AskFirst or Disallow to
 control AI training crawler access.
 
 **HTML meta tags:** implement smeldr.Headable on your content type and return a
-smeldr.Head struct. Forge renders <title>, <meta name="description">,
+smeldr.Head struct. Smeldr renders <title>, <meta name="description">,
 canonical, Open Graph, Twitter Card, and JSON-LD tags via the
 {{template "smeldr:head" .Head}} partial. BreadcrumbList JSON-LD is generated
 automatically when Breadcrumbs is non-empty.`,
@@ -304,8 +304,8 @@ automatically when Breadcrumbs is non-empty.`,
 			slug:    "ai-indexing",
 			title:   "AI Indexing with llms.txt and AIDoc",
 			section: "Reference",
-			body: `Forge implements the llms.txt standard (llmstxt.org) natively. Pass
-AIIndex(LLMsTxt) as a module option and Forge maintains a compact content index
+			body: `Smeldr implements the llms.txt standard (llmstxt.org) natively. Pass
+AIIndex(LLMsTxt) as a module option and Smeldr maintains a compact content index
 at /llms.txt that AI assistants can fetch to understand your site's structure.
 
 **Compact index (/llms.txt):** one line per Published item in the format
@@ -313,7 +313,7 @@ at /llms.txt that AI assistants can fetch to understand your site's structure.
 the content type implements it, otherwise from the first 160 characters of the
 plain-text body.
 
-**Full corpus (/llms-full.txt):** pass AIIndex(LLMsTxtFull). Forge
+**Full corpus (/llms-full.txt):** pass AIIndex(LLMsTxtFull). Smeldr
 concatenates the Markdownable.Markdown() output of every Published item.
 Useful for RAG pipelines and AI assistants that want full context.
 

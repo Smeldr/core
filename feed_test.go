@@ -29,7 +29,7 @@ func seedFeedPost(t *testing.T, repo Repository[*testFeedPost], title string, st
 	if status == Published {
 		n.PublishedAt = time.Now().UTC()
 	}
-	p := &testFeedPost{Node: n, Title: title, Description: "Desc: " + title, Author: "Feed Author", Tags: []string{"tech", "forge"}}
+	p := &testFeedPost{Node: n, Title: title, Description: "Desc: " + title, Author: "Feed Author", Tags: []string{"tech", "smeldr"}}
 	if err := repo.Save(context.Background(), p); err != nil {
 		t.Fatalf("seedFeedPost: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestFeedOption(t *testing.T) {
 
 func TestFeedEndpoint(t *testing.T) {
 	repo := NewMemoryRepo[*testFeedPost]()
-	seedFeedPost(t, repo, "Hello Forge", Published)
+	seedFeedPost(t, repo, "Hello Smeldr", Published)
 
 	store := NewFeedStore("example.com", "https://example.com")
 	m := NewModule((*testFeedPost)(nil),

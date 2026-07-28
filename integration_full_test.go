@@ -28,7 +28,7 @@ package smeldr
 //   G19 - Scheduler end-to-end: processScheduled + AfterPublish signal (M8 + M1)
 //   G20 - Scheduler wired through App.Content(): schedulerModules populated, tick publishes (M8 + M2 + M3)
 //   G21 - Full v1.0.0 stack: scheduler + sitemap + feed + AI index + redirects (M1+M2+M3+M5+M7+M8)
-//   G22 - forge-mcp MCPModule interface + lifecycle (M10)
+//   G22 - mcp MCPModule interface + lifecycle (M10)
 //   G23 - CLI round-trip: GET->PUT lifecycle and field preservation (Decision 28)
 //   G34 - SingleInstance routing: GET /{prefix} serves item; MCPMeta.SingleInstance = true (T50)
 //   G35 - Standalone routing: GET /{slug} dispatched by App; two standalone modules (T50)
@@ -2133,7 +2133,7 @@ func TestFull_G21_V1FullStack(t *testing.T) {
 	}
 }
 
-// - G22: forge-mcp core - MCPModule interface + lifecycle (M10) --------------
+// - G22: mcp core - MCPModule interface + lifecycle (M10) --------------
 
 // testMCPPost is the canonical MCP test content type for the G22 group.
 // Required fields with min constraints exercise MCPCreate validation and
@@ -2172,7 +2172,7 @@ func findField(schema []MCPField, name string) (MCPField, bool) {
 
 // TestFull_G22_MCPModuleInterface verifies that App.MCPModules() returns the
 // registered modules and that MCPMeta() and MCPSchema() report correct
-// metadata on the forge core side of Amendment A49.
+// metadata on the smeldr core side of Amendment A49.
 func TestFull_G22_MCPModuleInterface(t *testing.T) {
 	repo1 := NewMemoryRepo[*testMCPPost]()
 	m1 := NewModule((*testMCPPost)(nil),
@@ -2318,7 +2318,7 @@ func TestFull_G22_MCPCreatePublishLifecycle(t *testing.T) {
 // - G23: CLI round-trip - GET->PUT lifecycle and field preservation (Decision 28) -
 
 // TestFull_G23_CLIRoundTrip verifies that the HTTP API correctly handles
-// the GET->PUT round-trip pattern used by forge-cli for lifecycle operations.
+// the GET->PUT round-trip pattern used by cli for lifecycle operations.
 // Specifically it checks:
 //   - PublishedAt is set server-side on publish (not taken from the body)
 //   - PublishedAt is preserved on a subsequent update (no re-publish)
@@ -2367,7 +2367,7 @@ func TestFull_G23_CLIRoundTrip(t *testing.T) {
 	}
 
 	// Step 1: Create a draft with Tags - POST /posts.
-	createBody := `{"Title":"Round-trip Post","Body":"Hello world","Status":"draft","Tags":["go","forge"]}`
+	createBody := `{"Title":"Round-trip Post","Body":"Hello world","Status":"draft","Tags":["go","smeldr"]}`
 	w1 := do("POST", "/posts", []byte(createBody), author)
 	if w1.Code != http.StatusCreated {
 		t.Fatalf("create: status = %d; want 201; body: %s", w1.Code, w1.Body.String())

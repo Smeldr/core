@@ -61,7 +61,7 @@ func scanDest(addr any) any {
 
 // DB is the database interface accepted by [NewSQLRepo], [NewTokenStore],
 // [NewAuditStore], and [NewWebhookStore]. It is satisfied by *sql.DB, *sql.Tx,
-// and forgepgx.Wrap(pool). Pass a concrete implementation — do not implement
+// and pgx.Wrap(pool). Pass a concrete implementation — do not implement
 // DB directly.
 type DB interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)

@@ -4,7 +4,7 @@ import (
 	"net/http"
 )
 
-// TemplateData is the value passed to every HTML template rendered by Forge.
+// TemplateData is the value passed to every HTML template rendered by Smeldr.
 // T is the content type for show handlers (e.g. *BlogPost) or a slice type
 // for list handlers (e.g. []*BlogPost).
 //
@@ -13,7 +13,7 @@ import (
 // top level of the struct — existing template calls like {{.Head.Title}} are
 // unchanged.
 //
-// To use {{template "forge:head" .}} in a custom handler without TemplateData,
+// To use {{template "smeldr:head" .}} in a custom handler without TemplateData,
 // embed [PageHead] directly in your own data struct:
 //
 //	type homeData struct {
@@ -33,7 +33,7 @@ import (
 //
 // In templates:
 //
-//	{{template "forge:head" .}}
+//	{{template "smeldr:head" .}}
 //	<h1>{{.Content.Title}}</h1>
 //	<p>Welcome, {{.User.Name}}</p>
 type TemplateData[T any] struct {

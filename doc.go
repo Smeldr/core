@@ -1,4 +1,4 @@
-// Package forge is a Go web framework for content-first applications: structured
+// Package smeldr is a Go web framework for content-first applications: structured
 // content types with lifecycle management (draft → scheduled → published → archived),
 // AI indexing, RSS feeds, sitemaps, MCP tool support, and zero third-party runtime
 // dependencies.
@@ -58,11 +58,11 @@
 //   - [SitemapConfig] — controls whether this module contributes to /sitemap.xml.
 //   - [AIIndex] — enables /llms.txt and /llms-full.txt AI content indexes.
 //   - [MCP] — exposes the module via the Model Context Protocol.
-//   - [Social] — connects the module to a forge-social posting schedule.
+//   - [Social] — connects the module to Smeldr's social posting schedule.
 //
 // # Authentication
 //
-// Forge uses token-based authentication. Two modes are available:
+// Smeldr uses token-based authentication. Two modes are available:
 //
 //   - Stateless HMAC tokens (default): create tokens with [SignToken] and verify
 //     them with the [BearerHMAC] auth function. Tokens are self-contained and
@@ -77,7 +77,7 @@
 //
 // # Signals
 //
-// Forge fires a lifecycle [Signal] at each content transition. Attach handlers to
+// Smeldr fires a lifecycle [LifecycleEvent] at each content transition. Attach handlers to
 // trigger side effects such as notifications, cache invalidation, or social posting.
 //
 // Module-level typed handlers receive the full typed content item:

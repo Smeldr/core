@@ -198,7 +198,7 @@ func renderMarkdown(s string) template.HTML {
 		}
 
 		// HTML passthrough: a line whose trimmed form starts with '<' is emitted
-		// verbatim. Forge is self-hosted; content authors are trusted — the same
+		// verbatim. Smeldr is self-hosted; content authors are trusted — the same
 		// role system that governs all MCP write operations.
 		if strings.HasPrefix(trimmed, "<") {
 			flushPara()

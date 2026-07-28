@@ -147,7 +147,7 @@ func smeldrLLMsEntries(data any) template.HTML {
 
 // — TemplateFuncMap ————————————————————————————————————————————————————————
 
-// TemplateFuncMap returns a [template.FuncMap] containing all Forge template
+// TemplateFuncMap returns a [template.FuncMap] containing all Smeldr template
 // helper functions. Pass it to [template.Template.Funcs] before parsing:
 //
 //	tpl := template.New("page").Funcs(smeldr.TemplateFuncMap())

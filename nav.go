@@ -49,7 +49,7 @@ type NavItem struct {
 	// ParentID is the ID of the parent NavItem. Empty for top-level items.
 	ParentID string
 
-	// Module is the Forge module table name this item maps to, e.g.
+	// Module is the Smeldr module table name this item maps to, e.g.
 	// "posts". Empty for custom or ghost items not backed by a content module.
 	Module string
 

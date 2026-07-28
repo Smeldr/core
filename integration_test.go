@@ -162,7 +162,7 @@ func TestIntegration_htmlFallback_noTemplates(t *testing.T) {
 // headTpl is a minimal show template that includes the smeldr:head partial.
 const headTpl = `<!DOCTYPE html><html><head>{{template "smeldr:head" .}}</head><body>{{.Content.Title}}</body></html>`
 
-func TestIntegration_forgeHead_noIndex(t *testing.T) {
+func TestIntegration_smeldrHead_noIndex(t *testing.T) {
 	dir := intTmpDir(t, `<p>list</p>`, headTpl)
 	_, handler, repo := intSetup(t,
 		Templates(dir),
@@ -185,7 +185,7 @@ func TestIntegration_forgeHead_noIndex(t *testing.T) {
 	}
 }
 
-func TestIntegration_forgeHead_canonical(t *testing.T) {
+func TestIntegration_smeldrHead_canonical(t *testing.T) {
 	dir := intTmpDir(t, `<p>list</p>`, headTpl)
 	_, handler, repo := intSetup(t,
 		Templates(dir),
@@ -212,7 +212,7 @@ func TestIntegration_forgeHead_canonical(t *testing.T) {
 	}
 }
 
-func TestIntegration_forgeHead_jsonLD(t *testing.T) {
+func TestIntegration_smeldrHead_jsonLD(t *testing.T) {
 	const jsonLDTpl = `<!DOCTYPE html><html><head>{{template "smeldr:head" .}}{{smeldr_meta .Head .Content}}</head><body></body></html>`
 	dir := intTmpDir(t, `<p>list</p>`, jsonLDTpl)
 	_, handler, repo := intSetup(t,

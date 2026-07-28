@@ -1,4 +1,4 @@
-// Package main is a self-contained Forge devlog — a production-pattern blog
+// Package main is a self-contained Smeldr devlog — a production-pattern blog
 // application that demonstrates the full v1.22.2 feature set:
 //
 //   - SQLite persistence via smeldr.SQLRepo (no cgo; uses modernc.org/sqlite)
@@ -41,9 +41,9 @@ import (
 	mcp "smeldr.dev/mcp"
 )
 
-// Post is the content type for a Forge devlog post.
+// Post is the content type for a Smeldr devlog post.
 //
-// Forge: embed smeldr.Node — never compose it. Node provides ID, Slug, Status,
+// Smeldr: embed smeldr.Node — never compose it. Node provides ID, Slug, Status,
 // PublishedAt, ScheduledAt, CreatedAt, and UpdatedAt. SQLRepo maps exported
 // fields to SQL columns using the `db` struct tag; `db:"-"` excludes a field.
 type Post struct {
@@ -54,17 +54,17 @@ type Post struct {
 	Tags  []string `db:"-"` // join table in production; excluded from SQL scan
 }
 
-// Head implements smeldr.Headable, which Forge calls when assembling HTML
+// Head implements smeldr.Headable, which Smeldr calls when assembling HTML
 // responses, sitemaps, and AI endpoints.
 //
-// Forge: returning a populated smeldr.Head enables the smeldr:head template
+// Smeldr: returning a populated smeldr.Head enables the smeldr:head template
 // partial to emit correct <title>, <meta description>, Open Graph, Twitter
 // Card, and JSON-LD Article tags with zero additional code.
 func (p *Post) Head() smeldr.Head {
 	return smeldr.Head{
-		Title:       p.Title + " — Forge Devlog",
+		Title:       p.Title + " — Smeldr Devlog",
 		Description: smeldr.Excerpt(p.Body, 160),
-		Author:      "The Forge Team",
+		Author:      "The Smeldr Team",
 		Published:   p.PublishedAt,
 		Tags:        p.Tags,
 		Type:        "Article",
@@ -74,7 +74,7 @@ func (p *Post) Head() smeldr.Head {
 // Markdown implements smeldr.Markdownable, which powers /llms-full.txt and
 // the Accept: text/markdown content-negotiation path.
 //
-// Forge: when AIIndex(LLMsTxtFull) is set, Forge calls Markdown() on each
+// Smeldr: when AIIndex(LLMsTxtFull) is set, Smeldr calls Markdown() on each
 // Published item and concatenates the results into /llms-full.txt so AI
 // assistants can consume the entire content corpus in one request.
 func (p *Post) Markdown() string {
@@ -83,7 +83,7 @@ func (p *Post) Markdown() string {
 
 // createSchema ensures all required tables exist in the SQLite database.
 //
-// Forge: smeldr.CreateAuditTable creates smeldr_audit_log. The posts and
+// Smeldr: smeldr.CreateAuditTable creates smeldr_audit_log. The posts and
 // smeldr_tokens tables are defined here so the full schema is visible in one
 // place and the application starts with a known, consistent state on every run.
 func createSchema(db *sql.DB) error {
@@ -121,7 +121,7 @@ func createSchema(db *sql.DB) error {
 // seedIfEmpty inserts devlog posts when the repository is empty.
 // It is a no-op on every subsequent startup — safe to call unconditionally.
 //
-// Forge: repo.FindAll with PerPage:1 is the correct emptiness check — it
+// Smeldr: repo.FindAll with PerPage:1 is the correct emptiness check — it
 // issues a SELECT LIMIT 1 against the posts table rather than a full scan.
 func seedIfEmpty(ctx context.Context, repo smeldr.Repository[*Post]) error {
 	existing, err := repo.FindAll(ctx, smeldr.ListOptions{PerPage: 1})
@@ -146,9 +146,9 @@ func seedIfEmpty(ctx context.Context, repo smeldr.Repository[*Post]) error {
 
 	posts := []postSpec{
 		{
-			slug:  "why-forge-has-zero-dependencies",
-			title: "Why Forge Has Zero Dependencies",
-			body: `When we started building Forge, the first architectural decision we locked was
+			slug:  "why-smeldr-has-zero-dependencies",
+			title: "Why Smeldr Has Zero Dependencies",
+			body: `When we started building Smeldr, the first architectural decision we locked was
 simple: zero third-party dependencies in the core package. Every Go developer
 has seen it — a promising framework that pulls in a dependency graph the size of
 a small city, pins you to one logging library, one router, one database layer.
@@ -160,7 +160,7 @@ We asked ourselves what third-party code would add that justified the cost —
 version conflicts, supply chain risk, upgrade treadmills — and answered:
 nothing we actually needed.
 
-The constraint paid dividends immediately. Forge builds in under two seconds.
+The constraint paid dividends immediately. Smeldr builds in under two seconds.
 go test ./... runs in under a second with no network fetches. You can vendor it
 with a single go mod vendor and never worry about left-pad moments. Zero
 dependencies is not a marketing claim; it is a design principle that makes
@@ -177,7 +177,7 @@ infrastructure you have to operate, monitor, and keep in sync with your
 application state. We wanted something you could run on a single binary with no
 external dependencies.
 
-Forge uses an adaptive in-process ticker. When the scheduler starts it looks at
+Smeldr uses an adaptive in-process ticker. When the scheduler starts it looks at
 the nearest ScheduledAt timestamp across all modules and sets its tick interval
 to half the remaining time, down to a minimum of one second. If nothing is
 scheduled the interval falls back to 60 seconds. This means a post scheduled
@@ -197,12 +197,12 @@ typical content volumes. No queue, no worker, no operations burden.`,
 			title: "Building llms.txt Support Into a Go Web Framework",
 			body: `The llms.txt standard gives AI assistants a machine-readable map of a
 website's content. The format is deliberately simple: a markdown file at
-/llms.txt with a list of links and one-line descriptions. Forge implements it
-natively — just pass AIIndex(LLMsTxt) as a module option and Forge handles
+/llms.txt with a list of links and one-line descriptions. Smeldr implements it
+natively — just pass AIIndex(LLMsTxt) as a module option and Smeldr handles
 the rest.
 
-Internally, Forge maintains a LLMsStore that accumulates entries as modules
-register themselves. Each entry carries a title, URL, and summary. Forge derives
+Internally, Smeldr maintains a LLMsStore that accumulates entries as modules
+register themselves. Each entry carries a title, URL, and summary. Smeldr derives
 the summary from the content type's AISummary() method if the type implements
 AIDocSummary, or falls back to the first 160 characters of the plain-text
 excerpt. The /llms.txt handler renders the store in the standard compact format.
@@ -216,10 +216,10 @@ without repeated fetches.`,
 			published: now.Add(-56 * 24 * time.Hour),
 		},
 		{
-			slug:  "content-lifecycle-in-forge",
-			title: "Content Lifecycle in Forge: Draft, Scheduled, Published, Archived",
-			body: `Every piece of content in Forge moves through a defined lifecycle: Draft →
-Scheduled → Published → Archived. Forge enforces this at the framework level,
+			slug:  "content-lifecycle-in-smeldr",
+			title: "Content Lifecycle in Smeldr: Draft, Scheduled, Published, Archived",
+			body: `Every piece of content in Smeldr moves through a defined lifecycle: Draft →
+Scheduled → Published → Archived. Smeldr enforces this at the framework level,
 not the application level. A Draft item returns 404 on public endpoints. A
 Scheduled item is invisible until its ScheduledAt time passes. An Archived item
 is preserved in storage but excluded from all public lists.
@@ -227,7 +227,7 @@ is preserved in storage but excluded from all public lists.
 This matters because lifecycle enforcement is the kind of logic that is trivial
 to implement once, catastrophic to forget. We have all seen staging content
 accidentally published, deleted posts returning 200s, draft articles indexed by
-Google. Forge makes the correct behaviour the only available behaviour —
+Google. Smeldr makes the correct behaviour the only available behaviour —
 developers cannot forget to check status because the check does not exist in
 application code; it exists in the framework.
 
@@ -249,7 +249,7 @@ that generates a fixed set of routes per module — list, show, create, update,
 delete, feed, sitemap, aidoc — the standard mux covers everything we need.
 
 Third-party routers offer features like regex constraints, middleware per-route,
-and automatic OPTIONS handling. We do not need any of these. Forge handles
+and automatic OPTIONS handling. We do not need any of these. Smeldr handles
 middleware at the module and app level, not the route level. Regex constraints
 on slugs would complicate the URL scheme without benefit.
 
@@ -261,9 +261,9 @@ adding a dependency is not a trade-off — it is a mistake.`,
 			published: now.Add(-28 * 24 * time.Hour),
 		},
 		{
-			slug:  "forge-v1-release",
-			title: "Forge v1.0.0: Production-Ready, Zero Dependencies",
-			body: `Today we are tagging Forge v1.0.0. The API is stable. The test suite covers
+			slug:  "smeldr-v1-release",
+			title: "Smeldr v1.0.0: Production-Ready, Zero Dependencies",
+			body: `Today we are tagging Smeldr v1.0.0. The API is stable. The test suite covers
 87% of production code paths. Benchmarks confirm that the hot paths — token
 validation, redirect lookup, HTML template rendering — all run in single-digit
 microseconds with zero or near-zero allocations on the critical path.
@@ -277,21 +277,21 @@ afternoon and trust in production on day one.`,
 			published: now.Add(-14 * 24 * time.Hour),
 		},
 		{
-			// Forge: Draft items are stored but never served on public endpoints.
+			// Smeldr: Draft items are stored but never served on public endpoints.
 			// GET /posts/mcp-support-preview returns 404 while this is a Draft.
 			// Authenticated Authors see it via GET /posts/mcp-support-preview.
 			slug:   "mcp-support-preview",
-			title:  "Preview: Forge and the Model Context Protocol",
-			body:   "A first look at MCP support in Forge v1.22 — AI agents can create, update, and publish content directly via Claude, Cursor, or any MCP-compatible assistant.",
+			title:  "Preview: Smeldr and the Model Context Protocol",
+			body:   "A first look at MCP support in Smeldr v1.22 — AI agents can create, update, and publish content directly via Claude, Cursor, or any MCP-compatible assistant.",
 			status: smeldr.Draft,
 		},
 		{
-			// Forge: Scheduled items have a ScheduledAt timestamp in the future.
+			// Smeldr: Scheduled items have a ScheduledAt timestamp in the future.
 			// The in-process scheduler transitions them to Published automatically.
 			// Visit http://localhost:8080/posts after 2 minutes to see this post appear.
-			slug:    "zero-to-production-with-forge",
-			title:   "Zero to Production With Forge",
-			body:    "A step-by-step guide to building a production Forge application from scratch — deploying on a single VPS with a SQLite backend and MCP support for AI-assisted content authoring.",
+			slug:    "zero-to-production-with-smeldr",
+			title:   "Zero to Production With Smeldr",
+			body:    "A step-by-step guide to building a production Smeldr application from scratch — deploying on a single VPS with a SQLite backend and MCP support for AI-assisted content authoring.",
 			status:  smeldr.Scheduled,
 			schedAt: &schedIn2m,
 		},
@@ -314,7 +314,7 @@ afternoon and trust in production on day one.`,
 }
 
 func main() {
-	// Forge: DB_PATH configures where the SQLite database file lives.
+	// Smeldr: DB_PATH configures where the SQLite database file lives.
 	// The default "blog.db" is fine for local development. In production,
 	// set it to a persistent path (e.g. /data/blog.db on a VPS).
 	dbPath := os.Getenv("DB_PATH")
@@ -322,7 +322,7 @@ func main() {
 		dbPath = "blog.db"
 	}
 
-	// Forge: modernc.org/sqlite registers the "sqlite" driver name via the
+	// Smeldr: modernc.org/sqlite registers the "sqlite" driver name via the
 	// blank import above. No cgo required — the driver is pure Go.
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -334,7 +334,7 @@ func main() {
 		log.Fatalf("create schema: %v", err)
 	}
 
-	// Forge: SECRET should be a 32+ byte cryptographically random value in
+	// Smeldr: SECRET should be a 32+ byte cryptographically random value in
 	// production. Generate it once at deploy time and store it in an environment
 	// variable or secrets manager. The same secret signs both session cookies
 	// and bearer tokens — rotate it and all tokens are instantly invalidated.
@@ -344,13 +344,13 @@ func main() {
 		log.Println("WARN: using default SECRET — set the SECRET env var before deploying")
 	}
 
-	// Forge: TokenStore persists named bearer tokens in smeldr_tokens. Tokens
+	// Smeldr: TokenStore persists named bearer tokens in smeldr_tokens. Tokens
 	// are issued via the MCP create_token tool or the smeldr-cli token command.
 	// smeldr.New wires TokenStore into the authentication middleware automatically
 	// when it is present in Config — no app.Use() call required.
 	tokenStore := smeldr.NewTokenStore(db, secret)
 
-	// Forge: SQLRepo[*Post] maps Post fields to the posts table via `db` struct
+	// Smeldr: SQLRepo[*Post] maps Post fields to the posts table via `db` struct
 	// tags. It implements smeldr.Repository[*Post] — the same interface used by
 	// MemoryRepo, so you can swap storage backends without changing module code.
 	repo := smeldr.NewSQLRepo[*Post](db)
@@ -360,45 +360,45 @@ func main() {
 		log.Fatalf("seed: %v", err)
 	}
 
-	// Forge: On(AfterPublish, ...) registers a signal handler that fires every
+	// Smeldr: On(AfterPublish, ...) registers a signal handler that fires every
 	// time a post transitions to Published — whether via API, MCP, or the
 	// in-process scheduler. One hook covers all publish paths.
 	m := smeldr.NewModule((*Post)(nil),
 		smeldr.At("/posts"),
 		smeldr.Repo(repo),
 
-		// Forge: Auth(Read(Guest), Write(Author)) allows anyone to read Published
+		// Smeldr: Auth(Read(Guest), Write(Author)) allows anyone to read Published
 		// posts and requires a valid Author bearer token to create or update.
 		// Tokens are issued via smeldr.TokenStore — no hardcoded credentials.
 		smeldr.Auth(smeldr.Read(smeldr.Guest), smeldr.Write(smeldr.Author)),
 
-		// Forge: MCP(MCPRead, MCPWrite) exposes this module as MCP resources and
+		// Smeldr: MCP(MCPRead, MCPWrite) exposes this module as MCP resources and
 		// tools. AI agents connected via the /mcp endpoint can list, read, create,
 		// update, publish, schedule, archive, and delete posts.
 		smeldr.MCP(smeldr.MCPRead, smeldr.MCPWrite),
 
-		// Forge: SitemapConfig{} opts this module into /sitemap.xml.
+		// Smeldr: SitemapConfig{} opts this module into /sitemap.xml.
 		// Default behaviour: weekly changefreq, 0.5 priority. No configuration
 		// needed unless you want to override those defaults.
 		smeldr.SitemapConfig{},
 
-		// Forge: Social(OpenGraph, TwitterCard) generates og: and twitter: meta
+		// Smeldr: Social(OpenGraph, TwitterCard) generates og: and twitter: meta
 		// tags from the Head() return value on every HTML response.
 		smeldr.Social(smeldr.OpenGraph, smeldr.TwitterCard),
 
-		// Forge: Feed() enables GET /posts/feed.xml. The aggregate /feed.xml is
+		// Smeldr: Feed() enables GET /posts/feed.xml. The aggregate /feed.xml is
 		// mounted automatically when any module registers a feed.
 		smeldr.Feed(smeldr.FeedConfig{
-			Title:       "Forge Devlog",
-			Description: "Engineering notes and release announcements from the Forge team.",
+			Title:       "Smeldr Devlog",
+			Description: "Engineering notes and release announcements from the Smeldr team.",
 		}),
 
-		// Forge: AIIndex(LLMsTxt, LLMsTxtFull, AIDoc) registers published content
+		// Smeldr: AIIndex(LLMsTxt, LLMsTxtFull, AIDoc) registers published content
 		// in /llms.txt (compact link list), /llms-full.txt (full markdown corpus),
 		// and /posts/{slug}/aidoc (per-item token-efficient text for AI assistants).
 		smeldr.AIIndex(smeldr.LLMsTxt, smeldr.LLMsTxtFull, smeldr.AIDoc),
 
-		// Forge: Templates("templates") enables HTML rendering. Forge parses
+		// Smeldr: Templates("templates") enables HTML rendering. Smeldr parses
 		// templates/list.html and templates/show.html at startup and returns 500
 		// if either file is missing or has a syntax error — fast failure, not
 		// silent degradation.
@@ -413,9 +413,9 @@ func main() {
 	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
 		BaseURL: "http://localhost:8080",
 		Secret:  []byte(secret),
-		// Forge: DB is required for auth middleware, audit, token validation,
-		// and any forge package that needs durable storage. Pass the same *sql.DB
-		// that owns your schema — Forge never creates tables unless you call the
+		// Smeldr: DB is required for auth middleware, audit, token validation,
+		// and any smeldr package that needs durable storage. Pass the same *sql.DB
+		// that owns your schema — Smeldr never creates tables unless you call the
 		// explicit Create* functions.
 		DB:         db,
 		TokenStore: tokenStore,
@@ -423,16 +423,16 @@ func main() {
 
 	app.Content(m)
 
-	// Forge: SEO with Sitemaps: true appends /sitemap.xml to robots.txt so
+	// Smeldr: SEO with Sitemaps: true appends /sitemap.xml to robots.txt so
 	// crawlers discover it automatically.
 	app.SEO(&smeldr.RobotsConfig{Sitemaps: true})
 
-	// Forge: Audit records every write operation (create, update, publish,
+	// Smeldr: Audit records every write operation (create, update, publish,
 	// archive, delete) in smeldr_audit_log. The /_audit endpoint (Editor+) lets
 	// admins query the trail by slug or actor.
 	app.Audit(smeldr.NewAuditStore(db))
 
-	// Forge: mcp.New(app) creates the MCP server. Wire it on two routes:
+	// Smeldr: mcp.New(app) creates the MCP server. Wire it on two routes:
 	// GET /mcp for SSE (streaming) connections and POST /mcp/message for
 	// stateless HTTP connections. Both paths serve the same handler — the MCP
 	// transport layer picks the right mode automatically.
@@ -450,7 +450,7 @@ func main() {
 		}
 	}))
 
-	log.Println("Forge Devlog — http://localhost:8080")
+	log.Println("Smeldr Devlog — http://localhost:8080")
 	log.Println("  Home:       http://localhost:8080/")
 	log.Println("  Posts:      http://localhost:8080/posts")
 	log.Println("  Feed:       http://localhost:8080/posts/feed.xml")

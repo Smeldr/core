@@ -1,7 +1,7 @@
-// Package forgepgx provides a [smeldr.DB] adapter for pgx/v5 native connection
-// pools. It bridges [pgxpool.Pool] to the [smeldr.DB] interface so Forge modules
-// can use pgx's maximum-throughput connection pool without any changes to core
-// Forge code.
+// Package pgx provides a [smeldr.DB] adapter for pgx/v5 native connection
+// pools. It bridges [pgxpool.Pool] to the [smeldr.DB] interface so Smeldr
+// modules can use pgx's maximum-throughput connection pool without any
+// changes to core Smeldr code.
 //
 // # Usage
 //
@@ -12,12 +12,12 @@
 //	app := smeldr.New(smeldr.Config{
 //	    BaseURL: "https://example.com",
 //	    Secret:  []byte(os.Getenv("SECRET")),
-//	    DB:      forgepgx.Wrap(pool),
+//	    DB:      pgx.Wrap(pool),
 //	})
 //
 // See [Decision 22] in DECISIONS.md for performance rationale and driver
 // comparison.
-package forgepgx
+package pgx
 
 import (
 	"context"
@@ -45,7 +45,7 @@ type poolAdapter struct {
 // a *sql.DB wrapper; no network connections are established at this point.
 //
 //	pool, _ := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
-//	db := forgepgx.Wrap(pool)
+//	db := pgx.Wrap(pool)
 //	app := smeldr.New(smeldr.Config{DB: db, ...})
 func Wrap(p *pgxpool.Pool) smeldr.DB {
 	return &poolAdapter{db: stdlib.OpenDBFromPool(p)}
