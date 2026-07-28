@@ -261,3 +261,148 @@ separate tracked task rather than fixed here (out of scope for a rename).
 Level 2 amendment.
 
 ---
+
+## A224 — Wire `App.Provenance()` into a real instance; fix `ActorKind` for human/job/agent (T178)
+
+### What
+
+**Part 1 — `example/server`:** new `ServerConfig.EnableProvenance` field /
+`ENABLE_PROVENANCE` env var, following the exact `ENABLE_RELATIONS`
+convention: `smeldr.CreateProvenanceTable(db)` then
+`app.Provenance(smeldr.NewProvenanceStore(db))`, gated behind the flag in
+`buildApp`. No new HTTP read route added (`App.Provenance` has never had
+one, unlike `App.Audit`'s `GET /_audit`; not asked for by the originating
+task). New test `TestServerToggles/on/provenance` proves a real
+`ProvenanceRecord` lands via the exact `buildApp` wiring `main()` uses.
+
+**Part 2 — `ActorKind` human/job/agent:** two new exported `Role` constants,
+`Job` and `Agent` (`roles.go`), deliberately **not** registered in
+`roleLevels` — pure classification tags, invisible to `HasRole`'s hierarchy,
+detected only via `IsRole`. `SignalEvent` gains `ActorRoles []Role` (the full
+role set, unlike the existing lossy `ActorRole` `Roles[0]` string), captured
+synchronously in `buildSignalEvent` at the same moment as `ActorID`/
+`ActorRole`. `actorKindFor(actorID string, roles []Role) string`
+(unexported, no compatibility concern) resolves `"job"`/`"agent"` via
+`IsRole` against the passed roles, `"human"` otherwise, `""` when `actorID`
+is empty. `App.Provenance()`'s `OnSignal` closure reads `ev.ActorRoles`
+directly. `relations.go`'s `recordAssertProvenance` now also passes its
+ctx-derived `Roles` into the same shared `actorKindFor`; `RelationEdge.
+CreatedByJob`'s existing override is unchanged and still wins unconditionally
+over a ctx-derived actor.
+
+**Part 3 — `App.Handler()` now wires the signal bus (independent fix, not a
+Part 2 implementation detail):** `App.Handler()` never called
+`wireSignalBus()` — only `App.Run()` did. Any caller embedding Smeldr's
+`http.Handler` in their own `http.Server` instead of calling the blocking
+`Run()` — a documented, encouraged pattern per `Handler()`'s own godoc
+example, not an edge case — never got any `OnSignal` subscriber wired at
+all: `App.Webhooks`/`App.Audit`/`App.Provenance`/any custom `OnSignal`
+handler were silently dead for such callers. `example/server`'s own
+`buildTestServer`/`httptest`-based test harness is exactly this pattern
+(`buildApp` calls `app.Handler()` directly, `main.go:183`), meaning every
+`example/server` test exercising the signal-dependent path was silently
+running against a dead bus until this fix. Fixed: `Handler()` now also calls
+`wireSignalBus()`. Deliberately **re-entrant, not run-once**: `App.Content()`
+can add modules to `hookableModules` between an early `Handler()` call and a
+later one — exactly `example/server`'s own `buildApp` shape (an early
+`app.Handler()` call precedes `RegisterOrchestrationTypes`'s `Content()`
+calls in the same function). A first attempt used a run-once guard matching
+`Handler()`'s other one-time setups; caught via this task's own
+`TestServerToggles/on/provenance` test that this was wrong — modules
+registered after the guarded call never got their `afterHook` wired.
+`setAfterHook` (`module.go`) is a single-field assignment, not an
+accumulating list, and `notifyAfter` only ever calls it once per dispatch —
+re-running `wireSignalBus` on every `Handler()` call safely overwrites with
+an equivalent closure, no duplicate-dispatch risk, no HTTP route
+registration inside it (unlike the setups that need a `!a.xRegistered` guard
+to avoid a double-registration panic).
+
+**One incidental finding, confirmed pre-existing and unrelated — flagged
+separately, not fixed here:** `MCPCreate` (`module.go`) hardcodes status
+`"draft"` when a caller omits one; every orchestration type's registered
+`StateFlow` (`orchestration.go`) has a different `IsInitial` state
+(`pending`/`backlog`/`proposed`/`scoped`/`open`), so `validateInitialState`
+(A216) rejects the default — `create_goal`/`create_task`/`create_decision`/
+`create_amendment`/`create_signal` all currently fail via MCP unless the
+caller supplies the correct status explicitly. Reproduced against a clean
+`main` checkout with zero other changes, confirmed via `example/server`'s own
+pre-existing `TestServerToggles/on/orchestration` test — genuinely
+pre-existing, not a regression from this branch. Tracked separately (spawned
+as a background task, same handling as T179).
+
+### Why
+
+Brand needed to know precisely what marketing copy can honestly claim:
+`App.Provenance()` (A220) had zero real call sites anywhere, and `ActorKind`
+never resolved to anything but `"human"`/`""` on the lifecycle-transition
+path, an inconsistency with `relations.go`'s own relation-edge path (which
+already detects `"job"` via `CreatedByJob`).
+
+### Design decisions
+
+1. **No `CreatedByJob`-style field added to `SignalEvent`.** `CreatedByJob`
+   is edge-specific data populated by whoever constructs a `RelationEdge`
+   before calling `Assert` — lifecycle-transition call sites
+   (`MCPPublish`/`MCPArchive`/`updateHandler`/`dynamic.go`'s `SetStatus*`)
+   have no equivalent "edge-shaped" parameter to attach such a field to, and
+   zero real caller in this codebase performs a job-driven lifecycle
+   transition today. Inventing new parameters across all of them
+   speculatively would violate this project's own "don't design for
+   hypothetical future requirements" discipline.
+2. **Reused the existing, already-extensible custom-role mechanism
+   (`NewRole`/`IsRole`) rather than a new parallel taxonomy.** `Job`/`Agent`
+   are plain `Role` values, deliberately unregistered in the permission
+   hierarchy — any future caller (a job-runner module, an agent-authenticated
+   token) gets correct `ActorKind` attribution for free by including the tag
+   alongside a real permission role in `User.Roles`, with zero further core
+   changes.
+3. **An originally-proposed ctx-recovery design was implemented, tested, and
+   found broken *empirically* before being redesigned — not assumed
+   correct by analogy to `relations.go`'s existing pattern.** The first
+   design had `Provenance()`'s `OnSignal` closure recover roles via a
+   `ctx.(Context)` type assertion, mirroring `recordAssertProvenance`'s own
+   established pattern. `dispatchBus` wraps the incoming ctx via
+   `context.WithoutCancel` + `context.WithTimeout` before invoking handlers;
+   these stdlib wrapper types do not preserve `smeldr.Context`'s richer
+   method set, so the type assertion silently returns `ok=false` on every
+   real dispatch — confirmed by writing the intended job-driven test against
+   this design first and watching it fail (`ActorKind = "human"`, not
+   `"job"`) before touching anything further.
+   `recordAssertProvenance`'s identical-looking pattern works because
+   `insertEdge` calls it synchronously, never through `dispatchBus`'s async
+   rewrap — the two call sites looked comparable but weren't. Redesigned to
+   capture roles into `SignalEvent.ActorRoles` at `buildSignalEvent` time
+   instead — synchronous, before dispatch, no ctx-recovery needed in
+   `Provenance()`'s closure at all. Re-ran the same test: passed. Every
+   pre-existing hand-built `SignalEvent{}` test literal needed zero edits — a
+   nil `ActorRoles` falls through to `"human"` exactly as before.
+4. **Part 3's `wireSignalBus` fix is re-entrant, not idempotent-once** — see
+   the "What" section for the concrete failure mode a run-once guard
+   produced.
+
+### Consequences
+
+- New exported symbols: `Job`, `Agent` (`roles.go`), `SignalEvent.ActorRoles`.
+  No existing exported symbol changed, removed, or deprecated.
+- **Part 3, independent behaviour fix:** `App.Handler()` now also wires the
+  signal bus (previously only `App.Run()` did). No signature change — this
+  closes a real, previously-silent gap for any caller embedding the handler
+  directly in their own `http.Server` (a documented pattern, not an edge
+  case), and for any `httptest`-based test harness doing the same.
+- `example/server`: new `ENABLE_PROVENANCE` env var / `ServerConfig` field.
+- Tests: `TestActorKindFor` extended; new
+  `TestAppProvenance_JobDrivenTransition_ActorKindJob`,
+  `TestAppProvenance_AgentDrivenTransition_ActorKindAgent`,
+  `TestSignalBus_ActorRolesSurviveDispatch`,
+  `TestInsertEdge_RecordsProvenance_JobRoleWithoutCreatedByJob`,
+  `TestInsertEdge_RecordsProvenance_CreatedByJobOverridesCtxRole`,
+  `TestJobAgentRoles_NotInHierarchy`, `TestServerToggles/on/provenance`.
+  Coverage: 96.1% (unchanged).
+- Level 2 amendment (new exported symbols, cross-file: `roles.go`,
+  `signals.go`, `provenance.go`, `relations.go`, `smeldr.go`,
+  `example/server/main.go`). Minor version bump, matching A220's own
+  precedent for new exported symbols: v1.57.3 → v1.58.0.
+
+Level 2 amendment.
+
+---

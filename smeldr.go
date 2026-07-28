@@ -1072,8 +1072,18 @@ func (a *App) emitSignal(ctx context.Context, sig LifecycleEvent, ev SignalEvent
 }
 
 // wireSignalBus constructs the afterHook closure and injects it into every
-// hookable module collected by Content(). Called once by Run() before
-// starting the HTTP server. The closure builds a [SignalEvent], dispatches
+// hookable module collected by Content() so far. Called on every [App.Handler]
+// call (and, redundantly but harmlessly, once more by [App.Run]) rather than
+// only once — deliberately re-entrant, not run-once: [App.Content] can add
+// modules to hookableModules between an early [App.Handler] call (as
+// [App.Run] itself makes, to build its http.Server, and as some callers make
+// directly to embed the handler in their own http.Server, e.g. tests using
+// httptest) and a later one, and every hookable module needs its afterHook
+// set, not just the ones registered before the first call. Re-running this
+// on an already-wired module is a cheap, harmless overwrite with an
+// equivalent closure — no HTTP route registration happens here, unlike most
+// of Handler()'s other one-time setups, so there is no double-registration
+// panic risk to guard against. The closure builds a [SignalEvent], dispatches
 // it to all registered [App.OnSignal] handlers, then calls any legacy
 // [App.AddSignalListener] callbacks.
 func (a *App) wireSignalBus() {
@@ -1153,6 +1163,7 @@ func httpsRedirect() func(http.Handler) http.Handler {
 //
 //	srv := &http.Server{Handler: app.Handler()}
 func (a *App) Handler() http.Handler {
+	a.wireSignalBus()
 	if a.sitemapStore != nil && !a.sitemapIndexRegistered {
 		a.sitemapIndexRegistered = true
 		a.mux.Handle("GET /sitemap.xml", a.sitemapStore.IndexHandler(a.cfg.BaseURL))
@@ -1653,7 +1664,9 @@ func (a *App) Run(addr string) error {
 	// serveErr receives the result of ListenAndServe.
 	serveErr := make(chan error, 1)
 
-	// Inject webhook delivery hooks and signal listeners into all modules.
+	// Already ran inside a.Handler() above (line ~1659) — re-run here too so
+	// any module registered between that call and this point still gets its
+	// afterHook wired (see wireSignalBus's own godoc: deliberately re-entrant).
 	a.wireSignalBus()
 
 	// Start the webhook worker pool if configured.

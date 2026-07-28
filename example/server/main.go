@@ -34,6 +34,7 @@
 //	MASTODON_CLIENT_SECRET Mastodon OAuth client secret (required when ENABLE_SOCIAL)
 //	MASTODON_INSTANCE_URL  Mastodon instance base URL (required when ENABLE_SOCIAL)
 //	ENABLE_WEBHOOKS       wire outbound webhook delivery
+//	ENABLE_PROVENANCE     wire transition-provenance recording (App.Provenance)
 //	ENABLE_AGENTS         wire the agent job system (connects to this server's own /mcp endpoint)
 //	AGENT_MCP_URL         agent MCP endpoint (default: http://127.0.0.1:PORT/mcp/message)
 //	AGENT_MCP_TOKEN       bearer token for agent MCP calls
@@ -79,6 +80,7 @@ type ServerConfig struct {
 	MastodonClientSecret string
 	MastodonInstanceURL  string
 	EnableWebhooks       bool
+	EnableProvenance     bool
 	EnableAgents         bool
 	AgentMCPURL          string
 	AgentMCPToken        string
@@ -119,6 +121,7 @@ func parseConfig() ServerConfig {
 		MastodonClientSecret: os.Getenv("MASTODON_CLIENT_SECRET"),
 		MastodonInstanceURL:  os.Getenv("MASTODON_INSTANCE_URL"),
 		EnableWebhooks:       os.Getenv("ENABLE_WEBHOOKS") != "",
+		EnableProvenance:     os.Getenv("ENABLE_PROVENANCE") != "",
 		EnableAgents:         os.Getenv("ENABLE_AGENTS") != "",
 		AgentMCPURL:          envOr("AGENT_MCP_URL", "http://127.0.0.1:"+port+"/mcp/message"),
 		AgentMCPToken:        os.Getenv("AGENT_MCP_TOKEN"),
@@ -167,6 +170,13 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 		rs = store
 		app.Relations(store)
+	}
+
+	if cfg.EnableProvenance {
+		if err := smeldr.CreateProvenanceTable(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create provenance table: %w", err)
+		}
+		app.Provenance(smeldr.NewProvenanceStore(db))
 	}
 
 	// Early Handler call initialises the nav tree and probes smeldr_tokens.

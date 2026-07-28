@@ -231,6 +231,18 @@ type SignalEvent struct {
 	// unauthenticated requests.
 	ActorID string
 
+	// ActorRoles is the full set of roles held by the authenticated user
+	// (unlike [SignalEvent.ActorRole], which is only the first role). Captured
+	// synchronously in [buildSignalEvent], before dispatch — [App.OnSignal]
+	// handlers run through [App.dispatchBus], which wraps the request ctx via
+	// context.WithoutCancel/context.WithTimeout; those stdlib wrapper types do
+	// not preserve [Context]'s richer method set, so a handler cannot recover
+	// roles via a ctx.(Context) type assertion of its own. Nil for
+	// unauthenticated requests or hand-built [SignalEvent] literals that don't
+	// set it — nil behaves like "no classification role present" wherever
+	// this field is consulted (e.g. [ProvenanceRecord.ActorKind] derivation).
+	ActorRoles []Role
+
 	// raw holds the original content item. Used internally by the webhook
 	// delivery handler to build the full payload. Not exposed to external
 	// OnSignal subscribers.
@@ -263,9 +275,11 @@ func buildSignalEvent(ctx Context, _ LifecycleEvent, meta afterHookMeta, item an
 	}
 	role := "guest"
 	actorID := ""
+	var actorRoles []Role
 	if u := ctx.User(); len(u.Roles) > 0 {
 		role = string(u.Roles[0])
 		actorID = u.ID
+		actorRoles = u.Roles
 	}
 	url := strings.TrimRight(baseURL, "/") + meta.Prefix + "/" + slug
 	return SignalEvent{
@@ -278,6 +292,7 @@ func buildSignalEvent(ctx Context, _ LifecycleEvent, meta afterHookMeta, item an
 		PreviousState: meta.PrevState,
 		ActorRole:     role,
 		ActorID:       actorID,
+		ActorRoles:    actorRoles,
 		raw:           item,
 	}
 }

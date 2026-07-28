@@ -354,6 +354,16 @@ Write operations require `Author` role or higher. The Bearer token you
 were given determines your role. If an operation returns `forbidden`,
 you do not have sufficient role — do not retry.
 
+**Actor classification (`Job`/`Agent` roles, T178/A224):** two `Role`
+constants exist purely to classify *who* is acting, not *what* they're
+permitted to do — include one alongside a real permission role in a token's
+`Roles` (e.g. `[]Role{Editor, Job}`) to have that actor recorded as
+`ActorKind: "job"` or `"agent"` (instead of `"human"`) in
+`ProvenanceRecord`s written by `App.Provenance()`. No tool documented here
+currently mints a `Job`- or `Agent`-tagged token — this is a mechanism for a
+future job-runner or agent-authentication integration, not a capability any
+MCP tool exposes today.
+
 ### Available tools (MCPWrite)
 
 For each registered content type, these tools are available:

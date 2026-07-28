@@ -340,6 +340,68 @@ func TestServerToggles(t *testing.T) {
 		}
 	})
 
+	t.Run("on/provenance", func(t *testing.T) {
+		// Proves App.Provenance() is wired through the real buildApp path
+		// (per buildTestServer's own doc comment) into a real running
+		// instance, not just tested as a library capability.
+		cfg := baseConfig()
+		cfg.EnableProvenance = true
+		cfg.EnableOrchestration = true
+		ts := buildTestServer(t, cfg)
+		authorToken := createToken(t, ts, "author", "author")
+
+		// status: "open" is passed explicitly — Goal's registered flow
+		// (orchGoalFlow) has no "draft" state at all, unlike MCPCreate's
+		// blanket default when status is omitted. This is a real,
+		// currently-shipping conflict between MCPCreate's hardcoded Draft
+		// default and every orchestration type's custom initial state,
+		// unrelated to this task — flagged separately, worked around here
+		// rather than fixed (out of scope for T178).
+		goal := callTool(t, ts.URL, authorToken, "create_goal", map[string]any{
+			"goal_id":     "T-provenance-test",
+			"description": "Goal for provenance wiring test",
+			"priority":    float64(1),
+			"band":        "P1",
+			"size":        "S",
+			"status":      "open",
+		})
+		goalNodeID, _ := goal["ID"].(string)
+		if goalNodeID == "" {
+			t.Fatalf("create_goal: ID missing: %v", goal)
+		}
+
+		// notifyAfter (module.go) fires the signal-bus afterHook in its own
+		// goroutine — poll briefly rather than assuming the async write has
+		// already landed by the time this HTTP call returns.
+		store := smeldr.NewProvenanceStore(ts.db)
+		var records []smeldr.ProvenanceRecord
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			var err error
+			records, err = store.List(context.Background(), smeldr.ProvenanceFilter{SubjectType: "Goal"})
+			if err != nil {
+				t.Fatalf("ProvenanceStore.List: %v", err)
+			}
+			if len(records) > 0 || time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if len(records) == 0 {
+			t.Fatal("no ProvenanceRecord found for the Goal creation — App.Provenance() is not wired")
+		}
+		r := records[0]
+		if r.SubjectID != goalNodeID {
+			t.Errorf("SubjectID = %q, want %q", r.SubjectID, goalNodeID)
+		}
+		if r.Verb != "create" {
+			t.Errorf("Verb = %q, want create", r.Verb)
+		}
+		if r.ActorKind != "human" || r.ActorID == "" {
+			t.Errorf("actor: got %s/%s, want human/<non-empty>", r.ActorKind, r.ActorID)
+		}
+	})
+
 	t.Run("on/redirects", func(t *testing.T) {
 		cfg := baseConfig()
 		cfg.EnableRedirects = true

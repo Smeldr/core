@@ -102,6 +102,69 @@ func TestInsertEdge_RecordsProvenance_CreatedByJob(t *testing.T) {
 	}
 }
 
+// TestInsertEdge_RecordsProvenance_JobRoleWithoutCreatedByJob confirms the
+// ctx-derived actor is classified "job" via the Job role even when
+// CreatedByJob is not set on the edge — the case for a caller that has a real
+// smeldr.Context (e.g. an automation authenticated with its own token, not a
+// background sweep that constructs the edge directly).
+func TestInsertEdge_RecordsProvenance_JobRoleWithoutCreatedByJob(t *testing.T) {
+	store := setupRelationStore(t)
+	upsertTestKind(t, store, "related_to", "post", "post")
+
+	prov := &fakeProvenanceStore{}
+	store.setProvenanceStore(prov)
+
+	ctx := NewTestContext(User{ID: "job-9", Roles: []Role{Editor, Job}})
+	if err := store.Assert(ctx, RelationEdge{
+		SourceType: "post", SourceID: "p1",
+		TargetType: "post", TargetID: "p2",
+		RelationKind: "related_to", EdgeClass: "asserted",
+	}); err != nil {
+		t.Fatalf("Assert: %v", err)
+	}
+
+	if len(prov.appended) != 1 {
+		t.Fatalf("got %d provenance records, want 1", len(prov.appended))
+	}
+	r := prov.appended[0]
+	if r.ActorKind != "job" || r.ActorID != "job-9" {
+		t.Errorf("actor: got %s/%s, want job/job-9 (ctx-derived Job role, no CreatedByJob)", r.ActorKind, r.ActorID)
+	}
+}
+
+// TestInsertEdge_RecordsProvenance_CreatedByJobOverridesCtxRole confirms
+// CreatedByJob still wins even when the ctx-derived actor already resolves
+// to "agent" via role — edge-level data takes priority over the
+// authenticated caller, per the same precedence rule
+// TestInsertEdge_RecordsProvenance_CreatedByJob already covers against a
+// plain human ctx.
+func TestInsertEdge_RecordsProvenance_CreatedByJobOverridesCtxRole(t *testing.T) {
+	store := setupRelationStore(t)
+	upsertTestKind(t, store, "supersedes", "post", "post")
+
+	prov := &fakeProvenanceStore{}
+	store.setProvenanceStore(prov)
+
+	jobID := "sweep-job-2"
+	ctx := NewTestContext(User{ID: "agent-3", Roles: []Role{Agent}})
+	if err := store.Assert(ctx, RelationEdge{
+		SourceType: "post", SourceID: "p1",
+		TargetType: "post", TargetID: "p2",
+		RelationKind: "supersedes", EdgeClass: "asserted",
+		CreatedByJob: &jobID,
+	}); err != nil {
+		t.Fatalf("Assert: %v", err)
+	}
+
+	if len(prov.appended) != 1 {
+		t.Fatalf("got %d provenance records, want 1", len(prov.appended))
+	}
+	r := prov.appended[0]
+	if r.ActorKind != "job" || r.ActorID != jobID {
+		t.Errorf("actor: got %s/%s, want job/%s (CreatedByJob overrides ctx-derived Agent role)", r.ActorKind, r.ActorID, jobID)
+	}
+}
+
 // TestInsertEdge_NilProvenanceStore_NoOp confirms relation assertion works
 // unchanged when App.Provenance was never wired — the normal, fully-supported
 // default state.

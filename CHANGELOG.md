@@ -23,6 +23,21 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.58.0] — 2026-07-29
+
+### Added
+- `App.Provenance()` (A220, v1.57.0) is now wired into a real, running instance: `example/server` gains a new `ENABLE_PROVENANCE` environment variable / `ServerConfig.EnableProvenance` field, following the same convention as `ENABLE_RELATIONS`. Verified end to end via a new test that exercises the exact `buildApp` wiring `main()` uses. (A224)
+- `Job`, `Agent`: two new exported `Role` constants (`roles.go`) — classification tags for automated/AI actors, deliberately unregistered in the permission hierarchy (never satisfy `HasRole`; detected via `IsRole`). Include one alongside a real permission role in `User.Roles` (e.g. `[]Role{Editor, Job}`) to get correct `ProvenanceRecord.ActorKind` attribution ("job"/"agent" instead of "human") on both A220 call sites — no caller mints such a token anywhere in this codebase today; the mechanism is real and wired regardless, ready for the first one that does. (A224)
+- `SignalEvent.ActorRoles []Role`: the full role set of the authenticated user (unlike the existing `ActorRole` string, which is only the first role), captured synchronously in `buildSignalEvent`. (A224)
+
+### Fixed
+- `App.Handler()` now also wires the signal bus (previously only the blocking `App.Run()` did). Any caller embedding Smeldr's `http.Handler` directly in their own `http.Server` — a documented pattern, not an edge case — silently never got any `OnSignal` subscriber wired at all: `App.Webhooks`, `App.Audit`, `App.Provenance`, and any custom `OnSignal` handler were dead for such callers. No signature change. (A224)
+
+### Changed
+- `App.Provenance()`'s internal `ActorKind` derivation now correctly distinguishes "human"/"job"/"agent" on both the lifecycle-transition path (`provenance.go`) and the relation-assertion path (`relations.go`'s `recordAssertProvenance`, which already detected "job" via `RelationEdge.CreatedByJob` — this closes the inconsistency between the two). `CreatedByJob`'s existing precedence over a ctx-derived actor is unchanged. (A224)
+
+---
+
 ## [1.57.3] — 2026-07-28
 
 ### Fixed

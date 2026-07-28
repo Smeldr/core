@@ -123,7 +123,9 @@ the API surface in one place. The file names are the organisation.
 smeldr.dev/
 │
 ├── errors.go         Error interface, sentinel errors, WriteError(), ValidationError
-├── roles.go          Role type, hierarchy, HasRole(), IsRole(), built-in constants, Option interface
+├── roles.go          Role type, hierarchy, HasRole(), IsRole(), built-in constants, Option interface;
+│                     Job/Agent constants — classification tags, deliberately unregistered in the
+│                     hierarchy (level 0, HasRole never matches; IsRole does) (Amendment A224, T178)
 ├── mcp.go            MCPOperation type, MCPRead/MCPWrite constants, MCP() option,
 │                     MCPMeta struct (Prefix, TypeName, Operations, SingleInstance), MCPField struct
 │                     (incl. Format/Description — D27), MCPModule interface
@@ -135,8 +137,13 @@ smeldr.dev/
 │                     NewBackgroundContext, NewContextWithUser
 ├── signals.go        LifecycleEvent type (renamed from Signal, A183), On[T]() option,
 │                     dispatchBefore(), dispatchAfter(), debouncer, debouncer.Stop() (Amendment A39);
-│                     SignalEvent{Type, Slug, Title, URL, Timestamp, PreviousState, ActorRole, ActorID},
-│                     afterHookMeta (unexported), buildSignalEvent (unexported) (Amendment A94)
+│                     SignalEvent{Type, Slug, Title, URL, Timestamp, PreviousState, ActorRole, ActorID,
+│                     ActorRoles}, afterHookMeta (unexported), buildSignalEvent (unexported) (Amendment A94);
+│                     ActorRoles []Role captured synchronously in buildSignalEvent (same moment as
+│                     ActorID/ActorRole) — added because dispatchBus's context.WithoutCancel/WithTimeout
+│                     wrapping strips smeldr.Context's method set from the ctx an OnSignal handler
+│                     receives, so a handler cannot recover roles via ctx.(Context) itself (Amendment
+│                     A224, T178)
 ├── orchestration.go  Signal, Task, Decision, Amendment, Goal content types embedding Node;
 │                     GoalContext struct (Goal + LinkedDecisions + LinkedTasks + LinkedGoals);
 │                     QueryGoalContext(ctx, DB, *RelationStore, goalID) (*GoalContext, error);
@@ -189,7 +196,10 @@ smeldr.dev/
 │                     AfterUpdate/AfterPublish/AfterUnpublish/AfterSchedule/AfterArchive/AfterDelete via
 │                     the signal bus, writes one ProvenanceRecord per event (recordProvenance, fail-open);
 │                     provenanceVerbFor/currentStatusOf/actorKindFor (unexported); purely additive —
-│                     AuditRecord/App.Audit unchanged, no shared table (Amendment A220, T149)
+│                     AuditRecord/App.Audit unchanged, no shared table (Amendment A220, T149);
+│                     actorKindFor(actorID, roles []Role) resolves "job"/"agent" via IsRole against
+│                     SignalEvent.ActorRoles (not ctx-recovery — see signals.go entry above); wired into
+│                     a real running instance via example/server's ENABLE_PROVENANCE (Amendment A224, T178)
 ├── blocks.go          DynamicNode (embeds Node; TypeName, Fields json.RawMessage) + Head(),
 │                     NewDynamicContentRepo(db) *SQLRepo[*DynamicNode] (binds smeldr_dynamic_content),
 │                     CreateBlockTables(db) — grouped idempotent creator: smeldr_dynamic_content +
@@ -202,7 +212,11 @@ smeldr.dev/
 │                     App.Handler() time when both App.Relations and App.Provenance are configured;
 │                     insertEdge calls recordAssertProvenance (unexported) — recovers the actor via a
 │                     type assertion on ctx (ctx.(Context)), no signature change to Assert/
-│                     MCPAssertRelation/MCPProposeRelation, no smeldr.dev/mcp changes (Amendment A220, T149)
+│                     MCPAssertRelation/MCPProposeRelation, no smeldr.dev/mcp changes (Amendment A220, T149);
+│                     recordAssertProvenance also passes the ctx-derived Roles into actorKindFor (this
+│                     call site is genuinely synchronous, unaffected by the dispatchBus ctx-wrapping
+│                     constraint that ruled out the same approach in provenance.go); CreatedByJob still
+│                     overrides a ctx-derived actor unconditionally (Amendment A224, T178)
 ├── edges.go           ContentEdge, ContentEdgeStore, NewContentEdgeStore(db); AddChild/Children/
 │                     ChildrenOf (batch IN())/RemoveChild/Reorder (atomic CASE); scanEdges, edgeColumns;
 │                     one composition-edge table for page→block + collection→item (Amendment A116, T32)
@@ -599,6 +613,28 @@ All sentinels live in `errors.go`. Call sites reference the package-level variab
 `errorTemplateLookup` is guarded by `sync.Once`. It is set exactly once by
 `App.Handler()`. Subsequent calls to `App.Handler()` are no-ops for this
 variable. Reads in `respond()` are safe with no additional locking.
+
+### `wireSignalBus` — called from `App.Handler()`, re-entrant not run-once (Amendment A224, T178)
+
+`App.Handler()` now calls `a.wireSignalBus()` on every call, not only inside
+`App.Run()`. Found while testing `App.Provenance()`'s wiring in
+`example/server`: any caller that embeds `App.Handler()`'s `http.Handler` in
+its own `http.Server` (or an `httptest.NewServer`-based in-process test
+server) instead of calling the blocking `App.Run()` previously never got
+`OnSignal` subscribers (`App.Webhooks`, `App.Audit`, `App.Provenance`, custom
+`OnSignal` handlers) wired at all — a real gap, not hypothetical, since
+`example/server`'s own `main()` happens to call `Run()`, but its test harness
+(`buildTestServer`, `main_test.go`) does not and never had.
+
+Deliberately **re-entrant, not guarded to run once**: `App.Content()` can add
+modules to `hookableModules` between an early `Handler()` call and a later
+one (this is exactly `example/server`'s own `buildApp` shape — an early
+`app.Handler()` call precedes `RegisterOrchestrationTypes`'s `Content()`
+calls in the same function), so every call re-wires every module currently
+in `hookableModules`. Cheap and harmless to repeat — no HTTP route
+registration happens in `wireSignalBus`, unlike most of `Handler()`'s other
+one-time setups, so there is no double-registration panic risk to guard
+against with a `!a.xRegistered`-style flag.
 
 ### X-Request-ID contract
 

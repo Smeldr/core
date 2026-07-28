@@ -411,3 +411,35 @@ func TestSignalBus_WithoutCancel(t *testing.T) {
 		t.Fatal("handler not called")
 	}
 }
+
+// TestSignalBus_ActorRolesSurviveDispatch proves SignalEvent.ActorRoles is
+// captured synchronously in buildSignalEvent, before dispatchBus's ctx
+// rewrap — the fix for the confirmed-broken alternative (recovering roles
+// via a ctx.(Context) type assertion inside the OnSignal handler itself,
+// which the wrapped ctx does not support). Exercises the real
+// MCPCreate -> buildSignalEvent -> dispatchBus -> handler path end to end,
+// not a direct dispatchBus(ev) call with a hand-built literal.
+func TestSignalBus_ActorRolesSurviveDispatch(t *testing.T) {
+	app, mod := newBusApp(t, "test-secret-bus-actorroles")
+
+	handlerRan := make(chan []Role, 1)
+	app.OnSignal(AfterCreate, func(_ context.Context, ev SignalEvent) error {
+		handlerRan <- ev.ActorRoles
+		return nil
+	})
+	app.wireSignalBus()
+
+	jobCtx := NewTestContext(User{ID: "job-1", Roles: []Role{Editor, Job}})
+	if _, err := mod.MCPCreate(jobCtx, map[string]any{"title": "ActorRoles"}); err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+
+	select {
+	case roles := <-handlerRan:
+		if !IsRole(roles, Job) {
+			t.Errorf("ev.ActorRoles = %v, want to contain Job", roles)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("handler not called")
+	}
+}

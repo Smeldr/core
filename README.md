@@ -24,7 +24,7 @@ Or coordinate your entire pipeline and automated workflow, AI actions and human 
 
 Directly from chat.
 
-**v1.57.3 — stable.** Public APIs are stable within v1.
+**v1.58.0 — stable.** Public APIs are stable within v1.
 See [CHANGELOG.md](CHANGELOG.md).
 
 ## 30-second start
@@ -48,7 +48,8 @@ SECRET=changeme go run .
 
 Optional subsystems are gated by environment variables (`ENABLE_TOKENS`,
 `ENABLE_GOVERNANCE`, `ENABLE_RELATIONS`, `ENABLE_DYNAMIC_CONTENT`, `ENABLE_BLOCKS`,
-`ENABLE_MEDIA`, `ENABLE_SOCIAL`, `ENABLE_WEBHOOKS`, `ENABLE_AGENTS`, `OAUTH_ISSUER`).
+`ENABLE_MEDIA`, `ENABLE_SOCIAL`, `ENABLE_WEBHOOKS`, `ENABLE_PROVENANCE`,
+`ENABLE_AGENTS`, `OAUTH_ISSUER`).
 Set any to a non-empty value to enable that subsystem. See `example/server/main.go`
 for the full variable reference and wiring order.
 

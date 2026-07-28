@@ -25,6 +25,27 @@ func TestRoleLevel(t *testing.T) {
 	}
 }
 
+// TestJobAgentRoles_NotInHierarchy documents the deliberate choice that Job
+// and Agent are classification tags, not permission levels: they must never
+// be registered in roleLevels, so HasRole never matches them and levelOf
+// returns 0. A future reader must not "fix" this by registering them — doing
+// so would let a Job/Agent-tagged token satisfy permission checks it wasn't
+// meant to.
+func TestJobAgentRoles_NotInHierarchy(t *testing.T) {
+	if got := levelOf(Job); got != 0 {
+		t.Errorf("levelOf(Job) = %d, want 0 (unregistered)", got)
+	}
+	if got := levelOf(Agent); got != 0 {
+		t.Errorf("levelOf(Agent) = %d, want 0 (unregistered)", got)
+	}
+	if HasRole([]Role{Job}, Job) {
+		t.Error("HasRole([Job], Job) = true, want false (level 0 never satisfies HasRole)")
+	}
+	if !IsRole([]Role{Editor, Job}, Job) {
+		t.Error("IsRole([Editor, Job], Job) = false, want true (exact-match scan still sees it)")
+	}
+}
+
 // TestHasRole verifies the hierarchical permission check.
 func TestHasRole(t *testing.T) {
 	tests := []struct {

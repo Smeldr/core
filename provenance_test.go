@@ -282,11 +282,83 @@ func TestCurrentStatusOf_RealNode(t *testing.T) {
 // --- actorKindFor ---
 
 func TestActorKindFor(t *testing.T) {
-	if got := actorKindFor(""); got != "" {
-		t.Errorf("actorKindFor(\"\") = %q, want empty", got)
+	if got := actorKindFor("", nil); got != "" {
+		t.Errorf("actorKindFor(\"\", nil) = %q, want empty", got)
 	}
-	if got := actorKindFor("u1"); got != "human" {
-		t.Errorf("actorKindFor(u1) = %q, want human", got)
+	if got := actorKindFor("u1", []Role{Editor}); got != "human" {
+		t.Errorf("actorKindFor(u1, [Editor]) = %q, want human", got)
+	}
+	if got := actorKindFor("job-1", []Role{Editor, Job}); got != "job" {
+		t.Errorf("actorKindFor(job-1, [Editor,Job]) = %q, want job", got)
+	}
+	if got := actorKindFor("agent-1", []Role{Agent}); got != "agent" {
+		t.Errorf("actorKindFor(agent-1, [Agent]) = %q, want agent", got)
+	}
+}
+
+// TestAppProvenance_JobDrivenTransition_ActorKindJob exercises the real
+// app.dispatchBus path (not a direct call to Provenance()'s closure).
+//
+// An earlier design recovered roles inside the OnSignal closure via a
+// ctx.(Context) type assertion — empirically confirmed broken: dispatchBus
+// wraps ctx via context.WithoutCancel + context.WithTimeout before invoking
+// handlers, and those stdlib wrapper types do not preserve smeldr.Context's
+// richer method set, so the type assertion silently saw ok=false on every
+// real dispatch (unlike relations.go's recordAssertProvenance, which is
+// called synchronously and never passes through dispatchBus's rewrap — the
+// two call sites looked identical but weren't). SignalEvent.ActorRoles,
+// captured synchronously in buildSignalEvent before dispatch, is the fix;
+// this test asserts against that field directly, the same way
+// buildSignalEvent's real callers exercise it.
+func TestAppProvenance_JobDrivenTransition_ActorKindJob(t *testing.T) {
+	store := &fakeProvenanceStore{}
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("provenance-job-test-secret-12345"),
+	}))
+	app.Provenance(store)
+
+	ctx := NewTestContext(User{ID: "job-42", Roles: []Role{Editor, Job}})
+	ev := SignalEvent{
+		Type: "Post", Slug: "s", NodeID: "n1",
+		ActorID: "job-42", ActorRoles: []Role{Editor, Job},
+		PreviousState: "draft",
+	}
+	app.dispatchBus(ctx, ev, AfterPublish)
+
+	if len(store.appended) != 1 {
+		t.Fatalf("got %d appended, want 1", len(store.appended))
+	}
+	if store.appended[0].ActorKind != "job" {
+		t.Errorf("ActorKind = %q, want %q (ev.ActorRoles: [Editor, Job])",
+			store.appended[0].ActorKind, "job")
+	}
+}
+
+// TestAppProvenance_AgentDrivenTransition_ActorKindAgent mirrors the job
+// case above for the Agent classification role.
+func TestAppProvenance_AgentDrivenTransition_ActorKindAgent(t *testing.T) {
+	store := &fakeProvenanceStore{}
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("provenance-agent-test-secret-1234"),
+	}))
+	app.Provenance(store)
+
+	ctx := NewTestContext(User{ID: "agent-7", Roles: []Role{Agent}})
+	ev := SignalEvent{
+		Type: "Post", Slug: "s", NodeID: "n1",
+		ActorID: "agent-7", ActorRoles: []Role{Agent},
+		PreviousState: "draft",
+	}
+	app.dispatchBus(ctx, ev, AfterPublish)
+
+	if len(store.appended) != 1 {
+		t.Fatalf("got %d appended, want 1", len(store.appended))
+	}
+	if store.appended[0].ActorKind != "agent" {
+		t.Errorf("ActorKind = %q, want %q (ev.ActorRoles: [Agent])",
+			store.appended[0].ActorKind, "agent")
 	}
 }
 

@@ -19,6 +19,19 @@ const (
 	Editor Role = "editor"
 	// Admin has full access including app configuration (level 4).
 	Admin Role = "admin"
+
+	// Job classifies an actor as an automated job rather than a human — a
+	// classification tag, not a permission level. It carries no weight in the
+	// role hierarchy (never registered in roleLevels, so [HasRole] never
+	// matches it); include it alongside a real permission role in
+	// [User.Roles] (e.g. []Role{Editor, Job}) so permission checks still see
+	// the real role. Detected via [IsRole] when deriving
+	// [ProvenanceRecord.ActorKind].
+	Job Role = "job"
+
+	// Agent classifies an actor as an AI agent rather than a human. See [Job]
+	// for the same classification-tag convention.
+	Agent Role = "agent"
 )
 
 // roleMu protects roleLevels for concurrent custom role registration.

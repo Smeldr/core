@@ -257,7 +257,7 @@ func (a *App) Provenance(store ProvenanceStore) *App {
 				Verb:        provenanceVerbFor(s, ev.PreviousState, toState),
 				FromState:   ev.PreviousState,
 				ToState:     toState,
-				ActorKind:   actorKindFor(ev.ActorID),
+				ActorKind:   actorKindFor(ev.ActorID, ev.ActorRoles),
 				ActorID:     ev.ActorID,
 			})
 			return nil
@@ -266,15 +266,23 @@ func (a *App) Provenance(store ProvenanceStore) *App {
 	return a
 }
 
-// actorKindFor returns "human" when actorID is non-empty (an authenticated user
-// or MCP-client identity — smeldr.Context.User() does not currently distinguish
-// a human operator from an AI agent driving the same client) and empty otherwise,
-// matching ProvenanceRecord's own "empty only if truly unattributable" principle.
-// "agent" is reserved for a future, more specific agent-identity concept that
-// does not exist in the codebase yet (design doc §9 open question 3, confirmed).
-func actorKindFor(actorID string) string {
+// actorKindFor returns "" when actorID is empty (matching ProvenanceRecord's
+// own "empty only if truly unattributable" principle), "job" or "agent" when
+// roles contains the matching [Job]/[Agent] classification role (checked via
+// [IsRole], independent of the permission hierarchy — a token can carry both
+// a real permission role and a classification role at once, e.g.
+// []Role{Editor, Job}), and "human" otherwise. No caller mints a [Job]- or
+// [Agent]-tagged token anywhere in this codebase today; the classification
+// mechanism is real and wired regardless, ready for the first caller that does.
+func actorKindFor(actorID string, roles []Role) string {
 	if actorID == "" {
 		return ""
+	}
+	if IsRole(roles, Job) {
+		return "job"
+	}
+	if IsRole(roles, Agent) {
+		return "agent"
 	}
 	return "human"
 }

@@ -346,10 +346,12 @@ func (s *RelationStore) recordAssertProvenance(ctx context.Context, edge Relatio
 		return
 	}
 	var actorID string
+	var roles []Role
 	if sc, ok := ctx.(Context); ok {
 		actorID = sc.User().ID
+		roles = sc.User().Roles
 	}
-	actorKind := actorKindFor(actorID)
+	actorKind := actorKindFor(actorID, roles)
 	if edge.CreatedByJob != nil && *edge.CreatedByJob != "" {
 		actorKind = "job"
 		actorID = *edge.CreatedByJob
