@@ -1464,32 +1464,6 @@ func (r deletefailRepo[T]) Save(ctx context.Context, item T) error {
 }
 func (r deletefailRepo[T]) Delete(_ context.Context, _ string) error { return errRepoError }
 
-// secondSavefailRepo: first Save call succeeds via inner, second and later fail.
-type secondSavefailRepo[T any] struct {
-	inner     Repository[T]
-	saveCalls int
-}
-
-func (r *secondSavefailRepo[T]) FindByID(ctx context.Context, id string) (T, error) {
-	return r.inner.FindByID(ctx, id)
-}
-func (r *secondSavefailRepo[T]) FindBySlug(ctx context.Context, s string) (T, error) {
-	return r.inner.FindBySlug(ctx, s)
-}
-func (r *secondSavefailRepo[T]) FindAll(ctx context.Context, o ListOptions) ([]T, error) {
-	return r.inner.FindAll(ctx, o)
-}
-func (r *secondSavefailRepo[T]) Save(ctx context.Context, item T) error {
-	r.saveCalls++
-	if r.saveCalls >= 2 {
-		return errRepoError
-	}
-	return r.inner.Save(ctx, item)
-}
-func (r *secondSavefailRepo[T]) Delete(ctx context.Context, id string) error {
-	return r.inner.Delete(ctx, id)
-}
-
 // — writeContent branch coverage —————————————————————————————————————————————
 
 func TestWriteContent_textHTML_returns406(t *testing.T) {
@@ -1615,13 +1589,39 @@ func TestModule_updateHandler_saveError(t *testing.T) {
 	}
 }
 
-func TestModule_updateHandler_secondSaveError(t *testing.T) {
-	mem := NewMemoryRepo[*testPost]()
-	p := seedPost(t, mem, "Test Post", Draft)
-	repo := &secondSavefailRepo[*testPost]{inner: mem}
-	m := newTestModule(repo)
+// TestModule_updateHandler_publishSetsPublishedAtOneSave proves the T179/A226
+// fix against a real SQL-backed repo — the same repo shape
+// (modernc.org/sqlite + SQLRepo, not MemoryRepo) that surfaced the bug in
+// example/blog, since SQLRepo.Save's rev-based CAS (Amendment A158) is what a
+// MemoryRepo-backed test can't exercise. Before this fix, this exact
+// sequence — a real repo, draft→published via PUT — deterministically
+// returned 409 rev_conflict and never reached AfterPublish.
+func TestModule_updateHandler_publishSetsPublishedAtOneSave(t *testing.T) {
+	db := newSQLiteDB(t)
+	if _, err := db.ExecContext(context.Background(), `
+		CREATE TABLE test_posts (
+			id           TEXT NOT NULL PRIMARY KEY,
+			slug         TEXT NOT NULL DEFAULT '',
+			status       TEXT NOT NULL DEFAULT 'draft',
+			created_at   DATETIME NOT NULL DEFAULT '',
+			updated_at   DATETIME NOT NULL DEFAULT '',
+			scheduled_at DATETIME,
+			published_at DATETIME,
+			title        TEXT NOT NULL DEFAULT '',
+			body         TEXT NOT NULL DEFAULT '',
+			rev          INTEGER NOT NULL DEFAULT 0
+		)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	repo := NewSQLRepo[*testPost](db)
+	p := seedPost(t, repo, "Test Post", Draft)
 
-	// Draft → Published triggers a second Save to record PublishedAt.
+	published := make(chan string, 1)
+	m := newTestModule(repo, On[*testPost](AfterPublish, func(_ Context, item *testPost) error {
+		published <- item.Slug
+		return nil
+	}))
+
 	update := map[string]any{"Title": p.Title, "Status": string(Published)}
 	body, _ := json.Marshal(update)
 	w := httptest.NewRecorder()
@@ -1629,8 +1629,24 @@ func TestModule_updateHandler_secondSaveError(t *testing.T) {
 	r.SetPathValue("slug", p.Slug)
 	m.updateHandler(w, r)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", w.Code)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200\nbody: %s", w.Code, w.Body.String())
+	}
+	var updated testPost
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if updated.PublishedAt.IsZero() {
+		t.Error("PublishedAt was not set")
+	}
+
+	select {
+	case gotSlug := <-published:
+		if gotSlug != p.Slug {
+			t.Errorf("AfterPublish: got slug %q, want %q", gotSlug, p.Slug)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("AfterPublish: signal not received within 500ms")
 	}
 }
 

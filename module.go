@@ -1876,20 +1876,20 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Set PublishedAt on manual status transition to Published — mirrors the
+	// scheduler's behaviour (see processScheduled). Must happen before Save,
+	// not via a second Save call: SQLRepo.Save's rev-based CAS (Amendment
+	// A158) increments the stored rev without writing the new value back
+	// into item, so a second Save with the same in-memory item would always
+	// hit ErrRevConflict against the row Save #1 just advanced (Amendment
+	// A226, T179).
+	if prevStatus != Published && newStatus == Published {
+		setNodeTime(item, "PublishedAt", time.Now().UTC())
+	}
+
 	if err := m.repo.Save(ctx, item); err != nil {
 		WriteError(w, r, err)
 		return
-	}
-
-	// Set PublishedAt on manual status transition to Published — mirrors the
-	// scheduler's behaviour (see processScheduled). Must happen before signals
-	// so AfterPublish handlers see the correct timestamp.
-	if prevStatus != Published && newStatus == Published {
-		setNodeTime(item, "PublishedAt", time.Now().UTC())
-		if err := m.repo.Save(ctx, item); err != nil {
-			WriteError(w, r, err)
-			return
-		}
 	}
 	if m.syncSaveHook != nil {
 		if err := m.syncSaveHook(ctx, m.contentTypeName, nodeIDOf(item), item); err != nil {

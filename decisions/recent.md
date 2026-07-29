@@ -524,3 +524,111 @@ just a refactor.
 Level 2 amendment.
 
 ---
+
+## A226 — Fix `updateHandler`'s double-`Save` on publish-via-PUT (T179)
+
+### What
+
+`example/blog`'s `TestBlogSignal` and `TestBlogFullServer/audit/
+recordedOnPublish` both failed deterministically — every run, not
+intermittently — with a 409 `rev_conflict` on the PUT request that
+publishes a draft post.
+
+`module.go`'s `updateHandler` calls `m.repo.Save(ctx, item)` **twice** when
+a request transitions an item from non-`Published` to `Published`: once
+unconditionally, then again after `setNodeTime(item, "PublishedAt", ...)`.
+`SQLRepo.Save` (`storage.go`) is a compare-and-swap: `UPDATE ... WHERE
+rev = $N` using the in-memory `item.Rev` value, then increments the stored
+`rev` by 1 (`SET rev = table.rev + 1`) — it never writes the new,
+incremented value back into the caller's `item` struct. After Save #1
+succeeds, the database row's `rev` is `N+1`, but `item.Rev` in Go is still
+`N`. Save #2 issues `UPDATE ... WHERE rev = $N` again — against a row now
+at `N+1` — matches zero rows, and returns `ErrRevConflict`. This is
+structurally guaranteed to fail every time a PUT transitions an item to
+`Published`; `updateHandler` returns the 409 before
+`m.notifyAfter(ctx, AfterPublish, ...)` is ever reached, so no PUT-driven
+publish fired `AfterPublish` at all, silently, in addition to returning
+the wrong status code.
+
+**Historical origin, found via `git log -S`:** the double-`Save` pattern
+was introduced deliberately by Amendment A48 (`c4fdce2`, Milestone 9,
+2026-03-15) — "Second save committed before AfterPublish signal dispatch
+so handlers see the correct timestamp." At the time this was correct: no
+optimistic-concurrency mechanism existed yet. Amendment A158 (`Node.Rev`,
+2026-06-20 — three months later) added the `rev`-based CAS to `SQLRepo.Save`
+for a completely unrelated reason (preventing lost updates under concurrent
+writers) and silently broke A48's pattern — two unrelated amendments never
+re-verified against each other, caught only because `example/blog`'s own
+integration-style tests exercise a real SQL-backed publish-via-PUT.
+
+**Verified empirically before proposing the fix:** implemented the change
+directly first, ran `TestBlogSignal`/`TestBlogFullServer` — both passed.
+Ran the full `example/blog` suite — green. Ran core's own `go test ./...`
+— one pre-existing test failed: `TestModule_updateHandler_secondSaveError`,
+which exists specifically to exercise the second-`Save`-fails error branch
+this fix removes. Reverted the change afterward, per protocol, before
+writing the plan.
+
+**Other `setNodeTime(item, "PublishedAt", ...)` call sites — checked, not
+affected.** `processScheduled` (scheduler) and `MCPPublish` both set status
++ `PublishedAt` **before** their single `Save` call — never had this bug.
+`dynamic.go`'s `DynamicTypeRepo.setStatus` (the runtime/dynamic-content
+equivalent) uses one direct hand-written `UPDATE` with no `rev`-CAS
+mechanism at all — also unaffected. `updateHandler` was the only broken
+site — and its own bug contradicted A48's own stated intent ("mirrors the
+scheduler's behaviour"), which `processScheduled` already does correctly.
+
+### Fix
+
+Set `PublishedAt` before the (now single) `Save` call, matching
+`processScheduled`/`MCPPublish`'s own existing, correct shape:
+
+```go
+if prevStatus != Published && newStatus == Published {
+    setNodeTime(item, "PublishedAt", time.Now().UTC())
+}
+
+if err := m.repo.Save(ctx, item); err != nil {
+    WriteError(w, r, err)
+    return
+}
+```
+
+### Test changes
+
+**Removed, not repurposed:** `TestModule_updateHandler_secondSaveError`
+and its sole fixture, `secondSavefailRepo` (confirmed via grep it had no
+other caller) — the second-`Save`-fails scenario they exercised becomes
+structurally impossible, not merely untested. `TestModule_updateHandler_
+saveError` (the merged single `Save`'s error path) continues to cover
+what remains.
+
+**Added:** `TestModule_updateHandler_publishSetsPublishedAtOneSave` — a
+real regression test against a real `SQLRepo`-backed repo (not
+`MemoryRepo`, which can't exercise the rev-CAS at all, matching
+`example/blog`'s own failure mode), proving the actual fix rather than
+just the absence of an error: response status 200, `PublishedAt` non-zero,
+and an `AfterPublish` `On(...)` hook actually fires.
+
+`example/blog`'s `TestBlogSignal`/`TestBlogFullServer/audit/
+recordedOnPublish` needed no changes — they already correctly expressed
+the expected behaviour; they simply go from red to green.
+
+### Consequences
+
+- No exported Go symbols changed.
+- Real behaviour fix: PUT-driven publish transitions now succeed and fire
+  `AfterPublish` (previously always failed with 409, silently skipping the
+  signal).
+- `example/blog`'s two previously-failing tests now pass.
+- New test: `TestModule_updateHandler_publishSetsPublishedAtOneSave`.
+  Removed: `TestModule_updateHandler_secondSaveError`, `secondSavefailRepo`.
+  Coverage: 96.1% (unchanged).
+- Patch release, matching A221/A222/A225's own precedent for real
+  previously-broken-functionality fixes with no new exported symbols:
+  v1.58.1 → v1.58.2.
+- Level 2 amendment (route behaviour change, `module.go`).
+
+Level 2 amendment.
+
+---

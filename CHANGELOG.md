@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.58.2] — 2026-07-29
+
+### Fixed
+- `updateHandler` (HTTP PUT) no longer makes a second `Save` call to record `PublishedAt` when a request publishes an item — that second call always failed with a 409 `rev_conflict` against `SQLRepo`'s rev-based optimistic concurrency, since the first `Save` had already advanced the stored `rev` without updating the caller's in-memory copy. `PublishedAt` is now set before the single `Save` call, matching the scheduler's and `MCPPublish`'s existing correct behaviour. Previously, publishing any item via a raw HTTP PUT (not MCP) deterministically failed and never fired `AfterPublish`. (A226)
+
+---
+
 ## [1.58.1] — 2026-07-29
 
 ### Fixed
