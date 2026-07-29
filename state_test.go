@@ -756,6 +756,72 @@ func (d *stateCountFailDB) QueryRowContext(ctx context.Context, query string, _ 
 	return sql.OpenDB(&queryErrConnector{err: errors.New("simulated state count error")}).QueryRowContext(ctx, "SELECT v")
 }
 
+// — defaultInitialState ——————————————————————————————————————————————————————
+
+func TestDefaultInitialState_nilDB(t *testing.T) {
+	if got := defaultInitialState(context.Background(), nil, "Goal"); got != "" {
+		t.Errorf("nil DB: got %q, want empty", got)
+	}
+}
+
+func TestDefaultInitialState_nonSQLite(t *testing.T) {
+	// failOnNthExecDB.QueryRowContext returns guardRowConn{noRow:true} → scan
+	// fails → sqlite_master probe returns error → fail open.
+	db := &failOnNthExecDB{failAt: 999}
+	if got := defaultInitialState(context.Background(), db, "Goal"); got != "" {
+		t.Errorf("non-SQLite: got %q, want empty", got)
+	}
+}
+
+func TestDefaultInitialState_noFlow(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	// No flow registered for "Goal" — only the seeded default flow exists,
+	// which is keyed on type_name IS NULL, not "Goal" itself.
+	if got := defaultInitialState(ctx, db, "Goal"); got != "" {
+		t.Errorf("no flow: got %q, want empty", got)
+	}
+}
+
+func TestDefaultInitialState_noInitialState(t *testing.T) {
+	// restrictedFlow's states (published/archived) have neither marked
+	// IsInitial — the flow exists but no row satisfies is_initial=true.
+	db := newSQLiteDB(t)
+	restrictedFlow(t, db)
+	if got := defaultInitialState(context.Background(), db, "testPost"); got != "" {
+		t.Errorf("flow with no initial state: got %q, want empty", got)
+	}
+}
+
+func TestDefaultInitialState_customInitialState(t *testing.T) {
+	// orchGoalFlow is the real, production Goal flow (orchestration.go) —
+	// IsInitial state is "open", never "draft". This is T180's own
+	// motivating scenario, not a synthetic fixture.
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(orchGoalFlow()); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	if got := defaultInitialState(ctx, db, "Goal"); got != "open" {
+		t.Errorf("custom initial state: got %q, want %q", got, "open")
+	}
+}
+
+func TestDefaultInitialState_stateQueryError(t *testing.T) {
+	// stateCountFailDB passes the sqlite_master probe and flow lookup but
+	// fails the smeldr_states query — must fail open.
+	if got := defaultInitialState(context.Background(), &stateCountFailDB{}, "Goal"); got != "" {
+		t.Errorf("state query error: got %q, want empty", got)
+	}
+}
+
 // — Module[T] integration tests for validateTransition ————————————————————————
 
 // restrictedFlow registers a flow for "testPost" that only permits published→archived.
@@ -884,6 +950,140 @@ func TestCreateHandler_invalidInitialState(t *testing.T) {
 	items, _ := mem.FindAll(context.Background(), ListOptions{})
 	if len(items) != 0 {
 		t.Errorf("repo count = %d; want 0 (aborted on invalid initial state)", len(items))
+	}
+}
+
+// — Module[T] integration tests for applyDefaultStatus (T180, A225) —————————————
+
+// customInitialFlow registers a flow for "testPost" whose IsInitial state is
+// "backlog", never "draft" — the same shape as the real orchestration types
+// (orchestration.go) that motivated this fix, applied to the lightweight
+// testPost type so these tests don't need full orchestration wiring.
+func customInitialFlow(t *testing.T, db DB) {
+	t.Helper()
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	flow := StateFlow{
+		Name:     "custom-initial",
+		TypeName: "testPost",
+		States:   []State{{Name: "backlog", IsInitial: true}, {Name: "archived", IsTerminal: true}},
+		Transitions: []Transition{
+			{From: "backlog", To: "archived"},
+		},
+	}
+	if err := app.RegisterFlow(flow); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+}
+
+func TestMCPCreate_omittedStatus_customInitialState(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	customInitialFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	ctx := NewTestContext(editorUser())
+	created, err := m.MCPCreate(ctx, map[string]any{"Title": "Test"})
+	if err != nil {
+		t.Fatalf("MCPCreate with omitted status: %v", err)
+	}
+	item := created.(*testPost)
+	if item.Status != "backlog" {
+		t.Errorf("Status = %q, want %q", item.Status, "backlog")
+	}
+}
+
+func TestMCPCreate_omittedStatus_defaultsToDraft(t *testing.T) {
+	// No custom flow registered for "testPost" — regression guard: the
+	// overwhelmingly common case (no custom StateFlow) must still default
+	// to the literal Draft constant, exactly as before this fix.
+	sqlDB := newSQLiteDB(t)
+	if err := migrateStateFlows(context.Background(), sqlDB); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+
+	mem := NewMemoryRepo[*testPost]()
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	ctx := NewTestContext(editorUser())
+	created, err := m.MCPCreate(ctx, map[string]any{"Title": "Test"})
+	if err != nil {
+		t.Fatalf("MCPCreate with omitted status: %v", err)
+	}
+	item := created.(*testPost)
+	if item.Status != Draft {
+		t.Errorf("Status = %q, want %q", item.Status, Draft)
+	}
+}
+
+func TestCreateHandler_omittedStatus_customInitialState(t *testing.T) {
+	// Before this fix, an omitted status via HTTP POST silently persisted
+	// the literal empty string "" — never "draft", and never the type's own
+	// initial state. This proves the fix, not just the absence of an error.
+	sqlDB := newSQLiteDB(t)
+	customInitialFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	body, _ := json.Marshal(map[string]string{"Title": "Test"})
+	w := httptest.NewRecorder()
+	r := withUser(
+		httptest.NewRequest(http.MethodPost, "/testposts", bytes.NewReader(body)),
+		editorUser(),
+	)
+	r.Header.Set("Content-Type", "application/json")
+	m.createHandler(w, r)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201\nbody: %s", w.Code, w.Body.String())
+	}
+	var created testPost
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if created.Status != "backlog" {
+		t.Errorf("Status = %q, want %q", created.Status, "backlog")
+	}
+}
+
+func TestCreateHandler_omittedStatus_defaultsToDraft(t *testing.T) {
+	// No custom flow registered — regression guard, same as the MCPCreate
+	// counterpart above.
+	sqlDB := newSQLiteDB(t)
+	if err := migrateStateFlows(context.Background(), sqlDB); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+
+	mem := NewMemoryRepo[*testPost]()
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	body, _ := json.Marshal(map[string]string{"Title": "Test"})
+	w := httptest.NewRecorder()
+	r := withUser(
+		httptest.NewRequest(http.MethodPost, "/testposts", bytes.NewReader(body)),
+		editorUser(),
+	)
+	r.Header.Set("Content-Type", "application/json")
+	m.createHandler(w, r)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201\nbody: %s", w.Code, w.Body.String())
+	}
+	var created testPost
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if created.Status != Draft {
+		t.Errorf("Status = %q, want %q", created.Status, Draft)
 	}
 }
 

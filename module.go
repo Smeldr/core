@@ -1755,6 +1755,7 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		pv.Elem().FieldByIndex(f.slug).SetString(slug)
 	}
+	applyDefaultStatus(ctx, m.db, m.contentTypeName, pv, f)
 
 	item := ptrToT[T](pv, m.proto)
 
@@ -2200,6 +2201,23 @@ func coerceSliceFields(fields map[string]any, t reflect.Type) {
 // is always generated; the slug is auto-derived when absent. The item is
 // validated before persistence. AfterCreate signals are dispatched
 // asynchronously.
+// applyDefaultStatus sets pv's status field to typeName's own registered
+// initial state when the caller left it empty, falling back to the literal
+// Draft constant when no custom flow is registered for typeName — the same
+// default every content type without a custom StateFlow has always gotten.
+// Shared by createHandler and MCPCreate so both create paths default an
+// omitted status identically.
+func applyDefaultStatus(ctx context.Context, db DB, typeName string, pv reflect.Value, f nodeFields) {
+	if pv.Elem().FieldByIndex(f.status).String() != "" {
+		return
+	}
+	status := Draft
+	if s := defaultInitialState(ctx, db, typeName); s != "" {
+		status = Status(s)
+	}
+	pv.Elem().FieldByIndex(f.status).Set(reflect.ValueOf(status))
+}
+
 func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	pv, elemType := m.newItemPtr()
 	coerceSliceFields(fields, elemType)
@@ -2225,9 +2243,7 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 		})
 		pv.Elem().FieldByIndex(f.slug).SetString(slug)
 	}
-	if pv.Elem().FieldByIndex(f.status).String() == "" {
-		pv.Elem().FieldByIndex(f.status).Set(reflect.ValueOf(Draft))
-	}
+	applyDefaultStatus(ctx, m.db, m.contentTypeName, pv, f)
 
 	item := ptrToT[T](pv, m.proto)
 	if err := RunValidation(item); err != nil {

@@ -350,20 +350,15 @@ func TestServerToggles(t *testing.T) {
 		ts := buildTestServer(t, cfg)
 		authorToken := createToken(t, ts, "author", "author")
 
-		// status: "open" is passed explicitly — Goal's registered flow
-		// (orchGoalFlow) has no "draft" state at all, unlike MCPCreate's
-		// blanket default when status is omitted. This is a real,
-		// currently-shipping conflict between MCPCreate's hardcoded Draft
-		// default and every orchestration type's custom initial state,
-		// unrelated to this task — flagged separately, worked around here
-		// rather than fixed (out of scope for T178).
+		// No explicit status — proves the T180/A225 fix from a third angle:
+		// create_goal must default to Goal's own registered initial state
+		// ("open"), not fail or silently persist the wrong value.
 		goal := callTool(t, ts.URL, authorToken, "create_goal", map[string]any{
 			"goal_id":     "T-provenance-test",
 			"description": "Goal for provenance wiring test",
 			"priority":    float64(1),
 			"band":        "P1",
 			"size":        "S",
-			"status":      "open",
 		})
 		goalNodeID, _ := goal["ID"].(string)
 		if goalNodeID == "" {

@@ -406,3 +406,121 @@ already detects `"job"` via `CreatedByJob`).
 Level 2 amendment.
 
 ---
+
+## A225 — Fix `MCPCreate`'s hardcoded `Draft` default breaking all 5 orchestration types (T180)
+
+### What
+
+`module.go`'s `MCPCreate` hardcoded a caller-omitted status to the literal
+`Draft` constant, regardless of whether the content type has a custom
+`StateFlow` registered whose actual `IsInitial` state is something else.
+`validateInitialState` (A216, T148) then correctly rejected `"draft"` as
+not a registered state for that flow, producing a hard `-32001 Conflict`.
+This broke `create_signal`/`create_task`/`create_decision`/
+`create_amendment`/`create_goal` via MCP whenever the caller omitted status
+— all five orchestration types registered by `RegisterOrchestrationTypes`
+have a non-`"draft"` `IsInitial` state (`"pending"`/`"backlog"`/
+`"proposed"`/`"scoped"`/`"open"` respectively).
+
+**The equivalent HTTP path was checked directly, per instruction, rather
+than assumed to have "the same hardcoding" — it doesn't.** `createHandler`
+has no status-defaulting logic at all: it decodes the request body into a
+zero-valued struct, and if `status` is absent, the field stays at `Status`'s
+Go zero value (`""`), not `"draft"` (`Draft Status = "draft"` — not the
+same value). `validateInitialState` is only called `if s != ""`, so an
+omitted status skips validation entirely and persists the literal empty
+string. Confirmed empirically with a throwaway test. This is a **second,
+silent** bug, not a copy of MCPCreate's, and not limited to orchestration
+types — it affects any content type created via raw HTTP POST with no
+status field. For an orchestration type specifically it is arguably worse
+than MCPCreate's loud failure: `""` is not a valid state or a valid
+transition `from_state` in that type's own flow, so the item is created
+into a permanently stuck status with no error at all. No existing test
+checked the resulting `Status` of a plain create with omitted status
+(`TestModuleCreateSuccess` asserts ID/Slug/repo-count, never `Status`) —
+this gap had never been exercised.
+
+A216's own archived entry (`decisions/phase17-archive.md`) confirms this is
+adjacent to, not a regression of, its own scope: A216 added
+`validateInitialState` to reject an *explicitly supplied* invalid status
+(`"done"`); it never addressed an *omitted* one.
+
+### Fix
+
+New `defaultInitialState(ctx context.Context, db DB, typeName string) string`
+(`state.go`, co-located with `validateInitialState`/`suppressesSignals`):
+queries `smeldr_state_flows`/`smeldr_states` for the type's own registered
+`IsInitial` state, fail-open on nil DB, non-SQLite, missing flow, no
+`IsInitial` state, or query error. Deliberately does **not** fall back to
+the default flow the way `validateInitialState`/`suppressesSignals` do —
+the built-in default flow's own seeded initial state is always `"draft"`
+(`migrateStateFlows`), so a second query against it would return the same
+answer for no benefit.
+
+New `applyDefaultStatus(ctx context.Context, db DB, typeName string, pv reflect.Value, f nodeFields)`
+(`module.go`, co-located with its two callers): sets `pv`'s status field to
+`defaultInitialState`'s result when the caller left it empty, falling back
+to the literal `Draft` constant when no custom flow is registered. Shared
+by `createHandler` and `MCPCreate`, replacing `MCPCreate`'s old hardcoded
+block and adding genuine defaulting to `createHandler` for the first time —
+closing both gaps with one mechanism rather than porting one path's broken
+logic to the other. `createHandler`'s existing
+`if s := string(nodeStatusOf(item)); s != "" { validateInitialState(...) }`
+check now always has a non-empty status to validate (previously only ran
+when the caller explicitly supplied one) — a genuine strengthening, not
+just a refactor.
+
+### Design decisions
+
+1. **Direction 1 (look up the registered flow) over Direction 2 (a
+   module-registration default-status hook), investigated and rejected.**
+   `RegisterFlow`'s `State{IsInitial: true}` is already persisted per-type
+   in `smeldr_states.is_initial`. A second, module-level "default status"
+   option would be a second source of truth that can drift from the
+   registered flow (someone changes the flow's initial state later and
+   forgets the module option) — exactly the kind of duplication this
+   project's DRY principle warns against.
+2. **`defaultInitialState` does not fall back to the default flow.**
+   Verified the built-in default flow's own `IsInitial` state actually is
+   `"draft"` (`migrate.go`'s `migrateStateFlows`) before relying on this —
+   the Go-level fallback to the literal `Draft` constant in
+   `applyDefaultStatus` produces the identical answer without a second
+   query, for the overwhelmingly common case (no custom flow registered).
+3. **Dedicated `TestApplyDefaultStatus_*` unit tests, planned but not
+   written — a deliberate deviation, not an oversight.** Coverage
+   confirmed 100% on both new functions from the integration tests alone
+   (`TestMCPCreate_omittedStatus_customInitialState`/`_defaultsToDraft`,
+   `TestCreateHandler_omittedStatus_customInitialState`/`_defaultsToDraft`,
+   plus the existing `TestMCPCreate_invalidInitialState`/
+   `TestCreateHandler_invalidInitialState` exercising the already-set-status
+   early return). Adding isolated unit tests on top would have duplicated
+   the same branches without exercising anything the integration tests
+   don't already prove end to end.
+
+### Consequences
+
+- No exported Go symbols changed — `defaultInitialState` and
+  `applyDefaultStatus` are both unexported.
+- Real behaviour fix, cross-file (`state.go` + `module.go`), affecting two
+  HTTP/MCP entry points.
+- `example/server`'s `TestServerToggles/on/orchestration`/
+  `on/orchestrationWithRelations` (failing on `main` before this fix,
+  confirmed via a clean checkout during T178) now pass. The `on/provenance`
+  test's `"status": "open"` workaround (added during T178 to sidestep this
+  exact bug) removed — proves the fix from a third angle.
+- New tests: `TestDefaultInitialState_nilDB`, `_nonSQLite`, `_noFlow`,
+  `_noInitialState`, `_customInitialState`, `_stateQueryError`
+  (`state_test.go`); `TestMCPCreate_omittedStatus_customInitialState`,
+  `_defaultsToDraft`, `TestCreateHandler_omittedStatus_customInitialState`,
+  `_defaultsToDraft` (`state_test.go`, alongside the existing A216
+  integration tests). Coverage: 96.1% (unchanged), 100% on both new
+  functions.
+- Patch release, matching A221/A222's own precedent for real
+  previously-broken-functionality fixes with no new exported symbols:
+  v1.58.0 → v1.58.1.
+- Level 2 amendment (cross-file, real behaviour fix affecting two
+  entry points).
+
+Level 2 amendment.
+
+---

@@ -479,6 +479,39 @@ func validateInitialState(ctx context.Context, db DB, typeName, statusName strin
 	return nil
 }
 
+// defaultInitialState returns the IsInitial state registered for typeName's
+// own custom StateFlow, or "" when none is registered — or on any
+// structural/DB issue, fail-open, matching validateInitialState's own
+// fail-open cases (nil DB, non-SQLite, missing flow, query error). Callers
+// fall back to the literal Draft constant when this returns "": the
+// built-in default flow's own initial state is "draft" (migrateStateFlows),
+// so a second query against it here would return the same answer for no
+// benefit — unlike validateInitialState/suppressesSignals, this function
+// deliberately does not fall back to the default flow.
+func defaultInitialState(ctx context.Context, db DB, typeName string) string {
+	if db == nil {
+		return ""
+	}
+	var dummy int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
+		return ""
+	}
+	var flowID string
+	if err := db.QueryRowContext(ctx,
+		`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
+	).Scan(&flowID); err != nil {
+		return ""
+	}
+	var name string
+	if err := db.QueryRowContext(ctx,
+		`SELECT name FROM smeldr_states WHERE flow_id = $1 AND is_initial = $2 LIMIT 1`,
+		flowID, true,
+	).Scan(&name); err != nil {
+		return ""
+	}
+	return name
+}
+
 // suppressesSignals reports whether the given state in the type's registered
 // flow has suppresses_signals=true. Returns false on any error (fail-open).
 // Called by notifyAfter to gate After* event dispatch.

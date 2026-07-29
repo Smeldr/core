@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.58.1] — 2026-07-29
+
+### Fixed
+- `MCPCreate` no longer hardcodes an omitted status to the literal `Draft` constant — it now defaults to the content type's own registered initial state when a custom `StateFlow` exists, falling back to `Draft` only when none is registered. Previously this broke `create_signal`/`create_task`/`create_decision`/`create_amendment`/`create_goal` via MCP whenever the caller omitted status, since none of the five orchestration types' own initial states is `"draft"`. (A225)
+- `createHandler` (HTTP POST) now applies the same default-status logic. Previously it had no status-defaulting at all — an omitted status silently persisted as the literal empty string, which for a custom-flow type is not a valid state or transition `from_state` either, leaving the item permanently stuck with no error. (A225)
+
+---
+
 ## [1.58.0] — 2026-07-29
 
 ### Added
