@@ -1,14 +1,10 @@
 ﻿# Smeldr
 
-Content-driven backend for agents, readers, and APIs.
+AI-native content backend in Go. Typed lifecycle (draft, publish, archive), native MCP tools for every type, zero runtime dependencies.
 
 [![Go Reference](https://pkg.go.dev/badge/smeldr.dev/core.svg)](https://pkg.go.dev/smeldr.dev/core)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Smeldr/core)](https://goreportcard.com/report/github.com/Smeldr/core)
 [![codecov](https://codecov.io/gh/Smeldr/core/graph/badge.svg)](https://codecov.io/gh/Smeldr/core)
 [![Version](https://img.shields.io/github/v/release/smeldr/core?filter=v*&color=%2341A300)](https://github.com/smeldr/core/releases/latest)
-
-Smeldr has MCP as primary interface.
-Go. Zero runtime dependencies.
 
 Start a chat with your favorite agent, create content together and then...
 
@@ -62,6 +58,10 @@ for the full variable reference and wiring order.
 - **Scheduled publishing** — set a future `ScheduledAt`; Smeldr transitions to Published automatically
 - **Content negotiation** — one endpoint serves JSON, HTML, or Markdown based on `Accept`
 
+**AI-native**
+- **AI indexing** — `/llms.txt` compact index, `/llms-full.txt` Markdown corpus, and per-item `/aidoc` endpoints
+- **MCP integration** — connect AI agents to read and write content via the Model Context Protocol
+
 **Auth & security**
 - **Role-based auth** — Guest → Author → Editor → Admin enforced per-module, per-operation
 - **Cookie compliance** — `/.well-known/cookies.json` declares cookie categories for GDPR tooling
@@ -73,10 +73,6 @@ for the full variable reference and wiring order.
 - **Open Graph** — og:title, og:description, og:image meta tags for social link previews
 - **Twitter Cards** — twitter: meta tags with summary and summary_large_image support
 - **RSS feed** — per-module feed at `/{prefix}/feed.xml` plus a global aggregate at `/feed.xml`
-
-**AI-native**
-- **AI indexing** — `/llms.txt` compact index, `/llms-full.txt` Markdown corpus, and per-item `/aidoc` endpoints
-- **MCP integration** — connect AI agents to read and write content via the Model Context Protocol
 
 **Infrastructure**
 - **Graceful shutdown** — drains in-flight requests before exiting on SIGINT/SIGTERM
