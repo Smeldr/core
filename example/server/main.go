@@ -271,7 +271,8 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 		stopFuncs = append(stopFuncs, func() { oauthStore.Close() }) //nolint:errcheck
 		oauthSrv := oauth.New(oauth.Config{
-			Issuer: cfg.OAuthIssuer,
+			Issuer:   cfg.OAuthIssuer,
+			Resource: cfg.BaseURL + "/mcp",
 			VerifyBearer: func(token string) bool {
 				if tokenStore == nil {
 					return false

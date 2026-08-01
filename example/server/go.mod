@@ -1,6 +1,6 @@
 module example/server
 
-go 1.26.4
+go 1.26.5
 
 require (
 	modernc.org/sqlite v1.50.1
@@ -8,7 +8,7 @@ require (
 	smeldr.dev/core v1.54.0
 	smeldr.dev/mcp v1.28.0
 	smeldr.dev/media v1.6.0
-	smeldr.dev/oauth v0.2.0
+	smeldr.dev/oauth v0.4.0
 	smeldr.dev/social v0.9.2
 )
 
