@@ -265,3 +265,61 @@ was already non-zero — a real regression, not a simplification.
 Level 1 amendment.
 
 ---
+
+## A230 — `smeldr.dev/mcp`: fix stale `published→draft` assertion in `TestStateTool_TransitionItem_InvalidTransition` (T184, standalone module)
+
+### What
+
+The test asserted `published → draft` is rejected by the default flow
+("not in the default flow"). It isn't, hasn't been since core's Amendment
+A217 (`d74cab7`, 2026-07-15, "enforce validateTransition in updateHandler +
+published→draft") deliberately added `{"published", "draft"}` to the default
+flow's seeded transitions (`migrate.go`) as an intentional "unpublish"
+feature — confirmed via `git log -S` on the exact literal.
+
+**Severity, checked rather than taken at face value.** `smeldr.dev/mcp`'s
+own `go.mod` pins `smeldr.dev/core v1.54.0` (2026-07-05 — predates A217).
+Ran the failing test two ways to isolate this: with the local `go.work`
+(gitignored, dev-only convenience file pointing at core's live working
+tree) it fails, because the workspace silently overrides `go.mod`'s pinned
+version, building against current core (v1.58.2+, which has A217). With
+`GOWORK=off` (forcing resolution from `go.sum`'s actual pinned `v1.54.0`)
+it passes, because that version genuinely predates the addition. **Real CI
+(fresh clone, no gitignored workspace) was green the whole time** — this
+was a local-development-only false failure, not a live CI break, contrary
+to how it was initially framed. Still worth fixing: the assertion is
+factually stale regardless of which core version resolves it, and it will
+become a genuine CI break the moment anyone bumps `smeldr.dev/mcp`'s core
+dependency (a plausible near-future event, not hypothetical).
+
+### Fix
+
+Swapped the attempted invalid target from `"draft"` (now valid) to
+`"scheduled"` — not in the default flow's transition list in either
+version, and directionally safer than reaching for `archived` (one hop
+closer to plausibly gaining its own outgoing transitions someday, e.g. a
+hypothetical "restore from archive" feature). Added a comment flagging this
+as a "currently invalid, not guaranteed forever" assumption, so the next
+core amendment that touches transitions updates this test deliberately
+instead of going stale again — the same failure mode this amendment itself
+fixes.
+
+### Flagged, not fixed here
+
+`smeldr.dev/mcp/go.mod` pinning `smeldr.dev/core v1.54.0` while actual core
+is at v1.58.3 is a real, growing gap — worth its own dedicated task to bump
+and re-verify `smeldr.dev/mcp`'s full test suite against current core
+(A217 through A230 span multiple behaviour changes never tested against
+for real). Not attempted here — a dependency bump plus full regression pass
+is a different shape of work than fixing one stale assertion.
+
+### Consequences
+
+- Test-only change, no exported symbol, no route, no behaviour changed.
+- No version bump, no tag (matches A228's precedent: "no version bump" =
+  "no consumer-visible behaviour changed").
+- Level 1 amendment (single test file, no cross-file consequences).
+
+Level 1 amendment.
+
+---
