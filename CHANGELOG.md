@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.58.3] — 2026-07-30
+
+### Fixed
+- `createHandler` (HTTP POST) and `MCPCreate` now stamp `PublishedAt` when an item is created directly with `status: "published"` — previously neither path set it, leaving RSS `PubDate`/sitemap `LastMod` at a zero date for directly-published items. A caller-supplied `PublishedAt` (e.g. a data-import path) is preserved, not overwritten. (A229)
+
+---
+
 ## [1.58.2] — 2026-07-29
 
 ### Fixed

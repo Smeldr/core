@@ -250,6 +250,64 @@ func TestModuleCreateSuccess(t *testing.T) {
 	}
 }
 
+// TestCreateHandler_publishedDirectlyStampsPublishedAt proves the T181 fix:
+// creating directly with status "published" (no PublishedAt supplied) now
+// stamps PublishedAt, where before it silently stayed zero.
+func TestCreateHandler_publishedDirectlyStampsPublishedAt(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := newTestModule(repo)
+
+	before := time.Now().UTC()
+	body, _ := json.Marshal(map[string]string{"Title": "Test", "Status": "published"})
+	w := httptest.NewRecorder()
+	r := withUser(
+		httptest.NewRequest(http.MethodPost, "/testposts", bytes.NewReader(body)),
+		editorUser(),
+	)
+	r.Header.Set("Content-Type", "application/json")
+	m.createHandler(w, r)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201\nbody: %s", w.Code, w.Body.String())
+	}
+	var created testPost
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if created.PublishedAt.Before(before) {
+		t.Errorf("PublishedAt = %v, want >= %v (still zero or stale)", created.PublishedAt, before)
+	}
+}
+
+// TestCreateHandler_publishedWithExplicitPublishedAtPreserved proves
+// stampPublishedAt does not clobber a caller-supplied PublishedAt (e.g. a
+// data-import path preserving a historical publish date).
+func TestCreateHandler_publishedWithExplicitPublishedAtPreserved(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := newTestModule(repo)
+
+	historical := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	body, _ := json.Marshal(map[string]any{"Title": "Test", "Status": "published", "PublishedAt": historical})
+	w := httptest.NewRecorder()
+	r := withUser(
+		httptest.NewRequest(http.MethodPost, "/testposts", bytes.NewReader(body)),
+		editorUser(),
+	)
+	r.Header.Set("Content-Type", "application/json")
+	m.createHandler(w, r)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201\nbody: %s", w.Code, w.Body.String())
+	}
+	var created testPost
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !created.PublishedAt.Equal(historical) {
+		t.Errorf("PublishedAt = %v, want preserved historical value %v", created.PublishedAt, historical)
+	}
+}
+
 // — Update handler tests ——————————————————————————————————————————————————
 
 func TestModuleUpdateForbiddenGuest(t *testing.T) {

@@ -348,3 +348,45 @@ func TestMCPModuleInterface(t *testing.T) {
 		t.Error("MCPGet after MCPDelete should return error")
 	}
 }
+
+// TestMCPCreate_publishedDirectlyStampsPublishedAt proves the T181 fix:
+// MCPCreate with status "published" (no PublishedAt supplied) now stamps
+// PublishedAt, where before it silently stayed zero.
+func TestMCPCreate_publishedDirectlyStampsPublishedAt(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := newTestModule(repo)
+	ctx := NewTestContext(editorUser())
+
+	before := time.Now().UTC()
+	created, err := m.MCPCreate(ctx, map[string]any{"title": "Test", "status": "published"})
+	if err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+	item := created.(*testPost)
+	if item.PublishedAt.Before(before) {
+		t.Errorf("PublishedAt = %v, want >= %v (still zero or stale)", item.PublishedAt, before)
+	}
+}
+
+// TestMCPCreate_publishedWithExplicitPublishedAtPreserved proves
+// stampPublishedAt does not clobber a caller-supplied PublishedAt (e.g. a
+// data-import path preserving a historical publish date).
+func TestMCPCreate_publishedWithExplicitPublishedAtPreserved(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := newTestModule(repo)
+	ctx := NewTestContext(editorUser())
+
+	historical := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	created, err := m.MCPCreate(ctx, map[string]any{
+		"title":       "Test",
+		"status":      "published",
+		"publishedAt": historical,
+	})
+	if err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+	item := created.(*testPost)
+	if !item.PublishedAt.Equal(historical) {
+		t.Errorf("PublishedAt = %v, want preserved historical value %v", item.PublishedAt, historical)
+	}
+}

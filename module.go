@@ -342,6 +342,16 @@ func nodeStatusOf(v any) Status {
 	return rv.FieldByIndex(f.status).Interface().(Status)
 }
 
+// nodePublishedAtOf returns the PublishedAt field of v via its Go field name.
+func nodePublishedAtOf(v any) time.Time {
+	rv := elemValue(v)
+	path := goFieldPath(rv.Type(), "PublishedAt")
+	if path == nil {
+		return time.Time{}
+	}
+	return rv.FieldByIndex(path).Interface().(time.Time)
+}
+
 // nodeIDOf returns the ID field of v.
 func nodeIDOf(v any) string {
 	rv := elemValue(v)
@@ -1758,6 +1768,7 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 	applyDefaultStatus(ctx, m.db, m.contentTypeName, pv, f)
 
 	item := ptrToT[T](pv, m.proto)
+	stampPublishedAt(item)
 
 	// Validate before any persistence.
 	if err := RunValidation(item); err != nil {
@@ -2218,6 +2229,17 @@ func applyDefaultStatus(ctx context.Context, db DB, typeName string, pv reflect.
 	pv.Elem().FieldByIndex(f.status).Set(reflect.ValueOf(status))
 }
 
+// stampPublishedAt sets PublishedAt to now when item's status is Published and
+// PublishedAt has not already been set — covers the case where an item is created
+// (or resolves, via a custom flow's own IsInitial state) directly as Published.
+// Deliberately does not overwrite a caller-supplied PublishedAt (e.g. a data-import
+// path preserving a historical publish date).
+func stampPublishedAt(item any) {
+	if nodeStatusOf(item) == Published && nodePublishedAtOf(item).IsZero() {
+		setNodeTime(item, "PublishedAt", time.Now().UTC())
+	}
+}
+
 func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	pv, elemType := m.newItemPtr()
 	coerceSliceFields(fields, elemType)
@@ -2246,6 +2268,7 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	applyDefaultStatus(ctx, m.db, m.contentTypeName, pv, f)
 
 	item := ptrToT[T](pv, m.proto)
+	stampPublishedAt(item)
 	if err := RunValidation(item); err != nil {
 		return nil, err
 	}

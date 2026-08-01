@@ -177,3 +177,91 @@ described, since it was previously omitted there too.
 Level 1 amendment.
 
 ---
+
+## A229 — Fix `PublishedAt` never stamped when created directly as `published` (T181)
+
+### What
+
+Neither `createHandler` (HTTP) nor `MCPCreate` (MCP) had any `PublishedAt`
+stamping logic. Both already had status-aware branches for the "created
+directly as Published" case (`createHandler`'s slug-collision check,
+its `AfterPublish` hook fire), so the scenario wasn't unconsidered — the
+timestamp was just never wired in. RSS `PubDate`/sitemap `LastMod` showed a
+wrong (zero) date on public-facing surfaces for directly-published items.
+
+**NEXT.md's suspected second half of the bug — checked directly, refuted,
+not assumed.** The concern was that a follow-up `publish_post`/`MCPPublish`
+call on the already-published item (as a manual workaround) would be
+rejected by `validateTransition` on a `published→published` self-transition.
+Reproduced directly against a real migrated SQLite DB: `validateTransition`
+(`state.go`) has an explicit `if fromStatus == toStatus { return nil }` early
+return, so the self-transition is never gated by the transition-edge lookup
+at all. `MCPPublish` then unconditionally runs `setNodeTime(item,
+"PublishedAt", time.Now().UTC())` on every successful call, regardless of
+`prevStatus`. The follow-up call already self-heals today — no second bug
+exists. Verified with a throwaway test, run, and reverted before writing the
+plan (not committed).
+
+### Fix
+
+New helpers in `module.go`, alongside the existing `nodeStatusOf`/`nodeIDOf`
+accessors and `applyDefaultStatus`:
+
+```go
+// nodePublishedAtOf returns the PublishedAt field of v via its Go field name.
+func nodePublishedAtOf(v any) time.Time {
+	rv := elemValue(v)
+	path := goFieldPath(rv.Type(), "PublishedAt")
+	if path == nil {
+		return time.Time{}
+	}
+	return rv.FieldByIndex(path).Interface().(time.Time)
+}
+
+// stampPublishedAt sets PublishedAt to now when item's status is Published and
+// PublishedAt has not already been set.
+func stampPublishedAt(item any) {
+	if nodeStatusOf(item) == Published && nodePublishedAtOf(item).IsZero() {
+		setNodeTime(item, "PublishedAt", time.Now().UTC())
+	}
+}
+```
+
+Called as `stampPublishedAt(item)` immediately after `item := ptrToT[T](pv,
+m.proto)` in both `createHandler` and `MCPCreate`, before `RunValidation` —
+a validation failure never has visible side effects.
+
+**Deliberately not reused at the 4 existing `PublishedAt`-stamping call
+sites** (`updateHandler`, `MCPPublish`, `MCPSchedule`'s scheduler path,
+`processScheduled`). Those already know they're handling a genuine state
+*transition* into Published (each gated on its own `prevStatus`) and
+unconditionally overwrite `PublishedAt` on every such transition, including
+republish. Routing them through `stampPublishedAt`'s IsZero guard would
+silently change that — a republish would stop updating `PublishedAt` if it
+was already non-zero — a real regression, not a simplification.
+
+### Consequences
+
+- No exported Go symbols changed — both new functions are unexported.
+- Consumer-observable behaviour change: directly-published items' API
+  responses (HTTP and MCP) now include a non-zero `PublishedAt` where they
+  previously didn't.
+- New tests: `TestCreateHandler_publishedDirectlyStampsPublishedAt`,
+  `TestCreateHandler_publishedWithExplicitPublishedAtPreserved`
+  (`module_test.go`); `TestMCPCreate_publishedDirectlyStampsPublishedAt`,
+  `TestMCPCreate_publishedWithExplicitPublishedAtPreserved` (`mcp_test.go`).
+  Coverage: 96.1% (unchanged); `stampPublishedAt` 100%, `nodePublishedAtOf`
+  80% (the `path == nil` defensive branch is structurally unreachable for
+  any `Node`-embedding content type — every Smeldr content type embeds
+  `Node`, which always has a `PublishedAt` field — same defensive
+  convention as `setNodeTime`'s own identical check; not adding a
+  dedicated test for a branch no real content type can trigger).
+- Patch release, matching A221/A222/A225/A226's own precedent for real
+  previously-broken-functionality fixes with no new exported symbols:
+  v1.58.2 → v1.58.3.
+- Level 1 amendment (isolated to `module.go`, no route/interface change,
+  one new unexported helper pair + two one-line call sites).
+
+Level 1 amendment.
+
+---
