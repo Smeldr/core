@@ -86,6 +86,73 @@ func TestMCPProposeRelation_StoresInferred(t *testing.T) {
 	}
 }
 
+func TestMCPObserveRelation_OK(t *testing.T) {
+	store := setupMCPRelations(t)
+	upsertTestKind(t, store, "tagged", "article", "tag")
+
+	ctx := context.Background()
+	edge, err := store.MCPObserveRelation(ctx, "article", "art-1", "tag", "tag-1", "tagged", nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("MCPObserveRelation: %v", err)
+	}
+	if edge.ID == "" {
+		t.Error("want non-empty ID")
+	}
+	if edge.EdgeClass != "observed" {
+		t.Errorf("want EdgeClass=observed, got %q", edge.EdgeClass)
+	}
+	if edge.SourceID != "art-1" || edge.TargetID != "tag-1" {
+		t.Errorf("unexpected edge fields: %+v", edge)
+	}
+}
+
+func TestMCPObserveRelation_UnknownKind(t *testing.T) {
+	store := setupMCPRelations(t)
+
+	_, err := store.MCPObserveRelation(context.Background(), "article", "art-1", "tag", "tag-1", "nonexistent", nil, nil, nil, nil)
+	if err != ErrNotFound {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestMCPObserveRelation_StoresObserved(t *testing.T) {
+	store := setupMCPRelations(t)
+	upsertTestKind(t, store, "tagged", "article", "tag")
+
+	ctx := context.Background()
+	edge, err := store.MCPObserveRelation(ctx, "article", "art-1", "tag", "tag-1", "tagged", nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("MCPObserveRelation: %v", err)
+	}
+	if edge.EdgeClass != "observed" {
+		t.Errorf("want EdgeClass=observed, got %q", edge.EdgeClass)
+	}
+
+	// Verify stored in DB with observed class.
+	edges, err := store.GetBySource(ctx, "article", "art-1", "tagged")
+	if err != nil {
+		t.Fatalf("GetBySource: %v", err)
+	}
+	if len(edges) != 1 || edges[0].EdgeClass != "observed" {
+		t.Errorf("expected 1 observed edge in DB, got: %+v", edges)
+	}
+}
+
+func TestMCPObserveRelation_WithConfidenceAndAttributes(t *testing.T) {
+	store := setupMCPRelations(t)
+	upsertTestKind(t, store, "tagged", "article", "tag")
+
+	conf := 0.85
+	attrs := json.RawMessage(`{"source":"webhook"}`)
+	edge, err := store.MCPObserveRelation(context.Background(), "article", "art-1", "tag", "tag-1", "tagged", &conf, nil, nil, attrs)
+	if err != nil {
+		t.Fatalf("MCPObserveRelation: %v", err)
+	}
+	if edge.Confidence == nil || *edge.Confidence != 0.85 {
+		t.Errorf("want Confidence=0.85, got %v", edge.Confidence)
+	}
+}
+
 func TestMCPGetRelations_Source(t *testing.T) {
 	store := setupMCPRelations(t)
 	upsertTestKind(t, store, "tagged", "article", "tag")

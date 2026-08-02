@@ -415,6 +415,37 @@ func (s *RelationStore) MCPProposeRelation(ctx context.Context,
 	})
 }
 
+// MCPObserveRelation records an edge a system directly witnessed (e.g. via an
+// inbound integration), for example a webhook-reported fact rather than a human's
+// direct claim or an agent's inference. Identical to MCPAssertRelation and
+// MCPProposeRelation but stores edge_class="observed". Excluded from
+// governance.go's asserted-only dynamic-scope check and from
+// RecomputeAsserted/BulkRecompute's asserted-only diff scope, by design
+// (design/edge-class-observed-spike.md) — a system-witnessed fact is not
+// automatically the same trust tier as a deliberate human grant, and is not
+// subject to Layer 1's reference-field-driven reconciliation.
+func (s *RelationStore) MCPObserveRelation(ctx context.Context,
+	sourceType, sourceID, targetType, targetID, relationKind string,
+	confidence *float64, validAt, invalidAt *time.Time,
+	attributes json.RawMessage,
+) (RelationEdge, error) {
+	if _, ok := s.GetKind(relationKind); !ok {
+		return RelationEdge{}, ErrNotFound
+	}
+	return s.insertEdge(ctx, RelationEdge{
+		SourceType:   sourceType,
+		SourceID:     sourceID,
+		TargetType:   targetType,
+		TargetID:     targetID,
+		RelationKind: relationKind,
+		EdgeClass:    "observed",
+		Confidence:   confidence,
+		ValidAt:      validAt,
+		InvalidAt:    invalidAt,
+		Attributes:   attributes,
+	})
+}
+
 // MCPGetRelations queries the relation graph for a given item.
 // direction must be "source", "target", or "both".
 // kind filters by relation kind; empty string returns all kinds.

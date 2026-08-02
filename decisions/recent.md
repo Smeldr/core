@@ -323,3 +323,134 @@ is a different shape of work than fixing one stale assertion.
 Level 1 amendment.
 
 ---
+
+## A231 — Thread `EdgeClass`/`Confidence` through `Reachability`'s output (T194)
+
+### What
+
+`ReachabilityItem` (`reachability.go:15-22`) was `{Type, ID}` only. The BFS
+(`reachabilityNeighbors`) already read each `RelationEdge`'s full struct while
+walking `GetBySource`/`GetByTarget`, then discarded everything but the
+neighbor's type/id when building `reachabilityNode`, and `Reachability`'s main
+loop discarded it a second time when building `ReachabilityItem`. The real,
+structured asserted/observed/inferred distinction (T193/A232) existed in the
+database but never survived into anything that reads `Reachability`'s output.
+
+**Checked, not assumed: no `smeldr.dev/mcp` `Reachability` exposure exists at
+all.** Grepped the whole mcp repo for `reachab`/`Reachability`, case-
+insensitive — zero hits. T193's own NEXT.md estimated "~1-2 days across both
+repos" for this task; there is no second repo to touch. This is core-only.
+
+### The real gap this surfaced
+
+Adding two fields looked like a small change until accounting for what they
+mean: a node can be reached by **multiple edges at the same hop distance**
+(e.g. two different relation kinds both linking the same source to the same
+target). The BFS's `seenNodes` dedup previously kept whichever edge was
+processed first — order depended on `frontier`'s slice order and each
+`GetBySource`/`GetByTarget` call's row order, neither guaranteed stable. That
+was invisible while nothing downstream read per-edge metadata. It stops being
+invisible the moment `EdgeClass`/`Confidence` ride along, since now *which*
+edge "won" the tie determines what a caller sees — live, previously-silent
+nondeterminism.
+
+### Fix
+
+New unexported `reachabilityCandidate` (pairs a discovered node with the
+edge's `EdgeClass`/`Confidence`), `edgeClassRank` (asserted=2, observed=1,
+inferred/unknown=0), and `betterCandidate` (higher rank wins; within the same
+rank, higher `Confidence` wins, nil treated as lowest). `reachabilityNeighbors`
+returns `[]reachabilityCandidate` instead of bare `[]reachabilityNode`.
+`Reachability`'s per-depth loop now collects all of a depth's candidate edges
+per new node into a map before finalizing the ring, applying `betterCandidate`
+on each new candidate, rather than committing on first discovery. Existing
+behaviour (one node per ring, shortest-distance-wins, ring order not
+guaranteed — confirmed via `reachability_test.go`'s own `ringKeys()` helper,
+which sorts before comparing) is unaffected; only which edge's metadata gets
+attached when there's a genuine choice.
+
+### Consequences
+
+- `ReachabilityItem` gains `EdgeClass string`/`Confidence *float64` —
+  additive, backward-compatible JSON (`confidence` uses `omitempty`,
+  matching `RelationEdge`'s own convention).
+- New tests: `TestReachability_ItemsCarryEdgeClassAndConfidence` (base case),
+  `TestReachability_TieBreak_PrefersAssertedOverInferred`,
+  `TestReachability_TieBreak_PrefersObservedOverInferred`,
+  `TestReachability_TieBreak_PrefersHigherConfidenceWithinSameClass`,
+  `TestReachability_TieBreak_NilConfidenceTreatedAsLowest`. All existing
+  `TestReachability_*` tests needed no changes (they compare via `ringKeys()`,
+  type:id only).
+- No exported symbols removed. Coverage: 96.1%; `edgeClassRank`/`Reachability`/
+  `reachabilityNeighbors` 100%, `betterCandidate` 87.5% (the uncovered branch
+  is an order-dependent tie already exercised symmetrically by the confidence
+  tests above — not a defensive-dead-code case, just a small residual gap
+  below the function's full branch count; total coverage already clears the
+  96% gate).
+- Patch release (consumer-observable: new JSON fields on `Reachability`'s
+  existing response shape). Bundled with A232 in the same commit —
+  v1.58.3 → v1.58.4.
+- Level 2 amendment (exported struct fields added, real behaviour addition to
+  an existing method's output).
+
+Level 2 amendment.
+
+---
+
+## A232 — Implement `EdgeClass`'s `"observed"` value (T196)
+
+### What
+
+Per T193's own resolved recommendation (`design/edge-class-observed-spike.md`)
+— both judgment calls already confirmed by the architect, not re-litigated
+here.
+
+New `MCPObserveRelation` (`relations.go`), mirroring `MCPAssertRelation`/
+`MCPProposeRelation` exactly in shape, storing `edge_class="observed"`:
+records an edge a system directly witnessed (e.g. via an inbound integration),
+as opposed to a human's direct claim or an agent's inference.
+
+`smeldr.dev/mcp` gains a matching `observe_relation` tool (`relation_tools.go`),
+mirroring `propose_relation`'s tool definition and dispatch case, Author role
+(same as its siblings). `get_relations`' `edge_class` filter enum gains
+`"observed"` — otherwise the new value would be unfilterable via the one tool
+built specifically to filter by edge class. Doc comments updated from "six"
+to "seven" tool definitions/relation management tools throughout
+`relation_tools.go`.
+
+### Deliberately not changed — confirmed no-ops, not oversights
+
+- `governance.go`'s dynamic-scope check stays `edge_class='asserted'`-only —
+  a system-witnessed fact is not automatically the same trust tier as a
+  deliberate human grant, per the spike's own resolved reasoning.
+- `RecomputeAsserted`/`BulkRecompute`'s diff scope stays `asserted`-only —
+  observed facts are not subject to Layer 1's reference-field-driven
+  reconciliation.
+- No new `RelationKindDef.Mode` value — kinds already in `asserted` mode
+  permit both `asserted` and `observed` edges (both are non-probabilistic
+  facts, just different origins).
+
+### Consequences
+
+- New exported method: `RelationStore.MCPObserveRelation`. No exported
+  symbols removed or changed elsewhere.
+- `smeldr.dev/mcp`: new `observe_relation` tool — consumer-observable, its
+  own patch version bump/tag in that repo (unlike A228's doc-only case, this
+  is a real new capability).
+- New tests: `TestMCPObserveRelation_OK`, `_UnknownKind`, `_StoresObserved`,
+  `_WithConfidenceAndAttributes` (`relations_mcp_test.go`, core);
+  `TestRelationTools_ObserveRelation`, `_MissingArgs`, `_UnknownKind`
+  (`relation_tools_test.go`, mcp), plus extended
+  `TestRelationTools_GetRelations_EdgeClassFilter` to prove the new enum
+  value filters correctly, and updated the three tests that hardcode the
+  tool-name list (`_PresentWithStore`, `_IsRelationTool`,
+  `_RelationToolDefs_AllPresent`) to include `observe_relation`.
+- Coverage: 96.1% (core, unchanged), 96.4% (mcp).
+- Patch release (consumer-observable: new write path). Bundled with A231 in
+  the same core commit — v1.58.3 → v1.58.4.
+- Level 2 amendment (new exported method, real new write path, cross-repo
+  consequence).
+
+Level 2 amendment.
+
+---

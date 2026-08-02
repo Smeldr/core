@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.58.4] — 2026-08-02
+
+### Added
+- `Reachability`'s output now carries the `EdgeClass`/`Confidence` of the edge that reached each item — previously discarded during traversal. When a node is reachable via more than one edge at the same hop distance, the most-trusted edge wins (`asserted` > `observed` > `inferred`, then higher confidence). (A231)
+- New `RelationStore.MCPObserveRelation` method and `smeldr.dev/mcp`'s matching `observe_relation` tool: records an edge a system directly witnessed (e.g. via a webhook/integration), as a third `EdgeClass` value alongside `asserted` and `inferred`. (A232)
+
+---
+
 ## [1.58.3] — 2026-07-30
 
 ### Fixed

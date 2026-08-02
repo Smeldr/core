@@ -168,6 +168,148 @@ func TestReachability_MultiHopChain(t *testing.T) {
 	assertRing(t, got.Rings[2], 3, []string{"post:p4"})
 }
 
+// TestReachability_ItemsCarryEdgeClassAndConfidence proves the T194 fix: a single
+// unambiguous edge's EdgeClass/Confidence survive into the item, where before they
+// were silently dropped.
+func TestReachability_ItemsCarryEdgeClassAndConfidence(t *testing.T) {
+	store := setupRelationStore(t)
+	ctx := context.Background()
+	upsertTestKind(t, store, "related_to", "post", "post")
+
+	mustAssert(t, store, "post", "p1", "post", "p2", "related_to")
+
+	got, err := store.Reachability(ctx, "post", "p1", "", "outgoing", 1)
+	if err != nil {
+		t.Fatalf("Reachability: %v", err)
+	}
+	items := got.Rings[0].Items
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].EdgeClass != "asserted" {
+		t.Errorf("EdgeClass = %q, want asserted", items[0].EdgeClass)
+	}
+	if items[0].Confidence != nil {
+		t.Errorf("Confidence = %v, want nil (mustAssert sets none)", items[0].Confidence)
+	}
+}
+
+// TestReachability_TieBreak_PrefersAssertedOverInferred proves that when a node is
+// reachable via two edges at the same depth — one asserted, one inferred — the
+// item reports the more-trusted asserted edge, not whichever was processed first.
+func TestReachability_TieBreak_PrefersAssertedOverInferred(t *testing.T) {
+	store := setupRelationStore(t)
+	ctx := context.Background()
+	upsertTestKind(t, store, "kind_a", "post", "post")
+	upsertTestKind(t, store, "kind_b", "post", "post")
+
+	mustAssert(t, store, "post", "p1", "post", "shared", "kind_a")
+	if _, err := store.MCPProposeRelation(ctx, "post", "p1", "post", "shared", "kind_b", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPProposeRelation: %v", err)
+	}
+
+	got, err := store.Reachability(ctx, "post", "p1", "", "outgoing", 1)
+	if err != nil {
+		t.Fatalf("Reachability: %v", err)
+	}
+	items := got.Rings[0].Items
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1 (same node reached twice)", len(items))
+	}
+	if items[0].EdgeClass != "asserted" {
+		t.Errorf("EdgeClass = %q, want asserted (must win over inferred)", items[0].EdgeClass)
+	}
+}
+
+// TestReachability_TieBreak_PrefersObservedOverInferred proves the middle tier
+// of the asserted > observed > inferred precedence: when a node is reachable via
+// an observed edge and an inferred edge at the same depth, observed wins.
+func TestReachability_TieBreak_PrefersObservedOverInferred(t *testing.T) {
+	store := setupRelationStore(t)
+	ctx := context.Background()
+	upsertTestKind(t, store, "kind_a", "post", "post")
+	upsertTestKind(t, store, "kind_b", "post", "post")
+
+	if _, err := store.MCPObserveRelation(ctx, "post", "p1", "post", "shared", "kind_a", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPObserveRelation: %v", err)
+	}
+	if _, err := store.MCPProposeRelation(ctx, "post", "p1", "post", "shared", "kind_b", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPProposeRelation: %v", err)
+	}
+
+	got, err := store.Reachability(ctx, "post", "p1", "", "outgoing", 1)
+	if err != nil {
+		t.Fatalf("Reachability: %v", err)
+	}
+	items := got.Rings[0].Items
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].EdgeClass != "observed" {
+		t.Errorf("EdgeClass = %q, want observed (must win over inferred)", items[0].EdgeClass)
+	}
+}
+
+// TestReachability_TieBreak_PrefersHigherConfidenceWithinSameClass proves that
+// when two edges of the same EdgeClass reach the same node at the same depth, the
+// one with higher Confidence wins.
+func TestReachability_TieBreak_PrefersHigherConfidenceWithinSameClass(t *testing.T) {
+	store := setupRelationStore(t)
+	ctx := context.Background()
+	upsertTestKind(t, store, "kind_a", "post", "post")
+	upsertTestKind(t, store, "kind_b", "post", "post")
+
+	low, high := 0.2, 0.9
+	if _, err := store.MCPProposeRelation(ctx, "post", "p1", "post", "shared", "kind_a", &low, nil, nil, nil); err != nil {
+		t.Fatalf("MCPProposeRelation low: %v", err)
+	}
+	if _, err := store.MCPProposeRelation(ctx, "post", "p1", "post", "shared", "kind_b", &high, nil, nil, nil); err != nil {
+		t.Fatalf("MCPProposeRelation high: %v", err)
+	}
+
+	got, err := store.Reachability(ctx, "post", "p1", "", "outgoing", 1)
+	if err != nil {
+		t.Fatalf("Reachability: %v", err)
+	}
+	items := got.Rings[0].Items
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].Confidence == nil || *items[0].Confidence != high {
+		t.Errorf("Confidence = %v, want %v (higher must win)", items[0].Confidence, high)
+	}
+}
+
+// TestReachability_TieBreak_NilConfidenceTreatedAsLowest proves that when two
+// edges share an EdgeClass but only one has a Confidence set, the one with a
+// value wins over the one without.
+func TestReachability_TieBreak_NilConfidenceTreatedAsLowest(t *testing.T) {
+	store := setupRelationStore(t)
+	ctx := context.Background()
+	upsertTestKind(t, store, "kind_a", "post", "post")
+	upsertTestKind(t, store, "kind_b", "post", "post")
+
+	conf := 0.5
+	if _, err := store.MCPProposeRelation(ctx, "post", "p1", "post", "shared", "kind_a", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPProposeRelation no-confidence: %v", err)
+	}
+	if _, err := store.MCPProposeRelation(ctx, "post", "p1", "post", "shared", "kind_b", &conf, nil, nil, nil); err != nil {
+		t.Fatalf("MCPProposeRelation with-confidence: %v", err)
+	}
+
+	got, err := store.Reachability(ctx, "post", "p1", "", "outgoing", 1)
+	if err != nil {
+		t.Fatalf("Reachability: %v", err)
+	}
+	items := got.Rings[0].Items
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].Confidence == nil || *items[0].Confidence != conf {
+		t.Errorf("Confidence = %v, want %v (set value must beat nil)", items[0].Confidence, conf)
+	}
+}
+
 func TestReachability_KindFilter(t *testing.T) {
 	store := setupRelationStore(t)
 	ctx := context.Background()
