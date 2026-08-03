@@ -2078,6 +2078,124 @@ func TestWithAudit_Revoke_AppendError(t *testing.T) {
 	}
 }
 
+// --- Grant/Revoke audit-write atomicity tests (T200) ---
+
+// govBeginTxFailDB wraps a real DB and makes BeginTx always fail, exercising
+// the begin-tx error path in Grant/Revoke's atomic-audit branch.
+type govBeginTxFailDB struct {
+	DB
+}
+
+func (d *govBeginTxFailDB) BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error) {
+	return nil, errors.New("simulated begin tx failure")
+}
+
+// countGrants returns the number of rows in smeldr_role_grants — used to
+// prove a rolled-back Grant/Revoke left no trace of its attempted mutation.
+func countGrants(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM smeldr_role_grants`).Scan(&n); err != nil {
+		t.Fatalf("countGrants: %v", err)
+	}
+	return n
+}
+
+// TestGrant_AuditAppendFailure_RollsBackInsert proves the T200 fix: when the
+// audit append fails inside the atomic path (a real sqlGovernanceAuditStore
+// pointed at a DB missing the audit table — a genuine SQL failure, not a
+// mock), the just-inserted grant is rolled back, not left orphaned.
+func TestGrant_AuditAppendFailure_RollsBackInsert(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	// Deliberately no CreateGovernanceAuditTable call — the audit INSERT
+	// this triggers will genuinely fail with "no such table".
+	store := NewRoleStore(db).WithAudit("actor", NewGovernanceAuditStore(db))
+
+	before := countGrants(t, db)
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: NewID(), RoleName: "author"}); err == nil {
+		t.Fatal("expected error from audit append failure, got nil")
+	}
+	if after := countGrants(t, db); after != before {
+		t.Errorf("grant count = %d after failed Grant, want unchanged %d (insert should have rolled back)", after, before)
+	}
+}
+
+// TestRevoke_AuditAppendFailure_RollsBackDelete proves the T200 fix: when the
+// audit append fails inside the atomic path, a Revoke's delete is rolled
+// back — the grant still exists afterward, matching the error it returned.
+func TestRevoke_AuditAppendFailure_RollsBackDelete(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	// Create the grant with a plain, unaudited store first.
+	grantID, err := NewRoleStore(db).Grant(ctx, RoleGrant{TokenID: NewID(), RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	// Deliberately no CreateGovernanceAuditTable call.
+	store := NewRoleStore(db).WithAudit("actor", NewGovernanceAuditStore(db))
+
+	before := countGrants(t, db)
+	if err := store.Revoke(ctx, grantID); err == nil {
+		t.Fatal("expected error from audit append failure, got nil")
+	}
+	if after := countGrants(t, db); after != before {
+		t.Errorf("grant count = %d after failed Revoke, want unchanged %d (delete should have rolled back)", after, before)
+	}
+	var stillExists int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_role_grants WHERE id = $1`, grantID,
+	).Scan(&stillExists); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if stillExists != 1 {
+		t.Errorf("grant %q should still exist after rolled-back Revoke, found %d rows", grantID, stillExists)
+	}
+}
+
+func TestGrant_BeginTxError(t *testing.T) {
+	db := setupGovernanceAuditTable(t)
+	ctx := context.Background()
+	wrapped := &govBeginTxFailDB{DB: db}
+	store := NewRoleStore(wrapped).WithAudit("actor", NewGovernanceAuditStore(db))
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: NewID(), RoleName: "author"}); err == nil {
+		t.Fatal("expected error from begin-tx failure, got nil")
+	}
+	if n := countGrants(t, db); n != 0 {
+		t.Errorf("grant count = %d, want 0 (begin-tx failure means nothing should ever have been written)", n)
+	}
+}
+
+func TestRevoke_BeginTxError(t *testing.T) {
+	db := setupGovernanceAuditTable(t)
+	ctx := context.Background()
+	grantID, err := NewRoleStore(db).Grant(ctx, RoleGrant{TokenID: NewID(), RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	wrapped := &govBeginTxFailDB{DB: db}
+	store := NewRoleStore(wrapped).WithAudit("actor", NewGovernanceAuditStore(db))
+	if err := store.Revoke(ctx, grantID); err == nil {
+		t.Fatal("expected error from begin-tx failure, got nil")
+	}
+	if n := countGrants(t, db); n != 1 {
+		t.Errorf("grant count = %d, want 1 (begin-tx failure means the delete should never have run)", n)
+	}
+}
+
+// setupGovernanceAuditTable creates governance tables plus the audit table —
+// unlike setupGovernanceAuditDB (which also returns a wired RoleStore/audit
+// store), this returns just the *sql.DB for tests that need to wrap it.
+func setupGovernanceAuditTable(t *testing.T) *sql.DB {
+	t.Helper()
+	db := setupGovernanceDB(t)
+	if err := CreateGovernanceAuditTable(db); err != nil {
+		t.Fatalf("CreateGovernanceAuditTable: %v", err)
+	}
+	return db
+}
+
 // --- ToolPolicy tests ---
 
 func TestRoleStore_ToolPolicy_Hit(t *testing.T) {

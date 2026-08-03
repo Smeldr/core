@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.58.5] — 2026-08-03
+
+### Fixed
+- `RoleStore.Grant`/`Revoke` no longer silently mutate governance state while reporting failure: when the audit-store write fails, the state change is now rolled back together with it (in the common case — the bundled SQL-backed audit store on a transactional DB). Previously a failed audit write left a grant created or revoked despite the function returning an error. (A233)
+
+---
+
 ## [1.58.4] — 2026-08-02
 
 ### Added

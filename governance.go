@@ -470,7 +470,28 @@ func NewGovernanceAuditStore(db DB) GovernanceAuditStore {
 }
 
 func (s *sqlGovernanceAuditStore) Append(ctx context.Context, r GovernanceAuditRecord) error {
-	if _, err := s.db.ExecContext(ctx,
+	return appendAuditRecord(ctx, s.db, r)
+}
+
+// txGovernanceAuditAppender is implemented by GovernanceAuditStore
+// implementations that can append using an explicit execer instead of their
+// own internally-bound DB — letting Grant/Revoke include the audit write in
+// the same transaction as the state change, when the underlying DB supports
+// transactions. Implementations that can't (e.g. a remote log service) simply
+// don't implement it — Grant/Revoke fall back to the sequential Append call.
+type txGovernanceAuditAppender interface {
+	appendTx(ctx context.Context, exec DB, r GovernanceAuditRecord) error
+}
+
+func (s *sqlGovernanceAuditStore) appendTx(ctx context.Context, exec DB, r GovernanceAuditRecord) error {
+	return appendAuditRecord(ctx, exec, r)
+}
+
+// appendAuditRecord inserts r via exec — shared by Append (using the store's
+// own db) and appendTx (using a caller-supplied transaction), so both go
+// through identical SQL with no risk of drift between the two paths.
+func appendAuditRecord(ctx context.Context, exec DB, r GovernanceAuditRecord) error {
+	if _, err := exec.ExecContext(ctx,
 		`INSERT INTO smeldr_governance_audit
 			(id, actor_token_id, action, target_kind, target_id, before_json, after_json, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -667,7 +688,29 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 	newID := NewID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	if _, err := s.db.ExecContext(ctx,
+	// Share one transaction across the insert, the grant-id resolve, and the
+	// audit append when possible — see txGovernanceAuditAppender. Falls back to
+	// sequential writes on s.db when the audit store can't participate (a
+	// custom, non-SQL GovernanceAuditStore) or the DB doesn't support
+	// transactions.
+	var exec DB = s.db
+	commit := func() error { return nil }
+	txAppender, atomic := s.auditStore.(txGovernanceAuditAppender)
+	if atomic {
+		if txdb, ok := s.db.(txBeginner); ok {
+			tx, err := txdb.BeginTx(ctx, nil)
+			if err != nil {
+				return "", fmt.Errorf("smeldr: Grant: begin tx: %w", err)
+			}
+			defer tx.Rollback() //nolint:errcheck
+			exec = tx
+			commit = tx.Commit
+		} else {
+			atomic = false
+		}
+	}
+
+	if _, err := exec.ExecContext(ctx,
 		`INSERT INTO smeldr_role_grants (id, token_id, role_id, scope_static, scope_anchor_id, created_at)
 			SELECT $1, $2, $3, $4, $5, $6
 			WHERE NOT EXISTS (
@@ -684,14 +727,14 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 	// Re-query to find the canonical grant ID (new or pre-existing).
 	var grantID string
 	if anchorID != nil {
-		if err := s.db.QueryRowContext(ctx,
+		if err := exec.QueryRowContext(ctx,
 			`SELECT id FROM smeldr_role_grants WHERE token_id=$1 AND role_id=$2 AND scope_anchor_id=$3`,
 			grant.TokenID, roleID, *anchorID,
 		).Scan(&grantID); err != nil {
 			return "", fmt.Errorf("smeldr: Grant: resolve grant id: %w", err)
 		}
 	} else {
-		if err := s.db.QueryRowContext(ctx,
+		if err := exec.QueryRowContext(ctx,
 			`SELECT id FROM smeldr_role_grants WHERE token_id=$1 AND role_id=$2 AND scope_anchor_id IS NULL`,
 			grant.TokenID, roleID,
 		).Scan(&grantID); err != nil {
@@ -720,9 +763,18 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 			After:        string(afterJSON),
 			CreatedAt:    time.Now().UTC(),
 		}
-		if err := s.auditStore.Append(ctx, rec); err != nil {
-			return "", fmt.Errorf("smeldr: Grant: audit: %w", err)
+		var appendErr error
+		if atomic {
+			appendErr = txAppender.appendTx(ctx, exec, rec)
+		} else {
+			appendErr = s.auditStore.Append(ctx, rec)
 		}
+		if appendErr != nil {
+			return "", fmt.Errorf("smeldr: Grant: audit: %w", appendErr)
+		}
+	}
+	if err := commit(); err != nil {
+		return "", fmt.Errorf("smeldr: Grant: commit: %w", err)
 	}
 	return grantID, nil
 }
@@ -765,7 +817,28 @@ func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
 			beforeJSON = string(b)
 		}
 	}
-	if _, err := s.db.ExecContext(ctx,
+	// Share one transaction across the delete and the audit append when
+	// possible — see txGovernanceAuditAppender. Falls back to sequential
+	// writes on s.db when the audit store can't participate (a custom,
+	// non-SQL GovernanceAuditStore) or the DB doesn't support transactions.
+	var exec DB = s.db
+	commit := func() error { return nil }
+	txAppender, atomic := s.auditStore.(txGovernanceAuditAppender)
+	if atomic {
+		if txdb, ok := s.db.(txBeginner); ok {
+			tx, err := txdb.BeginTx(ctx, nil)
+			if err != nil {
+				return fmt.Errorf("smeldr: Revoke: begin tx: %w", err)
+			}
+			defer tx.Rollback() //nolint:errcheck
+			exec = tx
+			commit = tx.Commit
+		} else {
+			atomic = false
+		}
+	}
+
+	if _, err := exec.ExecContext(ctx,
 		`DELETE FROM smeldr_role_grants WHERE id = $1`, grantID,
 	); err != nil {
 		return fmt.Errorf("smeldr: Revoke: %w", err)
@@ -781,9 +854,18 @@ func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
 			After:        "{}",
 			CreatedAt:    time.Now().UTC(),
 		}
-		if err := s.auditStore.Append(ctx, rec); err != nil {
-			return fmt.Errorf("smeldr: Revoke: audit: %w", err)
+		var appendErr error
+		if atomic {
+			appendErr = txAppender.appendTx(ctx, exec, rec)
+		} else {
+			appendErr = s.auditStore.Append(ctx, rec)
 		}
+		if appendErr != nil {
+			return fmt.Errorf("smeldr: Revoke: audit: %w", appendErr)
+		}
+	}
+	if err := commit(); err != nil {
+		return fmt.Errorf("smeldr: Revoke: commit: %w", err)
 	}
 	return nil
 }

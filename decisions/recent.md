@@ -454,3 +454,148 @@ to "seven" tool definitions/relation management tools throughout
 Level 2 amendment.
 
 ---
+
+## A233 — Fix `RoleStore.Grant`/`Revoke`'s non-atomic audit-write gap (T200)
+
+### What
+
+`Grant` and `Revoke` (`governance.go`) each ran their state-changing SQL
+(`INSERT`/`DELETE`) and their `GovernanceAuditStore.Append` call as two
+separate, non-transactional writes. If the audit write failed after the
+state change had already succeeded, the function returned an error — but
+the grant/revoke had already taken effect. A caller reading "Revoke failed"
+would reasonably assume the grant still exists; it didn't. Found during
+T199's spike, independently verified by the architect against source
+(`governance.go:768-786` at the time).
+
+`design/governance-model.md` §9's own Article I commitment states the audit
+trail on `Grant`/`Revoke` exists specifically because "changing them in
+place with no history violates... 'authority never changes silently.'"
+This failure mode was exactly that — a silent authority change, the precise
+thing the mechanism was built to prevent.
+
+### Checked before implementing, not assumed
+
+NEXT.md's own suggested fix was to mirror `relations.go`'s `applyRelationDiff`
+— a `txBeginner` interface-check that begins a transaction on `s.db` when
+supported. Read `GovernanceAuditStore`'s actual definition before applying
+this mechanically: it is an **exported, pluggable interface**
+("Applications may supply their own implementation, e.g. writing to a
+remote log service"). The bundled `sqlGovernanceAuditStore` holds its own
+separately-bound `db DB` field, set once at `NewGovernanceAuditStore(db)`
+construction — entirely independent of `RoleStore.db`. `applyRelationDiff`'s
+pattern works because *all* its writes go through the same `s.db`; here, a
+transaction on `RoleStore.db` alone would not pull `auditStore.Append`'s
+write into it — `Append` still calls `ExecContext` on its own stored
+reference, oblivious to any transaction the caller happens to be running.
+A mechanical copy of the suggested pattern would have compiled, looked
+right, and not actually fixed the bug. The architect independently verified
+this exact claim against source before approving the plan.
+
+True cross-object atomicity also isn't universally guaranteeable — a custom
+`GovernanceAuditStore` writing to a remote log service has no shared
+transaction with a local SQL `DB` to join, by construction. The realistic,
+implemented goal: make the common case (the bundled SQL-backed store,
+sharing a transactional DB) genuinely atomic, and leave custom
+implementations exactly as robust as they were before — not silently
+claimed improved.
+
+### Fix
+
+New unexported optional interface, alongside `GovernanceAuditStore`:
+
+```go
+type txGovernanceAuditAppender interface {
+	appendTx(ctx context.Context, exec DB, r GovernanceAuditRecord) error
+}
+```
+
+`sqlGovernanceAuditStore` implements it; both `Append` and `appendTx` now
+delegate to one shared `appendAuditRecord(ctx, exec DB, r) error` helper — no
+duplicated SQL, no risk of the two paths drifting apart.
+
+`Grant`/`Revoke` each type-assert `s.auditStore.(txGovernanceAuditAppender)`.
+When it succeeds *and* `s.db` satisfies the existing `txBeginner` interface,
+a transaction is opened; the state-changing write, any ID-resolution reads,
+and the audit append all go through that transaction (`exec`), and a
+deferred `tx.Rollback()` (matching `applyRelationDiff`'s own established
+idiom) undoes everything if any step — including the audit append itself —
+fails. When either condition doesn't hold (a custom, non-SQL audit store, or
+a `DB` without transaction support), both functions fall back to the exact
+sequential behaviour they had before: still fail-closed (an audit failure
+still returns an error), just without the rollback guarantee — an honest,
+documented limitation, not a silently-claimed fix that doesn't apply.
+
+**Incidental second bug closed as a side effect, not the primary target:**
+`Grant`'s existing shape is insert-then-resolve-the-real-ID-via-SELECT (to
+handle its own idempotent upsert case). Before this fix, if that resolve
+`SELECT` failed after a successful `INSERT`, the grant was permanently
+orphaned in the database with no way to learn its ID. The same transaction
+wrap rolls that back too, for free.
+
+`DefineRole` has the identical two-separate-writes shape (and the same
+`failAppendAuditStore`-covered test) but is explicitly out of NEXT.md's
+scope ("Fix `RoleStore.Revoke`/`Grant`'s..."). Not touched — flagged as a
+same-shape follow-up candidate.
+
+### Test changes
+
+Existing tests using `failAppendAuditStore` (`TestWithAudit_Grant_AppendError`,
+`TestWithAudit_Revoke_AppendError`) needed **no changes** — that fixture only
+implements `Append`, not `appendTx`, so the interface check fails for it and
+these tests correctly keep exercising the (unchanged) fallback path, still
+expecting an error with no rollback guarantee. Verified this precisely
+rather than assumed: `setupGovernanceDB` returns a real `*sql.DB` (which does
+have a real `BeginTx`), so it's specifically the audit-store type — not the
+DB — that determines which path a given test exercises.
+
+New tests use a **real SQL failure, not a mock** — a genuine
+`sqlGovernanceAuditStore` pointed at a database where
+`CreateGovernanceAuditTable` was deliberately never called, so its own
+`INSERT INTO smeldr_governance_audit` genuinely fails with "no such table"
+— mirroring `govQueryRowFailDB`'s existing route-to-nonexistent-target
+trick, rather than inventing a new mocking approach:
+
+- `TestGrant_AuditAppendFailure_RollsBackInsert` / `TestRevoke_AuditAppendFailure_RollsBackDelete`
+  — prove the actual fix: after a failed `Grant`/`Revoke`, the grant table's
+  row count (and, for Revoke, the specific grant's continued existence) is
+  unchanged from before the call.
+- `TestGrant_BeginTxError` / `TestRevoke_BeginTxError` — a small `txBeginner`-
+  satisfying wrapper whose `BeginTx` always errors (same wrap-and-fail shape
+  as `govQueryRowFailDB`), proving the error propagates and nothing changes
+  when a transaction can't even be opened.
+
+**One accepted, named coverage gap:** `commit()` failing after an
+already-successful sequence of statement executions within the same open
+transaction is a driver/connection-level failure mode with no deterministic
+way to trigger against SQLite in-memory without a custom driver mock, which
+this codebase doesn't have. Not silently left uncovered — named here and in
+the code's own test-plan reasoning, matching this session's established
+precedent (e.g. A229's `nodePublishedAtOf` gap) for defensive branches that
+aren't realistically reachable in tests.
+
+### Consequences
+
+- No exported Go symbols changed — `txGovernanceAuditAppender`,
+  `appendAuditRecord`, and `appendTx` are all unexported.
+- Real behaviour fix: `Grant`/`Revoke` (and therefore `smeldr.dev/mcp`'s
+  `grant_role`/`revoke_grant` tools) no longer silently mutate governance
+  state while reporting failure, in the common (bundled audit store,
+  transactional DB) case.
+- Closes A190's own documented "non-atomic — mutation may have already
+  taken effect" caveat for that case; the caveat still applies, honestly,
+  for custom non-SQL `GovernanceAuditStore` implementations.
+- New tests: `TestGrant_AuditAppendFailure_RollsBackInsert`,
+  `TestRevoke_AuditAppendFailure_RollsBackDelete`, `TestGrant_BeginTxError`,
+  `TestRevoke_BeginTxError`. Coverage: 96.1% (unchanged); `Grant` 96.3%,
+  `Revoke` 95.0% (the named `commit()` gap), `appendAuditRecord`/`appendTx`
+  100%.
+- Patch release, matching precedent for real behaviour fixes with no new
+  exported symbols: v1.58.4 → v1.58.5.
+- Level 2 amendment (real behaviour fix to a governance-critical, MCP-exposed
+  operation, matching A226's own precedent for classifying this shape of fix
+  Level 2 despite no exported-symbol change).
+
+Level 2 amendment.
+
+---
