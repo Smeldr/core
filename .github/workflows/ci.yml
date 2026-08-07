@@ -56,6 +56,12 @@ jobs:
       - name: Run govulncheck
         run: govulncheck ./...
 
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+
+      - name: Run golangci-lint
+        run: golangci-lint run ./...
+
   integration:
     name: Test (pgx integration)
     runs-on: ubuntu-latest
