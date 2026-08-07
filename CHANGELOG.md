@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.60.0] — 2026-08-07
+
+### Added
+- `RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStore) error` (`orchestration.go`) — registers the four relation kinds D36 settled for the orchestration graph: `derives_from` (Task→Goal), `depends_on` (Task→Task), `ships_as` (Task→Amendment), `supersedes` (Decision→Decision); all `Mode: "asserted"`, `Directional: true`, `Weighted: false`. Idempotent — safe to call on every boot. Wired into `example/server/main.go`'s `ENABLE_RELATIONS`+`ENABLE_ORCHESTRATION` gate. (A236, D36)
+
+---
+
 ## [1.59.0] — 2026-08-07
 
 ### Added

@@ -999,4 +999,80 @@ Level 2 amendment.
 
 ---
 
+## A236 — Register the four orchestration relation kinds (D36, M0 step 2)
+
+### What
+
+Implements D36 in full: `RegisterOrchestrationRelationKinds(ctx
+context.Context, store *RelationStore) error` (`orchestration.go`, new)
+— a public registration function for all four orchestration-layer
+relation kinds, allowing M0-step-3's permanent instance and other
+callers to wire them up without duplicating their inline definitions.
+
+Registers four relation kinds via `RelationStore.UpsertKind`, each with
+Mode=asserted, Directional=true, Weighted=false:
+
+- `derives_from`: Task → Goal (architect derives a Task from a Goal)
+- `depends_on`: Task → Task (implementer's mandatory pre-check)
+- `ships_as`: Task → Amendment (Amendment names the Task it shipped for)
+- `supersedes`: Decision → Decision (role-gated Decision supersede)
+
+(A fifth candidate, `implements` [Amendment → Decision], remains
+unregistered per D36 — never used in a worked example.)
+
+### D36 already settled this — a citation miss, not a re-litigated decision
+
+NEXT.md's own framing presented Mode/Directional/Weighted/TypePairs as
+an open design question, to be argued independently from the design
+docs (`decision-authority-and-lineage.md` §11,
+`process-types-and-workflow.md`'s relation table). The plan did that
+independent analysis, tracing each kind to a deliberate act by a named
+actor at an identifiable workflow moment — and converged on values
+identical to D36's.
+
+D36 (commit `7db0eb6`) had, in fact, already settled this exact
+question before this task began. This was not a re-litigated decision
+or a code change — it was a citation miss, caught and corrected before
+commit, not silently smoothed over. D36 is the controlling decision;
+this amendment implements its verdict. `docs/ARCHITECTURE.md` and this
+entry cite D36 directly rather than presenting the reasoning as if
+discovered in a vacuum.
+
+### Implementation notes
+
+- **Mode is validated but not enforced at write time.**
+  `RelationKindDef.Mode` is checked by `ValidateRelationKindDef` when a
+  kind is registered, but the actual `edge_class` written to an edge is
+  chosen entirely by which write call is used: `MCPAssertRelation`
+  (`"asserted"`), `MCPProposeRelation` (`"inferred"`), or
+  `MCPObserveRelation` (`"observed"`) — independent of the registered
+  kind's `Mode`. `Mode` is a documented default character for the kind
+  today, not yet a live enforcement gate.
+- **`TypePairs` is documentation-only.** Read only by
+  `ValidateRelationKindDef`'s JSON-shape check, never by `insertEdge` or
+  any write path — safe to populate descriptively (e.g.
+  `[{"source_type":"Task","target_type":"Goal"}]`).
+- **Wired into the existing orchestration gate.** Called from
+  `example/server/main.go`'s existing `if cfg.EnableRelations &&
+  cfg.EnableOrchestration` block (previously only called
+  `ContextPacketHandler`), using `context.Background()` — the function
+  has no other `ctx` variable in scope. Idempotent by design, relying on
+  `UpsertKind`'s own idempotency.
+
+2 new tests in `orchestration_test.go`:
+
+- `TestRegisterOrchestrationRelationKinds_RoundTrip` — asserts all four
+  kinds' `Mode`/`Directional`/`Weighted`/`TypePairs` via `ListKinds()`,
+  then calls registration again to prove idempotency.
+- `TestRegisterOrchestrationRelationKinds_UpsertError` — covers the
+  single linear error-return path on `UpsertKind` failure, reusing the
+  existing `mockRelationStore`/`errExecDB` fixtures from
+  `relations_errors_test.go`.
+
+Coverage: 96.2% overall; `RegisterOrchestrationRelationKinds` itself
+100%. No exported symbols changed elsewhere. MINOR version bump
+(new exported API surface): v1.59.0 → v1.60.0.
+
+Status: Ratified 2026-08-07.
+
 ---

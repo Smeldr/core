@@ -3,6 +3,7 @@ package smeldr
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -760,5 +761,72 @@ func TestAuthorizeDecisionScope_GrantCheckError(t *testing.T) {
 	err := authorizeDecisionScope(context.Background(), rs, "tok", d, map[string]string{"core": "core-ratifier"})
 	if !errors.Is(err, ErrForbidden) {
 		t.Errorf("grant check error: want ErrForbidden (fail-closed), got %v", err)
+	}
+}
+
+// — RegisterOrchestrationRelationKinds ———————————————————————————————————————
+
+func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
+	store := setupRelationStore(t)
+	ctx := context.Background()
+
+	if err := RegisterOrchestrationRelationKinds(ctx, store); err != nil {
+		t.Fatalf("RegisterOrchestrationRelationKinds: %v", err)
+	}
+
+	want := map[string]struct {
+		label     string
+		typePairs string
+	}{
+		"derives_from": {"Derives From", `[{"source_type":"Task","target_type":"Goal"}]`},
+		"depends_on":   {"Depends On", `[{"source_type":"Task","target_type":"Task"}]`},
+		"ships_as":     {"Ships As", `[{"source_type":"Task","target_type":"Amendment"}]`},
+		"supersedes":   {"Supersedes", `[{"source_type":"Decision","target_type":"Decision"}]`},
+	}
+
+	kinds := store.ListKinds()
+	if len(kinds) != len(want) {
+		t.Fatalf("ListKinds: got %d kinds, want %d: %+v", len(kinds), len(want), kinds)
+	}
+	for _, k := range kinds {
+		w, ok := want[k.TypeName]
+		if !ok {
+			t.Errorf("unexpected kind registered: %q", k.TypeName)
+			continue
+		}
+		if k.Label != w.label {
+			t.Errorf("%s: Label = %q, want %q", k.TypeName, k.Label, w.label)
+		}
+		if k.Mode != "asserted" {
+			t.Errorf("%s: Mode = %q, want %q", k.TypeName, k.Mode, "asserted")
+		}
+		if !k.Directional {
+			t.Errorf("%s: Directional = false, want true", k.TypeName)
+		}
+		if k.Weighted {
+			t.Errorf("%s: Weighted = true, want false", k.TypeName)
+		}
+		if string(k.TypePairs) != w.typePairs {
+			t.Errorf("%s: TypePairs = %s, want %s", k.TypeName, k.TypePairs, w.typePairs)
+		}
+	}
+
+	// Idempotent — a second call must not error or duplicate kinds.
+	if err := RegisterOrchestrationRelationKinds(ctx, store); err != nil {
+		t.Fatalf("second RegisterOrchestrationRelationKinds call: %v", err)
+	}
+	if got := len(store.ListKinds()); got != len(want) {
+		t.Errorf("after second call: got %d kinds, want %d", got, len(want))
+	}
+}
+
+func TestRegisterOrchestrationRelationKinds_UpsertError(t *testing.T) {
+	store := mockRelationStore(&errExecDB{})
+	err := RegisterOrchestrationRelationKinds(context.Background(), store)
+	if err == nil {
+		t.Fatal("want error when UpsertKind fails, got nil")
+	}
+	if !strings.Contains(err.Error(), `"derives_from"`) {
+		t.Errorf("error = %q, want it to name the failing kind %q", err.Error(), "derives_from")
 	}
 }

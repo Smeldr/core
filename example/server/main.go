@@ -201,6 +201,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.EnableRelations && cfg.EnableOrchestration {
+		if err := smeldr.RegisterOrchestrationRelationKinds(context.Background(), rs); err != nil {
+			return ServerResult{}, fmt.Errorf("register orchestration relation kinds: %w", err)
+		}
 		app.ContextPacketHandler(rs, cfg.InstanceName)
 	}
 

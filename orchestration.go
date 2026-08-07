@@ -4,6 +4,7 @@ package smeldr
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -373,6 +374,51 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 	app.Content(NewModule[*Goal]((*Goal)(nil),
 		At("/goals"), Repo(NewSQLRepo[*Goal](db, Table("smeldr_goals"))), MCP(MCPRead, MCPWrite),
 	))
+}
+
+// RegisterOrchestrationRelationKinds registers the relation kinds that
+// connect the orchestration types (Task, Goal, Decision, Amendment):
+// derives_from (Task→Goal), depends_on (Task→Task), ships_as
+// (Task→Amendment), and supersedes (Decision→Decision). Idempotent — safe
+// to call on every boot; UpsertKind updates in place if a kind with the
+// same type_name is already registered.
+func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStore) error {
+	kinds := []RelationKindDef{
+		{
+			TypeName:    "derives_from",
+			Label:       "Derives From",
+			Mode:        "asserted",
+			Directional: true,
+			TypePairs:   json.RawMessage(`[{"source_type":"Task","target_type":"Goal"}]`),
+		},
+		{
+			TypeName:    "depends_on",
+			Label:       "Depends On",
+			Mode:        "asserted",
+			Directional: true,
+			TypePairs:   json.RawMessage(`[{"source_type":"Task","target_type":"Task"}]`),
+		},
+		{
+			TypeName:    "ships_as",
+			Label:       "Ships As",
+			Mode:        "asserted",
+			Directional: true,
+			TypePairs:   json.RawMessage(`[{"source_type":"Task","target_type":"Amendment"}]`),
+		},
+		{
+			TypeName:    "supersedes",
+			Label:       "Supersedes",
+			Mode:        "asserted",
+			Directional: true,
+			TypePairs:   json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"}]`),
+		},
+	}
+	for _, k := range kinds {
+		if err := store.UpsertKind(ctx, k); err != nil {
+			return fmt.Errorf("register relation kind %q: %w", k.TypeName, err)
+		}
+	}
+	return nil
 }
 
 // orchSignalFlow returns the state flow for [Signal] records.
