@@ -714,6 +714,11 @@ date, a tagger, and a message, and appear as formal releases on GitHub.
   Exception: a standalone-module amendment (mcp, cli, media, etc.) that changes
   consumer-observable behaviour gets a patch tag so downstream `go get` consumers
   can receive the fix.
+- "Milestone" in this rule means a classic `Milestone{N}_BACKLOG.md` milestone
+  only. The self-hosting roadmap's M0–M5 step numbering (D33) is a distinct,
+  unrelated scheme — completing an M0–M5 step does not by itself trigger a tag;
+  a MINOR-bump amendment shipped as an M0–M5 step is tagged or not by the same
+  rules as any other amendment (see above).
 
 **Standalone module tagging rule (non-negotiable):**
 smeldr.dev/mcp, smeldr.dev/cli, smeldr.dev/media, smeldr.dev/social,
