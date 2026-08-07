@@ -126,6 +126,16 @@ type Transition struct {
 	// transition might require one; a Task todo→doing transition typically
 	// would not.
 	RequiredReason bool
+
+	// Strict, when true, closes two of validateTransition's fail-open
+	// branches for this specific transition (D34): a nil RoleStore (governance
+	// not wired) and an empty actorID (no authenticated caller) are rejected
+	// with ErrForbidden instead of silently allowed through. False (the zero
+	// value, matching every existing flow's behaviour unchanged) keeps
+	// today's lenient posture — RequiredRole is checked only when a RoleStore
+	// and actor are actually present. Only meaningful alongside a non-empty
+	// RequiredRole: Strict has no effect on a transition with no role gate.
+	Strict bool
 }
 
 // TransitionTrigger registers an async or sync handler on a state transition.
@@ -211,8 +221,8 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 			roleArg = t.RequiredRole
 		}
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_transitions(id, flow_id, from_state, to_state, required_role, required_reason) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`,
-			NewID(), flowID, t.From, t.To, roleArg, t.RequiredReason,
+			`INSERT INTO smeldr_transitions(id, flow_id, from_state, to_state, required_role, required_reason, strict) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`,
+			NewID(), flowID, t.From, t.To, roleArg, t.RequiredReason, t.Strict,
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: upsert transition %s→%s: %w", flow.Name, t.From, t.To, err)
 		}
@@ -392,16 +402,21 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 	// ── FAIL-OPEN structural boundary ────────────────────────────────────────
 	// Fetch the transition row. required_role may be NULL (no gate) or a role name.
 	var requiredRole sql.NullString
-	var requiredReason bool
+	var requiredReason, strict bool
 	err = db.QueryRowContext(ctx,
-		`SELECT required_role, required_reason FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = $3`,
+		`SELECT required_role, required_reason, strict FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = $3`,
 		flowID, fromStatus, toStatus,
-	).Scan(&requiredRole, &requiredReason)
+	).Scan(&requiredRole, &requiredReason, &strict)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: transition %s→%s is not permitted for type %q", ErrConflict, fromStatus, toStatus, typeName)
 	}
 	if err != nil {
-		return nil // query failed — fail open rather than blocking all transitions
+		// D34: fail closed globally — this branch fires before the strict
+		// check below is ever reached, for every transition, strict or not.
+		// A transient error (SQLITE_BUSY, cancelled context) must not silently
+		// bypass a role gate; the caller can retry.
+		return fmt.Errorf("%w: transition %s→%s: could not verify authorization: %s",
+			ErrInternal, fromStatus, toStatus, err)
 	}
 
 	// ── FAIL-CLOSED: required_reason ─────────────────────────────────────────
@@ -416,11 +431,21 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 		return nil // no role gate on this transition
 	}
 	if rs == nil {
-		return nil // governance not wired — skip required_role check
+		if strict {
+			return fmt.Errorf("%w: transition %s→%s requires role %q but governance is not wired",
+				ErrForbidden, fromStatus, toStatus, requiredRole.String)
+		}
+		return nil // governance not wired — skip required_role check (non-strict, unchanged)
 	}
 	if actorID == "" {
 		// Any caller without an actor in context (system paths, plain
-		// context.Context, background jobs) is treated as pre-authorized.
+		// context.Context, background jobs) is treated as pre-authorized —
+		// unless this transition is strict (D34), in which case an absent
+		// actor cannot satisfy a role gate and is rejected instead.
+		if strict {
+			return fmt.Errorf("%w: transition %s→%s requires role %q but no actor is present",
+				ErrForbidden, fromStatus, toStatus, requiredRole.String)
+		}
 		return nil
 	}
 	ok, err := rs.RoleGranted(ctx, actorID, requiredRole.String, AuthTarget{})

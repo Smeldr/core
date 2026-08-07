@@ -2,6 +2,7 @@ package smeldr
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -101,6 +102,30 @@ func TestDecisionFlow_definition(t *testing.T) {
 	}
 	if got := initialState(f); got != "proposed" {
 		t.Errorf("initial = %q, want %q", got, "proposed")
+	}
+
+	// D34: ratify and supersede require the "admin" role, fail-closed.
+	var ratify, supersede *Transition
+	for i := range f.Transitions {
+		tr := &f.Transitions[i]
+		switch {
+		case tr.From == "proposed" && tr.To == "ratified":
+			ratify = tr
+		case tr.From == "ratified" && tr.To == "superseded":
+			supersede = tr
+		}
+	}
+	if ratify == nil {
+		t.Fatal("proposed→ratified transition not found")
+	}
+	if ratify.RequiredRole != "admin" || !ratify.Strict {
+		t.Errorf("proposed→ratified: RequiredRole=%q Strict=%v, want %q true", ratify.RequiredRole, ratify.Strict, "admin")
+	}
+	if supersede == nil {
+		t.Fatal("ratified→superseded transition not found")
+	}
+	if supersede.RequiredRole != "admin" || !supersede.Strict {
+		t.Errorf("ratified→superseded: RequiredRole=%q Strict=%v, want %q true", supersede.RequiredRole, supersede.Strict, "admin")
 	}
 }
 
@@ -654,4 +679,86 @@ func insertTestTask(t *testing.T, db DB, taskID string) string {
 		t.Fatalf("insertTestTask Save: %v", err)
 	}
 	return tk.ID
+}
+
+// — authorizeDecisionScope (D34) —————————————————————————————————————————————
+
+func TestAuthorizeDecisionScope_NotDecision(t *testing.T) {
+	db := setupGovernanceDB(t)
+	rs := NewRoleStore(db)
+	tk := &Task{Node: Node{ID: NewID()}, TaskID: "T1"}
+	err := authorizeDecisionScope(context.Background(), rs, "tok", tk, map[string]string{"core": "core-ratifier"})
+	if err != nil {
+		t.Errorf("non-Decision item: want nil, got %v", err)
+	}
+}
+
+func TestAuthorizeDecisionScope_NilRS(t *testing.T) {
+	d := &Decision{Node: Node{ID: NewID()}, Scope: "core"}
+	err := authorizeDecisionScope(context.Background(), nil, "tok", d, map[string]string{"core": "core-ratifier"})
+	if err != nil {
+		t.Errorf("nil RoleStore: want nil, got %v", err)
+	}
+}
+
+func TestAuthorizeDecisionScope_EmptyActor(t *testing.T) {
+	db := setupGovernanceDB(t)
+	rs := NewRoleStore(db)
+	d := &Decision{Node: Node{ID: NewID()}, Scope: "core"}
+	err := authorizeDecisionScope(context.Background(), rs, "", d, map[string]string{"core": "core-ratifier"})
+	if err != nil {
+		t.Errorf("empty actorID: want nil, got %v", err)
+	}
+}
+
+func TestAuthorizeDecisionScope_UnmappedScope(t *testing.T) {
+	db := setupGovernanceDB(t)
+	rs := NewRoleStore(db)
+	d := &Decision{Node: Node{ID: NewID()}, Scope: "unmapped-scope"}
+	err := authorizeDecisionScope(context.Background(), rs, "tok", d, map[string]string{"core": "core-ratifier"})
+	if err != nil {
+		t.Errorf("unmapped scope: want nil, got %v", err)
+	}
+}
+
+func TestAuthorizeDecisionScope_Granted(t *testing.T) {
+	db := setupGovernanceDB(t)
+	rs := NewRoleStore(db)
+	const uid = "tok-core-ratifier"
+	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"approve"}}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	if _, err := rs.Grant(context.Background(), RoleGrant{TokenID: uid, RoleName: "core-ratifier"}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	d := &Decision{Node: Node{ID: NewID()}, Scope: "core"}
+	err := authorizeDecisionScope(context.Background(), rs, uid, d, map[string]string{"core": "core-ratifier"})
+	if err != nil {
+		t.Errorf("granted role: want nil, got %v", err)
+	}
+}
+
+func TestAuthorizeDecisionScope_NotGranted(t *testing.T) {
+	db := setupGovernanceDB(t)
+	rs := NewRoleStore(db)
+	const uid = "tok-no-grant"
+	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"approve"}}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	d := &Decision{Node: Node{ID: NewID()}, Scope: "core"}
+	err := authorizeDecisionScope(context.Background(), rs, uid, d, map[string]string{"core": "core-ratifier"})
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("ungranted role: want ErrForbidden, got %v", err)
+	}
+}
+
+func TestAuthorizeDecisionScope_GrantCheckError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	wrapped := &govQueryFailDB{DB: db, failOn: "FROM smeldr_role_grants g"}
+	rs := NewRoleStore(wrapped)
+	d := &Decision{Node: Node{ID: NewID()}, Scope: "core"}
+	err := authorizeDecisionScope(context.Background(), rs, "tok", d, map[string]string{"core": "core-ratifier"})
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("grant check error: want ErrForbidden (fail-closed), got %v", err)
+	}
 }

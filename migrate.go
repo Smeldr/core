@@ -38,6 +38,7 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 			to_state        TEXT    NOT NULL,
 			required_role   TEXT,
 			required_reason BOOLEAN NOT NULL DEFAULT FALSE,
+			strict          BOOLEAN NOT NULL DEFAULT FALSE,
 			UNIQUE(flow_id, from_state, to_state)
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_transition_triggers (
@@ -113,7 +114,10 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 	if err := migrateStateFlowConflictColumns(ctx, db); err != nil {
 		return err
 	}
-	return migrateTransitionReasonColumn(ctx, db)
+	if err := migrateTransitionReasonColumn(ctx, db); err != nil {
+		return err
+	}
+	return migrateTransitionStrictColumn(ctx, db)
 }
 
 // migrateTransitionReasonColumn adds the required_reason column to
@@ -149,6 +153,44 @@ func migrateTransitionReasonColumn(ctx context.Context, db DB) error {
 			`ALTER TABLE smeldr_transitions ADD COLUMN required_reason BOOLEAN NOT NULL DEFAULT FALSE`,
 		); err != nil {
 			return fmt.Errorf("smeldr: migrateTransitionReasonColumn: required_reason: %w", err)
+		}
+	}
+	return nil
+}
+
+// migrateTransitionStrictColumn adds the strict column to smeldr_transitions
+// on pre-existing SQLite databases that predate this column (D34, T206).
+// Fresh installs on any DB engine already have the column via the CREATE
+// TABLE statement above; this only upgrades an existing SQLite database
+// created before this column existed. Idempotent — safe to call on every
+// boot. A no-op on non-SQLite databases (PRAGMA not supported), same
+// precedent as migrateTransitionReasonColumn.
+func migrateTransitionStrictColumn(ctx context.Context, db DB) error {
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_transitions)")
+	if err != nil {
+		return nil // non-SQLite — assume schema is current
+	}
+	defer rows.Close()
+	var hasStrict bool
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt *string
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			continue
+		}
+		if name == "strict" {
+			hasStrict = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !hasStrict {
+		if _, err := db.ExecContext(ctx,
+			`ALTER TABLE smeldr_transitions ADD COLUMN strict BOOLEAN NOT NULL DEFAULT FALSE`,
+		); err != nil {
+			return fmt.Errorf("smeldr: migrateTransitionStrictColumn: strict: %w", err)
 		}
 	}
 	return nil

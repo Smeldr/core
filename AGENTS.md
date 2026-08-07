@@ -538,6 +538,8 @@ Four built-in types for the architect/pilot protocol. Call `RegisterOrchestratio
 
 Each type embeds `Node` and receives the standard auto-generated MCP tools (`create_signal`, `get_signal`, `list_signals`, `update_signal`, `publish_signal`, `archive_signal`, `delete_signal`, and the equivalent for `task`, `decision`, `amendment`).
 
+**`Decision` ratify/supersede requires the `admin` role (D34, A234).** `Decision`'s `proposed → ratified` and `ratified → superseded` transitions are gated: the caller's token must hold a grant for the `admin` role (via `App.Governance`), or the transition is rejected — including when governance isn't wired or no actor is present in context, both of which used to silently allow the transition through. No MCP tool can currently move a `Decision` to `ratified` or `superseded` at all: `publish_decision`/`archive_decision` only ever target the built-in `Published`/`Archived` states, neither of which exists in `Decision`'s own flow. Today this transition is only reachable via a direct HTTP `PUT /decisions/{slug}` request with a changed `status` field.
+
 **`LifecycleEvent` (renamed from `Signal` in A183)**
 
 The Go type `smeldr.Signal` was renamed to `smeldr.LifecycleEvent` to free the `Signal` name for the orchestration content type above. All constant names are unchanged (`AfterCreate`, `AfterPublish`, etc.). If you have code that references `smeldr.Signal` as a type (not a constant), update it to `smeldr.LifecycleEvent`.

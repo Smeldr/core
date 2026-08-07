@@ -567,11 +567,14 @@ func TestValidateTransition_transitionQueryError(t *testing.T) {
 	// transitFailDB returns a valid SQLite-probe result (count=0) and a valid flowID,
 	// but fails the SELECT required_role FROM smeldr_transitions query with a real error
 	// (not sql.ErrNoRows — that would mean "transition not found" → ErrConflict).
-	// validateTransition must fail open (return nil) when the transitions query errors.
+	// D34: validateTransition must fail CLOSED (ErrInternal) when the transitions
+	// query errors — this branch fires before the strict check is ever reached,
+	// for every transition, strict or not.
 	ctx := context.Background()
 	db := &transitFailDB{}
-	if err := validateTransition(ctx, db, nil, "", "Post", "draft", "published", ""); err != nil {
-		t.Errorf("transitions query error: want nil (fail open), got %v", err)
+	err := validateTransition(ctx, db, nil, "", "Post", "draft", "published", "")
+	if !errors.Is(err, ErrInternal) {
+		t.Errorf("transitions query error: want ErrInternal (fail closed), got %v", err)
 	}
 }
 
@@ -1729,6 +1732,74 @@ func TestMigrateTransitionReasonColumn_alterFail(t *testing.T) {
 	// rows (no error), column absent, then ALTER TABLE fails (no such table).
 	db := newSQLiteDB(t)
 	if err := migrateTransitionReasonColumn(context.Background(), db); err == nil {
+		t.Error("expected error when ALTER TABLE has no target table, got nil")
+	}
+}
+
+// — migrateTransitionStrictColumn tests (D34) ————————————————————————————————
+
+func TestMigrateTransitionStrictColumn_addsColumn(t *testing.T) {
+	// Simulate a pre-D34 DB: create smeldr_transitions WITHOUT strict,
+	// then call migrateTransitionStrictColumn directly.
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_transitions (
+			id INTEGER PRIMARY KEY,
+			flow_id TEXT NOT NULL,
+			from_state TEXT NOT NULL,
+			to_state TEXT NOT NULL,
+			required_role TEXT,
+			required_reason BOOLEAN NOT NULL DEFAULT FALSE
+		)`,
+	); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if err := migrateTransitionStrictColumn(ctx, db); err != nil {
+		t.Fatalf("migrateTransitionStrictColumn: %v", err)
+	}
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_transitions)")
+	if err != nil {
+		t.Fatalf("PRAGMA: %v", err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt *string
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			continue
+		}
+		if name == "strict" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("strict column missing after migration")
+	}
+}
+
+func TestMigrateTransitionStrictColumn_idempotent(t *testing.T) {
+	db := newMigratedDB(t) // migrateStateFlows already adds the column
+	ctx := context.Background()
+	if err := migrateTransitionStrictColumn(ctx, db); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+}
+
+func TestMigrateTransitionStrictColumn_nonSQLite(t *testing.T) {
+	db := &queryFailDB{}
+	if err := migrateTransitionStrictColumn(context.Background(), db); err != nil {
+		t.Fatalf("non-SQLite: expected nil, got %v", err)
+	}
+}
+
+func TestMigrateTransitionStrictColumn_alterFail(t *testing.T) {
+	// Empty SQLite DB with no smeldr_transitions table: PRAGMA returns empty
+	// rows (no error), column absent, then ALTER TABLE fails (no such table).
+	db := newSQLiteDB(t)
+	if err := migrateTransitionStrictColumn(context.Background(), db); err == nil {
 		t.Error("expected error when ALTER TABLE has no target table, got nil")
 	}
 }
@@ -3026,6 +3097,92 @@ func TestValidateTransition_RequiredRole_GrantCheckError(t *testing.T) {
 	err := validateTransition(context.Background(), db, rs, "tok", "GovPost", "draft", "published", "")
 	if !errors.Is(err, ErrForbidden) {
 		t.Errorf("grant query error: want ErrForbidden (fail-closed), got %v", err)
+	}
+}
+
+// — D34 strict-transition tests ————————————————————————————————————————————
+
+// setupGovStateStrictDB extends setupGovStateDB with a second flow
+// ("GovPostStrict") whose draft→published transition is both RequiredRole
+// and Strict — used to exercise the fail-closed [E]/[F] branches without
+// disturbing the non-strict "GovPost" flow's own existing test coverage.
+func setupGovStateStrictDB(t *testing.T) (*sql.DB, *RoleStore) {
+	t.Helper()
+	db, rs := setupGovStateDB(t)
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "govpoststrict-flow",
+		TypeName: "GovPostStrict",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published"},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "published", RequiredRole: "editor", Strict: true},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	return db, rs
+}
+
+func TestValidateTransition_Strict_NilRS_Forbidden(t *testing.T) {
+	db, _ := setupGovStateStrictDB(t)
+	err := validateTransition(context.Background(), db, nil, "tok", "GovPostStrict", "draft", "published", "")
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("strict, nil RoleStore: want ErrForbidden, got %v", err)
+	}
+}
+
+func TestValidateTransition_Strict_EmptyActor_Forbidden(t *testing.T) {
+	db, rs := setupGovStateStrictDB(t)
+	err := validateTransition(context.Background(), db, rs, "", "GovPostStrict", "draft", "published", "")
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("strict, empty actorID: want ErrForbidden, got %v", err)
+	}
+}
+
+func TestValidateTransition_Strict_Granted(t *testing.T) {
+	db, rs := setupGovStateStrictDB(t)
+	tokenID := setupTokenWithRole(t, db, rs, "editor")
+	err := validateTransition(context.Background(), db, rs, tokenID, "GovPostStrict", "draft", "published", "")
+	if err != nil {
+		t.Errorf("strict, authorized editor: want nil, got %v", err)
+	}
+}
+
+func TestValidateTransition_Strict_NotGranted(t *testing.T) {
+	db, rs := setupGovStateStrictDB(t)
+	tokenID := setupTokenWithRole(t, db, rs, "author") // author does not have editor role
+	err := validateTransition(context.Background(), db, rs, tokenID, "GovPostStrict", "draft", "published", "")
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("strict, unauthorized actor: want ErrForbidden, got %v", err)
+	}
+}
+
+// TestRegisterFlow_StrictColumnPersisted confirms Transition.Strict actually
+// reaches the smeldr_transitions row, not just compiles — the non-strict
+// "GovPost" flow (setupGovStateDB) and the strict "GovPostStrict" flow
+// (setupGovStateStrictDB) are registered side by side in the same DB above;
+// this reads both rows back directly to prove they differ.
+func TestRegisterFlow_StrictColumnPersisted(t *testing.T) {
+	db, _ := setupGovStateStrictDB(t)
+	var nonStrict, strict bool
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT t.strict FROM smeldr_transitions t JOIN smeldr_state_flows f ON t.flow_id = f.id WHERE f.type_name = 'GovPost'`,
+	).Scan(&nonStrict); err != nil {
+		t.Fatalf("read GovPost strict column: %v", err)
+	}
+	if nonStrict {
+		t.Error("GovPost draft→published: want strict=false, got true")
+	}
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT t.strict FROM smeldr_transitions t JOIN smeldr_state_flows f ON t.flow_id = f.id WHERE f.type_name = 'GovPostStrict'`,
+	).Scan(&strict); err != nil {
+		t.Fatalf("read GovPostStrict strict column: %v", err)
+	}
+	if !strict {
+		t.Error("GovPostStrict draft→published: want strict=true, got false")
 	}
 }
 

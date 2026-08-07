@@ -2337,6 +2337,114 @@ func TestModule_checkWriteOp_StoreWired_ErrorFailClosed(t *testing.T) {
 	}
 }
 
+// — D34: Decision ratify authorization, end-to-end via updateHandler ————————
+
+// decisionRatifyModule wires a real Module[*Decision] against a DB with
+// governance + orchDecisionFlow registered, mirroring how App.Handler wires
+// a production Decision module (RegisterOrchestrationTypes +
+// RegisterFlow(orchDecisionFlow())), so the RequiredRole/Strict gate set in
+// orchestration.go is exercised through the actual call path (updateHandler),
+// not re-implemented against validateTransition directly.
+func decisionRatifyModule(t *testing.T) (*Module[*Decision], *RoleStore, *Decision) {
+	t.Helper()
+	db := setupGovernanceDB(t)
+	if err := migrateStateFlows(context.Background(), db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(orchDecisionFlow()); err != nil {
+		t.Fatalf("RegisterFlow(orchDecisionFlow): %v", err)
+	}
+	repo := NewSQLRepo[*Decision](db, Table("smeldr_decisions"))
+	d := &Decision{
+		Node:           Node{ID: NewID(), Slug: "d34-test", Status: "proposed"},
+		DecisionNumber: "D999",
+		Scope:          "core",
+	}
+	if err := repo.Save(context.Background(), d); err != nil {
+		t.Fatalf("seed Decision: %v", err)
+	}
+	m := NewModule((*Decision)(nil), Repo(repo))
+	m.setDB(db)
+	store := NewRoleStore(db)
+	m.setRoleStore(store)
+	return m, store, d
+}
+
+func TestModule_updateHandler_decisionRatify_forbidden(t *testing.T) {
+	m, store, d := decisionRatifyModule(t)
+	const uid = "tok-editor-no-admin"
+	// editor holds "update" (passes checkWriteOp) but not "admin" (D34's gate).
+	govGrant(t, store, uid, "editor")
+
+	body, _ := json.Marshal(map[string]any{"Status": "ratified"})
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/decisions/"+d.Slug, bytes.NewReader(body)),
+		User{ID: uid, Name: "Editor", Roles: []Role{Editor}})
+	r.SetPathValue("slug", d.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("ratify without admin: status = %d, want 403\nbody: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestModule_updateHandler_decisionRatify_authorized(t *testing.T) {
+	m, store, d := decisionRatifyModule(t)
+	const uid = "tok-admin"
+	govGrant(t, store, uid, "admin")
+
+	body, _ := json.Marshal(map[string]any{"Status": "ratified"})
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/decisions/"+d.Slug, bytes.NewReader(body)),
+		User{ID: uid, Name: "Admin", Roles: []Role{Admin}})
+	r.SetPathValue("slug", d.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ratify with admin: status = %d, want 200\nbody: %s", w.Code, w.Body.String())
+	}
+	var updated Decision
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if updated.Status != "ratified" {
+		t.Errorf("Status = %q, want %q", updated.Status, "ratified")
+	}
+}
+
+// TestModule_updateHandler_decisionRatify_scopeForbidden exercises
+// updateHandler's authorizeDecisionScope call site specifically (not the
+// generic RequiredRole gate above it): the actor holds "admin" — satisfying
+// orchDecisionFlow's own RequiredRole — but decisionScopeRoles maps this
+// Decision's Scope to a second role the actor does not hold, so the new
+// call site's own WriteError branch is what rejects the request.
+func TestModule_updateHandler_decisionRatify_scopeForbidden(t *testing.T) {
+	m, store, d := decisionRatifyModule(t)
+	decisionScopeRoles["core"] = "core-ratifier" // d.Scope == "core"
+	t.Cleanup(func() { delete(decisionScopeRoles, "core") })
+	if err := store.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"approve"}}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+
+	const uid = "tok-admin-no-scope-role"
+	govGrant(t, store, uid, "admin") // satisfies RequiredRole, not decisionScopeRoles
+
+	body, _ := json.Marshal(map[string]any{"Status": "ratified"})
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/decisions/"+d.Slug, bytes.NewReader(body)),
+		User{ID: uid, Name: "Admin", Roles: []Role{Admin}})
+	r.SetPathValue("slug", d.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("ratify without core-ratifier scope role: status = %d, want 403\nbody: %s", w.Code, w.Body.String())
+	}
+}
+
 // isVisible — Published items are always visible regardless of governance.
 func TestModule_isVisible_Published_AlwaysVisible(t *testing.T) {
 	m, _ := govModule(t)

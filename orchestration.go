@@ -4,6 +4,7 @@ package smeldr
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 )
@@ -186,6 +187,45 @@ type Decision struct {
 	NextEvalAt time.Time `json:"next_eval_at" db:"next_eval_at"`
 	// EvalNote records the outcome of the most recent evaluation pass.
 	EvalNote string `json:"eval_note" db:"eval_note"`
+}
+
+// decisionScopeRoles maps a Decision's Scope field to the role name required
+// to transition it — ratify (proposed→ratified) or supersede
+// (ratified→superseded) — per D34. Deliberately starts empty: no
+// scope-to-role policy has been decided yet. An unmapped Scope value is not
+// an error — it simply means authorizeDecisionScope has nothing additional
+// to check for that item, and the generic RequiredRole gate already set on
+// orchDecisionFlow's transitions is what enforces authority today.
+var decisionScopeRoles = map[string]string{}
+
+// authorizeDecisionScope checks whether actorID holds the role D34 maps from
+// item's Scope field, via scopeRoles. It is layered alongside — not instead
+// of — validateTransition's generic RequiredRole gate: RequiredRole is fixed
+// per (from, to) transition row and shared by every Decision regardless of
+// its own Scope, while Scope is a per-instance field a shared row can't
+// express.
+//
+// Returns nil (no additional check) when item is not *Decision, rs is nil,
+// actorID is empty, or item's Scope has no entry in scopeRoles — the same
+// fail-open posture validateTransition itself uses for a non-strict
+// transition, so this wrapper is not a stricter island with its own rules.
+func authorizeDecisionScope(ctx context.Context, rs *RoleStore, actorID string, item any, scopeRoles map[string]string) error {
+	d, ok := item.(*Decision)
+	if !ok || rs == nil || actorID == "" {
+		return nil
+	}
+	role, ok := scopeRoles[d.Scope]
+	if !ok {
+		return nil
+	}
+	granted, err := rs.RoleGranted(ctx, actorID, role, AuthTarget{})
+	if err != nil {
+		return fmt.Errorf("%w: scope %q requires role %q: %s", ErrForbidden, d.Scope, role, err)
+	}
+	if !granted {
+		return fmt.Errorf("%w: scope %q requires role %q", ErrForbidden, d.Scope, role)
+	}
+	return nil
 }
 
 // Amendment is an orchestration content type representing a committed
@@ -401,12 +441,16 @@ func orchDecisionFlow() StateFlow {
 			{Name: "archived", IsTerminal: true},
 		},
 		Transitions: []Transition{
-			{From: "proposed", To: "ratified"},
+			// D34: ratify and supersede require the "admin" role, fail-closed
+			// (Strict) so a nil RoleStore or missing actor rejects rather than
+			// silently allows — the highest of the three built-in seeded
+			// roles, requiring no new provisioning to start enforcing.
+			{From: "proposed", To: "ratified", RequiredRole: "admin", Strict: true},
 			{From: "proposed", To: "archived"},
 			{From: "ratified", To: "pending-re-evaluation"},
 			{From: "pending-re-evaluation", To: "ratified"},
 			{From: "pending-re-evaluation", To: "superseded"},
-			{From: "ratified", To: "superseded"},
+			{From: "ratified", To: "superseded", RequiredRole: "admin", Strict: true},
 			{From: "superseded", To: "archived"},
 		},
 		Triggers: []TransitionTrigger{

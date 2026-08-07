@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.58.6] — 2026-08-07
+
+### Changed
+- `Decision`'s `proposed → ratified` and `ratified → superseded` transitions now require the `admin` role. Ratification and supersede authority was already a real, working mechanism (`RoleStore` grants + per-transition `required_role`) — this closes the gap left by those two transitions never having it set, and by three fail-open branches in `validateTransition` that made even a set `required_role` unreliable. (A234)
+
+### Fixed
+- `validateTransition` now fails closed instead of silently allowing a transition through when the `smeldr_transitions` lookup itself errors (a transient DB error), independent of whether that transition requires a role. (A234)
+
 ## [1.58.5] — 2026-08-03
 
 ### Fixed

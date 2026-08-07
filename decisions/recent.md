@@ -848,3 +848,41 @@ exclusively Peter's or the relevant implementer's.
 Status: Ratified 2026-08-07.
 
 ---
+
+## A234 — Decision authority enforcement: strict transitions + Decision-specific role gate (T206)
+
+### What
+
+Closes D34's authorization gap across four pieces in `smeldr/core`:
+
+1. New `Transition.Strict bool` field in `state.go`, stored as `smeldr_transitions.strict` column (additive). New idempotent migration in `migrate.go`, structurally identical to the existing `migrateTransitionReasonColumn`.
+
+2. `validateTransition` now fail-closed on strict transitions: when `Strict: true`, a nil `RoleStore` or empty `actorID` returns `ErrForbidden` instead of silently allowing. When `Strict: false` (every pre-existing transition), both branches are unchanged. Separately and unconditionally, `smeldr_transitions` row lookup errors (not `sql.ErrNoRows`) now return `ErrInternal` instead of nil — prevents a strict transition from silently passing under transient DB errors.
+
+3. `orchDecisionFlow()` in `orchestration.go`: the two governance transitions (`proposed → ratified` and `ratified → superseded`) now carry `RequiredRole: "admin"` and `Strict: true`. Previously bare `{From, To}` pairs with no role or strictness.
+
+4. New unexported `decisionScopeRoles map[string]string` (starts empty) and `authorizeDecisionScope` function in `orchestration.go`. Reads a `Decision`'s `Scope` field, maps it to a required role via `decisionScopeRoles`, and checks via `RoleStore.RoleGranted` with zero-value `AuthTarget` (only matches `ScopeGlobal` grants, not `ScopeDynamic`). Wired into `updateHandler` immediately after `validateTransition`, on status-change PUT requests.
+
+### Implementation detail caught in testing
+
+`authorizeDecisionScope` reads the existing item's `Scope` (pre-decode), not the newly-decoded item, to prevent scope-zeroing attacks: if a PUT request omits `scope` from its JSON body, a decode-time check would zero that field before checking authorization, silently bypassing the gate. Worse, a caller could pair a status change with a favorable scope in the same request. Test `TestModule_updateHandler_decisionRatify_scopeForbidden` explicitly verified this: it asserts the check still rejects an unauthorized actor even when the request body contains no scope field. This caught and prevented the bug before ship.
+
+### Why strict defaults to false; why row-lookup error fix is unconditional
+
+Existing transitions (thousands in the wild) ship with `Strict: false`, preserving their prior behaviour. When `strict: true`, two previously-unconditional allow-paths now reject; when false, they are byte-for-byte unchanged.
+
+The row-lookup error fix is unconditional because shipping `Strict: true` without it would not actually close the authority gap: a transient DB error (e.g. SQLITE_BUSY) would still silently allow the transition before the strictness check ran. This is a real bug independent of the Strict feature.
+
+### Known gaps — out of scope
+
+- `decisionScopeRoles` ships empty: no scope-to-role policy has been decided yet (D34 is explicit this is a separate, still-open question). This layer is real and tested but currently a no-op. Plain `RequiredRole: "admin"` (piece 3) is what enforces anything today.
+- `RequiredReason` was deliberately left unset on both transitions: `updateHandler` hardcodes reason to empty string with no passthrough. Setting `RequiredReason: true` would make both transitions permanently unreachable through the only path that reaches them — a self-defeating trap. Flagged as a separate follow-up (updateHandler has no reason-passthrough for any content type, not just Decision).
+- No MCP tool can currently move a `Decision` to `ratified` or `superseded`: `transition_item` only operates on dynamic content; `MCPUpdate` explicitly discards caller-supplied status changes. Only direct HTTP `PUT /decisions/{slug}` reaches this code. Separate named gap.
+
+### Consequences
+
+19 new tests (4 `migrateTransitionStrictColumn`, 4 `validateTransition` strict-branch, 1 `RegisterFlow` strict-persistence, 7 `authorizeDecisionScope`, 3 `updateHandler` e2e) plus 2 existing tests updated (`TestValidateTransition_transitionQueryError`'s assertion for the fail-closed `[B]` change; `TestDecisionFlow_definition` extended to assert the new `RequiredRole`/`Strict` fields). Overall coverage 96.1%. Branch coverage: 100% on `validateTransition`, `authorizeDecisionScope`, `orchDecisionFlow`; 89.5% on `migrateTransitionStrictColumn` (one defensive rows.Scan error-continue branch, matching precedented `migrateTransitionReasonColumn` shape). Patch version bump v1.58.5 → v1.58.6: a `PUT /decisions/{slug}` status change to `ratified` or `superseded` now requires the `admin` role where it was previously unenforced (a request that used to succeed can now return 403). No exported symbols removed; `Transition.Strict` is additive. Level 2 amendment.
+
+Status: Shipped 2026-08-07.
+
+---

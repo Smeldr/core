@@ -1871,6 +1871,17 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, r, err)
 			return
 		}
+		// D34: layered scope-aware check on top of the generic RequiredRole
+		// gate above — a no-op for every type except *Decision, and a no-op
+		// for *Decision too until decisionScopeRoles is populated. Checked
+		// against existing, not item: updateHandler decodes a full-replace
+		// body, so an item.Scope changed (or omitted and zeroed) in the same
+		// request must not be able to steer which role this check requires —
+		// authority is decided by the Decision's actual current Scope.
+		if err := authorizeDecisionScope(ctx, m.roleStore, ctx.User().ID, any(existing), decisionScopeRoles); err != nil {
+			WriteError(w, r, err)
+			return
+		}
 	}
 
 	if err := dispatchBefore(ctx, m.signals[BeforeUpdate], item); err != nil {
