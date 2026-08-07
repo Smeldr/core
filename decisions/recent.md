@@ -599,3 +599,252 @@ aren't realistically reachable in tests.
 Level 2 amendment.
 
 ---
+
+## D33 — Self-hosting roadmap: pipeline proven before vision demonstrated, milestone-phased
+
+### Scope
+
+cross-cutting
+
+### Decision
+
+The migration of the architect/implementer coordination process onto a live
+Smeldr instance ships in six sequenced milestones (M0–M5, full detail:
+`smeldr/architect/design/self-hosting-roadmap.md`), not as one undertaking.
+M0 proves the dispatch pipeline (Goal/Task/Signal, live for all five agents)
+without authority enforcement, lineage tracing, headless automation, or
+historical migration — deliberately. M1 (authority) and M2 (lineage) are the
+critical path to M5 (supersede-triggered re-evaluation), the capstone that
+actually demonstrates decisions building on decisions. M3 (headless
+automation) and M4 (historical migration) run independently, off that
+critical path. M0's own completion is named "the pipeline working," never
+"the vision demonstrated" — the two claims are never conflated in any report
+about this work.
+
+### Alternatives considered and rejected
+
+- **Building everything simultaneously ("all in").** Rejected on two
+  grounds: it multiplies fault surface (a broken first pilot Task would be
+  indistinguishable from a broken headless listener if both are new at
+  once), and two of the deferred pieces (the supersede-trigger's
+  job-granularity and loop-prevention questions; headless automation's
+  worktree-isolation mechanics) have no finished design yet — building them
+  is not actually available regardless of ambition, only designing them is.
+- **Treating M0's own "successful turn" as sufficient proof of the
+  self-hosting vision.** Rejected explicitly — a Task moving through its
+  lifecycle with no Decision, no authority check, and no lineage in play
+  proves the plumbing, not the promise that decisions build on decisions,
+  visibly and traceably.
+
+### Consequences
+
+Future dispatch of self-hosting work is scoped per milestone, not as one
+large task. Any report of M0's completion must state plainly that
+authority/lineage/headless/migration remain unbuilt.
+
+Status: Ratified 2026-08-07.
+
+---
+
+## D34 — Decision authority: role-to-transition mapping, not a rank axis; epistemic origin stays separate from authority
+
+### Scope
+
+core
+
+### Decision
+
+Authority over who may ratify or supersede a `Decision` is expressed through
+the role/transition mechanism already shipped in core (`RoleStore` grants +
+`required_role` on a state-flow transition) — not a new rank integer on
+`Decision`, and not by repurposing `RelationEdge.EdgeClass`
+(asserted/inferred/observed). `EdgeClass` stays pure epistemic origin (how an
+edge came to exist); authority (who may bind it) is a separate axis,
+expressed through which role is required on the ratify/supersede transition
+and which actors hold that role. An unratified agent proposal is
+distinguished from a ratified one via `Decision`'s own `proposed → ratified`
+lifecycle state, not a new field.
+
+For `Decision`-class-specific authority (e.g. an implementation-scoped
+decision needing a different ratifying role than a cross-cutting one), the
+mechanism is a thin, `Decision`-specific authorization wrapper that maps
+`Decision.Scope` to a required role name in application code, then grants
+that role with `ScopeGlobal` — not `RoleGranted`'s `ScopeDynamic` path, which
+would require a pre-existing asserted relation edge from every `Decision` to
+a scope-anchor before it could be ratified, an ordering dependency not worth
+taking on for this case.
+
+### Alternatives considered and rejected
+
+- **A rank integer on `Decision`** (e.g. Peter=100, architect=80,
+  implementer=40, supersede-if-rank≥target). Rejected: duplicates state
+  already living in role/grant records (a rank change after the fact would
+  desync from history), and forces a total order onto what is really a
+  partial order per operation.
+- **Reusing `EdgeClass` as a proxy for authority.** Rejected: conflates
+  epistemic origin with binding authority — an agent can deliberately
+  assert a low-authority `Decision` (asserted-but-overridable is a normal,
+  real state), which the `EdgeClass` framing would misrepresent as
+  "inferred."
+- **Routing `Decision`-class-specific authority through `RoleGranted`'s
+  `ScopeDynamic`** (relation-edge-based scoping) as the default. Rejected:
+  requires every `Decision` to carry an asserted edge to its scope-anchor
+  before ratification can even be attempted, an ordering dependency with no
+  clear owner. Left available for a narrower future case, not the default.
+
+### Consequences
+
+`smeldr_transitions.required_role`/`required_reason` on `Decision`'s own
+`proposed → ratified` and `ratified → superseded` transitions is real, scoped
+follow-up work — currently unset, verified directly against
+`orchDecisionFlow()`. A fail-open gap in `validateTransition` (three
+branches: query-error, `RoleStore` not wired, no actor in context) needs a
+paired fix (a new `strict` column plus a resolved posture on the query-error
+branch) before this authority model is actually enforced, not just designed.
+Full detail: `smeldr/architect/design/decision-authority-and-lineage.md`.
+
+Status: Ratified 2026-08-07.
+
+---
+
+## D35 — Decision lineage: bounded, cycle-safe query-time traversal, not a maintained transitive closure or a new relation kind
+
+### Scope
+
+core
+
+### Decision
+
+Tracing what a `Decision`'s premise ultimately rests on (walking
+`depends_on`/`derives_from`/`supersedes` edges upstream, potentially through
+superseded history) is implemented as a read-time traversal
+(`trace_lineage(item_id)`), computed on demand — not as a relation kind that
+"carries" transitivity, and not as an eagerly-maintained transitive-closure
+table. Three guards are required, not optional: a visited-set for cycle
+detection; an explicit "truncated" signal when a depth limit is hit, never a
+silent cutoff; and a decided, non-default behaviour at an invalidated edge —
+the traversal follows it rather than stopping, and flags it as invalidated
+in the returned trace, since the invalidated edge is usually where the
+actual answer lives.
+
+### Alternatives considered and rejected
+
+- **A maintained transitive-closure table**, updated reactively on every
+  edge write. Rejected: reintroduces the exact cascade-amplification risk
+  `AfterRelationCascade`'s own depth=1 limit was built to avoid, for a
+  question (lineage) that is asked rarely, at query time, not on every
+  write — the wrong side of the write/read cost asymmetry.
+- **A new relation kind meant to "carry" transitive lineage directly.**
+  Rejected: edges don't carry transitivity, traversal computes it; a
+  relation kind can't substitute for a real bounded walk.
+
+### Consequences
+
+`trace_lineage` is real, unbuilt work, reusing `ContentEdgeStore`'s existing
+batched `IN (...)` read pattern (`edges.go`) as its technique, not its code
+(that store serves a different type, `ContentEdge`, not `RelationEdge`). Not
+yet decided, flagged as its own open question: whether a trace crossing into
+a superseded `Decision`'s own `supersedes` chain should continue to the
+replacement or stop — a distinct decision from "follow invalidated edges,"
+not implied by it. Full detail:
+`smeldr/architect/design/decision-authority-and-lineage.md`.
+
+Status: Ratified 2026-08-07.
+
+---
+
+## D36 — Relation kinds for the orchestration graph: derives_from, depends_on, ships_as, supersedes
+
+### Scope
+
+core
+
+### Decision
+
+Four relation kinds are registered for the five orchestration types (Goal,
+Task, Decision, Amendment, Signal), all `Mode=asserted`, `Directional=true`,
+`Weighted=false`:
+
+- **`derives_from`** (Task → Goal) — load-bearing: a Goal's closure is
+  computed by confirming every derived Task is `done`.
+- **`depends_on`** (Task → Task) — the edge an implementer checks (via
+  `get_goal_context`) before proceeding past `active`; direction is
+  dependent-points-at-dependency, so `GetByTarget` correctly finds
+  dependents if cascade notification is ever wired to this relation kind.
+- **`ships_as`** (Task → Amendment) — the only link back to the Task an
+  Amendment shipped for; `Amendment` carries no `TaskRef`-equivalent field
+  of its own, verified directly against `orchestration.go`.
+- **`supersedes`** (Decision → Decision) — complements `Decision`'s own
+  `superseded` state with *which* decision did the superseding; the state
+  alone can't carry that.
+
+`implements` (Amendment → Decision) remains an open, unconfirmed candidate —
+named once, in passing, never used in a worked example. Not registered by
+this decision.
+
+`Signal` is explicitly excluded from the relation graph — its own `TaskRef`
+field already covers its link to `Task`; a relation kind would be redundant.
+
+### Alternatives considered and rejected
+
+- **Registering `implements` alongside the other four.** Rejected for now:
+  no real worked example has ever needed it; registering an unused kind
+  adds surface area without a concrete use to validate it against.
+
+### Consequences
+
+Registration (`upsert_relation_kind`, four calls) is real, scoped,
+currently-unbuilt setup work — a prerequisite for any `depends_on`/
+`derives_from`/`ships_as`/`supersedes` edge being assertable at all. Full
+detail: `smeldr/architect/design/process-types-and-workflow.md` §1,
+`decision-authority-and-lineage.md` §11.
+
+Status: Ratified 2026-08-07.
+
+---
+
+## D37 — Architect may propose, register, and commit new Decision entries directly to smeldr/core
+
+### Scope
+
+cross-cutting
+
+### Decision
+
+Architect may write new Decision entries directly to `decisions/recent.md`
+and `DECISIONS.md`'s index table, using local file tools, and commit and
+push that change directly to `smeldr/core` — a narrow, explicit exception to
+the standing rule that architect never runs git write actions on pilot
+repos. Peter reviews and ratifies before each commit. D-number assignment
+follows the same discipline as A-number assignment: read `DECISIONS.md`'s
+actual index table directly, the correct next number is the last row + 1,
+never pre-assigned or guessed. The `decisions/recent.md` archiving mechanic
+(moving old entries to a phase-archive file once the ~20KB threshold is hit)
+stays core-implementer's job, not delegated further, per the documented
+2026-07-30 incident where a less-careful actor corrupted that exact
+line-surgery mechanic.
+
+### Alternatives considered and rejected
+
+- **Keeping the old rule** (all `decisions/` writes route via `NEXT.md` to
+  core-implementer). Reconsidered because its actual justification was a
+  remote-push tooling limitation (`push_files` truncation on large files),
+  not an authority principle — and because it created exactly the failure
+  mode this investigation surfaced: real decisions (D33–D36 above)
+  accumulating in architect's own `design/` documents without ever being
+  registered, dependent on someone remembering to formalize them later.
+  Found directly: D-numbering had gone dormant since D32 (2026-05-17), with
+  genuinely decision-shaped content flowing through Amendment numbering
+  instead for nearly three months.
+
+### Consequences
+
+`CLAUDE.md` (`smeldr/architect`) updated 2026-08-07 with the full rule,
+including the git-commit boundary and the D-number-assignment discipline.
+Does not extend to any other pilot-repo git write action (merges, tags,
+releases, PRs, any file outside `decisions/`/`DECISIONS.md`) — those stay
+exclusively Peter's or the relevant implementer's.
+
+Status: Ratified 2026-08-07.
+
+---
