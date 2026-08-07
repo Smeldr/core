@@ -23,6 +23,15 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.59.0] — 2026-08-07
+
+### Added
+- `lineage.go`: `LineageNode`, `LineageTrace` — a bounded, read-time upstream traversal result over the relation graph's `depends_on`/`derives_from` edges. (A235)
+- `RelationStore.TraceLineage(ctx, anchorType, anchorID string, maxDepth int) (*LineageTrace, error)` — walks upstream from an anchor item to find what it depends on or derives from, up to `maxDepth` hops. Cycle-safe (a visited-set, not a maintained closure); an invalidated edge is followed rather than stopped at, flagged via `LineageNode.Invalidated`; a superseded item is followed to its current replacement (the full chain, not just one revision), recorded at the same depth as the superseded item rather than consuming an extra hop. `LineageTrace.Truncated` is set only when the walk genuinely had more to explore past `maxDepth` — checked explicitly, not inferred from a non-empty frontier. (A235)
+- `MaxLineageDepth = 10` — safety ceiling on `TraceLineage`'s `maxDepth` parameter and on how far a single supersede chain is followed. (A235)
+
+---
+
 ## [1.58.6] — 2026-08-07
 
 ### Changed
@@ -30,6 +39,8 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ### Fixed
 - `validateTransition` now fails closed instead of silently allowing a transition through when the `smeldr_transitions` lookup itself errors (a transient DB error), independent of whether that transition requires a role. (A234)
+
+---
 
 ## [1.58.5] — 2026-08-03
 

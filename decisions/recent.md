@@ -886,3 +886,117 @@ The row-lookup error fix is unconditional because shipping `Strict: true` withou
 Status: Shipped 2026-08-07.
 
 ---
+
+## A235 — Build `trace_lineage`: bounded, cycle-safe upstream lineage traversal (D35, M2)
+
+### What
+
+Implements D35 in full: `RelationStore.TraceLineage(ctx, anchorType, anchorID
+string, maxDepth int) (*LineageTrace, error)` (`lineage.go`, new) — a
+bounded, read-time upstream traversal over `depends_on`/`derives_from`
+edges, reporting every item found as a `LineageNode` (`Type`, `ID`, `Depth`,
+`RelationKind`, `EdgeClass`, `Confidence`, `Invalidated`, `Superseded`).
+
+Reuses `reachability.go`'s (A219/A231) established BFS shape directly —
+`reachabilityNode`, `edgeClassRank`, `betterCandidate` — rather than
+`edges.go`'s `ChildrenOf`, the reuse target NEXT.md/D35 originally named:
+`ChildrenOf` is a flat, single-level batched fetch over a structurally
+unrelated type (`ContentEdge`), with no BFS, no visited-set, no depth
+tracking, while `reachability.go` already solves guard 1 (cycle detection
+via a visited-set) in this exact package, over this exact `RelationEdge`
+type. What NEXT.md's pointer got right is narrower than "the technique":
+one batched `IN (...)` query per BFS level instead of one query per
+frontier node — which `reachability.go` itself does not do
+(`reachabilityNeighbors` queries per node). New `batchEdgesBySource`/
+`batchEdgesByTarget`/`batchEdgesByTypeAndIDs` (unexported) apply that
+batching, grouped by node type per query rather than a composite
+`(type, id)` row-value `IN (...)`, since row-value support is not verified
+portable across this package's SQLite and pgx backends. Flagged and
+approved by the architect before implementation
+(`plans/core-m2-next-plan.md` §2).
+
+Three guards, per D35:
+
+1. Cycle detection via a shared visited-set across the whole traversal.
+2. `LineageTrace.Truncated` — an explicit signal when the walk still had
+   unexplored frontier at `maxDepth`, computed via a one-time,
+   non-recording peek (`hasFurtherLineage`) rather than assumed from
+   "frontier non-empty at the boundary" (a false-positive bug caught during
+   implementation — see below).
+3. Invalidated edges (`InvalidAt` set) are followed, not stopped at —
+   flagged via `LineageNode.Invalidated`.
+
+Resolves D35's own open question (does a trace crossing into a superseded
+`Decision` continue to the replacement, or stop): **follows it**, argued
+independently in the plan (`core-m2-next-plan.md` §3, approved) on the same
+reasoning D35 guard 3 already accepted for invalidated edges — stopping
+would hide exactly what the query was asked to find. A superseded node's
+replacement is recorded at the *same* `Depth` as the superseded node (a
+lateral step, not an extra upstream hop) — a node's supersede history is
+revision metadata about its identity, not a new premise in the reasoning
+chain.
+
+### Two real bugs found and fixed during implementation, not part of the approved plan's original design
+
+1. **`Truncated` false positive.** The initial design set
+   `Truncated = true` whenever the frontier was non-empty at `maxDepth` —
+   but a non-empty frontier only means nodes were found, not that *they*
+   have further edges. A test with two leaf nodes found at `maxDepth=1`,
+   neither with further edges, caught this returning `Truncated=true` when
+   the graph was actually fully exhausted. Fixed with `hasFurtherLineage`:
+   a one-time peek query at the depth boundary, checking whether the final
+   frontier has *any* unvisited depends_on/derives_from target or incoming
+   supersedes edge, without recording anything into the trace.
+2. **Supersede chains only resolved one hop.** The initial
+   `followSupersedes` found a node's *immediate* replacement but never
+   checked whether that replacement had itself since been superseded — a
+   Decision revised twice (X → X2 → X3) would trace to X2, not the actual
+   current X3, directly contradicting the plan's own stated purpose ("the
+   agent wants the current replacement"). Fixed: `followSupersedes` now
+   loops, chasing each newly-found replacement for further supersession
+   until none remain. This removed the only depth-bound that would
+   otherwise have applied to that walk (chain length is not counted
+   against `maxDepth`, by design — see above) — so a pathologically long
+   revision history could otherwise run the loop unbounded. Capped at
+   `MaxLineageDepth` hops, reusing the same ceiling as the main walk;
+   hitting the cap sets `Truncated`, the same signal used for the
+   hop-depth limit. `TestTraceLineage_MultiHopSupersedeChain` and
+   `TestTraceLineage_SupersedeChainCappedAtMaxLineageDepth` prove the fix
+   and the cap respectively.
+
+Both were caught by coverage-driven testing during implementation, fixed in
+this same commit, and reviewed as part of the diff — not re-litigated as a
+new planning round (matches A231's own precedent for a mid-implementation
+tie-break discovery).
+
+### Deliberately out of scope, per the approved plan
+
+- No anchor-existence check — matches `Reachability`'s own precedent
+  (reports graph structure only), and confirmed load-bearing beyond
+  consistency: `resolveItemTable` (the only existing type-to-table lookup)
+  is SQLite-only (queries `sqlite_master`), so using it here would be a
+  real portability bug against pgx, not just an unnecessary coupling
+  (architect's own finding, `core-m2-next-plan.md` §7).
+- No MCP tool — `smeldr.dev/mcp` is a separate repo outside this
+  task/worktree; `trace_lineage` ships core-only, matching `Reachability`'s
+  own T194/T196 split (core first, MCP wiring dispatched separately, only
+  when asked for).
+- No `state.go`/`orchestration.go` changes — the M1 collision risk NEXT.md
+  named does not materialize; `lineage.go` is genuinely new, standalone.
+
+### Consequences
+
+- New file `lineage.go`: exported `LineageNode`, `LineageTrace` types;
+  `MaxLineageDepth = 10` constant; `RelationStore.TraceLineage` method. No
+  exported symbols changed elsewhere.
+- 20 new tests (`lineage_test.go`), 100% coverage on every new function
+  (`TraceLineage`, `hasFurtherLineage`, `followSupersedes`,
+  `batchEdgesBySource`, `batchEdgesByTarget`, `batchEdgesByTypeAndIDs`).
+- Package coverage: 96.2%.
+- Level 2 amendment (new exported symbols, new file, real new read path).
+
+Level 2 amendment.
+
+---
+
+---
