@@ -707,18 +707,25 @@ date, a tagger, and a message, and appear as formal releases on GitHub.
 
 **Tag format:** `vMAJOR.MINOR.PATCH` — must match the version in `CHANGELOG.md`
 
-**When to tag:**
-- Every milestone that ships a version bump (`v0.x.0`) gets a tag
-- Patch releases (bug fixes, no API change) get a tag
-- Amendments alone do not get a tag unless they ship with a milestone.
-  Exception: a standalone-module amendment (mcp, cli, media, etc.) that changes
-  consumer-observable behaviour gets a patch tag so downstream `go get` consumers
-  can receive the fix.
-- "Milestone" in this rule means a classic `Milestone{N}_BACKLOG.md` milestone
-  only. The self-hosting roadmap's M0–M5 step numbering (D33) is a distinct,
-  unrelated scheme — completing an M0–M5 step does not by itself trigger a tag;
-  a MINOR-bump amendment shipped as an M0–M5 step is tagged or not by the same
-  rules as any other amendment (see above).
+**When to tag (non-negotiable, no milestone gate):**
+Any commit on `main` that changes `README.md`'s version line
+(`**vX.Y.Z — stable.**`) gets an annotated tag and a GitHub Release —
+always, unconditionally. The version line is the promise; the tag is what
+makes it true. This applies identically whether the commit is a patch
+bump for a single bugfix Amendment, a MINOR bump for new exported API, or
+a full `Milestone{N}_BACKLOG.md` milestone. "Milestone" is never a gating
+concept for tagging, in either sense of the word this project uses it —
+not a classic `Milestone{N}_BACKLOG.md` milestone, and not a step in the
+self-hosting roadmap's separate M0–M5 numbering (D33). If a commit does
+not change the `README.md` version line, it does not get a tag, full stop
+— that is the only condition that matters. (History: v1.59.0, v1.60.0,
+and v1.60.1 shipped on `main` untagged for a full day before this rule
+existed in writing — `TraceLineage` and `RegisterOrchestrationRelationKinds`
+were unreachable to every consumer of the module in that window.
+Backfilled and closed 2026-08-08; this rule exists so it does not recur.)
+- Standalone-module tagging follows its own rule below — unaffected by
+  this section, since standalone modules have their own `CHANGELOG.md`
+  and no `README.md` version line of core's own to key off.
 
 **Standalone module tagging rule (non-negotiable):**
 smeldr.dev/mcp, smeldr.dev/cli, smeldr.dev/media, smeldr.dev/social,
