@@ -700,3 +700,82 @@ Amendments A235/A236's own new-type additions. v1.60.1 → v1.61.0.
 Status: Ratified 2026-08-08.
 
 ---
+
+## D39 — Module paths: `smeldr.dev/x` is for published modules only, private repos use `github.com/Smeldr/x`
+
+### Scope
+
+cross-repo
+
+### Decision
+
+A repo's Go module path is decided by whether the module is *published for
+others to import*, not by who owns it or how it feels:
+
+- **`smeldr.dev/<name>`** — public modules intended to be fetched as a
+  dependency. Requires a matching vanity entry in `smeldr/site-dev`'s own
+  handler list, and is not optional: the path resolves only because
+  `smeldr.dev` serves a `go-import` meta tag for it. Current entries are
+  `core`, `pgx`, `social`, `agent`, `cli` (dedicated handlers) plus `mcp`,
+  `media`, `oauth` (via `vanityGoGetMiddleware`, which avoids colliding with
+  those paths' existing site routes).
+- **`github.com/Smeldr/<name>`** — private repos. Resolves directly with no
+  vanity entry, no `smeldr/site-dev` change, and no deploy of the site to add
+  a new one. Proven in real use: `smeldr/cloud`'s `go.mod` depends on
+  `github.com/Smeldr/mail` at a pseudo-version and fetches it successfully.
+
+The next private repo, `smeldr/runner` (the M3 listener, not yet created), uses
+`github.com/Smeldr/runner` under this decision.
+
+### Why, beyond consistency
+
+Two reasons that are not preference:
+
+1. **A vanity path is infrastructure, not a name.** `smeldr.dev/<name>` is
+   inert unless someone adds it to `site-dev`'s list and redeploys the site.
+   Choosing a vanity path for a private repo silently takes on that dependency
+   and produces a module path that cannot be resolved until the work is done.
+2. **`smeldr.dev` is the public framework site.** Serving a `go-import` meta
+   tag for a private repo advertises that the repo exists and where it lives,
+   to anyone who asks, and then fails on authentication. Publishing a pointer
+   to something deliberately private is the wrong default.
+
+### `smeldr/cloud` is inconsistent with this rule and stays that way
+
+`smeldr/cloud` declares `module smeldr.dev/cloud` and has **no** vanity entry in
+`site-dev`'s list. Verified directly against `site-dev/main.go:622-627` and its
+`vanityGoGetMiddleware`. `go get smeldr.dev/cloud` cannot resolve.
+
+That is not a latent bug, and this decision explicitly does not create follow-up
+work from it. `smeldr/cloud` is Smeldr Cloud itself, the commercial product: a
+leaf application, deliberately private, with no reason any module should ever
+import it. A module path that cannot resolve costs nothing when nothing will
+ever ask it to resolve.
+
+What the case actually demonstrates is the rule's own point from the other
+direction. `cloud` took the vanity path, never did the `site-dev` work that
+would make it real, and nothing broke, because the vanity path was never
+buying it anything in the first place. The choice was pure cost with no
+benefit, and the only reason that stayed invisible is that the cost was also
+zero. For a private repo that *is* imported, the same choice would not have
+been free: `smeldr/mail` would have needed a public meta tag on `smeldr.dev`
+before `smeldr/cloud` could depend on it at all, and it correctly took the
+plain path instead.
+
+Changing `cloud`'s module path would touch every import in the repo to gain
+nothing. Left as is, deliberately. Recorded here so the inconsistency reads as
+a settled judgment rather than an oversight nobody noticed.
+
+### Alternatives considered and rejected
+
+- **Vanity paths for everything, adding private repos to the site's list.**
+  Rejected on reason 2 above, plus it makes creating a private repo require a
+  public site deploy.
+- **Plain GitHub paths for everything, retiring the vanity scheme.** Rejected:
+  the vanity paths are a real published promise on eight modules, `smeldr.dev/core`
+  is in every consumer's `go.mod` and in public documentation, and breaking that
+  to gain internal uniformity is a bad trade.
+
+Status: Ratified 2026-08-08.
+
+---
