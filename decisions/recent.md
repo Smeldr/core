@@ -408,3 +408,295 @@ Full design, five review passes with real defects found on each:
 Status: Ratified 2026-08-08.
 
 ---
+
+## A238 — smeldr.dev/mcp: ErrRevConflict gets its own JSON-RPC code (M3 part 1)
+
+### What happened
+
+`errorFor` (`tool.go:101-116`) had explicit branches for `ValidationError`
+(-32602), `ErrNotFound`, `ErrForbidden`, and `ErrConflict` (-32001). Everything
+else — including `ErrRevConflict` — fell through to the generic `-32603
+"internal error: ..."` catch-all. `ErrConflict` and `ErrRevConflict` are two
+independently-constructed sentinel values in smeldr/core's errors.go (60, 65),
+neither wrapping the other. This means `errors.Is(err, smeldr.ErrConflict)` can
+never match an `ErrRevConflict`-carrying error, so both landed in the same
+-32603 bucket, indistinguishable from transient errors like `SQLITE_BUSY`.
+
+D38's fencing protocol (Run coordination for headless automation, M3) requires
+listeners to reliably tell "I lost the lease race, re-read lease_holder" apart
+from "something transient just happened, retry." Before this fix, both needed
+the same -32603 response, distinguishable only by parsing message text.
+
+### Why not add ErrRevConflict to the existing -32001 bucket
+
+-32001 is already shared by `ErrNotFound`, `ErrForbidden`, and `ErrConflict`,
+distinguished only by message text. Adding `ErrRevConflict` there would still
+require message parsing to branch on "lost the lease race" vs. "forbidden" vs.
+"not found" — exactly the string-matching fragility being fixed, just moved to
+a different bucket.
+
+### The fix
+
+`ErrRevConflict` gets its own dedicated code: `-32002`. JSON-RPC reserves
+-32000 to -32099 for implementation-defined server errors; -32001 was already
+mcp's "handled application error" bucket, so -32002 is the next unused value
+in that range.
+
+```go
+if errors.Is(err, smeldr.ErrRevConflict) {
+    return &jsonRPCError{Code: -32002, Message: err.Error()}
+}
+```
+
+Added as its own branch in `errorFor`, placed directly after the
+`ErrConflict` branch for readability (order doesn't matter functionally since
+the two sentinels never match each other's check).
+
+The function's own doc comment was updated to list all five outcomes
+(`ValidationError`, `ErrNotFound`, `ErrForbidden`, `ErrConflict`,
+`ErrRevConflict`, plus the generic fallback). It had previously documented
+none of the five branches explicitly — the `ErrConflict` branch in particular
+was undocumented before this fix.
+
+### Other sentinels checked, none needed the same treatment
+
+Systematically read every sentinel in smeldr/core's errors.go: `ErrNotFound`,
+`ErrGone`, `ErrForbidden`, `ErrUnauth`, `ErrConflict`, `ErrRevConflict`,
+`ErrLastAdmin`, `ErrBadRequest`, `ErrNotAcceptable`, `ErrRequestTooLarge`,
+`ErrTooManyRequests`, `ErrInternal`. Of the ones `errorFor` doesn't already
+branch on (`ErrGone`, `ErrUnauth`, `ErrLastAdmin`, `ErrBadRequest`,
+`ErrNotAcceptable`, `ErrRequestTooLarge`, `ErrTooManyRequests`, `ErrInternal`),
+none are named or implied anywhere in D38 or its design document as something
+a Run-coordinating listener's decision logic needs to distinguish. `ErrLastAdmin`
+is governance/token-admin-tooling specific, unrelated to Run coordination.
+No other change proposed.
+
+### Tests
+
+New test in `coverage_gap_test.go`, matching the existing
+`TestErrorFor_NotFound`/`TestErrorFor_Forbidden` pattern exactly (bare
+sentinel, since that's how `SQLRepo.Save` actually returns `ErrRevConflict`
+— unwrapped, confirmed at `storage.go:774` in smeldr/core):
+
+```go
+func TestErrorFor_RevConflict(t *testing.T) {
+    got := errorFor(smeldr.ErrRevConflict)
+    if got.Code != -32002 {
+        t.Errorf("ErrRevConflict: code = %d, want -32002", got.Code)
+    }
+}
+```
+
+Coverage: 96.4% (mcp package total, unchanged). No exported symbols changed.
+No version-line change in mcp's own README (mcp doesn't have the same
+version-line-gates-tagging convention as core), but mcp's own CHANGELOG.md
+gets a new section and this is a real behavior change worth a patch tag — a
+listener can now receive a JSON-RPC code (-32002) it's never seen before and
+must handle. v1.29.3 → v1.29.4.
+
+Flagged, not fixed (pre-existing, unrelated to this change, confirmed
+identical on main before this work via `git stash` + `golangci-lint run`):
+four pre-existing golangci-lint findings in `mcp_test.go` (unchecked
+`pw.Write` calls) and `node_tools.go` (an ineffectual assignment) — none in
+files this amendment touches.
+
+Status: Ratified 2026-08-08.
+
+---
+
+## A239 — smeldr/core: the Run orchestration module (D38, M3 part 1)
+
+### The type
+
+New sixth orchestration content type in `orchestration.go`: `Run` — one row per
+mechanical episode of headless automated work, from the moment a listener claims
+it to the moment it merges or is abandoned.
+
+Fields: `TaskID`, `Repo`, `Machine`, `Branch`, `WorktreePath`, `BaseSHA`,
+`LeaseHolder`, `Outcome` (type `RunOutcome`), `Cleanup` (type
+`RunCleanupState`), `AcknowledgedAt` (type `time.Time`).
+
+Two new exported string-enum types, following the existing `ConflictPolicy`
+type's own precedent (a plain `string`-based type with named constants):
+
+- `RunOutcome` — values `RunMerged` ("merged"), `RunNeedsResync`
+  ("needs-resync"), `RunStuck` ("stuck"), `RunFailed` ("failed"),
+  `RunOrphaned` ("orphaned"). Empty string means the Run is still in-flight;
+  every named value is terminal, including `RunNeedsResync`, whose continuation
+  is always a new Run branching from this one, never a resumption of this row.
+
+- `RunCleanupState` — values `RunCleanupPending` ("pending"), `RunCleanupDone`
+  ("done").
+
+### Deliberately no StateFlow
+
+Unlike the other five orchestration types, `Run` registers no `StateFlow`. Its
+authoritative state lives entirely in `LeaseHolder`/`Outcome`, guarded by
+`SQLRepo.Save`'s rev-based compare-and-swap, never in the inherited
+`Node.Status` field via `validateTransition`.
+
+D38 itself names the wrong, natural-looking precedent to avoid:
+`smeldr/agent`'s `AgentJob` type registers a real `StateFlow` and routes its
+whole lifecycle through `Status` — copying that shape for Run would look
+natural and be wrong, since Run's coordination fundamentally needs the one
+atomic compare-and-swap the framework has (`SQLRepo.Save`'s rev-CAS), which
+`DynamicTypeRepo`/`validateTransition`-based state changes don't provide at all.
+
+### Every Run stays Draft forever — named explicitly, not left as an implicit accident
+
+Because no code path ever calls anything that would publish a Run, every Run
+row's `Node.Status` field stays at `Draft` for the row's entire life. Verified
+this doesn't hide Run rows from a listener's own reads: `MCPList`
+(`module.go:2154`) applies no draft-visibility filtering of its own — it
+returns everything the underlying repo's `FindAll` returns unless the caller
+explicitly requests a status subset.
+
+This property is stated directly in `Run`'s own godoc comment, not left as an
+implicit, undocumented side effect.
+
+### Extending the existing registration functions, not adding a parallel pair
+
+`CreateOrchestrationTables` and `RegisterOrchestrationTypes` were extended in
+place — a new `CREATE TABLE IF NOT EXISTS smeldr_runs` statement joined the
+existing statement list; a new `app.Content(NewModule[*Run](...))` call joined
+the existing five. The `flows` slice was NOT touched — no `orchRunFlow()`
+function exists, matching the no-StateFlow decision directly.
+
+Both functions' doc comments were updated from "five" to "six" throughout. This
+was a deliberate choice against building a parallel `CreateRunTable`/
+`RegisterRunType` pair: D38 itself frames Run as "a sixth typed orchestration
+module," not a separate concept, and duplicating the wiring shape for one type
+would be unnecessary parallel structure.
+
+`Run` is registered with `MCP(MCPRead, MCPWrite)`, matching its five siblings.
+This is not just a consistency choice: D38's own claim/renewal/land-time-holder-check
+writes are all designed to travel the MCP `update` tool's path
+(`mcp/tool.go`'s `handleToolsCall` calls `MCPUpdate`), so write access is a
+real requirement for the future M3 listener to be buildable at all, not a style
+preference.
+
+### AcknowledgedAt: caught and fixed before building, not assumed safe
+
+The field gating deletion of a preserved stuck/failed/orphaned Run's worktree
+was originally planned as `AcknowledgedAt *time.Time` (a pointer, nil meaning
+"not yet acknowledged"). Verified directly before writing any code, not
+assumed: this would have been the first `*time.Time` custom field on any
+SQLRepo-backed content type in the codebase. `Node.ScheduledAt` and
+`RelationEdge`'s own timestamp fields looked like they might be evidence it
+would work — checked directly, addressed below, and turned out to be a real
+finding of their own, not settled evidence either way.
+
+Traced the actual mechanism (`storage.go`): `scanDest` only special-cases a
+scan destination whose Go type is `*time.Time` — which is exactly what you get
+when you take the address of a field whose OWN declared type is plain
+`time.Time` (i.e. `&someTimeTimeField` is `*time.Time`). A field declared as
+`*time.Time` itself has an address of `**time.Time` (pointer to the pointer
+field), which does not match `scanDest`'s type assertion and falls through to
+the raw, unwrapped scan destination — meaning it would receive SQLite's
+string-formatted TIMESTAMPTZ value with no parsing logic able to handle it,
+since the custom `timeScanner` wrapper (needed because "Go 1.26's database/sql
+convertAssign does not handle string→*time.Time natively," per its own
+comment) is never engaged for a `**time.Time` destination.
+
+Fixed to `AcknowledgedAt time.Time` (not a pointer), with the zero value
+meaning "not yet acknowledged" — matching `Decision.NextEvalAt`'s own
+already-proven, already-tested nullable-timestamp convention. This is a
+better, more consistent choice than the original pointer design, not merely a
+workaround forced by a bug.
+
+**Second finding, caught during architect review of the first draft of this
+comment, not before**: the first draft cited `Node.ScheduledAt` alongside
+`NextEvalAt` as a second working precedent for the zero-value convention.
+`Node.ScheduledAt` is itself `*time.Time` (`node.go:70`) — not a `time.Time`
+precedent at all, and the sentence contradicted itself as written. Resolving
+which of the two contradicting claims was true meant checking directly rather
+than picking one and moving on: does `Node.ScheduledAt` genuinely work as a
+`*time.Time` through this same generic path (meaning the `scanDest` reasoning
+above is incomplete), or was the citation simply wrong?
+
+Wrote a throwaway test (not committed) exercising `Node.ScheduledAt` through
+a real `NewSQLRepo`-backed table, matching the exact `Save`/`FindByID` path
+`AcknowledgedAt` would use. A nil `ScheduledAt` round-trips fine — `database/sql`'s
+built-in `**T` handling sets the pointer to nil on a nil driver value with no
+string-parsing needed. A **non-nil** `ScheduledAt` reproduces `scanDest`'s
+exact failure: `sql: Scan error ... unsupported Scan, storing driver.Value
+type string into type *time.Time`. Checked whether every existing test that
+looked like it exercised this was actually testing the SQL-backed path: it
+wasn't — `TestFull_scheduler_publishesOverdue`, `TestFull_scheduler_appWiring`,
+and every other test asserting a non-nil `ScheduledAt` use `NewMemoryRepo`,
+which never touches `scanDest` or SQLite scanning at all. The only assertions
+against a real `FindByID` result check the **nil** case (the field cleared
+after publishing) — never a genuine non-nil round-trip against `SQLRepo`.
+
+**This is very likely a real, previously-unnoticed latent bug in
+`Node.ScheduledAt`** — not fixed here, per the architect's own instruction:
+flagged as its own follow-up task, out of this Amendment's scope. The citation
+itself is corrected to name only `Decision.NextEvalAt` as the real precedent.
+
+### The rev-echo contract: documented, not tested — stated plainly rather than faked
+
+D38's own text: any lease-touching write that omits `rev` from its update
+payload silently degrades to last-write-wins, indistinguishable from correct
+behaviour under any single-threaded test — and this is true of any test
+written for this module too.
+
+This cannot be tested at the layer this task builds, and that's stated directly
+rather than manufacturing a test that looks like coverage and isn't: the failure
+mode lives entirely in how a future caller (the M3 listener, not built by this
+task) constructs its MCP update payload — whether it includes `rev` or not.
+Nothing in `orchestration.go` decides that; this task builds no such caller.
+
+The contract itself is documented directly on `Run`'s own godoc comment so the
+eventual listener implementer sees it at the type definition, not only in this
+Decision's own text.
+
+What IS tested, a different and real claim this task's own code does make:
+`TestRun_SaveRevConflict` proves `Run` genuinely participates in
+`SQLRepo.Save`'s real compare-and-swap — not a test of future listener
+discipline, but proof the type is correctly wired onto the one atomic
+primitive the whole design depends on. Mirrors the existing
+`TestSQLRepo_Save_RevConflict` test's exact pattern: save an item (stored rev
+0→1), save again with a stale rev value (0), assert `ErrRevConflict`.
+
+### Tests
+
+- `TestOrchestrationTypes_embedNode` — new `Run` sub-test.
+- `TestCreateOrchestrationTables` — `smeldr_runs` added to the table-existence
+  check.
+- `TestRegisterOrchestrationTypes_flows` — the flow-count assertion stays at 5
+  (not 6), PLUS a new, load-bearing assertion: a direct query confirming zero
+  `smeldr_state_flows` rows exist for `type_name='Run'`. This second check
+  matters because an unchanged count of 5 alone couldn't distinguish "Run
+  correctly has no flow" from "Run's module registration was silently forgotten
+  entirely."
+- New `TestRun_SaveRevConflict` (above).
+
+### AGENTS.md also corrected — a real, pre-existing staleness found in passing
+
+AGENTS.md's orchestration-types section said "Four built-in types" and its
+table listed only Signal/Task/Decision/Amendment — `Goal` (added earlier by
+Amendment A198) had never been added to that table at all, a pre-existing
+staleness unrelated to this task but directly in the same section being edited.
+
+Corrected to six types, with both Goal and Run added to the table, and a new
+paragraph added warning that Run.status is inert and AI assistants should read
+LeaseHolder/Outcome instead.
+
+### Companion mcp-repo change
+
+A238 (this same work cycle, `smeldr.dev/mcp`, no core-package files touched)
+is the prerequisite: `ErrRevConflict` gets its own JSON-RPC code, -32002,
+needed before D38's fencing protocol can work at all. No docs/ARCHITECTURE.md
+entry for A238, matching A227/A228's own precedent (standalone-module-only
+changes don't get entries in core's own architecture doc).
+
+### Coverage and versioning
+
+No exported symbols removed anywhere. Coverage: 96.2% (core package total,
+unchanged from baseline). MINOR version bump — new exported API surface (Run,
+RunOutcome, RunCleanupState, and their constants), same classification as
+Amendments A235/A236's own new-type additions. v1.60.1 → v1.61.0.
+
+Status: Ratified 2026-08-08.
+
+---

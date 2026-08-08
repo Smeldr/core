@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.61.0] — 2026-08-08
+
+### Added
+- `Run` (`orchestration.go`) — a sixth orchestration content type: one row per mechanical episode of headless automated work (D38, M3), from claim to merge-or-abandon. Deliberately registers no `StateFlow` — its authoritative state lives in `LeaseHolder`/`Outcome`, guarded by `SQLRepo.Save`'s rev-CAS, never in `Node.Status`. `RunOutcome` (`merged`/`needs-resync`/`stuck`/`failed`/`orphaned`) and `RunCleanupState` (`pending`/`done`) are new exported string-enum types with their constants. `CreateOrchestrationTables`/`RegisterOrchestrationTypes` now wire six types (five flows — `Run` gets none). (A239, D38)
+
+---
+
 ## [1.60.1] — 2026-08-07
 
 ### Fixed

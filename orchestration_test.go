@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestOrchestrationTypes_embedNode verifies at compile time that all five
+// TestOrchestrationTypes_embedNode verifies at compile time that all six
 // orchestration types embed [Node] and are pointer-receiverable by the
 // generic content module infrastructure.
 func TestOrchestrationTypes_embedNode(t *testing.T) {
@@ -36,6 +36,12 @@ func TestOrchestrationTypes_embedNode(t *testing.T) {
 		_ = g.Node
 		_ = g.Slug
 		_ = g.GoalID
+	})
+	t.Run("Run", func(t *testing.T) {
+		var r Run
+		_ = r.Node
+		_ = r.Slug
+		_ = r.TaskID
 	})
 }
 
@@ -151,7 +157,7 @@ func TestAmendmentFlow_definition(t *testing.T) {
 }
 
 // TestCreateOrchestrationTables verifies that CreateOrchestrationTables creates
-// all five tables without error and that they are queryable.
+// all six tables without error and that they are queryable.
 func TestCreateOrchestrationTables(t *testing.T) {
 	db := newSQLiteDB(t)
 	if err := CreateOrchestrationTables(db); err != nil {
@@ -159,7 +165,7 @@ func TestCreateOrchestrationTables(t *testing.T) {
 	}
 	ctx := context.Background()
 	for _, table := range []string{
-		"smeldr_signals", "smeldr_tasks", "smeldr_decisions", "smeldr_amendments", "smeldr_goals",
+		"smeldr_signals", "smeldr_tasks", "smeldr_decisions", "smeldr_amendments", "smeldr_goals", "smeldr_runs",
 	} {
 		row := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table)
 		var n int
@@ -177,8 +183,9 @@ func TestRegisterOrchestrationTypes_nilDB(t *testing.T) {
 	RegisterOrchestrationTypes(app, nil)
 }
 
-// TestRegisterOrchestrationTypes_flows verifies that with a real SQLite DB all
-// four flows are persisted via RegisterFlow without error.
+// TestRegisterOrchestrationTypes_flows verifies that with a real SQLite DB
+// exactly the five flow-bearing types are persisted via RegisterFlow, and
+// that Run — deliberately flow-less, D38 — gets none.
 func TestRegisterOrchestrationTypes_flows(t *testing.T) {
 	db := newSQLiteDB(t)
 	ctx := context.Background()
@@ -193,7 +200,8 @@ func TestRegisterOrchestrationTypes_flows(t *testing.T) {
 		Secret:  []byte("test-secret-key!!"),
 		DB:      db,
 	})
-	// Must not panic; should register all 4 flows without logging errors.
+	// Must not panic; should register all 5 flows (not 6 — Run gets none)
+	// without logging errors.
 	RegisterOrchestrationTypes(app, db)
 
 	// Verify the 5 orchestration flows were inserted (exclude the default seed flow).
@@ -204,7 +212,22 @@ func TestRegisterOrchestrationTypes_flows(t *testing.T) {
 		t.Fatalf("count state flows: %v", err)
 	}
 	if n != 5 {
-		t.Errorf("registered flow count = %d, want 5", n)
+		t.Errorf("registered flow count = %d, want 5 (Run must not add a sixth)", n)
+	}
+
+	// Load-bearing assertion, not just an unchanged count: a type
+	// deliberately registered *without* a flow is a first for this
+	// codebase. An unchanged count of 5 alone could also mean "I forgot
+	// to register Run's module at all" — this proves specifically that no
+	// row exists for type_name='Run', not merely that the total is right.
+	var runFlowCount int
+	row = db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM smeldr_state_flows WHERE type_name = 'Run'")
+	if err := row.Scan(&runFlowCount); err != nil {
+		t.Fatalf("count Run state flows: %v", err)
+	}
+	if runFlowCount != 0 {
+		t.Errorf("Run state flow count = %d, want 0 (Run registers no StateFlow, D38)", runFlowCount)
 	}
 }
 
@@ -828,5 +851,32 @@ func TestRegisterOrchestrationRelationKinds_UpsertError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `"derives_from"`) {
 		t.Errorf("error = %q, want it to name the failing kind %q", err.Error(), "derives_from")
+	}
+}
+
+// TestRun_SaveRevConflict proves Run is genuinely wired onto SQLRepo's real
+// rev-CAS (D38 §1/§3) — not a test of the future listener's rev-echo
+// discipline, which this task builds no code for (see Run's own doc
+// comment). Mirrors TestSQLRepo_Save_RevConflict's exact pattern.
+func TestRun_SaveRevConflict(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	repo := NewSQLRepo[*Run](db, Table("smeldr_runs"))
+	ctx := context.Background()
+
+	item := &Run{Node: Node{ID: "run-1", Slug: "run-1"}, TaskID: "T145"}
+	// First insert: stored rev = 0.
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	// Second save with item.Rev = 0: WHERE rev=0 matches stored rev=0 → update, stored rev→1.
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	// Third save with item.Rev = 0 (stale): WHERE rev=0 fails (stored rev=1) → ErrRevConflict.
+	if err := repo.Save(ctx, item); !errors.Is(err, ErrRevConflict) {
+		t.Errorf("third save (stale rev): got %v, want ErrRevConflict", err)
 	}
 }

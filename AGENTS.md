@@ -283,7 +283,7 @@ SECRET=changeme go run .
 | `ENABLE_RELATIONS` | boolean | wire the relation graph store |
 | `ENABLE_DYNAMIC_CONTENT` | boolean | wire the runtime content type system |
 | `ENABLE_BLOCKS` | boolean | wire the block/composition system MCP tools |
-| `ENABLE_ORCHESTRATION` | boolean | wire orchestration types (Signal, Task, Decision, Amendment, Goal); set `ENABLE_RELATIONS` for full `get_goal_context` traversal |
+| `ENABLE_ORCHESTRATION` | boolean | wire orchestration types (Signal, Task, Decision, Amendment, Goal, Run); set `ENABLE_RELATIONS` for full `get_goal_context` traversal |
 | `INSTANCE_NAME` | optional | source name embedded in `GET /packet/{type}/{slug}` responses (default: `smeldr-dogfood`); requires both `ENABLE_RELATIONS` and `ENABLE_ORCHESTRATION` |
 | `ENABLE_REDIRECTS` | boolean | wire database-backed redirect management |
 | `ENABLE_PAGE_META` | boolean | wire per-path SEO override store |
@@ -527,7 +527,11 @@ These tools are available when `App.Config().DB` is non-nil (any app with a data
 
 ### Orchestration content types (A183)
 
-Four built-in types for the architect/pilot protocol. Call `RegisterOrchestrationTypes(app, db)` at startup — after `CreateOrchestrationTables(db)` — to activate them. All four types are registered with `MCP(MCPRead, MCPWrite)`, so MCP tools are generated automatically.
+Six built-in types for the architect/pilot protocol and headless
+automation (M3, D38). Call `RegisterOrchestrationTypes(app, db)` at
+startup — after `CreateOrchestrationTables(db)` — to activate them. All
+six types are registered with `MCP(MCPRead, MCPWrite)`, so MCP tools are
+generated automatically.
 
 | Type | Table | Initial state | Purpose |
 |------|-------|---------------|---------|
@@ -535,8 +539,20 @@ Four built-in types for the architect/pilot protocol. Call `RegisterOrchestratio
 | `Task` | `smeldr_tasks` | `backlog` | Work item in the task state machine |
 | `Decision` | `smeldr_decisions` | `proposed` | Architectural decision with a re-evaluation cycle |
 | `Amendment` | `smeldr_amendments` | `scoped` | Committed changeset linking a Task to its implementation |
+| `Goal` | `smeldr_goals` | `open` | Work goal, linked to Decisions and Tasks via the relation graph |
+| `Run` | `smeldr_runs` | n/a — no state flow | One mechanical episode of headless automated work (D38, M3) |
 
-Each type embeds `Node` and receives the standard auto-generated MCP tools (`create_signal`, `get_signal`, `list_signals`, `update_signal`, `publish_signal`, `archive_signal`, `delete_signal`, and the equivalent for `task`, `decision`, `amendment`).
+Each type embeds `Node` and receives the standard auto-generated MCP tools (`create_signal`, `get_signal`, `list_signals`, `update_signal`, `publish_signal`, `archive_signal`, `delete_signal`, and the equivalent for `task`, `decision`, `amendment`, `goal`, `run`).
+
+**`Run` has no state flow — its `status` field is inert (D38).** Unlike
+the other five types, `Run`'s real state lives in its own `lease_holder`
+and `outcome` fields, not `status`. `publish_run`/`archive_run`/
+`schedule_run` exist (the standard tool set every `MCP(MCPWrite)` type
+gets) but do not gate anything — no code path validates a `Run` transition
+because no flow is registered for it. Every `Run` row stays `Draft` for
+its entire life; this does not hide it from `list_runs`/`get_run`, since
+`Run` is read the same way every other type is. Do not build logic that
+gates on `Run.status` — read `lease_holder`/`outcome` instead.
 
 **`Decision` ratify/supersede requires the `admin` role (D34, A234).** `Decision`'s `proposed → ratified` and `ratified → superseded` transitions are gated: the caller's token must hold a grant for the `admin` role (via `App.Governance`), or the transition is rejected — including when governance isn't wired or no actor is present in context, both of which used to silently allow the transition through. No MCP tool can currently move a `Decision` to `ratified` or `superseded` at all: `publish_decision`/`archive_decision` only ever target the built-in `Published`/`Archived` states, neither of which exists in `Decision`'s own flow. Today this transition is only reachable via a direct HTTP `PUT /decisions/{slug}` request with a changed `status` field.
 

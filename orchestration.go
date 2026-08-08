@@ -247,10 +247,118 @@ type Amendment struct {
 	Summary string `json:"summary"`
 }
 
-// CreateOrchestrationTables creates the five orchestration content tables
-// (smeldr_signals, smeldr_tasks, smeldr_decisions, smeldr_amendments, smeldr_goals)
-// if they do not already exist. Call once at application startup before
-// [RegisterOrchestrationTypes].
+// RunOutcome is the terminal state of a completed or abandoned [Run] (D38
+// §3). Empty means the Run is still in-flight — every named value below is
+// terminal, including RunNeedsResync, whose continuation is always a new
+// Run branching from this one, never a resumption of this row.
+type RunOutcome string
+
+const (
+	// RunMerged means the Run's branch was squash-merged successfully.
+	RunMerged RunOutcome = "merged"
+	// RunNeedsResync means the land-time freshness gate found main had
+	// moved; a human resolves it, and continuation is always a new Run.
+	RunNeedsResync RunOutcome = "needs-resync"
+	// RunStuck means a step failed or timed out; the worktree is preserved
+	// as crash-scene evidence for inspection.
+	RunStuck RunOutcome = "stuck"
+	// RunFailed means the Run was abandoned; the worktree is preserved.
+	RunFailed RunOutcome = "failed"
+	// RunOrphaned means an admin declared the lease expired and reclaimed
+	// it; a new Run opens for the same Task.
+	RunOrphaned RunOutcome = "orphaned"
+)
+
+// RunCleanupState is whether a terminal [Run]'s worktree/branch cleanup has
+// completed (D38 §6/§7). A failed cleanup degrades to a disk-space problem,
+// never a correctness one — names are never reused, so nothing else is ever
+// blocked by a cleanup that hasn't finished yet.
+type RunCleanupState string
+
+const (
+	// RunCleanupPending means cleanup has not yet completed (or has not
+	// yet been attempted). The janitor pass retries it.
+	RunCleanupPending RunCleanupState = "pending"
+	// RunCleanupDone means the worktree and branch have been removed.
+	RunCleanupDone RunCleanupState = "done"
+)
+
+// Run is an orchestration content type representing one mechanical episode
+// of headless automated work (D38, M3): from the moment a listener claims
+// it to the moment it merges or is abandoned. Unlike the other five
+// orchestration types, Run registers no [StateFlow] — its authoritative
+// state lives in LeaseHolder and Outcome, guarded by [SQLRepo.Save]'s
+// rev-CAS, never in the embedded [Node].Status field via
+// [validateTransition]. Node.Status is present (inherited, required by the
+// generic content-module machinery) but carries no meaning for Run: no
+// code path ever publishes a Run, so every row stays Draft for its entire
+// life. This does not hide Run rows from a listener's own reads — MCPList
+// applies no draft-visibility filtering of its own (it returns everything
+// [Repo.FindAll] returns unless the caller explicitly requests a status
+// subset).
+//
+// Every lease-touching write (claim, renewal, the land-time holder check,
+// reclaim) MUST echo the Rev value it last read for this row — this is a
+// contract the M3 listener (not built by this task) must uphold, not
+// something Run or SQLRepo enforces on its own: a write whose payload
+// omits rev has MCPUpdate silently seed the row's current value instead,
+// satisfying the CAS by construction and degrading claims/renewals to
+// last-write-wins, indistinguishably from correct behaviour under any
+// single-threaded test (D38 §3).
+type Run struct {
+	Node
+	// TaskID is the Task this Run performs mechanical work for (e.g. "T145").
+	TaskID string `json:"task_id" db:"task_id"`
+	// Repo is the repository this Run operates on (e.g. "smeldr/core").
+	Repo string `json:"repo"`
+	// Machine identifies which machine this Run's worktree/branch live on.
+	Machine string `json:"machine"`
+	// Branch is the git branch name — derived from this Run's own ID,
+	// never a timestamp or a next-available scan, and never reused (D38 §6).
+	Branch string `json:"branch"`
+	// WorktreePath is the local filesystem path of this Run's git worktree.
+	WorktreePath string `json:"worktree_path" db:"worktree_path"`
+	// BaseSHA is the commit this Run's branch started from.
+	BaseSHA string `json:"base_sha" db:"base_sha"`
+	// LeaseHolder is the listener process ID that currently holds this
+	// Run's lease. Written only by the lease holder itself or by a reclaim
+	// action that terminals the Run (D38 §8) — never by anything else,
+	// including the claude -p child process the listener spawns.
+	LeaseHolder string `json:"lease_holder" db:"lease_holder"`
+	// Outcome is empty while the Run is in-flight. No lease_expires_at
+	// field exists — expiry is computed as Node.UpdatedAt plus a TTL
+	// constant by whoever asks (D38 §8), not stored.
+	Outcome RunOutcome `json:"outcome"`
+	// Cleanup tracks this Run's worktree/branch cleanup progress.
+	Cleanup RunCleanupState `json:"cleanup"`
+	// AcknowledgedAt gates deletion of a preserved stuck/failed/orphaned
+	// Run's worktree (D38 §7). The zero value means not yet acknowledged —
+	// matching [Decision].NextEvalAt's own established nullable-timestamp
+	// convention, not a *time.Time: the generic SQLRepo scan path
+	// (scanDest, storage.go) only special-cases a scan destination whose
+	// address is naturally *time.Time — which is what taking the address
+	// of a plain time.Time field gives you. A *time.Time field's own
+	// address is **time.Time, unhandled by that special case, and falls
+	// through to database/sql's generic pointer-to-pointer path, which
+	// cannot parse SQLite's string-formatted timestamps into the inner
+	// *time.Time it allocates. Verified directly, not assumed: reproduced
+	// this exact failure empirically against a real SQLRepo before
+	// choosing this field's type. [Node].ScheduledAt is *time.Time and
+	// is NOT a working counterexample — every existing test that round-
+	// trips a non-nil ScheduledAt uses NewMemoryRepo, never NewSQLRepo;
+	// a nil ScheduledAt round-trips fine (database/sql's nil-source case
+	// needs no string parsing), but a non-nil one hits this exact failure
+	// against a real SQLite-backed repo. This looks like a real,
+	// previously-untested latent bug in Node.ScheduledAt, flagged to the
+	// architect as its own follow-up — not fixed here, out of this
+	// task's scope.
+	AcknowledgedAt time.Time `json:"acknowledged_at" db:"acknowledged_at"`
+}
+
+// CreateOrchestrationTables creates the six orchestration content tables
+// (smeldr_signals, smeldr_tasks, smeldr_decisions, smeldr_amendments,
+// smeldr_goals, smeldr_runs) if they do not already exist. Call once at
+// application startup before [RegisterOrchestrationTypes].
 func CreateOrchestrationTables(db DB) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS smeldr_signals (
@@ -331,6 +439,26 @@ func CreateOrchestrationTables(db DB) error {
 			size         TEXT NOT NULL DEFAULT '',
 			description  TEXT NOT NULL DEFAULT ''
 		)`,
+		`CREATE TABLE IF NOT EXISTS smeldr_runs (
+			id              TEXT PRIMARY KEY,
+			slug            TEXT NOT NULL UNIQUE,
+			status          TEXT NOT NULL DEFAULT 'draft',
+			published_at    TIMESTAMPTZ,
+			scheduled_at    TIMESTAMPTZ,
+			created_at      TIMESTAMPTZ NOT NULL,
+			updated_at      TIMESTAMPTZ NOT NULL,
+			rev             INTEGER NOT NULL DEFAULT 0,
+			task_id         TEXT NOT NULL DEFAULT '',
+			repo            TEXT NOT NULL DEFAULT '',
+			machine         TEXT NOT NULL DEFAULT '',
+			branch          TEXT NOT NULL DEFAULT '',
+			worktree_path   TEXT NOT NULL DEFAULT '',
+			base_sha        TEXT NOT NULL DEFAULT '',
+			lease_holder    TEXT NOT NULL DEFAULT '',
+			outcome         TEXT NOT NULL DEFAULT '',
+			cleanup         TEXT NOT NULL DEFAULT '',
+			acknowledged_at TIMESTAMPTZ
+		)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
@@ -340,11 +468,12 @@ func CreateOrchestrationTables(db DB) error {
 	return nil
 }
 
-// RegisterOrchestrationTypes registers the five orchestration content types
-// ([Signal], [Task], [Decision], [Amendment], [Goal]) with the application
-// and their custom state flows. Call after [CreateOrchestrationTables] and
-// before [App.Run]. Flow registration errors are logged and do not block
-// startup (fail-open).
+// RegisterOrchestrationTypes registers the six orchestration content types
+// ([Signal], [Task], [Decision], [Amendment], [Goal], [Run]) with the
+// application. The first five also get their custom state flows; [Run]
+// deliberately does not (D38 — see its own doc comment). Call after
+// [CreateOrchestrationTables] and before [App.Run]. Flow registration
+// errors are logged and do not block startup (fail-open).
 func RegisterOrchestrationTypes(app *App, db DB) {
 	flows := []StateFlow{
 		orchSignalFlow(),
@@ -373,6 +502,15 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 	))
 	app.Content(NewModule[*Goal]((*Goal)(nil),
 		At("/goals"), Repo(NewSQLRepo[*Goal](db, Table("smeldr_goals"))), MCP(MCPRead, MCPWrite),
+	))
+	// Run gets no entry in the flows slice above — D38 requires no
+	// StateFlow (see Run's own doc comment). MCP(MCPRead, MCPWrite) is not
+	// just consistency with its five siblings: D38's claim/renewal/
+	// land-time-holder-check writes all travel the MCP update path
+	// (mcp/tool.go's handleToolsCall → MCPUpdate), so MCPWrite is a real
+	// requirement for the future listener, not a style preference.
+	app.Content(NewModule[*Run]((*Run)(nil),
+		At("/runs"), Repo(NewSQLRepo[*Run](db, Table("smeldr_runs"))), MCP(MCPRead, MCPWrite),
 	))
 }
 
