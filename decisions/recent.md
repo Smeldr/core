@@ -1076,3 +1076,168 @@ Coverage: 96.2% overall; `RegisterOrchestrationRelationKinds` itself
 Status: Ratified 2026-08-07.
 
 ---
+
+## A237 — Fix D34 enforcement gap: bootstrap admin token couldn't ratify Decisions (M0 step 3)
+
+### What
+
+The bootstrap flow creates a token with `role="admin"` (set by
+`TokenStore.ensureBootstrap`, called from `App.Handler()`), which
+satisfies the generic MCP tool access gate. But `RoleStore.RoleGranted`,
+called by `validateTransition` when checking a `Decision` with
+`Strict: true`, queries only `smeldr_role_grants` — it never reads
+`smeldr_tokens.role`.
+
+On a governance-enabled instance with an empty `smeldr_tokens` table,
+the bootstrap token could do everything EXCEPT ratify or supersede a
+`Decision` — exactly the operation a governance-enabled instance exists
+to support.
+
+### Checked before implementing, not assumed
+
+Traced the full authorization path from source, not assumed from naming:
+
+- `validateTransition` (`state.go`) calls
+  `rs.RoleGranted(ctx, actorID, requiredRole.String, AuthTarget{})`
+- `RoleGranted` (`governance.go`) queries
+  `smeldr_role_grants` JOIN `smeldr_roles` only
+- Never reads `smeldr_tokens.role` at all
+
+Additional complication found: the `actorID` passed to `RoleGranted` is
+the random `User.ID` embedded in the JWT's claims at token-creation time.
+This ID is NOT the same as `smeldr_tokens.id` (the SHA-256 fingerprint of
+the raw signed token). The two are computed independently and never
+cross-referenced. The `actorID` is what `RoleStore.Grant` requires in its
+`TokenID` field.
+
+Confirmed by grepping the whole package: no production code anywhere
+called `RoleStore.Grant` before this fix — a real, latent gap, not
+hypothetical.
+
+### Fix
+
+New unexported helper in `auth.go`:
+
+```go
+func (ts *TokenStore) createToken(ctx context.Context, name, role string,
+	ttl time.Duration) (raw, userID string, err error)
+```
+
+This factors `Create`'s existing logic (build a `User`, sign it, hash and
+insert the fingerprint into `smeldr_tokens`) into a shared implementation
+that also returns the JWT's own `User.ID`.
+
+`Create`'s exported signature and behaviour are completely unchanged — it
+now delegates to `createToken` and discards the `userID`:
+
+```go
+func (ts *TokenStore) Create(ctx context.Context, name, role string,
+	ttl time.Duration) (string, error) {
+	raw, _, err := ts.createToken(ctx, name, role, ttl)
+	return raw, err
+}
+```
+
+`ensureBootstrap`'s signature changes (unexported, non-breaking) from
+returning nothing to returning the created token's identity:
+
+```go
+func (ts *TokenStore) ensureBootstrap(ctx context.Context) (
+	userID string, created bool)
+```
+
+`App.Handler()` in `smeldr.go` extends the bootstrap block: when a token
+was freshly created AND `App.Governance` is wired, it grants the bootstrap
+token the `admin` role:
+
+```go
+if created && a.governance != nil {
+	if _, err := a.governance.Grant(context.Background(), RoleGrant{
+		TokenID: userID, RoleName: "admin",
+	}); err != nil {
+		slog.Warn("smeldr: failed to grant admin role to bootstrap token",
+			"err", err)
+	}
+}
+```
+
+This is fail-open (logs a warning, does not panic or block startup) —
+matching every other branch in that same bootstrap block.
+
+The grant is sufficient with no other `RoleGrant` fields needed:
+`seedDefaultRoles` already seeds the `admin` role with
+`scope_mode='global'` at role-definition time, and `RoleGranted`'s
+`ScopeGlobal` case returns `true` unconditionally on any matching grant
+row. A bare `RoleGrant{TokenID: userID, RoleName: "admin"}` is a complete,
+unconditional global admin grant.
+
+### Why not a script or a documented manual step
+
+NEXT.md offered two alternatives, both rejected in the approved plan:
+
+**A one-time devops setup script:** an extra artifact to write, ship, and
+remember to run, for something the App can already safely do at boot.
+
+**A documented manual step:** exactly the kind of "someone has to
+remember to do this" step that gets missed — the original task framing
+was already worried about this. It is not acceptable for a
+governance-enabled instance to have a permanently unreachable operation
+at bootstrap.
+
+Both alternatives lose to the idempotent-at-boot shape `ensureBootstrap`
+and `seedDefaultRoles` already established as this project's precedent
+for exactly this kind of bootstrap concern.
+
+### Tests and coverage
+
+5 tests changed/added in `auth_test.go` and `coverage_test.go`:
+
+- `TestTokenStore_ensureBootstrap_empty` extended to assert
+  `created == true` and a non-empty `userID`
+- `TestTokenStore_ensureBootstrap_nonEmpty` extended to assert
+  `created == false` and empty `userID`
+- `TestTokenStore_ensureBootstrap_createFails` extended to assert
+  `created == false` and empty `userID`
+- New `TestApp_Handler_bootstrapGrantsAdmin` — end-to-end: after calling
+  `App.Handler()` with governance wired and an empty `smeldr_tokens`
+  table, queries `smeldr_role_grants` for the admin-role row, then calls
+  `RoleStore.RoleGranted` on that token ID and asserts `true` — proves the
+  fix through the real API, not just that "Grant was called"
+- New `TestApp_Handler_bootstrapGrantFails` — governance wired against a
+  DB wrapper that fails the `INSERT INTO smeldr_role_grants` statement;
+  asserts `Handler()` does not panic (fail-open)
+
+Named, accepted coverage gap: `createToken`'s `SignToken`-error branch is
+at 91.7% function coverage (one uncovered line). This is a structurally
+unreachable branch (the same pre-existing `json.Marshal`-on-a-simple-struct
+failure that `encodeToken`'s own doc comment already calls "unreachable in
+practice"), now visible under the new `createToken` function name instead
+of being invisible inside `Create`'s own body. Not a regression —
+package-wide coverage held flat at 96.2% before and after this change
+(`ensureBootstrap` and `Create` both 100%).
+
+### Context: design decisions made alongside this fix
+
+No new binary needed for the permanent self-hosting instance —
+`example/server`'s existing config-driven binary already supports the
+required `ENABLE_TOKENS`+`ENABLE_GOVERNANCE`+`ENABLE_RELATIONS`+
+`ENABLE_ORCHESTRATION` combination as-is. SQLite chosen as the backend for
+that instance's own deployment — matches the existing proven backup
+pattern and avoids being the first live test of a documented (Amendment
+A235) SQLite-only portability gap in the relation/lineage code that
+instance depends on.
+
+**Important distinction:** this bootstrap grant is a break-glass safety
+net so ratify/supersede is never permanently unreachable from a
+governance-enabled instance's very first boot. It is explicitly NOT a
+substitute for provisioning an operator's own real, deliberately-granted
+token — a separate, later step in the self-hosting rollout plan.
+
+No new exported symbols. Patch bump (consumer-observable: a fresh boot
+with `ENABLE_GOVERNANCE` set and an empty `smeldr_tokens` table now also
+grants the bootstrap token an admin `RoleStore` role, where it previously
+silently could not ratify/supersede a `Decision`). v1.60.0 → v1.60.1.
+
+Status: Ratified 2026-08-07.
+
+---

@@ -1470,6 +1470,83 @@ func TestApp_Handler_withTokenStore(t *testing.T) {
 	_ = app.Handler()
 }
 
+// — App.Handler bootstrap-grant block (A237) —————————————————————————————
+
+func TestApp_Handler_bootstrapGrantsAdmin(t *testing.T) {
+	db := newSQLiteDB(t)
+	_, err := db.ExecContext(context.Background(), `
+		CREATE TABLE smeldr_tokens (
+			id         TEXT NOT NULL PRIMARY KEY,
+			name       TEXT NOT NULL,
+			role       TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			revoked_at TEXT,
+			created_at TEXT NOT NULL
+		)`)
+	if err != nil {
+		t.Fatalf("create smeldr_tokens table: %v", err)
+	}
+	ts := NewTokenStore(db, testSecret)
+	app := New(Config{
+		BaseURL:    "https://example.com",
+		Secret:     []byte(testSecret),
+		DB:         db,
+		TokenStore: ts,
+	})
+	rs := NewRoleStore(db)
+	if err := app.Governance(rs); err != nil {
+		t.Fatalf("Governance: %v", err)
+	}
+	_ = app.Handler()
+
+	var tokenID string
+	row := db.QueryRowContext(context.Background(), `
+		SELECT g.token_id FROM smeldr_role_grants g
+		JOIN smeldr_roles r ON r.id = g.role_id
+		WHERE r.name = 'admin'`)
+	if err := row.Scan(&tokenID); err != nil {
+		t.Fatalf("expected an admin grant row for the bootstrap token, got: %v", err)
+	}
+	granted, err := rs.RoleGranted(context.Background(), tokenID, "admin", AuthTarget{})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if !granted {
+		t.Error("expected RoleGranted(bootstrap token, admin) to be true")
+	}
+}
+
+func TestApp_Handler_bootstrapGrantFails(t *testing.T) {
+	db := newSQLiteDB(t)
+	_, err := db.ExecContext(context.Background(), `
+		CREATE TABLE smeldr_tokens (
+			id         TEXT NOT NULL PRIMARY KEY,
+			name       TEXT NOT NULL,
+			role       TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			revoked_at TEXT,
+			created_at TEXT NOT NULL
+		)`)
+	if err != nil {
+		t.Fatalf("create smeldr_tokens table: %v", err)
+	}
+	wrapped := &execFailDB{DB: db, failOn: "INSERT INTO smeldr_role_grants"}
+	ts := NewTokenStore(wrapped, testSecret)
+	app := New(Config{
+		BaseURL:    "https://example.com",
+		Secret:     []byte(testSecret),
+		DB:         wrapped,
+		TokenStore: ts,
+	})
+	rs := NewRoleStore(wrapped)
+	if err := app.Governance(rs); err != nil {
+		t.Fatalf("Governance: %v", err)
+	}
+	// Must not panic — the grant failure is logged and swallowed (fail-open),
+	// matching every other branch in this bootstrap block.
+	_ = app.Handler()
+}
+
 // — ptrToT: non-pointer T uses pv.Elem() branch ———————————————————————
 
 func TestPtrToT_nonPointer(t *testing.T) {

@@ -1318,7 +1318,17 @@ func (a *App) Handler() http.Handler {
 		if err := a.tokenStore.probeTable(context.Background()); err != nil {
 			fmt.Fprintf(os.Stderr, "WARN  smeldr: TokenStore is configured but the smeldr_tokens table is missing or inaccessible — create it using the DDL in the TokenStore documentation\n")
 		} else {
-			a.tokenStore.ensureBootstrap(context.Background())
+			userID, created := a.tokenStore.ensureBootstrap(context.Background())
+			// A237: the freshly created bootstrap token also needs an admin
+			// RoleStore grant — a Strict transition gate (D34) checks
+			// RoleGranted (smeldr_role_grants), which the token's own Role
+			// field never satisfies. This is a break-glass safety net, not
+			// a substitute for provisioning a real operator's own token.
+			if created && a.governance != nil {
+				if _, err := a.governance.Grant(context.Background(), RoleGrant{TokenID: userID, RoleName: "admin"}); err != nil {
+					slog.Warn("smeldr: failed to grant admin role to bootstrap token", "err", err)
+				}
+			}
 		}
 	}
 	// D29: initialise the navigation tree when NavMode is set or App.Nav() items

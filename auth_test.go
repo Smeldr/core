@@ -831,18 +831,30 @@ func (b *bootstrapDB) QueryRowContext(ctx context.Context, query string, _ ...an
 func TestTokenStore_ensureBootstrap_empty(t *testing.T) {
 	db := &bootstrapDB{count: 0}
 	store := NewTokenStore(db, "test-secret-32-bytes-xxxxxxxxxxxx")
-	store.ensureBootstrap(context.Background())
+	userID, created := store.ensureBootstrap(context.Background())
 	if db.insertCount != 1 {
 		t.Errorf("ensureBootstrap on empty table: expected 1 INSERT (Create), got %d", db.insertCount)
+	}
+	if !created {
+		t.Error("ensureBootstrap on empty table: expected created=true")
+	}
+	if userID == "" {
+		t.Error("ensureBootstrap on empty table: expected non-empty userID")
 	}
 }
 
 func TestTokenStore_ensureBootstrap_nonEmpty(t *testing.T) {
 	db := &bootstrapDB{count: 1}
 	store := NewTokenStore(db, "test-secret-32-bytes-xxxxxxxxxxxx")
-	store.ensureBootstrap(context.Background())
+	userID, created := store.ensureBootstrap(context.Background())
 	if db.insertCount != 0 {
 		t.Errorf("ensureBootstrap on non-empty table: expected no INSERT (no-op), got %d", db.insertCount)
+	}
+	if created {
+		t.Error("ensureBootstrap on non-empty table: expected created=false")
+	}
+	if userID != "" {
+		t.Errorf("ensureBootstrap on non-empty table: expected empty userID, got %q", userID)
 	}
 }
 
@@ -1290,7 +1302,13 @@ func TestTokenStore_Revoke_updateError(t *testing.T) {
 
 func TestTokenStore_ensureBootstrap_createFails(t *testing.T) {
 	store := NewTokenStore(&bootstrapFailInsertDB{}, testSecret)
-	store.ensureBootstrap(context.Background())
+	userID, created := store.ensureBootstrap(context.Background())
+	if created {
+		t.Error("ensureBootstrap on Create failure: expected created=false")
+	}
+	if userID != "" {
+		t.Errorf("ensureBootstrap on Create failure: expected empty userID, got %q", userID)
+	}
 }
 
 func TestTokenStore_probeTable_success(t *testing.T) {

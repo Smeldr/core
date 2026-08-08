@@ -415,32 +415,39 @@ func (ts *TokenStore) probeTable(ctx context.Context) error {
 // When the table already contains at least one row (any token, revoked or not)
 // this is a no-op. The raw token is emitted via [log/slog] at Warn level and
 // is never persisted — copy it immediately.
-func (ts *TokenStore) ensureBootstrap(ctx context.Context) {
+//
+// Returns the created token's User.ID and true when a token was actually
+// created, so [App.Handler] can additionally grant it the admin RoleStore
+// role in the same boot sequence (M0 step 3) — the token's own Role field
+// satisfies the generic Role hierarchy but not a Strict governance gate,
+// which checks smeldr_role_grants instead. Returns ("", false) on a no-op
+// or on failure.
+func (ts *TokenStore) ensureBootstrap(ctx context.Context) (userID string, created bool) {
 	row := ts.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_tokens`)
 	var n int
 	if err := row.Scan(&n); err != nil || n > 0 {
-		return
+		return "", false
 	}
-	raw, err := ts.Create(ctx, "bootstrap-admin", "admin", 10*365*24*time.Hour)
+	raw, uid, err := ts.createToken(ctx, "bootstrap-admin", "admin", 10*365*24*time.Hour)
 	if err != nil {
 		slog.Warn("smeldr: failed to create bootstrap admin token", "err", err)
-		return
+		return "", false
 	}
 	slog.Warn("smeldr: smeldr_tokens is empty — bootstrap admin token created (copy now, shown once):\n\t" + raw)
+	return uid, true
 }
 
-// Create generates a signed named bearer token with the given role and ttl,
-// stores its SHA-256 fingerprint in smeldr_tokens, and returns the raw token
-// string. The raw token is never persisted; it cannot be retrieved after this
-// call — pass it to the client through a secure channel.
-//
-// role must be a valid [Role] string ("author", "editor", "admin").
-// ttl must be positive.
-func (ts *TokenStore) Create(ctx context.Context, name, role string, ttl time.Duration) (string, error) {
+// createToken is the shared implementation behind [TokenStore.Create] and
+// [TokenStore.ensureBootstrap]. userID is the JWT's own User.ID (the value
+// validateTransition/RoleGranted check against), distinct from the returned
+// smeldr_tokens.id fingerprint — callers that need to reference this token's
+// identity elsewhere (e.g. granting a governance role) get it directly,
+// without redundantly decoding the token they just created.
+func (ts *TokenStore) createToken(ctx context.Context, name, role string, ttl time.Duration) (raw, userID string, err error) {
 	user := User{ID: NewID(), Name: name, Roles: []Role{Role(role)}}
-	raw, err := SignToken(user, ts.secret, ttl)
+	raw, err = SignToken(user, ts.secret, ttl)
 	if err != nil {
-		return "", ErrInternal
+		return "", "", ErrInternal
 	}
 	h := sha256.Sum256([]byte(raw))
 	id := hex.EncodeToString(h[:])
@@ -451,9 +458,21 @@ func (ts *TokenStore) Create(ctx context.Context, name, role string, ttl time.Du
 		id, name, role, expiresAt.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	if err != nil {
-		return "", ErrInternal
+		return "", "", ErrInternal
 	}
-	return raw, nil
+	return raw, user.ID, nil
+}
+
+// Create generates a signed named bearer token with the given role and ttl,
+// stores its SHA-256 fingerprint in smeldr_tokens, and returns the raw token
+// string. The raw token is never persisted; it cannot be retrieved after this
+// call — pass it to the client through a secure channel.
+//
+// role must be a valid [Role] string ("author", "editor", "admin").
+// ttl must be positive.
+func (ts *TokenStore) Create(ctx context.Context, name, role string, ttl time.Duration) (string, error) {
+	raw, _, err := ts.createToken(ctx, name, role, ttl)
+	return raw, err
 }
 
 // List returns all token records from smeldr_tokens ordered by created_at

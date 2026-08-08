@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.60.1] — 2026-08-07
+
+### Fixed
+- `TokenStore.ensureBootstrap`'s auto-created bootstrap admin token now also receives an admin `RoleStore` grant when `App.Governance` is wired, on a fresh boot with an empty `smeldr_tokens` table. Previously the token's `role="admin"` field satisfied only the generic Role hierarchy — a `Decision`'s `Strict: true` ratify/supersede transitions (D34) check `RoleGranted` against `smeldr_role_grants` instead, which the bootstrap token never populated, so it could do everything except the one thing a governance-enabled instance exists to support. (A237)
+
+---
+
 ## [1.60.0] — 2026-08-07
 
 ### Added
