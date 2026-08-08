@@ -1241,3 +1241,140 @@ silently could not ratify/supersede a `Decision`). v1.60.0 → v1.60.1.
 Status: Ratified 2026-08-07.
 
 ---
+
+## D38 — Run coordination for headless automation: a sixth typed orchestration module, leases over CAS, branches carry state
+
+### Scope
+
+core
+
+### Decision
+
+Headless automation (M3) coordinates through a new sixth typed
+orchestration module, `Run`: one row per mechanical episode, from claim to
+merge-or-abandon. Five choices are load-bearing.
+
+**1. `Run` is a typed module, never a `DynamicTypeRepo` type.** Verified
+directly against core at `40310e8`: `SQLRepo.Save` (`storage.go:700-778`)
+carries the only atomic test-and-set in the framework, an `ON CONFLICT ...
+WHERE {table}.rev = $revPH` guard that returns `ErrRevConflict` on
+`RowsAffected == 0`. `DynamicTypeRepo.UpdateFields`/`setStatus`
+(`dynamic.go:175-261`) have no such guard, and `setStatus` validates and
+writes as two separate statements, so two concurrent transitions from the
+same state can both pass validation and both apply. `conflictRejectCheck`
+(`state.go:651-674`) looks like it might already prevent this and does not:
+it is a `SELECT COUNT(*)` outside any transaction, counted globally per
+type name, with a literal `// fail-open` comment on its error path.
+Advisory, not a lock. The claim mechanism therefore reuses `Save`'s CAS
+directly rather than layering on `Task`'s own transitions, because
+state-changing writes are exactly the writes that lack atomicity, and the
+one atomic write does not change status at all.
+
+**2. Every lease-touching write echoes the `rev` it last read.** Claims,
+renewals, the land-time holder check and reclaims, without exception.
+`Node.Rev` has no `json` tag (`node.go:83`), mcp's update handler passes
+caller arguments through unfiltered (`mcp/tool.go:414`), and `MCPUpdate`
+restores only `ID`/`Slug`/`Status` after decoding (`module.go:2297-2339`).
+A write that omits `rev` therefore has `MCPUpdate` seed the row's current
+value into its own guard, satisfying the CAS by construction and degrading
+the whole design to last-write-wins, silently, and indistinguishably from
+correct behaviour under any single-threaded test. "Claims are CAS writes"
+is the version that fails silently. "Claims are CAS writes that echo the
+`rev` they read" is the version that does not.
+
+**3. `Run` registers no `StateFlow`.** Its authoritative state lives in
+`lease_holder` and `outcome`, guarded by the writes above, never in
+`Status` through `validateTransition`. The nearest existing precedent
+argues the opposite way and is a trap: `smeldr/agent` (`e589dcf`) registers
+a real `StateFlow` for `AgentJob` (`flow/module.go:91-109`) and routes its
+lifecycle through `Status`. Copying that shape here would look natural and
+be wrong.
+
+**4. The branch carries state, the worktree is a disposable cache.** Every
+step ends with all work committed and pushed to the remote before the
+process exits; a dirty exit is a step failure. Branch and directory names
+derive from the `Run` row's own ID, never from timestamps or a
+next-available scan, and are never reused. A cleanup that fails therefore
+degrades to a disk-space problem rather than a correctness one, and no Run
+depends on the previous Run's cleanup having succeeded.
+
+**5. Landing is serialized and gated, never automatically rebased.**
+Immediately before merge the listener fetches; if the branch's merge-base
+with `main` is not `main`'s current tip, the Run does not merge. It
+terminals as `needs-resync`, emits a `Signal`, and stops. Every sequential
+human-facing number is allocated inside the land step, strictly after that
+gate passes, never carried on a branch beforehand. This generalizes the
+S-number rule this project already follows, and it is what makes the
+M1/M2 trial's actual failure impossible by construction rather than merely
+caught sooner.
+
+### Alternatives considered and rejected
+
+- **The `Task` state machine as the coordination point**, with a Task
+  transition serving as the claim. Rejected on the source evidence in
+  point 1: the transition path is precisely the path with no CAS.
+- **The existing heartbeat `Signal` doubling as the lease.** Rejected, and
+  the restart-on-failure design guarantees the divergence rather than
+  merely permitting it: a listener crashes mid-Run, systemd restarts it in
+  seconds, the new process heartbeats immediately with no memory of the Run
+  it was running. A lease defined as "the holder's heartbeat is fresh"
+  would call that Run validly held. Heartbeat answers "is listener L up"
+  and never authorizes anything; the lease answers "does L validly hold Run
+  R". Their timers stay two mechanisms that happen to share an interval,
+  never merged later as an optimization.
+- **Automatic rebase, or a merge queue now.** Rejected for M3. The M1/M2
+  collision was semantic: two branches each internally consistent, cleanly
+  rebase-able, both wrong about the same number. Rebase resolves text, not
+  meaning. A merge queue is the eventual destination once throughput
+  demands it, and it requires trusting unattended re-verification after an
+  automated rebase, which is a trust decision reserved for Peter later, not
+  an engineering one to assume now.
+- **A shared "who is currently active on this repo" registry** that human
+  and automated sessions both voluntarily check. Rejected: a voluntarily
+  checked registry is a second source of truth that drifts, and then lies
+  with authority it has not earned. The enforcement point stays singular,
+  the land-time freshness gate, applied uniformly to both paths.
+- **Treating any `ErrRevConflict` as "lost, stand down".** Rejected as a
+  source of false fencing. The error only means the row changed since the
+  last read, which an innocent write also causes. On conflict the correct
+  response is to re-read: `lease_holder` empty means retry, `lease_holder`
+  equal to self means the write already succeeded and its response was
+  lost, a different holder or a terminal `outcome` means genuinely lost.
+
+### Consequences
+
+One prerequisite in `smeldr/mcp` is required before the fencing protocol
+can work at all: `ErrConflict` and `ErrRevConflict` are two independently
+constructed sentinels (`errors.go:59-66`, neither wrapping the other), so
+`errorFor`'s `errors.Is(err, smeldr.ErrConflict)` branch never matches
+`ErrRevConflict` and it falls into the generic `-32603` bucket
+(`mcp/tool.go:101-116`), the same bucket a transient `SQLITE_BUSY` reaches.
+Over MCP a listener currently cannot tell "lost the race" from "transient,
+retry" except by matching error text.
+
+Exclusivity of one Run per repo rests on topology for M3 (one listener per
+repo, architect creating one Run at a time), not on a mechanism. Named
+rather than attributed to the CAS, which guards a given row and says
+nothing about a second row for the same repo. The mechanical version, a
+persistent per-repo lock row claimed through the same CAS pattern, is not
+built for M3 and becomes necessary the moment a second concurrent Run per
+repo is real.
+
+Lease TTL starts at 15-20 minutes, three to four missed heartbeats, as a
+ratified estimate rather than a derived number. Expiry evaluation compares
+a server-stamped `updated_at` against the evaluator's own clock, so the
+TTL must stay orders of magnitude above plausible skew: minutes, never
+seconds, whatever later tuning from real data recommends. A non-terminal
+Run row is written only by its lease holder or by a reclaim that terminals
+it, and by exactly one process, the listener, never its child. All other
+commentary about an in-flight Run goes into a `Signal` referencing it,
+because `Save` stamps `UpdatedAt` on every successful write by anyone, so
+a human annotating a suspected-dead Run directly on the row would silently
+extend the dead holder's lease.
+
+Full design, five review passes with real defects found on each:
+`smeldr/architect/design/m3-headless-worktree-isolation.md`.
+
+Status: Ratified 2026-08-08.
+
+---
