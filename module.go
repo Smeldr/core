@@ -1527,6 +1527,12 @@ func (m *Module[T]) processScheduled(ctx Context, now time.Time) (int, *time.Tim
 				"id", nodeIDOf(item), "err", err)
 			continue
 		}
+		// A240: fire any registered async TransitionTrigger for this
+		// transition. processScheduled is system-initiated (skips
+		// validateTransition entirely, unlike the other four transition
+		// sites) but a registered trigger doesn't care who initiated the
+		// transition, only that it happened.
+		fireAsyncTriggers(ctx.Request().Context(), m.db, m.contentTypeName, string(Scheduled), string(Published), nodeIDOf(item))
 		m.notifyAfter(ctx, AfterPublish, "scheduled", item)
 		published++
 	}
@@ -1918,6 +1924,16 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, r, err)
 			return
 		}
+	}
+
+	// A240: fire any registered async TransitionTrigger for this transition.
+	// Guarded by the same prevStatus != newStatus check already gating
+	// validateTransition above — an unconditional call would just find zero
+	// matching trigger rows for a same-status save (no kind registers an
+	// X→X trigger), but the guard matches this handler's own existing shape
+	// and avoids a wasted query on every plain content edit.
+	if prevStatus != newStatus {
+		fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(newStatus), nodeIDOf(item))
 	}
 
 	m.notifyAfter(ctx, AfterUpdate, string(prevStatus), item)
@@ -2371,6 +2387,10 @@ func (m *Module[T]) MCPPublish(ctx Context, slug string) error {
 	if err := m.repo.Save(ctx, item); err != nil {
 		return err
 	}
+	// A240: fire any registered async TransitionTrigger for this transition.
+	// Unconditional — matches dynamic.go's setStatus/ScheduleContent, which
+	// don't special-case a same-status call either.
+	fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(Published), nodeIDOf(item))
 	m.notifyAfter(ctx, AfterPublish, string(prevStatus), item)
 	m.invalidateCache()
 	m.triggerRebuild()
@@ -2397,6 +2417,8 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time) error {
 	if err := m.repo.Save(ctx, item); err != nil {
 		return err
 	}
+	// A240: fire any registered async TransitionTrigger for this transition.
+	fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(Scheduled), nodeIDOf(item))
 	m.notifyAfter(ctx, AfterSchedule, string(prevStatus), item)
 	m.invalidateCache()
 	return nil
@@ -2420,6 +2442,8 @@ func (m *Module[T]) MCPArchive(ctx Context, slug string) error {
 	if err := m.repo.Save(ctx, item); err != nil {
 		return err
 	}
+	// A240: fire any registered async TransitionTrigger for this transition.
+	fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(Archived), nodeIDOf(item))
 	m.notifyAfter(ctx, AfterArchive, string(prevStatus), item)
 	m.invalidateCache()
 	m.triggerRebuild()

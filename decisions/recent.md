@@ -779,3 +779,218 @@ a settled judgment rather than an oversight nobody noticed.
 Status: Ratified 2026-08-08.
 
 ---
+
+## A240 — the async trigger pipeline now runs for typed orchestration modules
+
+### The bug found
+
+`fireAsyncTriggers` (in `state.go`) is the function that fires a
+registered `TransitionTrigger` (e.g. the `schedule-eval` trigger type)
+when a content item transitions between states. Before this fix,
+`fireAsyncTriggers` had exactly two call sites in the entire codebase,
+both in `dynamic.go`, inside `DynamicTypeRepo.setStatus` and
+`DynamicTypeRepo.ScheduleContent` — both part of the T32 "dynamic
+content" system (runtime-defined content types). `module.go` — which
+holds the code for Smeldr's six built-in "typed" orchestration content
+types (`Signal`, `Task`, `Decision`, `Amendment`, `Goal`, `Run`, all
+defined via `NewModule[T]`) — had zero call sites for
+`fireAsyncTriggers`.
+
+Every real place a typed module actually changes its `Status` field is
+one of five: `updateHandler` (the HTTP PUT handler), `MCPPublish`,
+`MCPSchedule`, `MCPArchive` (three MCP-callable lifecycle methods), and
+`processScheduled` (the background scheduler that publishes overdue
+Scheduled items — this one is system-initiated and skips the
+`validateTransition` authorization check entirely). All five
+successfully change an item's `Status` via `m.repo.Save`, and none of
+them called `fireAsyncTriggers`.
+
+This meant: no registered async `TransitionTrigger` had ever fired for
+any typed orchestration module. The clearest proof this was unintended:
+Smeldr's own built-in `Decision` type has a real, working
+`schedule-eval` `TransitionTrigger` registered on its
+`proposed → ratified` transition (added by Amendment A187 on
+2026-07-01) — meant to schedule a future re-evaluation of a ratified
+Decision. Because `Decision` is a typed module, that trigger had never
+fired for a single ratified Decision in the ~5 weeks since A187 shipped.
+
+### The fix
+
+One line added at each of the five real transition call sites in
+`module.go`, immediately after each site's own successful
+`m.repo.Save(...)` call:
+
+```go
+fireAsyncTriggers(ctx, m.db, m.contentTypeName, fromState, toState, itemID)
+```
+
+(with the real `fromState`/`toState`/`itemID` values already in scope at
+each site — e.g. in `updateHandler` these are `string(prevStatus)`,
+`string(newStatus)`, `nodeIDOf(item)`). This exactly mirrors how
+`dynamic.go`'s own two working call sites already call the same function
+— no new function was created, `fireAsyncTriggers` itself was not
+changed at all, and no new exported symbol was added.
+
+Two different calling conventions were used, deliberately, matching each
+site's own existing surrounding code shape:
+
+- `updateHandler`'s call is wrapped in `if prevStatus != newStatus { ... }`
+  — guarded, matching the same condition that already gates its
+  `validateTransition` call just above it. This avoids firing a wasted
+  DB query on every plain content edit that doesn't change status at all.
+- The three `MCP*` lifecycle methods (`MCPPublish`, `MCPSchedule`,
+  `MCPArchive`) and `processScheduled` call it unconditionally, with no
+  such guard — this matches `dynamic.go`'s own `setStatus`/`ScheduleContent`,
+  which also don't special-case a same-status call.
+
+### MCPUpdate deliberately excluded
+
+`MCPUpdate` (a sixth method that also modifies content) was deliberately
+NOT touched, and this is not an oversight. This is confirmed directly
+from `MCPUpdate`'s own existing doc comment, which already states that
+`Node.Status` is always restored to its pre-existing value after the
+merge. The literal line in the code, `module.go` line 2333, does
+`pv.Elem().FieldByIndex(f.status).Set(reflect.ValueOf(nodeStatusOf(existing)))`
+unconditionally on every call. Inside `MCPUpdate`, the "from" status and
+the "to" status are always structurally identical — it can never
+represent a real transition, so there is nothing there to add a
+trigger-firing call for. This was stated project intent already
+documented in the code, not a bug this investigation revealed.
+
+### Scope narrowed on review
+
+The original investigation (dispatched via a NEXT.md task) asked four
+questions and found three real things, but only the first was actually
+implemented in this Amendment:
+
+1. **The bug above** (fixed, this Amendment).
+2. A second, separate finding: the mechanism meant to drain
+   `smeldr_eval_queue` (the queue `schedule-eval` inserts into) is
+   `agent.NewEvalQueueScheduler`, a real, documented, tested function
+   in the separate `smeldr.dev/agent` module — but `example/server`
+   (Smeldr's own reference application, and also the binary that runs
+   the actual `process.smeldr.dev` self-hosting instance) never calls it.
+   This was going to be fixed in the same task (wiring the scheduler
+   into `example/server`), but the architect held it back on review
+   after tracing a real safety consequence: shipping both fixes together
+   would mean the live `process.smeldr.dev` instance — which holds real
+   governance records — would start automatically transitioning ratified
+   `Decision` records to `pending-re-evaluation` with **zero observability**.
+   This finding (wiring the scheduler into `example/server`) was NOT
+   implemented in this Amendment — deliberately held, and not itself
+   assigned a tracking number; it is simply deferred until finding 3
+   below is resolved, at which point wiring it becomes safe.
+3. A third finding: `DrainEvalQueue` (the function that actually applies
+   a due queue entry) applies its transition via a raw SQL `UPDATE`
+   statement directly against the database — never through
+   `SQLRepo.Save`, never through the Signal-dispatch mechanism
+   (`m.notifyAfter`), and never through any `Module[T]` method at all
+   (by design — `DrainEvalQueue` has no access to the typed module
+   registry, since it needs to work generically across both typed and
+   dynamic content). Consequence: an eval-queue-driven transition produces
+   zero Signal dispatch, zero Provenance record (Smeldr's `App.Provenance`
+   feature subscribes only to Signals), and zero cache invalidation —
+   completely invisible to those systems even though the row's status
+   genuinely changed. The architect independently found and added a
+   fourth fact during their own review: `DrainEvalQueue`'s function body
+   also calls neither `validateTransition` nor `RoleGranted` anywhere —
+   meaning the authorization/role-gating system is also silently bypassed
+   for any eval-queue-driven transition. This doesn't currently cause a
+   problem for `Decision` specifically, but the bypass is structural, not
+   a deliberate exemption. **Both facets of this finding — the
+   observability gap and the authorization-bypass gap — are tracked
+   together as a single future task, T211, not dispatched, not
+   implemented in this Amendment.** (Finding 2, the `example/server`
+   wiring, is not itself part of T211's scope — it is a separate,
+   un-numbered deferral that T211 unblocks, not something T211 tracks.)
+
+### Tests
+
+Eight tests total — seven new, one pre-existing (unaffected, still passing):
+
+- `TestModule_updateHandler_firesAsyncTrigger` — drives a real HTTP PUT
+  request through `updateHandler`, transitioning draft→published, and
+  asserts the trigger dispatch log line appears.
+- `TestModule_updateHandler_noTriggerOnSameStatus` — proves the
+  `updateHandler` guard is real, not vacuous. This test deliberately
+  registers a trigger ON THE SAME-STATUS transition itself
+  (`draft→draft`, a self-loop), not on some other transition — because
+  if the trigger were registered on a different transition instead
+  (e.g. `draft→published`), this test would pass whether or not the
+  guard code existed at all, since `fireAsyncTriggers`'s own SQL query
+  would simply find no matching trigger row either way. With a real
+  `draft→draft` trigger registered, the test proves the *guard* — not
+  merely "nothing matched" — is what's actually preventing the dispatch.
+  Independently verified during implementation by temporarily deleting
+  the guard's `if` condition and re-running this test: it failed as
+  expected, then the guard was restored and it passed again.
+- `TestModule_MCPPublish_firesAsyncTrigger` — drives a real `MCPPublish`
+  call, asserts dispatch.
+- `TestModule_MCPPublish_firesAsyncTriggerEvenOnSameStatus` — the other
+  half of the asymmetry proof: republishing an already-Published item is
+  a real, legitimately-allowed self-transition in this codebase
+  (`validateTransition`'s own `fromStatus == toStatus` case always passes
+  it through as valid). With a trigger registered specifically on
+  `published→published`, calling `MCPPublish` again on an already-Published
+  item must still fire it — proving `MCPPublish`'s call is genuinely
+  unconditional, in contrast with `updateHandler`'s guard. Independently
+  verified by temporarily removing the `MCPPublish` call site: both this
+  test and the plain `TestModule_MCPPublish_firesAsyncTrigger` test
+  failed as expected.
+- `TestModule_MCPSchedule_firesAsyncTrigger` — drives a real `MCPSchedule`
+  call (draft→scheduled), asserts dispatch.
+- `TestModule_MCPArchive_firesAsyncTrigger` — drives a real `MCPArchive`
+  call (draft→archived), asserts dispatch.
+- `TestModule_processScheduled_firesAsyncTrigger` — drives a real
+  `processScheduled` call (scheduled→published, the background-scheduler
+  path), asserts dispatch.
+- `TestSetStatus_firesAsyncTrigger` — pre-existing test covering the
+  dynamic-content path (`DynamicTypeRepo.SetStatus`), unrelated to this
+  Amendment's own change, unaffected, still passes.
+
+Every new test drives a real typed-module transition path (an actual HTTP
+request through `updateHandler`, or an actual `MCP*`/`processScheduled`
+method call) — none of the new tests call `fireAsyncTriggers` directly.
+
+A new shared test helper, `setupTriggerFlowTransition`, was added
+(parameterized by `from`/`to` state names) alongside the pre-existing
+`setupTriggerFlow` helper (which only supports a fixed `draft→published`
+shape) — needed because `MCPSchedule`/`MCPArchive`/`processScheduled`
+and the self-transition test all need different state pairs.
+
+### What this Amendment does NOT achieve
+
+Registered async `TransitionTrigger`s now correctly fire and insert rows
+into `smeldr_eval_queue` for typed orchestration modules. But until T211
+lands and `example/server` is updated separately, **nothing drains that
+queue anywhere** — rows will visibly accumulate there, inert, inspectable.
+
+This is the intended, safer intermediate state (an inert queue is visible
+and harmless), not an oversight, and this Amendment's own record should
+say so plainly, since someone will eventually find a populated
+`smeldr_eval_queue` table with no consumer and needs to be able to tell
+that this is documented, deliberate, and not evidence of a forgotten bug.
+
+The full sequence: registered triggers fire (this Amendment), rows
+accumulate (visible, safe), nothing drains yet. T211 tracks
+`DrainEvalQueue`'s own two internal gaps (Signal/Provenance/cache
+observability, and the `validateTransition`/`RoleGranted` authorization
+bypass) — closing those is the prerequisite for safely wiring
+`example/server` to drain the queue at all, which remains its own,
+separate, un-numbered follow-up once T211 lands.
+
+### Coverage and versioning
+
+No new error-return-path function was added — `fireAsyncTriggers` itself
+is completely unchanged, this is purely five new call sites to an
+existing, already-tested, void (no return value) function. No error-path
+table was needed. No exported symbols were changed anywhere. Coverage:
+96.2% package-wide, unchanged from baseline before this Amendment. Patch
+version bump (this is a consumer-observable behaviour change — a
+`TransitionTrigger` registered against a typed module's flow now actually
+fires, where it silently never did before — but no exported Go symbol
+changed): v1.61.0 → v1.61.1.
+
+Status: Ratified 2026-08-08.
+
+---

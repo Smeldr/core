@@ -1592,6 +1592,263 @@ func TestSetStatus_firesAsyncTrigger(t *testing.T) {
 	}
 }
 
+// — A240: async triggers for typed orchestration modules ————————————————————
+//
+// Every test below drives a real typed-module transition path
+// (updateHandler over real HTTP, or a real MCP*/processScheduled method
+// call) — never fireAsyncTriggers directly. That distinction is the whole
+// point: before A240, fireAsyncTriggers had exactly two call sites, both
+// in dynamic.go, and no typed module (Signal/Task/Decision/Amendment/
+// Goal/Run) ever reached it through any of its own five real transition
+// sites (updateHandler, MCPPublish, MCPSchedule, MCPArchive,
+// processScheduled).
+
+// setupTriggerFlowTransition registers a minimal StateFlow for "testPost"
+// with a single (from, to) transition carrying one async trigger — like
+// setupTriggerFlow but for an arbitrary transition pair. Needed because
+// MCPSchedule/MCPArchive/processScheduled don't share updateHandler/
+// MCPPublish's draft->published shape, and the self-transition test below
+// needs a from==to pair setupTriggerFlow can't express.
+func setupTriggerFlowTransition(t *testing.T, db DB, triggerClass, triggerType, from, to string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	states := []State{{Name: from, IsInitial: true}}
+	if to != from {
+		states = append(states, State{Name: to})
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:        "trigger-test-" + from + "-" + to,
+		TypeName:    "testPost",
+		States:      states,
+		Transitions: []Transition{{From: from, To: to}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	var transID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT t.id FROM smeldr_transitions t
+		JOIN smeldr_state_flows f ON t.flow_id = f.id
+		WHERE f.type_name = 'testPost' AND t.from_state = $1 AND t.to_state = $2
+	`, from, to).Scan(&transID); err != nil {
+		t.Fatalf("get transition id: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_transition_triggers (id, transition_id, trigger_class, trigger_type, config) VALUES (?, ?, ?, ?, ?)`,
+		NewID(), transID, triggerClass, triggerType, `{}`,
+	); err != nil {
+		t.Fatalf("insert trigger: %v", err)
+	}
+}
+
+// captureAsyncTriggerLog swaps slog's default handler for the duration of
+// the test and returns the buffer it writes to. Matches
+// TestSetStatus_firesAsyncTrigger's own precedent exactly.
+func captureAsyncTriggerLog(t *testing.T) *safeBuf {
+	t.Helper()
+	prev := slog.Default()
+	t.Cleanup(func() { restoreDefaultLogging(prev) })
+	var buf safeBuf
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	return &buf
+}
+
+func TestModule_updateHandler_firesAsyncTrigger(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	setupTriggerFlow(t, sqlDB, "async", "create-LifecycleEvent")
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test Post", Draft)
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	buf := captureAsyncTriggerLog(t)
+
+	update := map[string]any{"Title": p.Title, "Status": string(Published)}
+	body, _ := json.Marshal(update)
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/testposts/"+p.Slug, bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200\nbody: %s", w.Code, w.Body.String())
+	}
+	time.Sleep(50 * time.Millisecond)
+	if !strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
+		t.Errorf("updateHandler draft->published: want async trigger dispatch log, got:\n%s", buf.String())
+	}
+}
+
+// TestModule_updateHandler_noTriggerOnSameStatus pins the asymmetry
+// flagged during review: updateHandler's fireAsyncTriggers call is
+// guarded by prevStatus != newStatus (unlike the three MCP lifecycle
+// methods, proven unconditional in
+// TestModule_MCPPublish_firesAsyncTriggerEvenOnSameStatus below). The
+// trigger is deliberately registered on draft->draft itself (not a
+// different transition) — a trigger registered elsewhere would make this
+// test pass whether or not the guard exists, since fireAsyncTriggers'
+// own query would find no matching row either way. Only a same-status
+// trigger that actually exists can prove the guard, not just the
+// mechanism's own natural "nothing matches," is what's stopping it.
+func TestModule_updateHandler_noTriggerOnSameStatus(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	setupTriggerFlowTransition(t, sqlDB, "async", "create-LifecycleEvent", "draft", "draft")
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test Post", Draft)
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	buf := captureAsyncTriggerLog(t)
+
+	// Same status (draft -> draft): only the title changes.
+	update := map[string]any{"Title": "Updated Title", "Status": string(Draft)}
+	body, _ := json.Marshal(update)
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/testposts/"+p.Slug, bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200\nbody: %s", w.Code, w.Body.String())
+	}
+	time.Sleep(50 * time.Millisecond)
+	if strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
+		t.Errorf("updateHandler with unchanged status: want NO async trigger dispatch, got:\n%s", buf.String())
+	}
+}
+
+func TestModule_MCPPublish_firesAsyncTrigger(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	setupTriggerFlow(t, sqlDB, "async", "create-LifecycleEvent")
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test Post", Draft)
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	buf := captureAsyncTriggerLog(t)
+
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPPublish(ctx, p.Slug); err != nil {
+		t.Fatalf("MCPPublish: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if !strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
+		t.Errorf("MCPPublish draft->published: want async trigger dispatch log, got:\n%s", buf.String())
+	}
+}
+
+// TestModule_MCPPublish_firesAsyncTriggerEvenOnSameStatus is the other
+// half of the asymmetry pin: MCPPublish's fireAsyncTriggers call is
+// unconditional, unlike updateHandler's guard above. Republishing an
+// already-Published item is a real, allowed self-transition
+// (validateTransition's own fromStatus==toStatus early-return) — with a
+// trigger registered specifically on published->published, it must still
+// fire.
+func TestModule_MCPPublish_firesAsyncTriggerEvenOnSameStatus(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	setupTriggerFlowTransition(t, sqlDB, "async", "create-LifecycleEvent", "published", "published")
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test Post", Published)
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	buf := captureAsyncTriggerLog(t)
+
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPPublish(ctx, p.Slug); err != nil {
+		t.Fatalf("MCPPublish (republish): %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if !strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
+		t.Errorf("MCPPublish on an already-Published item: want async trigger dispatch (MCP sites call fireAsyncTriggers unconditionally, unlike updateHandler's guard), got:\n%s", buf.String())
+	}
+}
+
+func TestModule_MCPSchedule_firesAsyncTrigger(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	setupTriggerFlowTransition(t, sqlDB, "async", "create-LifecycleEvent", "draft", "scheduled")
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test Post", Draft)
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	buf := captureAsyncTriggerLog(t)
+
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPSchedule(ctx, p.Slug, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("MCPSchedule: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if !strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
+		t.Errorf("MCPSchedule draft->scheduled: want async trigger dispatch log, got:\n%s", buf.String())
+	}
+}
+
+func TestModule_MCPArchive_firesAsyncTrigger(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	setupTriggerFlowTransition(t, sqlDB, "async", "create-LifecycleEvent", "draft", "archived")
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test Post", Draft)
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	buf := captureAsyncTriggerLog(t)
+
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPArchive(ctx, p.Slug); err != nil {
+		t.Fatalf("MCPArchive: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if !strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
+		t.Errorf("MCPArchive draft->archived: want async trigger dispatch log, got:\n%s", buf.String())
+	}
+}
+
+func TestModule_processScheduled_firesAsyncTrigger(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	setupTriggerFlowTransition(t, sqlDB, "async", "create-LifecycleEvent", "scheduled", "published")
+
+	mem := NewMemoryRepo[*testPost]()
+	past := time.Now().UTC().Add(-1 * time.Minute)
+	p := &testPost{Node: Node{ID: NewID(), Slug: "overdue", Status: Scheduled, ScheduledAt: &past}, Title: "Overdue"}
+	if err := mem.Save(context.Background(), p); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	buf := captureAsyncTriggerLog(t)
+
+	ctx := NewBackgroundContext("example.com")
+	published, _, err := m.processScheduled(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("processScheduled: %v", err)
+	}
+	if published != 1 {
+		t.Fatalf("published = %d, want 1", published)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if !strings.Contains(buf.String(), "fireAsyncTriggers dispatch") {
+		t.Errorf("processScheduled scheduled->published: want async trigger dispatch log, got:\n%s", buf.String())
+	}
+}
+
 // safeBuf is a goroutine-safe bytes.Buffer for slog handlers in tests that spawn goroutines.
 // bytes.Buffer is not safe for concurrent use; the race detector flags slog writes from
 // async goroutines against reads in the test goroutine.

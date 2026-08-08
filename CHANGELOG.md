@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.61.1] — 2026-08-08
+
+### Fixed
+- Registered `TransitionTrigger`s (e.g. `schedule-eval`) now actually fire for typed orchestration modules (`Signal`/`Task`/`Decision`/`Amendment`/`Goal`/`Run`). `fireAsyncTriggers` previously had only two call sites, both in the T32 dynamic-content path — no typed module's own transitions (`updateHandler`, `MCPPublish`, `MCPSchedule`, `MCPArchive`, `processScheduled`) ever reached it, so `Decision`'s own `schedule-eval` trigger on `proposed→ratified` (A187) had never fired for any ratified `Decision`. `MCPUpdate` is unaffected by design — it always restores the existing `Status`, so it can never represent a transition. Note: nothing in `example/server` drains `smeldr_eval_queue` yet (a separate, deliberately deferred follow-up, T211) — rows will now correctly accumulate there, visibly, rather than never being written at all. (A240)
+
+---
+
 ## [1.61.0] — 2026-08-08
 
 ### Added
