@@ -30,6 +30,94 @@ Archived 2026-08-08: A227-A233, D33-D37, A234-A235 → phase21-archive.md
 Archived 2026-08-09: A236-A240, D38-D39 → phase22-archive.md
 ---
 
+## D41 — A conclusion that forecloses an alternative is registered as a Decision, or it will be rediscovered
+
+### Scope
+
+process
+
+### Decision
+
+When work reaches a conclusion that rules out an alternative someone would
+otherwise plausibly take, **the conclusion is registered as a `Decision`**. Not
+the analysis it came from, not the conversation, just the conclusion and what it
+forecloses.
+
+This applies to conclusions from external sparring (GPT, Claude Design, Fable 5
+reports) exactly as it applies to conclusions reached internally. The origin does
+not change whether it is binding.
+
+### The trigger, stated so it can be recognised in the moment rather than in hindsight
+
+"Register the important things" is unusable, because importance is judged
+afterwards. Four signals, any one of which is enough:
+
+1. **You can name the alternative you rejected.** Every Decision from D33 to D40
+   has the form *X, not Y*. If there is no Y, nothing was decided, something was
+   described. This is the primary test.
+2. **You catch yourself citing it as settled.** The moment you write "as we
+   established" or "per the earlier conclusion" about something with no
+   D-number, that thing is load-bearing and undocumented.
+3. **It cost real effort to reach.** Multiple rounds, an external report, or a
+   sparring pass that broke an earlier attempt. Rediscovering it will cost the
+   same again.
+4. **Someone arriving without it would plausibly do the opposite.** Not "would
+   be confused", would actively go the other way.
+
+### What not to register, so the register stays readable
+
+Implementation choices the code already documents. Anything a reader would
+derive from source in five minutes. Anything an existing Decision already
+covers. Restating a conclusion in new words is worse than not restating it,
+because the two versions then drift.
+
+### Why this exists
+
+**A worked example, 2026-08-09, and the reason this rule is not theoretical.**
+An analysis on 2026-07-06 concluded that detection primitives stay free under
+AGPL, that findings must be persisted deduplicated items rather than a
+computation, and that a v1 surface should be a digest proving the sweep ran
+rather than a standing inbox that looks dead when empty. Those conclusions were
+recorded in `analysis/fable5-operational-insights-report-2026-07-06.md` and
+inside a very long `T111` row in `ARCHITECT_TODO.md`. **Neither location is read
+at session start.**
+
+Five weeks later a full day of architect and external sparring re-derived most
+of it independently, and got one part wrong that the earlier work had already
+corrected: conflating semantic contradiction between decisions, which requires
+reasoning Smeldr deliberately does not do, with mechanical competing authority,
+which is deterministic and already implemented. The project had previously fixed
+that exact conflation in marketing copy.
+
+The information was on disk the whole time, in the same repository, and was not
+found. `DECISIONS.md`'s index **is** read at session start, every time. A
+D-number would have surfaced it in the first ten minutes.
+
+### Consequences
+
+The decisions register grows faster, deliberately. That is the cost, and it is
+lower than the cost it replaces: `decisions/recent.md` has an archiving
+mechanism that already works, and the index line is what does the finding, not
+the body.
+
+Architect holds decisions-write authority (D37), so architect registers these
+without a separate dispatch.
+
+**A retroactive pass over `analysis/` is warranted and is not part of this
+decision.** Twenty-one documents exist there; an unknown number contain
+conclusions that never became Decisions. Finding them is real work and deserves
+its own session rather than being folded into whatever is running.
+
+**The durable fix is not this rule.** It is M0 steps 4-9, where decisions and
+tasks live in the running instance and an agent queries them instead of reading
+markdown. This rule reduces the bleeding while that remains untouched. The irony
+of the project's own coordination problem being the thing the product exists to
+solve is noted rather than resolved.
+
+Status: Ratified 2026-08-09.
+
+---
+
 ## D40 — Ratification and supersession after re-evaluation are authority-bearing and gated the same as their direct counterparts
 
 ### Scope
