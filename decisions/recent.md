@@ -681,3 +681,98 @@ pending Peter's clearance) rather than its own separate bump.
 Status: Implements D43.
 
 ---
+
+## A245 — `example/server` gets the sibling examples' `replace smeldr.dev/core` directive
+
+### Found by asking the tag to stand on its own
+
+Building the `v1.63.0` release artifact required a fresh worktree checked
+out exactly at the tag, built with `GOWORK=off` — no gitignored `go.work`
+present to quietly substitute local sibling checkouts for whatever each
+module's own `go.mod` actually declares. `example/server` failed to
+compile: `smeldr.CreateProvenanceTable`, `app.Provenance`,
+`smeldr.NewProvenanceStore`, `smeldr.RegisterOrchestrationRelationKinds`,
+`app.ContextPacketHandler` all undefined.
+
+### Not a stale pin — a missing directive
+
+`example/server/go.mod` pins `smeldr.dev/core v1.54.0`. Checked when each
+missing symbol shipped, not guessed: `ContextPacketHandler` is A214
+(v1.55.0, 2026-07-11), `Provenance`/`ProvenanceStore` is A220 (v1.57.0,
+2026-07-27), `RegisterOrchestrationRelationKinds` is A236 (v1.60.0). The
+pin has been behind `main.go` for roughly a month.
+
+Checked the three sibling example modules rather than assuming
+`example/server` was uniquely broken: `example/blog`, `example/api`, and
+`example/docs` all carry `replace smeldr.dev/core => ../..`.
+`example/server` carries no replace directive at all — it is the only one
+of the four that doesn't follow the repo's own established pattern, and
+the only one that failed.
+
+### The consequence is user-facing, not just a release-tooling inconvenience
+
+README's own "Generic server" section documents `cd example/server && go
+run .` as the way to try it after cloning. `go.work` is gitignored — a
+fresh clone has no local override, resolves `smeldr.dev/core` to the
+pinned v1.54.0, and hits exactly the five errors above. This has been true
+for about a month; nobody hit it because nobody in this project builds
+`example/server` without the workspace in the ordinary course of things.
+
+### The fix is the sibling pattern, not a version bump
+
+`replace smeldr.dev/core => ../..`, added via `go mod edit -replace`
+(`example/server/go.mod`); `go mod tidy` (`GOWORK=off`) removed four
+now-unnecessary `go.sum` lines for the old pinned version and left the
+`require` block's version string untouched, matching Go's own convention
+that a `replace` target's declared version becomes advisory once
+replaced.
+
+A version bump to `v1.63.0` was rejected — flagged in the plan, agreed
+before implementation: a pin goes stale again at the next release and
+reproduces this exact failure in about a month, on whatever module happens
+to ship next. A relative `replace` never goes stale; it always builds
+against whatever is actually checked out, which is what the other three
+examples already rely on and why they didn't break.
+
+The other five pinned dependencies (`mcp`, `agent`, `media`, `oauth`,
+`social`) are separate repos and cannot be relatively replaced from a
+`smeldr/core`-only clone, so they keep real version pins. Checked, not
+swept in silently: `GOWORK=off go build ./...`, `go vet ./...`, and `go
+test ./...` all pass with only the core replace added — no further
+undefined symbols, so none of the other five are currently behind.
+
+### `smeldr.dev/core`'s own content is unchanged
+
+`example/server` is its own module (`module example/server`) — its
+`go.mod` is not part of the `smeldr.dev/core` package. Verified, not
+assumed: `git diff` against the `v1.63.0` tag touches only files under
+`example/server/`. No `smeldr.dev/core` file changed, so no version bump
+and no new tag — a release here would describe a change to a module whose
+published content did not move.
+
+### Separately flagged, not folded in
+
+`example/blog/go.mod` also carries `replace smeldr.dev/mcp =>
+../../../mcp` — a path that reaches outside this repo. A clone of
+`smeldr/core` alone cannot satisfy it, which means README's primary
+quickstart path may have the same class of problem for a different
+reason. Not verified against a real clean clone here; tracked as its own,
+separate follow-up rather than guessed at and swept into this fix.
+
+### Tests and coverage
+
+No new tests — a dependency-resolution fix, not a behavior change;
+`example/server`'s own existing test suite (`go test ./...`, `GOWORK=off`)
+passing is the proof. No `smeldr.dev/core` coverage change (no core files
+touched).
+
+### Versioning
+
+No version bump, no tag — `smeldr.dev/core`'s own published content is
+unchanged. Level 1 amendment (single-file config fix, no cross-file
+consequences within the `smeldr.dev/core` package itself).
+
+Status: Implements the repo's own existing convention (A197's original
+per-example `replace` directives), restoring `example/server` to it.
+
+---
