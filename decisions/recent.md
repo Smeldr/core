@@ -31,6 +31,112 @@ Archived 2026-08-09: A236-A240, D38-D39 → phase22-archive.md
 Archived 2026-08-09: D40-D42, A241 → phase23-archive.md
 ---
 
+## D45 — Two relation kinds complete the Workspace model: `investigates` and `contradicts`
+
+### Scope
+
+core
+
+### Decision
+
+`RegisterOrchestrationRelationKinds` gains two kinds beside D36's four:
+
+| TypeName | Pair | Mode | Directional | Weighted |
+|---|---|---|---|---|
+| `investigates` | Task to Decision | `asserted` | true | false |
+| `contradicts` | Decision to Decision | `inferable` | **false** | **true** |
+
+`investigates` carries delegation: Workspace may originate model work without
+owning the work. Creating an investigation is not assigning a person, and the
+`Task` is real model state rather than surface state.
+
+`contradicts` is the vehicle for semantic contradiction. **Declaring it does
+not make Smeldr detect anything.** It gives reasoning performed elsewhere a
+declared shape to arrive in.
+
+### Why `contradicts` is the more consequential of the two
+
+`design/workspace.md` §13.9e establishes that a Workspace condition has one of
+three provenances: detected, asserted, or scheduled. Detected and scheduled
+both have live mechanisms. **Asserted had no vehicle at all**, which made an
+entire third of the model theoretical.
+
+An agent reasons outside Smeldr, concludes that two `Decision`s are
+incompatible, and writes that conclusion in as an edge. `edge_class` records
+whether a human asserted it or an agent inferred it; `confidence` records how
+strongly. Workspace then projects the consequence of a claim the model
+already holds.
+
+The governing line, which this decision must not be read as weakening:
+
+> Reasoning may enter the model as a claim. Workspace may expose its
+> consequences. Workspace may never perform the reasoning.
+
+### The three field choices, each defended separately
+
+**`Mode: "inferable"`, and it is the first.** D36's four kinds are all
+`asserted`, because each records something someone established. `inferable`
+says this is a kind an agent may reasonably infer rather than one that must be
+stated. That is exactly the boundary where reasoning enters, and marking it in
+the model rather than only in a design document is the point.
+
+`Mode` is not `edge_class`. `Mode` describes what the kind permits;
+`edge_class` records how one particular edge actually arrived. A236 established
+that `edge_class` is set by which of `MCPAssertRelation`/`MCPProposeRelation`/
+`MCPObserveRelation` is called, independent of the kind's `Mode`. Both are
+needed and neither implies the other.
+
+**`Directional: false`, also the first.** Contradiction is symmetric: if A
+contradicts B then B contradicts A. A direction would be a fact the model does
+not have, and would make traversal order meaningful when it is not.
+
+**`Weighted: true`, and stated honestly as documentation.** Verified against
+source rather than assumed: `Weighted` is written by `UpsertKind`
+(`relations.go:260`) and read back (`:575`) and **consulted nowhere**. Like
+`TypePairs` per A236, it documents rather than enforces. `Confidence` is a
+free `*float64` on every edge regardless. Setting it true records that
+confidence is meaningful for this kind, and nobody should later assume it
+gates anything.
+
+### Alternatives considered and rejected
+
+- **Do not declare `contradicts`; keep contradiction out of the model
+  entirely.** Defensible on the ground that Smeldr must never reason. Rejected
+  because it confuses detecting with receiving: refusing the shape does not
+  make the project more honest, it makes an entire provenance unreachable
+  while the design document continues to claim it.
+- **Make `contradicts` directional.** Rejected: it would encode a direction
+  the model has no basis for, and invite a reader to infer that the source
+  somehow contradicts *more*.
+- **Reuse `supersedes` for contradiction.** Rejected, and this is the one
+  worth stating at length. Supersession is a decision someone made: one thing
+  now stands in place of another. Contradiction is a claim about two things
+  that both still stand. Collapsing them would destroy precisely the
+  distinction Workspace exists to surface, since a superseded `Decision` needs
+  no human and a contradicted pair is the case that does.
+
+### Consequences
+
+**Declaring a kind is not a capability.** After this ships, an instance can
+hold a contradiction claim. Nothing in Smeldr produces one, and nothing
+should. The first writer will be an agent outside the framework.
+
+**Nothing writes either kind yet.** `investigates` is written when Workspace's
+delegation action is built; `contradicts` when an external agent asserts one.
+Both are declared ahead of their writers deliberately, so the surface can be
+designed against a real model rather than a promised one.
+
+**`RegisterOrchestrationRelationKinds` and its documentation say "four" in
+several places.** Six now.
+
+**`TypePairs` remains documentation-only** (A236), so both kinds are writable
+outside their declared pairs. That is the existing behaviour of every kind and
+is not changed here.
+
+Status: Ratified 2026-08-09.
+
+---
+
 ## D44 — An authority mutation always leaves a record, and the record is not optional
 
 ### Scope
