@@ -357,3 +357,120 @@ classification as A235/A236's own new-symbol additions. v1.61.2 → v1.62.0.
 Status: Implements D43, D44.
 
 ---
+
+## A243 — D43 + D44/T216, smeldr.dev/mcp half
+
+### Scope
+
+The mcp-side companion to A242: the only way to grant, list, or revoke a
+governance role, now that A242 removed the implicit token-role→grant
+bridge. Without this, A242 alone leaves governance grants reachable only
+by calling `RoleStore.Grant`/`ListGrants`/`Revoke` directly in Go — no
+agent or operator using the MCP surface could grant a role at all.
+
+### Three new tools, mirroring the token-tool shape exactly
+
+`grantToolDefs()` (`grant_tools.go`, new file) and `handleGrantTool`
+follow `tokenToolDefs()`/`handleTokenTool`'s established pattern
+(`tool.go`) rather than inventing a new one:
+
+- **`grant_role`** — required `token_id`, `role`; optional `scope_static`
+  (`[]string`) and `scope_anchor_id`. Calls
+  `rs.WithAudit(ctx.User().ID, s.app.GovernanceAuditStore()).Grant(ctx,
+  RoleGrant{...})` — unconditionally, per A242's Part 3: D44 guarantees
+  `GovernanceAuditStore()` is non-nil whenever `RoleStore()` is non-nil, so
+  there is no conditional-audit branch to write or test.
+- **`list_grants`** — optional `token_id`; verified, not assumed, that
+  `RoleStore.ListGrants` (`governance.go:872`) treats an empty `tokenID`
+  as "no filter" before relying on it.
+- **`revoke_grant`** — required `id`, the grant's own primary key, **not**
+  a `token_id`. Deliberate asymmetry, not an inconsistency: you grant a
+  *role*, and you revoke a *grant* by its own identity — forcing CRUD-style
+  symmetry (`revoke_grant(token_id, role)`) would make the tool names agree
+  with each other and disagree with `RoleStore.Revoke`'s actual signature.
+
+Registration and dispatch in `tool.go` gate on `s.app.RoleStore() != nil` —
+the same signal already used for token tools' `s.tokenStore != nil` gate,
+not a second feature flag for the same fact. All three require Admin via
+the ordinary `authoriseTool`/`ToolPolicy` path against A242's new
+`"administer"` rows (`grant_role`/`list_grants`/`revoke_grant`), which is
+why this and A242 had to ship in the same release — `authoriseTool` denies
+an unpolicied tool for everyone, the same code path as a real DB error.
+
+### `token_id` means the JWT `User.ID`, not the `list_tokens` fingerprint
+
+Stated explicitly in both tools' descriptions and in `AGENTS.md`, because
+nothing about the argument name makes this obvious and D43 built the
+distinction deliberately: `RoleGrant.TokenID` (and every `RoleStore` method
+that takes a `tokenID` parameter) has always meant the JWT `User.ID`
+embedded at signing time, never `smeldr_tokens.id` (the SHA-256
+fingerprint `list_tokens`/`create_token`'s `id` field shows). `TokenStore`
+exposes no method that returns a freshly created token's `User.ID` — by
+design, per D43, creating a token is not the moment a role gets decided.
+The operator's only path to it is `smeldr.VerifyTokenString` (already
+exported, already used by `mcp.New`'s own SSE bearer-verification example)
+against the raw token they just received. `AGENTS.md`'s new grant-tools
+section states this plainly rather than leaving it to be discovered by a
+failed `grant_role` call against a fingerprint.
+
+### `go.mod`, sequenced after the release, not alongside it
+
+`go.mod`'s `smeldr.dev/core` requirement bumped `v1.58.4` → `v1.62.0` only
+after A242 was tagged, released, and proxy-verified
+(`GOPROXY=https://proxy.golang.org go list -m smeldr.dev/core@v1.62.0`) —
+not against a `go.work`-local override. `GOFLAGS=-mod=mod GOWORK=off go mod
+tidy` and `GOWORK=off go build ./...` both confirmed clean against the real
+published module before this commit, so `main` here never carries a
+`go.mod` that only resolves inside this workspace.
+
+### The end-to-end proof this needed, not a unit-test substitute
+
+`TestGrantTools_EndToEnd_MintedGrantRatifiesDecision` walks the full
+operator path in one test, refusing every shortcut a smaller test would
+have taken: `create_token` (MCP) mints a real bearer token; the token is
+decoded via `VerifyTokenString` to recover its `User.ID` (the step above,
+proven necessary rather than assumed); `grant_role` (MCP) grants `admin` to
+that ID from a **separate** admin actor, not a self-grant; the newly
+granted token's own raw JWT — not the granter's — is used as the
+`Authorization` header on a real `PUT /decisions/{slug}` request against
+`smeldr.RegisterOrchestrationTypes`'s real `app.Handler()`, exercising
+`orchDecisionFlow`'s `RequiredRole: "admin", Strict: true` gate exactly as
+a production request would. Asserts `200` and `Status == "ratified"`. This
+is the proof that a grant minted purely through MCP's own tool surface is
+real, load-bearing authority elsewhere in the system — not merely an
+MCP-side bookkeeping row — closing the loop A242 opened.
+
+`TestGrantTools_AuditRecordsWritten` is the audit-side analogue: calls
+`grant_role` then `revoke_grant` through the real `handleToolsCall`
+dispatch path, then queries `smeldr_governance_audit` directly by
+`actor_token_id`/`action`/`target_id` — never calling `WithAudit`/`Append`
+directly — proving D44's mandatory trail is actually reached from the MCP
+surface, not just from `RoleStore`'s own already-tested Go API.
+
+### Tests and coverage
+
+16 new tests in `grant_tools_test.go`: presence/absence in `tools/list`;
+`grant_role` success (with and without scope), missing `token_id`/`role`,
+non-array/non-string `scope_static`, unknown role (`-32001`, `ErrNotFound`
+via `errorFor`); `list_grants` unfiltered and filtered; `revoke_grant`
+success and missing `id`; the `handleGrantTool` unknown-name default
+branch; a forbidden case for an editor-only actor across all three tools;
+the audit and end-to-end proofs above. Package coverage: 96.3%. `go
+build`/`vet`/`gofmt`/`test` all clean; `golangci-lint` reports only the
+same four pre-existing, unrelated findings A238 already flagged
+(`mcp_test.go`, `node_tools.go`) — none in any file this task touched.
+
+No exported `smeldr.dev/core` symbols changed by this half. New exported
+`smeldr.dev/mcp` behaviour: three new MCP tools. `AGENTS.md` (smeldr/core)
+gains a governance grant tools section plus a note on the token-management
+section that creating a token grants no role.
+
+### Coverage and versioning
+
+MINOR bump — new tool surface, same classification as A227/A238's own
+new-tool additions. `smeldr.dev/mcp` v1.29.4 → v1.30.0. No `smeldr/core`
+version change (A242 already shipped its own).
+
+Status: Implements D43, D44.
+
+---

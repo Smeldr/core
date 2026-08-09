@@ -449,6 +449,36 @@ These tools are available when the site has `TokenStore` configured:
 - Never revoke a token without explicit instruction from the site owner
 - `create_token` returns the plaintext token once — copy it immediately
   and deliver it through a secure channel. It cannot be retrieved again.
+- **Creating a token grants it no governance role.** A freshly created
+  token can authenticate but is authorized for nothing until an admin
+  calls `grant_role` for it — see the next section. This is deliberate
+  (D43): granting authority is always its own explicit act, never a
+  byproduct of token creation.
+
+### Governance grant management tools (Admin role required)
+
+These tools are available when the site has governance wired via
+`App.Governance(store)`. They are the only way to grant, list, or revoke
+a governance role — a token's legacy `role` field (set at `create_token`
+time) has no bearing on what a token is actually authorized to do once
+governance is wired.
+
+| Tool | Description |
+|------|-------------|
+| `grant_role` | Grants a role to a token. Requires `token_id` (the token's JWT user ID, not its `list_tokens` fingerprint) and `role`. Optional `scope_static` (array of `"type:id"`/`"type:*"` patterns) and `scope_anchor_id` for scoped roles. |
+| `list_grants` | Lists governance grants. Omit `token_id` to list every grant on the instance; pass it to filter to one token. |
+| `revoke_grant` | Revokes a grant by its own `id` (from `grant_role` or `list_grants`) — not by `token_id`. |
+
+**Critical rules for grant operations:**
+
+- `token_id` for `grant_role`/`list_grants` is the token's JWT user ID —
+  **not** the SHA-256 fingerprint `list_tokens` returns. A freshly created
+  token's user ID must be read from the decoded token itself; it is not
+  returned by `create_token` or discoverable via `list_tokens`.
+- `revoke_grant` takes the grant's own ID, never a `token_id` — you grant
+  a *role*, and you revoke a *grant*.
+- Every grant and revoke is recorded in an audit trail automatically —
+  there is no way to opt out (D44).
 
 ### Webhook management tools (Admin role required)
 
