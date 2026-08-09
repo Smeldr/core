@@ -1,11 +1,11 @@
 module example/blog
 
-go 1.26.3
+go 1.26.5
 
 require (
-	smeldr.dev/core v0.0.0
-	smeldr.dev/mcp v0.0.0
-	modernc.org/sqlite v1.50.0
+	modernc.org/sqlite v1.50.1
+	smeldr.dev/core v1.63.0
+	smeldr.dev/mcp v1.30.0
 )
 
 require (
@@ -15,11 +15,10 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	modernc.org/libc v1.72.0 // indirect
+	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
+	smeldr.dev/oauth v0.2.0 // indirect
 )
 
 replace smeldr.dev/core => ../..
-
-replace smeldr.dev/mcp => ../../../mcp

@@ -27,6 +27,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 ```bash
 git clone https://github.com/smeldr/core
+cd core
 cd example/blog
 go run .
 # open http://localhost:8080

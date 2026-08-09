@@ -1,6 +1,6 @@
 module example/docs
 
-go 1.26.2
+go 1.26.5
 
 require smeldr.dev/core v0.0.0
 

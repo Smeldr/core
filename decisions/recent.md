@@ -776,3 +776,271 @@ Status: Implements the repo's own existing convention (A197's original
 per-example `replace` directives), restoring `example/server` to it.
 
 ---
+
+## A246 — T217: the other three examples don't build from a clean clone either
+
+### Found by actually doing it, not by pattern-matching A245
+
+A245 fixed `example/server`'s missing `smeldr.dev/core` replace. The
+architect verified that fix the same way it was proposed to be
+verified — a shallow clone into a tempdir, no sibling repos, `GOWORK=off`,
+`go build ./...` in each example — and found a second, unrelated defect
+in the process: `example/blog`, `example/api`, and `example/docs` don't
+build from a clean clone either, for a different reason.
+
+### The defect
+
+Each of the three declares a `go` line below what the `smeldr.dev/core`
+module they `replace` in actually requires:
+
+| module | declared `go` | core requires |
+|---|---|---|
+| `example/blog` | `1.26.3` | `1.26.5` |
+| `example/api` | `1.26.2` | `1.26.5` |
+| `example/docs` | `1.26.2` | `1.26.5` |
+| `example/server` | `1.26.5` | `1.26.5` (already correct) |
+
+Go's automatic toolchain switching keys off the **main** module's own
+`go` directive — never a `replace` target's. A main module declaring
+`1.26.3` never triggers a switch to a newer toolchain even though the
+code it's about to build (`smeldr.dev/core`, replaced in from `../..`)
+requires one, and the build fails outright:
+
+```
+go: module ../.. requires go >= 1.26.5 (running go 1.26.3)
+```
+
+`example/server` declaring `1.26.5` was luck, not design — A245 fixed
+its missing replace directive without anyone checking whether its `go`
+line happened to already be correct, which it did, incidentally.
+
+### A dispatch error caught by checking the source, not the description
+
+NEXT.md stated all three examples declare `go 1.26.3`. Checked each
+`go.mod` directly rather than trusting the summary: only `example/blog`
+does. `example/api` and `example/docs` declare `1.26.2`. The architect
+had checked `blog` only and generalized from one file to three. Reading
+core's own root `go.mod` for the real target value, rather than copying
+`1.26.5` out of the task description either, is what surfaced the
+discrepancy — the same "check the source, not the summary" habit A245
+and this task's own verification method both depend on.
+
+### Fix: bump the `go` line, nothing else
+
+One line changed per file — `example/blog/go.mod`, `example/api/go.mod`,
+`example/docs/go.mod` all now declare `go 1.26.5`, matching core's own
+root `go.mod`.
+
+### `example/blog`'s second, load-bearing defect: a replace path outside the repo
+
+`example/blog/go.mod` also carried `replace smeldr.dev/mcp =>
+../../../mcp` — three directories up from `example/blog/`, outside
+`smeldr/core` entirely. Absent in any clone of this repo alone; this is
+the failure that appears immediately after the `go` line is fixed, not a
+separate, later concern.
+
+Checked whether this was a stale, unused import before proposing
+anything — it isn't: `example/blog/main.go` imports `smeldr.dev/mcp` and
+calls `mcp.New(app)`, wiring a real MCP server into two routes. Dropping
+the dependency entirely would change what the example demonstrates,
+which was explicitly not this task's call to make.
+
+### The rule, stated once rather than left implicit
+
+`example/server` already embodies the right shape for this without ever
+stating it as a rule: a dependency that lives **in this repo**
+(`smeldr.dev/core`) gets a relative `replace`; a dependency that lives in
+a **separate repo** (`mcp`, `agent`, `media`, `oauth`, `social`) gets a
+real version pin, resolved via the proxy, because a relative path to a
+sibling repo cannot exist in an isolated clone of `smeldr/core` alone.
+`example/blog` was the one place still relatively-replacing an
+out-of-repo module. Fixed to match: `replace smeldr.dev/mcp =>
+../../../mcp` removed, `require smeldr.dev/mcp v1.30.0` (the newest
+tagged release; nothing in `example/blog/main.go` requires anything
+older) added via `go mod edit -require` + `GOWORK=off go mod tidy`.
+
+**Named explicitly, not presented as closing the question**: a version
+pin is only as safe as whatever actually re-checks it stays current, and
+no such check runs automatically today. This is the identical failure
+mode A245 itself was born from — `example/server`'s `smeldr.dev/core`
+pin went stale for a month, invisible precisely because nothing built it
+outside `go.work`. `example/blog`'s new `smeldr.dev/mcp` pin carries the
+same latent risk until a repeatable isolation build exists. This task's
+own manual clean-clone run (below) is a point-in-time check, not that
+missing automation — T217 tracks the larger pattern; whether the answer
+is a clean-clone CI job, a release-time check, or something else is
+explicitly not decided here.
+
+### Verification, from real isolation — the part the architect said would be checked
+
+Cloned into a tempdir placed **entirely outside** the `Smeldr/` directory
+tree — not a subdirectory of it. A clone inside the tree could still
+resolve `example/blog`'s old `../../../mcp` path by relative traversal
+and would have proven nothing about whether the fix actually removed
+that dependency; placing the clone outside the tree removes every
+sibling repo (`mcp`, `agent`, `media`, `oauth`, `social`) and any
+`go.work` file from being reachable at all, by relative path or by Go's
+own upward directory search.
+
+`GOWORK=off go build ./...` in all four example directories inside that
+clone. All four exit 0. Error text was checked as well as exit codes —
+not just "green" — so that `example/blog`'s previously-known failure
+mode couldn't mask a new, different regression behind the same exit
+code.
+
+### README, trivially true, fixed in the same commit
+
+The 30-second quickstart did:
+
+```bash
+git clone https://github.com/smeldr/core
+cd example/blog
+```
+
+`git clone` with no explicit target directory clones into `./core` — the
+next line needs to be inside that directory. As written, the documented
+command failed before it ever reached the `go.mod` question this task
+is about. Added `cd core` between the two lines.
+
+### Scope grew mid-task: the deploy that already happened
+
+`process.smeldr.dev` was rebuilt from A245's fix and deployed. Its own
+`/_health` reported `mcp: 1.28.0`. `grant_role`, `list_grants`,
+`revoke_grant`, and `create_token`'s `token_id` field all shipped in
+`smeldr.dev/mcp` v1.30.0 (A243, A244). A245 added a relative `replace`
+for `smeldr.dev/core` only — `example/server`'s `smeldr.dev/mcp` pin was
+never touched, so the artifact that shipped carried core v1.63.0 against
+mcp v1.28.0. The tool-policy rows for the three grant tools are in the
+live database, because those come from core. The tools themselves are
+not, because those come from mcp. M0 step 4 — the reason T216 exists —
+had not actually reached the instance.
+
+**The specific reasoning that let this through was shared, not solely
+the architect's.** A245's own claim that the other five pinned
+dependencies "were checked, not assumed, to still be current" rested on
+`GOWORK=off go build/vet/test ./...` passing. That check proves
+`main.go` doesn't call anything a pinned version lacks. It says nothing
+about whether the pinned version is actually the current release — MCP
+tools are additive, so a stale tool pin loses tools *silently*: no
+compile error, no test failure, nothing observable until an operator
+calls a tool that was never in the binary. "Does it build" and "is the
+pin current" are two different questions, answered by two different
+checks, and only the first one had been run.
+
+### Checked each of the five out-of-repo pins against what's actually published
+
+Not assumed from whether the build passes — checked directly (`go list
+-m -versions`, `GOWORK=off`, against the real proxy) and reported for
+all five, including the ones that turned out fine:
+
+| module | pinned | latest published | action |
+|---|---|---|---|
+| `smeldr.dev/mcp` | v1.28.0 | v1.30.0 | bumped |
+| `smeldr.dev/social` | v0.9.2 | v0.10.1 | **not bumped — see below** |
+| `smeldr.dev/agent` | v0.7.1 | v0.7.1 | already current |
+| `smeldr.dev/media` | v1.6.0 | v1.6.0 | already current |
+| `smeldr.dev/oauth` | v0.4.0 | v0.4.0 | already current |
+
+**`mcp` v1.28.0 → v1.30.0, bumped.** Read every intervening `CHANGELOG.md`
+entry (v1.29.0 through v1.30.0) before bumping, not just the version
+number: `list_type_tools` tool (additive), `id`-as-slug-alias widening
+(additive — old `slug`-only calls still work), `list_type_tools`
+reordered to the front of `tools/list` (a real output-order change, but
+`example/server` doesn't parse its own `tools/list` output — no
+consumer impact here), `observe_relation` tool (additive),
+`ErrRevConflict` gaining its own `-32002` code instead of falling into
+generic `-32603` (a real behavior change to an existing error path — a
+client branching on `-32603` to catch a rev conflict would now miss it;
+`example/server` itself does not do this), `grant_role`/`list_grants`/
+`revoke_grant`/`token_id` (additive, and the entire point of this
+bump). None of these remove or alter behavior `example/server` itself
+depends on — bumped.
+
+**`social` v0.9.2 → v0.10.1, not bumped — flagged instead, per the
+explicit instruction to stop rather than carry a behavior change
+silently.** v0.10.0 is additive (five new REST endpoints). v0.10.1 is
+not: `MCPCreate`'s explicit `status` field was previously silently
+ignored on create; v0.10.1 makes it take effect. A caller that
+previously set `status` and had it silently dropped will now see it
+actually applied — a real behavior change to existing input handling,
+not new surface. Unrelated to T216's urgency (social is opt-in via
+`ENABLE_SOCIAL`, no connection to the grant-tools gap), so left at
+v0.9.2 pending a separate decision rather than bundled into this fix.
+
+**Recorded here explicitly, not left implicit: `example/server`'s
+`smeldr.dev/social` pin is now *knowingly* behind, with the reason
+written down.** A stale pin nobody wrote a reason for is exactly how
+`smeldr.dev/mcp` reached v1.28.0 in the first place — this Amendment's
+own opening finding. The difference between "knowingly behind, reason
+on record" and "accidentally behind, discovered three months from now"
+is entirely this paragraph existing.
+
+**`agent`, `media`, `oauth`: checked, already current, no action.**
+Reported so "no change" reads as verified rather than unmentioned.
+
+### A side effect noticed on review, not deliberately made: `example/server`'s `core` require line
+
+`go mod tidy` (run as part of the `mcp` bump above, and separately when
+A245 first added the `core` replace) rewrote `example/server/go.mod`'s
+`smeldr.dev/core` require line from `v1.54.0` to `v1.63.0`. Not a
+deliberate edit — Go's own convention for a replaced module's nominal
+require version, applied automatically. Flagged on review because it
+is consequential, not because it was wrong: Go's build info reports the
+*require* version for a replaced module, not the replaced content's
+actual version, so `/_health`'s `"core"` field — previously a lie
+(`"1.54.0"` while the binary actually ran whatever `../..` contained) —
+now happens to read `"1.63.0"`, matching the real content for this
+build specifically.
+
+**This is a real, welcome side effect for T219 (the same
+decoration-not-measurement problem `/_health`'s version fields have
+generally), and it does not close T219.** The require line will drift
+stale again at the next `smeldr.dev/core` release exactly the way it
+already did once, because nothing re-derives it from the replaced
+module's actual content — only `go mod tidy` running incidentally (as
+here) keeps it honest, and nothing forces that to happen on every
+release. What changed today is that the string is *currently* true
+rather than *currently* false, not that it is now guaranteed true.
+
+### The artifact was rebuilt, because the one already on disk was wrong
+
+The `v1.63.0`/`smeldr-server` build A245 produced (and devops has, as of
+this Amendment, not yet deployed further than the one instance above)
+carried the stale mcp pin. Rebuilt after the mcp bump, from the commit
+that carries both fixes; verified end to end against a real running
+instance (not just `go build`) that `tools/list` now includes
+`grant_role`/`list_grants`/`revoke_grant`, and `create_token`'s response
+includes `token_id`. Commit, SHA-256, and static-link confirmation
+reported in the `committed` signal, same shape as A245's own report.
+
+### What this says about T217's own design, stated because T217 is still open
+
+The clean-clone `GOWORK=off go build ./...` check this Amendment (and
+A245) both rely on catches "does not compile." It would not have caught
+this — the stale `mcp` pin builds fine, every symbol it needs already
+existed in v1.28.0. **Pin currency is a second, different check from
+build success, and they do not overlap**: a build check proves the code
+compiles against whatever is pinned; a currency check proves the pin
+still points at the current release. Neither substitutes for the other,
+and nothing in this repo runs the second one automatically yet. T217
+now covers both — this Amendment's own mid-task discovery is the
+evidence for why the scope needed both, not resolved proof that either
+is solved.
+
+### Tests and coverage
+
+No new tests — dependency-resolution and `go.mod` fixes, not a behavior
+change to any tested code path. Verification is the isolation build
+itself, described above, not a Go test. No `smeldr.dev/core` coverage
+change — no core `.go` files touched.
+
+### Versioning
+
+No version bump, no tag — same reasoning as A245: nothing in the
+`smeldr.dev/core` package's own content changed; these are `example/*`
+module and documentation fixes. Level 1 amendment.
+
+Status: Fixes a defect A245's own verification uncovered. Names, does
+not close, the isolation-build gap both amendments depend on.
+
+---
