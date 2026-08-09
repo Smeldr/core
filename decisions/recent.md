@@ -31,6 +31,85 @@ Archived 2026-08-09: A236-A240, D38-D39 → phase22-archive.md
 Archived 2026-08-09: D40-D42, A241 → phase23-archive.md
 ---
 
+## D44 — An authority mutation always leaves a record, and the record is not optional
+
+### Scope
+
+core
+
+### Decision
+
+Every change to **who may do what** is recorded in `smeldr_governance_audit`:
+granting a role, revoking a grant, defining or redefining a role. Actor,
+action, target, before, after, time.
+
+**The record is not separately enabled.** Wiring governance wires audit.
+`App.Governance` creates the audit table and holds the store, the same way it
+already holds the `RoleStore`. There is no option to turn it off and no way to
+reach a governance-enabled instance that has no audit trail.
+
+The actor recorded is the JWT's `User.ID`, per D43, which is the same value
+`Authorized` and `RoleGranted` check against.
+
+### Why this is not an implementation detail
+
+D43 removed the implicit bridge between `smeldr_tokens.role` and governance
+grants, on the ground that granting must be an act with an actor, a target and
+a time rather than a string match at boot. **That argument depends entirely on
+the record existing.** An opt-in audit trail means an operator can wire
+governance without it, and granting is once again an act nobody can point at
+afterward.
+
+Making the record optional makes the decision optional. Article I says
+authority never changes silently; a change that leaves no trace is silent
+whatever ceremony surrounded it at the time.
+
+### The boundary against provenance, stated so the two are not conflated
+
+This decision covers mutations of the **authority model**. It does not cover
+acts *performed under* that authority.
+
+A state transition is recorded through `ProvenanceRecord` (`Verb`,
+`FromState`, `ToState`, `ActorKind`, `ActorID`, `Surface`, `Reason`), which is
+a different mechanism answering a different question. Governance audit answers
+"who was given the right to do this". Provenance answers "who then did it".
+
+Both are required. Neither substitutes for the other, and a gap in one must
+never be argued away by pointing at the other.
+
+### Alternatives considered and rejected
+
+- **Audit as an opt-in `ServerOption` on the MCP server.** Proposed by
+  core-implementer while planning T216, and reasonable on its own terms: it
+  matches how every other optional subsystem in this codebase is wired, and a
+  library normally lets its consumer choose. Rejected because the thing being
+  made optional is not a subsystem, it is the evidence that a decision
+  happened.
+- **Audit wired in `example/server` only.** Would have made the live instance
+  correct and left every other deployment to remember. The failure mode this
+  whole task exists to fix was something correct in principle that nobody had
+  actually wired.
+
+### Consequences
+
+**Enabling governance now creates a table that did not exist before on that
+instance.** `CreateGovernanceAuditTable` is idempotent and documented as safe
+on every startup, so this is a no-op on second boot, but it is a
+consumer-visible change and belongs in the CHANGELOG.
+
+**A deployment cannot have governance without audit.** That is the point, and
+it is also the cost: a consumer who wanted role gating and no audit table no
+longer has that combination.
+
+**`RoleStore.WithAudit` keeps its per-request shape.** It bakes a fixed actor
+into the store it returns, so the actor is attached per call rather than at
+startup. This decision does not change that and must not be read as
+permission to wire a single shared actor once.
+
+Status: Ratified 2026-08-09.
+
+---
+
 ## D43 — Creating a token confers no governance role; granting is a separate, explicit act
 
 ### Scope
