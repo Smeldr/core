@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.63.0] — 2026-08-09
+
+### Added
+- `TokenStore.CreateWithID(ctx, name, role, ttl) (raw, userID string, err error)` — behaves exactly like `TokenStore.Create` (unchanged, same signature), but also returns the new token's JWT `User.ID`, the identity `RoleGrant.TokenID` — and so `smeldr.dev/mcp`'s `grant_role` tool — expects. Closes a real gap in D43's own operator surface: creating a token and granting it a role are two acts, but nothing previously returned the identity the second act needs, so an operator had to hand-decode the raw JWT between them. `smeldr.dev/mcp`'s `create_token` tool now returns this directly as `token_id`. (A244, D43)
+
+---
+
 ## [1.62.0] — 2026-08-09
 
 ### Added

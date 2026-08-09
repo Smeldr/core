@@ -475,6 +475,19 @@ func (ts *TokenStore) Create(ctx context.Context, name, role string, ttl time.Du
 	return raw, err
 }
 
+// CreateWithID behaves exactly like [TokenStore.Create], but also returns
+// the new token's JWT User.ID — the identity [RoleGrant.TokenID] (and so
+// [RoleStore.Grant]'s token_id argument, surfaced by smeldr.dev/mcp's
+// grant_role tool) expects. Create's own signature is unchanged; callers
+// that only need the raw token keep using it.
+//
+// Per D43, creating a token confers no governance role by itself — a
+// caller that also needs to grant one must hold this ID before calling
+// [RoleStore.Grant].
+func (ts *TokenStore) CreateWithID(ctx context.Context, name, role string, ttl time.Duration) (raw, userID string, err error) {
+	return ts.createToken(ctx, name, role, ttl)
+}
+
 // List returns all token records from smeldr_tokens ordered by created_at
 // descending (newest first). Revoked and expired tokens are included; inspect
 // [TokenRecord.RevokedAt] to filter client-side.

@@ -1247,6 +1247,47 @@ func TestTokenStore_Create_execError(t *testing.T) {
 	}
 }
 
+// TestTokenStore_CreateWithID verifies CreateWithID (A244) returns a
+// non-empty userID distinct from the token's own smeldr_tokens.id
+// fingerprint — the two identities D43/D44's grant surface depends on
+// staying distinguishable.
+func TestTokenStore_CreateWithID(t *testing.T) {
+	db := newTestTokensDB(t)
+	store := NewTokenStore(db, testSecret)
+	raw, userID, err := store.CreateWithID(context.Background(), "ci", "author", time.Hour)
+	if err != nil {
+		t.Fatalf("CreateWithID: %v", err)
+	}
+	if raw == "" {
+		t.Error("raw token is empty")
+	}
+	if userID == "" {
+		t.Fatal("userID is empty")
+	}
+
+	records, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	if records[0].ID == userID {
+		t.Errorf("userID %q must not equal the token's own fingerprint %q", userID, records[0].ID)
+	}
+}
+
+// TestTokenStore_CreateWithID_execError verifies CreateWithID surfaces the
+// same error Create does — it is a thin wrapper over createToken with no
+// new failure mode of its own.
+func TestTokenStore_CreateWithID_execError(t *testing.T) {
+	store := NewTokenStore(&errExecDB{}, testSecret)
+	_, _, err := store.CreateWithID(context.Background(), "test", "author", time.Hour)
+	if !errors.Is(err, ErrInternal) {
+		t.Errorf("expected ErrInternal, got %v", err)
+	}
+}
+
 func TestTokenStore_List_queryError(t *testing.T) {
 	store := NewTokenStore(&errQueryDB{}, testSecret)
 	_, err := store.List(context.Background())

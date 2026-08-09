@@ -474,3 +474,104 @@ version change (A242 already shipped its own).
 Status: Implements D43, D44.
 
 ---
+
+## A244 — D43/T216 addition: expose the identity `grant_role` needs from `create_token`
+
+### The gap, found on review of A243, not inferred
+
+D43 splits token provisioning into two acts — create a token, then grant it
+a role — deliberately, so granting authority is never a byproduct. A243
+shipped the second act (`grant_role`) but not a way to reach it from the
+first: `create_token` returned `{token, message}`, `list_tokens` returns
+only the SHA-256 fingerprint, and `grant_role` requires the JWT `User.ID`.
+The only way to bridge them was decoding the raw JWT by hand.
+
+That is not the two-act sequence D43 describes. It is a two-act sequence
+with a manual, undocumented step in the middle — and it is the exact
+operation the self-hosting roadmap's M0 step 4 and step 9 consist of. D43
+required the second act to be explicit; it did not say the explicit act
+should be unreachable from the surface built for it.
+
+### The fix is smaller than the gap
+
+`createToken` (`auth.go`) already computes and returns the JWT `User.ID`;
+`TokenStore.Create` already discards it, unchanged, same signature, same
+callers. New method exposes what already exists:
+
+```go
+func (ts *TokenStore) CreateWithID(ctx context.Context, name, role string, ttl time.Duration) (raw, userID string, err error) {
+	return ts.createToken(ctx, name, role, ttl)
+}
+```
+
+A thin wrapper, no new logic, no new failure mode — the same shape `Create`
+already is over `createToken`. `smeldr.dev/mcp`'s `create_token` tool
+switches to it and adds the field to its response:
+
+```go
+raw, tokenID, err := s.tokenStore.CreateWithID(ctx, tokenName, role, ttl)
+...
+return toolResult(map[string]any{
+	"token":    raw,
+	"token_id": tokenID,
+	"message":  "Store this token securely — it cannot be retrieved again.",
+}), nil
+```
+
+### `token_id`, not `user_id`
+
+Named to match `grant_role`'s own argument, not the Go-level `User.ID` this
+actually is — call-site continuity over Go-level precision. A caller
+reading `create_token`'s response and a caller writing `grant_role`'s
+argument should be looking at the same field name; `user_id` would have
+preserved exactly the friction this fix exists to remove, just moved one
+field over. `AGENTS.md`'s grant-tools section (shipped by A243) is
+corrected in the same commit — it previously stated decoding the raw token
+was the only way to learn this value, which A243 was still technically
+correct about, and A244 makes false.
+
+### The test that was standing in for the gap gets rewritten, not duplicated
+
+`TestGrantTools_EndToEnd_MintedGrantRatifiesDecision` (A243) used
+`smeldr.VerifyTokenString` to recover the second actor's ID — that call was
+never testing a real operator workflow, it was standing in for the missing
+field. Once `token_id` is real, the test's happy path reads it directly off
+`create_token`'s response instead. Adding a second test beside the
+unchanged original would have left a passing test permanently documenting
+a workaround no operator should take — the kind of thing that quietly
+calcifies into the "supported" way to do something. A narrower
+`TestHandleTokenTool_CreateWithID_TokenIDMatchesJWT` keeps exactly one
+`VerifyTokenString` call, as a consistency check that the returned
+`token_id` matches what the JWT actually carries — not as the documented
+path.
+
+### The rest of the operator chain, checked rather than assumed to hold
+
+Verifying this one hop invited the question of whether the other three
+hold. They do, checked directly: `RoleGrant.ID` is empty on input to
+`Grant` and populated by `ListGrants`, and `revoke_grant` takes exactly
+that value — `list_grants`→`revoke_grant` needs no bridge. `RoleGrant.TokenID`
+is the same `User.ID` that `Authorized`/`RoleGranted` query by —
+`grant_role`'s `token_id` argument reaches authorization correctly. The
+operator surface closes end to end as of this Amendment, not assumed to.
+
+### Tests and coverage
+
+2 new core tests: `TestTokenStore_CreateWithID` (non-empty `userID`,
+distinct from the token's own fingerprint), `TestTokenStore_CreateWithID_execError`
+(surfaces the same error `Create` does). mcp: the end-to-end test rewritten
+in place, one new consistency test added. `AGENTS.md` corrected. No
+exported symbols removed; new exported `TokenStore.CreateWithID`. Coverage:
+core 96.2%, mcp 96.3%. `go build`/`vet`/`gofmt`/`test` clean both repos;
+`golangci-lint` reports only the same four pre-existing, unrelated findings
+already flagged by A238 — none in any file this addition touched.
+
+### Coverage and versioning
+
+MINOR bump both repos — new exported API surface. `smeldr/core` v1.62.0 →
+v1.63.0. `smeldr.dev/mcp` rides the same release as A243 (still unreleased,
+pending Peter's clearance) rather than its own separate bump.
+
+Status: Implements D43.
+
+---

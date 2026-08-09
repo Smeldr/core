@@ -436,7 +436,7 @@ These tools are available when the site has `TokenStore` configured:
 
 | Tool | Description |
 |------|-------------|
-| `create_token` | Issues a new named token with a given role and TTL |
+| `create_token` | Issues a new named token with a given role and TTL. Returns `token_id` alongside the raw token — pass it directly to `grant_role`. |
 | `list_tokens` | Lists all tokens with name, role, expiry, revoked status |
 | `revoke_token` | Revokes a token by ID — effective immediately |
 
@@ -453,7 +453,9 @@ These tools are available when the site has `TokenStore` configured:
   token can authenticate but is authorized for nothing until an admin
   calls `grant_role` for it — see the next section. This is deliberate
   (D43): granting authority is always its own explicit act, never a
-  byproduct of token creation.
+  byproduct of token creation. `create_token`'s response already includes
+  the `token_id` `grant_role` needs, so this is normally a direct
+  two-call sequence with nothing to decode in between.
 
 ### Governance grant management tools (Admin role required)
 
@@ -472,9 +474,9 @@ governance is wired.
 **Critical rules for grant operations:**
 
 - `token_id` for `grant_role`/`list_grants` is the token's JWT user ID —
-  **not** the SHA-256 fingerprint `list_tokens` returns. A freshly created
-  token's user ID must be read from the decoded token itself; it is not
-  returned by `create_token` or discoverable via `list_tokens`.
+  **not** the SHA-256 fingerprint `list_tokens` returns. `create_token`'s
+  response includes this value directly as `token_id` — use it as-is,
+  there is no need to decode the raw token to recover it.
 - `revoke_grant` takes the grant's own ID, never a `token_id` — you grant
   a *role*, and you revoke a *grant*.
 - Every grant and revoke is recorded in an audit trail automatically —
