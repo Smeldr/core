@@ -111,8 +111,11 @@ func TestDecisionFlow_definition(t *testing.T) {
 		t.Errorf("initial = %q, want %q", got, "proposed")
 	}
 
-	// D34: ratify and supersede require the "admin" role, fail-closed.
-	var ratify, supersede *Transition
+	// D34/D40: ratify and supersede require the "admin" role, fail-closed
+	// — both from "proposed"/"ratified" directly (D34) and from
+	// "pending-re-evaluation" (D40): re-evaluation is the same
+	// authority-bearing act through a different door.
+	var ratify, supersede, reEvalRatify, reEvalSupersede *Transition
 	for i := range f.Transitions {
 		tr := &f.Transitions[i]
 		switch {
@@ -120,6 +123,10 @@ func TestDecisionFlow_definition(t *testing.T) {
 			ratify = tr
 		case tr.From == "ratified" && tr.To == "superseded":
 			supersede = tr
+		case tr.From == "pending-re-evaluation" && tr.To == "ratified":
+			reEvalRatify = tr
+		case tr.From == "pending-re-evaluation" && tr.To == "superseded":
+			reEvalSupersede = tr
 		}
 	}
 	if ratify == nil {
@@ -133,6 +140,18 @@ func TestDecisionFlow_definition(t *testing.T) {
 	}
 	if supersede.RequiredRole != "admin" || !supersede.Strict {
 		t.Errorf("ratified→superseded: RequiredRole=%q Strict=%v, want %q true", supersede.RequiredRole, supersede.Strict, "admin")
+	}
+	if reEvalRatify == nil {
+		t.Fatal("pending-re-evaluation→ratified transition not found")
+	}
+	if reEvalRatify.RequiredRole != "admin" || !reEvalRatify.Strict {
+		t.Errorf("pending-re-evaluation→ratified: RequiredRole=%q Strict=%v, want %q true", reEvalRatify.RequiredRole, reEvalRatify.Strict, "admin")
+	}
+	if reEvalSupersede == nil {
+		t.Fatal("pending-re-evaluation→superseded transition not found")
+	}
+	if reEvalSupersede.RequiredRole != "admin" || !reEvalSupersede.Strict {
+		t.Errorf("pending-re-evaluation→superseded: RequiredRole=%q Strict=%v, want %q true", reEvalSupersede.RequiredRole, reEvalSupersede.Strict, "admin")
 	}
 }
 

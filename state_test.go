@@ -3105,7 +3105,10 @@ func TestDrainEvalQueue_notDueYet(t *testing.T) {
 }
 
 func TestDrainEvalQueue_transitionFail(t *testing.T) {
-	// Queue row due now but target table missing → UPDATE fails → skipped++, row deleted.
+	// Queue row due now but target table missing → drainAuthorizationGate's
+	// own status-read fails first (no such table) → skipped++, row deleted.
+	// The failure point moved with the authorization-gate addition; the
+	// observable outcome (skipped, not triggered, row still gone) did not.
 	db := newMigratedDB(t)
 	ctx := context.Background()
 	qID := NewID()
@@ -3223,6 +3226,402 @@ func (d *evalQueueScanFailDB) QueryContext(ctx context.Context, q string, args .
 		return sql.OpenDB(&scanErrConnector{}).QueryContext(ctx, "SELECT v")
 	}
 	return d.DB.QueryContext(ctx, q, args...)
+}
+
+// — drainAuthorizationGate / recordAuthorizationRequiredSignal — direct unit tests —
+
+// gatedItemFixture creates a target table + one row for drainAuthorizationGate's
+// own tests, independent of DrainEvalQueue/smeldr_eval_queue.
+func gatedItemFixture(t *testing.T, db *sql.DB, table, itemID, status string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS `+table+` (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create %s: %v", table, err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO `+table+` (id, status) VALUES (?, ?)`, itemID, status,
+	); err != nil {
+		t.Fatalf("insert %s row: %v", table, err)
+	}
+}
+
+func TestDrainAuthorizationGate_StatusReadError(t *testing.T) {
+	db := newMigratedDB(t)
+	gatedItemFixture(t, db, "gate_items", "item-1", "reviewing")
+	wrapped := &nthQueryRowFailDB{DB: db, fail: 1} // 1st QueryRowContext = status read
+	_, _, err := drainAuthorizationGate(context.Background(), wrapped, "gate_items", "GateItem", "item-1", "approved")
+	if err == nil {
+		t.Fatal("expected error from status read, got nil")
+	}
+}
+
+func TestDrainAuthorizationGate_SameState_NotGated(t *testing.T) {
+	db := newMigratedDB(t)
+	gatedItemFixture(t, db, "gate_items", "item-2", "approved")
+	fromState, requiredRole, err := drainAuthorizationGate(context.Background(), db, "gate_items", "GateItem", "item-2", "approved")
+	if err != nil {
+		t.Fatalf("drainAuthorizationGate: %v", err)
+	}
+	if fromState != "approved" || requiredRole != "" {
+		t.Errorf("fromState=%q requiredRole=%q, want approved/empty", fromState, requiredRole)
+	}
+}
+
+func TestDrainAuthorizationGate_NoFlow_NotGated(t *testing.T) {
+	// Deliberately newSQLiteDB, not newMigratedDB: migrateStateFlows seeds
+	// a "default" flow, so a type-specific lookup miss always falls
+	// through to a real (if unrelated) default flow in every other test
+	// here. To exercise the true both-lookups-fail path, smeldr_state_flows
+	// must not exist at all.
+	db := newSQLiteDB(t)
+	gatedItemFixture(t, db, "gate_items", "item-3", "reviewing")
+	fromState, requiredRole, err := drainAuthorizationGate(context.Background(), db, "gate_items", "GateItem", "item-3", "approved")
+	if err != nil {
+		t.Fatalf("drainAuthorizationGate: %v", err)
+	}
+	if fromState != "reviewing" || requiredRole != "" {
+		t.Errorf("fromState=%q requiredRole=%q, want reviewing/empty", fromState, requiredRole)
+	}
+}
+
+func TestDrainAuthorizationGate_NoTransitionRow_NotGated(t *testing.T) {
+	db := newMigratedDB(t)
+	gatedItemFixture(t, db, "gate_items", "item-4", "reviewing")
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "gate-flow",
+		TypeName: "GateItem",
+		States:   []State{{Name: "reviewing", IsInitial: true}, {Name: "archived"}},
+		// No "reviewing" -> "approved" transition declared at all.
+		Transitions: []Transition{{From: "reviewing", To: "archived"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	fromState, requiredRole, err := drainAuthorizationGate(context.Background(), db, "gate_items", "GateItem", "item-4", "approved")
+	if err != nil {
+		t.Fatalf("drainAuthorizationGate: %v", err)
+	}
+	if fromState != "reviewing" || requiredRole != "" {
+		t.Errorf("fromState=%q requiredRole=%q, want reviewing/empty", fromState, requiredRole)
+	}
+}
+
+func TestDrainAuthorizationGate_UngatedTransition(t *testing.T) {
+	db := newMigratedDB(t)
+	gatedItemFixture(t, db, "gate_items", "item-5", "reviewing")
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:        "gate-flow",
+		TypeName:    "GateItem",
+		States:      []State{{Name: "reviewing", IsInitial: true}, {Name: "approved"}},
+		Transitions: []Transition{{From: "reviewing", To: "approved"}}, // no RequiredRole
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	fromState, requiredRole, err := drainAuthorizationGate(context.Background(), db, "gate_items", "GateItem", "item-5", "approved")
+	if err != nil {
+		t.Fatalf("drainAuthorizationGate: %v", err)
+	}
+	if fromState != "reviewing" || requiredRole != "" {
+		t.Errorf("fromState=%q requiredRole=%q, want reviewing/empty", fromState, requiredRole)
+	}
+}
+
+func TestDrainAuthorizationGate_GatedTransition(t *testing.T) {
+	db := newMigratedDB(t)
+	gatedItemFixture(t, db, "gate_items", "item-6", "reviewing")
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "gate-flow",
+		TypeName: "GateItem",
+		States:   []State{{Name: "reviewing", IsInitial: true}, {Name: "approved"}},
+		Transitions: []Transition{
+			{From: "reviewing", To: "approved", RequiredRole: "reviewer"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	fromState, requiredRole, err := drainAuthorizationGate(context.Background(), db, "gate_items", "GateItem", "item-6", "approved")
+	if err != nil {
+		t.Fatalf("drainAuthorizationGate: %v", err)
+	}
+	if fromState != "reviewing" || requiredRole != "reviewer" {
+		t.Errorf("fromState=%q requiredRole=%q, want reviewing/reviewer", fromState, requiredRole)
+	}
+}
+
+func TestDrainAuthorizationGate_TransitionQueryError(t *testing.T) {
+	db := newMigratedDB(t)
+	gatedItemFixture(t, db, "gate_items", "item-7", "reviewing")
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "gate-flow",
+		TypeName: "GateItem",
+		States:   []State{{Name: "reviewing", IsInitial: true}, {Name: "approved"}},
+		Transitions: []Transition{
+			{From: "reviewing", To: "approved", RequiredRole: "reviewer"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	// 1st QueryRowContext = status read, 2nd = flow-id lookup, 3rd = transition-row lookup.
+	wrapped := &nthQueryRowFailDB{DB: db, fail: 3}
+	_, _, err := drainAuthorizationGate(context.Background(), wrapped, "gate_items", "GateItem", "item-7", "approved")
+	if err == nil {
+		t.Fatal("expected error from transition-row read, got nil")
+	}
+}
+
+func TestRecordAuthorizationRequiredSignal_Success(t *testing.T) {
+	db := newMigratedDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	ctx := context.Background()
+	if err := recordAuthorizationRequiredSignal(ctx, db, "GateItem", "item-8", "reviewing", "approved", "reviewer"); err != nil {
+		t.Fatalf("recordAuthorizationRequiredSignal: %v", err)
+	}
+	var sender, receiver, signalType, status string
+	if err := db.QueryRowContext(ctx,
+		`SELECT sender, receiver, signal_type, status FROM smeldr_signals`,
+	).Scan(&sender, &receiver, &signalType, &status); err != nil {
+		t.Fatalf("SELECT smeldr_signals: %v", err)
+	}
+	if sender != "system" || receiver != "reviewer" || signalType != "authorization-required" || status != "pending" {
+		t.Errorf("Signal fields = (%q,%q,%q,%q), want (system,reviewer,authorization-required,pending)",
+			sender, receiver, signalType, status)
+	}
+}
+
+func TestRecordAuthorizationRequiredSignal_InsertError(t *testing.T) {
+	db := newMigratedDB(t)
+	// smeldr_signals table deliberately not created.
+	err := recordAuthorizationRequiredSignal(context.Background(), db, "GateItem", "item-9", "reviewing", "approved", "reviewer")
+	if err == nil {
+		t.Fatal("expected error from INSERT into missing smeldr_signals, got nil")
+	}
+}
+
+// — DrainEvalQueue — gated transition wiring, end-to-end ————————————————————
+
+func TestDrainEvalQueue_GatedTransition_SignalEmittedNotApplied(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	gatedItemFixture(t, db, "gate_items", "item-10", "reviewing")
+
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "gate-flow",
+		TypeName: "GateItem",
+		States:   []State{{Name: "reviewing", IsInitial: true}, {Name: "approved"}},
+		Transitions: []Transition{
+			{From: "reviewing", To: "approved", RequiredRole: "reviewer"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+
+	qID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'GateItem', 'item-10', 'approved', datetime('now', '-1 second'))`,
+		qID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 0 || skipped != 1 {
+		t.Errorf("gated: expected (0,1), got (%d,%d)", triggered, skipped)
+	}
+
+	// Item status must be unchanged — automation never crossed the gate.
+	var status string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM gate_items WHERE id = 'item-10'`).Scan(&status); err != nil {
+		t.Fatalf("SELECT status: %v", err)
+	}
+	if status != "reviewing" {
+		t.Errorf("item status = %q, want unchanged %q", status, "reviewing")
+	}
+
+	// Exactly one Signal recorded, addressed to the declared role.
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_signals WHERE signal_type = 'authorization-required'`).Scan(&count); err != nil {
+		t.Fatalf("SELECT signal count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("authorization-required signal count = %d, want 1", count)
+	}
+	var receiver string
+	if err := db.QueryRowContext(ctx, `SELECT receiver FROM smeldr_signals WHERE signal_type = 'authorization-required'`).Scan(&receiver); err != nil {
+		t.Fatalf("SELECT signal receiver: %v", err)
+	}
+	if receiver != "reviewer" {
+		t.Errorf("signal receiver = %q, want %q", receiver, "reviewer")
+	}
+
+	// Queue row must still be deleted — blocked transitions are not re-queued.
+	var qCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_eval_queue`).Scan(&qCount); err != nil {
+		t.Fatalf("SELECT queue: %v", err)
+	}
+	if qCount != 0 {
+		t.Errorf("queue row not deleted, count=%d", qCount)
+	}
+}
+
+func TestDrainEvalQueue_GatedTransition_SignalRecordFails(t *testing.T) {
+	// Same as TestDrainEvalQueue_GatedTransition_SignalEmittedNotApplied,
+	// but smeldr_signals is deliberately never created — exercises
+	// DrainEvalQueue's own log-and-continue branch when the gate check
+	// succeeds (a role is required) but recordAuthorizationRequiredSignal
+	// itself fails. The item must still not transition, and the queue row
+	// must still be deleted — a Signal failing to record does not change
+	// the authorization verdict.
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	gatedItemFixture(t, db, "gate_items", "item-11", "reviewing")
+
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "gate-flow",
+		TypeName: "GateItem",
+		States:   []State{{Name: "reviewing", IsInitial: true}, {Name: "approved"}},
+		Transitions: []Transition{
+			{From: "reviewing", To: "approved", RequiredRole: "reviewer"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+
+	qID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'GateItem', 'item-11', 'approved', datetime('now', '-1 second'))`,
+		qID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 0 || skipped != 1 {
+		t.Errorf("gated, signal-record-fails: expected (0,1), got (%d,%d)", triggered, skipped)
+	}
+
+	var status string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM gate_items WHERE id = 'item-11'`).Scan(&status); err != nil {
+		t.Fatalf("SELECT status: %v", err)
+	}
+	if status != "reviewing" {
+		t.Errorf("item status = %q, want unchanged %q", status, "reviewing")
+	}
+
+	var qCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_eval_queue`).Scan(&qCount); err != nil {
+		t.Fatalf("SELECT queue: %v", err)
+	}
+	if qCount != 0 {
+		t.Errorf("queue row not deleted, count=%d", qCount)
+	}
+}
+
+// nthExecFailDB wraps a real DB and makes the nth ExecContext call fail.
+type nthExecFailDB struct {
+	DB
+	n    int
+	fail int // 1-indexed
+}
+
+func (d *nthExecFailDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	d.n++
+	if d.n == d.fail {
+		return nil, errors.New("simulated exec error")
+	}
+	return d.DB.ExecContext(ctx, q, args...)
+}
+
+func TestDrainEvalQueue_UngatedTransition_UpdateFails(t *testing.T) {
+	// The ungated (default) branch's own UPDATE failing — a pre-existing
+	// DrainEvalQueue path, unaffected by the authorization-gate addition.
+	// registerFlow runs against the unwrapped db so its own ExecContext
+	// calls don't shift the wrapped DB's call count; only DrainEvalQueue's
+	// own two ExecContext calls (UPDATE, then DELETE) are ever seen by it.
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	gatedItemFixture(t, db, "gate_items", "item-12", "reviewing")
+
+	regApp := &App{cfg: Config{DB: db}}
+	if err := regApp.RegisterFlow(StateFlow{
+		Name:        "gate-flow",
+		TypeName:    "GateItem",
+		States:      []State{{Name: "reviewing", IsInitial: true}, {Name: "approved"}},
+		Transitions: []Transition{{From: "reviewing", To: "approved"}}, // no RequiredRole
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+
+	qID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'GateItem', 'item-12', 'approved', datetime('now', '-1 second'))`,
+		qID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	wrapped := &nthExecFailDB{DB: db, fail: 1} // 1st ExecContext inside DrainEvalQueue = the UPDATE
+	app := &App{cfg: Config{DB: wrapped}}
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 0 || skipped != 1 {
+		t.Errorf("ungated, update fails: expected (0,1), got (%d,%d)", triggered, skipped)
+	}
+}
+
+func TestDrainEvalQueue_DeleteFails(t *testing.T) {
+	// The queue-row DELETE failing — logged, does not affect the returned
+	// counts (the transition itself already applied or was handled).
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	gatedItemFixture(t, db, "gate_items", "item-13", "reviewing")
+
+	regApp := &App{cfg: Config{DB: db}}
+	if err := regApp.RegisterFlow(StateFlow{
+		Name:        "gate-flow",
+		TypeName:    "GateItem",
+		States:      []State{{Name: "reviewing", IsInitial: true}, {Name: "approved"}},
+		Transitions: []Transition{{From: "reviewing", To: "approved"}}, // no RequiredRole
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+
+	qID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'GateItem', 'item-13', 'approved', datetime('now', '-1 second'))`,
+		qID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	wrapped := &nthExecFailDB{DB: db, fail: 2} // 1st = UPDATE (succeeds), 2nd = DELETE (fails)
+	app := &App{cfg: Config{DB: wrapped}}
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 1 || skipped != 0 {
+		t.Errorf("delete fails: expected (1,0), got (%d,%d)", triggered, skipped)
+	}
 }
 
 func TestRegisterFlow_checkTriggerQueryFail(t *testing.T) {

@@ -310,3 +310,133 @@ more consequential now that more transitions are gated, not less.
 Status: Ratified 2026-08-09.
 
 ---
+
+## A241 — D40's gate, and D42/T211's authority half
+
+### Part 1 — D40
+
+`orchDecisionFlow()`'s `pending-re-evaluation → ratified` and
+`pending-re-evaluation → superseded` transitions gain `RequiredRole: "admin"`,
+`Strict: true` — matching D34's own `proposed → ratified`/`ratified →
+superseded` exactly.
+
+`decisionRatifyModule` (`module_test.go`), the fixture A234's own tests
+already use for a real `Module[*Decision]` with governance + `orchDecisionFlow`
+wired against a real DB, took a hardcoded `"proposed"` seed status. Generalized
+to `decisionModuleAtStatus(t, status string)`; its 3 existing callers now pass
+`"proposed"` explicitly — confirmed by inspection, not assumed, that none of
+them exercised any other status, so this is a pure generalization with no
+behaviour change to the existing three tests.
+
+4 new tests, reusing the generalized fixture seeded at
+`"pending-re-evaluation"`, mirroring the existing D34 ratify tests' own
+shape — a real `updateHandler` call, real `httptest.Recorder`, real
+`RoleStore` grant/no-grant, not a struct-field assertion:
+`TestModule_updateHandler_decisionReEvalRatify_forbidden`/`_authorized`,
+`TestModule_updateHandler_decisionReEvalSupersede_forbidden`/`_authorized`.
+`TestDecisionFlow_definition` extended (not just added to) to also find and
+assert `RequiredRole`/`Strict` on both new transitions.
+
+### Part 2 — D42, T211's authority half
+
+Implements D42 in full — read D42's own body for the argued design decision
+(the `Strict`-carve-out gap found in the naive `validateTransition(ctx, db,
+rs, "", ...)` approach, the two rejected alternatives, and the stated
+unwired-governance consequence); not restated here per D41's own rule against
+restating a conclusion in new words.
+
+`App.DrainEvalQueue` (`state.go`) now declines to apply any transition whose
+target flow declares a `RequiredRole`. New `drainAuthorizationGate(ctx, db DB,
+table, typeName, itemID, toState string) (fromState, requiredRole string, err
+error)`: reads the item's live status directly — `smeldr_eval_queue` stores
+only `to_state`, confirmed directly (the INSERT site, `state.go`) has no
+`from_state` column, so the gate question cannot be answered without this
+read — then the same two-step flow-id lookup `validateTransition` already
+uses (type-specific, falling back to the seeded `"default"` flow), then reads
+`required_role` for the specific `from→to` transition row. Returns the role
+name itself, not a bool, so the caller never has to re-derive "which role" from
+a separate lookup.
+
+New `recordAuthorizationRequiredSignal(ctx, db DB, typeName, itemID, fromState,
+toState, requiredRole string) error`: raw `INSERT INTO smeldr_signals` (`$N`
+placeholders, this codebase's own convention — not `smeldr.dev/mcp`'s `?`
+style), `sender="system"`, `receiver=requiredRole` (never a hardcoded role —
+`RequiredRole` is free-form, and a fixed value would be a false statement about
+authority on any instance with a custom role name), `signal_type=
+"authorization-required"`, `status='pending'` (`orchSignalFlow`'s own initial
+state).
+
+`DrainEvalQueue`'s loop gains one branch: gate-check error → existing skip+log
+treatment (a plain failure is not an authorization verdict, so it is not
+conflated with one); role required → `recordAuthorizationRequiredSignal`
+instead of the `UPDATE`, `skipped++`; not gated → the existing raw `UPDATE`,
+byte-for-byte unchanged. The queue row is deleted unconditionally in every
+case, matching the pre-existing "failed transitions are not re-queued" rule —
+blocked transitions are not re-queued either.
+
+**Two limits named here, deliberately not built here — architect review:**
+
+1. **The gate is authorization, not validation.** `drainAuthorizationGate`
+   returns "not gated" both when a transition is genuinely open and when the
+   transition row simply doesn't exist (`sql.ErrNoRows`) — `validateTransition`
+   treats that same missing-row case as `ErrConflict` (not permitted at all).
+   Correct for the question this gate asks (no declared `required_role` means
+   nothing to enforce), but it means the drain still applies a transition the
+   flow never declared as legal in the first place — a different gap than the
+   authority question this task answers. Declared-transition validity on the
+   drain path belongs with T211's still-open observability half, not here.
+2. **A `recordAuthorizationRequiredSignal` failure is the one way the loud
+   failure goes quiet.** If the `Signal` insert itself fails, the item is not
+   transitioned, no `Signal` exists, and the queue row is still deleted (a
+   `slog.WarnContext` log line is the only trace). This is a real gap in D42's
+   own argument — the whole point of a `Signal` over a log line is that it
+   persists and is queryable — but keeping the queue row on this one failure
+   mode would mean special-casing `DrainEvalQueue`'s existing, pre-existing
+   "failed transitions are not re-queued" rule for a single branch, which is
+   not this task's rule to revisit. Named so a future reader does not assume
+   the `Signal` path is unconditionally reliable.
+
+### Tests and coverage
+
+15 new tests. 6 direct `drainAuthorizationGate` unit tests, one per branch:
+status-read error, same-state short-circuit, no flow registered anywhere for
+the type (genuinely exercised via `newSQLiteDB` rather than `newMigratedDB` —
+`migrateStateFlows` always seeds a `"default"` flow, so a `newMigratedDB`-based
+attempt at this case silently falls through to that default flow instead, a
+real trap caught while writing the test, not assumed safe), flow found but no
+matching transition row, transition found but ungated, transition found and
+gated, and a transition-row query error. `recordAuthorizationRequiredSignal`:
+one success test asserting the inserted row's exact fields, one INSERT-error
+test.
+
+`DrainEvalQueue`-level tests prove the wiring, not the mechanism, through the
+real `App.DrainEvalQueue` entry point exclusively — per explicit architect
+review criterion for this task: a gated transition blocks the item (status
+unchanged), records exactly one `authorization-required` `Signal` addressed to
+the declared role, and still deletes the queue row; a `recordAuthorizationRequiredSignal`
+failure logs and continues rather than panicking or double-counting. Two
+pre-existing `DrainEvalQueue` branches — the ungated path's own `UPDATE`
+failure and the queue-row `DELETE` failure — lost their only prior test
+coverage as a side effect of the new gate-check now running first (the
+existing `TestDrainEvalQueue_transitionFail` fixture now fails at the
+gate-check stage instead of at the `UPDATE`, same observable outcome, moved
+cause — its comment updated to say so rather than leaving a stale claim in
+place); given fresh, direct coverage instead via a new `nthExecFailDB` test
+wrapper (mirroring the existing `nthQueryRowFailDB` pattern).
+
+No exported symbols changed anywhere. Coverage: 96.2% package-wide;
+`drainAuthorizationGate`, `recordAuthorizationRequiredSignal`, and
+`DrainEvalQueue` all 100%. `go build`/`vet`/`gofmt`/`test`/`golangci-lint` all
+clean.
+
+### Coverage and versioning
+
+Patch bump — consumer-observable behaviour change on any governance-enabled
+instance (`PUT /decisions/{slug}` re-evaluation-door ratify/supersede now
+requires `admin`; any instance with a `RequiredRole`-gated `DrainEvalQueue`
+target now blocks automation on it instead of silently applying it), no new
+exported symbols. v1.61.1 → v1.61.2.
+
+Status: Implements D40, D42.
+
+---

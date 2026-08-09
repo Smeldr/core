@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.61.2] — 2026-08-09
+
+### Fixed
+- `orchDecisionFlow()`'s `pending-re-evaluation → ratified`/`→ superseded` transitions now require the `admin` role (`Strict`, matching D34's own direct-path transitions) — ratifying/superseding is the same authority-bearing act regardless of which door it is entered through. (A241, D40)
+- `App.DrainEvalQueue` no longer applies a transition that declares a `RequiredRole` — automation records a `Signal` naming the required role instead of crossing the boundary itself. Nothing in production changes today (the only target the drain currently reaches, `pending-re-evaluation`, is deliberately ungated by D40), but any future `RequiredRole`-gated drain target now fails loudly instead of silently succeeding. (A241, D42)
+
+---
+
 ## [1.61.1] — 2026-08-08
 
 ### Fixed

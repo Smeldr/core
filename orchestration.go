@@ -625,15 +625,20 @@ func orchDecisionFlow() StateFlow {
 			{Name: "archived", IsTerminal: true},
 		},
 		Transitions: []Transition{
-			// D34: ratify and supersede require the "admin" role, fail-closed
-			// (Strict) so a nil RoleStore or missing actor rejects rather than
-			// silently allows — the highest of the three built-in seeded
-			// roles, requiring no new provisioning to start enforcing.
+			// D34/D40: ratify and supersede require the "admin" role,
+			// fail-closed (Strict) so a nil RoleStore or missing actor
+			// rejects rather than silently allows — the highest of the
+			// three built-in seeded roles, requiring no new provisioning
+			// to start enforcing. D40 extends the same gate to the
+			// re-evaluation door into the same two states: ratifying or
+			// superseding is an authority-bearing act regardless of which
+			// state it is entered from, and having been re-evaluated first
+			// does not supply the authority the direct path requires.
 			{From: "proposed", To: "ratified", RequiredRole: "admin", Strict: true},
 			{From: "proposed", To: "archived"},
 			{From: "ratified", To: "pending-re-evaluation"},
-			{From: "pending-re-evaluation", To: "ratified"},
-			{From: "pending-re-evaluation", To: "superseded"},
+			{From: "pending-re-evaluation", To: "ratified", RequiredRole: "admin", Strict: true},
+			{From: "pending-re-evaluation", To: "superseded", RequiredRole: "admin", Strict: true},
 			{From: "ratified", To: "superseded", RequiredRole: "admin", Strict: true},
 			{From: "superseded", To: "archived"},
 		},

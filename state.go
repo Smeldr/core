@@ -736,15 +736,99 @@ func isNoSuchTable(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "no such table")
 }
 
+// drainAuthorizationGate reports whether typeName's fromState→toState
+// transition requires a role — automation may never cross such a boundary
+// itself (D42, [DrainEvalQueue]'s authority half of T211).
+// requiredRole is empty when the transition is not gated; a non-empty
+// value is the exact role name the flow declares, independent of whether
+// that transition is [Transition.Strict] and independent of whether
+// governance is wired on this instance — declaring a RequiredRole is the
+// operator's stated intent about that transition, and the absence of a
+// wired [RoleStore] does not withdraw it for an unattended caller.
+//
+// Returns the item's current status as fromState (needed by the caller
+// either way, and unavailable from smeldr_eval_queue itself, which stores
+// only toState). A query error is reported as err, not folded into a
+// "gated" verdict — the caller falls back to its own existing skip+log
+// behaviour for a plain failure rather than misreporting it as an
+// authorization block.
+func drainAuthorizationGate(ctx context.Context, db DB, table, typeName, itemID, toState string) (fromState, requiredRole string, err error) {
+	if err := db.QueryRowContext(ctx,
+		"SELECT status FROM "+quoteIdent(table)+" WHERE id = $1", itemID,
+	).Scan(&fromState); err != nil {
+		return "", "", fmt.Errorf("smeldr: drainAuthorizationGate: read status: %w", err)
+	}
+	if fromState == toState {
+		return fromState, "", nil
+	}
+
+	var flowID string
+	lookupErr := db.QueryRowContext(ctx,
+		`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
+	).Scan(&flowID)
+	if lookupErr != nil {
+		lookupErr = db.QueryRowContext(ctx,
+			`SELECT id FROM smeldr_state_flows WHERE type_name IS NULL AND name = 'default' LIMIT 1`,
+		).Scan(&flowID)
+		if lookupErr != nil {
+			return fromState, "", nil // no flow registered — nothing to gate
+		}
+	}
+
+	var role sql.NullString
+	rowErr := db.QueryRowContext(ctx,
+		`SELECT required_role FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = $3`,
+		flowID, fromState, toState,
+	).Scan(&role)
+	if errors.Is(rowErr, sql.ErrNoRows) {
+		return fromState, "", nil // transition not declared — nothing to gate
+	}
+	if rowErr != nil {
+		return "", "", fmt.Errorf("smeldr: drainAuthorizationGate: read transition: %w", rowErr)
+	}
+	if !role.Valid {
+		return fromState, "", nil
+	}
+	return fromState, role.String, nil
+}
+
+// recordAuthorizationRequiredSignal inserts a Signal recording that
+// typeName/itemID's fromState→toState transition requires a human holding
+// requiredRole — the loud-failure half of T211's authority answer
+// ([drainAuthorizationGate]). A Signal is a persisted, queryable row
+// (unlike a log line), addressed to the exact role the flow declares —
+// never a hardcoded role, since RequiredRole is free-form and a Signal
+// naming the wrong authority would be a false statement about who may act.
+func recordAuthorizationRequiredSignal(ctx context.Context, db DB, typeName, itemID, fromState, toState, requiredRole string) error {
+	id := NewID()
+	now := time.Now().UTC()
+	message := fmt.Sprintf("%s %s: %s→%s requires role %q", typeName, itemID, fromState, toState, requiredRole)
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_signals
+			(id, slug, status, created_at, updated_at, sender, receiver, signal_type, message, task_ref, sequence)
+		VALUES
+			($1, $2, 'pending', $3, $4, 'system', $5, 'authorization-required', $6, '', 0)`,
+		id, id, now, now, requiredRole, message,
+	)
+	if err != nil {
+		return fmt.Errorf("smeldr: recordAuthorizationRequiredSignal: %w", err)
+	}
+	return nil
+}
+
 // DrainEvalQueue transitions items whose scheduled evaluation time has arrived.
-// It selects all rows from smeldr_eval_queue WHERE eval_at <= now, applies a
-// direct status UPDATE to each item, then deletes the queue row regardless of
-// whether the UPDATE succeeded (failed transitions are not re-queued — they
-// are logged and counted as skipped).
+// It selects all rows from smeldr_eval_queue WHERE eval_at <= now, then for
+// each row checks whether the item's current status→to_state transition is
+// role-gated ([drainAuthorizationGate]): if not, applies a direct status
+// UPDATE; if it is, automation does not cross the boundary itself — a
+// [recordAuthorizationRequiredSignal] Signal is recorded instead. Either way
+// the queue row is deleted regardless of outcome (failed or blocked
+// transitions are not re-queued — they are logged/recorded and counted as
+// skipped).
 //
 // Returns the number of items transitioned (triggered) and items skipped due
-// to errors. Returns (0, 0, nil) when Config.DB is nil or the table does not
-// yet exist (fail-open).
+// to errors or a role gate. Returns (0, 0, nil) when Config.DB is nil or the
+// table does not yet exist (fail-open).
 func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err error) {
 	db := a.cfg.DB
 	if db == nil {
@@ -788,18 +872,42 @@ func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err e
 	now := time.Now().UTC()
 	for _, r := range pending {
 		table := resolveItemTable(ctx, db, r.typeName)
-		_, updateErr := db.ExecContext(ctx,
-			"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
-			r.toState, now, r.itemID,
-		)
-		if updateErr != nil {
-			slog.WarnContext(ctx, "smeldr: DrainEvalQueue: UPDATE failed",
-				"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "error", updateErr)
+
+		fromState, requiredRole, gateErr := drainAuthorizationGate(ctx, db, table, r.typeName, r.itemID, r.toState)
+		switch {
+		case gateErr != nil:
+			// A plain failure, not an authorization verdict — falls back
+			// to the same skip+log treatment as any other DrainEvalQueue
+			// error rather than misreporting it as "authorization
+			// required."
+			slog.WarnContext(ctx, "smeldr: DrainEvalQueue: authorization gate check failed",
+				"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "error", gateErr)
 			skipped++
-		} else {
-			triggered++
+		case requiredRole != "":
+			// Automation may never cross a role-gated boundary itself —
+			// the authority half of T211. Emit the loud-failure Signal
+			// instead of applying the transition.
+			if sigErr := recordAuthorizationRequiredSignal(ctx, db, r.typeName, r.itemID, fromState, r.toState, requiredRole); sigErr != nil {
+				slog.WarnContext(ctx, "smeldr: DrainEvalQueue: authorization-required signal failed",
+					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "required_role", requiredRole, "error", sigErr)
+			}
+			skipped++
+		default:
+			_, updateErr := db.ExecContext(ctx,
+				"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
+				r.toState, now, r.itemID,
+			)
+			if updateErr != nil {
+				slog.WarnContext(ctx, "smeldr: DrainEvalQueue: UPDATE failed",
+					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "error", updateErr)
+				skipped++
+			} else {
+				triggered++
+			}
 		}
-		// Always delete from queue — failed transitions are not re-queued.
+
+		// Always delete from queue — failed/blocked transitions are not
+		// re-queued.
 		if _, delErr := db.ExecContext(ctx,
 			`DELETE FROM smeldr_eval_queue WHERE id = $1`, r.id,
 		); delErr != nil {
