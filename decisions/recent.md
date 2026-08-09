@@ -30,6 +30,121 @@ Archived 2026-08-08: A227-A233, D33-D37, A234-A235 → phase21-archive.md
 Archived 2026-08-09: A236-A240, D38-D39 → phase22-archive.md
 ---
 
+## D42 — Automation never crosses a role-gated transition; it stops and says so
+
+### Scope
+
+core
+
+### Decision
+
+When an automated path reaches a state transition that declares a
+`RequiredRole`, it **does not perform the transition**. It leaves the item
+where it is and records a `Signal` stating that a human holding the governing
+role must act.
+
+**The predicate is `RequiredRole != ""`, evaluated independently of `Strict`
+and independently of whether governance is wired.** A transition that names a
+role is closed to automation, full stop.
+
+First applied in `App.DrainEvalQueue` (`state.go:748`), the timer-driven path
+that transitions items whose `eval_at` has passed. It is the general rule for
+every automated path, not a property of that one function.
+
+### Why the obvious implementation is the wrong one
+
+The natural move is to call the existing
+`validateTransition(ctx, db, rs, "", typeName, from, to, "")` with an empty
+`actorID` and let it decide. **It does not implement this rule**, and the
+architect's own dispatch suggested trying it before core-implementer checked.
+
+`state.go:440-445`: an empty `actorID` is treated as *pre-authorized* unless
+the transition is `Strict`. A non-strict gated transition would let automation
+straight through. The bug would not appear on any transition that exists
+today, because D34's and D40's four gates are all `Strict: true`. It would
+appear the first time someone registers a gated transition without `Strict`,
+which is a reasonable thing to do and carries no warning that it opens a hole.
+
+`Strict` answers a different question: whether an *interactive* caller, with a
+real but unauthorized actor, fails closed or open when governance is not
+wired. It says nothing about a caller with no actor at all. The two questions
+were conflated because until now only one of them was ever asked.
+
+The check therefore has its own narrow implementation that asks only "does this
+transition name a role", never "is this absent actor authorized". Automation is
+not trying to be someone. What it must not do is be no one and treat that as
+sufficient.
+
+### The Signal names the role that is actually required
+
+The emitted `Signal` carries `receiver = <the transition's required_role>`, not
+a hardcoded `"admin"`. `RequiredRole` is a free-form role name, so a fixed
+`"admin"` would be a false statement about authority on any instance with a
+custom role. "Which authority does this require" is also the field a human-
+facing surface needs, so the record carries it rather than having it re-derived
+from the transition row later.
+
+`sender = "system"`, `signal_type = "authorization-required"`, `status =
+"pending"` (`orchSignalFlow`'s initial state). Addressing the role rather than
+an individual matches D38's `Run` reclaim convention: the model knows roles and
+token bearers, never people.
+
+### Alternatives considered and rejected
+
+- **Automation is exempt, because authority was granted when the trigger was
+  configured.** There is no authorization event to point at. `RegisterFlow` is
+  Go code run at startup by whoever wrote `main.go`, not an audited act by an
+  identified actor. `define_state_flow` is admin-gated and would be such an
+  act, but nothing records who called it, so the drain has nothing to consult.
+  This option asserts a chain of authority that does not exist on disk.
+- **The trigger carries an actor, and automation acts as whoever configured
+  it.** Closer, since `define_state_flow` does have a real actor to capture.
+  Rejected on Article XI rather than on mechanics: configuring a trigger is a
+  one-time act of setting up a rule, and a timer firing months later "as" that
+  admin manufactures a fresh authorization event out of a stale one. The
+  mechanics are also bad (no actor column on `TransitionTrigger` or
+  `smeldr_eval_queue`, and an unanswered question about what happens to a
+  queued row when the configuring admin's grant is revoked), but the
+  constitutional objection stands on its own.
+- **Mirror `validateTransition`'s non-strict carve-out, so the drain also
+  skips the check when governance is unwired.** Rejected. Declaring a
+  `RequiredRole` is the operator's stated intent about that transition;
+  not having wired governance yet does not withdraw the declaration.
+
+### Consequences
+
+**A visible asymmetry on instances that declare roles without wiring
+governance.** Where a flow sets `RequiredRole` and `App.Governance()` was never
+called, `rs == nil` and an interactive caller passes on the non-strict path
+(`state.go:433-439`), while automation now blocks and emits a `Signal`
+addressed to a role that has no definition anywhere. Interactive passes,
+automated stops, on the identical transition. This is stated rather than fixed:
+a `Signal` nobody can act on is a visible defect in that instance's own setup,
+which is the loud failure this decision is for.
+
+**Nothing in production changes today.** The only transition the drain
+currently reaches is entry into `pending-re-evaluation`, which D40 deliberately
+leaves ungated. The rule exists so that the first gated target ever configured
+fails loudly instead of silently succeeding.
+
+**Blocked items are not deduplicated.** A blocked item's queue row is deleted
+like any other, matching `DrainEvalQueue`'s existing "failed transitions are
+not re-queued" rule. If the same eval arms again later, a second `Signal` is
+raised rather than being matched against the unresolved first one.
+Re-arm/dedup policy is orthogonal to who may authorize a crossing and is not
+settled here.
+
+**T211's observability half stays open.** The ungated path still applies its
+transition through a raw `UPDATE` with no `ProvenanceRecord`, no `Signal`
+dispatch and no cache invalidation. Closing it needs either an `App`-level
+type-name-to-module registry or type-erased dispatch, both of which land in M5
+territory. This decision covers who may cross a boundary, not what gets
+recorded when one is crossed legitimately.
+
+Status: Ratified 2026-08-09.
+
+---
+
 ## D41 — A conclusion that forecloses an alternative is registered as a Decision, or it will be rediscovered
 
 ### Scope
