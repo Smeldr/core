@@ -217,3 +217,143 @@ must not be revoked.
 Status: Ratified 2026-08-09.
 
 ---
+
+## A242 — D43 + D44/T216, smeldr/core half
+
+### Verified before touching anything, not assumed
+
+D43 states `RoleGranted`/`Authorized` resolve the actor from `User.ID`,
+never `smeldr_tokens.id`. Grepped every production call site to confirm
+this holds everywhere, not just where D43 itself had already checked:
+
+```
+module.go:1369        m.roleStore.Authorized(ctx, ctx.User().ID, "read", ...)
+module.go:1397        m.roleStore.Authorized(ctx, ctx.User().ID, op, ...)
+orchestration.go:222  rs.RoleGranted(ctx, actorID, role, AuthTarget{})
+state.go:451          rs.RoleGranted(ctx, actorID, requiredRole.String, AuthTarget{})
+mcp/tool.go:89        rs.Authorized(ctx, ctx.User().ID, requiredOp, target)
+```
+
+All five resolve from `ctx.User().ID` or a JWT-sourced `actorID`. D43 had
+checked two of these before this task; this closes the other three. Removal
+breaks no working path, because no working path was ever reading the rows
+`migrateTokenGrants` produced.
+
+### Part 1 — remove the bridge
+
+`migrateTokenGrants` removed (`governance.go`), along with its call site in
+`migrateGovernance` and 8 dedicated tests. The bootstrap grant in
+`App.Handler` (A237) is untouched — it grants against the JWT `User.ID`
+directly, D43's named exception, already correct.
+
+### The inert-row question — membership, not shape
+
+What happens to existing `smeldr_role_grants` rows keyed on a fingerprint?
+Once `list_grants` ships (`smeldr.dev/mcp`, A243), calling it would return
+these mixed in with real grants, with no way to tell them apart short of
+knowing the 64-hex-character diagnostic. Left alone, that's a real cost of
+doing nothing, not a hypothetical one.
+
+The first draft of the fix deleted rows whose `token_id` was 64 hex
+characters — D43's own diagnostic, made executable. Wrong predicate, caught
+on review: that diagnostic exists so a human reading a table can tell the
+two apart by eye. As a `DELETE` predicate it deletes authorization data on
+the *shape* of a string, and would take a legitimate grant with it if any
+deployment ever produced a `User.ID` of that shape. OAuth-issued tokens do
+not go through `NewID()`.
+
+The exact predicate was already sitting in the bug itself:
+`migrateTokenGrants` wrote `smeldr_tokens.id` into `token_id`, so an inert
+row is precisely one whose `token_id` **appears in** `smeldr_tokens.id` — a
+real grant's `token_id` can never appear there without a SHA-256 preimage.
+New `pruneInertTokenGrants(ctx, db) (removed int, err error)`:
+
+```go
+func pruneInertTokenGrants(ctx context.Context, db DB) (removed int, err error) {
+	result, err := db.ExecContext(ctx,
+		`DELETE FROM smeldr_role_grants WHERE token_id IN (SELECT id FROM smeldr_tokens)`,
+	)
+	...
+}
+```
+
+Fail-open (missing `smeldr_tokens` errors, caller logs and continues — the
+same treatment the removed migration had for the same reason), logged via
+`slog.Info` on every run including zero removed, so a fresh instance's own
+startup log shows the check ran rather than merely that it found nothing.
+Wired into `migrateGovernance` in place of the removed call.
+
+**Stated plainly, because the name alone doesn't say it — this is
+enforcement, not migration.** `pruneInertTokenGrants` is not one-time
+cleanup that eventually has nothing left to do. It runs on every
+`migrateGovernance` call — every app startup, forever — and deletes any
+`smeldr_role_grants` row whose `token_id` appears in `smeldr_tokens.id`,
+full stop. It doesn't know or care that today's matching rows came from a
+removed migration; it enforces D43's own rule (granting is a separate,
+explicit act, never a byproduct of a token's role field) continuously,
+which is stronger than a cleanup pass and is the right shape for that rule.
+The consequence worth naming: anyone who ever keys a grant on
+`smeldr_tokens.id` deliberately will watch it vanish at their next restart,
+with a log line that gives no hint their own choice is what triggered it.
+
+`TestPruneInertTokenGrants_RemovesOnlyMatchingRows` proves the fix is
+membership, not shape directly: it seeds a real grant whose `token_id` is
+*also* 64 hex characters but never appears in `smeldr_tokens.id`, and
+asserts it survives pruning while the genuinely inert row is removed.
+
+### Part 3 — audit is not optional (D44)
+
+`App.Governance` now unconditionally calls `CreateGovernanceAuditTable` and
+constructs a `GovernanceAuditStore`, held on a new unexported
+`App.governanceAudit` field alongside the existing `App.governance`. New
+`App.GovernanceAuditStore()` accessor beside `App.RoleStore()`. No option,
+no opt-out — D44's own argument is that this is what makes it impossible to
+reach a governance-enabled instance with no audit trail.
+
+**A real design point, found while planning, that does not follow from
+`RoleStore.WithAudit`'s own signature and would have been easy to build
+wrong:** `WithAudit(actorTokenID string, log GovernanceAuditStore)
+*RoleStore` bakes one fixed actor into the store it returns. It cannot be
+wired once at startup — every MCP call comes from a different token. Every
+caller (`smeldr.dev/mcp`'s new grant tools, A243) must derive a **fresh**
+audit-wrapped store per request: `rs.WithAudit(ctx.User().ID, auditStore)`
+immediately before each `Grant`/`Revoke` call, never a single shared
+instance held across requests. Recorded here so it is not rediscovered, and
+not left only in a plan file that gets deleted.
+
+### Part 2 — tool policy rows
+
+Three new rows in `seedToolPolicies`, matching `create_token`/`list_tokens`/
+`revoke_token`'s own `"administer"` gate exactly: `grant_role`,
+`list_grants`, `revoke_grant`. Must ship in the same release as
+`smeldr.dev/mcp`'s own tool implementation (A243) — `authoriseTool`
+(`mcp/tool.go`) treats a tool with no `smeldr_tool_policies` row as denied
+for everyone, the identical code path a real DB error takes.
+
+### Tests and coverage
+
+17 new/extended tests: `pruneInertTokenGrants` — exec error (including the
+real missing-`smeldr_tokens` case), `RowsAffected` error, the
+membership-vs-shape regression above, idempotency; `App.Governance`
+extended to assert `GovernanceAuditStore()` is non-nil on success, plus a
+new test for `CreateGovernanceAuditTable` itself failing (neither
+`RoleStore()` nor `GovernanceAuditStore()` gets wired on that path);
+`seedToolPolicies`'s existing spot-check table extended with the three new
+rows. No new error-path table needed beyond `pruneInertTokenGrants`'s own —
+every other touched function's error paths were already tested before this
+task.
+
+No exported symbols removed. New exported `App.GovernanceAuditStore()`.
+Coverage: 96.3% package-wide; `pruneInertTokenGrants`, `Governance`,
+`GovernanceAuditStore`, `migrateGovernance` all 100%. `go build`/`vet`/
+`gofmt`/`test`/`golangci-lint` all clean. `example/server` unaffected by
+design — D44's whole point is that it needs no audit wiring of its own.
+
+### Coverage and versioning
+
+MINOR bump — new exported API surface (`App.GovernanceAuditStore()`), same
+classification as A235/A236's own new-symbol additions. v1.61.2 → v1.62.0.
+
+Status: Implements D43, D44.
+
+---

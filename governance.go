@@ -86,10 +86,10 @@ func migrateGovernance(ctx context.Context, db DB) error {
 		return err
 	}
 
-	// Token migration: fail-open. smeldr_tokens may not exist in every
+	// Inert-grant cleanup: fail-open. smeldr_tokens may not exist in every
 	// deployment (apps that never call WithTokenStore). Log and continue.
-	if err := migrateTokenGrants(ctx, db); err != nil {
-		slog.Warn("smeldr: migrateGovernance: token grant migration skipped", "err", err)
+	if _, err := pruneInertTokenGrants(ctx, db); err != nil {
+		slog.Warn("smeldr: migrateGovernance: inert grant pruning skipped", "err", err)
 	}
 	return nil
 }
@@ -232,6 +232,13 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		{"create_token", "administer"},
 		{"list_tokens", "administer"},
 		{"revoke_token", "administer"},
+		// Governance grant management (Admin gate — instance infrastructure,
+		// D43/T216). Must ship in the same release as smeldr.dev/mcp's
+		// grant_role/list_grants/revoke_grant tools: authoriseTool denies a
+		// tool with no policy row for everyone, the same as a DB error.
+		{"grant_role", "administer"},
+		{"list_grants", "administer"},
+		{"revoke_grant", "administer"},
 		// Nav tools (Editor gate for write — operational, not CRUDAP)
 		{"list_nav_items", "read"},
 		{"create_nav_item", "manage"},
@@ -272,66 +279,55 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 	return nil
 }
 
-// migrateTokenGrants inserts a global-scope smeldr_role_grants row for every
-// smeldr_tokens row whose role matches a built-in role name. Idempotent: the
-// insert uses a WHERE NOT EXISTS guard because SQLite treats NULLs as distinct
-// in UNIQUE constraints, making INSERT OR IGNORE unreliable for the
-// (token_id, role_id, NULL) triple.
+// pruneInertTokenGrants is not one-time cleanup — it is a permanent
+// invariant, enforced on every [migrateGovernance] call (every app
+// startup, forever): no smeldr_role_grants row may have a token_id that
+// appears in smeldr_tokens.id. It deletes any such row. Read that as
+// enforcement of D43's own rule ("granting a governance role is a separate,
+// explicit act — never a byproduct of a token's role field"), not as a
+// migration step that will eventually have nothing left to do and could be
+// removed. It never reaches a quiescent end state: it runs, and finds
+// nothing, on every healthy boot forever after the legacy rows are gone.
 //
-// Returns an error if smeldr_tokens cannot be queried. The caller
-// ([migrateGovernance]) handles this as a fail-open warning.
-func migrateTokenGrants(ctx context.Context, db DB) error {
-	rows, err := db.QueryContext(ctx, `SELECT id, role FROM smeldr_tokens`)
+// Concretely, today, this deletes rows left behind by the removed
+// migrateTokenGrants migration (D43) — rows whose token_id is a token
+// fingerprint (smeldr_tokens.id) rather than a JWT User.ID, and so can
+// never be reached by [RoleStore.RoleGranted]/[RoleStore.Authorized] (both
+// query by User.ID only). But the check does not know or care that those
+// rows came from a removed migration; it would just as readily remove a
+// grant someone deliberately keyed on smeldr_tokens.id today, silently, at
+// their next restart, with a log line that gives no indication their own
+// choice is what triggered it.
+//
+// The predicate is membership, not shape: a row is inert exactly when its
+// token_id appears in smeldr_tokens.id. A format check (e.g. "64 hex
+// characters", D43's own diagnostic for a human reading a table) would
+// delete authorization data based on what a string looks like rather than
+// what it is, and would take a legitimate grant with it if any deployment
+// ever produced a User.ID of that shape — a real grant's token_id can never
+// appear in smeldr_tokens.id without a SHA-256 preimage, so membership is
+// exact where shape is only usually right.
+//
+// Logged on every run, including zero removed, so a fresh instance's own
+// startup log shows the check ran rather than merely that it found nothing.
+//
+// Returns an error if smeldr_role_grants or smeldr_tokens cannot be
+// queried. The caller ([migrateGovernance]) handles this as a fail-open
+// warning, the same treatment the removed migrateTokenGrants migration
+// (D43) had for the same reason.
+func pruneInertTokenGrants(ctx context.Context, db DB) (removed int, err error) {
+	result, err := db.ExecContext(ctx,
+		`DELETE FROM smeldr_role_grants WHERE token_id IN (SELECT id FROM smeldr_tokens)`,
+	)
 	if err != nil {
-		return fmt.Errorf("smeldr: migrateTokenGrants: query tokens: %w", err)
+		return 0, fmt.Errorf("smeldr: pruneInertTokenGrants: %w", err)
 	}
-	defer rows.Close()
-
-	type tokenRow struct {
-		id   string
-		role string
+	n, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("smeldr: pruneInertTokenGrants: rows affected: %w", err)
 	}
-	var tokens []tokenRow
-	for rows.Next() {
-		var t tokenRow
-		if err := rows.Scan(&t.id, &t.role); err != nil {
-			return fmt.Errorf("smeldr: migrateTokenGrants: scan: %w", err)
-		}
-		tokens = append(tokens, t)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("smeldr: migrateTokenGrants: rows: %w", err)
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	for _, t := range tokens {
-		var roleID string
-		err := db.QueryRowContext(ctx,
-			`SELECT id FROM smeldr_roles WHERE name = $1`, t.role,
-		).Scan(&roleID)
-		if err == sql.ErrNoRows {
-			continue // unknown role — no grant
-		}
-		if err != nil {
-			return fmt.Errorf("smeldr: migrateTokenGrants: lookup role %q: %w", t.role, err)
-		}
-
-		// WHERE NOT EXISTS guard: NULL values in UNIQUE constraints are treated as
-		// distinct by SQLite, so ON CONFLICT would not prevent duplicate
-		// (token_id, role_id, NULL) rows. IS NOT DISTINCT FROM handles NULL portably.
-		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_role_grants (id, token_id, role_id, scope_static, scope_anchor_id, created_at)
-				SELECT $1, $2, $3, '[]', NULL, $4
-				WHERE NOT EXISTS (
-					SELECT 1 FROM smeldr_role_grants
-					WHERE token_id = $5 AND role_id = $6 AND scope_anchor_id IS NULL
-				)`,
-			NewID(), t.id, roleID, now, t.id, roleID,
-		); err != nil {
-			return fmt.Errorf("smeldr: migrateTokenGrants: insert grant for token %q: %w", t.id, err)
-		}
-	}
-	return nil
+	slog.Info("smeldr: pruneInertTokenGrants: removed inert fingerprint-keyed grants", "removed", n)
+	return int(n), nil
 }
 
 // RoleDefinition describes a named set of operations and scope shape that may be
@@ -1194,7 +1190,16 @@ func (a *App) Governance(store *RoleStore) error {
 	if err := migrateGovernance(context.Background(), a.cfg.DB); err != nil {
 		return fmt.Errorf("smeldr: Governance: %w", err)
 	}
+	// D44: an authority mutation always leaves a record, and the record is
+	// not optional. Wiring governance wires audit — there is no separate
+	// opt-in, and no way to reach a governance-enabled instance with no
+	// audit trail. CreateGovernanceAuditTable is idempotent, safe to call
+	// on every startup.
+	if err := CreateGovernanceAuditTable(a.cfg.DB); err != nil {
+		return fmt.Errorf("smeldr: Governance: %w", err)
+	}
 	a.governance = store
+	a.governanceAudit = NewGovernanceAuditStore(a.cfg.DB)
 	return nil
 }
 
@@ -1202,6 +1207,17 @@ func (a *App) Governance(store *RoleStore) error {
 // [App.Governance] has not been called.
 func (a *App) RoleStore() *RoleStore {
 	return a.governance
+}
+
+// GovernanceAuditStore returns the [GovernanceAuditStore] created alongside
+// the [RoleStore] by [App.Governance], or nil if [App.Governance] has not
+// been called. Per D44, this is never nil when [App.RoleStore] is non-nil —
+// governance and its audit trail are wired together, not independently.
+// Callers (e.g. smeldr.dev/mcp's grant/revoke tools) derive a per-request,
+// per-actor store via [RoleStore.WithAudit] before each mutation; this
+// accessor supplies the underlying log, not an actor-scoped store itself.
+func (a *App) GovernanceAuditStore() GovernanceAuditStore {
+	return a.governanceAudit
 }
 
 // ToolPolicy returns the required operation string for toolName from

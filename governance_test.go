@@ -226,6 +226,9 @@ func TestMigrateGovernance_ToolPoliciesSeed(t *testing.T) {
 		{"create_redirect", "manage"},
 		{"list_posts", "read"},
 		{"delete_post", "delete"},
+		{"grant_role", "administer"},
+		{"list_grants", "administer"},
+		{"revoke_grant", "administer"},
 	}
 	for _, c := range cases {
 		var op string
@@ -268,141 +271,183 @@ func TestMigrateGovernance_ToolPoliciesIdempotent(t *testing.T) {
 	}
 }
 
+// — pruneInertTokenGrants (D43/D44) ————————————————————————————————————————
+
+// rowsAffectedFailResult is a sql.Result whose RowsAffected always errors.
+type rowsAffectedFailResult struct{}
+
+func (rowsAffectedFailResult) LastInsertId() (int64, error) { return 0, nil }
+func (rowsAffectedFailResult) RowsAffected() (int64, error) {
+	return 0, errors.New("simulated rows affected error")
+}
+
+// rowsAffectedFailDB wraps a real DB and makes a matching ExecContext return
+// rowsAffectedFailResult instead of the real result.
+type rowsAffectedFailDB struct {
+	DB
+	failOn string
+}
+
+func (d *rowsAffectedFailDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	if strings.Contains(q, d.failOn) {
+		return rowsAffectedFailResult{}, nil
+	}
+	return d.DB.ExecContext(ctx, q, args...)
+}
+
+// TestPruneInertTokenGrants_ExecError verifies an error when the DELETE
+// itself fails — including the real-world case of a missing smeldr_tokens
+// table, which the DELETE's own subquery reads.
+func TestPruneInertTokenGrants_ExecError(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE smeldr_role_grants (id TEXT PRIMARY KEY, token_id TEXT NOT NULL, role_id TEXT NOT NULL, scope_static TEXT NOT NULL DEFAULT '[]', scope_anchor_id TEXT, created_at DATETIME NOT NULL)`,
+	); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	// smeldr_tokens deliberately not created.
+	if _, err := pruneInertTokenGrants(ctx, db); err == nil {
+		t.Fatal("expected error when smeldr_tokens is absent, got nil")
+	}
+}
+
+// TestPruneInertTokenGrants_RowsAffectedError verifies an error when
+// RowsAffected itself fails on an otherwise-successful DELETE.
+func TestPruneInertTokenGrants_RowsAffectedError(t *testing.T) {
+	db := newSQLiteDB(t)
+	setupTokensTable(t, db)
+	ctx := context.Background()
+	if err := migrateGovernance(ctx, db); err != nil {
+		t.Fatalf("migrateGovernance: %v", err)
+	}
+	wrapped := &rowsAffectedFailDB{DB: db, failOn: "DELETE FROM smeldr_role_grants"}
+	if _, err := pruneInertTokenGrants(ctx, wrapped); err == nil {
+		t.Fatal("expected error when RowsAffected fails, got nil")
+	}
+}
+
+// TestPruneInertTokenGrants_RemovesOnlyMatchingRows verifies the membership
+// predicate: a row whose token_id matches a real smeldr_tokens.id is
+// removed; a row whose token_id matches a real JWT User.ID (present nowhere
+// in smeldr_tokens) survives. Confirms the fix is membership, not shape —
+// the surviving row's token_id is deliberately also 64 hex characters, so a
+// format-based predicate would have wrongly removed it too.
+func TestPruneInertTokenGrants_RemovesOnlyMatchingRows(t *testing.T) {
+	db := newSQLiteDB(t)
+	setupTokensTable(t, db)
+	ctx := context.Background()
+	if err := migrateGovernance(ctx, db); err != nil {
+		t.Fatalf("migrateGovernance: %v", err)
+	}
+
+	fingerprint := strings.Repeat("a", 64)
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_tokens (id, role) VALUES (?, 'admin')`, fingerprint,
+	); err != nil {
+		t.Fatalf("insert token: %v", err)
+	}
+
+	var editorRoleID string
+	if err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_roles WHERE name = 'editor'`).Scan(&editorRoleID); err != nil {
+		t.Fatalf("lookup editor role: %v", err)
+	}
+
+	inertGrantID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_role_grants (id, token_id, role_id, scope_static, scope_anchor_id, created_at)
+			VALUES (?, ?, ?, '[]', NULL, ?)`,
+		inertGrantID, fingerprint, editorRoleID, time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		t.Fatalf("insert inert grant: %v", err)
+	}
+
+	// A real grant's token_id, coincidentally also 64 hex characters, but
+	// never present in smeldr_tokens.id — must survive.
+	realUserID := strings.Repeat("b", 64)
+	realGrantID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_role_grants (id, token_id, role_id, scope_static, scope_anchor_id, created_at)
+			VALUES (?, ?, ?, '[]', NULL, ?)`,
+		realGrantID, realUserID, editorRoleID, time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		t.Fatalf("insert real grant: %v", err)
+	}
+
+	removed, err := pruneInertTokenGrants(ctx, db)
+	if err != nil {
+		t.Fatalf("pruneInertTokenGrants: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("removed = %d, want 1", removed)
+	}
+
+	var inertCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_role_grants WHERE id = ?`, inertGrantID).Scan(&inertCount); err != nil {
+		t.Fatalf("count inert: %v", err)
+	}
+	if inertCount != 0 {
+		t.Error("fingerprint-keyed grant survived pruning")
+	}
+
+	var realCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_role_grants WHERE id = ?`, realGrantID).Scan(&realCount); err != nil {
+		t.Fatalf("count real: %v", err)
+	}
+	if realCount != 1 {
+		t.Error("real grant with a 64-hex-character User.ID was wrongly removed — pruning is using shape, not membership")
+	}
+}
+
+// TestPruneInertTokenGrants_Idempotent verifies a second run removes 0.
+func TestPruneInertTokenGrants_Idempotent(t *testing.T) {
+	db := newSQLiteDB(t)
+	setupTokensTable(t, db)
+	ctx := context.Background()
+	if err := migrateGovernance(ctx, db); err != nil {
+		t.Fatalf("migrateGovernance: %v", err)
+	}
+
+	fingerprint := strings.Repeat("c", 64)
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_tokens (id, role) VALUES (?, 'admin')`, fingerprint,
+	); err != nil {
+		t.Fatalf("insert token: %v", err)
+	}
+	var adminRoleID string
+	if err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_roles WHERE name = 'admin'`).Scan(&adminRoleID); err != nil {
+		t.Fatalf("lookup admin role: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_role_grants (id, token_id, role_id, scope_static, scope_anchor_id, created_at)
+			VALUES (?, ?, ?, '[]', NULL, ?)`,
+		NewID(), fingerprint, adminRoleID, time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		t.Fatalf("insert inert grant: %v", err)
+	}
+
+	first, err := pruneInertTokenGrants(ctx, db)
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if first != 1 {
+		t.Fatalf("first run removed = %d, want 1", first)
+	}
+	second, err := pruneInertTokenGrants(ctx, db)
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if second != 0 {
+		t.Errorf("second run removed = %d, want 0", second)
+	}
+}
+
 // TestMigrateGovernance_NilDB verifies that migrateGovernance returns an error
 // immediately when db is nil.
 func TestMigrateGovernance_NilDB(t *testing.T) {
 	ctx := context.Background()
 	if err := migrateGovernance(ctx, nil); err == nil {
 		t.Fatal("expected error for nil DB, got nil")
-	}
-}
-
-// TestMigrateTokenGrants_GlobalScopeGrant verifies that a token with a known
-// role gets a global-scope grant row after migration.
-func TestMigrateTokenGrants_GlobalScopeGrant(t *testing.T) {
-	db := newSQLiteDB(t)
-	setupTokensTable(t, db)
-	ctx := context.Background()
-
-	if err := migrateGovernance(ctx, db); err != nil {
-		t.Fatalf("migrateGovernance: %v", err)
-	}
-
-	// Insert a token with role="editor".
-	tokenID := NewID()
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_tokens (id, role) VALUES (?, 'editor')`, tokenID,
-	); err != nil {
-		t.Fatalf("insert token: %v", err)
-	}
-
-	if err := migrateTokenGrants(ctx, db); err != nil {
-		t.Fatalf("migrateTokenGrants: %v", err)
-	}
-
-	// A grant row must exist for this token with the editor role.
-	var grantCount int
-	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM smeldr_role_grants g
-			JOIN smeldr_roles r ON r.id = g.role_id
-			WHERE g.token_id = ? AND r.name = 'editor' AND g.scope_anchor_id IS NULL`,
-		tokenID,
-	).Scan(&grantCount); err != nil {
-		t.Fatalf("query grant: %v", err)
-	}
-	if grantCount != 1 {
-		t.Errorf("grant count for editor token: want 1, got %d", grantCount)
-	}
-}
-
-// TestMigrateTokenGrants_UnknownRoleSkipped verifies that a token with an
-// unrecognised role produces no grant row and no error.
-func TestMigrateTokenGrants_UnknownRoleSkipped(t *testing.T) {
-	db := newSQLiteDB(t)
-	setupTokensTable(t, db)
-	ctx := context.Background()
-
-	if err := migrateGovernance(ctx, db); err != nil {
-		t.Fatalf("migrateGovernance: %v", err)
-	}
-
-	tokenID := NewID()
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_tokens (id, role) VALUES (?, 'superuser')`, tokenID,
-	); err != nil {
-		t.Fatalf("insert token: %v", err)
-	}
-
-	if err := migrateTokenGrants(ctx, db); err != nil {
-		t.Fatalf("migrateTokenGrants returned error for unknown role: %v", err)
-	}
-
-	var grantCount int
-	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM smeldr_role_grants WHERE token_id = ?`, tokenID,
-	).Scan(&grantCount); err != nil {
-		t.Fatalf("count grants: %v", err)
-	}
-	if grantCount != 0 {
-		t.Errorf("expected no grant for unknown role, got %d", grantCount)
-	}
-}
-
-// TestMigrateTokenGrants_Idempotent verifies that calling migrateTokenGrants
-// twice produces exactly one grant per token.
-func TestMigrateTokenGrants_Idempotent(t *testing.T) {
-	db := newSQLiteDB(t)
-	setupTokensTable(t, db)
-	ctx := context.Background()
-
-	if err := migrateGovernance(ctx, db); err != nil {
-		t.Fatalf("migrateGovernance: %v", err)
-	}
-
-	tokenID := NewID()
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_tokens (id, role) VALUES (?, 'admin')`, tokenID,
-	); err != nil {
-		t.Fatalf("insert token: %v", err)
-	}
-
-	for i := range 2 {
-		if err := migrateTokenGrants(ctx, db); err != nil {
-			t.Fatalf("run %d: migrateTokenGrants: %v", i+1, err)
-		}
-	}
-
-	var grantCount int
-	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM smeldr_role_grants WHERE token_id = ?`, tokenID,
-	).Scan(&grantCount); err != nil {
-		t.Fatalf("count grants: %v", err)
-	}
-	if grantCount != 1 {
-		t.Errorf("grant count after two runs: want 1, got %d", grantCount)
-	}
-}
-
-// TestMigrateTokenGrants_NoTokensTable verifies that migrateTokenGrants returns
-// an error when smeldr_tokens does not exist. This error is caught by
-// migrateGovernance and handled as a fail-open warning.
-func TestMigrateTokenGrants_NoTokensTable(t *testing.T) {
-	db := newSQLiteDB(t)
-	ctx := context.Background()
-
-	// Create governance tables but NOT smeldr_tokens.
-	stmts := []string{
-		`CREATE TABLE smeldr_roles (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, operations TEXT NOT NULL, scope_mode TEXT NOT NULL DEFAULT 'global', scope_relation_kind TEXT, scope_direction TEXT, trust_level INTEGER NOT NULL DEFAULT 0, allow_self_approval INTEGER NOT NULL DEFAULT 0, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)`,
-		`CREATE TABLE smeldr_role_grants (id TEXT PRIMARY KEY, token_id TEXT NOT NULL, role_id TEXT NOT NULL, scope_static TEXT NOT NULL DEFAULT '[]', scope_anchor_id TEXT, created_at DATETIME NOT NULL)`,
-	}
-	for _, s := range stmts {
-		if _, err := db.ExecContext(ctx, s); err != nil {
-			t.Fatalf("setup: %v", err)
-		}
-	}
-
-	if err := migrateTokenGrants(ctx, db); err == nil {
-		t.Fatal("expected error when smeldr_tokens is absent, got nil")
 	}
 }
 
@@ -512,90 +557,6 @@ func TestSeedToolPolicies_ExecError(t *testing.T) {
 	wrapped := &execFailDB{DB: db, failOn: "smeldr_tool_policies"}
 	if err := seedToolPolicies(ctx, wrapped); err == nil {
 		t.Fatal("expected error from seedToolPolicies when ExecContext fails, got nil")
-	}
-}
-
-// TestMigrateTokenGrants_QueryError verifies that migrateTokenGrants returns an
-// error when the initial SELECT on smeldr_tokens fails.
-func TestMigrateTokenGrants_QueryError(t *testing.T) {
-	db := newSQLiteDB(t)
-	setupTokensTable(t, db)
-	ctx := context.Background()
-
-	if err := migrateGovernance(ctx, db); err != nil {
-		t.Fatalf("migrateGovernance: %v", err)
-	}
-
-	wrapped := &govQueryFailDB{DB: db, failOn: "FROM smeldr_tokens"}
-	if err := migrateTokenGrants(ctx, wrapped); err == nil {
-		t.Fatal("expected error when token query fails, got nil")
-	}
-}
-
-// TestMigrateTokenGrants_RoleLookupError verifies that migrateTokenGrants
-// returns an error when the role lookup fails (not a no-rows miss).
-func TestMigrateTokenGrants_RoleLookupError(t *testing.T) {
-	db := newSQLiteDB(t)
-	setupTokensTable(t, db)
-	ctx := context.Background()
-
-	if err := migrateGovernance(ctx, db); err != nil {
-		t.Fatalf("migrateGovernance: %v", err)
-	}
-
-	tokenID := NewID()
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_tokens (id, role) VALUES (?, 'admin')`, tokenID,
-	); err != nil {
-		t.Fatalf("insert token: %v", err)
-	}
-
-	wrapped := &govQueryRowFailDB{DB: db, failOn: "FROM smeldr_roles"}
-	if err := migrateTokenGrants(ctx, wrapped); err == nil {
-		t.Fatal("expected error when role lookup fails, got nil")
-	}
-}
-
-// TestMigrateTokenGrants_InsertError verifies that migrateTokenGrants returns
-// an error when the grant INSERT fails.
-func TestMigrateTokenGrants_InsertError(t *testing.T) {
-	db := newSQLiteDB(t)
-	setupTokensTable(t, db)
-	ctx := context.Background()
-
-	if err := migrateGovernance(ctx, db); err != nil {
-		t.Fatalf("migrateGovernance: %v", err)
-	}
-
-	tokenID := NewID()
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_tokens (id, role) VALUES (?, 'editor')`, tokenID,
-	); err != nil {
-		t.Fatalf("insert token: %v", err)
-	}
-
-	wrapped := &execFailDB{DB: db, failOn: "smeldr_role_grants"}
-	if err := migrateTokenGrants(ctx, wrapped); err == nil {
-		t.Fatal("expected error when grant INSERT fails, got nil")
-	}
-}
-
-// TestMigrateTokenGrants_ScanError verifies that migrateTokenGrants returns an
-// error when scanning the token row fails (NULL into non-nullable string).
-func TestMigrateTokenGrants_ScanError(t *testing.T) {
-	db := newSQLiteDB(t)
-	setupTokensTable(t, db)
-	ctx := context.Background()
-
-	if err := migrateGovernance(ctx, db); err != nil {
-		t.Fatalf("migrateGovernance: %v", err)
-	}
-
-	// govQueryNullRowsDB replaces the SELECT on smeldr_tokens with a 2-column
-	// NULL row; scanning NULL into id string triggers a conversion error.
-	wrapped := &govQueryNullRowsDB{DB: db, nullOn: "SELECT id, role FROM smeldr_tokens"}
-	if err := migrateTokenGrants(ctx, wrapped); err == nil {
-		t.Fatal("expected scan error, got nil")
 	}
 }
 
@@ -1440,12 +1401,45 @@ func TestAppGovernance_Success(t *testing.T) {
 	if app.RoleStore() == nil {
 		t.Error("expected RoleStore to be non-nil after Governance()")
 	}
+	// D44: audit is not optional — wiring governance always wires audit too.
+	if app.GovernanceAuditStore() == nil {
+		t.Error("expected GovernanceAuditStore to be non-nil after Governance()")
+	}
+}
+
+// TestAppGovernance_CreateAuditTableError verifies that Governance itself
+// fails, and neither RoleStore nor GovernanceAuditStore is wired, when
+// CreateGovernanceAuditTable's own DDL fails — D44's "no way to reach a
+// governance-enabled instance with no audit trail" must hold even under a
+// partial failure, not just on the happy path.
+func TestAppGovernance_CreateAuditTableError(t *testing.T) {
+	db := newSQLiteDB(t)
+	setupTokensTable(t, db)
+	wrapped := &execFailDB{DB: db, failOn: "smeldr_governance_audit"}
+	app := New(Config{BaseURL: "https://example.com", Secret: make([]byte, 16), DB: wrapped})
+	store := NewRoleStore(wrapped)
+	if err := app.Governance(store); err == nil {
+		t.Fatal("expected error when CreateGovernanceAuditTable fails, got nil")
+	}
+	if app.RoleStore() != nil {
+		t.Error("expected RoleStore to stay nil when Governance fails partway through")
+	}
+	if app.GovernanceAuditStore() != nil {
+		t.Error("expected GovernanceAuditStore to stay nil when Governance fails partway through")
+	}
 }
 
 func TestAppRoleStore_Nil(t *testing.T) {
 	app := New(Config{BaseURL: "https://example.com", Secret: make([]byte, 16)})
 	if app.RoleStore() != nil {
 		t.Error("expected nil RoleStore before Governance() is called")
+	}
+}
+
+func TestAppGovernanceAuditStore_Nil(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: make([]byte, 16)})
+	if app.GovernanceAuditStore() != nil {
+		t.Error("expected nil GovernanceAuditStore before Governance() is called")
 	}
 }
 

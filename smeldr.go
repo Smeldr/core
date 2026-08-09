@@ -300,6 +300,7 @@ type App struct {
 
 	governance        *RoleStore                              // non-nil when App.Governance() was called
 	governanceModules []interface{ setRoleStore(*RoleStore) } // modules that receive the RoleStore at Handler() time
+	governanceAudit   GovernanceAuditStore                    // set alongside governance — D44: audit is not optional
 
 	logRing        *logRing // non-nil when App.CaptureLogs() was called; backs GET /_logs
 	logsHandlerReg bool     // true once GET /_logs is registered

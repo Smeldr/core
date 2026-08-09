@@ -23,6 +23,19 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.62.0] — 2026-08-09
+
+### Added
+- `App.GovernanceAuditStore()` accessor, beside `App.RoleStore()`. `App.Governance` now creates the governance audit table and constructs the store unconditionally whenever governance is wired — audit is no longer a separate opt-in step. (A242, D44)
+
+### Changed
+- Wiring `App.Governance` now also creates `smeldr_governance_audit` (idempotent DDL, safe on every startup) — a governance-enabled instance always has an audit trail; there is no longer a way to wire role gating without it. (A242, D44)
+
+### Fixed
+- `migrateTokenGrants` removed: it granted governance roles by matching `smeldr_tokens.role` against a role name at boot, keyed on the token's SHA-256 fingerprint — a value `RoleGranted`/`Authorized` never query by, so every grant it ever produced was unreachable. Creating a token no longer confers any governance role; granting one is a separate, explicit act via `RoleStore.Grant`. New `pruneInertTokenGrants` removes any inert rows a prior instance's boot-time migration left behind, by membership in `smeldr_tokens.id` rather than by string shape. (A242, D43)
+
+---
+
 ## [1.61.2] — 2026-08-09
 
 ### Fixed
