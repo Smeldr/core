@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.64.0] — 2026-08-11
+
+### Added
+- `App.TransitionItem(ctx, typeName, slug, toState) (map[string]any, error)` extends flow-validated state transitions to compiled types (e.g. `Signal`, `Task`, `Decision`), not just runtime-defined dynamic content. Runs the identical `validateTransition` authority check the HTTP path already makes; a compiled type's raw status update does not advance `Node.Rev` (see REFERENCE.md for the concurrency consequence). Backs `smeldr.dev/mcp`'s `transition_item`, `get_valid_transitions`, and `list_items_by_state` tools, which previously worked only against `smeldr_dynamic_content`. (A251, D49)
+
+---
+
 ## [1.63.3] — 2026-08-10
 
 ### Fixed

@@ -73,6 +73,111 @@ compiled-state-tools cycle.
 
 ---
 
+## A251 — App.TransitionItem extends state transitions to compiled types (smeldr/core half of D49)
+
+### What this closes
+
+`transition_item`/`get_valid_transitions`/`list_items_by_state` cleanly
+rejected compiled types after A248 (T225's own fix) instead of
+crashing — correct, but not the same as operating on one. M0 step 7's
+signal protocol needs a real MCP path to move a `Signal`'s flow state;
+this closes that gap.
+
+### The mechanism
+
+New `App.TransitionItem(ctx, typeName, slug, toState) (map[string]any,
+error)` branches on `TypeRegistry().Lookup(typeName).Kind`:
+
+- `"content"` delegates unchanged to `DynamicContentRepo` +
+  `SetStatus` — zero behavioural difference for every existing
+  dynamic-content caller. Not reimplemented; literally called.
+- `"compiled"` resolves the table via `resolveItemTable` (D42/D47's
+  own reused helper), runs the identical `validateTransition` call
+  `updateHandler` (`module.go:1876`) already makes for the HTTP path
+  — same signature, same arguments, same `ErrForbidden` on a `Strict`
+  gate without the role — then a raw `UPDATE … SET status = …`,
+  mirroring `applyConflictPolicy`'s own `conflictSupersede` precedent
+  in the same file rather than inventing a new raw-update shape.
+
+A compiled type whose backing table can't be found (partial
+migration, an unregistered module) returns a distinct error instead
+of silently falling into the dynamic-content branch — D47's own guard
+against exactly that ambiguity, applied here too.
+
+### Why App, not the MCPModule interface (D49)
+
+Two designs were considered. The chosen one — a new `App` method — adds
+zero exported interface surface. The rejected one — a new required
+`MCPTransition` method on the exported `MCPModule` interface,
+implemented generically on `Module[T]` with typed `repo.Save` (rev-CAS
+preserved) — was rejected on the API stability promise: Go interface
+satisfaction has no default-method escape hatch, so a new required
+method breaks every `MCPModule` implementer that is not `Module[T]`
+itself. See D49's own entry for the full argument.
+
+### Rev behaviour, stated explicitly per D49's own boundary requirement
+
+The compiled-type raw `UPDATE` does not read or advance `Node.Rev`.
+Concurrency consequence, said plainly: a concurrent `Save` holding the
+item's pre-transition rev still satisfies `Save`'s CAS check (the
+stored rev in the DB is unchanged) and will silently overwrite this
+status change with whatever status its own in-memory item carries —
+no `ErrRevConflict`, no error at all. This is not a new risk this
+Amendment introduces: `DynamicTypeRepo.setStatus` and
+`applyConflictPolicy`'s own `conflictSupersede` path already make
+this exact choice for their raw status updates. This Amendment
+extends an already-accepted pattern to a new table class; it does not
+invent the exposure.
+
+### Async triggers
+
+Fires `fireAsyncTriggers` (A240's `TransitionTrigger` pipeline) after
+a successful compiled-type update — the same, and only, hook
+`setStatus` fires for the dynamic path. Does **not** fire
+`module.go`'s `notifyAfter`/`AfterPublish`-class signal-bus hooks for
+either branch. This is an existing, deliberate split in the codebase
+already: the state-flow-transition path and the lifecycle-signal path
+are two different mechanisms today, confirmed by reading `setStatus`
+directly before writing this method. Extending `transition_item` to
+compiled types makes that existing split apply symmetrically — it
+does not create a new asymmetry.
+
+### A pre-existing gap closed as a side effect, not the main point
+
+The unregistered-type error now wraps `ErrBadRequest` instead of a
+bare error. Found while wiring the mcp side: `errorFor` had no mapping
+for `ErrBadRequest` at all, even though `validateTransition`'s own
+`RequiredReason` case has returned it since T149/A220 with nowhere for
+a JSON-RPC caller to see anything but a generic `-32603`. Fixed in the
+paired `smeldr.dev/mcp` Amendment (A252): `ErrBadRequest` now maps to
+`-32602`, the same code `ValidationError` already uses, since both
+mean the caller's own request was malformed.
+
+### Tests and coverage
+
+17 new tests (`state_transition_item_test.go`), full error-path table:
+unregistered type, item not found (both branches), invalid target
+state, transition not permitted, role-gated forbidden/granted, DB nil,
+compiled-type table missing, transition-row query failure (D34
+fail-closed), UPDATE exec failure, conflict-policy violation, and the
+item-lookup SELECT itself failing. No exported symbols removed.
+Coverage: 96.3% package-wide; `TransitionItem` itself 94.7% — two
+branches named, not chased: `DynamicContentRepo`'s own error and
+`repo.List`'s own error inside the already-passed `Kind == "content"`
+check are structurally unreachable through the real dispatch path
+(state tools require `Config().DB != nil` before dispatch even
+reaches this method, and `Kind` cannot change between this method's
+own registry check and `DynamicContentRepo`'s identical internal one).
+
+### Versioning
+
+MINOR bump — new exported API surface (`App.TransitionItem`), same
+classification as A235/A236/A239. v1.63.3 → v1.64.0.
+
+Status: Implements D49.
+
+---
+
 ## D48 — A generated tool's authority requirement is derived from its structure, never enumerated by hand
 
 ### Scope

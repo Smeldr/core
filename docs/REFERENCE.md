@@ -3384,6 +3384,24 @@ func (a *App) RegisterFlow(flow StateFlow) error
 
 Registers a state flow for a content type. Idempotent — safe to call on every startup. The flow is stored in `smeldr_state_flows`; states in `smeldr_flow_states`; transitions in `smeldr_flow_transitions`. `ActiveState` and `ConflictPolicy` are updated on every call.
 
+### `App.TransitionItem` (D49)
+
+```go
+func (a *App) TransitionItem(ctx context.Context, typeName, slug, toState string) (map[string]any, error)
+```
+
+Moves the item identified by `typeName` and `slug` to `toState` — resolving whichever table stores it: a compiled `Module`'s own table, or `smeldr_dynamic_content` for a runtime-defined type. Validates the transition exactly as the HTTP path and `DynamicTypeRepo.SetStatus` already do (`validateTransition`, including any `RequiredRole`/`Strict` gate). Backs `smeldr.dev/mcp`'s `transition_item` tool.
+
+```go
+result, err := app.TransitionItem(ctx, "Signal", "some-signal-slug", "read")
+// result: map[string]any{"id": ..., "slug": ..., "status": "read"}
+```
+
+- Runtime-defined type (`TypeDescriptor.Kind == "content"`) — delegates unchanged to `DynamicContentRepo` + `SetStatus`. Zero behavioural difference from calling those directly.
+- Compiled type (`Kind == "compiled"`) — resolves the table via `resolveItemTable`, then performs a raw `UPDATE … SET status = …` after `validateTransition` and `applyConflictPolicy` pass. **Does not advance `Node.Rev`** — the same choice `SetStatus`/`applyConflictPolicy`'s own supersede path already make for their raw status updates. A concurrent `Save` holding the item's pre-transition rev still satisfies `Save`'s CAS check and silently overwrites the status change with whatever status its own in-memory item carries.
+- Fires `fireAsyncTriggers` after a successful compiled-type update (A240's `TransitionTrigger` pipeline) — the same, and only, hook `SetStatus` fires for the dynamic path. Does **not** fire `module.go`'s `notifyAfter`/`AfterPublish`-class signal-bus hooks for either path; that mechanism is orthogonal to state-flow transitions in this codebase, not something this method newly declines.
+- An unregistered `typeName` returns an error wrapping `ErrBadRequest`. A registered-but-missing item returns `ErrNotFound`. A compiled type whose backing table cannot be found (partial migration, an unregistered module) returns a distinct error rather than silently falling into the dynamic-content branch — matching D47's own guard against exactly that ambiguity.
+
 ### `ConflictPolicy` (A186)
 
 ```go

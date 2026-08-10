@@ -731,6 +731,94 @@ func resolveItemTable(ctx context.Context, db DB, typeName string) string {
 	return "smeldr_dynamic_content"
 }
 
+// TransitionItem moves the item identified by typeName and slug to toState,
+// resolving whichever table stores it — a compiled [Module]'s own table or
+// a runtime-defined dynamic type — and validating the transition exactly as
+// the HTTP path ([Module.updateHandler]) and [DynamicTypeRepo.SetStatus]
+// already do (D49). actorID for the D34/D40 role gate is extracted from ctx
+// when it carries a [Context]; a plain context.Context yields an empty
+// actorID, matching SetStatus's own existing behaviour. Returns
+// [ErrNotFound] when typeName is registered but no item has the given slug,
+// or a descriptive error when typeName is not registered at all.
+//
+// Rev note (D49): the compiled-type branch performs a raw status UPDATE and
+// does not read or advance [Node.Rev] — the same choice
+// [DynamicTypeRepo.SetStatus] and applyConflictPolicy's own supersede path
+// already make for their raw status updates. A concurrent [SQLRepo.Save]
+// holding the item's pre-transition rev still satisfies Save's CAS check
+// (the stored rev is unchanged) and will silently overwrite this status
+// change with whatever status its own in-memory item carries — the same
+// exposure the existing dynamic-content and conflict-supersede paths
+// already carry, now extended to compiled types rather than newly
+// introduced.
+func (a *App) TransitionItem(ctx context.Context, typeName, slug, toState string) (map[string]any, error) {
+	desc := a.typeRegistry.Lookup(typeName)
+	if desc == nil {
+		return nil, fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName)
+	}
+	if desc.Kind == "content" {
+		repo, err := a.DynamicContentRepo(typeName)
+		if err != nil {
+			return nil, err
+		}
+		node, err := repo.GetBySlug(ctx, slug)
+		if err != nil {
+			return nil, err
+		}
+		if err := repo.SetStatus(ctx, node.ID, Status(toState)); err != nil {
+			return nil, err
+		}
+		return map[string]any{"id": node.ID, "slug": slug, "status": toState}, nil
+	}
+
+	if a.cfg.DB == nil {
+		return nil, fmt.Errorf("smeldr: TransitionItem requires Config.DB")
+	}
+	db := a.cfg.DB
+	table := resolveItemTable(ctx, db, typeName)
+	if table == "smeldr_dynamic_content" {
+		// desc.Kind == "compiled" (the only other branch reachable here) but
+		// no dedicated table was found — a partial migration or an
+		// unregistered module's table simply absent. D47's own guard against
+		// this exact ambiguity: do not silently fall into the dynamic-content
+		// branch for a type the registry says is compiled.
+		return nil, fmt.Errorf("smeldr: %q is registered as a compiled type but its table could not be found", typeName)
+	}
+
+	var id, currentStatus string
+	err := db.QueryRowContext(ctx,
+		"SELECT id, status FROM "+quoteIdent(table)+" WHERE slug = $1", slug,
+	).Scan(&id, &currentStatus)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
+	}
+
+	type smeldrCtxAccessor interface{ User() User }
+	actorID := ""
+	if sc, ok := ctx.(smeldrCtxAccessor); ok {
+		actorID = sc.User().ID
+	}
+	if err := validateTransition(ctx, db, a.governance, actorID, typeName, currentStatus, toState, ""); err != nil {
+		return nil, err
+	}
+	if err := applyConflictPolicy(ctx, db, nil, typeName, toState, id); err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(ctx,
+		"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
+		toState, now, id,
+	); err != nil {
+		return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
+	}
+	fireAsyncTriggers(ctx, db, typeName, currentStatus, toState, id)
+	return map[string]any{"id": id, "slug": slug, "status": toState}, nil
+}
+
 // isNoSuchTable reports whether err is a SQLite "no such table" error.
 func isNoSuchTable(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "no such table")
