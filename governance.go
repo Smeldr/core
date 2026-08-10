@@ -265,6 +265,12 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// Signal tools (Author+)
 		{"create_signal", "create"},
 		{"list_signals", "read"},
+		// Orchestration discovery tools (Author+). Not module-generated — the
+		// mcp-side verb-derived policy fallback only rescues a missing row for
+		// a tool a real module backs, so these two need a seeded row like any
+		// other framework tool.
+		{"get_goal_context", "read"},
+		{"list_type_tools", "read"},
 	}
 
 	for _, p := range policies {

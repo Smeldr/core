@@ -2207,6 +2207,23 @@ func TestRoleStore_ToolPolicy_Hit(t *testing.T) {
 	}
 }
 
+func TestRoleStore_ToolPolicy_OrchestrationDiscoveryTools(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	for _, tool := range []string{"get_goal_context", "list_type_tools"} {
+		op, found, err := store.ToolPolicy(context.Background(), tool)
+		if err != nil {
+			t.Fatalf("ToolPolicy(%q): %v", tool, err)
+		}
+		if !found {
+			t.Errorf("expected found=true for seeded tool %q", tool)
+		}
+		if op != "read" {
+			t.Errorf("ToolPolicy(%q) op = %q, want \"read\"", tool, op)
+		}
+	}
+}
+
 func TestRoleStore_ToolPolicy_NotFound(t *testing.T) {
 	db := setupGovernanceDB(t)
 	store := NewRoleStore(db)

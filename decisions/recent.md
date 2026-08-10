@@ -206,6 +206,51 @@ is separate work with its own open questions about what a run must record.
 Status: Ratified 2026-08-10.
 
 ---
+## A249 — seedToolPolicies rows for get_goal_context/list_type_tools (T224, smeldr/core half of D48)
+
+### What this closes
+
+D48's boundary is explicit: `manage`, `administer`, `define-type`,
+`define-flow`, and `define-relation-kind` have no generated verb
+form and are never derived, and `get_goal_context`/`list_type_tools`
+are framework tools, not generated ones — both get explicit `read`
+rows rather than relying on the mcp-side fallback D48 itself
+introduces. This is that seeding.
+
+Verified live on `process.smeldr.dev` before this fix, as part of
+T224's investigation: a token holding a real admin grant received
+`-32001 forbidden` calling either tool, with no `smeldr_tool_policies`
+row for either name and therefore nothing an operator could inspect
+or grant against — `authoriseTool`'s not-found branch fails closed
+by design (D44), and nothing had ever seeded a row for these two.
+
+### Why "read", not something else
+
+`AGENTS.md` already documented `get_goal_context` as requiring the
+`Author` role (A199) before this fix — the seeded row makes reality
+match a promise already published, not a new behavioural decision.
+`list_type_tools` is a pure discovery/introspection tool (lists the
+MCP tools available for a given content type) with the same shape:
+read-only, no side effect, appropriate at the same tier as every
+other `"read"`-gated tool in `seedToolPolicies`.
+
+### Tests and coverage
+
+New `TestRoleStore_ToolPolicy_OrchestrationDiscoveryTools` asserts
+both tools resolve `found=true`/`op="read"` through the real
+`RoleStore.ToolPolicy` path (not the seeding function directly).
+No exported symbols changed. Coverage: 96.2% package-wide.
+
+### Versioning
+
+Patch bump — two previously-forbidden-for-everyone tools become
+usable at their already-documented tier; no exported API surface
+added. v1.63.2 → v1.63.3.
+
+Status: Implements D48.
+
+---
+
 ## A248 — Fix DynamicContentRepo's compiled-type guard (T225)
 
 ### Root cause

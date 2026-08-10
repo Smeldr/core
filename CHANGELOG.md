@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.63.3] — 2026-08-10
+
+### Fixed
+- `get_goal_context` and `list_type_tools` (MCP tools) were forbidden for every caller, including a token holding a real admin grant, because `smeldr_tool_policies` had no seeded row for either — an unrecognised tool name fails closed by design (D44), but nothing had ever seeded these two framework discovery tools. Both now seed as `"read"`, matching what `AGENTS.md` already documented. (A249, D48)
+
+---
+
 ## [1.63.2] — 2026-08-10
 
 ### Fixed
