@@ -31,6 +31,126 @@ Archived 2026-08-09: A236-A240, D38-D39 → phase22-archive.md
 Archived 2026-08-09: D40-D42, A241 → phase23-archive.md
 ---
 
+## D46 — A finding and a condition are different objects, and suppressing a finding is a Decision rather than a button
+
+### Scope
+
+core, process
+
+### Decision
+
+**A finding is what a detector produces.** An observation about the model:
+this edge points at something that is gone. It belongs to the detector and is
+a record of what was seen and when.
+
+**A condition is what requires a human.** Something previously settled can no
+longer be safely treated as settled, and an explicit transition that requires
+a role would resolve it.
+
+They are not the same object and are governed differently:
+
+- **Findings are persisted, deduplicated and stateful.** Dedup key: detector
+  type, subject item ID, finding fingerprint. **A finding resolves when its
+  detector stops firing on the subject**, not when a human says it is fixed.
+- **Conditions are projections and own no state.** No seen, snoozed,
+  dismissed, claimed or acknowledged. The surface cannot be made to lie
+  because there is nothing on it that hides anything.
+
+**Suppressing a finding that is still firing is not a surface action. It is
+registering a `Decision`.** The act being performed is *the model detects this
+and we have ruled that it stands anyway*, which is an authority-bearing
+statement with an actor, a time and an audit record. It is reversible by
+supersession like any other decision, and it answers "why is this not shown"
+with a ratified statement rather than with a button someone pressed.
+
+The finding continues to fire. It should. The detector is still right about
+what it sees.
+
+### What this reconciles
+
+`analysis/fable5-operational-insights-report-2026-07-06.md` §2.1a argued that
+findings must be persisted, deduplicated, stateful records, because otherwise
+the same stale relation resurfaces every sweep and an Ignore action means
+nothing. It proposed a flow of `open → acknowledged → delegated → resolved /
+dismissed / accepted-as-is`.
+
+`design/workspace.md` §13.5 held the opposite: the surface owns no state, and
+there is deliberately no dismiss action, because one would let the surface
+lie.
+
+**Both are right, about different objects.** The analysis is describing
+findings; Workspace is describing conditions. The apparent contradiction was
+two documents using one word for two things.
+
+The analysis is also internally in tension on exactly this point, which is the
+tell: its §2.1d says a finding is resolved when *its detector no longer fires*,
+"not the human's claim that they fixed it", while its own card actions offer
+Ignore and Mark accepted. This decision keeps §2.1d and discards the buttons.
+
+### Only one of Workspace's three provenances is a finding
+
+Worth stating, because the word invites the assumption that all three are:
+
+- **Detected** is a finding. A detector produced it.
+- **Asserted** is not. Nothing found it; an agent outside Smeldr reasoned and
+  wrote a claim in.
+- **Scheduled** is not. Nothing was discovered; a date that a person set
+  arrived.
+
+So persistence, dedup and detector-verified resolution apply to one of the
+three. What the other two require is open and is not settled here.
+
+### Alternatives considered and rejected
+
+- **A dismiss or ignore action on the surface.** The analysis's own card
+  design, and the natural thing to build. Rejected: it makes the surface
+  capable of hiding a condition the model still holds, which is the single
+  property Workspace exists to guarantee. It also records nothing about who
+  decided or why.
+- **Conditions carry state, and findings are computed at read time.** The
+  inverse assignment, and it fails on the analysis's own argument: a
+  recomputed finding cannot be deduplicated across runs, so the same stale
+  relation resurfaces every sweep.
+- **No suppression at all.** Coherent, and it was the reading Workspace's
+  no-state rule implied on its own. Rejected because the case is real: a
+  finding can be correct and the organization can still have ruled that the
+  situation stands. Refusing to model that does not remove it; it moves it
+  out of the system into someone's memory.
+
+### Consequences
+
+**A `Decision` acquires a second job.** Alongside recording what an
+organization decided, it becomes the mechanism by which a detected finding is
+overruled. That is a widening of what `Decision` means and it is deliberate.
+
+**The mechanism by which a suppressing `Decision` is linked to the finding it
+overrules is not designed here.** A relation kind is the obvious shape, and
+D45 already added two for the Workspace surface, but which kind and in which
+direction is open.
+
+**Workspace's condition filter gains a case it does not have today**: a
+condition whose finding is still firing but which a ratified `Decision` has
+settled must stop appearing. The criterion is unchanged, an explicit
+authorized transition resolved it, but the transition is on the `Decision`
+rather than on the subject.
+
+**This decision does not settle whether `Insight` (T126) is the persisted
+finding type**, nor whether the six existing orchestration modules are the
+right pattern for it. It settles what the object is, not what it is called or
+where it lives.
+
+### How this was reached, recorded because the question mattered more than the answer
+
+Architect framed the blocking question as "are conditions persisted items",
+and spent a day citing the July analysis from a summary without reading it.
+Peter asked what a finding actually is. **The distinction dissolved the
+conflict rather than resolving it**, and the suppression mechanism followed
+from it directly rather than being negotiated.
+
+Status: Ratified 2026-08-10.
+
+---
+
 ## D45 — Two relation kinds complete the Workspace model: `investigates` and `contradicts`
 
 ### Scope
