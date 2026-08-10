@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.63.1] — 2026-08-10
+
+### Fixed
+- `App.SweepStructural`'s default `TargetChecker` now correctly resolves compiled [`Module`] types (e.g. `Decision`, `Task`, `Goal`, `Amendment`, `Signal`, `Run`) instead of only ever checking `smeldr_dynamic_content`. Previously, wiring the sweep unchanged on an instance with any compiled content type would conclude every relation target had disappeared and invalidate the entire lineage graph on first run. For a compiled type, alive now means the row still exists — no status, terminal or otherwise, is treated as "gone" (a superseded or archived `Decision` still keeps its relations). Also closes a second route to the same hazard: a compiled type whose table is unexpectedly absent (partial migration, an unregistered module) now surfaces as a skipped check rather than a false "not alive" verdict. (A247)
+
+---
+
 ## [1.63.0] — 2026-08-09
 
 ### Added

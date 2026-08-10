@@ -901,21 +901,74 @@ func (a *App) RelationStore() *RelationStore {
 	return a.relationStore
 }
 
-// SweepStructural runs a structural premise sweep using a default [TargetChecker]
-// that queries smeldr_dynamic_content by id and checks status = 'published'.
-// It fires [AfterRelationCascade] for each stale source edge via [App.emitSignal].
-// Returns (0, 0, nil) immediately if no [RelationStore] is configured.
+// defaultTargetChecker returns the [TargetChecker] [App.SweepStructural]
+// uses when the caller supplies none of its own.
 //
-// The default TargetChecker only knows about smeldr_dynamic_content (runtime-defined
-// content types). Applications that use compiled content types (via [Module]) must
-// supply a custom TargetChecker by calling [RelationStore.SweepStructural] directly.
-func (a *App) SweepStructural(ctx context.Context) (flagged, skipped int, err error) {
-	rs := a.RelationStore()
-	if rs == nil {
-		return 0, 0, nil
-	}
-	check := func(ctx context.Context, targetType, targetID string) (bool, error) {
-		rows, err := a.cfg.DB.QueryContext(ctx,
+// SweepStructural asks a structural question — does the thing this edge
+// points at still exist — not a semantic one about where that thing
+// currently sits in its own lifecycle. For a compiled [Module] type
+// (resolved via [resolveItemTable] to its own table), alive means the row
+// still exists, full stop: no status, terminal or otherwise, is treated
+// as "gone." A [Decision] that reached "superseded" or "archived" is still
+// the record of a real decision — nothing about its own lifecycle
+// retracts a [RelationEdge] that legitimately points at it, the way
+// deleting the row would. The same reasoning holds for every built-in
+// orchestration type without exception, including [Run], which never
+// leaves Draft by design (D38, A239): this checker never consults
+// Status for a compiled type, so Run needs no special case at all.
+//
+// For a runtime-defined content type (no dedicated table,
+// resolveItemTable falls back to smeldr_dynamic_content), alive means
+// status = 'published', matching this function's original behaviour.
+//
+// resolveItemTable's own fallback is where the same hazard this function
+// exists to fix can reappear sideways: it returns smeldr_dynamic_content
+// whenever it finds no dedicated table for targetType, which is correct
+// for a genuine dynamic-content type but indistinguishable, from a bare
+// "no row" result alone, from a compiled type whose own table is simply
+// absent — a partially migrated instance, or a consumer that has stopped
+// registering a module. Both would otherwise reach the same status
+// lookup, find no row, and return false, invalidating every edge to a
+// target this checker never actually examined. Guarded against directly:
+// before trusting the dynamic-content branch at all, targetType must be
+// confirmed as an actually-registered content type in
+// smeldr_content_type_schemas. When it isn't — or when that table itself
+// can't be queried — this returns an error rather than a verdict.
+// [RelationStore.SweepStructural] treats a checker error as skipped, not
+// stale, which is the only safe direction here: a sweep that cannot tell
+// whether a target exists must decline, never delete.
+//
+// Narrows, but does not eliminate, the caller-facing guidance this
+// function's own callers still need: an application with a genuinely
+// different "alive" definition for its own compiled types — one that,
+// unlike every built-in orchestration flow, does treat some status as
+// equivalent to deletion — must still supply its own [TargetChecker] via
+// [RelationStore.SweepStructural] directly.
+func defaultTargetChecker(db DB) TargetChecker {
+	return func(ctx context.Context, targetType, targetID string) (bool, error) {
+		table := resolveItemTable(ctx, db, targetType)
+		if table != "smeldr_dynamic_content" {
+			var exists int
+			if err := db.QueryRowContext(ctx,
+				"SELECT COUNT(*) FROM "+quoteIdent(table)+" WHERE id=$1", targetID,
+			).Scan(&exists); err != nil {
+				return false, fmt.Errorf("smeldr: defaultTargetChecker: %q: %w", targetType, err)
+			}
+			return exists > 0, nil
+		}
+
+		var registered int
+		if err := db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM smeldr_content_type_schemas WHERE type_name=$1 AND kind='content'",
+			targetType,
+		).Scan(&registered); err != nil {
+			return false, fmt.Errorf("smeldr: defaultTargetChecker: %q: not a compiled type and the dynamic content type registry could not be checked: %w", targetType, err)
+		}
+		if registered == 0 {
+			return false, fmt.Errorf("smeldr: defaultTargetChecker: %q: no compiled table and not a registered dynamic content type — cannot determine liveness", targetType)
+		}
+
+		rows, err := db.QueryContext(ctx,
 			"SELECT status FROM smeldr_dynamic_content WHERE id=$1", targetID)
 		if err != nil {
 			return false, err
@@ -930,6 +983,22 @@ func (a *App) SweepStructural(ctx context.Context) (flagged, skipped int, err er
 		}
 		return status == "published", nil
 	}
+}
+
+// SweepStructural runs a structural premise sweep using [defaultTargetChecker].
+// It fires [AfterRelationCascade] for each stale source edge via [App.emitSignal].
+// Returns (0, 0, nil) immediately if no [RelationStore] is configured.
+//
+// See [defaultTargetChecker] for what "alive" means for a compiled
+// [Module] type versus a runtime-defined one, and for the narrowed cases
+// where an application still needs to supply its own [TargetChecker] via
+// [RelationStore.SweepStructural] directly.
+func (a *App) SweepStructural(ctx context.Context) (flagged, skipped int, err error) {
+	rs := a.RelationStore()
+	if rs == nil {
+		return 0, 0, nil
+	}
+	check := defaultTargetChecker(a.cfg.DB)
 	onStale := func(ctx context.Context, e RelationEdge) {
 		a.emitSignal(ctx, AfterRelationCascade, SignalEvent{
 			Type:   e.SourceType,

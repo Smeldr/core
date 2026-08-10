@@ -1269,3 +1269,85 @@ Status: Fixes a defect A245's own verification uncovered. Names, does
 not close, the isolation-build gap both amendments depend on.
 
 ---
+
+## A247 — a `TargetChecker` that knows the orchestration types
+
+Implements D47 (`decisions/recent.md`) — read that entry for the
+category-error principle, the sideways `resolveItemTable`-fallback
+hazard, and the three rejected alternatives; not restated here.
+
+### The implementation, small, reusing what D42 already built
+
+`resolveItemTable(ctx, db, typeName) string` (`state.go:721`, built for
+D42's `drainAuthorizationGate`) already does exactly the type-name to
+table resolution this needed — reused rather than duplicated, checked
+before writing anything new. New unexported `defaultTargetChecker(db
+DB) TargetChecker` (`smeldr.go`) replaces the inline closure
+`App.SweepStructural` used to build: for any table `resolveItemTable`
+resolves to something other than `smeldr_dynamic_content`, alive means
+`SELECT COUNT(*) ... WHERE id=$1` finds a row; otherwise, after the
+registry check above, the original `status = 'published'` lookup,
+byte-for-byte unchanged.
+
+### Where this belongs — `App`'s own default, not an opt-in
+
+Replaces `App.SweepStructural`'s built-in default, per D47's own
+rejection of an opt-in constructor or `example/server`-only wiring.
+One consequence worth stating precisely at the implementation level:
+`resolveItemTable`'s own fallback design means the corrected default
+covers *any* compiled `Module`-registered type automatically, not just
+the six built-in orchestration ones — no hardcoded type list, so a
+consumer with their own compiled types gets the fix without doing
+anything. `SweepStructural`'s existing caller-facing guidance narrows
+rather than disappears: still true for an application whose own "alive"
+definition genuinely differs from "row exists" (D47's own documented
+surviving case) — that consumer still supplies its own `TargetChecker`
+via `RelationStore.SweepStructural` directly.
+
+### Tests and coverage
+
+9 new tests, all driven through `App.SweepStructural`, never the
+checker function directly — the explicit check criterion, and the
+right one: a checker correct in isolation but never reached by the
+real entry point is the same defect class as the one this fixes.
+Compiled-target alive and hard-deleted; the two named checks
+(superseded and archived `Decision` both keep their relations,
+identical assertions, stated as the same rule rather than two separate
+rules that happen to agree); the compiled-table query-error path;
+both ways the registry lookup itself can fail (an unrecognized type
+with no table anywhere, including a decoy dynamic-content row under a
+different real type to prove the checker isn't just matching by
+coincidental ID; the `smeldr_content_type_schemas` table missing
+entirely, reached by constructing `App.relationStore` directly since
+`App.Relations()` always creates that table as a side effect); a
+genuine dynamic-content deletion, proving the registry gate didn't
+change what "not found" already meant for a type that legitimately
+belongs there. One existing test (`TestAppSweepStructural_DefaultChecker`)
+updated, not left to fail silently: it exercised a dynamic content type
+("article") that was never registered in `smeldr_content_type_schemas`,
+which this Amendment's own new registry check would now (correctly)
+reject — fixed by registering the type properly rather than weakening
+the check to pass the old test.
+
+No exported symbols changed. Coverage: 96.3% package-wide;
+`defaultTargetChecker` 90.9% — two DB-failure leaves in the unchanged
+dynamic-content branch (`QueryContext`/`Scan` errors) left uncovered,
+the same class of failure already exercised for the compiled-table
+branch; named here rather than left silent. `go build`/`vet`/`gofmt`/
+`test`/`golangci-lint` all clean.
+
+### Explicitly out of scope, confirmed against the dispatch's own exclusions
+
+No scheduler, no cron, no call site invoking `SweepStructural` on a
+timer — this builds the checker, not the trigger. `SweepStructural`'s
+return values unchanged (the missing relations-examined count is real,
+named as its own separate task, not carried here).
+
+### Versioning
+
+Patch bump — a real, consumer-observable fix to `App.SweepStructural`'s
+existing default behaviour, not new exported API surface.
+
+Status: Implements D47.
+
+---

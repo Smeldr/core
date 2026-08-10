@@ -211,6 +211,20 @@ func TestAppSweepStructural_DefaultChecker(t *testing.T) {
 		t.Fatalf("NewRelationStore: %v", err)
 	}
 
+	// "article" must be a registered dynamic content type (kind="content")
+	// before defaultTargetChecker will trust a status lookup against it —
+	// resolveItemTable's own fallback to smeldr_dynamic_content is what a
+	// compiled type with a missing table reaches too, so the checker
+	// confirms targetType is genuinely registered first.
+	if err := CreateSchemaTable(db); err != nil {
+		t.Fatalf("CreateSchemaTable: %v", err)
+	}
+	if err := NewSchemaStore(db).Save(context.Background(), &ContentTypeSchema{
+		TypeName: "article", Kind: "content",
+	}); err != nil {
+		t.Fatalf("SchemaStore.Save: %v", err)
+	}
+
 	// Register kind and assert an edge from article to a dynamic content target.
 	upsertTestKind(t, rs, "linked", "article", "article")
 	ctx := context.Background()
@@ -256,5 +270,51 @@ func TestAppSweepStructural_DefaultChecker(t *testing.T) {
 	}
 	if f != 1 || sk != 0 {
 		t.Errorf("want (1,0) for draft target, got (%d,%d)", f, sk)
+	}
+}
+
+// TestAppSweepStructural_DefaultChecker_RegisteredTypeRowMissing proves
+// genuine dynamic-content deletion still works exactly as before this
+// task's change: a registered content type whose target row was never
+// created (or was hard-deleted) is correctly reported not alive, not an
+// error — the registry check this task adds gates whether the status
+// lookup is trusted at all, not whether "not found" still means "gone"
+// once it is.
+func TestAppSweepStructural_DefaultChecker_RegisteredTypeRowMissing(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateBlockTables(db); err != nil {
+		t.Fatalf("CreateBlockTables: %v", err)
+	}
+	if err := CreateRelationTables(db); err != nil {
+		t.Fatalf("CreateRelationTables: %v", err)
+	}
+	if err := CreateSchemaTable(db); err != nil {
+		t.Fatalf("CreateSchemaTable: %v", err)
+	}
+	if err := NewSchemaStore(db).Save(context.Background(), &ContentTypeSchema{
+		TypeName: "article", Kind: "content",
+	}); err != nil {
+		t.Fatalf("SchemaStore.Save: %v", err)
+	}
+	rs, err := NewRelationStore(db)
+	if err != nil {
+		t.Fatalf("NewRelationStore: %v", err)
+	}
+	upsertTestKind(t, rs, "linked", "article", "article")
+
+	ctx := context.Background()
+	if _, err := rs.MCPAssertRelation(ctx, "article", "src-1", "article", "tgt-never-created", "linked", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPAssertRelation: %v", err)
+	}
+
+	app := &App{cfg: Config{DB: db}}
+	app.Relations(rs)
+
+	f, sk, err := app.SweepStructural(ctx)
+	if err != nil {
+		t.Fatalf("SweepStructural: %v", err)
+	}
+	if f != 1 || sk != 0 {
+		t.Errorf("want (1,0) for a registered type whose row was never created, got (%d,%d)", f, sk)
 	}
 }
