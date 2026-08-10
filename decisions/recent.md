@@ -32,6 +32,47 @@ Archived 2026-08-09: D40-D42, A241 → phase23-archive.md
 Archived 2026-08-10: D43-D46, A242-A247 → phase24-archive.md
 ---
 
+## D49 — Transition authority for compiled types lives on App, not on the MCPModule interface
+
+### Scope
+
+core (App.TransitionItem), mcp (transition_item dispatch)
+
+### Decision
+
+Flow-validated state transitions for compiled types are performed by a
+new `App.TransitionItem(ctx, typeName, slug, toState)` — resolving the
+item's table via `resolveItemTable`, validating via the same
+`validateTransition` call the REST path (`updateHandler`) already makes,
+and persisting via the file's established raw status-UPDATE pattern
+(`setStatus`/`conflictSupersede`'s own precedent). The dynamic-content
+branch delegates to `DynamicContentRepo` unchanged.
+
+### Rejected alternative
+
+A new required `MCPTransition(ctx, slug, toState)` method on the exported
+`MCPModule` interface, implemented generically on `Module[T]` with typed
+`repo.Save` (rev-CAS preserved). Rejected on the API stability promise:
+Go interface satisfaction has no default-method escape, so a new required
+method breaks every `MCPModule` implementer that is not `Module[T]`
+itself. The benefit it would buy — typed rev-CAS on a status-only write —
+is one the codebase's existing status-write paths already forgo
+deliberately; declining it here is consistency, not new risk.
+
+### Boundary
+
+The raw status-UPDATE's `rev` behaviour must be stated explicitly in the
+implementing Amendment's own text, whichever it is — it borders T227's
+territory (rev echo semantics), and an unstated rev semantic is the kind
+of gap that gets rediscovered expensively.
+
+### Status
+
+Ratified 2026-08-11 (Peter, via architect session). Implementation: the
+compiled-state-tools cycle.
+
+---
+
 ## D48 — A generated tool's authority requirement is derived from its structure, never enumerated by hand
 
 ### Scope
