@@ -31,6 +31,111 @@ Archived 2026-08-09: A236-A240, D38-D39 → phase22-archive.md
 Archived 2026-08-09: D40-D42, A241 → phase23-archive.md
 ---
 
+## D47 — A structural sweep gets a structural answer: for a compiled type, alive means the row exists
+
+### Scope
+
+core
+
+### Decision
+
+`SweepStructural`'s `TargetChecker` asks whether the thing an edge points at
+still exists. For any compiled `Module` type, **alive means the row is still
+there. No status is ever consulted.**
+
+Not `superseded`, not `archived`, not `expired`, not any future terminal
+state. A hard delete is the only thing that makes a target gone.
+
+For a runtime-defined content type the existing rule is unchanged: alive means
+`status = 'published'`.
+
+### The principle, which is why this holds for types that do not exist yet
+
+**A status is a semantic state. Existence is a structural fact. Answering a
+structural question with a semantic test is a category error whatever status
+is chosen.**
+
+Stated this way deliberately, rather than as a table of the six current types.
+A per-type enumeration would have to be revisited every time a seventh type or
+a new terminal state is added, and each revisit is another chance to get it
+wrong. The principle survives both.
+
+It also dissolves a doubt rather than accepting it. Core-implementer proposed
+the right rule but grounded it in an observation, that none of the six flows'
+terminal states happen to mean "this never occurred", and was therefore least
+confident about `Signal`'s `expired`, which reads closer to "no longer
+relevant" than the others. Under the principle, `expired` is not a harder case
+than `superseded`. It is the same case.
+
+### What the wrong answer costs, in each direction
+
+**Treating a terminal status as gone destroys history.** A `supersedes` edge
+pointing at a superseded `Decision` is the record of the supersession itself.
+Invalidating it deletes the evidence of the very act it documents. Archiving
+is bookkeeping, not retraction, and a `derives_from` edge that breaks because
+someone tidied up is a lost lineage.
+
+**Answering "alive" unconditionally is equally wrong.** A checker that never
+returns false makes the sweep incapable of detecting anything, which is the
+state the whole exercise exists to leave. Hard delete is real and reachable
+through the generic delete tool, so this rule still has a false to return.
+
+### The hazard this closes, and the one it opens sideways
+
+`App.SweepStructural`'s built-in checker previously queried only
+`smeldr_dynamic_content` and returned false when it found no row. Every
+compiled type would have answered false. **On an orchestration instance the
+first run would have invalidated the entire lineage graph.** The behaviour was
+documented in the function's own godoc, which said compiled types need a
+custom checker; the defect was that nothing enforced it and an architect task
+said "wire the detectors" without naming it.
+
+`resolveItemTable` falls back to `smeldr_dynamic_content` whenever it finds no
+dedicated table, which is correct for a genuine dynamic type and
+indistinguishable from a compiled type whose table is simply absent: a
+partially migrated instance, or a consumer that stopped registering a module.
+Both would have reached the status lookup, found no row, and returned false.
+The original hazard, reached sideways.
+
+**Closed by requiring positive evidence rather than inferring from absence.**
+Before the dynamic branch is trusted at all, the type must be confirmed as
+registered in `smeldr_content_type_schemas`. When it is not, or when that
+registry cannot be queried, the checker returns an **error rather than a
+verdict**. `SweepStructural` counts an error as skipped and leaves the edge
+untouched.
+
+> A sweep that cannot tell whether a target exists must decline, never delete.
+
+### Alternatives considered and rejected
+
+- **Archived, superseded or expired means not alive.** The natural reading,
+  and what the existing dynamic-content rule implies by analogy. Rejected: it
+  destroys history, and it is the answer someone would arrive at by extending
+  the old behaviour rather than by asking what the sweep is for.
+- **A per-type table of what alive means.** Correct today and wrong on the
+  day a seventh type lands.
+- **Leaving the fix opt-in**, as a constructor or as `example/server` wiring.
+  Rejected: an opt-in does not reach the consumer who does not know they are
+  at risk, which is precisely the population this protects.
+
+### Consequences
+
+**Consumer-visible behaviour change on any instance with compiled types.**
+Previously the default checker invalidated all their edges; now it does not.
+Anyone relying on the old behaviour was relying on a bug.
+
+**One caller-facing case survives and is documented.** An application whose
+own compiled types genuinely do treat some status as equivalent to deletion,
+unlike every built-in orchestration flow, must still supply its own
+`TargetChecker`.
+
+**This does not schedule anything.** The sweep still has no caller. Wiring it
+is separate work with its own open questions about what a run must record.
+
+Status: Ratified 2026-08-10.
+
+---
+
 ## D46 — A finding and a condition are different objects, and suppressing a finding is a Decision rather than a button
 
 ### Scope
