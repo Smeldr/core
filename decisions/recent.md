@@ -31,6 +31,76 @@ Archived 2026-08-09: A236-A240, D38-D39 → phase22-archive.md
 Archived 2026-08-09: D40-D42, A241 → phase23-archive.md
 ---
 
+## D48 — A generated tool's authority requirement is derived from its structure, never enumerated by hand
+
+### Scope
+
+mcp (mechanism), core (seed rows + documentation)
+
+### Decision
+
+When `smeldr_tool_policies` has no row for a tool name, the required
+operation is **derived from the tool's own verb prefix** — `get`/`list` →
+`read`, `create` → `create`, `update` → `update`, `publish`/`schedule` →
+`publish`, `archive` → `archive`, `delete` → `delete` — **if and only if a
+real registered module backs the parsed type name** (`moduleForType`, or
+`moduleForAdminList` for list-tools' plural names). Otherwise denial stands
+exactly as before.
+
+**An explicit policy row always wins over derivation.** Derivation is a
+default, not an override: an operator who writes a row for a specific tool
+changes that tool's requirement, and nothing re-derives it.
+
+### What this settles
+
+T224: `seedToolPolicies` is a hand-maintained list covering the four
+built-in content types and a set of framework tools. The six orchestration
+types' generated per-type tools had no rows, and `authoriseTool`'s
+fail-closed not-found branch therefore denied every one of them — verified
+live on `process.smeldr.dev` with a token holding a real admin grant.
+`create_signal` worked and `get_signal` did not, for no reason an operator
+could inspect. M0 step 7 was blocked on it.
+
+The deeper defect is the list itself. A hand-enumerated authority surface
+is correct only for what was enumerated at the time — the exact class D47
+closed for the sweep's `TargetChecker`, and this same list was already
+patched once this week (A242's grant tools, whose own comment warns that an
+unpolicied tool is denied for everyone). A seventh orchestration type, or
+any new compiled module, would silently reopen the hole.
+
+### Rejected alternatives
+
+- **Seed rows per generated tool, per deployment.** Correct today, wrong
+  the day the next type lands, and each patch is another chance to miss
+  one. Rejected on D47's own argument, not on cost.
+- **Missing row means allow.** Fails Article I outright — an unknown tool
+  name would acquire authority nobody granted.
+- **Derivation inside core's `RoleStore.ToolPolicy`.** `parseToolName` and
+  the module registry are mcp-side knowledge; core cannot confirm a real
+  module backs a type name. The fallback lives in `mcp`'s `authoriseTool`
+  path, where that confirmation is possible — an unknown or misspelled
+  name still fails closed because no module confirms it.
+
+### Boundary
+
+`manage`, `administer`, `define-type`, `define-flow` and
+`define-relation-kind` have no generated verb form and are **never
+derived** — every tool requiring them keeps an explicit row.
+`get_goal_context` and `list_type_tools` are framework tools, not generated
+ones, and get explicit `read` rows in the same change.
+
+The derivation rule is documented in governance-model.md §4 in the same
+commit that ships it. A requirement an operator cannot read about anywhere
+is silent authority, which is the failure mode this project keeps finding
+elsewhere (T219, T223).
+
+### Status
+
+Ratified 2026-08-10 (Peter, via architect session). Implementation: T224's
+cycle, smeldr.dev/mcp.
+
+---
+
 ## D47 — A structural sweep gets a structural answer: for a compiled type, alive means the row exists
 
 ### Scope
