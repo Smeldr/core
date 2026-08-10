@@ -146,20 +146,24 @@ func TestDynamicContentRepo_UnknownType(t *testing.T) {
 }
 
 func TestDynamicContentRepo_CompiledType_Rejected(t *testing.T) {
-	app := newDynApp(t)
-	// "posts" style compiled module — register a "block" kind descriptor via ServeDynamicContent
-	// Just create a simple module to exercise the "compiled type" path
-	_ = app.ServeDynamicContent()
+	db := openDynDB(t)
+	if err := smeldr.CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte(dynTestSecret),
+		DB:      db,
+	}))
+	smeldr.RegisterOrchestrationTypes(app, db)
 
-	// Register a "block" schema manually via SchemaStore, then verify DynamicContentRepo rejects it
-	// Actually the easiest way: call DefineContentType then manually check GetByID rejects blocks.
-	// Instead, let's test with a compiled module type prefix - no module means "not registered" error.
-	// We already covered "unknown type" above; test compiled rejection via a manual schema with Kind=block.
-
-	// We can't easily inject a Kind="block" TypeDescriptor through the public API.
-	// This path is covered indirectly through DefineContentType always forcing Kind="content".
-	// Mark as passed — the compiled-type rejection is tested at unit level above (unexported).
-	t.Skip("compiled-type rejection path requires internal access")
+	_, err := app.DynamicContentRepo("Signal")
+	if err == nil {
+		t.Fatal("expected error for compiled type")
+	}
+	if !strings.Contains(err.Error(), "compiled type") {
+		t.Fatalf("expected compiled-type error, got: %v", err)
+	}
 }
 
 func TestDynamicContentRepo_NilDB_Direct(t *testing.T) {

@@ -27,7 +27,7 @@ type TypeDescriptor struct {
 	Name   string             // canonical type name
 	Prefix string             // URL prefix (operator-definable; default: pluralized Name)
 	Schema *ContentTypeSchema // schema descriptor; nil for compiled modules in this increment
-	Kind   string             // "block" | "content"
+	Kind   string             // "block" | "content" | "compiled"
 	// Fetch returns Published items as type-erased maps for the ContentList
 	// block resolver (T96). Nil for runtime-defined types (T104 increment 2
 	// will handle those via DynamicContentRepo). Set at App.Content() time

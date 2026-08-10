@@ -3161,7 +3161,7 @@ type TypeDescriptor struct {
     Name   string
     Prefix string             // URL prefix (e.g. "/posts")
     Schema *ContentTypeSchema // nil for compiled modules in this increment
-    Kind   string             // "block" | "content"
+    Kind   string             // "block" | "content" | "compiled"
     Fetch  func(ctx context.Context, opts ListOptions) ([]map[string]any, error)
 }
 ```
@@ -3169,6 +3169,13 @@ type TypeDescriptor struct {
 `Fetch` is set automatically at `App.Content()` time for any `Module[T]` that
 implements `ContentLister` (i.e. every compiled module). It returns Published items
 as type-erased `map[string]any` for the ContentList block resolver.
+
+`Kind` distinguishes three registration paths: `"content"` for runtime-defined
+types created via `DefineContentType`, `"compiled"` for every `Module[T]`
+registered through `App.Content()` (all six orchestration types plus any
+custom compiled module), and `"block"` reserved for the block system's own
+kind. `DynamicContentRepo` rejects any `Kind != "content"` — a compiled
+module's data lives behind its own module, not `smeldr_dynamic_content`.
 
 | Method | Effect |
 |--------|--------|

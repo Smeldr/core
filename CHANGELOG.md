@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.63.2] — 2026-08-10
+
+### Fixed
+- `DynamicContentRepo` now correctly identifies compiled orchestration types (e.g. `Signal`, `Run`, `Task`, `Decision`, `Amendment`, `Goal`) instead of misclassifying them as runtime-defined dynamic types. Previously, MCP tools like `transition_item`, `get_valid_transitions`, and `list_items_by_state` would crash with `-32603 internal error: SQL logic error: no such table: smeldr_dynamic_content` when called on a compiled type. The guard now cleanly rejects compiled types with the intended error message. Fix: compiled modules' `TypeDescriptor.Kind` is now `"compiled"` (not `"content"`), allowing the guard to distinguish them at registration time. (A248)
+
+---
+
 ## [1.63.1] — 2026-08-10
 
 ### Fixed

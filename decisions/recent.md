@@ -1421,3 +1421,103 @@ existing default behaviour, not new exported API surface.
 Status: Implements D47.
 
 ---
+
+## A248 — Fix DynamicContentRepo's compiled-type guard (T225)
+
+### Root cause
+
+`App.Content()` registered every compiled module's
+`TypeDescriptor` with `Kind: "content"` — the same value
+assigned to genuine runtime-defined dynamic types created
+via `DefineContentType`. This identity fooled
+`DynamicContentRepo`'s compiled-type guard (`Kind !=
+"content"` check) into believing compiled types were
+runtime-defined and normal, causing them to bind to
+`smeldr_dynamic_content` instead of their module's own
+storage. MCP tools `transition_item`, `get_valid_transitions`,
+and `list_items_by_state` crashed with `-32603 internal
+error: SQL logic error: no such table: smeldr_dynamic_content`
+when called on compiled orchestration types (Signal, Run,
+Task, Decision, Amendment, Goal).
+
+### How it was found
+
+Reproduced locally, not reasoned about, per NEXT.md's own
+instruction: a real in-process instance
+(`RegisterOrchestrationTypes` called, no dynamic content
+ever configured), a real `Signal` seeded, `get_valid_transitions`
+called through the actual `handleToolsCall` entry point.
+Traced backward from the missing-table crash through the SQL
+error to the binding logic, then to the mislabeled `Kind`
+field at the single registration site (`smeldr.go`).
+Corroborating evidence found independently: the long-skipped
+test `TestDynamicContentRepo_CompiledType_Rejected` had sat
+skipped since A153 for the same reason — unable to inject a
+`Kind: "block"` descriptor through the public API, because
+the real public path had never produced one.
+
+### The fix
+
+`App.Content()` now assigns `Kind: "compiled"` (a new, third
+value) when registering a compiled module's `TypeDescriptor`,
+in place of `"content"`. Every one of `dynamic.go`'s six
+`Kind != "content"` guards is a pure inequality, so any
+non-`"content"` value — including the shorter `"block"` —
+would have worked identically through every guard. `"block"`
+was rejected anyway: `dynamic.go`'s `define_content_type` HTTP
+handler and `smeldr.dev/mcp`'s matching MCP tool both echo
+`desc.Kind` back in their response. Checked both, not assumed
+harmless — neither can currently leak a compiled module's
+`Kind`, only because `DefineContentType` unconditionally
+forces `schema.Kind = "content"` regardless of what's passed
+in. That safety is coincidental, not structural: nothing stops
+a future diagnostic surface from enumerating
+`TypeRegistry.All()` and rendering `.Kind` for every registered
+type, compiled ones included, at which point `"block"` would
+be an actively false answer. `registry.go`'s `TypeDescriptor.Kind`
+field comment updated from `"block" | "content"` to `"block" |
+"content" | "compiled"` — `"block"` itself stays a real,
+distinct value (the block system's own use), unrenamed.
+
+### Tests and coverage
+
+`TestDynamicContentRepo_CompiledType_Rejected`
+(`dynamic_app_test.go`) un-skipped: now calls
+`CreateOrchestrationTables` + `RegisterOrchestrationTypes`
+against a real app instance and asserts
+`DynamicContentRepo("Signal")` returns the existing
+`"is a compiled type; use its module directly"` error, through
+the real public registration path rather than an unexported
+internal one. No exported symbols changed. Coverage: 96.2%
+package-wide. `go build`/`vet`/`gofmt`/`test`/`golangci-lint`
+all clean.
+
+### Explicitly out of scope, confirmed against the dispatch's own exclusions
+
+This one-line fix alone makes `transition_item`/
+`get_valid_transitions`/`list_items_by_state`
+(`smeldr.dev/mcp`) return the existing clean
+`"compiled type; use its module directly"` message for any
+compiled type instead of crashing — through a mechanism that
+already existed and was simply never reached. Whether these
+three tools should be extended to actually *operate* on
+compiled types, not just reject them cleanly, was argued both
+directions in the plan (`resolveItemTable`, D42/D47's own
+reused helper, plus the fully generic `validateTransition`
+that `DynamicTypeRepo.setStatus` already calls before its one
+dynamic-content-specific line, mean the authority gate would
+not be bypassed) but deliberately not shipped here — a real
+capability gap for M0 step 7, its own future dispatch, not
+risked by bundling into this fix.
+
+### Versioning
+
+Patch bump — a real, consumer-observable fix to
+`DynamicContentRepo`'s existing guard (three MCP tools stop
+crashing on any compiled orchestration type), not new exported
+API surface. `TypeDescriptor.Kind` gained a documented value;
+no exported symbol removed. v1.63.1 → v1.63.2.
+
+Status: Agreed.
+
+---

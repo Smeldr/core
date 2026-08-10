@@ -575,7 +575,7 @@ func (a *App) Content(v any, opts ...Option) {
 					a.typeRegistry.Register(&TypeDescriptor{
 						Name:   meta.TypeName,
 						Prefix: meta.Prefix,
-						Kind:   "content",
+						Kind:   "compiled",
 					})
 				} else if meta.Prefix != "" {
 					a.typeRegistry.RegisterPrefix(meta.Prefix, meta.TypeName)
