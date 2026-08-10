@@ -206,6 +206,79 @@ is separate work with its own open questions about what a run must record.
 Status: Ratified 2026-08-10.
 
 ---
+## A250 — derive missing tool-policy rows from a generated tool's own verb (T224, smeldr.dev/mcp half of D48)
+
+### The mechanism D48 requires
+
+`authoriseTool`'s `ToolPolicy`-not-found branch (`tool.go`) previously
+failed closed unconditionally — the exact behaviour that left every
+one of the six orchestration types' own generated per-type tools
+forbidden for everyone, T224's root finding. New `deriveToolPolicy`:
+when no `smeldr_tool_policies` row exists, derive the required
+operation from the tool's own verb prefix, using the identical
+vocabulary `seedToolPolicies` itself already seeds with (`get`/`list`
+→ `read`, `create` → `create`, `update` → `update`, `publish`/
+`schedule` → `publish`, `archive` → `archive`, `delete` → `delete`).
+
+Derivation only fires when a real registered module backs the parsed
+type name: `moduleForAdminList` for a `list_*` name (reverses the
+plural — `list_decisions` → `decision`), `moduleForType` for every
+other verb. An unknown or misspelled tool name still fails closed —
+nothing derives a requirement for a type name no module confirms.
+An explicit `smeldr_tool_policies` row always wins over derivation;
+derivation is a default, not an override.
+
+`manage`, `administer`, `define-type`, `define-flow`, and
+`define-relation-kind` have no generated-tool verb form and are never
+derived, per D48's own boundary — every tool requiring one of these
+keeps an explicit row, always.
+
+### Why derivation lives in mcp, not core
+
+`parseToolName` and the module registry (`s.modules`) are mcp-side
+knowledge. Confirming "a real module backs this type name" — the
+check that keeps an unrecognised name failing closed — is only
+possible where that registry lives. Moving derivation into core's
+`RoleStore.ToolPolicy` would give core no way to make that
+confirmation, and D48 itself named this as a rejected alternative.
+
+### Tests, made permanent not one-time
+
+New `TestAuthoriseTool_PolicyCoverage_Enumerated`: derives the full
+tool list from a real `tools/list` response — not hand-listed — and
+asserts every tool resolves through either an explicit row or
+derivation. This is the acceptance criterion itself, not just a
+regression check: a future generated tool with no coverage is caught
+here, the same way this one wasn't. New
+`TestAuthoriseTool_GetSignal_NoLongerForbidden` reproduces T224's own
+live symptom directly through `handleToolsCall` (a real `Signal`, a
+real admin-granted token) rather than only through the enumeration
+sweep.
+
+### A real release-ordering lesson, found by the test itself
+
+`go.mod`'s `smeldr.dev/core` pin was left at v1.63.0 when this shipped
+— core v1.63.2 (A248, the `Kind` fix) and v1.63.3 (A249, the seed
+rows this enumeration test depends on) were not yet tagged, matching
+A243's own precedent of waiting for a proxy-verified tag rather than
+a `go.work`-local override. CI caught this live: with the pin still
+at v1.63.0, `TestAuthoriseTool_PolicyCoverage_Enumerated` correctly
+failed on exactly `get_goal_context` and `list_type_tools` — the two
+rows that only exist in v1.63.3 — because CI resolves the real
+published proxy, not `go.work`'s local override that had been masking
+the gap locally. The test was doing exactly what it was built for;
+fixed by tagging core first, then bumping the pin against the
+verified tag, matching the required sequence exactly.
+
+### Versioning
+
+Patch bump — no exported symbols changed (`deriveToolPolicy` is
+unexported). v1.30.0 → v1.30.1.
+
+Status: Implements D48.
+
+---
+
 ## A249 — seedToolPolicies rows for get_goal_context/list_type_tools (T224, smeldr/core half of D48)
 
 ### What this closes
