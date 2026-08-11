@@ -178,6 +178,47 @@ Status: Implements D49.
 
 ---
 
+## A252 — transition_item/get_valid_transitions/list_items_by_state operate on compiled types (D49, smeldr.dev/mcp half)
+
+### What shipped
+
+`transition_item` now calls the new `smeldr.dev/core` `App.TransitionItem` (A251) instead
+of cleanly rejecting every compiled type, the actual capability A251's core-side work
+exists to expose. `get_valid_transitions` and `list_items_by_state` need no new core API:
+both resolve a compiled type's current status/listing through its own module's already-
+exported, type-erased `MCPGet`/`MCPList` — status is read from the marshaled JSON result
+(`Node.Status` carries no `json` tag, so it marshals under its own field name; no
+reflection required). Role-gated transitions (D34/D40) behave identically through this
+path to the REST path, since both ultimately reach the same `validateTransition` call.
+
+### errorFor gains a mapping it always should have had
+
+`validateTransition`'s `RequiredReason` branch has returned `ErrBadRequest` since T149/A220
+with no JSON-RPC code mapping anywhere in `errorFor` — every call fell through to the
+generic `-32603`. Closed as a direct side effect of wiring `App.TransitionItem`'s own "type
+not registered" error through the same path: `errorFor` now maps `smeldr.ErrBadRequest` →
+`-32602`, the same code `ValidationError` already uses.
+
+### Versioning
+
+Requires `smeldr.dev/core` v1.64.0+ (`App.TransitionItem`) — go.mod bumped only after
+core's tag was proxy-verified, matching A243's own precedent, not a `go.work`-local
+override. MINOR bump — new consumer-visible tool capability, three previously-clean-
+rejecting tools now actually operate on compiled types. v1.30.1 → v1.30.2.
+
+Status: Implements D49 (paired with A251, smeldr/core half — see that entry for the full
+design rationale, not restated here).
+
+### Note
+
+This entry backfills a completeness gap: `mcp/CHANGELOG.md`'s own `[1.30.2]` section and
+A251's own text both already cited "A252" at the time of that release, but the index row
+and this body were never written — the same class of gap A250 itself named and fixed one
+cycle earlier. Found and fixed during T227's plan review (2026-08-11), before T227's own
+Amendment number could be correctly assigned.
+
+---
+
 ## D48 — A generated tool's authority requirement is derived from its structure, never enumerated by hand
 
 ### Scope
