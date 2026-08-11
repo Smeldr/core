@@ -33,6 +33,70 @@ Archived 2026-08-10: D43-D46, A242-A247 → phase24-archive.md
 Archived 2026-08-11: D47, A248-A251 → phase25-archive.md
 ---
 
+## D50 — The Task flow is the protocol; Signals are not a chat channel
+
+### Scope
+
+process (the live-instance coordination protocol), core (one flow rename)
+
+### Decision
+
+The ship-code pipeline runs on `Task` state transitions alone.
+`waiting-plan → plan-reviewing` *is* plan-ready,
+`plan-reviewing → implementing` *is* approved-start,
+`implementing → commit-reviewing` *is* commit-ready. Each transition
+already carries actor, timestamp, audit, and a `Reason` field for the
+one-line message; plans and answers stay in plan files, as always.
+
+**Retired for the live channel:** protocol-verb `Signal` records, the
+`sequence` counter, the `read` step, and dispatch signals — a dispatch is
+the `Task`'s own creation.
+
+**The `Signal` type is reserved for system-emitted notifications** —
+D42's automation-stopped-at-a-gate class — not agent conversation.
+
+**The flow renames `architect-task` → `agent-task`.** It governs any
+agent's work through the pipeline; the old name claimed the process was
+architect's own, which is also why the flow living in core looked like a
+layering smell. A generic agent work pipeline earns its place in the
+framework; only the name said otherwise.
+
+**Delivery:** interactive sessions use session-start queries plus the
+desktop doorbell (transport, never record, per AGENT_PROTOCOL.md's own
+rules). Headless and product-grade delivery is T231's event coverage plus
+M3's relay — deferred with M3, since the doorbell does not exist for
+unattended sessions and no customer has Peter's desktop app. File-based
+(unmigrated) roles are unchanged.
+
+### Why
+
+The Signal-record protocol reified the file channel's own compensations.
+Explicit messages, sequence counters and read-receipts existed because
+files cannot push and hold no state; copying that shape onto a system
+that already has state, ordering, audit and events produced double
+bookkeeping — the same phase recorded in `Task.Status` and again in a
+`signal_type` chain, with no rule for which record wins when they
+disagree. That is Article IV's silent ambiguity, built in on day one of
+the channel.
+
+### Rejected alternatives
+
+- **Keeping both records.** Drift by design; every future reader must
+  reconcile two accounts of one fact.
+- **Building the relay now for interactive use.** The doorbell suffices
+  for active sessions; the relay serves headless automation and belongs
+  to M3's own track.
+- **Keeping the `architect-task` name.** Generic behaviour under a
+  role-specific name is how the layering question arose at all.
+
+### Status
+
+Ratified 2026-08-11 (Peter, via architect session). Takes effect between
+cycles: T230 finishes under the old protocol; the next dispatched task
+runs on Task transitions alone.
+
+---
+
 ## D49 — Transition authority for compiled types lives on App, not on the MCPModule interface
 
 ### Scope
