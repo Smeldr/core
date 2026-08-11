@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -566,6 +567,63 @@ func TestSQLRepo_Save_insert(t *testing.T) {
 	want := `INSERT INTO blog_posts ("id", "title") VALUES ($1, $2) ON CONFLICT ("id") DO UPDATE SET "title"=EXCLUDED."title"`
 	if q := getLastQuery(); q != want {
 		t.Errorf("query = %q, want %q", q, want)
+	}
+}
+
+// TestSQLRepo_Save_update_returningRev proves a rev-bearing type's generated
+// SQL appends RETURNING "rev", and that the value the fake driver returns is
+// written back onto the caller's own struct with no re-read.
+func TestSQLRepo_Save_update_returningRev(t *testing.T) {
+	db := newTestDB(t)
+	setFakeResult([]string{"rev"}, [][]driver.Value{{int64(5)}})
+	r := NewSQLRepo[*revNode](db, Table("rev_nodes"))
+	item := &revNode{Node: Node{ID: "1", Slug: "a"}}
+	if err := r.Save(context.Background(), item); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if q := getLastQuery(); !strings.Contains(q, `RETURNING "rev"`) {
+		t.Errorf("query = %q, want it to contain RETURNING \"rev\"", q)
+	}
+	if item.Rev != 5 {
+		t.Errorf("item.Rev = %d, want 5 (write-back from fake driver's returned row)", item.Rev)
+	}
+}
+
+// TestSQLRepo_Save_RevConflict_fakeDriver proves sql.ErrNoRows from an empty
+// RETURNING result maps to ErrRevConflict, at the fast unit-test level —
+// complements the slower real-SQLite TestSQLRepo_Save_RevConflict.
+func TestSQLRepo_Save_RevConflict_fakeDriver(t *testing.T) {
+	db := newTestDB(t)
+	setFakeResult([]string{"rev"}, nil) // no rows: CAS WHERE guard didn't match
+	r := NewSQLRepo[*revNode](db, Table("rev_nodes"))
+	item := &revNode{Node: Node{ID: "1", Slug: "a"}}
+	if err := r.Save(context.Background(), item); !errors.Is(err, ErrRevConflict) {
+		t.Errorf("Save: got %v, want ErrRevConflict", err)
+	}
+}
+
+// TestSQLRepo_Save_ValueType_NoPanic proves a value-type T (already
+// discouraged by NewSQLRepo's own doc comment) with a rev column does not
+// panic on write-back — src is not addressable, so writeBackTimestamps and
+// the rev write-back must both no-op via their own CanSet guard.
+func TestSQLRepo_Save_ValueType_NoPanic(t *testing.T) {
+	db := newTestDB(t)
+	setFakeResult([]string{"rev"}, [][]driver.Value{{int64(0)}})
+	r := NewSQLRepo[revNode](db, Table("rev_nodes"))
+	err := r.Save(context.Background(), revNode{Node: Node{ID: "1", Slug: "a"}})
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+}
+
+// TestSQLRepo_Save_execError_noRev proves Save's plain-Exec path (a type
+// with no rev column) returns the underlying error unwrapped, reusing the
+// existing errExecDB fixture (auth_test.go) rather than a new one.
+func TestSQLRepo_Save_execError_noRev(t *testing.T) {
+	r := NewSQLRepo[BlogPost](&errExecDB{})
+	err := r.Save(context.Background(), BlogPost{ID: "1", Title: "Hello"})
+	if err == nil || err.Error() != "exec error" {
+		t.Errorf("Save: got %v, want the underlying exec error", err)
 	}
 }
 

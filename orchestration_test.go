@@ -874,9 +874,12 @@ func TestRegisterOrchestrationRelationKinds_UpsertError(t *testing.T) {
 }
 
 // TestRun_SaveRevConflict proves Run is genuinely wired onto SQLRepo's real
-// rev-CAS (D38 §1/§3) — not a test of the future listener's rev-echo
-// discipline, which this task builds no code for (see Run's own doc
-// comment). Mirrors TestSQLRepo_Save_RevConflict's exact pattern.
+// rev-CAS (D38 §1/§3) — not a test of the future listener's own MCP-update-
+// payload rev-echo discipline (D38 §3), which stays a separate, still-open
+// concern this task does not touch (see Run's own doc comment). The
+// SQLRepo-level echo this test's own stale/fresh-copy split now exercises
+// is a different, lower layer (A253): whether Save tells its immediate Go
+// caller the truth at all. Mirrors TestSQLRepo_Save_RevConflict's pattern.
 func TestRun_SaveRevConflict(t *testing.T) {
 	db := newSQLiteDB(t)
 	if err := CreateOrchestrationTables(db); err != nil {
@@ -890,12 +893,21 @@ func TestRun_SaveRevConflict(t *testing.T) {
 	if err := repo.Save(ctx, item); err != nil {
 		t.Fatalf("first save: %v", err)
 	}
+	// A second holder reads the item at rev 0 and never advances its own
+	// copy — this manufactures a genuinely stale write, independent of
+	// what item.Rev becomes after the next Save.
+	stale := &Run{Node: Node{ID: "run-1", Slug: "run-1", Rev: item.Rev}, TaskID: "T145"}
+
 	// Second save with item.Rev = 0: WHERE rev=0 matches stored rev=0 → update, stored rev→1.
 	if err := repo.Save(ctx, item); err != nil {
 		t.Fatalf("second save: %v", err)
 	}
-	// Third save with item.Rev = 0 (stale): WHERE rev=0 fails (stored rev=1) → ErrRevConflict.
-	if err := repo.Save(ctx, item); !errors.Is(err, ErrRevConflict) {
-		t.Errorf("third save (stale rev): got %v, want ErrRevConflict", err)
+	if item.Rev != 1 {
+		t.Fatalf("item.Rev after second save = %d, want 1 (write-back)", item.Rev)
+	}
+
+	// stale.Rev is still 0: WHERE rev=0 fails (stored rev=1) → ErrRevConflict.
+	if err := repo.Save(ctx, stale); !errors.Is(err, ErrRevConflict) {
+		t.Errorf("stale save: got %v, want ErrRevConflict", err)
 	}
 }

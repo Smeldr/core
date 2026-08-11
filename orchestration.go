@@ -304,7 +304,10 @@ const (
 // omits rev has MCPUpdate silently seed the row's current value instead,
 // satisfying the CAS by construction and degrading claims/renewals to
 // last-write-wins, indistinguishably from correct behaviour under any
-// single-threaded test (D38 §3).
+// single-threaded test (D38 §3). This is a separate, still-open concern
+// from whether [SQLRepo.Save] itself tells its immediate Go caller the
+// truth — that lower-layer gap is fixed (A253): Save now writes the
+// database's post-write Rev back onto the caller's own struct.
 type Run struct {
 	Node
 	// TaskID is the Task this Run performs mechanical work for (e.g. "T145").

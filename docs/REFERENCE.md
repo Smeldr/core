@@ -3010,6 +3010,10 @@ repo.Save(ctx, node)
 (the table name cannot be derived from the type), with the full
 `FindByID` / `FindBySlug` / `FindAll` / `Save` / `Delete` / `Seq` surface.
 
+`Save` writes the post-save `Rev`, `UpdatedAt`, and `CreatedAt` back onto `node`
+itself once the write succeeds (v1.64.1+) — no re-read needed to see the current
+`Rev` after a call like the one above, as long as `node` is a pointer (as it is here).
+
 ### `ContentEdge` and `ContentEdgeStore`
 
 A `ContentEdge` records that one parent contains one child at one position. The

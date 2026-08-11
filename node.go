@@ -79,7 +79,9 @@ type Node struct {
 	// On first insert Rev = 0. On each subsequent save Rev = Rev + 1.
 	// Use Rev as an optimistic-concurrency token to detect concurrent writes:
 	// if two goroutines read the same node (both see Rev = 3), the second
-	// Save returns [ErrRevConflict] instead of silently overwriting.
+	// Save returns [ErrRevConflict] instead of silently overwriting. The
+	// first goroutine's own struct reflects the real post-save Rev as soon
+	// as its Save call returns — no re-read required (see [SQLRepo.Save]).
 	Rev int `db:"rev"`
 }
 

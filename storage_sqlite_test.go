@@ -155,23 +155,34 @@ func TestSQLRepo_Save_RevIncrements(t *testing.T) {
 	if err := repo.Save(ctx, item); err != nil {
 		t.Fatalf("first save: %v", err)
 	}
+	// item.Rev reflects the write-back with no re-read needed.
+	if item.Rev != 0 {
+		t.Errorf("item.Rev after first save = %d, want 0", item.Rev)
+	}
 	got, _ := repo.FindByID(ctx, "inc-1")
 	if got.Rev != 0 {
 		t.Errorf("after first save: Rev = %d, want 0", got.Rev)
 	}
 
-	// Second save using the refetched item (Rev=0 matches stored): stored rev → 1.
-	if err := repo.Save(ctx, got); err != nil {
+	// Second save reusing item directly (no re-read) — Save's own write-back
+	// keeps item.Rev current, so this is the "matches stored" case again.
+	if err := repo.Save(ctx, item); err != nil {
 		t.Fatalf("second save: %v", err)
+	}
+	if item.Rev != 1 {
+		t.Errorf("item.Rev after second save = %d, want 1", item.Rev)
 	}
 	got, _ = repo.FindByID(ctx, "inc-1")
 	if got.Rev != 1 {
 		t.Errorf("after second save: Rev = %d, want 1", got.Rev)
 	}
 
-	// Third save using the refetched item (Rev=1 matches stored): stored rev → 2.
-	if err := repo.Save(ctx, got); err != nil {
+	// Third save, same item, same reasoning: no re-read was ever needed.
+	if err := repo.Save(ctx, item); err != nil {
 		t.Fatalf("third save: %v", err)
+	}
+	if item.Rev != 2 {
+		t.Errorf("item.Rev after third save = %d, want 2", item.Rev)
 	}
 	got, _ = repo.FindByID(ctx, "inc-1")
 	if got.Rev != 2 {
@@ -190,14 +201,53 @@ func TestSQLRepo_Save_RevConflict(t *testing.T) {
 	if err := repo.Save(ctx, item); err != nil {
 		t.Fatalf("first save: %v", err)
 	}
+	// A second holder reads the item at rev 0 and never advances its own
+	// copy — this manufactures a genuinely stale write, independent of
+	// what item.Rev becomes after the next Save.
+	stale := &revNode{Node: Node{ID: "cas-1", Slug: "cas", Rev: item.Rev}}
+
 	// Second save with item.Rev = 0: WHERE rev=0 matches stored rev=0 → update, stored rev→1.
 	if err := repo.Save(ctx, item); err != nil {
 		t.Fatalf("second save: %v", err)
 	}
-	// Third save with item.Rev = 0 (stale): WHERE rev=0 fails (stored rev=1) → ErrRevConflict.
-	err := repo.Save(ctx, item)
-	if !errors.Is(err, ErrRevConflict) {
+	// Save writes the database-computed rev back onto item — no re-read needed.
+	if item.Rev != 1 {
+		t.Fatalf("item.Rev after second save = %d, want 1 (write-back)", item.Rev)
+	}
+
+	// stale.Rev is still 0: WHERE rev=0 fails (stored rev=1) → ErrRevConflict.
+	if err := repo.Save(ctx, stale); !errors.Is(err, ErrRevConflict) {
 		t.Errorf("expected ErrRevConflict, got %v", err)
+	}
+}
+
+// TestSQLRepo_Save_WritesBackTimestamps proves UpdatedAt/CreatedAt are
+// written onto the caller's own struct with no re-read needed — the part
+// of Save's write-back contract beyond Rev.
+func TestSQLRepo_Save_WritesBackTimestamps(t *testing.T) {
+	db := newSQLiteDB(t)
+	createRevNodesTable(t, db)
+	repo := NewSQLRepo[*revNode](db, Table("rev_nodes"))
+	ctx := context.Background()
+
+	item := &revNode{Node: Node{ID: "ts-1", Slug: "ts"}}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	if item.UpdatedAt.IsZero() {
+		t.Error("item.UpdatedAt is zero after first save, want non-zero (write-back)")
+	}
+	if item.CreatedAt.IsZero() {
+		t.Error("item.CreatedAt is zero after first save, want non-zero (write-back)")
+	}
+	firstCreatedAt := item.CreatedAt
+
+	// A second save must not change CreatedAt (only set when previously zero).
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	if !item.CreatedAt.Equal(firstCreatedAt) {
+		t.Errorf("item.CreatedAt changed on second save: got %v, want %v", item.CreatedAt, firstCreatedAt)
 	}
 }
 

@@ -178,6 +178,157 @@ Status: Implements D49.
 
 ---
 
+## A253 — SQLRepo.Save writes back the caller's own struct (T227)
+
+### The bug
+
+`Save` (`storage.go`) built a separate addressable copy (`cp`/`rv`) for the
+DB write. `UpdatedAt`/`CreatedAt` were written into that copy; the SQL
+incremented `rev` in the database (`SET rev = table.rev + 1`); the CAS
+guard was checked via `RowsAffected()`. None of it — not the incremented
+`rev`, not even `UpdatedAt` — was ever written back into the caller's own
+struct. A successful `Save` call left `item` completely untouched.
+
+Confirmed live, not hypothetical: `PUT /signals/{slug}` on
+`process.smeldr.dev` during M0 step 6 responded `"Rev": 0`; a re-read
+immediately after showed `"Rev": 1`. `smeldr/runner`'s own `client_test.go`
+(M3 runner build) hit the identical thing from `update_run`.
+
+**Prior art already in this codebase, now closed rather than worked
+around again.** A226 fixed a *symptom* of this exact root cause —
+`updateHandler` called `Save` twice on a publish-via-PUT, and the second
+call's CAS failed because the first call's rev increment was never echoed
+back — by removing the second `Save` entirely, not by fixing `Save`'s own
+contract. D38 (`orchestration.go`, `Run`'s own doc comment) named this
+precise gap as future work three weeks ago, deliberately left unbuilt: "a
+write whose payload omits rev has MCPUpdate silently seed the row's
+current value instead... degrading claims/renewals to last-write-wins,
+indistinguishably from correct behaviour under any single-threaded test
+(D38 §3)." That entry is explicit the SQLRepo-level echo did not exist
+yet. This task builds it.
+
+### Write-back to the passed pointer, not a changed return shape
+
+`NewSQLRepo`'s own doc comment already documents the convention that `T`
+is a pointer type — matching the proto passed to `NewModule`. When that
+convention is followed, `item`'s underlying struct is already addressable
+the moment `Save` dereferences it, before today's code ever copied it
+away into `cp`. Writing into that same value directly needs no new
+capability, only for `Save` to stop copying away from the value that
+matters. A changed return shape would have been a breaking signature
+change to an exported method used directly by every module handler in
+`smeldr/core` itself, by every standalone repo that embeds
+`smeldr.dev/core`, and by any external caller using `SQLRepo` directly for
+a custom type — for zero benefit the write-back approach doesn't already
+give. When `item` is not the conventional addressable shape (a value-type
+`T`, already discouraged by `NewSQLRepo`'s own doc comment), write-back is
+a guarded no-op via `src.CanSet()`: the write still succeeds, only the
+echo is skipped, identical to prior silent behaviour for that
+already-discouraged case. No new panic risk.
+
+### Scope: rev, and the identical UpdatedAt/CreatedAt defect
+
+The task named `rev` as the observed symptom, but the exact same
+copy-only defect affects `UpdatedAt` and `CreatedAt` for the identical
+reason — they are written into `rv`, never into `src`. Fixing only `rev`
+while leaving the other two half-fixed in the same function, in the same
+commit, would have repeated A226's own shape: symptom fixed, contract
+untouched, inside the very task that exists to end it. All three are
+fixed together. `UpdatedAt`/`CreatedAt` write-back needed no round trip —
+their correct value is already known in Go before the query runs (`now`,
+computed once) — so it is a plain field copy from `rv` to `src`, gated
+only on `src.CanSet()`, factored into a new unexported
+`writeBackTimestamps(src, rv reflect.Value, updatedAtPath, createdAtPath
+[]int)`.
+
+### The rev echo itself: RETURNING, one round trip, not a guess
+
+`rev` is different from the timestamps: its correct new value is owned by
+the database (`SET rev = table.rev + 1`), unknowable in Go ahead of time.
+Fix: append `RETURNING rev` to the same statement and use
+`QueryRowContext` instead of `ExecContext` — the database computes and
+returns the authoritative value in the *same* round trip, whether the
+branch taken was a fresh INSERT (no conflict — the `rev` returned is
+whatever was inserted, per `Node.Rev`'s own "on first insert Rev = 0"
+contract) or the CAS-guarded `DO UPDATE` (`rev` returned is `old+1`).
+This is the direct alternative to the "guaranteed extra read roundtrip"
+the task itself named as today's cost — `TestSQLRepo_Save_RevIncrements`
+literally did this extra read before this fix and no longer needs to.
+
+CAS-conflict detection moves from `RowsAffected() == 0` to
+`errors.Is(err, sql.ErrNoRows)` on the `Scan` — `QueryRowContext` returns
+no row when the `WHERE`-guarded `DO UPDATE` didn't fire, exactly
+mirroring `RowsAffected() == 0` before. Still maps to the existing
+`ErrRevConflict` sentinel — no new sentinel, per `ERROR_HANDLING.md`'s own
+criteria (an existing named 4xx condition, not a new one).
+
+First use of `RETURNING` anywhere in `smeldr/core`. Safe on both backends:
+SQLite (`modernc.org/sqlite v1.50.0`, RETURNING supported since SQLite
+3.35) and PostgreSQL (native, long-standing). `smeldr.DB`'s
+`QueryRowContext` is already the method used for every other single-row
+read in the codebase (`auth.go`) — no new interface surface. Verification
+relies on the SQLite-backed tests; `pgx/pgx_integration_test.go` is gated
+behind `-tags integration` plus a live `DATABASE_URL`, unavailable in this
+environment — the architect asked that the pgx-integration CI job be
+watched explicitly on push rather than concluding green from the SQLite
+suite alone (A213's own lesson).
+
+### Two tests that passed because of the bug, not in spite of it
+
+`TestSQLRepo_Save_RevConflict` and `TestRun_SaveRevConflict` both relied
+on the caller's own `Rev` field staying stale across `Save` calls to
+manufacture their conflict scenario: a second `Save` on the same `item`
+"happened" to still carry the pre-increment rev, matching the stored rev
+by coincidence of the bug rather than by test design. Once `Save` writes
+back, that second call correctly advances `item.Rev`, and the tests'
+own third call would then succeed instead of conflicting — their premise
+broke the moment the fix landed, confirmed directly (`go test` failed
+exactly these two, nothing else, before the rewrite). Both rewritten to
+hold a deliberately-separate, deliberately-never-advanced stale copy
+instead of relying on the caller's own struct to go stale by omission —
+each now also directly asserts the write-back (`item.Rev == 1` after the
+second save), proving the fix, not just the unbroken conflict path.
+
+### Doc comments
+
+`Node.Rev` (`node.go`) gained one sentence: the first goroutine's own
+struct now reflects the real post-save `Rev` with no re-read required.
+`Run`'s own doc comment (`orchestration.go`) gained one sentence
+distinguishing this task's fix (a lower layer — whether `Save` tells its
+immediate Go caller the truth at all) from D38 §3's own, still entirely
+open concern (a future M3 listener that omits `rev` from its own MCP
+update payload). Neither the D38 §3 claim nor its scope was narrowed or
+removed.
+
+### Tests
+
+5 new: `TestSQLRepo_Save_WritesBackTimestamps`, `TestSQLRepo_Save_
+update_returningRev`, `TestSQLRepo_Save_RevConflict_fakeDriver`,
+`TestSQLRepo_Save_ValueType_NoPanic` (a value-type `T` with a `rev`
+column does not panic on write-back — the `CanSet()`-guarded skip path,
+previously untested since no existing fixture combined "has rev" with
+"used as a value type"), `TestSQLRepo_Save_execError_noRev` (reuses the
+existing `errExecDB` fixture from `auth_test.go` rather than a new one).
+`TestSQLRepo_Save_RevIncrements` extended with direct `item.Rev`
+assertions after each `Save` call, proving no re-read is needed through
+the whole sequence, alongside its existing `FindByID` DB-truth checks.
+
+### Versioning
+
+No exported symbols changed — `Save(ctx, item T) error`'s signature is
+identical. Level 2 despite that: a real behaviour change to a
+widely-used exported method with consequences in more than one file (see
+above). Coverage: 96.3% package-wide; `Save` itself 100% (the one
+previously-missing branch, the plain-`Exec` error path for a type with no
+`rev` column, closed with `TestSQLRepo_Save_execError_noRev`). Patch bump
+— matches A226/A233/A241's own precedent for a real, consumer-observable
+behaviour fix with no new API surface. v1.64.0 → v1.64.1.
+
+Status: Implements no new Decision — a direct bugfix to an existing,
+long-standing contract gap A226 and D38 §3 had each already named.
+
+---
+
 ## A252 — transition_item/get_valid_transitions/list_items_by_state operate on compiled types (D49, smeldr.dev/mcp half)
 
 ### What shipped

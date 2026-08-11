@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"iter"
 	"reflect"
@@ -694,9 +695,20 @@ func (r *SQLRepo[T]) FindAll(ctx context.Context, opts ListOptions) ([]T, error)
 	return Query[T](ctx, r.db, query, args...)
 }
 
-// Save upserts item into the table. UpdatedAt is set to the current UTC time.
-// CreatedAt is set only when its current value is the zero time.
+// Save upserts item into the table. UpdatedAt is set to the current UTC
+// time. CreatedAt is set only when its current value is the zero time.
 // The upsert key is the "id" column.
+//
+// When item is a settable pointer — the conventional, documented use of
+// SQLRepo (see [NewSQLRepo]) — Save writes the values it computed, or that
+// the database returned, back onto the caller's own struct once the write
+// is confirmed to have succeeded: UpdatedAt, CreatedAt, and, for types
+// embedding [Node], the post-save Rev. Rev is owned by the database
+// (incremented as part of the same statement, never guessed in Go), so the
+// caller sees the authoritative value with no extra round trip. If item is
+// not addressable (a value-type T, already discouraged by [NewSQLRepo]'s
+// own doc comment), the write still succeeds; only the write-back is
+// skipped, matching prior behaviour for that case.
 func (r *SQLRepo[T]) Save(ctx context.Context, item T) error {
 	// Create an addressable copy so we can write timestamps.
 	cp := reflect.New(r.elemType)
@@ -708,13 +720,15 @@ func (r *SQLRepo[T]) Save(ctx context.Context, item T) error {
 	rv := cp.Elem()
 
 	now := time.Now().UTC()
-	if path := goFieldPath(r.elemType, "UpdatedAt"); path != nil {
-		if f := rv.FieldByIndex(path); f.CanSet() {
+	updatedAtPath := goFieldPath(r.elemType, "UpdatedAt")
+	if updatedAtPath != nil {
+		if f := rv.FieldByIndex(updatedAtPath); f.CanSet() {
 			f.Set(reflect.ValueOf(now))
 		}
 	}
-	if path := goFieldPath(r.elemType, "CreatedAt"); path != nil {
-		if f := rv.FieldByIndex(path); f.CanSet() {
+	createdAtPath := goFieldPath(r.elemType, "CreatedAt")
+	if createdAtPath != nil {
+		if f := rv.FieldByIndex(createdAtPath); f.CanSet() {
 			if ts, ok := f.Interface().(time.Time); ok && ts.IsZero() {
 				f.Set(reflect.ValueOf(now))
 			}
@@ -726,7 +740,8 @@ func (r *SQLRepo[T]) Save(ctx context.Context, item T) error {
 	placeholders := make([]string, len(fields))
 	vals := make([]any, len(fields))
 	setParts := make([]string, 0, len(fields))
-	var revPH string // placeholder for the rev column in the INSERT list (e.g. "$3")
+	var revPH string   // placeholder for the rev column in the INSERT list (e.g. "$3")
+	var revIndex []int // struct field index path for the "rev" column
 
 	for i, f := range fields {
 		cols[i] = quoteIdent(f.name)
@@ -737,6 +752,7 @@ func (r *SQLRepo[T]) Save(ctx context.Context, item T) error {
 			// excluded from SET — id is the conflict key
 		case "rev":
 			revPH = fmt.Sprintf("$%d", i+1)
+			revIndex = f.index
 			// SET handled below: rev = table.rev + 1
 		default:
 			setParts = append(setParts, quoteIdent(f.name)+"=EXCLUDED."+quoteIdent(f.name))
@@ -760,21 +776,52 @@ func (r *SQLRepo[T]) Save(ctx context.Context, item T) error {
 	)
 	if revPH != "" {
 		// CAS guard: only apply the update if the stored rev matches what the
-		// caller had when they read the item. RowsAffected = 0 means conflict.
+		// caller had when they read the item. No returned row means conflict.
 		query += " WHERE " + r.table + "." + quoteIdent("rev") + " = " + revPH
 	}
 
-	result, err := r.db.ExecContext(ctx, query, vals...)
-	if err != nil {
-		return err
+	if revPH == "" {
+		if _, err := r.db.ExecContext(ctx, query, vals...); err != nil {
+			return err
+		}
+		writeBackTimestamps(src, rv, updatedAtPath, createdAtPath)
+		return nil
 	}
-	if revPH != "" {
-		n, _ := result.RowsAffected()
-		if n == 0 {
+
+	// RETURNING rev lets the database's own post-write value come back in
+	// the same round trip — rev is computed by SQL (table.rev + 1), never
+	// guessed in Go, so this is the only way to learn it without a second
+	// query. sql.ErrNoRows on Scan means the CAS WHERE guard above didn't
+	// match anything: the same conflict RowsAffected == 0 signalled before.
+	query += " RETURNING " + quoteIdent("rev")
+	var newRev int64
+	if err := r.db.QueryRowContext(ctx, query, vals...).Scan(&newRev); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			return ErrRevConflict
 		}
+		return err
+	}
+	writeBackTimestamps(src, rv, updatedAtPath, createdAtPath)
+	if src.CanSet() {
+		src.FieldByIndex(revIndex).SetInt(newRev)
 	}
 	return nil
+}
+
+// writeBackTimestamps copies the CreatedAt/UpdatedAt values Save already
+// computed in rv onto the caller's own struct src, once the write is
+// confirmed to have succeeded. No-op when src is not itself settable — see
+// [SQLRepo.Save]'s own doc comment.
+func writeBackTimestamps(src, rv reflect.Value, updatedAtPath, createdAtPath []int) {
+	if !src.CanSet() {
+		return
+	}
+	if updatedAtPath != nil {
+		src.FieldByIndex(updatedAtPath).Set(rv.FieldByIndex(updatedAtPath))
+	}
+	if createdAtPath != nil {
+		src.FieldByIndex(createdAtPath).Set(rv.FieldByIndex(createdAtPath))
+	}
 }
 
 // Delete removes the item with the given id. Returns [ErrNotFound] if no row

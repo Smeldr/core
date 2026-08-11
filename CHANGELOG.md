@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.64.1] — 2026-08-11
+
+### Fixed
+- `SQLRepo.Save` now writes the post-save `Rev`, `UpdatedAt`, and `CreatedAt` back onto the caller's own struct once the write succeeds — previously `Save` built a separate internal copy for the database write and never echoed any of the three back, so a successful call left `item` untouched: `Rev` stayed stale even though the stored value had advanced, forcing a re-read to see it. `Rev` is written back via a new `RETURNING "rev"` clause (the database's own authoritative post-write value, no guessing, no extra round trip); `UpdatedAt`/`CreatedAt` write back directly since their value is already known before the query runs. No signature change — write-back only applies when the caller passes a pointer, the already-documented, conventional use of `SQLRepo`. (A253)
+
+---
+
 ## [1.64.0] — 2026-08-11
 
 ### Added
