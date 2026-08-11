@@ -97,6 +97,89 @@ runs on Task transitions alone.
 
 ---
 
+## A254 — ERROR_HANDLING.md documentation review (T230)
+
+### What was stale
+
+`ERROR_HANDLING.md` had not been reviewed since the project's first month.
+Four findings from the dispatch, all independently verified against current
+source rather than patched blindly (the dispatch's own explicit instruction,
+naming D47/D48's hand-list defect class as what a blind patch would repeat):
+
+1. **"The single pipeline rule" no longer true as written.** The doc knows
+   only `WriteError` (HTTP). `smeldr.dev/mcp`'s `errorFor` (`tool.go`) is a
+   second, independent error-rendering pipeline for JSON-RPC, unmentioned.
+   Verified its actual body, not just its existence: it distinguishes
+   exactly five conditions (`*ValidationError`/`ErrBadRequest` → `-32602`,
+   `ErrNotFound`/`ErrForbidden`/`ErrConflict` → `-32001`, `ErrRevConflict` →
+   `-32002`); every other sentinel falls through to the generic `-32603`
+   bucket, indistinguishable there from a genuine internal error.
+2. **9 of 12 sentinels listed.** Counted `errors.go`'s actual var block
+   against the doc's Tier 1 code example — missing exactly `ErrRevConflict`,
+   `ErrLastAdmin`, `ErrInternal`. Confirmed, no discrepancy from the
+   dispatch's own count.
+3. **Line 114's wrap example taught the retired `"forge:"` prefix.** Grepped
+   the whole repository, not just this file, for the same defect class —
+   the other 16 files matching `forge:` are either decision archives
+   (correctly preserved historical text) or unrelated uses of the same
+   substring (a struct-tag rename note, a URI scheme, test DB credentials).
+   Nothing else repeats this specific pattern.
+4. **D16 citation and the "Known gaps" table.** D16 is not in `DECISIONS.md`
+   itself (index-only) — verified it lives in `decisions/core.md`, archived,
+   under the pre-abbreviation header `## Decision 16 — Error handling model`
+   (a first grep for `^## D16` missed it for exactly that formatting
+   reason). The "Known gaps (fixed in v1.0.1)" table reads as current,
+   neutral documentation with no framing that it is pure history — every
+   row already ✅ Fixed, from the project's first month.
+
+**Two more findings beyond the hand-list**, from re-reading the whole
+document rather than only the listed items: Tier 3's own description ("any
+error that is not a `smeldr.Error`...") is imprecise — a `smeldr.Error`
+whose own `HTTPStatus() >= 500` gets the identical generic-500 treatment as
+a fully untyped error, not exempted by satisfying the interface. Sentinel
+construction re-verified accurate as written — no change, checked not
+assumed.
+
+### The fix
+
+All in `ERROR_HANDLING.md`, docs-only: retitled the pipeline section to
+scope it explicitly to HTTP and added the `errorFor` breakdown verbatim
+(five sentinels named, the rest noted as falling to `-32603`); added the
+three missing sentinels to the Tier 1 example; replaced the `forge:` wrap
+example with `smeldr:`; fixed the Decision 16 citation to point at
+`decisions/core.md` directly; marked the "Known gaps" table as historical
+record in one sentence; added one clarifying sentence to Tier 3 on
+`smeldr.Error`-with-5xx handling.
+
+### Not fixed here, named instead
+
+A real, tangential finding surfaced while chasing the D16 citation:
+`decisions/core.md`'s own Decision 16 header (line 1274) has a mojibake
+character where an em dash should be — a genuine encoding artifact, out of
+this task's own file scope. Folded together with a wider, older version of
+the same completeness gap A250/A252 each closed for their own cycle,
+found while archiving `decisions/recent.md` in this task's own step 0:
+`A183`–`A190`'s index rows still point at `[recent.md]` despite being
+archived to `phase12-archive.md` back on 2026-07-04. Both become their own
+follow-up (T232, architect registers and dispatches later) rather than
+expanding this docs-only cycle's scope. A third, separate observation from
+the architect's own plan review — `errorFor`'s coverage gap for
+`ErrUnauth` specifically (falls to `-32603` like every unmapped sentinel,
+but unauthenticated requests are common enough over MCP that the gap may
+be worth its own decision) — is deferred to a future decision, not
+this cycle.
+
+### Versioning
+
+No exported symbols, no behaviour change — pure documentation accuracy.
+No version bump, no `CHANGELOG.md` entry (`ERROR_HANDLING.md` is not part
+of `smeldr.dev/core`'s own consumer-observable surface). Level 1 amendment.
+
+Status: Implements no new Decision — a documentation-accuracy fix against
+Decision 16's own existing contract.
+
+---
+
 ## D49 — Transition authority for compiled types lives on App, not on the MCPModule interface
 
 ### Scope

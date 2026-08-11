@@ -1,7 +1,8 @@
 # Smeldr — Error Handling Strategy
 
 This document is the authoritative reference for how errors are produced,
-propagated, and rendered in Smeldr. It supplements Decision 16 in `DECISIONS.md`.
+propagated, and rendered in Smeldr. It supplements Decision 16
+(`decisions/core.md`, archived).
 
 Read this document before writing any code that: handles or returns errors,
 calls `WriteError`, adds a new sentinel, uses `errors.As`/`errors.Is`,
@@ -9,7 +10,7 @@ or writes an HTTP response in an error path.
 
 ---
 
-## The single pipeline rule
+## The single pipeline rule — HTTP
 
 Every error-to-HTTP translation in Smeldr goes through one function:
 
@@ -27,6 +28,20 @@ This rule exists so that:
 - Error responses are always in the format the client negotiated (JSON or HTML)
 - All error events are logged consistently via `slog.Error`
 
+**A second, separate pipeline exists for MCP.** `smeldr.dev/mcp`'s `errorFor`
+(`tool.go`) renders errors to JSON-RPC error codes and does not go through
+`WriteError` — it is a distinct translation for a distinct transport. It
+distinguishes exactly five conditions today: `*ValidationError` → `-32602`,
+`smeldr.ErrBadRequest` → `-32602`, `smeldr.ErrNotFound` → `-32001`,
+`smeldr.ErrForbidden` → `-32001`, `smeldr.ErrConflict` → `-32001`,
+`smeldr.ErrRevConflict` → `-32002`. Every other sentinel — `ErrGone`,
+`ErrUnauth`, `ErrNotAcceptable`, `ErrTooManyRequests`, `ErrRequestTooLarge`,
+`ErrLastAdmin`, `ErrInternal` — falls through to the generic
+`-32603 "internal error: ..."` bucket, indistinguishable there from a genuine
+internal error. The rules below (sentinel tiers, `errors.As`, sentinel
+construction) apply to both pipelines; the single-function guarantee above is
+specific to the HTTP one.
+
 ---
 
 ## Error tiers
@@ -41,10 +56,13 @@ WriteError(w, r, smeldr.ErrGone)              // 410
 WriteError(w, r, smeldr.ErrForbidden)         // 403
 WriteError(w, r, smeldr.ErrUnauth)            // 401
 WriteError(w, r, smeldr.ErrConflict)          // 409
+WriteError(w, r, smeldr.ErrRevConflict)       // 409
+WriteError(w, r, smeldr.ErrLastAdmin)         // 409
 WriteError(w, r, smeldr.ErrBadRequest)        // 400
 WriteError(w, r, smeldr.ErrNotAcceptable)     // 406
 WriteError(w, r, smeldr.ErrTooManyRequests)   // 429
 WriteError(w, r, smeldr.ErrRequestTooLarge)   // 413
+WriteError(w, r, smeldr.ErrInternal)          // 500
 ```
 
 Sentinels are `smeldr.Error` values. They produce a JSON body with `code`,
@@ -98,7 +116,11 @@ array to the response body:
 Any error that is not a `smeldr.Error` or `*ValidationError` is treated as
 an internal error. `WriteError` logs the original message with `slog.Error`
 (including `request_id`) and sends a generic 500 to the client. The original
-message is **never** sent to the client.
+message is **never** sent to the client. Being a `smeldr.Error` does not by
+itself exempt an error from this tier: any sentinel whose own
+`HTTPStatus() >= 500` (including `ErrInternal` itself, or a custom sentinel a
+consumer defines with a 5xx status) gets the identical generic-500 treatment,
+not special-cased just because it satisfies the interface.
 
 ```go
 // Handler receives a database error, storage error, or unexpected failure:
@@ -111,7 +133,7 @@ if err := m.repo.Save(ctx, item); err != nil {
 If you need to wrap an internal error with context, preserve the chain:
 
 ```go
-return fmt.Errorf("forge: saving post: %w", err)
+return fmt.Errorf("smeldr: saving post: %w", err)
 ```
 
 `WriteError` unwraps via `errors.As`, so a wrapped `smeldr.Error` still
@@ -200,6 +222,7 @@ Before submitting any handler code, verify:
 
 ## Known gaps (fixed in v1.0.1 — Amendments A29–A32)
 
+**Historical record — all fixed, kept for context, not a current gap list.**
 The following violations existed in v1.0.0 and were repaired in v1.0.1:
 
 | File | Location | Violation | Amendment | Status |
