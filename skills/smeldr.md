@@ -1,9 +1,9 @@
 ﻿# Smeldr — developer skill
 
 Smeldr is a Go content framework. This skill covers what you need to work
-with Smeldr as a developer or pilot agent.
+with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.54.1 · smeldr.dev/mcp v1.29.0 · smeldr.dev/oauth v0.3.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.1 · smeldr.dev/social v0.9.2 · smeldr.dev/agent v0.7.1 · smeldr.dev/core/pgx v0.1.2
+Current versions: smeldr.dev/core v1.64.0 · smeldr.dev/mcp v1.30.2 · smeldr.dev/oauth v0.4.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.2 · smeldr.dev/social v0.10.1 · smeldr.dev/agent v0.7.1 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -373,7 +373,7 @@ Tools are named from the type in lower_snake_case.
 | `list_webhook_deliveries` / `retry_webhook` | Admin | Delivery introspection and retry |
 | `create_redirect` / `list_redirects` / `delete_redirect` | Editor+ | Redirect rule management (requires `app.Redirects(db)`) |
 | `set_page_meta` / `get_page_meta` / `delete_page_meta` / `list_page_meta` | Admin | Per-path SEO overrides (requires `mcp.WithPageMeta(db)`) |
-| `assert_relation` / `propose_relation` / `get_relations` | Author+ | Relation graph: assert/propose edges, query by source/target/both. Gate: `app.Relations(store)` called. |
+| `assert_relation` / `propose_relation` / `observe_relation` / `get_relations` | Author+ | Relation graph: assert/propose/observe edges (edge_class=asserted/inferred/observed), query by source/target/both. Gate: `app.Relations(store)` called. |
 | `preview_impact` | Editor+ | Return dependents of a target item without firing signals. Gate: `app.Relations(store)` called. |
 | `upsert_relation_kind` | Admin | Register or update a relation kind. Gate: `app.Relations(store)` called. |
 | `list_relation_kinds` | Author+ | List all registered relation kinds. Gate: `app.Relations(store)` called. |
@@ -422,7 +422,8 @@ import oauth "smeldr.dev/oauth"
 
 store, _ := oauth.NewSQLiteStore("./oauth.db")
 oauthSrv := oauth.New(oauth.Config{
-    Issuer: "https://cms.example.com",
+    Issuer:   "https://cms.example.com",
+    Resource: "https://cms.example.com/mcp", // must match mcp's own resource identifier
     VerifyBearer: func(token string) bool {
         _, ok := smeldr.VerifyTokenString(token, app.Secret(), app.TokenStore())
         return ok
@@ -432,6 +433,8 @@ mcpSrv := mcp.New(app, mcp.WithOAuth(oauthSrv))
 ```
 
 - `smeldr.VerifyTokenString(token, secret, store)` — validates a raw bearer token without `*http.Request` (v1.25.0+)
+- `oauth.Config.Resource` (oauth v0.4.0+) — required; RFC 8707 resource indicator this
+  authorization server issues audience-bound tokens for. `oauth.New` panics if empty.
 - `mcp.WithOAuth(*oauth.Server)` — enables OAuth; all HTTP endpoints require Bearer (v1.11.0+)
 - `mcp.WithForgeFallback()` — accepts forge bearer tokens as fallback when OAuth enabled; use alongside `WithOAuth` to keep Claude Desktop/smeldr-cli working (v1.11.1+). `ErrTokenNotFound` → try forge bearer · `ErrTokenExpired` → always 401
 - `GET /.well-known/oauth-protected-resource` — RFC 9728; triggers OAuth flow in AI clients on 401
@@ -722,13 +725,13 @@ The canonical source for this file is:
 
 When updating: edit here first, then sync to `core/skills/smeldr.md` via the
 doc-gate Copy-Item step before any M-number commit.
-Pilots read this file directly — no copies to distribute.
+Agents read this file directly — no copies to distribute.
 
 ---
 
 ## Haiku delegation — plan marking
 
-Every corepilot plan for a task that contains mechanical deliverables should include
+Every core-implementer plan for a task that contains mechanical deliverables should include
 a Haiku-scan step. For each deliverable in the plan, mark it `[Haiku]` if it is
 template-eligible, or leave it unmarked (implicitly Sonnet).
 
@@ -744,5 +747,5 @@ This makes delegation decisions explicit and reviewable by the architect.
 | coverage_test.go — 41 test stubs from plan table | [Haiku] |
 | codecov.yml — new file with exact content specified | [Haiku] |
 | decisions/recent.md — A150 entry (fixed format) | [Haiku] |
-| context/corepilot.md — coverage gate addition | Sonnet |
+| context/core-implementer.md — coverage gate addition | Sonnet |
 | Plan writing | Sonnet |
