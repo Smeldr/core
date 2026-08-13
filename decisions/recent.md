@@ -265,6 +265,65 @@ runs on Task transitions alone.
 
 ---
 
+## A255 — decisions index/archive integrity sweep (T232)
+
+### What was wrong
+
+Two findings from T230's own investigation, same defect family:
+
+1. `decisions/core.md` line 1274 had a mojibake character (U+FFFD, the
+   Unicode replacement character) where an em dash should be, in
+   `"## Decision 16 — Error handling model"` — a genuine encoding artifact,
+   the `Set-Content`-without-`-Encoding utf8` class `CLAUDE.md`'s own
+   environment notes warn about.
+2. `A183`–`A190`'s own `DECISIONS.md` index rows all linked to
+   `[recent.md]` despite being archived months earlier — the same
+   completeness/pointer defect class A250/A252 each closed for their own
+   cycle, older and wider here.
+
+### Verified, not assumed — the range itself was wrong
+
+Checked each of the eight individually against every archive file rather
+than trusting the range implied by `recent.md`'s own old archive-log line
+("Archived 2026-07-04: A184–A190 → phase12-archive.md"). That line was
+accurate for A184–A190 — but **A183 is not part of that batch**: it was
+archived earlier, into `phase11-archive.md`, and its own index row had
+never been corrected either. A fix that trusted the reported range alone
+would have written a second wrong link for A183 while believing it had
+fixed all eight.
+
+### Full mechanical sweep beyond the reported range — the task's own explicit instruction
+
+Extracted all 114 rows in `DECISIONS.md`'s index and checked each one's
+claimed link against whether the target file actually contains that
+entry's real header. Result: no other row shares this defect — the eight
+above are the complete set.
+
+**Three different decision-header conventions have been used across this
+project's history**, discovered while building the check itself: the
+current `## D16`/`## A253`-style short form; an older, fully spelled-out
+`## Decision 16`; and `## Amendment A215` with the full word. A sweep
+pattern written against only the first two produces false positives on
+the third (caught here against A215/A216/A217 before it could mislabel a
+correct link as broken) — recorded here explicitly so a future sweep does
+not have to rediscover it from scratch.
+
+### The fix
+
+`decisions/core.md`: one-character encoding fix. `DECISIONS.md`: A183's
+row repointed to `phase11-archive.md`; A184–A190's seven rows repointed
+to `phase12-archive.md`.
+
+### Versioning
+
+Docs only, no code, no exported symbols. Direct commit to `main`, matching
+the decisions-file-family precedent this session already established
+(A250/A252's own fix shape) — no branch. No version bump.
+
+Status: Documentation-accuracy fix, no new Decision.
+
+---
+
 ## A254 — ERROR_HANDLING.md documentation review (T230)
 
 ### What was stale

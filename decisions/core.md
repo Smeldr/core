@@ -1271,7 +1271,7 @@ forge:"required,oneof=draft|published|archived"
 
 ---
 
-## Decision 16 � Error handling model
+## Decision 16 — Error handling model
 
 **Status:** Locked
 **Date:** 2025-06-01
