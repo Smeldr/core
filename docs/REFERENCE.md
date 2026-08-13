@@ -3406,6 +3406,24 @@ result, err := app.TransitionItem(ctx, "Signal", "some-signal-slug", "read")
 - Fires `fireAsyncTriggers` after a successful compiled-type update (A240's `TransitionTrigger` pipeline) — the same, and only, hook `SetStatus` fires for the dynamic path. Does **not** fire `module.go`'s `notifyAfter`/`AfterPublish`-class signal-bus hooks for either path; that mechanism is orthogonal to state-flow transitions in this codebase, not something this method newly declines.
 - An unregistered `typeName` returns an error wrapping `ErrBadRequest`. A registered-but-missing item returns `ErrNotFound`. A compiled type whose backing table cannot be found (partial migration, an unregistered module) returns a distinct error rather than silently falling into the dynamic-content branch — matching D47's own guard against exactly that ambiguity.
 
+### `App.TransitionItemWithReason` (A256, v1.65.0+)
+
+```go
+func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toState, reason string) (map[string]any, error)
+```
+
+`App.TransitionItem` with a caller-supplied `reason`, needed to satisfy a
+`Transition.RequiredReason` gate (A220) — `App.TransitionItem` itself always
+passes an empty reason and can never satisfy one. Mirrors
+`DynamicTypeRepo.SetStatus`/`SetStatusWithReason`'s own shape: a second
+method rather than a signature change, so `App.TransitionItem`'s existing
+callers are unaffected. Backs `smeldr.dev/mcp`'s `transition_item` tool's
+optional `reason` argument.
+
+```go
+result, err := app.TransitionItemWithReason(ctx, "Decision", "some-decision-slug", "superseded", "no longer accurate")
+```
+
 ### `ConflictPolicy` (A186)
 
 ```go

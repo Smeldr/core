@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.65.0] — 2026-08-13
+
+### Added
+- `App.TransitionItemWithReason(ctx, typeName, slug, toState, reason string) (map[string]any, error)` — `App.TransitionItem` with a caller-supplied reason, satisfying a `Transition.RequiredReason` gate. `App.TransitionItem` is unchanged (an equivalent call with an empty reason); every existing caller is unaffected. (A256, T235)
+
+---
+
 ## [1.64.1] — 2026-08-11
 
 ### Fixed

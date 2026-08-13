@@ -265,6 +265,85 @@ runs on Task transitions alone.
 
 ---
 
+## A256 — App.TransitionItemWithReason (T235, smeldr/core half)
+
+### The gap, verified — and two of the dispatch's own assumptions corrected
+
+`transition_item` (mcp) has no `reason` parameter. The dispatch assumed
+`App.TransitionItem`'s signature "already takes a reason internally per
+A251" and that the REST path (`updateHandler`) has a working reason
+convention to mirror. Neither holds. Read `App.TransitionItem`'s full body:
+every `validateTransition` call inside it passes a hard-coded `""`. Grepped
+every `validateTransition(` call site in the repo: `updateHandler`,
+`MCPPublish`, `MCPSchedule`, `MCPArchive`, and `newSetStatusHandler` all
+pass `""` too. **No live entry point anywhere — REST or MCP, dynamic or
+compiled — has ever threaded a real reason through to `validateTransition`.**
+A `Transition` with `RequiredReason` set has been unreachable from every
+direction since the field was added (T149/A220), not a `transition_item`-
+specific gap.
+
+### The precedent, found instead
+
+`DynamicTypeRepo.SetStatus`/`SetStatusWithReason` already solved exactly
+this problem once, for a different caller — a second exported method
+added specifically to carry a reason without changing the original's
+signature, preserving the API stability promise. `SetStatusWithReason` is
+itself unwired: no production caller anywhere, tests only. This is the
+shape to reuse, not invent a second convention.
+
+### The fix
+
+New `App.TransitionItemWithReason(ctx, typeName, slug, toState, reason
+string) (map[string]any, error)` (`state.go`), mirroring `SetStatus`/
+`SetStatusWithReason`'s exact shape. `TransitionItem` becomes a thin
+wrapper — `return a.TransitionItemWithReason(ctx, typeName, slug, toState,
+"")` — unchanged signature, unchanged behaviour, every existing caller and
+test untouched (confirmed: all 15 pre-existing `TransitionItem` tests pass
+unmodified). `TransitionItemWithReason` carries the real logic: the
+dynamic branch calls `SetStatusWithReason` instead of `SetStatus`; the
+compiled branch passes `reason` into `validateTransition` instead of the
+hard-coded `""`.
+
+**Architect's own note, recorded per instruction**: this is the *second*
+`X`/`XWithReason` twin in core. Two is a pattern; a third would be
+accretion — the honest moment to revisit this shape is when a third
+reason-bearing operation appears, not now, when following the existing
+precedent is plainly better than inventing a third convention.
+
+### Out of scope, spun into its own task
+
+The four `module.go` call sites (`updateHandler`, `MCPPublish`,
+`MCPSchedule`, `MCPArchive`) still pass `""` — after this Amendment the
+REST path still cannot satisfy a `RequiredReason` gate. That needs a
+wire-format answer (where does a reason arrive in a `PUT` body), a
+different question from threading an already-existing parameter.
+Deliberately not widened into here — tracked as T237.
+
+### Tests
+
+`TestApp_TransitionItemWithReason_Compiled_RequiredReason` and
+`_Dynamic_RequiredReason`: both prove `TransitionItem` (empty reason via
+the wrapper) still fails a `RequiredReason` gate, and
+`TransitionItemWithReason` with a real reason succeeds — on both the
+compiled and dynamic branches. All 15 pre-existing `TransitionItem` tests
+pass unchanged, proving the wrapper introduces zero regression.
+
+### Versioning
+
+New exported symbol (`App.TransitionItemWithReason`) — MINOR bump. No
+behaviour change for any existing caller. Coverage: 96.3% package-wide;
+`TransitionItem` 100%, `TransitionItemWithReason` 97.4% (one uncovered
+branch, `DynamicContentRepo`'s own error path inside the already-passed
+`Kind == "content"` check — the identical, already-named,
+structurally-unreachable branch A251 itself documented; not new, not
+chased).
+
+Status: mcp half (tool schema changes for `transition_item` and
+`set_content_status`) sequenced after this tag is proxy-verified, per
+established practice.
+
+---
+
 ## A255 — decisions index/archive integrity sweep (T232)
 
 ### What was wrong

@@ -288,3 +288,111 @@ func TestApp_TransitionItem_ConflictPolicyViolated(t *testing.T) {
 		t.Errorf("expected ErrConflict from ConflictReject policy, got %v", err)
 	}
 }
+
+// — TransitionItemWithReason (T235) ————————————————————————————————————————
+
+// registerReasonGatedFlow creates a fresh compiled type with a single
+// RequiredReason-gated transition (draft -> published), mirroring
+// registerConflictFlow's own shape.
+func registerReasonGatedFlow(t *testing.T, app *App, db *sql.DB) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS reason_gated_types (id TEXT PRIMARY KEY, slug TEXT NOT NULL, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create reason_gated_types: %v", err)
+	}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "reason-gated-flow",
+		TypeName: "ReasonGatedType",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published"},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "published", RequiredReason: true},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	app.typeRegistry.Register(&TypeDescriptor{Name: "ReasonGatedType", Kind: "compiled"})
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO reason_gated_types (id, slug, status) VALUES ('rg-1', 'rg-1-slug', 'draft')`,
+	); err != nil {
+		t.Fatalf("insert reason_gated_types row: %v", err)
+	}
+}
+
+func TestApp_TransitionItemWithReason_Compiled_RequiredReason(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	registerReasonGatedFlow(t, app, db)
+
+	// TransitionItem (empty reason via the wrapper) must still fail — proves
+	// the wrapper delegates with "" rather than silently satisfying the gate.
+	if _, err := app.TransitionItem(context.Background(), "ReasonGatedType", "rg-1-slug", "published"); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("TransitionItem (no reason): got %v, want ErrBadRequest", err)
+	}
+
+	// TransitionItemWithReason with a real reason succeeds.
+	result, err := app.TransitionItemWithReason(context.Background(), "ReasonGatedType", "rg-1-slug", "published", "because the plan says so")
+	if err != nil {
+		t.Fatalf("TransitionItemWithReason: %v", err)
+	}
+	if result["status"] != "published" {
+		t.Errorf("result status = %v, want \"published\"", result["status"])
+	}
+}
+
+func TestApp_TransitionItemWithReason_Dynamic_RequiredReason(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	if err := CreateBlockTables(db); err != nil {
+		t.Fatalf("CreateBlockTables: %v", err)
+	}
+	if err := CreateSchemaTable(db); err != nil {
+		t.Fatalf("CreateSchemaTable: %v", err)
+	}
+	fields, err := json.Marshal([]SchemaField{
+		{Name: "Title", Type: "string", Required: true, Role: "title"},
+	})
+	if err != nil {
+		t.Fatalf("marshal fields: %v", err)
+	}
+	schema := &ContentTypeSchema{TypeName: "reasongated", Fields: fields}
+	desc, err := app.DefineContentType(context.Background(), schema)
+	if err != nil {
+		t.Fatalf("DefineContentType: %v", err)
+	}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "dynamic-reason-gated-flow",
+		TypeName: "reasongated",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published"},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "published", RequiredReason: true},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	repo, err := app.DynamicContentRepo(desc.Name)
+	if err != nil {
+		t.Fatalf("DynamicContentRepo: %v", err)
+	}
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Reason gated"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+
+	if _, err := app.TransitionItem(context.Background(), desc.Name, node.Slug, "published"); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("TransitionItem (no reason): got %v, want ErrBadRequest", err)
+	}
+
+	result, err := app.TransitionItemWithReason(context.Background(), desc.Name, node.Slug, "published", "because the plan says so")
+	if err != nil {
+		t.Fatalf("TransitionItemWithReason: %v", err)
+	}
+	if result["status"] != "published" {
+		t.Errorf("result status = %v, want \"published\"", result["status"])
+	}
+}

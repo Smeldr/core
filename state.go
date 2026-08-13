@@ -731,13 +731,27 @@ func resolveItemTable(ctx context.Context, db DB, typeName string) string {
 	return "smeldr_dynamic_content"
 }
 
-// TransitionItem moves the item identified by typeName and slug to toState,
-// resolving whichever table stores it — a compiled [Module]'s own table or
-// a runtime-defined dynamic type — and validating the transition exactly as
-// the HTTP path ([Module.updateHandler]) and [DynamicTypeRepo.SetStatus]
-// already do (D49). actorID for the D34/D40 role gate is extracted from ctx
-// when it carries a [Context]; a plain context.Context yields an empty
-// actorID, matching SetStatus's own existing behaviour. Returns
+// TransitionItem moves the item identified by typeName and slug to toState.
+// Equivalent to [App.TransitionItemWithReason] with an empty reason —
+// preserved unchanged, including for any [Transition.RequiredReason] gate,
+// which this form can never satisfy. Existing callers are unaffected by
+// [App.TransitionItemWithReason]'s addition.
+func (a *App) TransitionItem(ctx context.Context, typeName, slug, toState string) (map[string]any, error) {
+	return a.TransitionItemWithReason(ctx, typeName, slug, toState, "")
+}
+
+// TransitionItemWithReason moves the item identified by typeName and slug to
+// toState, resolving whichever table stores it — a compiled [Module]'s own
+// table or a runtime-defined dynamic type — and validating the transition
+// exactly as the HTTP path ([Module.updateHandler]) and
+// [DynamicTypeRepo.SetStatus] already do (D49). actorID for the D34/D40 role
+// gate is extracted from ctx when it carries a [Context]; a plain
+// context.Context yields an empty actorID, matching SetStatus's own existing
+// behaviour. reason satisfies a [Transition.RequiredReason] gate (A220);
+// added as a new method rather than changing [App.TransitionItem]'s own
+// signature, mirroring [DynamicTypeRepo.SetStatus]/[DynamicTypeRepo.
+// SetStatusWithReason]'s established shape — preserving the API stability
+// promise for [App.TransitionItem]'s existing callers (T235). Returns
 // [ErrNotFound] when typeName is registered but no item has the given slug,
 // or a descriptive error when typeName is not registered at all.
 //
@@ -751,7 +765,7 @@ func resolveItemTable(ctx context.Context, db DB, typeName string) string {
 // exposure the existing dynamic-content and conflict-supersede paths
 // already carry, now extended to compiled types rather than newly
 // introduced.
-func (a *App) TransitionItem(ctx context.Context, typeName, slug, toState string) (map[string]any, error) {
+func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toState, reason string) (map[string]any, error) {
 	desc := a.typeRegistry.Lookup(typeName)
 	if desc == nil {
 		return nil, fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName)
@@ -765,7 +779,7 @@ func (a *App) TransitionItem(ctx context.Context, typeName, slug, toState string
 		if err != nil {
 			return nil, err
 		}
-		if err := repo.SetStatus(ctx, node.ID, Status(toState)); err != nil {
+		if err := repo.SetStatusWithReason(ctx, node.ID, Status(toState), reason); err != nil {
 			return nil, err
 		}
 		return map[string]any{"id": node.ID, "slug": slug, "status": toState}, nil
@@ -801,7 +815,7 @@ func (a *App) TransitionItem(ctx context.Context, typeName, slug, toState string
 	if sc, ok := ctx.(smeldrCtxAccessor); ok {
 		actorID = sc.User().ID
 	}
-	if err := validateTransition(ctx, db, a.governance, actorID, typeName, currentStatus, toState, ""); err != nil {
+	if err := validateTransition(ctx, db, a.governance, actorID, typeName, currentStatus, toState, reason); err != nil {
 		return nil, err
 	}
 	if err := applyConflictPolicy(ctx, db, nil, typeName, toState, id); err != nil {
