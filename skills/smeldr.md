@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.64.1 · smeldr.dev/mcp v1.30.2 · smeldr.dev/oauth v0.4.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.2 · smeldr.dev/social v0.10.1 · smeldr.dev/agent v0.7.1 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.65.0 · smeldr.dev/mcp v1.31.0 · smeldr.dev/oauth v0.4.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.2 · smeldr.dev/social v0.10.1 · smeldr.dev/agent v0.7.1 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -378,7 +378,7 @@ Tools are named from the type in lower_snake_case.
 | `upsert_relation_kind` | Admin | Register or update a relation kind. Gate: `app.Relations(store)` called. |
 | `list_relation_kinds` | Author+ | List all registered relation kinds. Gate: `app.Relations(store)` called. |
 | `define_state_flow` | Admin | Register or update a state flow for a dynamic content type. Calls `App.RegisterFlow`; idempotent. `type_name` required. Returns `{name, type_name, state_count, transition_count}`. Gate: `App.Config().DB != nil`. |
-| `transition_item` | Editor | Move a dynamic content item to a new state; validates against registered flow (ErrConflict → -32001). Gate: `App.Config().DB != nil`. |
+| `transition_item` | Editor | Move a dynamic content item to a new state; validates against registered flow (ErrConflict → -32001). Optional `reason` param (v1.31.0+) — required if the target transition has `RequiredReason` set, else returns -32602. Gate: `App.Config().DB != nil`. |
 | `get_valid_transitions` | Author | List legal target states for the item's current state; falls back to default flow. Gate: `App.Config().DB != nil`. |
 | `list_items_by_state` | Author | List items of a dynamic content type in a given state. Gate: `App.Config().DB != nil`. |
 | `create_signal` | Author | Insert a signal into smeldr_signals with status=pending. Args: `sender`, `receiver`, `signal_type` (required); `task_ref`, `message`, `sequence` (optional). Requires `CreateOrchestrationTables`. Gate: `App.Config().DB != nil`. |
