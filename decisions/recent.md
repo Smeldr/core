@@ -33,6 +33,174 @@ Archived 2026-08-10: D43-D46, A242-A247 → phase24-archive.md
 Archived 2026-08-11: D47, A248-A251 → phase25-archive.md
 ---
 
+## D52 — `investigates` targets a condition's subject, which is often an edge
+
+### Scope
+
+core (relation kind declaration), process (Workspace delegation)
+
+### Decision
+
+`investigates` is declared `Task` → `Decision` **and** `Task` →
+`RelationEdge`. D45 declared only the first.
+
+### Why
+
+D51 rules that a condition is identified by its qualified subject
+`(subject_type, subject_id)`, and that subject is an edge for two of the
+three provenances:
+
+| Condition | Subject a `Task` would investigate |
+|---|---|
+| Detected | the `RelationEdge` carrying `invalid_at` |
+| Asserted (contradiction) | the `contradicts` edge |
+| Scheduled | the item — today only `Decision`, the one type with a gated re-evaluation state |
+
+So `Task` → `Decision` is correct for exactly one of three cases. For a
+contradiction it is worse than incomplete: pointing the investigation at
+one of the two `Decision`s **chooses a subject**, which is precisely what
+the symmetry of `contradicts` forbids and what D45 itself established
+when it made the kind non-directional.
+
+The system already treats edges as subjects — `recordAssertProvenance`
+writes `SubjectType: "RelationEdge"` (`relations.go:359-364`) — so this
+declares something the model can already express rather than inventing a
+shape.
+
+### Both pairs, not a superset
+
+Declared as the two pairs that are real today, not `Task` → anything.
+Other orchestration types have no gated state that produces a scheduled
+condition, so a pair naming them would be speculation. When a second type
+gains one, this gets another pair and that is the right cost.
+
+### Consequence stated honestly
+
+`TypePairs` is documentation-only and never enforced at write time
+(A236), so nothing was rejecting the wrong edge and nothing will accept
+the right one differently. **The value here is that a declaration which is
+documentation gets read as truth, and a wrong one is worse than an absent
+one.** Whether declarations should be enforced at all is T233's question,
+untouched here.
+
+### Status
+
+Ratified 2026-08-11 (Peter, via architect session). Amends D45, which
+otherwise stands as ratified — recorded as its own Decision rather than as
+a correction buried in D51's body, so the change carries its own lineage.
+
+---
+
+## D51 — A condition is a projection identified by its subject; a finding is a persisted, detector-owned record
+
+### Scope
+
+core (the `Finding` type), process (Workspace's model contract)
+
+### Decision
+
+**1. Conditions remain projections and own no state.** This confirms D46
+and closes T221's original framing ("are Workspace conditions persisted
+items"), which predates D46 and asks a question D46 already answered.
+
+**2. A condition's identity is its qualified subject
+`(subject_type, subject_id)`** — the durable object whose state
+constitutes the condition. Detected: the `RelationEdge` carrying
+`invalid_at`. Asserted: the `contradicts` edge. Scheduled: the item
+itself. **No record is created for a condition, in any provenance.**
+
+**3. Findings are persisted as a thin, detector-owned type, named
+`Finding`.** Written only by detectors: no `create_*`/`update_*` MCP
+tools, no human-driven state flow. This answers D46's own open question.
+
+### Why 2, derived rather than enumerated
+
+An identity exists so that two references to one thing are recognisable
+as the same. That yields five uses, and each was tested against the
+scheduled provenance — the only one with no obvious object:
+
+| Use | Requires | Scheduled condition |
+|---|---|---|
+| Stable rendering across refresh | something immutable to key on | the item's ID |
+| Model linkage (a suppressing `Decision`, an `investigates` `Task`) | an edge target | the item; suppression applies only to findings (D46) |
+| Addressing (a URL per row) | an address | the item's own address |
+| Detector dedup | a fingerprint across runs | vacuous — no detector runs, and D40's two gated exits are **one** condition per the `(condition)` ruling, so one item is one scheduled condition |
+| History ("was this present last week") | an arrival timestamp | missing — but that is T211's absent write, not an identity |
+
+All five are covered and none requires a new object. The three
+convergences recorded in T221 were therefore one absent write seen from
+three angles, and the answer is to make `DrainEvalQueue` write
+provenance, not to persist conditions.
+
+### Why 3
+
+D46 removed most of the shape the July analysis drew.
+`acknowledged`, `dismissed` and `accepted-as-is` are human claims about
+resolution, and D46 rules that a finding resolves when its **detector
+stops firing**, while suppression is a `Decision`. `delegated` became
+model work via `investigates`. What survives as grounds for persistence
+is real but narrow: dedup across sweep runs, a stable target for a
+suppressing `Decision`, and history.
+
+**A write surface would invite exactly the behaviour D46 forbids**, so
+the type has none — the tools would be the invitation. Nearest precedent
+is `Run` (D38): a type whose authoritative state lives outside
+`Node.Status`.
+
+### Named `Finding`, and the trail to the prior art
+
+`analysis/fable5-operational-insights-report-2026-07-06.md` and **T126
+call this `Insight`**. Recorded explicitly so the prior art stays
+findable — D41 exists because this project loses its own earlier work.
+
+Renamed for two reasons. D46 (one month later) established **finding** as
+the precise term for what a detector produces, so `Insight` would name the
+concept with a word the model no longer uses for it. And `Insight` is
+already a **Cloud capability** in `cloud-strategy.md` ("surface what the
+model implies but does not state") — a core type of the same name puts one
+word on a free AGPL primitive and a sold continuous service at once,
+across the two-vocabulary boundary. Article X: precise and intentionally
+small.
+
+### Rejected alternatives
+
+- **Conditions as persisted items** (T221's original framing). Puts state
+  in the surface's own subject matter and re-creates the "the surface can
+  be made to lie" failure §13.5 exists to prevent.
+- **A seventh orchestration type with full CRUDAP for findings.** The
+  write surface contradicts D46's resolution rule.
+- **A per-condition record for the scheduled provenance.** Dissolved by
+  deriving what identity is for.
+- **Deferring the identity question to empirical observation.** Architect
+  proposed this; Peter rejected it as hedging. The question was answerable
+  by reasoning and has been answered — deferring would have left T211 and
+  T223 blocked on a non-question.
+
+### Boundary
+
+- Identity must be **qualified**. Item IDs and edge IDs are both
+  `NewID()` UUIDs in conceptually different namespaces. The pattern
+  already exists: `smeldr_relations`' `source_type`/`source_id`, and
+  `recordAssertProvenance`'s `SubjectType: "RelationEdge"`.
+- **Not settled here:** §13.9c's volume question — what a Workspace with
+  3, 12 or 47 simultaneous conditions looks like. Presentation, not
+  model, and it blocks nothing.
+- `investigates`' declared pair is wrong for contradictions under this
+  ruling. Recorded, not fixed here: it becomes **D52**, so the amendment
+  to D45 carries its own lineage.
+
+### Unblocks
+
+T211 (arrival provenance is now known to be the whole scheduled gap),
+T223 (detectors can be wired knowing what they must record), T126 (the
+type's shape and name are settled).
+
+### Status
+
+Ratified 2026-08-11 (Peter, via architect session).
+
+---
+
 ## D50 — The Task flow is the protocol; Signals are not a chat channel
 
 ### Scope
