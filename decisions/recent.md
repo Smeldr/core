@@ -265,6 +265,51 @@ runs on Task transitions alone.
 
 ---
 
+## A257 — transition_item/set_content_status gain reason (T235, smeldr.dev/mcp half)
+
+### What shipped
+
+`transition_item` and `set_content_status` (`smeldr.dev/mcp`) both gain an
+optional `reason` string parameter, threaded to `smeldr.dev/core`'s new
+`App.TransitionItemWithReason`/`DynamicTypeRepo.SetStatusWithReason`
+(A256) respectively — satisfying a `Transition.RequiredReason` gate,
+which neither tool could reach before (both always passed an empty
+reason to the underlying core call). Omitting `reason` behaves exactly as
+before either tool shipped it.
+
+`set_content_status` was checked and fixed alongside `transition_item`
+per the dispatching task's own instruction to look for siblings with the
+same gap rather than closing one call site and leaving another open — it
+had the identical defect.
+
+### Versioning
+
+Requires `smeldr.dev/core` v1.65.0+ (`App.TransitionItemWithReason`,
+`DynamicTypeRepo.SetStatusWithReason`) — go.mod bumped only after core's
+tag was proxy-verified, not `go.work`-local, matching every prior
+core+mcp cycle. New consumer-visible tool capability on both tools.
+MINOR bump v1.30.2 → v1.31.0.
+
+Status: Implements no new Decision — mcp-side half of the same fix A256
+implements on the core side. See A256 for the full root-cause
+investigation (both dispatch assumptions corrected, the `SetStatus`/
+`SetStatusWithReason` precedent found and reused) — not restated here.
+
+### Note
+
+This entry backfills a completeness gap found at close-out review: A256
+covered the core half, but the mcp half's own Amendment was never
+written, and mcp's own `[1.31.0]` `CHANGELOG.md` entry cited no A-number
+where every other entry there does. Third occurrence of this exact shape
+in this session (after A250, A252) — flagged by the architect as
+structural, not incidental: when a cycle spans two repos, the second
+repo's Amendment is the one that goes missing, because a `Task`'s single
+state has no point in the flow where the second repo's work gets
+checked. Not solved here — the architect owns the fix, tracked
+separately from this backfill.
+
+---
+
 ## A256 — App.TransitionItemWithReason (T235, smeldr/core half)
 
 ### The gap, verified — and two of the dispatch's own assumptions corrected
