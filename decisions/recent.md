@@ -34,6 +34,104 @@ Archived 2026-08-11: D47, A248-A251 → phase25-archive.md
 Archived 2026-08-13: D48-D49, A252-A255 → phase26-archive.md
 ---
 
+## A258 — DrainEvalQueue records provenance (T211, D51)
+
+**Renumbered from the originally-drafted A260 at actual merge time —
+`origin/main`'s live `DECISIONS.md` index was re-checked immediately
+before this squash and was still A257 highest: T211 is the first of the
+T239/T243/T211 trio to actually land, not the last as originally
+assumed when the plan was written. A258 is correct as of this merge.**
+
+### What was wrong
+
+`App.DrainEvalQueue` applies its status transition via a raw `UPDATE`,
+never through `SQLRepo.Save`/`Module.notifyAfter` — confirmed against
+source: an eval-queue-driven transition produced zero `ProvenanceRecord`,
+while the row's status genuinely changed. D51 named this precisely: a
+scheduled Workspace condition's arrival had no record, and that absence
+was the one thing making three separate design questions look like
+three problems. This is that one absent write.
+
+The authority half (never crossing a role-gated boundary itself) was
+already closed — A241/D42. This Amendment is the observability half
+only.
+
+### Actor identity: `ActorKind: "job"`, not a `Run`
+
+`ProvenanceRecord.ActorID`'s own doc anticipates a non-human actor as a
+plain string, not a foreign key. `Run` (D38) is a heavier, structurally
+different object — claim/lease/worktree semantics for M3's git-
+worktree-based coding episodes. `DrainEvalQueue` is a stateless periodic
+sweep with no claim, no lease, no worktree — forcing it through `Run`'s
+shape would be a category mismatch, not reuse.
+
+Decision: `ActorKind: "job"`, `ActorID: "drain-eval-queue"` — a fixed,
+descriptive string naming the mechanism. **Generalises directly to
+`SweepStructural` (T223)** as the same pattern: any stateless periodic
+background mechanism gets `ActorKind: "job"` with a fixed `ActorID`
+naming itself. Answers T220's question for the drain; T223's own plan
+may cite this directly.
+
+**This settles the actor question only.** A sweep's *run record* — that
+a pass happened, when, what it walked, what it skipped — is a different
+object, not addressed here and not foreclosed by this Amendment. An
+actor is a string naming who acted; a run record is an entity queried,
+ordered by time, with staleness derived from it, and by D51's own
+reasoning about identity it sits considerably closer to `Run`'s own
+shape than the drain's actor ever did. Whether that record is a `Run`,
+something smaller, or something else again remains open — T223's own
+plan settles it, not this one.
+
+### Scope: provenance only, three effects argued out
+
+- **Provenance — IN.** D51's own named gap.
+- **Signal dispatch — OUT.** The drain's only current target is D40's
+  `pending-re-evaluation → ratified/superseded` (`Decision`). Firing
+  `AfterPublish`-class signals for an automated transition would
+  activate every human-publish subscriber (webhooks, audit) with no
+  operator decision that background automation should trigger them — a
+  materially bigger change than "record that this happened."
+- **Cache invalidation / rebuild triggers — OUT**, same reasoning:
+  orchestration types are `APIOnly`-class content with no public HTML
+  surface to invalidate or rebuild for; reachable only via the signal
+  path just excluded.
+
+### Failure handling: reuses `recordProvenance`'s existing fail-open discipline
+
+`recordProvenance` (unexported, same package) already implements exactly
+the rule this task needed: append, and on error, log at Warn and
+swallow. Calling it from `DrainEvalQueue` inherits that discipline for
+free. The queue-row deletion rule (A241, "not re-queued") stays
+unconditional — a provenance write failure does not block or alter it.
+
+`Surface: "trigger"` — the enum value existed but had no producer before
+this Amendment; `DrainEvalQueue` is exactly the `TransitionTrigger`-
+driven mechanism it was named for.
+
+### Tests
+
+4 new: a real drain run with `App.Provenance` wired produces exactly one
+correctly-populated record; no `App.Provenance` wired is a no-op
+(explicit regression pin on the existing fail-open contract); a failing
+provenance store still lets the queue row delete and `triggered`
+increment (A241 unweakened); the role-gated branch (Signal recorded, no
+UPDATE) writes zero provenance records.
+
+### Versioning
+
+New behaviour (a write that did not happen before now happens), no
+exported symbol changes (`recordProvenance` stays unexported). Coverage:
+96.3% package-wide; `DrainEvalQueue` itself 100%. Patch bump, matching
+A241's own classification for a prior `DrainEvalQueue` behaviour change
+of the same shape. Level 2 amendment (crosses into `docs/ARCHITECTURE.md`
+and touches an already-shipped function's real behaviour, even without a
+signature change).
+
+Status: Implements D51's own named gap — no new Decision, D51 already
+settled the scope.
+
+---
+
 ## D56 — `Standing` means the governed state, and the two state axes are named as two
 
 ### Scope

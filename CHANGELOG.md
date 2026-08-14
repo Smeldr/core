@@ -23,6 +23,15 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.65.1] — 2026-08-14
+
+Confirmed at merge time: `origin/main` was still v1.65.0 when this
+squashed — T211 is the first of the T239/T243/T211 trio to land, so
+v1.65.0 → v1.65.1 is correct, not an assumption.
+
+### Fixed
+- `App.DrainEvalQueue` now records one `ProvenanceRecord` per successful transition (`ActorKind: "job"`, `ActorID: "drain-eval-queue"`, `Surface: "trigger"`) — previously produced none despite genuinely changing the item's status. (A258, T211)
+
 ## [1.65.0] — 2026-08-13
 
 ### Added

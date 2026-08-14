@@ -3084,6 +3084,154 @@ func TestDrainEvalQueue_happy(t *testing.T) {
 	}
 }
 
+// failingProvenanceStore.Append always fails — used to prove
+// recordProvenance's fail-open discipline reaches DrainEvalQueue too
+// (T211): the queue row is still deleted, triggered still increments.
+type failingProvenanceStore struct{}
+
+func (s *failingProvenanceStore) Append(_ context.Context, _ ProvenanceRecord) error {
+	return errors.New("simulated provenance append failure")
+}
+func (s *failingProvenanceStore) List(_ context.Context, _ ProvenanceFilter) ([]ProvenanceRecord, error) {
+	return nil, nil
+}
+
+// TestDrainEvalQueue_RecordsProvenance_OnSuccessfulTransition (T211/D51)
+// verifies the one absent write D51 identified: a real drain-driven
+// transition, with App.Provenance wired, produces exactly one
+// ProvenanceRecord naming the drain as a "job" actor.
+func TestDrainEvalQueue_RecordsProvenance_OnSuccessfulTransition(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE eval_items (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create eval_items: %v", err)
+	}
+	itemID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO eval_items (id, status) VALUES (?, 'ratified')`, itemID,
+	); err != nil {
+		t.Fatalf("insert item: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'EvalItem', ?, 'pending-re-evaluation', datetime('now', '-1 second'))`,
+		NewID(), itemID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	store := &fakeProvenanceStore{}
+	app := &App{cfg: Config{DB: db}}
+	app.Provenance(store)
+
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 1 || skipped != 0 {
+		t.Fatalf("expected (1,0), got (%d,%d)", triggered, skipped)
+	}
+
+	if len(store.appended) != 1 {
+		t.Fatalf("got %d provenance records, want 1", len(store.appended))
+	}
+	rec := store.appended[0]
+	if rec.ActorKind != "job" || rec.ActorID != "drain-eval-queue" {
+		t.Errorf("actor: got kind=%q id=%q, want job/drain-eval-queue", rec.ActorKind, rec.ActorID)
+	}
+	if rec.Surface != "trigger" {
+		t.Errorf("Surface: got %q, want %q", rec.Surface, "trigger")
+	}
+	if rec.SubjectType != "EvalItem" || rec.SubjectID != itemID {
+		t.Errorf("subject: got %s/%s, want EvalItem/%s", rec.SubjectType, rec.SubjectID, itemID)
+	}
+	if rec.FromState != "ratified" || rec.ToState != "pending-re-evaluation" {
+		t.Errorf("states: got %s->%s, want ratified->pending-re-evaluation", rec.FromState, rec.ToState)
+	}
+	if rec.Verb != "transition" {
+		t.Errorf("Verb: got %q, want %q", rec.Verb, "transition")
+	}
+}
+
+// TestDrainEvalQueue_NoProvenanceStore_NoOp confirms the existing fail-open
+// contract explicitly: App.Provenance never called (provenanceStore nil) —
+// no panic, behaviour identical to before T211.
+func TestDrainEvalQueue_NoProvenanceStore_NoOp(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE eval_items (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create eval_items: %v", err)
+	}
+	itemID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO eval_items (id, status) VALUES (?, 'ratified')`, itemID,
+	); err != nil {
+		t.Fatalf("insert item: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'EvalItem', ?, 'pending-re-evaluation', datetime('now', '-1 second'))`,
+		NewID(), itemID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	app := &App{cfg: Config{DB: db}} // provenanceStore never set
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 1 || skipped != 0 {
+		t.Errorf("expected (1,0), got (%d,%d)", triggered, skipped)
+	}
+}
+
+// TestDrainEvalQueue_ProvenanceWriteFails_QueueRowStillDeleted (T211/A241)
+// pins that a failing provenance write does not weaken the existing
+// not-re-queued rule: the queue row is still deleted and triggered still
+// increments, matching recordProvenance's own fail-open discipline.
+func TestDrainEvalQueue_ProvenanceWriteFails_QueueRowStillDeleted(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE eval_items (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create eval_items: %v", err)
+	}
+	itemID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO eval_items (id, status) VALUES (?, 'ratified')`, itemID,
+	); err != nil {
+		t.Fatalf("insert item: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'EvalItem', ?, 'pending-re-evaluation', datetime('now', '-1 second'))`,
+		NewID(), itemID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	app := &App{cfg: Config{DB: db}}
+	app.Provenance(&failingProvenanceStore{})
+
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 1 || skipped != 0 {
+		t.Errorf("provenance write failure must not affect triggered/skipped: got (%d,%d), want (1,0)", triggered, skipped)
+	}
+	var qCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_eval_queue`).Scan(&qCount); err != nil {
+		t.Fatalf("SELECT queue: %v", err)
+	}
+	if qCount != 0 {
+		t.Errorf("queue row must still be deleted on provenance write failure, count=%d", qCount)
+	}
+}
+
 func TestDrainEvalQueue_notDueYet(t *testing.T) {
 	db := newMigratedDB(t)
 	ctx := context.Background()
@@ -3405,6 +3553,51 @@ func TestRecordAuthorizationRequiredSignal_InsertError(t *testing.T) {
 }
 
 // — DrainEvalQueue — gated transition wiring, end-to-end ————————————————————
+
+// TestDrainEvalQueue_AuthorizationGate_NoProvenanceWrite (T211) confirms
+// the role-gated branch (Signal recorded, no UPDATE applied) writes no
+// provenance record — only a real transition produces one, matching
+// provenanceVerbFor's own precondition that a record describes something
+// that actually happened.
+func TestDrainEvalQueue_AuthorizationGate_NoProvenanceWrite(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	gatedItemFixture(t, db, "gate_items", "item-11", "reviewing")
+
+	store := &fakeProvenanceStore{}
+	app := &App{cfg: Config{DB: db}}
+	app.Provenance(store)
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "gate-flow-prov",
+		TypeName: "GateItem",
+		States:   []State{{Name: "reviewing", IsInitial: true}, {Name: "approved"}},
+		Transitions: []Transition{
+			{From: "reviewing", To: "approved", RequiredRole: "reviewer"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'GateItem', 'item-11', 'approved', datetime('now', '-1 second'))`,
+		NewID(),
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 0 || skipped != 1 {
+		t.Fatalf("gated: expected (0,1), got (%d,%d)", triggered, skipped)
+	}
+	if len(store.appended) != 0 {
+		t.Errorf("gated transition (never applied): want 0 provenance records, got %d", len(store.appended))
+	}
+}
 
 func TestDrainEvalQueue_GatedTransition_SignalEmittedNotApplied(t *testing.T) {
 	db := newMigratedDB(t)

@@ -1004,6 +1004,34 @@ func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err e
 					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "error", updateErr)
 				skipped++
 			} else {
+				// T211/D51: record the condition's arrival. This is the one
+				// absent write D51 identified — provenance only (signal
+				// dispatch, cache invalidation and rebuild triggers are
+				// deliberately out of scope, argued in the Amendment: this
+				// drain's only target today is D40's Decision re-evaluation
+				// flow, and firing AfterPublish-class signals for an
+				// automated transition would activate every human-publish
+				// subscriber with no operator decision that background
+				// automation should trigger them). ActorKind "job" with a
+				// fixed ActorID naming the mechanism, not a Run (D38) — a
+				// stateless periodic sweep has no claim/lease/worktree
+				// lifecycle to attach a Run to; generalises to
+				// SweepStructural (T223) as the same pattern. Fail-open:
+				// recordProvenance itself logs-and-swallows an Append
+				// failure — the queue row is still deleted below regardless
+				// (A241's own "not re-queued" rule, unweakened).
+				if a.provenanceStore != nil {
+					recordProvenance(ctx, a.provenanceStore, ProvenanceRecord{
+						SubjectType: r.typeName,
+						SubjectID:   r.itemID,
+						Verb:        provenanceVerbFor(AfterUpdate, fromState, r.toState),
+						FromState:   fromState,
+						ToState:     r.toState,
+						ActorKind:   "job",
+						ActorID:     "drain-eval-queue",
+						Surface:     "trigger",
+					})
+				}
 				triggered++
 			}
 		}

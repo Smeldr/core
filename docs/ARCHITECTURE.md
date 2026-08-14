@@ -488,9 +488,16 @@ smeldr.dev/
                         transition is not applied; a Signal (signal_type="authorization-required",
                         sender="system", receiver=the exact declared role) is recorded instead and
                         the queue row is still deleted (blocked transitions are not re-queued,
-                        matching the existing failed-transition rule). The observability gap (no
-                        Save/notifyAfter/Provenance on the unblocked path) is unchanged — out of
-                        this task's scope, remains T211's other half (Amendment A241, D42)
+                        matching the existing failed-transition rule). A successful (ungated or
+                        authorized) transition now records one ProvenanceRecord (T211's
+                        observability half, D51) — ActorKind="job", ActorID="drain-eval-queue",
+                        Surface="trigger", via the same fail-open recordProvenance every other
+                        subscriber uses; a failed provenance write never blocks the queue-row
+                        deletion (A241's own not-re-queued rule, unweakened). Deliberately still
+                        unrestored: Save/notifyAfter's other three effects (Signal dispatch, cache
+                        invalidation, rebuild triggers) — argued out, not bundled in, since the
+                        drain's only current target (D40's Decision re-evaluation) would activate
+                        every human-publish subscriber with no operator decision behind it
 ├── forge.go          Config, MustConfig, New, App (Use/Content/Handle/Run/Handler/SEO),
 │                     Registrator, SEOOption, seoState (robots/ogDefaults/appSchema), httpsRedirect,
 │                     standaloneDispatcher internal interface (A101),
