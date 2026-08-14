@@ -3,24 +3,63 @@ package smeldr
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
 
 // --- fakeProvenanceStore ---
 
+// fakeProvenanceStore is a test double, not the shipped ProvenanceStore
+// (sqlProvenanceStore delegates to database/sql, which is safe for
+// concurrent use on its own). This fake needs its own mutex because
+// notifyAfter's afterHook runs on a separate goroutine (module.go:877) —
+// a caller exercising that real async path, as opposed to the synchronous
+// dispatchBus(...) call most tests in this file use directly, can read
+// appended/listed while Append is still writing them (T251).
 type fakeProvenanceStore struct {
+	mu       sync.Mutex
 	appended []ProvenanceRecord
 	listed   []ProvenanceRecord
+
+	// appendedCh, if non-nil, receives a non-blocking notification after
+	// each Append — lets a test wait for the async afterHook goroutine to
+	// actually finish instead of polling appended optimistically. Mirrors
+	// TestNotifyAfter_panicRecovery's own established channel-based
+	// precedent for synchronizing with that same goroutine.
+	appendedCh chan struct{}
 }
 
 func (f *fakeProvenanceStore) Append(_ context.Context, r ProvenanceRecord) error {
+	f.mu.Lock()
 	f.appended = append(f.appended, r)
+	f.mu.Unlock()
+	if f.appendedCh != nil {
+		select {
+		case f.appendedCh <- struct{}{}:
+		default:
+		}
+	}
 	return nil
 }
 
 func (f *fakeProvenanceStore) List(_ context.Context, _ ProvenanceFilter) ([]ProvenanceRecord, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.listed, nil
+}
+
+// Appended returns a snapshot of the records appended so far. Tests that
+// read after a synchronous dispatchBus(...) call don't need it (no
+// concurrent writer remains by the time dispatchBus returns), but any test
+// exercising the async afterHook goroutine must use it instead of reading
+// the field directly.
+func (f *fakeProvenanceStore) Appended() []ProvenanceRecord {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]ProvenanceRecord, len(f.appended))
+	copy(out, f.appended)
+	return out
 }
 
 // --- transitionIsGated tests (T243) ---
@@ -560,7 +599,7 @@ func TestNotifyAfter_SurfacePropagatesToSignalEvent(t *testing.T) {
 		BaseURL: "https://example.com",
 		Secret:  []byte("notifyafter-surface-test-secret-12"),
 	}))
-	store := &fakeProvenanceStore{}
+	store := &fakeProvenanceStore{appendedCh: make(chan struct{}, 1)}
 	app.Provenance(store)
 	app.hookableModules = append(app.hookableModules, m)
 	app.wireSignalBus()
@@ -569,17 +608,23 @@ func TestNotifyAfter_SurfacePropagatesToSignalEvent(t *testing.T) {
 	p := &testPost{Node: Node{ID: "n1", Slug: "s", Status: Published}}
 	m.notifyAfter(ctx, AfterPublish, "draft", surfaceMCP, "", p)
 
-	// afterHook runs in its own goroutine (module.go's notifyAfter) - wait for it.
-	deadline := time.Now().Add(2 * time.Second)
-	for len(store.appended) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
+	// afterHook runs in its own goroutine (module.go's notifyAfter) - wait for
+	// the actual completion signal (TestNotifyAfter_panicRecovery's own
+	// established precedent) rather than polling store.appended directly,
+	// which races with Append's write under the same goroutine (T251).
+	select {
+	case <-store.appendedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("afterHook goroutine never appended")
 	}
-	if len(store.appended) != 1 {
-		t.Fatalf("got %d appended, want 1", len(store.appended))
+
+	appended := store.Appended()
+	if len(appended) != 1 {
+		t.Fatalf("got %d appended, want 1", len(appended))
 	}
-	if store.appended[0].Surface != "mcp" {
+	if appended[0].Surface != "mcp" {
 		t.Errorf("Surface = %q, want %q (through notifyAfter -> afterHookMeta -> buildSignalEvent)",
-			store.appended[0].Surface, "mcp")
+			appended[0].Surface, "mcp")
 	}
 }
 
