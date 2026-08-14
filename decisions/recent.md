@@ -34,6 +34,234 @@ Archived 2026-08-11: D47, A248-A251 → phase25-archive.md
 Archived 2026-08-13: D48-D49, A252-A255 → phase26-archive.md
 ---
 
+## D56 — `Standing` means the governed state, and the two state axes are named as two
+
+### Scope
+
+cloud (`internal/read`), core (the distinction it makes explicit),
+architect (`constitution/vocabulary.md`, which is missing the axis)
+
+### Decision
+
+**A Managed Item has two independent state axes, and they are not versions
+of each other:**
+
+| Axis | Answers | Values | Every item has one? |
+|---|---|---|---|
+| Lifecycle (`Status`) | is this visible and served? | `draft`, `scheduled`, `published`, `archived` | yes |
+| Governed state (StateFlow) | where is this in its own governed process? | per flow, e.g. `proposed`, `ratified`, `superseded` | only types with a registered flow |
+
+They are orthogonal. A `Decision` may be `published` and `proposed` at the
+same time, and both facts are true and useful: the first says an API caller
+can read it, the second says nobody has ratified it.
+
+**`Standing` means the governed state. It is empty for a type with no
+registered flow — never a fallback to lifecycle.**
+
+Counting held-open items therefore skips types with no flow, which is
+correct: an item with no governed process cannot be unresolved.
+
+### Why
+
+`internal/read/anchor.go`'s `Standing` reads `Node.Status` while its own
+doc comment claims "the current StateFlow state string". The two
+vocabularies coincide only on `archived`, by accident.
+
+The consequence was never cosmetic: Tension and held-open counting for
+related `Task`/`Goal`/`Amendment` items read the wrong axis, so such items
+could apparently never read as resolved through that path.
+
+**A fallback to lifecycle was considered and rejected.** It reintroduces
+exactly today's defect in a quieter form: `archived` would again mean two
+different things depending on which axis produced it, and a reader could
+not tell which. An empty `Standing` says "this type has no governed
+process", which is a true and useful statement. A borrowed one says
+something false.
+
+**Peter's framing, which is the reason this is a decision rather than a bug
+fix:** the surface should show what the surface is about. Nobody reading a
+decision graph asks whether the row is published; they ask whether it is
+ratified. The lifecycle axis is the CMS heritage, and it stays — it is not
+legacy to be removed, it answers a real question. It simply is not what
+`Standing` is for.
+
+**The axes coexist by design, and this is the first document to say so.**
+`constitution/vocabulary.md` maps the constitutional "Lifecycle / State
+(Art VII)" concept to `Status` and does not mention governed states at all.
+The map was missing an axis, which is how one field came to be asked to
+carry both. That gap is architect's to close in `vocabulary.md`, in the
+same pass as this decision.
+
+### Consequences
+
+- `Standing`'s implementation and doc comment agree, on the governed state.
+- Held-open counting changes behaviour for flowless types: they stop being
+  counted rather than being counted wrongly.
+- `constitution/vocabulary.md` gains the two-axis distinction.
+- A237's honesty fix (T236) made the doc comment describe the code; this
+  decides which of the two the code should have been doing, which was the
+  open half that fix deliberately left.
+
+---
+
+## D55 — A closed module may sell a domain, never a capability the model needs
+
+### Scope
+
+constitution reading (`cloud-strategy.md`, Article IX), commercial strategy
+
+### Decision
+
+**Smeldr may offer closed, separately licensed modules, provided they add a
+domain rather than withhold a capability an organization needs to own and
+operate its model.**
+
+The test, applied before anything is built: **could an organization own and
+operate its own operational model without this?** If yes, it may be a
+closed module. If no, it belongs in core and stays AGPL.
+
+No such module is planned. This decision preserves the option and fixes the
+boundary while nobody has an interest in where it falls.
+
+### Why
+
+The question was whether Smeldr could sell closed add-ons the way Umbraco
+sells Forms — the one part of that revenue model not already open to us
+(Cloud is in progress, support becomes sellable when there is anyone to
+support, certification and partner programmes need an ecosystem that does
+not exist).
+
+**It looked constitutionally blocked. On reading the clause, it is not.**
+`cloud-strategy.md` says: *"Smeldr does not withhold a capability an
+organization needs to own and operate its model in order to upsell Cloud."*
+That is a condition of **necessity**, not of breadth. It does not say core
+contains everything; it says core does not withhold what ownership
+requires. A module that is not required for ownership was never inside the
+prohibition.
+
+This is a reading of the existing text, not an amendment and not a
+loophole — the qualifying clause is in the sentence, and taking it
+seriously is what reading it means. No constitutional change is needed, and
+that matters: an amendment made speculatively, for a revenue line nobody
+has planned, would be the loophole.
+
+**Article IX supplies the ladder that makes the distinction usable.**
+Capabilities strengthen the operational model; features realize
+capabilities; implementations realize features. A capability is load-bearing
+for the model itself. A domain is a subject area the model can be applied
+to. Removing validation from core would cripple the model. Not shipping a
+compliance domain does not.
+
+### The line, stated so it can be applied rather than argued each time
+
+- **Core, always:** anything the operational model needs to exist and be
+  operated — types, authority, state, relations, provenance, the surfaces
+  that reach them.
+- **Cloud:** running those capabilities continuously across the whole model,
+  which is what `cloud-strategy.md` already says commercial value comes
+  from.
+- **Eligible for a closed module:** a bounded domain built *on* a fully
+  capable core, whose absence leaves the core no less capable.
+
+### Rejected alternatives
+
+**Amend the constitution to permit withholding capabilities.** Rejected:
+it would break Article XII's ownership principle, and the honest reading
+above makes it unnecessary. An amendment is not cheaper than reading the
+sentence.
+
+**Rule the whole add-on model out.** Rejected: it forecloses a proven
+revenue line on a misreading, and the misreading is ours.
+
+### Consequences
+
+- The option is preserved without any code, licence or constitutional
+  change today.
+- Any future closed module must state which domain it adds and answer the
+  ownership test in writing before work starts.
+- Recorded so the reasoning is not rebuilt from scratch each time the
+  question resurfaces, which was this question's own history.
+- Untouched and separate: whether consulting revenue competes with Cloud
+  for Peter's hours is a business-shape question, not a licensing one.
+
+---
+
+## D54 — A cycle spanning two repos is two Tasks joined by `depends_on`
+
+### Scope
+
+process (Task shape), all implementing agents
+
+### Decision
+
+**A cycle that spans two repositories is two Tasks joined by a
+`depends_on` edge, one per repo — never one Task covering both.**
+
+Each runs its own full flow: its own section in the plan file, its own
+commit review, its own `done`. The upstream Task reaching `done` is what
+releases the downstream one, which is the release ordering that already
+exists in reality (upstream tag → proxy verify → downstream pin bump →
+downstream tag).
+
+**Either party opens the downstream Task the moment the plan establishes a
+second repo is in scope** — not at dispatch. Dispatch cannot know: T235 was
+dispatched as `XS` and turned out to be one core method plus two mcp
+schemas plus a release sequence. The plan gate is where scope becomes
+known, and requiring architect to predict it would reintroduce the guess
+that failed.
+
+### Why
+
+Three times, a two-repo cycle shipped with the second repo's Amendment
+missing: A250 (found weeks later, during T230), A252 (caught at review),
+and A257 (caught at close-out). The shape is identical every time — it is
+always the *second* repo's Amendment, never the first's.
+
+A `Task` has one state, and in a two-repo cycle that state is consumed by
+the first repo's work: `commit-reviewing` means "the core half is ready".
+The second repo's half cannot even be pinned until the first is tagged and
+proxy-verified, so by construction it arrives *after* the state that would
+have checked it. There is no point in the flow where anyone is asked "and
+the other repo?"
+
+This is not carelessness, and core-implementer named the constraint itself
+during T235 rather than working around it silently.
+
+### Rejected alternatives
+
+**Extra states on the Task flow** (`commit-reviewing-upstream` →
+`commit-reviewing-downstream`). Rejected: it bakes a two-repo assumption
+into a flow shared by every band, and an n-repo cycle would need n states.
+The `depends_on` edge expresses ordering without special-casing the count.
+
+**A `repos: [core, mcp]` field on the Task.** Rejected, and this is the
+sharpest of the three: **a field is not a gate.** The defect is precisely
+that nothing checked. A declared-but-unconsulted field repeats `TypePairs`
+(A236), still listed as an open loose end two months later. We have the
+receipt for this mistake already.
+
+**Requiring an Amendment per repo at close, and nothing else.** Not
+rejected — but it constrains what `done` requires, not what a Task is. It
+composes with this decision rather than replacing it, and alone it is a
+rule with no checkpoint attached, which is the situation that produced the
+three misses.
+
+### Consequences
+
+- Detection remains possible later and belongs with the sweep: "a released
+  tag with no Amendment citing it" is a checkable condition of exactly the
+  kind D46/D51 describe.
+- This gives the same three-level shape as the relations convention —
+  convention now, detector when the sweep is wired (T223), framework gate
+  last if it earns it (T233's family). The consistency is deliberate: it is
+  the same question each time, which is *where* an invariant should live.
+- Cost, stated plainly: more Tasks, and for a small change the pairing
+  reads as overhead. The counter is in the evidence — all three missed
+  Amendments were small changes. Small is where this fails, because small
+  is where "it is just a pin bump" wins the argument.
+
+---
+
 ## D53 — Breaking changes stay inside v1 until the first external importer; v2 is reserved for a stability statement, not a feature milestone
 
 ### Scope
