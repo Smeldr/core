@@ -30,11 +30,18 @@ under Milestone 10 and the v2+ Roadmap section.
 - `ProvenanceEntry` — `SubjectProvenance`'s return type; `Gated bool` plus `ActorKind`/`ActorID`/`Surface`/`Reason` populated only when `Gated`. (A260, T243)
 - `SignalEvent.Surface`, `SignalEvent.Reason` — which entry point (`"http"`/`"mcp"`/`"trigger"`) and free-text reason (if any) produced a signal; threaded through from `Module.notifyAfter`. `Reason` is currently empty at every call site pending T237. (A260, T243)
 
-## [1.65.1] — 2026-08-14
+## [1.65.1] — never released
 
-Confirmed at merge time: `origin/main` was still v1.65.0 when this
-squashed — T211 is the first of the T239/T243/T211 trio to land, so
-v1.65.0 → v1.65.1 is correct, not an assumption.
+This version was never tagged and no release was created for it. T211's
+squash to `main` correctly assigned the next sequential number at that
+time, but no release approval existed at that moment (CLAUDE.md's
+tagging rule requires the user's own explicit yes for every tag), so the
+tag was rightly withheld. T243 landed next and shipped v1.66.0 before
+v1.65.1 was ever tagged, superseding it. Its contents are fully present
+in [1.66.0] below — nothing here was lost, and the fix it describes has
+shipped. Left here, not folded into 1.66.0's own section, because the
+work happened as its own commit under its own number; folding it in
+would misrepresent it as always having belonged to 1.66.0 (T250).
 
 ### Fixed
 - `App.DrainEvalQueue` now records one `ProvenanceRecord` per successful transition (`ActorKind: "job"`, `ActorID: "drain-eval-queue"`, `Surface: "trigger"`) — previously produced none despite genuinely changing the item's status. (A258, T211)
