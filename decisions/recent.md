@@ -34,6 +34,108 @@ Archived 2026-08-11: D47, A248-A251 → phase25-archive.md
 Archived 2026-08-13: D48-D49, A252-A255 → phase26-archive.md
 ---
 
+## D53 — Breaking changes stay inside v1 until the first external importer; v2 is reserved for a stability statement, not a feature milestone
+
+### Scope
+
+core (and every `smeldr.dev/*` module that follows its versioning), release
+process, site-dev (the vanity handler, as a prerequisite recorded below)
+
+### Decision
+
+Two halves, one decision, because the second is what makes the first
+honest rather than merely convenient.
+
+**1. Breaking changes to core's exported API are taken inside v1, without a
+major bump, for as long as no external importer exists.** Downstream repos
+move their pin and fix the call sites that actually changed. No
+compatibility twin is added to preserve a signature for a caller that does
+not exist.
+
+**2. "No external importer" is a checked fact, not an assumption.** The
+check is the module proxy's own importers index
+(`pkg.go.dev/smeldr.dev/core?tab=importedby`), run at release time and
+folded into the clean-clone and pin-currency check that T217 exists to
+build. The moment a module outside `smeldr.dev/*` appears there, this
+decision's first half expires and a breaking change requires v2.
+
+**3. v2 is not earned by accumulating features.** It is reserved for a
+deliberate statement that the API is settled and we stand behind it, spent
+when there is someone to say it to — the first external importer, or public
+launch, whichever comes first. Finishing the consolidation is what makes
+the statement true; having an audience is what makes it worth making.
+
+### Why
+
+**The evidence, gathered rather than assumed.** The proxy's importers index
+lists exactly five importers of `smeldr.dev/core`: `agent/flow`,
+`core/pgx`, `mcp`, `media`, `social`. Every one is ours. GitHub's clone
+statistics are ambiguous and were not used.
+
+**The limit of that evidence, stated rather than rounded away:** the index
+only sees modules that are themselves published to the proxy. A closed,
+internal consumer would not appear. There is no positive sign of one, and
+the check above is the standing way we would find out.
+
+**What v2 actually costs, and it is not the rename.** Rewriting 150 import
+references across our own repos is mechanical. The permanent cost is that
+`smeldr.dev/core/v2` becomes what every future document, README, code
+example and article says, forever, and that two live major versions must be
+reasoned about from then on. That is a real price, and today it would buy
+protection for a population of zero.
+
+**The uncomfortable observation this decision answers.** Core is at v1.65
+and behaves like v0: sixty-five minor releases, and we are about to take a
+breaking change inside v1 because the alternative was six compatibility
+twins protecting nobody. The version number does not currently carry the
+meaning it claims. This decision does not fix that by renumbering; it names
+the condition under which the number starts being true, and the
+consolidation is the work of getting there.
+
+**Mechanical prerequisite, recorded so it is not discovered late.** A v2
+tag alone does nothing. `smeldr.dev` serves its `go-import` meta tag from
+`site-dev`'s `main.go` (`vanityHandler`/`vanityHTML`), which declares the
+module path as `smeldr.dev/{mod}`. For `go get smeldr.dev/core/v2` to
+resolve at all, that tag must declare `smeldr.dev/core/v2` as its own
+module path. That is a code change in a different repo, owned by a
+different agent, requiring a deploy of smeldr.dev **before** any v2 tag is
+usable by anyone.
+
+### Rejected alternatives
+
+**Go to v2 now.** Pays the permanent path cost immediately, and worse,
+spends the stability statement while there is no audience to hear it. The
+statement can only be made once.
+
+**Return to v0**, which would be semver-honest about the current state.
+Checked and unavailable: the proxy already holds v1 tags, and version
+resolution prefers the highest, so a v0 tag would be inert. Recorded so the
+next person does not re-derive it.
+
+**Avoid the break and keep adding compatibility twins.** This is what
+triggered the whole question. `SetStatus`/`SetStatusWithReason` and
+`TransitionItem`/`TransitionItemWithReason` already exist; a planned third
+reason-bearing operation would have added three more plus a parallel
+interface, six twins in total, every one of them preserving a signature for
+a caller that does not exist. The architect's own note at A256 said two is
+a pattern and a third would be accretion; this decision is that note
+honoured rather than overruled.
+
+### Consequences
+
+- The consolidation plan's single breaking pass
+  (`architect/design/consolidation-plan.md`, wave 2) is authorised by this
+  decision, and should be taken as one pass rather than one break per
+  feature — the window is open now and closes without warning.
+- T217's release check gains the importer lookup as a third item beside the
+  clean-clone build and the pin-currency check. The versioning policy and
+  the release check become the same mechanism.
+- Any Amendment taking a breaking change under this decision must say so
+  explicitly and cite D53, so the v1 series' own history shows where the
+  breaks are.
+
+---
+
 ## D52 — `investigates` targets a condition's subject, which is often an edge
 
 ### Scope
