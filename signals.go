@@ -243,6 +243,20 @@ type SignalEvent struct {
 	// this field is consulted (e.g. [ProvenanceRecord.ActorKind] derivation).
 	ActorRoles []Role
 
+	// Surface is which entry point dispatched this signal — "http", "mcp", or
+	// "trigger" (T243/provenance-visibility-brief.md §2.3). "cli" is a valid
+	// value in principle but has no current producer: nothing in this codebase
+	// can distinguish a smeldr-cli-originated HTTP request from any other HTTP
+	// caller, since both terminate in the same handlers. Empty for hand-built
+	// [SignalEvent] literals that don't set it.
+	Surface string
+
+	// Reason is the free-text reason supplied for the transition, if any —
+	// most acts carry none, which is the normal case, not a gap (T243). Empty
+	// until the call site that produced this signal had a real reason value
+	// to thread; several typed-content call sites do not yet (T237).
+	Reason string
+
 	// raw holds the original content item. Used internally by the webhook
 	// delivery handler to build the full payload. Not exposed to external
 	// OnSignal subscribers.
@@ -262,6 +276,16 @@ type afterHookMeta struct {
 	// PrevState is the lifecycle state before the transition.
 	// Empty for AfterCreate.
 	PrevState string
+
+	// Surface is which entry point triggered this signal — see
+	// [SignalEvent.Surface] for the full contract. Threaded from
+	// [Module.notifyAfter]'s own surface parameter (T243).
+	Surface string
+
+	// Reason is the free-text reason supplied for the transition, if any —
+	// see [SignalEvent.Reason]. Threaded from [Module.notifyAfter]'s own
+	// reason parameter (T243).
+	Reason string
 }
 
 // buildSignalEvent constructs a [SignalEvent] from the parameters available
@@ -293,6 +317,8 @@ func buildSignalEvent(ctx Context, _ LifecycleEvent, meta afterHookMeta, item an
 		ActorRole:     role,
 		ActorID:       actorID,
 		ActorRoles:    actorRoles,
+		Surface:       meta.Surface,
+		Reason:        meta.Reason,
 		raw:           item,
 	}
 }

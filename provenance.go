@@ -259,11 +259,109 @@ func (a *App) Provenance(store ProvenanceStore) *App {
 				ToState:     toState,
 				ActorKind:   actorKindFor(ev.ActorID, ev.ActorRoles),
 				ActorID:     ev.ActorID,
+				Surface:     ev.Surface,
+				Reason:      ev.Reason,
 			})
 			return nil
 		})
 	}
 	return a
+}
+
+// ProvenanceEntry is one item-history event with the gating decision of
+// provenance-visibility-brief.md §4.3 already applied: actor identity
+// (ActorKind, ActorID, Surface, Reason) is populated only when Gated — the
+// transition that produced this record required RequiredRole with Strict
+// enforcement. An ungated entry carries only the non-identifying facts
+// (Verb, FromState, ToState, Timestamp), matching the brief's own framing:
+// "an act that did not [require authority] gets a word and a date, with
+// nothing to open."
+type ProvenanceEntry struct {
+	Timestamp time.Time
+	Verb      string
+	FromState string
+	ToState   string
+	Gated     bool
+	ActorKind string // "" unless Gated
+	ActorID   string // "" unless Gated
+	Surface   string // "" unless Gated
+	Reason    string // "" unless Gated
+}
+
+// transitionIsGated reports whether typeName's fromState→toState transition
+// required RequiredRole with Strict enforcement — the exact predicate
+// [validateTransition] itself evaluates (D34/D40), reused via
+// [resolveFlowID]/[lookupTransitionGate] rather than reimplemented, per
+// provenance-visibility-brief.md §4.3 ("the tier is whether the act had to
+// pass an authority check").
+//
+// fromState == toState is never gated (an edit, not a transition — matches
+// [provenanceVerbFor]'s own "update" classification), checked before any
+// query. Any failure to resolve the gate — no flow, no declared edge, or a
+// genuine DB error — returns false. This fail-closed direction is the
+// opposite of [validateTransition]'s own: that function fails closed toward
+// *rejecting the transition* (D34: a DB error must never silently permit an
+// unauthorized act); this one fails closed toward *withholding the actor*
+// (a gate that cannot be resolved must never be treated as safe to reveal).
+// Both are the conservative choice for their own question — stated
+// explicitly so a future reader does not assume they point the same way.
+//
+// The `err != nil` check against [resolveFlowID]'s own return is correct
+// defensive code but structurally unreachable today: resolveFlowID
+// currently swallows a genuine DB error into found=false, nil error rather
+// than propagating it (T249 — a real, separate fail-open finding on
+// validateTransition's own authorization path, found by architect
+// reviewing this code, not introduced by it). This check stays correct
+// and dormant, not dead weight, until T249 fixes resolveFlowID to
+// propagate a real error — at which point this branch gets a live path.
+func transitionIsGated(ctx context.Context, db DB, typeName, fromState, toState string) bool {
+	if db == nil || fromState == toState {
+		return false
+	}
+	flowID, flowFound, err := resolveFlowID(ctx, db, typeName)
+	if err != nil || !flowFound {
+		return false
+	}
+	requiredRole, _, strict, edgeFound, err := lookupTransitionGate(ctx, db, flowID, fromState, toState)
+	if err != nil || !edgeFound {
+		return false
+	}
+	return requiredRole != "" && strict
+}
+
+// SubjectProvenance returns subjectType+subjectID's gating-aware provenance
+// history — never keyed on an actor (provenance-visibility-brief.md §4.1:
+// "actor is never a query key"; the [ProvenanceFilter] this function builds
+// never sets ActorID, satisfying the constraint structurally rather than by
+// caller discipline).
+//
+// This is the read mechanism the brief commits core to building (§4.7: "no
+// new surface" — no HTTP route, no MCP tool). Callers compose it directly,
+// the same way [smeldr.dev/cloud]'s own read layer already reads core data
+// (cloud/internal/read.BuildTraceReading takes a [DB] handle directly, no
+// round trip) — cloud's Trace witness certificate is the one surface the
+// brief names for showing an entry's actor.
+func SubjectProvenance(ctx context.Context, db DB, store ProvenanceStore, subjectType, subjectID string) ([]ProvenanceEntry, error) {
+	records, err := store.List(ctx, ProvenanceFilter{SubjectType: subjectType, SubjectID: subjectID})
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]ProvenanceEntry, 0, len(records))
+	for _, r := range records {
+		gated := transitionIsGated(ctx, db, subjectType, r.FromState, r.ToState)
+		e := ProvenanceEntry{
+			Timestamp: r.Timestamp,
+			Verb:      r.Verb,
+			FromState: r.FromState,
+			ToState:   r.ToState,
+			Gated:     gated,
+		}
+		if gated {
+			e.ActorKind, e.ActorID, e.Surface, e.Reason = r.ActorKind, r.ActorID, r.Surface, r.Reason
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
 }
 
 // actorKindFor returns "" when actorID is empty (matching ProvenanceRecord's

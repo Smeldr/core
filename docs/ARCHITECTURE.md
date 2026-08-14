@@ -294,7 +294,15 @@ smeldr.dev/
 │                     AuditRecord/App.Audit unchanged, no shared table (Amendment A220, T149);
 │                     actorKindFor(actorID, roles []Role) resolves "job"/"agent" via IsRole against
 │                     SignalEvent.ActorRoles (not ctx-recovery — see signals.go entry above); wired into
-│                     a real running instance via example/server's ENABLE_PROVENANCE (Amendment A224, T178)
+│                     a real running instance via example/server's ENABLE_PROVENANCE (Amendment A224, T178);
+│                     ProvenanceEntry, SubjectProvenance(ctx, db, store, subjectType, subjectID) — the read
+│                     mechanism (T243): item-scoped only (never actor-keyed, provenance-visibility-brief.md
+│                     §4.1), applies §4.3's gating decision per record via transitionIsGated (unexported;
+│                     reuses state.go's resolveFlowID/lookupTransitionGate — a RequiredRole+Strict
+│                     transition exposes ActorKind/ActorID/Surface/Reason, an ungated one carries only
+│                     Verb/FromState/ToState/Timestamp). No HTTP route, no MCP tool — brief §4.7 names
+│                     cloud's Trace witness certificate as the only surface, composed directly the same
+│                     way cloud/internal/read.BuildTraceReading already reads core data
 ├── blocks.go          DynamicNode (embeds Node; TypeName, Fields json.RawMessage) + Head(),
 │                     NewDynamicContentRepo(db) *SQLRepo[*DynamicNode] (binds smeldr_dynamic_content),
 │                     CreateBlockTables(db) — grouped idempotent creator: smeldr_dynamic_content +

@@ -2,6 +2,7 @@ package smeldr
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -20,6 +21,182 @@ func (f *fakeProvenanceStore) Append(_ context.Context, r ProvenanceRecord) erro
 
 func (f *fakeProvenanceStore) List(_ context.Context, _ ProvenanceFilter) ([]ProvenanceRecord, error) {
 	return f.listed, nil
+}
+
+// --- transitionIsGated tests (T243) ---
+
+func TestTransitionIsGated_StrictAndRole_True(t *testing.T) {
+	db, _ := setupGovStateStrictDB(t)
+	if !transitionIsGated(context.Background(), db, "GovPostStrict", "draft", "published") {
+		t.Error("RequiredRole+Strict transition: want gated=true")
+	}
+}
+
+func TestTransitionIsGated_RoleWithoutStrict_False(t *testing.T) {
+	db, _ := setupGovStateDB(t)
+	// GovPost's draft->published has RequiredRole="editor" but Strict is the
+	// zero value (false) - gating requires both, per §4.3's own tier.
+	if transitionIsGated(context.Background(), db, "GovPost", "draft", "published") {
+		t.Error("RequiredRole without Strict: want gated=false")
+	}
+}
+
+func TestTransitionIsGated_NilDB_False(t *testing.T) {
+	if transitionIsGated(context.Background(), nil, "GovPostStrict", "draft", "published") {
+		t.Error("nil db: want gated=false")
+	}
+}
+
+func TestTransitionIsGated_SameState_False(t *testing.T) {
+	db, _ := setupGovStateStrictDB(t)
+	// An edit (fromState == toState) is never a transition - provenanceVerbFor's
+	// own "update" classification - so never gated, and must not query the DB.
+	if transitionIsGated(context.Background(), db, "GovPostStrict", "draft", "draft") {
+		t.Error("fromState==toState: want gated=false")
+	}
+}
+
+func TestTransitionIsGated_NoFlowRegistered_False(t *testing.T) {
+	db, _ := setupGovStateDB(t)
+	if transitionIsGated(context.Background(), db, "NoSuchType", "draft", "published") {
+		t.Error("no flow registered for type: want gated=false")
+	}
+}
+
+func TestTransitionIsGated_EdgeNotDeclared_False(t *testing.T) {
+	db, _ := setupGovStateStrictDB(t)
+	// GovPostStrict has no published->draft edge declared.
+	if transitionIsGated(context.Background(), db, "GovPostStrict", "published", "draft") {
+		t.Error("undeclared edge: want gated=false")
+	}
+}
+
+// TestTransitionIsGated_UnresolvableGate_FailsClosedNoActor pins the
+// fail-closed direction stated in transitionIsGated's own doc comment: a
+// genuine DB error resolving the gate must return false (withhold the
+// actor), the opposite direction from validateTransition's own fail-closed
+// rule (which rejects the transition on the identical class of error).
+func TestTransitionIsGated_UnresolvableGate_FailsClosedNoActor(t *testing.T) {
+	db, _ := setupGovStateStrictDB(t)
+	wrapped := &govQueryRowFailDB{DB: db, failOn: "FROM smeldr_transitions"}
+	if transitionIsGated(context.Background(), wrapped, "GovPostStrict", "draft", "published") {
+		t.Error("unresolvable gate (DB error): want gated=false, not true")
+	}
+}
+
+// --- SubjectProvenance tests (T243) ---
+
+func TestSubjectProvenance_GatedTransition_ActorExposed(t *testing.T) {
+	db, _ := setupGovStateStrictDB(t)
+	store := &fakeProvenanceStore{listed: []ProvenanceRecord{
+		{
+			SubjectType: "GovPostStrict", SubjectID: "p1", Verb: "transition",
+			FromState: "draft", ToState: "published",
+			ActorKind: "human", ActorID: "actor-1", Surface: "mcp", Reason: "quarterly review",
+		},
+	}}
+	entries, err := SubjectProvenance(context.Background(), db, store, "GovPostStrict", "p1")
+	if err != nil {
+		t.Fatalf("SubjectProvenance: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	e := entries[0]
+	if !e.Gated {
+		t.Fatal("gated transition: want Gated=true")
+	}
+	if e.ActorKind != "human" || e.ActorID != "actor-1" || e.Surface != "mcp" || e.Reason != "quarterly review" {
+		t.Errorf("gated entry: actor fields not populated, got %+v", e)
+	}
+}
+
+func TestSubjectProvenance_UngatedTransition_ActorWithheld(t *testing.T) {
+	db, _ := setupGovStateDB(t)
+	store := &fakeProvenanceStore{listed: []ProvenanceRecord{
+		{
+			SubjectType: "GovPost", SubjectID: "p1", Verb: "transition",
+			FromState: "draft", ToState: "published",
+			ActorKind: "human", ActorID: "actor-1", Surface: "mcp", Reason: "should not leak",
+		},
+	}}
+	entries, err := SubjectProvenance(context.Background(), db, store, "GovPost", "p1")
+	if err != nil {
+		t.Fatalf("SubjectProvenance: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	e := entries[0]
+	if e.Gated {
+		t.Fatal("ungated transition (RequiredRole without Strict): want Gated=false")
+	}
+	if e.ActorKind != "" || e.ActorID != "" || e.Surface != "" || e.Reason != "" {
+		t.Errorf("ungated entry: actor fields must stay empty, got %+v", e)
+	}
+	if e.Verb != "transition" || e.FromState != "draft" || e.ToState != "published" {
+		t.Errorf("ungated entry: non-identifying facts must still be present, got %+v", e)
+	}
+}
+
+func TestSubjectProvenance_CreateAndUpdate_NeverGated(t *testing.T) {
+	db, _ := setupGovStateStrictDB(t)
+	store := &fakeProvenanceStore{listed: []ProvenanceRecord{
+		{SubjectType: "GovPostStrict", SubjectID: "p1", Verb: "create", FromState: "", ToState: "draft", ActorKind: "human", ActorID: "a1"},
+		{SubjectType: "GovPostStrict", SubjectID: "p1", Verb: "update", FromState: "draft", ToState: "draft", ActorKind: "human", ActorID: "a1"},
+	}}
+	entries, err := SubjectProvenance(context.Background(), db, store, "GovPostStrict", "p1")
+	if err != nil {
+		t.Fatalf("SubjectProvenance: %v", err)
+	}
+	for _, e := range entries {
+		if e.Gated {
+			t.Errorf("verb %q: want never gated, got Gated=true", e.Verb)
+		}
+	}
+}
+
+// TestSubjectProvenance_NoActorInFilter pins §4.1 structurally: the
+// ProvenanceFilter SubjectProvenance builds must never set ActorID, checked
+// by inspecting the filter the store actually received rather than trusting
+// caller discipline.
+func TestSubjectProvenance_NoActorInFilter(t *testing.T) {
+	spy := &filterSpyStore{}
+	db, _ := setupGovStateDB(t)
+	if _, err := SubjectProvenance(context.Background(), db, spy, "GovPost", "p1"); err != nil {
+		t.Fatalf("SubjectProvenance: %v", err)
+	}
+	if spy.gotFilter.ActorID != "" {
+		t.Errorf("ProvenanceFilter.ActorID: want empty (never a query key), got %q", spy.gotFilter.ActorID)
+	}
+	if spy.gotFilter.SubjectType != "GovPost" || spy.gotFilter.SubjectID != "p1" {
+		t.Errorf("filter: want item-scoped GovPost/p1, got %+v", spy.gotFilter)
+	}
+}
+
+func TestSubjectProvenance_StoreListError_Propagates(t *testing.T) {
+	db, _ := setupGovStateDB(t)
+	store := &errProvenanceStore{}
+	if _, err := SubjectProvenance(context.Background(), db, store, "GovPost", "p1"); err == nil {
+		t.Error("store.List error: want non-nil error propagated")
+	}
+}
+
+type filterSpyStore struct {
+	gotFilter ProvenanceFilter
+}
+
+func (s *filterSpyStore) Append(_ context.Context, _ ProvenanceRecord) error { return nil }
+func (s *filterSpyStore) List(_ context.Context, f ProvenanceFilter) ([]ProvenanceRecord, error) {
+	s.gotFilter = f
+	return nil, nil
+}
+
+type errProvenanceStore struct{}
+
+func (s *errProvenanceStore) Append(_ context.Context, _ ProvenanceRecord) error { return nil }
+func (s *errProvenanceStore) List(_ context.Context, _ ProvenanceFilter) ([]ProvenanceRecord, error) {
+	return nil, errors.New("simulated list failure")
 }
 
 // --- sqlProvenanceStore tests ---
@@ -332,6 +509,77 @@ func TestAppProvenance_JobDrivenTransition_ActorKindJob(t *testing.T) {
 	if store.appended[0].ActorKind != "job" {
 		t.Errorf("ActorKind = %q, want %q (ev.ActorRoles: [Editor, Job])",
 			store.appended[0].ActorKind, "job")
+	}
+}
+
+// TestAppProvenance_SurfaceAndReason_Populated (T243) pins that
+// Provenance()'s subscription actually copies ev.Surface/ev.Reason onto the
+// ProvenanceRecord it appends — the two fields the architect named as
+// currently-unset (added scope, 2026-08-14). Same dispatchBus-level pattern
+// as the ActorKind tests above: a hand-built SignalEvent through the real
+// subscription closure, not a direct struct-literal assertion.
+func TestAppProvenance_SurfaceAndReason_Populated(t *testing.T) {
+	store := &fakeProvenanceStore{}
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("provenance-surface-test-secret-123"),
+	}))
+	app.Provenance(store)
+
+	ctx := NewTestContext(User{ID: "actor-1", Roles: []Role{Editor}})
+	ev := SignalEvent{
+		Type: "Post", Slug: "s", NodeID: "n1",
+		ActorID: "actor-1", ActorRoles: []Role{Editor},
+		PreviousState: "draft",
+		Surface:       "mcp",
+		Reason:        "quarterly review",
+	}
+	app.dispatchBus(ctx, ev, AfterPublish)
+
+	if len(store.appended) != 1 {
+		t.Fatalf("got %d appended, want 1", len(store.appended))
+	}
+	if store.appended[0].Surface != "mcp" {
+		t.Errorf("Surface = %q, want %q", store.appended[0].Surface, "mcp")
+	}
+	if store.appended[0].Reason != "quarterly review" {
+		t.Errorf("Reason = %q, want %q", store.appended[0].Reason, "quarterly review")
+	}
+}
+
+// TestNotifyAfter_SurfacePropagatesToSignalEvent (T243) proves the surface
+// argument reaches SignalEvent.Surface through the real dispatch path —
+// notifyAfter -> afterHookMeta -> buildSignalEvent -> dispatchBus — not a
+// hand-built SignalEvent literal, mirroring signals_test.go's own
+// established "through the real path" precedent for other SignalEvent
+// fields.
+func TestNotifyAfter_SurfacePropagatesToSignalEvent(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	m := newTestModule(mem)
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("notifyafter-surface-test-secret-12"),
+	}))
+	store := &fakeProvenanceStore{}
+	app.Provenance(store)
+	app.hookableModules = append(app.hookableModules, m)
+	app.wireSignalBus()
+
+	ctx := NewTestContext(User{ID: "actor-1", Roles: []Role{Editor}})
+	p := &testPost{Node: Node{ID: "n1", Slug: "s", Status: Published}}
+	m.notifyAfter(ctx, AfterPublish, "draft", surfaceMCP, "", p)
+
+	// afterHook runs in its own goroutine (module.go's notifyAfter) - wait for it.
+	deadline := time.Now().Add(2 * time.Second)
+	for len(store.appended) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(store.appended) != 1 {
+		t.Fatalf("got %d appended, want 1", len(store.appended))
+	}
+	if store.appended[0].Surface != "mcp" {
+		t.Errorf("Surface = %q, want %q (through notifyAfter -> afterHookMeta -> buildSignalEvent)",
+			store.appended[0].Surface, "mcp")
 	}
 }
 

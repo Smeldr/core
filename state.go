@@ -372,19 +372,10 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 	if fromStatus == toStatus {
 		return nil
 	}
-	// Look up custom flow for this type.
-	var flowID string
-	err := db.QueryRowContext(ctx,
-		`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
-	).Scan(&flowID)
-	if err != nil {
-		// Fall back to the default flow (type_name IS NULL, name = 'default').
-		err = db.QueryRowContext(ctx,
-			`SELECT id FROM smeldr_state_flows WHERE type_name IS NULL AND name = 'default' LIMIT 1`,
-		).Scan(&flowID)
-		if err != nil {
-			return nil // no flow registered — no validation
-		}
+
+	flowID, flowFound, _ := resolveFlowID(ctx, db, typeName)
+	if !flowFound {
+		return nil // no flow registered — no validation
 	}
 
 	// Verify the target state exists in this flow before checking the transition
@@ -400,23 +391,17 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 	}
 
 	// ── FAIL-OPEN structural boundary ────────────────────────────────────────
-	// Fetch the transition row. required_role may be NULL (no gate) or a role name.
-	var requiredRole sql.NullString
-	var requiredReason, strict bool
-	err = db.QueryRowContext(ctx,
-		`SELECT required_role, required_reason, strict FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = $3`,
-		flowID, fromStatus, toStatus,
-	).Scan(&requiredRole, &requiredReason, &strict)
-	if errors.Is(err, sql.ErrNoRows) {
+	requiredRole, requiredReason, strict, edgeFound, gateErr := lookupTransitionGate(ctx, db, flowID, fromStatus, toStatus)
+	if !edgeFound && gateErr == nil {
 		return fmt.Errorf("%w: transition %s→%s is not permitted for type %q", ErrConflict, fromStatus, toStatus, typeName)
 	}
-	if err != nil {
+	if gateErr != nil {
 		// D34: fail closed globally — this branch fires before the strict
 		// check below is ever reached, for every transition, strict or not.
 		// A transient error (SQLITE_BUSY, cancelled context) must not silently
 		// bypass a role gate; the caller can retry.
 		return fmt.Errorf("%w: transition %s→%s: could not verify authorization: %s",
-			ErrInternal, fromStatus, toStatus, err)
+			ErrInternal, fromStatus, toStatus, gateErr)
 	}
 
 	// ── FAIL-CLOSED: required_reason ─────────────────────────────────────────
@@ -427,13 +412,13 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 	}
 
 	// ── FAIL-CLOSED authorization boundary ───────────────────────────────────
-	if !requiredRole.Valid || requiredRole.String == "" {
+	if requiredRole == "" {
 		return nil // no role gate on this transition
 	}
 	if rs == nil {
 		if strict {
 			return fmt.Errorf("%w: transition %s→%s requires role %q but governance is not wired",
-				ErrForbidden, fromStatus, toStatus, requiredRole.String)
+				ErrForbidden, fromStatus, toStatus, requiredRole)
 		}
 		return nil // governance not wired — skip required_role check (non-strict, unchanged)
 	}
@@ -444,20 +429,64 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 		// actor cannot satisfy a role gate and is rejected instead.
 		if strict {
 			return fmt.Errorf("%w: transition %s→%s requires role %q but no actor is present",
-				ErrForbidden, fromStatus, toStatus, requiredRole.String)
+				ErrForbidden, fromStatus, toStatus, requiredRole)
 		}
 		return nil
 	}
-	ok, err := rs.RoleGranted(ctx, actorID, requiredRole.String, AuthTarget{})
+	ok, err := rs.RoleGranted(ctx, actorID, requiredRole, AuthTarget{})
 	if err != nil {
 		return fmt.Errorf("%w: transition %s→%s requires role %q: %s",
-			ErrForbidden, fromStatus, toStatus, requiredRole.String, err)
+			ErrForbidden, fromStatus, toStatus, requiredRole, err)
 	}
 	if !ok {
 		return fmt.Errorf("%w: transition %s→%s requires role %q",
-			ErrForbidden, fromStatus, toStatus, requiredRole.String)
+			ErrForbidden, fromStatus, toStatus, requiredRole)
 	}
 	return nil
+}
+
+// resolveFlowID resolves typeName's registered flow — type-specific first,
+// falling back to the default flow (type_name IS NULL, name = 'default') —
+// returning found=false when neither exists (no flow registered at all).
+// Extracted from validateTransition (T243) so [transitionIsGated] can share
+// the identical resolution rather than reimplementing it.
+func resolveFlowID(ctx context.Context, db DB, typeName string) (flowID string, found bool, err error) {
+	e := db.QueryRowContext(ctx,
+		`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
+	).Scan(&flowID)
+	if e == nil {
+		return flowID, true, nil
+	}
+	e = db.QueryRowContext(ctx,
+		`SELECT id FROM smeldr_state_flows WHERE type_name IS NULL AND name = 'default' LIMIT 1`,
+	).Scan(&flowID)
+	if e != nil {
+		return "", false, nil
+	}
+	return flowID, true, nil
+}
+
+// lookupTransitionGate fetches fromState→toState's own transition row within
+// flowID, if declared. found=false with a nil error means the flow exists but
+// this exact edge is not declared in it — distinct from [resolveFlowID]
+// returning found=false, which means no flow exists at all; callers
+// (validateTransition, transitionIsGated) treat the two differently, so both
+// must stay visible rather than collapsed into one "not found" case.
+// Extracted from validateTransition (T243) — same query, same two outcomes,
+// now shared rather than duplicated for the provenance gating check.
+func lookupTransitionGate(ctx context.Context, db DB, flowID, fromState, toState string) (requiredRole string, requiredReason, strict, found bool, err error) {
+	var nullRole sql.NullString
+	e := db.QueryRowContext(ctx,
+		`SELECT required_role, required_reason, strict FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = $3`,
+		flowID, fromState, toState,
+	).Scan(&nullRole, &requiredReason, &strict)
+	if errors.Is(e, sql.ErrNoRows) {
+		return "", false, false, false, nil
+	}
+	if e != nil {
+		return "", false, false, false, e
+	}
+	return nullRole.String, requiredReason, strict, true, nil
 }
 
 // validateInitialState checks whether statusName is a known state in the

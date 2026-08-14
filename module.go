@@ -834,13 +834,32 @@ func snapshotItem(item any) any {
 	return cp.Interface()
 }
 
+// Surface values for [Module.notifyAfter]'s surface parameter — named
+// constants over scattered string literals, matching this file's own
+// [LifecycleEvent]-constant style. "cli" is a valid [SignalEvent.Surface]
+// value but has no constant here: nothing in module.go can distinguish a
+// smeldr-cli-originated HTTP request from any other HTTP caller (T243).
+const (
+	surfaceHTTP    = "http"
+	surfaceMCP     = "mcp"
+	surfaceTrigger = "trigger"
+)
+
 // notifyAfter fires the registered signal handlers for sig asynchronously
 // (via dispatchAfter) and then, if an afterHook has been wired by the App,
 // invokes it in a separate goroutine carrying [afterHookMeta] and the item.
 // A snapshot of item is taken before any goroutine is spawned so that
 // concurrent lifecycle transitions on the same pointer cannot race with the
 // signal handlers. Panics in the afterHook are recovered and logged.
-func (m *Module[T]) notifyAfter(ctx Context, sig LifecycleEvent, prevState string, item any) {
+//
+// surface and reason (T243) are threaded through to [SignalEvent.Surface]/
+// [SignalEvent.Reason] via [afterHookMeta] — each call site knows its own
+// surface ("http", "mcp", or "trigger"; see the surfaceHTTP/surfaceMCP/
+// surfaceTrigger constants). reason is "" at every call site today; the
+// plumbing exists so T237 only has to change its own argument, not this
+// signature, when it threads a real reason through the REST/MCP lifecycle
+// paths.
+func (m *Module[T]) notifyAfter(ctx Context, sig LifecycleEvent, prevState, surface, reason string, item any) {
 	if suppressesSignals(ctx, m.db, m.contentTypeName, string(nodeStatusOf(item))) {
 		return
 	}
@@ -851,6 +870,8 @@ func (m *Module[T]) notifyAfter(ctx Context, sig LifecycleEvent, prevState strin
 			TypeName:  m.contentTypeName,
 			Prefix:    m.prefix,
 			PrevState: prevState,
+			Surface:   surface,
+			Reason:    reason,
 		}
 		fn := m.afterHook
 		go func() {
@@ -1533,7 +1554,7 @@ func (m *Module[T]) processScheduled(ctx Context, now time.Time) (int, *time.Tim
 		// sites) but a registered trigger doesn't care who initiated the
 		// transition, only that it happened.
 		fireAsyncTriggers(ctx.Request().Context(), m.db, m.contentTypeName, string(Scheduled), string(Published), nodeIDOf(item))
-		m.notifyAfter(ctx, AfterPublish, "scheduled", item)
+		m.notifyAfter(ctx, AfterPublish, "scheduled", surfaceTrigger, "", item)
 		published++
 	}
 
@@ -1815,11 +1836,11 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// AfterCreate hooks (asynchronous).
-	m.notifyAfter(ctx, AfterCreate, "", item)
+	m.notifyAfter(ctx, AfterCreate, "", surfaceHTTP, "", item)
 
 	// Status-based publish hooks.
 	if nodeStatusOf(item) == Published {
-		m.notifyAfter(ctx, AfterPublish, "draft", item)
+		m.notifyAfter(ctx, AfterPublish, "draft", surfaceHTTP, "", item)
 	}
 
 	m.invalidateCache()
@@ -1936,19 +1957,19 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 		fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(newStatus), nodeIDOf(item))
 	}
 
-	m.notifyAfter(ctx, AfterUpdate, string(prevStatus), item)
+	m.notifyAfter(ctx, AfterUpdate, string(prevStatus), surfaceHTTP, "", item)
 
 	// Status-transition hooks.
 	if prevStatus != Published && newStatus == Published {
-		m.notifyAfter(ctx, AfterPublish, string(prevStatus), item)
+		m.notifyAfter(ctx, AfterPublish, string(prevStatus), surfaceHTTP, "", item)
 	} else if prevStatus == Published && newStatus != Published {
-		m.notifyAfter(ctx, AfterUnpublish, "published", item)
+		m.notifyAfter(ctx, AfterUnpublish, "published", surfaceHTTP, "", item)
 	}
 	if newStatus == Archived {
-		m.notifyAfter(ctx, AfterArchive, string(prevStatus), item)
+		m.notifyAfter(ctx, AfterArchive, string(prevStatus), surfaceHTTP, "", item)
 	}
 	if prevStatus != Scheduled && newStatus == Scheduled {
-		m.notifyAfter(ctx, AfterSchedule, string(prevStatus), item)
+		m.notifyAfter(ctx, AfterSchedule, string(prevStatus), surfaceHTTP, "", item)
 	}
 
 	m.invalidateCache()
@@ -1984,7 +2005,7 @@ func (m *Module[T]) deleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.notifyAfter(ctx, AfterDelete, string(nodeStatusOf(existing)), existing)
+	m.notifyAfter(ctx, AfterDelete, string(nodeStatusOf(existing)), surfaceHTTP, "", existing)
 
 	m.invalidateCache()
 	m.triggerRebuild()
@@ -2312,7 +2333,7 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 			return nil, err
 		}
 	}
-	m.notifyAfter(ctx, AfterCreate, "", item)
+	m.notifyAfter(ctx, AfterCreate, "", surfaceMCP, "", item)
 	m.invalidateCache()
 	return item, nil
 }
@@ -2360,7 +2381,7 @@ func (m *Module[T]) MCPUpdate(ctx Context, slug string, fields map[string]any) (
 			return nil, err
 		}
 	}
-	m.notifyAfter(ctx, AfterUpdate, string(nodeStatusOf(existing)), item)
+	m.notifyAfter(ctx, AfterUpdate, string(nodeStatusOf(existing)), surfaceMCP, "", item)
 	m.invalidateCache()
 	return item, nil
 }
@@ -2391,7 +2412,7 @@ func (m *Module[T]) MCPPublish(ctx Context, slug string) error {
 	// Unconditional — matches dynamic.go's setStatus/ScheduleContent, which
 	// don't special-case a same-status call either.
 	fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(Published), nodeIDOf(item))
-	m.notifyAfter(ctx, AfterPublish, string(prevStatus), item)
+	m.notifyAfter(ctx, AfterPublish, string(prevStatus), surfaceMCP, "", item)
 	m.invalidateCache()
 	m.triggerRebuild()
 	return nil
@@ -2419,7 +2440,7 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time) error {
 	}
 	// A240: fire any registered async TransitionTrigger for this transition.
 	fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(Scheduled), nodeIDOf(item))
-	m.notifyAfter(ctx, AfterSchedule, string(prevStatus), item)
+	m.notifyAfter(ctx, AfterSchedule, string(prevStatus), surfaceMCP, "", item)
 	m.invalidateCache()
 	return nil
 }
@@ -2444,7 +2465,7 @@ func (m *Module[T]) MCPArchive(ctx Context, slug string) error {
 	}
 	// A240: fire any registered async TransitionTrigger for this transition.
 	fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(Archived), nodeIDOf(item))
-	m.notifyAfter(ctx, AfterArchive, string(prevStatus), item)
+	m.notifyAfter(ctx, AfterArchive, string(prevStatus), surfaceMCP, "", item)
 	m.invalidateCache()
 	m.triggerRebuild()
 	return nil
@@ -2460,7 +2481,7 @@ func (m *Module[T]) MCPDelete(ctx Context, slug string) error {
 	if err := m.repo.Delete(ctx, nodeIDOf(item)); err != nil {
 		return err
 	}
-	m.notifyAfter(ctx, AfterDelete, string(nodeStatusOf(item)), item)
+	m.notifyAfter(ctx, AfterDelete, string(nodeStatusOf(item)), surfaceMCP, "", item)
 	m.invalidateCache()
 	m.triggerRebuild()
 	return nil

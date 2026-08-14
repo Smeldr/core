@@ -2739,6 +2739,80 @@ Prints a tab-aligned table to stdout. Requires `SMELDR_TOKEN` (or legacy `FORGE_
 
 ---
 
+## Provenance trail
+
+`App.Provenance(store ProvenanceStore)` subscribes to `AfterCreate`,
+`AfterUpdate`, `AfterPublish`, `AfterUnpublish`, `AfterSchedule`,
+`AfterArchive`, and `AfterDelete` via the signal bus and writes one
+`ProvenanceRecord` per event — additive and independent of `App.Audit`
+(both may be wired at once; the four events they share each produce their
+own record in their own store).
+
+### Setup
+
+```go
+// 1. Create the table once at startup
+smeldr.CreateProvenanceTable(db)
+
+// 2. Wire the provenance store
+app.Provenance(smeldr.NewProvenanceStore(db))
+```
+
+### `ProvenanceRecord` fields
+
+| Field | JSON | Description |
+|-------|------|-------------|
+| `ID` | `id` | UUID v7 primary key |
+| `Timestamp` | `timestamp` | UTC time the event was recorded |
+| `SubjectType` | `subject_type` | Go type name, e.g. `"Decision"`, `"RelationEdge"` |
+| `SubjectID` | `subject_id` | `Node.ID` or `RelationEdge.ID` |
+| `Verb` | `verb` | `"create"` \| `"update"` \| `"transition"` \| `"assert"` \| `"invalidate"` |
+| `FromState` | `from_state` | Empty for create/assert |
+| `ToState` | `to_state` | Empty for invalidate |
+| `ActorKind` | `actor_kind` | `"human"` \| `"job"` \| `"agent"`; empty only if truly unattributable |
+| `ActorID` | `actor_id` | User UUID, job identifier, or agent identifier |
+| `Surface` | `surface` | `"http"` \| `"mcp"` \| `"cli"` \| `"trigger"`; `"cli"` has no current producer — nothing distinguishes a `smeldr-cli` HTTP request from any other |
+| `Reason` | `reason` | Free text, empty unless the caller supplied one — most acts carry none |
+
+### Reading the trail — `SubjectProvenance`, not a route or tool
+
+There is **no HTTP endpoint and no MCP tool** for reading provenance, by
+design — `SubjectProvenance` is a plain Go function, meant to be composed
+directly by a caller holding its own `DB` handle (the same pattern
+`smeldr.dev/cloud`'s own read layer already uses for other core data), not
+reached over a network round trip:
+
+```go
+entries, err := smeldr.SubjectProvenance(ctx, db, store, "Decision", decisionID)
+```
+
+Each returned `ProvenanceEntry` carries the gating decision already applied:
+a transition that required a `RequiredRole` with `Strict: true` (see
+[State flows](#state-flows)) exposes `ActorKind`/`ActorID`/
+`Surface`/`Reason`; any other event carries only `Verb`/`FromState`/
+`ToState`/`Timestamp` — actor identity is never returned for an act nobody
+had to be authorized to perform. `SubjectProvenance` never accepts an actor
+as a query parameter — only `subjectType`/`subjectID` — an item-scoped
+query only, never an actor-scoped one.
+
+| `ProvenanceEntry` field | Populated |
+|---|---|
+| `Timestamp`, `Verb`, `FromState`, `ToState`, `Gated` | Always |
+| `ActorKind`, `ActorID`, `Surface`, `Reason` | Only when `Gated == true` |
+
+### Custom store
+
+Implement `ProvenanceStore` to use a different backend:
+
+```go
+type ProvenanceStore interface {
+    Append(ctx context.Context, r ProvenanceRecord) error
+    List(ctx context.Context, f ProvenanceFilter) ([]ProvenanceRecord, error)
+}
+```
+
+---
+
 ## MCP resource subscriptions
 
 Available in `smeldr.dev/mcp` when `App.AddSignalListener` is wired (set up

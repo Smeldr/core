@@ -1992,7 +1992,7 @@ func TestNotifyAfter_panicRecovery(t *testing.T) {
 	})
 	ctx := NewTestContext(User{})
 	p := &testPost{Node: Node{ID: "1", Slug: "slug"}}
-	m.notifyAfter(ctx, AfterCreate, "", p)
+	m.notifyAfter(ctx, AfterCreate, "", surfaceHTTP, "", p)
 	// Wait for the goroutine to panic and recover.
 	select {
 	case <-panicked:

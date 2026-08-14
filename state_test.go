@@ -1286,7 +1286,7 @@ func TestNotifyAfter_suppressedState_hooksSkipped(t *testing.T) {
 	})
 
 	p := &testPost{Node: Node{ID: NewID(), Slug: "s", Status: Published}}
-	m.notifyAfter(NewTestContext(User{}), AfterPublish, "draft", p)
+	m.notifyAfter(NewTestContext(User{}), AfterPublish, "draft", surfaceHTTP, "", p)
 
 	select {
 	case <-hookCalled:
@@ -1311,7 +1311,7 @@ func TestNotifyAfter_unsuppressedState_hooksFire(t *testing.T) {
 
 	// Item is in "draft" state — suppresses_signals=false for draft → hook must fire.
 	p := &testPost{Node: Node{ID: NewID(), Slug: "s", Status: Draft}}
-	m.notifyAfter(NewTestContext(User{}), AfterUpdate, "", p)
+	m.notifyAfter(NewTestContext(User{}), AfterUpdate, "", surfaceHTTP, "", p)
 
 	select {
 	case <-hookCalled:

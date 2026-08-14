@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.66.0] — 2026-08-14
+
+### Added
+- `SubjectProvenance(ctx, db, store, subjectType, subjectID) ([]ProvenanceEntry, error)` — the provenance read mechanism: item-scoped (never actor-keyed), applies an authority-gating decision per record (only a `RequiredRole`+`Strict` transition exposes actor identity). No HTTP route, no MCP tool — a plain Go function composed directly by callers holding their own `DB` handle. (A260, T243)
+- `ProvenanceEntry` — `SubjectProvenance`'s return type; `Gated bool` plus `ActorKind`/`ActorID`/`Surface`/`Reason` populated only when `Gated`. (A260, T243)
+- `SignalEvent.Surface`, `SignalEvent.Reason` — which entry point (`"http"`/`"mcp"`/`"trigger"`) and free-text reason (if any) produced a signal; threaded through from `Module.notifyAfter`. `Reason` is currently empty at every call site pending T237. (A260, T243)
+
 ## [1.65.1] — 2026-08-14
 
 Confirmed at merge time: `origin/main` was still v1.65.0 when this

@@ -199,6 +199,121 @@ architectural one.
 
 ---
 
+## A260 — SubjectProvenance, the provenance read mechanism (T243)
+
+**Renumbered from the originally-drafted A259 at actual merge time —
+T239 landed first and claimed A259 for itself. Re-checked `origin/main`'s
+live `DECISIONS.md` immediately before this squash: highest is now A259
+(T239). A260 is correct as of this merge.**
+
+### What was wrong
+
+The audit trail was write-only: `ProvenanceRecord` written on seven
+lifecycle events, readable through no surface at all — no HTTP route, no
+MCP tool, no cloud surface, `ProvenanceFilter` had zero production
+callers. Found 2026-08-14 immediately after Peter ratified D54 over MCP
+with his own credential, and nobody could confirm the record named him
+rather than the architect.
+
+### The mechanism: `SubjectProvenance`, no new HTTP/MCP surface
+
+`architect/design/provenance-visibility-brief.md` §4.7 is explicit: "no
+new surface" — no standalone audit route, no Workspace view, no browsing
+endpoint. This settles the task's own open question ("MCP tool, HTTP
+route, or both?") in a direction narrower than either option: a plain Go
+function, `SubjectProvenance(ctx, db, store, subjectType, subjectID)
+([]ProvenanceEntry, error)`, composed directly by callers holding their
+own `DB` handle — the same pattern `smeldr.dev/cloud`'s own
+`internal/read.BuildTraceReading` already uses to read core data (`db
+smeldr.DB` parameter, no round trip). `NewProvenanceStore(db DB)` being
+already exported (`provenance.go:76`) confirms the composition is real —
+cloud can construct a store from its own `smeldr.DB` today.
+
+Item-scoped only — `SubjectProvenance` never sets `ProvenanceFilter`'s
+`ActorID`, satisfying brief §4.1 ("actor is never a query key")
+structurally rather than by caller discipline.
+
+### The gating decision: §4.3, reusing validateTransition's own logic
+
+`ProvenanceEntry` carries `Gated bool`; `ActorKind`/`ActorID`/`Surface`/
+`Reason` are populated only when `Gated` — an ungated entry carries only
+`Verb`/`FromState`/`ToState`/`Timestamp`, matching the brief's own
+framing ("a word and a date, with nothing to open"). Gated means the
+transition that produced the record required `RequiredRole` with
+`Strict: true` — the exact predicate `validateTransition` (`state.go`)
+already evaluates. Extracted `resolveFlowID`/`lookupTransitionGate` from
+`validateTransition` into shared, unexported helpers (DRY — reused, not
+reimplemented) rather than duplicating the `smeldr_transitions` query;
+`validateTransition`'s own full existing test suite passed unmodified
+after the extraction, confirmed before writing anything new, proving the
+refactor is behaviour-preserving.
+
+**Fail-closed direction stated explicitly, and it points opposite to
+`validateTransition`'s own rule.** `validateTransition` fails closed
+toward *rejecting the transition* (D34: a DB error must never silently
+permit an unauthorized act). `transitionIsGated` fails closed toward
+*withholding the actor* — a gate that cannot be resolved must never be
+treated as safe to reveal. Both are the conservative choice for their
+own question; a future reader should not assume they point the same way
+just because both are called "fail-closed."
+
+### Surface and Reason populated (added scope, architect's own instruction)
+
+`App.Provenance`'s subscription built every `ProvenanceRecord` with
+`Surface`/`Reason` unset. `Surface` is now real: `SignalEvent` and
+`afterHookMeta` each gained a `Surface` field, threaded through a new
+`surface` parameter on `notifyAfter` (unexported, no external signature
+change) — all 14 production call sites in `module.go` traced individually
+and given the correct one of three new constants (`surfaceHTTP`/
+`surfaceMCP`/`surfaceTrigger`). `"cli"` has no producer — nothing in
+`module.go` can distinguish a `smeldr-cli` HTTP request from any other,
+named explicitly rather than silently omitted.
+
+`Reason` plumbing is complete but honestly empty everywhere today: none
+of the 14 call sites has a real reason value available (`updateHandler`/
+`MCPPublish`/`MCPSchedule`/`MCPArchive` all pass `""` to
+`validateTransition`, unchanged until T237 lands). Wiring the field now
+means T237, when it ships, only changes its own four `reason` arguments
+— this task's plumbing needs no further changes. Matches the brief's own
+framing directly: "most acts carry none... an empty reason [should be]
+unremarkable, not a hole."
+
+### Real, tangential finding — flagged, not fixed
+
+`DynamicTypeRepo.SetStatus`/`SetStatusWithReason` (`dynamic.go`) call
+only `fireAsyncTriggers`, never `notifyAfter`/`dispatchBus` — dynamic-
+content status transitions produce **no `ProvenanceRecord` at all**,
+independent of this task (T243 is read-side only). `SubjectProvenance`
+against a dynamic-content item correctly returns an empty or partial
+history; not a defect in this task, worth naming so an empty result
+isn't later mistaken for the mechanism being broken.
+
+### Tests
+
+12 new tests: `transitionIsGated`'s full branch table (strict+role,
+role-without-strict, nil DB, same-state, no flow, undeclared edge,
+unresolvable-gate-fails-closed), `SubjectProvenance`'s gated/ungated/
+create-and-update-never-gated/no-actor-in-filter/store-error cases, plus
+two Surface-propagation tests — one at the `dispatchBus` level (mirrors
+`TestAppProvenance_JobDrivenTransition_ActorKindJob`'s own established
+pattern) and one through the real `notifyAfter → afterHookMeta →
+buildSignalEvent` path, not a hand-built `SignalEvent` literal.
+
+### Versioning
+
+New exported symbols (`ProvenanceEntry`, `SubjectProvenance`) — MINOR
+bump. No existing signature changed (`notifyAfter` is unexported).
+Coverage: 96.3% package-wide; `SubjectProvenance` 100%, `transitionIsGated`
+88.9% (one structurally-unreachable branch — `resolveFlowID`'s own `err`
+return is always `nil` by construction, named not chased, same class as
+A251's own precedent). Level 2 amendment.
+
+Status: Implements provenance-visibility-brief.md's engineering half —
+cloud's own rendering into Trace's witness certificate is a separate,
+later task (T245).
+
+---
+
 ## D56 — `Standing` means the governed state, and the two state axes are named as two
 
 ### Scope
