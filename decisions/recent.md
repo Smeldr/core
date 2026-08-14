@@ -642,6 +642,34 @@ honoured rather than overruled.
   explicitly and cite D53, so the v1 series' own history shows where the
   breaks are.
 
+### Addendum, 2026-08-14 — what version number a breaking change gets
+
+The original decision settled that breaking changes are taken inside v1.
+It did not say what version number one gets, and the first such change
+(widening `MCPModule`, T237) surfaced the gap before it shipped.
+
+**A breaking change inside v1 takes a MINOR bump, with `BREAKING` stated
+plainly in the CHANGELOG entry and in the Amendment.**
+
+Within v1, MINOR is the largest signal available. PATCH would be actively
+misleading. MAJOR is already rejected above, because it forces a `/v2`
+module path permanently to protect a population that does not exist.
+
+**The version number cannot carry the truth inside v1.** That was the price
+accepted when v2 was declined. So the truth goes where it can be carried:
+the text a person actually reads before upgrading. This decision's own
+existing requirement — that any breaking change cite D53 explicitly —
+already puts the trail in the decisions record regardless of what the
+number says.
+
+**The honest limitation, stated rather than smoothed over:** a machine
+reading only version numbers gets no warning. That is the accepted cost.
+It is tolerable only because every consumer is ours and their pins move
+deliberately, so no machine makes that decision unattended. **The day the
+importer check finds an external module, this addendum expires with the
+decision's first half** — from then on a breaking change requires v2, and
+the question of what number it takes inside v1 stops existing.
+
 ---
 
 ## D52 — `investigates` targets a condition's subject, which is often an edge
