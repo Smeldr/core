@@ -615,6 +615,7 @@ Config: `SMELDR_URL`, `SMELDR_TOKEN`, `SMELDR_MCP_URL` (or `.smeldr-cli.env`; le
 - **Archived ≠ Draft** — preview tokens bypass Draft/Scheduled only, never Archived
 - **Timezone database** — `time.LoadLocation` fails on servers without OS tzdata (Alpine, scratch). forge-social embeds `time/tzdata` since v0.4.1 — ensure you are on v0.4.1 or later
 - **X body limit** — X posts are capped at 280 characters. Exceeding the limit returns a terminal `publishError` — the post will never be retried. Truncate before calling `create_scheduled_post` with `platform=x`
+- **Go stdlib CVEs turn CI red on an unrelated commit** — the vuln DB updates independent of any push; `govulncheck` starts failing on whatever commit happens to run next, time-triggered not commit-triggered. Fix is a `toolchain goX.Y.Z` line in `go.mod` (not a `go` line bump — a stdlib patch changes nothing about what the language or a caller needs, only which binary compiles the code; see A259), applied to every repo on the affected Go version, not just the ones with a `govulncheck` CI step — a repo without the step has the same exposure, only less visibility
 - **X media** — `media_url` is ignored for platform `x` in v0.5.0. Attach images only for Mastodon and LinkedIn
 
 ---

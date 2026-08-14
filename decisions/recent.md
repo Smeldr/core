@@ -132,6 +132,73 @@ settled the scope.
 
 ---
 
+## A259 — Go toolchain bump to 1.26.6 across seven repos (T239, red main)
+
+**Renumbered from the originally-drafted A258 at actual merge time —
+T211 (this same session's other branch) landed first and claimed A258.
+Re-checked `origin/main`'s live `DECISIONS.md` immediately before this
+squash: highest is now A258 (T211). A259 is correct as of this merge.**
+
+### What was wrong
+
+`main`'s CI went red with no causing commit — `govulncheck ./...` failed
+on `b95d886` (a docs-only archiving commit) reporting five Go
+**standard-library** vulnerabilities (GO-2026-6218, GO-2026-6091,
+GO-2026-6090, GO-2026-6089, GO-2026-5972), every one "Fixed in:
+...@go1.26.6". Time-triggered, not commit-triggered: the vulnerability
+database updated and every build started failing regardless of content.
+
+### The fix: `toolchain go1.26.6`, not a `go` line bump
+
+Two ways to move the toolchain say different things. `go 1.26.6` raises
+the module's own declared minimum language version — every consumer
+would need 1.26.6+ to build against us, forever, for a change that added
+no language feature and fixed no bug in our own code. `toolchain
+go1.26.6` pins the actual build toolchain (`GOTOOLCHAIN=auto`, default
+since Go 1.21) without changing the declared minimum — `go build`/
+`govulncheck`/etc. use 1.26.6 regardless of what's locally installed.
+
+The five vulnerabilities are all stdlib, all patched in a Go *patch*
+release — nothing about what the language or a caller needs changed,
+only which binary compiles the code. This is exactly the case the
+`toolchain` directive exists for. Bumping `go` itself would overstate
+the change and read as a false claim in the git history the day a real
+1.27 language-level bump happens.
+
+### Scope: all seven owned repos, not just the two CI catches
+
+`core` and `mcp` are the only two repos running `govulncheck` in CI
+(both resolve their Go version via `actions/setup-go@v5`'s
+`go-version-file: go.mod`, confirmed by reading each `ci.yml`), so those
+two were the ones going red. `cli`, `media`, `oauth`, `agent`, `social`
+carry the identical five stdlib holes with no CI step to catch them —
+verified `go 1.26.5`/no `toolchain` line in all seven via direct
+inspection before changing anything. Not having a `govulncheck` step
+means less *visibility*, not less exposure, so all seven get the same
+one-line fix for the same reason. `cloud`, `mail`, `site-dev` are
+architect's own dispatch to the cloud/site implementers — not this
+Amendment's scope.
+
+### Durable note, so this doesn't require re-deriving from a diff next time
+
+Recorded in `common/agent/skills/smeldr.md`'s "Common gotchas" section
+(read by every implementing agent at session start) rather than a
+per-repo README, since this recurs across every repo on the affected Go
+version, not just whichever one someone happens to be reading.
+
+### Versioning
+
+Docs/config only — no source change, no exported symbol, no
+consumer-observable behaviour change (the toolchain compiling the code
+is not part of any module's API surface). No version bump, no tag,
+matching A245/A246's own precedent for a build-tooling-only fix. Level 1
+amendment.
+
+Status: Implements no new Decision — a build-tooling fix, not an
+architectural one.
+
+---
+
 ## D56 — `Standing` means the governed state, and the two state axes are named as two
 
 ### Scope
