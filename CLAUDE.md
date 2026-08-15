@@ -2,6 +2,12 @@
 
 This is the Smeldr project — a Go AI-Native content backend. Zero dependencies. AI-first. Production-ready by default.
 
+**Shared protocol first:** `C:\Users\peter\Documents\Code\Smeldr\architect\AGENT_PROTOCOL.md`
+covers what does not change between implementing roles — how a Task arrives, how a plan
+gets approved, how a commit gets approved, and non-negotiable rules shared by every repo.
+Read it once per session, before this file's own role-specific rules below. This file
+covers what is specific to core-implementer, `smeldr/core`, and its standalone modules.
+
 ## New chat session — start here
 
 Every new chat has no memory of previous sessions. Follow these steps
@@ -16,28 +22,44 @@ amendment, active milestone and step, anything deferred.
 Read `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md`
 (local file). This gives you the current versions for all modules, the full
 list of MCP tools and CLI commands, and any known gotchas. Load it before
-checking for NEXT.md — not only at the doc-freshness checkpoint.
+querying the live instance for a pending Task — not only at the doc-freshness
+checkpoint.
 
-**Step 3 — Check for a pending task:**
-Check whether `NEXT.md` exists in THIS repo's root (`smeldr/core`, local workspace).
-NEXT.md is never located in the architect repo — that is read-only context only.
-If it exists:
-1. Read it and form a full implementation plan (including any questions).
-2. Write the plan file locally to:
+**Step 3 — Check the live instance for a pending Task:**
+Core no longer uses `NEXT.md` or `SIGNAL_CORE.md` — both retired 2026-08-15
+(migrated to the D50 protocol 2026-08-11). Dispatch is a `Task` on
+`process.smeldr.dev`: query for `backlog` Tasks with `band=core`, plus any
+Task already in flight where you act next (see AGENT_PROTOCOL.md's "The live
+instance" section for the full state table). If one exists:
+1. Claim it (`backlog → active`), read its full `Description` via `get_task`.
+2. Form a full implementation plan (including any questions), write it to
    `C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md`
-   Include the complete plan and any open questions in that file.
-3. Notify the user in chat that the plan is ready for review at
-   `smeldr/architect/plans/core-next-plan.md`. Do not write any code yet.
-4. Wait for explicit approval before implementing anything.
-5. At commit time: delete both `NEXT.md` and `plans/core-next-plan.md`
-   in the same commit as the implementation.
+   — or a task-scoped file (`plans/core-{task-slug}-next-plan.md`) if another
+   Task's plan is already open in the shared file (see AGENT_PROTOCOL.md's
+   plan-file-deletion rule).
+3. Transition `active → waiting-plan`, then `waiting-plan → plan-reviewing`
+   once the plan is written. Notify the user in chat that the plan is ready
+   for review. Do not write any code yet.
+4. Wait for the architect to transition `plan-reviewing → implementing`
+   (their answers land directly in the plan file). A chat "yes" to an
+   unrelated question is never approval.
+5. At commit time: transition `implementing → commit-reviewing`; once the
+   architect's written approval appears in the plan file, transition
+   `commit-reviewing → done` with `Reason: plan file deleted` (there is no
+   `committed` signal under D50 — the transition's own Reason is the only
+   record). Delete the plan file whole in the same commit — if another
+   Task's plan is still open in the same shared file, extract it to its own
+   task-scoped file first; never leave a still-open Task's content to die
+   with the shared file.
 6. After the commit: write `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md`
    locally with the amendment number, then commit and push from that repo
    (see "After every commit" for the exact command sequence).
 
-**Step 4 — If no NEXT.md:**
-Report what you found in `context/core-implementer.md` and ask the user what
-to work on. Do not proceed autonomously.
+**Step 4 — After closing a Task, and if nothing is waiting:**
+A session is not scoped to one Task. Once a Task reaches `done`, query the
+instance again for the next matching `backlog` Task before ending your
+turn — the same query as session start, not just at the very beginning.
+Only stop and report to the user once nothing matching `band=core` remains.
 
 **Why this matters:**
 An implementer that starts a new chat without reading context will use
@@ -48,14 +70,9 @@ file is the bridge between sessions. Always read it first.
 
 ## Before writing any code
 
-1. Read `NEXT.md` in the workspace root. If it exists:
-   - Read the task description.
-   - **Write the full implementation plan (including any questions) to the local file:
-     `C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md`**
-   - Notify the user in chat that the plan is ready for review at
-     `smeldr/architect/plans/core-next-plan.md`. Do not write any code yet.
-   - Wait for explicit approval. Do not implement anything until the user confirms the plan.
-   - Stop here — do not proceed with steps 2–7.
+1. If you have a claimed Task with no approved plan yet, you're already following
+   "New chat session — start here" Step 3 above — stop here and do not proceed with
+   steps 2–7 until the architect transitions `plan-reviewing → implementing`.
 2. Read session context from `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md`
    (local file). This is your state from the previous session.
 3. Read `DECISIONS.md` — index table only. Body text lives in `decisions/core.md`
@@ -75,11 +92,14 @@ file is the bridge between sessions. Always read it first.
 
 ## After every commit
 
-- If `NEXT.md` exists, delete it with `Remove-Item NEXT.md -ErrorAction SilentlyContinue`.
-  NEXT.md is written locally by the architect and is never committed to git — it is
-  always untracked. Do not use `git rm`; it will fail on an untracked file.
-- If `plans/core-next-plan.md` exists locally, delete it:
-  `Remove-Item "C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md"`
+- Transition the Task `commit-reviewing → done` with `Reason: plan file deleted`
+  once the architect's written approval appears in the plan file (see "New chat
+  session — start here" Step 3.5).
+- Delete `plans/core-next-plan.md` (or the task-scoped plan file) whole, in the same
+  commit as the implementation: `Remove-Item "C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md"`.
+  If another Task's plan is still open in the same shared file, extract it to its
+  own task-scoped file first — never delete a still-open Task's content along with
+  the shared file.
 - Update session context: write `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md`
   locally. Record: current versions, latest amendment shipped,
   current milestone and step, what was deferred or blocked.
@@ -106,7 +126,9 @@ DECISIONS.md is the index. Body text lives in separate files by topic:
 | `decisions/[topic].md` | Topic files on architect instruction | Only when instructed |
 
 **Archiving rule:** When `recent.md` reaches ~20KB, report at session start:
-"recent.md is Xkb — ready for archiving." Wait for NEXT.md with archiving instructions.
+"recent.md is Xkb — ready for archiving." Wait for the architect's next Task
+dispatch to include the archiving instruction as an explicit prerequisite step
+in the Task's own Description (see T254 for the applied pattern).
 The architect decides groupings and topic file names. Never archive autonomously.
 Non-Decisions are exempt — they go to `nondecisions.md` directly and do not count
 toward the rolling window.
@@ -184,52 +206,20 @@ When in doubt: Level 2.
 - A step that is deferred or descoped must be documented in `Milestone{N}_BACKLOG.md`
   immediately with the reason and the target milestone. Never silently skip.
 - **Email addresses in public documents:** Never infer, guess, or construct email
-  addresses. Only use an address that is explicitly stated in the NEXT.md task prompt.
+  addresses. Only use an address that is explicitly stated in the Task's own Description.
   If a document requires a contact address and none is provided, use the placeholder
   `[contact@example.com]` and flag it in the plan for Peter to fill in.
 
 ## Signal protocol
 
-Communication with the architect uses a single file per agent in smeldr/architect/.
-This file is your signal channel — read it at session start, write to it after
-every meaningful state change.
+**Retired 2026-08-15.** `SIGNAL_CORE.md` is deleted — core migrated to the D50
+Task-state protocol on 2026-08-11, and the file-based plan-ready/commit-ready
+signal vocabulary no longer applies. Do not recreate it or write to it.
 
-File: `C:\Users\peter\Documents\Code\Smeldr\architect\SIGNAL_CORE.md`   (core-implementer)
-File: `C:\Users\peter\Documents\Code\Smeldr\architect\SIGNAL_SITE.md`   (sitepilot)
-
-Format:
-
-```
----
-from: core
-to: architect
-seq: 3
-signal: commit-ready
-at: 2026-06-23T14:30:00Z
----
-Optional notes / questions
-```
-
-Signals:
-
-```
-plan-ready              — plan written, awaiting architect review
-plan-feedback           — architect: plan needs changes (see notes)
-approved-start          — architect: plan approved, begin implementation
-implementing            — pilot: work in progress
-implementation-question — pilot: blocked on question (see notes)
-commit-ready            — pilot: verified, awaiting commit approval
-commit-feedback         — architect: commit needs changes (see notes)
-commit-approved         — architect: commit approved
-committed               — pilot: commit done, context updated
-```
-
-Rules:
-- **after sending a signal that requires a response, start a Monitor watching the file**
-- seq starts at 1 per task, increments by 1 per write
-- file contains latest signal only (overwrite, not append)
-- never stage or commit signal files
-- read signal file at session start before NEXT.md
+Dispatch, plan approval, and commit approval all run through the Task's own
+state transitions on `process.smeldr.dev` instead — see "New chat session —
+start here" Step 3 above for the flow, and `AGENT_PROTOCOL.md`'s "The live
+instance" section for the full state table and the reasoning behind it (D50).
 
 ## Before planning or writing anything
 
@@ -522,14 +512,14 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
 
 "No changes needed" is only valid after explicitly reading each file and confirming it already reflects the shipped code. Never assume.
 
-After the gate is clear, write the commit message and signal `commit-ready` via
-`SIGNAL_CORE.md`, with the full commit message in the notes section. Start a Monitor
-on the signal file immediately after sending it.
+After the gate is clear, write the commit message in the plan file and transition
+the Task `implementing → commit-reviewing`.
 
-- Commits require a `commit-approved` signal from the architect (see Signal protocol) —
-  never committed on `commit-ready` alone, and never on a chat answer to an unrelated
-  technical question. Build, vet, format, and test commands are executed autonomously.
-- **A "yes" answer to a review question is not commit approval.** The confirmation of a technical fact and the approval of a commit are two distinct acts — approval is specifically the `commit-approved` signal. Never collapse them into one.
+- Commits require the architect's written approval in the plan file (see "New chat
+  session — start here" Step 3) — never committed on `commit-reviewing` alone, and
+  never on a chat answer to an unrelated technical question. Build, vet, format, and
+  test commands are executed autonomously.
+- **A "yes" answer to a review question is not commit approval.** The confirmation of a technical fact and the approval of a commit are two distinct acts — approval is specifically the architect's written response in the plan file. Never collapse them into one.
 
 ### Commit message format
 
@@ -619,7 +609,8 @@ Release type guidance:
 | Bugfix / patch | no | no | only if API changed |
 | Doc/infra fix | no | no | no |
 
-The content brief is handed to the architect, who converts it into a sitepilot NEXT.md.
+The content brief is handed to the architect, who converts it into a Task for
+site-implementer (band=site) on the live instance.
 Wait for feedback before proceeding.
 
 **5. Content suggestions (smeldr.dev/docs)**
@@ -657,13 +648,14 @@ Update `smeldr/architect/context/core-implementer.md` and push from that repo.
 
 ### Push follows commit approval
 
-Commit approval is the `commit-approved` signal from the architect on `SIGNAL_CORE.md`
-(see Signal protocol) — not a chat "yes", and not implied by answering an unrelated
-technical question.
+Commit approval is the architect's written response in the plan file (see "New chat
+session — start here" Step 3) — not a chat "yes", and not implied by answering an
+unrelated technical question.
 
-Push is not a separate gate: for feature-branch work, `commit-approved` means squash
-to main and push immediately (see "Branching and commit timestamps"). For direct-commit
-work with no feature branch, push follows the commit in the same step.
+Push is not a separate gate: for feature-branch work, the architect's approval in
+the plan file means squash to main and push immediately, in the same step as the
+`commit-reviewing → done` transition (see "Branching and commit timestamps"). For
+direct-commit work with no feature branch, push follows the commit in the same step.
 
 Write the plan for any docs task to:
 `C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md`
@@ -685,7 +677,8 @@ All milestone work happens on a local feature branch. Commits on the branch are
 free checkpoints — their timestamps do not matter and the branch is never pushed
 to GitHub unless explicitly requested.
 Branch naming: feature/m{N}-{slug} — e.g. feature/m11-webhooks.
-When the architect approves push via a separate NEXT.md, squash the branch to main.
+When the architect's written approval appears in the plan file and you transition
+`commit-reviewing → done`, squash the branch to main.
 "Commit approved" means commit on the feature branch only — never auto-squash to main:
     git checkout main
     git merge --squash feature/m{N}-{slug}
@@ -894,9 +887,9 @@ internal planning history. `Milestone_BACKLOG_TEMPLATE.md` is never removed.
   If yes to any of the above, a new Decision or Amendment must be proposed and agreed
   upon before the next step begins. The step is not complete until this review is done.
 - **Every step ends with a commit.** After the architecture review, write a commit
-  message following the standard format, signal `commit-ready` via `SIGNAL_CORE.md`
-  with the message in the notes, and wait for the `commit-approved` signal before
-  committing. Never commit without it.
+  message following the standard format in the plan file, transition the Task
+  `implementing → commit-reviewing`, and wait for the architect's written approval
+  in the plan file before committing. Never commit without it.
   Add the following checkbox at the end of every step's verification block:
   ```
   - [ ] Review docs/ARCHITECTURE.md and DECISIONS.md — no new decisions required,
