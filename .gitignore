@@ -28,3 +28,4 @@ dogfood-secret.txt
 .smeldr-cli.env
 server*.log
 example/server/seed_goals/
+example/server/smeldr-server
