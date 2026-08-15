@@ -207,6 +207,13 @@ smeldr.dev/
 │                     derives_from (Task→Goal), depends_on (Task→Task), ships_as (Task→Amendment),
 │                     supersedes (Decision→Decision), all Mode="asserted"/Directional=true/
 │                     Weighted=false, per D36; idempotent via UpsertKind (Amendment A236, M0 step 2)
+│                     orchTaskFlow/orchGoalFlow both gain "resolved" (IsTerminal), a fourth/third
+│                     outcome distinct from "done": the underlying need was met, but not by this
+│                     item's own tracked work (D58). Task: reachable from active/waiting-plan/
+│                     plan-reviewing, all RequiredReason=true. Goal: "parked" loses its (dishonest —
+│                     it has an outbound edge to "open") IsTerminal flag, and "resolved" is
+│                     reachable from open/in-progress/parked, all RequiredReason=true
+│                     (Amendment A261, T255)
 ├── context_packet.go ContextPacket, PacketSource, PacketAnchor, PacketBoundary, PacketOmission,
 │                     PacketItem, PacketRelation exported types;
 │                     BuildContextPacket(ctx, DB, *RelationStore, baseURL, sourceName, anchorType,

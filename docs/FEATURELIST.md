@@ -277,7 +277,7 @@ MCP resource subscriptions (Beta):
 - `Task` content type — work item in the architect/pilot state machine (architect-task flow: backlog -> active -> ... -> done/deferred)
 - `Decision` content type — ratified architectural decision with re-evaluation cycle (governance-decision flow: proposed -> ratified -> ... -> superseded/archived)
 - `Amendment` content type — committed changeset linking a Task to its code implementation (amendment-lifecycle flow: scoped -> in-progress -> commit-ready -> committed -> merged/rejected)
-- `Goal` content type — work goal with priority, band, and size; linked to Decisions and Tasks via the relation graph (goal-lifecycle flow: parked -> open -> in-progress -> done/deferred)
+- `Goal` content type — work goal with priority, band, and size; linked to Decisions and Tasks via the relation graph (goal-lifecycle flow: open -> in-progress -> done/resolved, open <-> parked, parked -> resolved)
 - `CreateOrchestrationTables(db DB) error` — creates all five DB tables
 - `RegisterOrchestrationTypes(app *App, db DB)` — registers all five types with state flows and MCP(MCPRead, MCPWrite); fail-open on nil DB
 - All five types embed `Node` and receive full MCP tool generation (create, get, list, update, publish, archive, delete)

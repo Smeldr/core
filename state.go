@@ -97,8 +97,12 @@ type State struct {
 	// Exactly one State in a flow should have IsInitial set to true.
 	IsInitial bool
 
-	// IsTerminal marks this state as a sink: no outbound transitions are
-	// permitted from a terminal state.
+	// IsTerminal marks this state as closed: no outbound transition to a
+	// non-terminal state is permitted from a terminal state — reopening live
+	// work from a closed item is what this forbids. A transition to another
+	// terminal state is allowed (e.g. Decision's superseded→archived, further
+	// bookkeeping on an already-settled item, never a reopening) — nothing
+	// currently validates this at registration time (D58).
 	IsTerminal bool
 
 	// SuppressesSignals prevents After* event hooks from firing for items

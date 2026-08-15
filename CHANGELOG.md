@@ -23,6 +23,11 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.66.1] — 2026-08-15
+
+### Fixed
+- `Task`/`Goal` orchestration flows gain a `resolved` terminal state — the underlying need was met, but not by this item's own tracked work, distinct from `done`. Previously `Task.plan-reviewing` had no honest close for "already done elsewhere, nothing to build", and `Goal.parked` claimed `IsTerminal: true` while holding an outbound edge back to `open`. Both closed with a new `resolved` state, `RequiredReason: true` on every transition into it. No exported symbols changed. (A261, D58, T255)
+
 ## [1.66.0] — 2026-08-14
 
 ### Added

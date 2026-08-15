@@ -375,3 +375,187 @@ from the start and drifted out of practice, not out of the model.
   blurring the right one's own vocabulary.
 
 ---
+
+## D58 — A governed flow closing on work done outside its own tracked history gets an honest terminal state for that, distinct from success
+
+### Scope
+
+core (`orchestration.go`'s five governed flows), `state.go` (`IsTerminal`'s
+own documented meaning)
+
+### Decision
+
+**When a governed flow's item can close because the underlying need was
+met — but not by that item's own tracked work — the flow needs a
+terminal state naming exactly that, distinct from the state meaning
+"this item's own work produced the outcome."** Two flows lacked one:
+
+- `Task`: `plan-reviewing` had exactly one legal exit, `implementing` —
+  no way to close a plan whose own conclusion was "already done
+  elsewhere, nothing to build" (found via T238, which sat stuck at
+  `plan-reviewing` with no honest path forward).
+- `Goal`: `parked` was marked `IsTerminal: true` but has an outbound
+  edge back to `open` — by `state.go`'s own definition that makes it
+  not a sink at all, so `Goal` had no real one-way close distinct from
+  a temporary, resumable pause (found via T146, never actioned).
+
+Both are the same shape, settled together: a new `resolved` terminal
+state in each flow, `RequiredReason: true` on every transition into it
+(the whole point of the state is an explanation of what resolved it
+elsewhere; a transition carrying none would be the same problem one
+level down). `Task.resolved` is reachable from `active`/`waiting-plan`/
+`plan-reviewing` — every state that precedes a real build actually
+starting, not only the one state where the gap was first found, since
+the same discovery can surface at any of the three. `Goal.resolved` is
+reachable from `open`/`in-progress`/`parked`. `Goal.parked` loses its
+`IsTerminal` flag as a pure honesty fix — it does not change what
+`parked` already does, only what it claims about itself.
+
+### Why the other three governed flows needed no change
+
+Checked individually against their own registered `Transitions`, not
+assumed symmetric with `Task`/`Goal` (`Run` has no `StateFlow`, D38,
+out of scope):
+
+- **`Signal`**: `acknowledged`/`expired` both have zero outbound edges
+  in either direction. A `Signal` is a system-emitted notification
+  (D42's class), not tracked work that could be "resolved elsewhere."
+- **`Amendment`**: `merged`/`rejected` both have zero outbound edges.
+  `rejected` already covers "this item's own tracked work did not
+  produce a shipped outcome," `merged` specifically means code landed.
+- **`Decision`**: `superseded` already *is* this shape — a newer
+  `Decision` replacing an older one is "resolved by other means,"
+  simply under an existing name. No new state needed.
+
+### A related, smaller, separate finding — flagged, not fixed
+
+`Decision.superseded` is marked `IsTerminal: true` but has an outbound
+edge to `archived` (`orchestration.go`) — structurally the same shape
+as `Goal.parked`'s own bug, just far more benign: `archived` is also
+terminal, so the edge never leads back to live work, only between two
+closed states (further bookkeeping on an already-settled `Decision`,
+never a reopening). `state.go`'s own doc comment on `IsTerminal` read
+literally ("no outbound transitions are permitted from a terminal
+state") already forbade this, undetected, because nothing has ever
+validated it — confirmed: no code anywhere consults `IsTerminal`
+besides upserting the column at registration.
+
+**Resolved as a documentation fix, not a code fix.** The doc comment
+described a stricter invariant than the codebase has ever actually
+relied on — `Decision`'s own flow already depended on the looser
+reading the day it was written. Corrected `state.go`'s comment to say
+what is actually enforced and actually true: a terminal state may not
+transition to a *non-terminal* one (a reopening), but may transition to
+another terminal state (further closed-state bookkeeping). Inventing a
+fix for `Decision.superseded → archived` was considered and rejected —
+nothing is hitting it, and building one speculatively is exactly the
+kind of unscoped work this decision's own `Goal`/`parked` finding
+argues against.
+
+### Rejected alternatives
+
+- **Fixing only the one literally-cited state per flow** (`Task`'s
+  `plan-reviewing`, `Goal`'s `parked`) rather than every state that
+  precedes the point of no return. Would relocate the same bug to
+  whichever of the other states the same discovery next surfaces at,
+  not close the shape.
+- **A single shared `resolved`-reachability mechanism instead of
+  per-flow transitions.** No such mechanism exists in `StateFlow`
+  today (transitions are declared per flow, per state) and building
+  one would be new infrastructure for a two-flow problem.
+- **Fixing `Decision.superseded → archived`'s structure to match
+  `IsTerminal`'s literal doc comment**, rather than correcting the
+  comment. Rejected above — no live defect, and Decision's own flow
+  has relied on the looser reading since it was written.
+
+### Consequences
+
+- `orchTaskFlow`/`orchGoalFlow` (both unexported, `orchestration.go`)
+  gain a `resolved` state and its transitions — no exported Go symbol
+  changes, but real consumer-observable behaviour: `transition_item`/
+  `get_valid_transitions` (mcp) now show a new valid state for `Task`
+  and `Goal`.
+- `state.go`'s `IsTerminal` doc comment corrected to describe actual,
+  relied-upon behaviour.
+- Any future governed flow author should read this decision before
+  assuming `IsTerminal` alone is enough — it says nothing about
+  *reachability into* the terminal state, which is each flow's own
+  transitions to design honestly.
+
+---
+
+## A261 — Task/Goal gain a "resolved" terminal state (D58, T255)
+
+### What was wrong
+
+Two orchestration flows had no honest way to close on "the underlying
+need was met, but not by this item's own tracked work" — see D58 for
+the full argument (same session, same commit). `orchTaskFlow`'s
+`plan-reviewing` had exactly one legal exit; `orchGoalFlow`'s `parked`
+claimed `IsTerminal: true` while holding an outbound edge back to
+`open`.
+
+### The fix
+
+`orchestration.go`:
+
+- `Task` gains `{Name: "resolved", IsTerminal: true}` plus three new
+  transitions, each `RequiredReason: true`:
+  `active→resolved`, `waiting-plan→resolved`, `plan-reviewing→resolved`.
+  Deliberately excluded: `implementing`/`commit-reviewing` (a build
+  already in flight means there was something to build) and `blocked`
+  (a stall, not a conclusion).
+- `Goal.parked` loses its `IsTerminal: true` flag (honesty fix only —
+  its behaviour, including the existing `parked→open` transition, is
+  unchanged). `Goal` gains `{Name: "resolved", IsTerminal: true}` plus
+  three new transitions, each `RequiredReason: true`:
+  `open→resolved`, `in-progress→resolved`, `parked→resolved`.
+
+`state.go`: `IsTerminal`'s doc comment corrected per D58 — describes
+"no outbound transition to a non-terminal state" rather than "no
+outbound transitions," matching what the codebase (`Decision`'s own
+`superseded→archived`) already relies on.
+
+`RequiredReason` verified against `validateTransition`
+(`state.go:363-446`) before use: the gate is unconditional, keyed only
+on the transition's own `RequiredReason` flag and whether a caller
+supplied a reason — independent of type `Kind`, so it applies
+identically to `Task`/`Goal` (compiled types, routed through
+`App.TransitionItemWithReason`, `state.go:797-863`) as it already does
+for dynamic content. Confirmed via direct read before implementing,
+not assumed; this is the first orchestration flow to use
+`RequiredReason`.
+
+### Docs
+
+`docs/ARCHITECTURE.md`'s `orchestration.go` package-structure entry
+gains a paragraph. `docs/FEATURELIST.md`'s `Goal` content-type
+description was already wrong independent of this task (listed
+`deferred`, a `Task` state, as one of `Goal`'s own outcomes, and
+omitted `parked→open`'s own return edge) — corrected in the same
+commit since it documents the exact flow this task touches.
+
+### Tests
+
+7 new: `TestTaskFlow_ResolvedReachableFromThreeStates`,
+`TestTaskFlow_ResolvedIsTerminal`,
+`TestGoalFlow_ParkedNoLongerTerminal` (explicit regression pin, not
+just an updated count),
+`TestGoalFlow_ResolvedReachableFromThreeStates`,
+`TestGoalFlow_ResolvedIsTerminal`. Two existing tests updated for the
+real new counts: `TestTaskFlow_definition` (9→10 states, 9→12
+transitions), `TestGoalFlow_definition` (`wantStates`/`wantTerminals`/
+transition count). `TestRegisterOrchestrationTypes_flows` re-read and
+confirmed unaffected — it counts registered flows only, not states or
+transitions per flow.
+
+### Versioning
+
+No new exported Go symbol (`orchTaskFlow`/`orchGoalFlow` stay
+unexported; `State`/`Transition`/`StateFlow` types unchanged) but real
+consumer-observable behaviour change via `transition_item`/
+`get_valid_transitions`. Patch bump, matching A247's/A253's own
+precedent for a behaviour fix with no new exported symbol. Coverage:
+96.3%. `go test -race ./...` clean. Level 2 amendment.
+
+---

@@ -585,6 +585,17 @@ func orchSignalFlow() StateFlow {
 
 // orchTaskFlow returns the state flow for [Task] records.
 // Tasks progress from backlog through active work stages to done or deferred.
+//
+// "resolved" (D58) is a fourth terminal outcome distinct from "done": the
+// underlying need was met, but not by this Task's own tracked work (e.g. a
+// plan whose own investigation concludes "already done elsewhere, nothing to
+// build" — T238). Reachable from every state that precedes a real build
+// actually starting ("active", "waiting-plan", "plan-reviewing") — not only
+// the state where this was first found, since the same discovery can surface
+// at any of the three. Not reachable from "implementing"/"commit-reviewing"
+// (once a build is in flight, "nothing to build" no longer applies) or
+// "blocked" (a stall, not a conclusion). RequiredReason: true — a transition
+// into "resolved" with no explanation is the same problem one level down.
 func orchTaskFlow() StateFlow {
 	return StateFlow{
 		Name:     "architect-task",
@@ -599,6 +610,7 @@ func orchTaskFlow() StateFlow {
 			{Name: "done", IsTerminal: true},
 			{Name: "blocked"},
 			{Name: "deferred", IsTerminal: true},
+			{Name: "resolved", IsTerminal: true},
 		},
 		Transitions: []Transition{
 			{From: "backlog", To: "active"},
@@ -610,6 +622,9 @@ func orchTaskFlow() StateFlow {
 			{From: "active", To: "blocked"},
 			{From: "blocked", To: "active"},
 			{From: "active", To: "deferred"},
+			{From: "active", To: "resolved", RequiredReason: true},
+			{From: "waiting-plan", To: "resolved", RequiredReason: true},
+			{From: "plan-reviewing", To: "resolved", RequiredReason: true},
 		},
 	}
 }
@@ -692,6 +707,16 @@ func orchAmendmentFlow() StateFlow {
 // orchGoalFlow returns the state flow for [Goal] records.
 // Goals move from open through active work to done or parked; parked goals
 // can return to open when a concrete need materialises.
+//
+// "parked" is deliberately not [State.IsTerminal] (D58) — it has an outbound
+// edge back to "open", so by definition it is a resumable pause, not a sink;
+// marking it terminal was dishonest labeling, found via T146 and never
+// actioned until now. "resolved" is the real one-way close distinct from a
+// pause: the underlying need was met, but not by this Goal's own tracked
+// work — same shape as [orchTaskFlow]'s own "resolved", reachable from
+// every non-terminal state including "parked" (a paused Goal can be
+// discovered resolved elsewhere while paused). RequiredReason: true, same
+// reasoning as the Task flow's own "resolved" transitions.
 func orchGoalFlow() StateFlow {
 	return StateFlow{
 		Name:     "goal-lifecycle",
@@ -700,7 +725,8 @@ func orchGoalFlow() StateFlow {
 			{Name: "open", IsInitial: true},
 			{Name: "in-progress"},
 			{Name: "done", IsTerminal: true},
-			{Name: "parked", IsTerminal: true},
+			{Name: "parked"},
+			{Name: "resolved", IsTerminal: true},
 		},
 		Transitions: []Transition{
 			{From: "open", To: "in-progress"},
@@ -708,6 +734,9 @@ func orchGoalFlow() StateFlow {
 			{From: "open", To: "parked"},
 			{From: "in-progress", To: "parked"},
 			{From: "parked", To: "open"},
+			{From: "open", To: "resolved", RequiredReason: true},
+			{From: "in-progress", To: "resolved", RequiredReason: true},
+			{From: "parked", To: "resolved", RequiredReason: true},
 		},
 	}
 }

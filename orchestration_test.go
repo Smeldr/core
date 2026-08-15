@@ -81,14 +81,71 @@ func TestTaskFlow_definition(t *testing.T) {
 	if f.TypeName != "Task" {
 		t.Errorf("TypeName = %q, want %q", f.TypeName, "Task")
 	}
-	if len(f.States) != 9 {
-		t.Errorf("state count = %d, want 9", len(f.States))
+	if len(f.States) != 10 {
+		t.Errorf("state count = %d, want 10", len(f.States))
 	}
-	if len(f.Transitions) != 9 {
-		t.Errorf("transition count = %d, want 9", len(f.Transitions))
+	if len(f.Transitions) != 12 {
+		t.Errorf("transition count = %d, want 12", len(f.Transitions))
 	}
 	if got := initialState(f); got != "backlog" {
 		t.Errorf("initial = %q, want %q", got, "backlog")
+	}
+}
+
+// TestTaskFlow_ResolvedReachableFromThreeStates pins exactly which states may
+// close a Task as "resolved" (D58): active, waiting-plan, plan-reviewing —
+// every state that precedes a real build starting — and confirms
+// implementing/commit-reviewing/blocked deliberately cannot.
+func TestTaskFlow_ResolvedReachableFromThreeStates(t *testing.T) {
+	f := orchTaskFlow()
+	want := map[string]bool{
+		"active":         true,
+		"waiting-plan":   true,
+		"plan-reviewing": true,
+	}
+	notWant := []string{"implementing", "commit-reviewing", "blocked", "backlog", "done", "deferred"}
+
+	got := map[string]bool{}
+	for _, tr := range f.Transitions {
+		if tr.To == "resolved" {
+			got[tr.From] = true
+			if !tr.RequiredReason {
+				t.Errorf("transition %s→resolved: RequiredReason = false, want true", tr.From)
+			}
+		}
+	}
+	for from := range want {
+		if !got[from] {
+			t.Errorf("missing transition %s→resolved", from)
+		}
+	}
+	for _, from := range notWant {
+		if got[from] {
+			t.Errorf("unexpected transition %s→resolved", from)
+		}
+	}
+}
+
+// TestTaskFlow_ResolvedIsTerminal confirms "resolved" is a genuine sink: no
+// transition anywhere in the flow has it as a source.
+func TestTaskFlow_ResolvedIsTerminal(t *testing.T) {
+	f := orchTaskFlow()
+	var resolved *State
+	for i := range f.States {
+		if f.States[i].Name == "resolved" {
+			resolved = &f.States[i]
+		}
+	}
+	if resolved == nil {
+		t.Fatal(`"resolved" state not found`)
+	}
+	if !resolved.IsTerminal {
+		t.Error(`"resolved".IsTerminal = false, want true`)
+	}
+	for _, tr := range f.Transitions {
+		if tr.From == "resolved" {
+			t.Errorf("unexpected outbound transition resolved→%s", tr.To)
+		}
 	}
 }
 
@@ -311,19 +368,83 @@ func TestGoalFlow_definition(t *testing.T) {
 	if f.TypeName != "Goal" {
 		t.Errorf("TypeName = %q, want %q", f.TypeName, "Goal")
 	}
-	wantStates := []string{"open", "in-progress", "done", "parked"}
+	wantStates := []string{"open", "in-progress", "done", "parked", "resolved"}
 	if got := stateNames(f); got != join(wantStates) {
 		t.Errorf("states = %s, want %s", got, join(wantStates))
 	}
 	if got := initialState(f); got != "open" {
 		t.Errorf("initial = %q, want %q", got, "open")
 	}
-	wantTerminals := []string{"done", "parked"}
+	wantTerminals := []string{"done", "resolved"}
 	if got := terminalStates(f); got != join(wantTerminals) {
 		t.Errorf("terminals = %s, want %s", got, join(wantTerminals))
 	}
-	if len(f.Transitions) != 5 {
-		t.Errorf("transition count = %d, want 5", len(f.Transitions))
+	if len(f.Transitions) != 8 {
+		t.Errorf("transition count = %d, want 8", len(f.Transitions))
+	}
+}
+
+// TestGoalFlow_ParkedNoLongerTerminal is an explicit regression pin, not just
+// an updated count assertion: "parked" has an outbound edge to "open" (a
+// resumable pause), so labeling it IsTerminal was dishonest (D58, T146) —
+// this fails loudly if that label ever comes back.
+func TestGoalFlow_ParkedNoLongerTerminal(t *testing.T) {
+	f := orchGoalFlow()
+	for _, s := range f.States {
+		if s.Name == "parked" && s.IsTerminal {
+			t.Error(`"parked".IsTerminal = true, want false — parked→open exists, it is not a sink`)
+		}
+	}
+}
+
+// TestGoalFlow_ResolvedReachableFromThreeStates mirrors the Task flow's own
+// equivalent test: open, in-progress, parked can all close a Goal as
+// "resolved" (D58), each requiring a reason.
+func TestGoalFlow_ResolvedReachableFromThreeStates(t *testing.T) {
+	f := orchGoalFlow()
+	want := map[string]bool{
+		"open":        true,
+		"in-progress": true,
+		"parked":      true,
+	}
+	got := map[string]bool{}
+	for _, tr := range f.Transitions {
+		if tr.To == "resolved" {
+			got[tr.From] = true
+			if !tr.RequiredReason {
+				t.Errorf("transition %s→resolved: RequiredReason = false, want true", tr.From)
+			}
+		}
+	}
+	for from := range want {
+		if !got[from] {
+			t.Errorf("missing transition %s→resolved", from)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("unexpected extra →resolved transitions: got %v, want %v", got, want)
+	}
+}
+
+// TestGoalFlow_ResolvedIsTerminal mirrors the Task flow's own equivalent test.
+func TestGoalFlow_ResolvedIsTerminal(t *testing.T) {
+	f := orchGoalFlow()
+	var resolved *State
+	for i := range f.States {
+		if f.States[i].Name == "resolved" {
+			resolved = &f.States[i]
+		}
+	}
+	if resolved == nil {
+		t.Fatal(`"resolved" state not found`)
+	}
+	if !resolved.IsTerminal {
+		t.Error(`"resolved".IsTerminal = false, want true`)
+	}
+	for _, tr := range f.Transitions {
+		if tr.From == "resolved" {
+			t.Errorf("unexpected outbound transition resolved→%s", tr.To)
+		}
 	}
 }
 
