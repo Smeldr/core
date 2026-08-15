@@ -127,5 +127,5 @@ smeldr.dev/media v1.6.0 h1:scgmCRWagyDm9MXdtvDG5gOJ91HcgUrShZJWG1+VA/k=
 smeldr.dev/media v1.6.0/go.mod h1:KbDJGqcoMjldCuk9n7Ei/WprDTPBZ3kl0t1UlLXN8tM=
 smeldr.dev/oauth v0.4.0 h1:pxRBGCvOfLD48YccrmpEPE8PwBHUdOSjs2oLDaHgeTM=
 smeldr.dev/oauth v0.4.0/go.mod h1:HqMFzHFL2QY7tMCvNaSsH0pxErDmarCabE9VERHHG9I=
-smeldr.dev/social v0.9.2 h1:3nzEhIFimNQi4tjdpBtXBY0QO2MuhJv+6KKfXYYK3eg=
-smeldr.dev/social v0.9.2/go.mod h1:4Cm7jGNsLaReAZM6y2MsFqGRiPQ5rbjLqchmvsgWLbg=
+smeldr.dev/social v0.10.1 h1:qNFj1V/T0HxttR23C448l5T/ZZKpFsO+mIlWytv/ibg=
+smeldr.dev/social v0.10.1/go.mod h1:tsIUmPNiX0dU+J4I5J2UBMw25uj4mq6WmT8/LumXj94=
