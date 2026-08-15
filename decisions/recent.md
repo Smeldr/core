@@ -1027,3 +1027,64 @@ Status: mcp half (tool schema changes for `transition_item` and
 established practice.
 
 ---
+
+## D57 — Task is the ship-code pipeline; Goal is the generic backlog item
+
+### Scope
+
+architect (which type it creates for new work), core (both flows already
+exist — this is a usage decision, not a schema change)
+
+### Decision
+
+**Task's own state flow (`backlog → active → waiting-plan →
+plan-reviewing → implementing → commit-reviewing → done`) is deliberately
+shaped for the ship-code dispatch cycle, not the general work-item type.**
+The original design doc named this explicitly: "Task's own state flow
+already mirrors the dispatch cycle exactly." `Goal`'s flow (`open →
+in-progress → done`/`parked`) already is the general type: no
+plan-review, no commit-review, no phase that presupposes a repo or a
+diff.
+
+Going forward: architect creates a `Task` only for work that ends in a
+plan-reviewed, commit-reviewed change to a repo. Everything else — a
+design discussion, a decision-in-progress, an investigation, anything
+that concludes without that cycle — is a `Goal`.
+
+### Why
+
+Found 2026-08-15 reviewing `T244` (a six-turn discussion round with
+brand, concluded, output written, already unblocking two other pieces of
+work) sitting stuck at `backlog` with no honest path to `done`.
+`get_valid_transitions` showed only `backlog → active` from where it
+sat; reaching `done` from there would mean walking through
+`waiting-plan`/`plan-reviewing`/`implementing`/`commit-reviewing` —
+states that would each misrepresent something that never happened, since
+no plan was written, no code was implemented, no commit was reviewed.
+
+**The stuck state was not a flow defect. It was the wrong type.**
+`Goal`'s flow already has the right shape, and was already documented
+for exactly this in `design/self-hosting-the-architect-process.md`'s
+original type mapping ("`ARCHITECT_TODO.md` rows not yet dispatched →
+`Goal` items, `open`. Broad backlog, not yet actively worked" versus
+`Task`'s own explicit dispatch-cycle mirroring). The distinction existed
+from the start and drifted out of practice, not out of the model.
+
+### Consequences
+
+- Architect creates `Task` only for ship-code work; `Goal` for
+  discussion/decision/investigation work.
+- `T244` stays a historical `Task`, not retyped — the record is closed
+  with a note rather than migrated, since nothing depends on its
+  identity changing and retyping risks breaking the references other
+  Tasks (`T243`, `T245`) already made to it by number.
+- `T238` is unaffected by this decision — it is a genuine `Task` (an
+  expected commit that turned out unnecessary), a different edge case:
+  the flow's missing "verified, no work needed" exit, not a type
+  mismatch. Tracked separately.
+- Rejected: renaming `Task`'s own states (`implementing`/
+  `commit-reviewing`) to generic terms. They are accurate for what
+  `Task` is actually for; the fix was choosing the right type, not
+  blurring the right one's own vocabulary.
+
+---
