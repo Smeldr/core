@@ -190,6 +190,7 @@ Each runs with: `cd example/blog && go run .`
 ## Reference
 
 Full API reference: [REFERENCE.md](docs/REFERENCE.md)  
+Self-hosting (release binaries, config, backup/restore): [SELF_HOSTING.md](docs/SELF_HOSTING.md)  
 Web docs: [smeldr.dev/docs](https://smeldr.dev/docs)
 
 For full token management reference (create, list, revoke) see [REFERENCE.md — Token management](docs/REFERENCE.md#token-management).  

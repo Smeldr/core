@@ -1,0 +1,37 @@
+name: Release binaries
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-and-attach:
+    name: Build example/server and attach to the release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build example/server (linux/amd64, static)
+        working-directory: example/server
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+          GOOS: 'linux'
+          GOARCH: 'amd64'
+        run: go build -o smeldr-server-linux-amd64 .
+
+      - name: Confirm the release exists before attaching to it
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release view ${{ github.ref_name }} --json tagName >/dev/null
+
+      - name: Attach binary to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.ref_name }} example/server/smeldr-server-linux-amd64
