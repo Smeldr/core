@@ -41,6 +41,16 @@ jobs:
           fi
           echo "No BOM found"
 
+      - name: Check gofmt
+        run: |
+          files=$(gofmt -l .)
+          if [ -n "$files" ]; then
+            echo "The following files are not gofmt'd:"
+            echo "$files"
+            exit 1
+          fi
+          echo "All files gofmt'd"
+
       - name: Run tests with race detector
         run: go test -race ./...
 
