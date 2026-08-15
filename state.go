@@ -832,10 +832,21 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 		return nil, fmt.Errorf("smeldr: %q is registered as a compiled type but its table could not be found", typeName)
 	}
 
-	var id, currentStatus string
+	// realSlug is fetched from the row, never assumed to equal the caller's
+	// own ident — ident can be a human ID (e.g. "T203") rather than a real
+	// slug when the fallback below resolves it (T253); echoing ident back
+	// as "slug" in the response would be wrong in that case.
+	var id, realSlug, currentStatus string
 	err := db.QueryRowContext(ctx,
-		"SELECT id, status FROM "+quoteIdent(table)+" WHERE slug = $1", slug,
-	).Scan(&id, &currentStatus)
+		"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE slug = $1", slug,
+	).Scan(&id, &realSlug, &currentStatus)
+	if errors.Is(err, sql.ErrNoRows) {
+		if col, ok := humanIDColumns[typeName]; ok {
+			err = db.QueryRowContext(ctx,
+				"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE "+quoteIdent(col)+" = $1", slug,
+			).Scan(&id, &realSlug, &currentStatus)
+		}
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -863,7 +874,7 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 		return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
 	}
 	fireAsyncTriggers(ctx, db, typeName, currentStatus, toState, id)
-	return map[string]any{"id": id, "slug": slug, "status": toState}, nil
+	return map[string]any{"id": id, "slug": realSlug, "status": toState}, nil
 }
 
 // isNoSuchTable reports whether err is a SQLite "no such table" error.

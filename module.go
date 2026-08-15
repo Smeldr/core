@@ -2204,10 +2204,40 @@ func (m *Module[T]) MCPList(ctx Context, status ...Status) ([]any, error) {
 	return result, nil
 }
 
-// MCPGet returns the item with the given slug regardless of its lifecycle
-// status. The caller is responsible for enforcing visibility rules.
+// resolveItem resolves ident against slug first — the common case, costs
+// nothing extra — then, only for a type with a registered
+// [humanIDColumns] entry, falls back to that human-facing identifier
+// column on a slug miss (e.g. "T203" for a Task). Every MCP method that
+// takes a caller-supplied identifier routes through this instead of calling
+// m.repo.FindBySlug directly, so a caller can supply either interchangeably
+// (T253). HTTP handlers deliberately do not use this — a URL path segment
+// is a slug by REST convention, not a candidate for this fallback.
+func (m *Module[T]) resolveItem(ctx Context, ident string) (T, error) {
+	item, err := m.repo.FindBySlug(ctx, ident)
+	if err == nil {
+		return item, nil
+	}
+	var zero T
+	if !errors.Is(err, ErrNotFound) {
+		return zero, err
+	}
+	col, ok := humanIDColumns[m.contentTypeName]
+	if !ok {
+		return zero, ErrNotFound
+	}
+	cr, ok := any(m.repo).(ColumnLookupRepository[T])
+	if !ok {
+		return zero, ErrNotFound
+	}
+	return cr.FindByColumn(ctx, col, ident)
+}
+
+// MCPGet returns the item with the given slug (or, for a type with a
+// human-facing identifier, that identifier — [Module.resolveItem])
+// regardless of its lifecycle status. The caller is responsible for
+// enforcing visibility rules.
 func (m *Module[T]) MCPGet(ctx Context, slug string) (any, error) {
-	item, err := m.repo.FindBySlug(ctx, slug)
+	item, err := m.resolveItem(ctx, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -2343,7 +2373,7 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 // Node.ID, Node.Slug, and Node.Status are always restored after the merge —
 // use the dedicated lifecycle methods to change status.
 func (m *Module[T]) MCPUpdate(ctx Context, slug string, fields map[string]any) (any, error) {
-	existing, err := m.repo.FindBySlug(ctx, slug)
+	existing, err := m.resolveItem(ctx, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -2363,10 +2393,12 @@ func (m *Module[T]) MCPUpdate(ctx Context, slug string, fields map[string]any) (
 		return nil, ErrBadRequest
 	}
 
-	// Restore identity and lifecycle so callers cannot overwrite them.
+	// Restore identity and lifecycle so callers cannot overwrite them. The
+	// item's own real slug, never the caller-supplied ident — slug and ident
+	// can differ when ident was a human ID resolved via resolveItem (T253).
 	f := getNodeFields(elemType)
 	pv.Elem().FieldByIndex(f.id).SetString(nodeIDOf(existing))
-	pv.Elem().FieldByIndex(f.slug).SetString(slug)
+	pv.Elem().FieldByIndex(f.slug).SetString(nodeSlugOf(existing))
 	pv.Elem().FieldByIndex(f.status).Set(reflect.ValueOf(nodeStatusOf(existing)))
 
 	item := ptrToT[T](pv, m.proto)
@@ -2389,11 +2421,14 @@ func (m *Module[T]) MCPUpdate(ctx Context, slug string, fields map[string]any) (
 // MCPPublish transitions the item with the given slug to Published, sets
 // PublishedAt to now, fires AfterPublish, and triggers derived-content rebuild.
 func (m *Module[T]) MCPPublish(ctx Context, slug string) error {
-	item, err := m.repo.FindBySlug(ctx, slug)
+	item, err := m.resolveItem(ctx, slug)
 	if err != nil {
 		return err
 	}
-	if err := m.checkSlugCollision(ctx, slug); err != nil {
+	// The item's own real slug, never the caller-supplied ident — ident can
+	// be a human ID resolved via resolveItem, which is not itself a slug
+	// and must never be checked as one (T253).
+	if err := m.checkSlugCollision(ctx, nodeSlugOf(item)); err != nil {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
@@ -2421,7 +2456,7 @@ func (m *Module[T]) MCPPublish(ctx Context, slug string) error {
 // MCPSchedule sets the item with the given slug to Scheduled and records
 // the time at which it will be automatically published.
 func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time) error {
-	item, err := m.repo.FindBySlug(ctx, slug)
+	item, err := m.resolveItem(ctx, slug)
 	if err != nil {
 		return err
 	}
@@ -2448,7 +2483,7 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time) error {
 // MCPArchive transitions the item with the given slug to Archived, fires
 // AfterArchive, and triggers derived-content rebuild.
 func (m *Module[T]) MCPArchive(ctx Context, slug string) error {
-	item, err := m.repo.FindBySlug(ctx, slug)
+	item, err := m.resolveItem(ctx, slug)
 	if err != nil {
 		return err
 	}
@@ -2474,7 +2509,7 @@ func (m *Module[T]) MCPArchive(ctx Context, slug string) error {
 // MCPDelete permanently removes the item with the given slug, fires
 // AfterDelete, and triggers derived-content rebuild.
 func (m *Module[T]) MCPDelete(ctx Context, slug string) error {
-	item, err := m.repo.FindBySlug(ctx, slug)
+	item, err := m.resolveItem(ctx, slug)
 	if err != nil {
 		return err
 	}

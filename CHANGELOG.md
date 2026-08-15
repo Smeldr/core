@@ -23,6 +23,11 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.67.0] — 2026-08-16
+
+### Added
+- `ColumnLookupRepository[T]` — an optional `Repository[T]` extension (mirrors `SeqRepository[T]`'s own established pattern), `FindByColumn(ctx, column, value) (T, error)`, implemented by both `SQLRepo[T]` and `MemoryRepo[T]`. Backs a new fallback: `get_task`/`update_task`/`transition_item`/`publish`/`archive`/`delete_task` now resolve a Task by its own human-facing `TaskID` (e.g. `"T203"`) when a slug lookup misses, same for `Goal.GoalID`/`Decision.DecisionNumber`/`Amendment.AmendmentNumber`. No breaking change — the existing `Repository[T]` interface is untouched. (A262, T253)
+
 ## [1.66.1] — 2026-08-15
 
 ### Fixed

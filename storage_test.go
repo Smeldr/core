@@ -556,6 +556,65 @@ func TestSQLRepo_FindBySlug_query(t *testing.T) {
 	}
 }
 
+// TestSQLRepo_FindByColumn_query pins the exact SQL FindByColumn issues —
+// column is quoted as an identifier, value is parameterized (T253).
+func TestSQLRepo_FindByColumn_query(t *testing.T) {
+	db := newTestDB(t)
+	setFakeResult(
+		[]string{"id", "title"},
+		[][]driver.Value{{"2", "World"}},
+	)
+	r := NewSQLRepo[BlogPost](db)
+	_, err := r.FindByColumn(context.Background(), "task_id", "T203")
+	if err != nil {
+		t.Fatalf("FindByColumn: %v", err)
+	}
+	want := `SELECT * FROM blog_posts WHERE "task_id" = $1`
+	if q := getLastQuery(); q != want {
+		t.Errorf("query = %q, want %q", q, want)
+	}
+}
+
+// TestMemoryRepo_FindByColumn resolves a real orchestration type (Task) by
+// its own db-tagged human-ID column via reflection, not a hardcoded
+// per-type table — proves fieldNameForColumn's own db-tag-driven mapping
+// works end to end (T253).
+func TestMemoryRepo_FindByColumn(t *testing.T) {
+	repo := NewMemoryRepo[*Task]()
+	tk := &Task{Node: Node{ID: "1", Slug: "task-t203"}, TaskID: "T203"}
+	if err := repo.Save(context.Background(), tk); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := repo.FindByColumn(context.Background(), "task_id", "T203")
+	if err != nil {
+		t.Fatalf("FindByColumn: %v", err)
+	}
+	if got.ID != "1" {
+		t.Errorf("ID = %q, want %q", got.ID, "1")
+	}
+}
+
+func TestMemoryRepo_FindByColumn_notFound(t *testing.T) {
+	repo := NewMemoryRepo[*Task]()
+	if _, err := repo.FindByColumn(context.Background(), "task_id", "T999"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestMemoryRepo_FindByColumn_unknownColumn confirms an unrecognized column
+// name fails closed (ErrNotFound), not a panic — fieldNameForColumn returns
+// "" and FindByColumn must handle that, not assume a match exists (T253).
+func TestMemoryRepo_FindByColumn_unknownColumn(t *testing.T) {
+	repo := NewMemoryRepo[*Task]()
+	tk := &Task{Node: Node{ID: "1", Slug: "task-t203"}, TaskID: "T203"}
+	if err := repo.Save(context.Background(), tk); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := repo.FindByColumn(context.Background(), "not_a_real_column", "T203"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestSQLRepo_Save_insert(t *testing.T) {
 	db := newTestDB(t)
 	setFakeExecRows(1)

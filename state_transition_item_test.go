@@ -46,6 +46,18 @@ func insertSignal(t *testing.T, db *sql.DB, id, slug, status string) {
 	}
 }
 
+// insertTaskWithTaskID inserts a minimal smeldr_tasks row directly, with a
+// realistic flow-driven status (not the CMS "published" constant) and its
+// own human-facing TaskID, for T253's human-ID resolution tests.
+func insertTaskWithTaskID(t *testing.T, db *sql.DB, id, slug, taskID, status string) {
+	t.Helper()
+	repo := NewSQLRepo[*Task](db, Table("smeldr_tasks"))
+	tk := &Task{Node: Node{ID: id, Slug: slug, Status: Status(status)}, TaskID: taskID}
+	if err := repo.Save(context.Background(), tk); err != nil {
+		t.Fatalf("insertTaskWithTaskID: %v", err)
+	}
+}
+
 // — happy paths ——————————————————————————————————————————————————————————
 
 func TestApp_TransitionItem_Compiled_HappyPath(t *testing.T) {
@@ -68,6 +80,54 @@ func TestApp_TransitionItem_Compiled_HappyPath(t *testing.T) {
 	}
 	if status != "read" {
 		t.Errorf("stored status = %q, want \"read\"", status)
+	}
+}
+
+// TestApp_TransitionItem_Compiled_ByHumanID exercises the reported bug
+// directly: a caller resolves a Task by its own human-facing TaskID
+// ("T203"), not its slug — this is the exact "transition_item" symptom
+// T253 reports. Also confirms the response's own "slug" field is the real
+// slug, not the human-ID ident echoed back (the same class of bug caught
+// and fixed in Module.MCPUpdate for the MCP dispatch path).
+func TestApp_TransitionItem_Compiled_ByHumanID(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	insertTaskWithTaskID(t, db, "task-1", "some-task-slug", "T203", "backlog")
+
+	result, err := app.TransitionItem(context.Background(), "Task", "T203", "active")
+	if err != nil {
+		t.Fatalf("TransitionItem by human ID: %v", err)
+	}
+	if result["status"] != "active" {
+		t.Errorf("result status = %v, want \"active\"", result["status"])
+	}
+	if result["slug"] != "some-task-slug" {
+		t.Errorf("result slug = %v, want %q (must not echo back the human-ID ident)", result["slug"], "some-task-slug")
+	}
+
+	var status string
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT status FROM smeldr_tasks WHERE id = ?", "task-1",
+	).Scan(&status); err != nil {
+		t.Fatalf("verify status: %v", err)
+	}
+	if status != "active" {
+		t.Errorf("stored status = %q, want \"active\"", status)
+	}
+}
+
+// TestApp_TransitionItem_Compiled_ByHumanID_StillResolvesBySlug confirms
+// the ordinary slug path is unaffected — the fallback only ever fires on a
+// slug miss.
+func TestApp_TransitionItem_Compiled_ByHumanID_StillResolvesBySlug(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	insertTaskWithTaskID(t, db, "task-2", "some-task-slug", "T204", "backlog")
+
+	result, err := app.TransitionItem(context.Background(), "Task", "some-task-slug", "active")
+	if err != nil {
+		t.Fatalf("TransitionItem by slug: %v", err)
+	}
+	if result["slug"] != "some-task-slug" {
+		t.Errorf("result slug = %v, want %q", result["slug"], "some-task-slug")
 	}
 }
 
@@ -196,7 +256,7 @@ func TestApp_TransitionItem_Dynamic_NotFound(t *testing.T) {
 func TestApp_TransitionItem_SelectQueryFails(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	insertSignal(t, db, "sig-select-fail", "sig-select-fail-slug", "pending")
-	app.cfg.DB = &govQueryRowFailDB{DB: db, failOn: "id, status FROM"}
+	app.cfg.DB = &govQueryRowFailDB{DB: db, failOn: "id, slug, status FROM"}
 	_, err := app.TransitionItem(context.Background(), "Signal", "sig-select-fail-slug", "read")
 	if !errors.Is(err, ErrInternal) {
 		t.Errorf("expected ErrInternal on the item lookup query failing, got %v", err)

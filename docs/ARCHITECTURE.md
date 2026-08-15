@@ -255,6 +255,15 @@ smeldr.dev/
 ├── storage.go        DB interface, Query[T], QueryOne[T], Repository[T], MemoryRepo[T], ListOptions;
 │                     timeScanner (unexported) — sql.Scanner for time.Time fields, handles SQLite
 │                     string format; scanDest (unexported) — wraps *time.Time destinations (A200)
+│                     ColumnLookupRepository[T] — optional Repository[T] extension (SeqRepository's
+│                     own precedent), FindByColumn(ctx, column, value) resolves an item by a
+│                     non-slug/id column; implemented by both SQLRepo (raw SQL) and MemoryRepo
+│                     (reflection via fieldNameForColumn, unexported, reuses dbFields — no per-type
+│                     table needed there). Module.resolveItem (module.go) and App.TransitionItem
+│                     (state.go) both fall back to it, via a new orchestration.go humanIDColumns
+│                     map, when a slug lookup misses on a type with a human-facing identifier (e.g.
+│                     Task.TaskID) — so get_task("T203") and transition_item resolve the same way
+│                     slug already did (Amendment A262, T253)
 ├── state.go          StateFlow, State, Transition — data-driven state machine types;
 │                     ConflictPolicy type (ConflictReject, ConflictSupersede constants);
 │                     StateFlow.ActiveState + StateFlow.ConflictPolicy optional fields;

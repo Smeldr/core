@@ -305,6 +305,23 @@ type SeqRepository[T any] interface {
 	Seq(ctx context.Context, opts ListOptions) iter.Seq2[T, error]
 }
 
+// ColumnLookupRepository is an optional extension of [Repository] that
+// supports resolving an item by a column other than slug or id — the
+// human-facing identifiers a handful of compiled orchestration types carry
+// (e.g. Task.TaskID, Decision.DecisionNumber). Both [MemoryRepo] and
+// [SQLRepo] implement this interface (T253).
+//
+// Callers type-assert their [Repository] to [ColumnLookupRepository] to use
+// it, the same pattern [SeqRepository] already establishes — an optional
+// capability, not a required method every custom [Repository] implementer
+// would otherwise have to add.
+type ColumnLookupRepository[T any] interface {
+	// FindByColumn returns the item whose named column equals value, or
+	// [ErrNotFound]. column is never caller-supplied — callers pass only a
+	// small, internally-known set of column names, never user input.
+	FindByColumn(ctx context.Context, column, value string) (T, error)
+}
+
 // MemoryRepo is a thread-safe in-memory implementation of [Repository].
 // It is intended for unit tests and prototyping — not production use.
 // Fields named ID and Slug are located via cached reflection on first use.
@@ -365,6 +382,41 @@ func (r *MemoryRepo[T]) FindByID(_ context.Context, id string) (T, error) {
 		return zero, ErrNotFound
 	}
 	return item, nil
+}
+
+// FindByColumn returns the first item whose db-tagged column matches value,
+// or [ErrNotFound]. Resolves column to its Go field name via [dbFields] (the
+// same struct-tag-driven mapping [SQLRepo.columnForField] uses in reverse),
+// so no per-type table is needed here — T253.
+func (r *MemoryRepo[T]) FindByColumn(_ context.Context, column, value string) (T, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var zero T
+	fieldName := fieldNameForColumn(reflect.TypeOf(zero), column)
+	if fieldName != "" {
+		for _, id := range r.order {
+			item := r.items[id]
+			if stringField(item, fieldName) == value {
+				return item, nil
+			}
+		}
+	}
+	return zero, ErrNotFound
+}
+
+// fieldNameForColumn resolves column to typ's own Go field name via its db
+// struct tags, or "" if none matches — the reverse of
+// [SQLRepo.columnForField], usable without an [*SQLRepo] instance.
+func fieldNameForColumn(typ reflect.Type, column string) string {
+	for typ.Kind() == reflect.Ptr {
+		typ = typ.Elem()
+	}
+	for _, f := range dbFields(typ) {
+		if f.name == column {
+			return typ.FieldByIndex(f.index).Name
+		}
+	}
+	return ""
 }
 
 // FindBySlug returns the first item whose Slug field matches slug, or [ErrNotFound].
@@ -659,6 +711,14 @@ func (r *SQLRepo[T]) FindByID(ctx context.Context, id string) (T, error) {
 func (r *SQLRepo[T]) FindBySlug(ctx context.Context, slug string) (T, error) {
 	return QueryOne[T](ctx, r.db,
 		"SELECT * FROM "+r.table+" WHERE "+quoteIdent("slug")+" = $1", slug)
+}
+
+// FindByColumn returns the item whose named column equals value, or
+// [ErrNotFound]. column is never caller-supplied — see
+// [ColumnLookupRepository] (T253).
+func (r *SQLRepo[T]) FindByColumn(ctx context.Context, column, value string) (T, error) {
+	return QueryOne[T](ctx, r.db,
+		"SELECT * FROM "+r.table+" WHERE "+quoteIdent(column)+" = $1", value)
 }
 
 // FindAll returns items matching opts. Status filter, ordering, and

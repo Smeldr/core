@@ -1790,6 +1790,152 @@ func TestMCPCreate_saveError(t *testing.T) {
 
 // — MCPUpdate error branches ——————————————————————————————————————————————————
 
+// — resolveItem: slug-or-human-ID resolution (T253) ————————————————————————
+
+// newTaskModule builds a *Module[*Task] with a real MemoryRepo, so
+// m.contentTypeName is genuinely "Task" (derived from the type, NewModule's
+// own convention) and humanIDColumns["Task"] applies for real, not a
+// fixture standing in for it.
+func newTaskModule(repo Repository[*Task]) *Module[*Task] {
+	return NewModule((*Task)(nil), Repo(repo))
+}
+
+func TestResolveItem_BySlug(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	tk := &Task{Node: Node{ID: "1", Slug: "task-t203"}, TaskID: "T203"}
+	if err := mem.Save(context.Background(), tk); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	m := newTaskModule(mem)
+	got, err := m.resolveItem(NewTestContext(editorUser()), "task-t203")
+	if err != nil {
+		t.Fatalf("resolveItem by slug: %v", err)
+	}
+	if got.TaskID != "T203" {
+		t.Errorf("TaskID = %q, want %q", got.TaskID, "T203")
+	}
+}
+
+func TestResolveItem_ByHumanID(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	tk := &Task{Node: Node{ID: "1", Slug: "task-t203"}, TaskID: "T203"}
+	if err := mem.Save(context.Background(), tk); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	m := newTaskModule(mem)
+	got, err := m.resolveItem(NewTestContext(editorUser()), "T203")
+	if err != nil {
+		t.Fatalf("resolveItem by human ID: %v", err)
+	}
+	if got.Slug != "task-t203" {
+		t.Errorf("Slug = %q, want %q", got.Slug, "task-t203")
+	}
+}
+
+func TestResolveItem_NoMatch(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	m := newTaskModule(mem)
+	if _, err := m.resolveItem(NewTestContext(editorUser()), "T999"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestResolveItem_NonOrchestrationType_NoFallback confirms a type with no
+// humanIDColumns entry (e.g. testPost) behaves identically to before this
+// task — a slug miss is ErrNotFound, no fallback attempted.
+func TestResolveItem_NonOrchestrationType_NoFallback(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	seedPost(t, mem, "Some Title", Draft)
+	m := newTestModule(mem)
+	if _, err := m.resolveItem(NewTestContext(editorUser()), "Some Title"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound (no humanIDColumns entry for testPost)", err)
+	}
+}
+
+// TestResolveItem_NonErrNotFoundPropagates confirms a repo error other than
+// ErrNotFound short-circuits resolveItem — no fallback attempted, the real
+// error propagates unchanged.
+func TestResolveItem_NonErrNotFoundPropagates(t *testing.T) {
+	m := newTaskModule(errorRepo[*Task]{})
+	if _, err := m.resolveItem(NewTestContext(editorUser()), "T203"); err == nil {
+		t.Error("expected the underlying repo error to propagate")
+	}
+}
+
+// notFoundOnlyRepo returns ErrNotFound from FindBySlug and implements
+// nothing beyond the base Repository[T] interface — deliberately not
+// [ColumnLookupRepository], to exercise resolveItem's own fail-closed
+// branch when a type has a humanIDColumns entry but its repo cannot
+// actually perform the fallback lookup.
+type notFoundOnlyRepo[T any] struct{}
+
+func (r notFoundOnlyRepo[T]) FindByID(_ context.Context, _ string) (T, error) {
+	var zero T
+	return zero, ErrNotFound
+}
+func (r notFoundOnlyRepo[T]) FindBySlug(_ context.Context, _ string) (T, error) {
+	var zero T
+	return zero, ErrNotFound
+}
+func (r notFoundOnlyRepo[T]) FindAll(_ context.Context, _ ListOptions) ([]T, error) {
+	return nil, ErrNotFound
+}
+func (r notFoundOnlyRepo[T]) Save(_ context.Context, _ T) error        { return ErrNotFound }
+func (r notFoundOnlyRepo[T]) Delete(_ context.Context, _ string) error { return ErrNotFound }
+
+// TestResolveItem_RepoLacksColumnLookup confirms resolveItem fails closed
+// (ErrNotFound, not a panic) when the type has a humanIDColumns entry but
+// its repo doesn't implement ColumnLookupRepository — a custom Repository[T]
+// implementer that predates T253 must keep working exactly as before.
+func TestResolveItem_RepoLacksColumnLookup(t *testing.T) {
+	m := newTaskModule(notFoundOnlyRepo[*Task]{})
+	if _, err := m.resolveItem(NewTestContext(editorUser()), "T203"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestModule_MCPGet_ByHumanID proves the fix end to end through the real
+// MCP dispatch method, not just resolveItem in isolation.
+func TestModule_MCPGet_ByHumanID(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	tk := &Task{Node: Node{ID: "1", Slug: "task-t203"}, TaskID: "T203"}
+	if err := mem.Save(context.Background(), tk); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	m := newTaskModule(mem)
+	got, err := m.MCPGet(NewTestContext(editorUser()), "T203")
+	if err != nil {
+		t.Fatalf("MCPGet by human ID: %v", err)
+	}
+	if got.(*Task).Slug != "task-t203" {
+		t.Errorf("Slug = %q, want %q", got.(*Task).Slug, "task-t203")
+	}
+}
+
+// TestModule_MCPUpdate_ByHumanID_PreservesRealSlug is the critical
+// regression pin for the bug caught while wiring this up: MCPUpdate must
+// restore the item's own real slug, never the caller-supplied identifier —
+// resolving "T203" and then writing "T203" into the Slug field would
+// silently corrupt it.
+func TestModule_MCPUpdate_ByHumanID_PreservesRealSlug(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	tk := &Task{Node: Node{ID: "1", Slug: "task-t203"}, TaskID: "T203"}
+	if err := mem.Save(context.Background(), tk); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	m := newTaskModule(mem)
+	updated, err := m.MCPUpdate(NewTestContext(editorUser()), "T203", map[string]any{"Priority": 5})
+	if err != nil {
+		t.Fatalf("MCPUpdate by human ID: %v", err)
+	}
+	if got := updated.(*Task).Slug; got != "task-t203" {
+		t.Errorf("Slug = %q, want %q (must not be overwritten with the human-ID ident)", got, "task-t203")
+	}
+	if updated.(*Task).TaskID != "T203" {
+		t.Errorf("TaskID = %q, want %q", updated.(*Task).TaskID, "T203")
+	}
+}
+
 func TestMCPUpdate_findBySlugError(t *testing.T) {
 	m := newTestModule(errorRepo[*testPost]{})
 	ctx := NewTestContext(editorUser())
@@ -1839,6 +1985,29 @@ func TestMCPUpdate_saveError(t *testing.T) {
 }
 
 // — MCPPublish error branches —————————————————————————————————————————————————
+
+// TestModule_MCPPublish_ByHumanID exercises a second MCP method end to end
+// by human ID — also confirms checkSlugCollision runs against the item's
+// own real slug, not the human-ID ident (the same class of bug caught in
+// MCPUpdate, fixed the same way here).
+func TestModule_MCPPublish_ByHumanID(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	tk := &Task{Node: Node{ID: "1", Slug: "task-t203", Status: Draft}, TaskID: "T203"}
+	if err := mem.Save(context.Background(), tk); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	m := newTaskModule(mem)
+	if err := m.MCPPublish(NewTestContext(editorUser()), "T203"); err != nil {
+		t.Fatalf("MCPPublish by human ID: %v", err)
+	}
+	got, err := mem.FindBySlug(context.Background(), "task-t203")
+	if err != nil {
+		t.Fatalf("FindBySlug after publish: %v", err)
+	}
+	if got.Status != Published {
+		t.Errorf("Status = %q, want %q", got.Status, Published)
+	}
+}
 
 func TestMCPPublish_findBySlugError(t *testing.T) {
 	m := newTestModule(errorRepo[*testPost]{})

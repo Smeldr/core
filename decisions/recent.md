@@ -559,3 +559,128 @@ precedent for a behaviour fix with no new exported symbol. Coverage:
 96.3%. `go test -race ./...` clean. Level 2 amendment.
 
 ---
+
+## A262 — Task's own human identifier gains a lookup path (T253)
+
+### What was wrong
+
+`get_task`/`update_task`/`transition_item`/`publish`/`archive`/
+`delete_task` all resolve their caller-supplied identifier via
+`Repository.FindBySlug` — matching `Node.Slug` only. A Task's own
+human-facing identifier (`TaskID`, e.g. `"T203"` — the identifier used
+in nearly every conversation about this project's own work) had no
+lookup path anywhere; the same gap applies to `Goal.GoalID`,
+`Decision.DecisionNumber`, `Amendment.AmendmentNumber`. A caller given
+"check on T253" had no direct way to look it up — only `list_tasks()`
+and a manual scan, which this project's own sessions had to do
+repeatedly.
+
+### The fix: an optional `Repository[T]` extension, not a breaking change
+
+New `ColumnLookupRepository[T]` interface (`storage.go`):
+`FindByColumn(ctx, column, value) (T, error)`. Declared as an
+**optional extension**, type-asserted by callers — the exact shape
+`SeqRepository[T]` already established — rather than widening the
+exported `Repository[T]` interface itself, which would break any
+custom repo implementer that predates this task (the same class of
+break D49 already ruled out for `MCPModule`, and D53 governs
+explicitly). Implemented by both `SQLRepo[T]` (raw parameterized SQL,
+`column` never caller-supplied) and `MemoryRepo[T]` (reflection via
+new unexported `fieldNameForColumn`, which resolves a db column name
+to its Go field name via the same struct-tag-driven `dbFields` cache
+`SQLRepo.columnForField` already uses in reverse — no per-type
+translation table needed in `storage.go` at all).
+
+**Which types get a fallback: an explicit map, not reflection-based
+auto-detection.** New `humanIDColumns` (`orchestration.go`): `Task` →
+`task_id`, `Goal` → `goal_id`, `Decision` → `decision_number`,
+`Amendment` → `amendment_number`. `Signal` has no entry — no canonical
+sequential identifier exists on it. Explicit, matching
+`anchorTypeTable`'s own shape (`context_packet.go`) — a future field
+merely named `...Number` must never silently become a lookup key
+nobody intended.
+
+**Two independent call sites, not one shared abstraction.** New
+`Module.resolveItem` (`module.go`, unexported): tries `FindBySlug`
+first (the common case, costs nothing extra), falls back to
+`FindByColumn` only on a slug miss for a type with a `humanIDColumns`
+entry. All six MCP methods (`MCPGet`/`MCPUpdate`/`MCPPublish`/
+`MCPSchedule`/`MCPArchive`/`MCPDelete`) now call it instead of
+`m.repo.FindBySlug` directly. `App.TransitionItem`/
+`TransitionItemWithReason`'s own compiled-type path (`state.go`) never
+went through `Module[T]` at all — a raw `SELECT ... WHERE slug = $1`
+against `resolveItemTable`'s result — so it gets the identical
+fallback expressed as a second raw-SQL attempt on `sql.ErrNoRows`,
+using the same `humanIDColumns` map. The two paths were already
+structurally independent before this task; a shared abstraction across
+them would be more machinery than a four-entry map justifies.
+
+**Deliberately not touched.** HTTP handlers
+(`aiDocHandler`/`showHandler`/`updateHandler`/`deleteHandler`/
+`findAndServe`/`findAndServeAIDoc`) resolve `r.PathValue("slug")` from
+a URL path — a URL path segment is a slug by REST convention, and a
+caller who already has a URL already has the slug; there is no "typed
+a human ID into a browser bar" scenario this needs to solve.
+`createHandler`'s own `FindBySlug` call is a slug-collision probe
+while generating a new slug, unrelated to identifier resolution.
+
+### Two real bugs caught while wiring this up, not part of the original ask
+
+**`MCPUpdate` was about to overwrite a Task's real slug with the
+caller's ident.** Its identity-restore step did
+`pv.Elem().FieldByIndex(f.slug).SetString(slug)` using the raw
+function parameter — correct when `slug` genuinely was the slug, but
+once `resolveItem` can also return a match via `TaskID`, that same
+parameter can hold `"T203"` instead. Fixed to restore the item's own
+real slug via the already-existing `nodeSlugOf(existing)` helper,
+never the caller-supplied ident.
+
+**`MCPPublish`'s `checkSlugCollision` had the identical shape** — it
+checked the raw ident for a collision rather than the item's own real
+slug, which would have checked the wrong string entirely when
+resolved by human ID. Fixed the same way, via `nodeSlugOf(item)`.
+
+**`TransitionItem`'s own response echoed the raw ident back as
+`"slug"`.** Fixed by fetching the real `slug` column in the same
+`SELECT` (already reading `id`/`status`) and returning that instead of
+the function parameter — same class of bug as `MCPUpdate`'s, same
+fix shape.
+
+### Verified before implementing, not assumed
+
+**`get_valid_transitions`/`list_items_by_state` (mcp) coverage,
+checked directly against `smeldr.dev/mcp`'s own source, not inferred
+from precedent alone.** `itemCurrentStatus`
+(`mcp/state_tools.go:283-310`) calls `m.MCPGet(ctx, slug)` for compiled
+types — covered transitively by the `MCPGet` fix, confirmed by reading
+the actual call, not assumed from A248/A249's own precedent.
+`itemsByState` (`mcp/state_tools.go:317+`) never resolves a single
+identifier at all — it lists every item in a given `state`, no slug/ID
+resolution happens there, so it was never a candidate.
+
+### Tests
+
+New: `TestSQLRepo_FindByColumn_query`, `TestMemoryRepo_FindByColumn`
+(+ `_notFound`, `_unknownColumn`), `TestResolveItem_BySlug`,
+`TestResolveItem_ByHumanID`, `TestResolveItem_NoMatch`,
+`TestResolveItem_NonOrchestrationType_NoFallback`,
+`TestResolveItem_NonErrNotFoundPropagates`,
+`TestResolveItem_RepoLacksColumnLookup` (the fail-closed branch: a
+type with a `humanIDColumns` entry whose repo doesn't implement
+`ColumnLookupRepository`), `TestModule_MCPGet_ByHumanID`,
+`TestModule_MCPUpdate_ByHumanID_PreservesRealSlug` (the regression pin
+for the bug above), `TestModule_MCPPublish_ByHumanID`,
+`TestApp_TransitionItem_Compiled_ByHumanID` (+
+`_StillResolvesBySlug`). One existing test's own mock fixture
+(`TestApp_TransitionItem_SelectQueryFails`) updated for the new SQL
+query text (`"id, status FROM"` → `"id, slug, status FROM"`) — the
+query itself changed to also fetch the real slug, not a behaviour
+regression.
+
+### Versioning
+
+New exported symbol (`ColumnLookupRepository[T]`). No existing
+exported signature changes. MINOR bump. Coverage: 96.3%;
+`resolveItem` 100%. `go test -race ./...` clean. Level 2 amendment.
+
+---

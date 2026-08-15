@@ -562,6 +562,24 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 	return nil
 }
 
+// humanIDColumns maps a compiled type name to its own human-facing
+// identifier column (e.g. "T203"), for types that have one — Task.TaskID,
+// Goal.GoalID, Decision.DecisionNumber, Amendment.AmendmentNumber. Signal
+// has no entry: it carries no canonical sequential identifier. Consulted by
+// [Module.resolveItem] and [App.TransitionItem] as a fallback when a slug
+// lookup misses, so `get_task`/`transition_item`/etc. can resolve "T203" the
+// same way they already resolve a real slug (T253). Explicit, not
+// reflection-derived from a naming convention — matching
+// [anchorTypeTable]'s own shape in context_packet.go — so a future field
+// merely named "...Number" never silently becomes a lookup key nobody
+// intended.
+var humanIDColumns = map[string]string{
+	"Task":      "task_id",
+	"Goal":      "goal_id",
+	"Decision":  "decision_number",
+	"Amendment": "amendment_number",
+}
+
 // orchSignalFlow returns the state flow for [Signal] records.
 // A signal starts as pending, is acknowledged or expires from any non-terminal state.
 func orchSignalFlow() StateFlow {
