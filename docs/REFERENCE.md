@@ -1144,6 +1144,24 @@ app.Content(m)
 
 `SQLRepo` uses `$N` positional placeholders (PostgreSQL / pgx compatible) and upserts via `ON CONFLICT (id) DO UPDATE`.
 
+### Schema migration (T246)
+
+`Create*Table` functions (`CreateSiteConfigTable`, `CreateBlockTables`, etc.) use `CREATE TABLE IF NOT EXISTS` — correct for a fresh install, but a no-op against a table that already exists in an older shape. `EnsureColumn` adds one column to an existing table when it is absent:
+
+```go
+func EnsureColumn(ctx context.Context, db DB, table, column, columnDDL string) error
+```
+
+```go
+if err := smeldr.EnsureColumn(ctx, db, "smeldr_site_configs", "custom_field", "TEXT NOT NULL DEFAULT ''"); err != nil {
+    log.Fatal(err)
+}
+```
+
+Idempotent — safe to call on every application startup. SQLite-only (`PRAGMA table_info`); a no-op on other database engines, which migrate by their own tooling. Additive only — never drops a column, so a downgrade after `EnsureColumn` has run simply leaves one unused column present, never lost data.
+
+**Ownership:** call `EnsureColumn` for a column your own type declares, at your own application's startup, the same way `Create*Table` is already called — there is no central registry of "columns the framework knows about." An application extending a framework-provided table (for example, adding custom fields to `SiteConfig`) calls `EnsureColumn` itself for its own added columns.
+
 ---
 
 ## Middleware

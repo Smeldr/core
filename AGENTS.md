@@ -85,6 +85,25 @@ Supported `smeldr_format` values:
 
 These tags are hints only. Smeldr performs no validation based on them.
 
+### Extending a framework-provided table
+
+If you add a field to a type backed by a table Smeldr itself creates
+(e.g. adding a custom column to `SiteConfig`), a fresh install picks it up
+automatically only if you also add the column to the table's own DDL — an
+already-provisioned instance needs its own migration. Use
+`smeldr.EnsureColumn` for that, at your own application's startup:
+
+```go
+if err := smeldr.EnsureColumn(ctx, db, "smeldr_site_configs", "custom_field", "TEXT NOT NULL DEFAULT ''"); err != nil {
+    log.Fatal(err)
+}
+```
+
+Idempotent — safe to call on every boot. SQLite-only; other database
+engines migrate by their own tooling. There is no central registry of
+columns Smeldr knows about — call `EnsureColumn` for a column you added,
+the same way you'd call a `Create*Table` function.
+
 ### Wiring a module
 
 This is the minimal wiring pattern from `example/blog/main.go`:

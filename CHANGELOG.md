@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.69.0] — 2026-08-16
+
+### Added
+- `EnsureColumn(ctx, db, table, column, columnDDL string) error` — a general, idempotent schema-migration path (T246): adds a column to an existing table when absent, additive-only, SQLite-only (a no-op on other engines). Generalizes four functions that independently hand-implemented the identical PRAGMA-probe-then-ALTER idiom (`MigrateNodeRevColumn`, `migrateTransitionReasonColumn`, `migrateTransitionStrictColumn`, `migrateStateFlowConflictColumns`) — all four are now thin wrappers over it, behaviour-preserving. Ownership: call it for a column your own type declares, at your own startup — no central registry; an application extending a framework-provided table calls it directly for its own columns. (A264, T246)
+
+### Fixed
+- `CreateSiteConfigTable` was missing the `scheduled_at`/`rev` columns `Node` requires — `SQLRepo.Save` failed against `smeldr_site_configs` on every call, including a freshly created table, not only a pre-existing one. Fixed by declaring both columns directly in the `CREATE TABLE` text (fresh installs) plus an `EnsureColumn` call for each (pre-existing installs that already ran the broken DDL). (A264, T246)
+
 ## [1.68.0] — 2026-08-16
 
 ### Added

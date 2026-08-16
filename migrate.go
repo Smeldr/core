@@ -120,6 +120,54 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 	return migrateTransitionStrictColumn(ctx, db)
 }
 
+// EnsureColumn adds column to table if it does not already exist, using
+// columnDDL as the column's full type/constraint clause — for example,
+// "TEXT NOT NULL DEFAULT" followed by an empty-string literal, or
+// "INTEGER NOT NULL DEFAULT 0". Idempotent — safe to call on every application
+// startup. A no-op on non-SQLite databases (PRAGMA table_info is
+// SQLite-specific, matching every existing column migration in this
+// package); other database engines migrate by their own tooling.
+//
+// Additive only — never drops a column, so downgrading to an older binary
+// after EnsureColumn has run leaves one unused column present, never lost
+// data or a broken older schema: older code that doesn't declare the
+// field simply never reads or writes it.
+//
+// Call EnsureColumn for a column your own type declares, at your own
+// application's startup, the same way Create*Table is already called —
+// there is no central registry of "columns the framework knows about."
+// An application extending a framework-provided table (T246's own
+// motivating incident: SiteConfig extended downstream, hand-patched
+// twice) calls EnsureColumn itself for its own added columns; ownership
+// follows whoever declared the field, not a shared migration list (T246).
+func EnsureColumn(ctx context.Context, db DB, table, column, columnDDL string) error {
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+quoteIdent(table)+")")
+	if err != nil {
+		return nil // non-SQLite — assume schema is current
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt *string
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			continue
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx,
+		"ALTER TABLE "+quoteIdent(table)+" ADD COLUMN "+quoteIdent(column)+" "+columnDDL,
+	); err != nil {
+		return fmt.Errorf("smeldr: EnsureColumn: %s.%s: %w", table, column, err)
+	}
+	return nil
+}
+
 // migrateTransitionReasonColumn adds the required_reason column to
 // smeldr_transitions on pre-existing SQLite databases that predate this
 // column (T149). Fresh installs on any DB engine already have the column via
@@ -128,34 +176,7 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 // A no-op on non-SQLite databases (PRAGMA not supported), same precedent
 // as migrateStateFlowConflictColumns.
 func migrateTransitionReasonColumn(ctx context.Context, db DB) error {
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_transitions)")
-	if err != nil {
-		return nil // non-SQLite — assume schema is current
-	}
-	defer rows.Close()
-	var hasRequiredReason bool
-	for rows.Next() {
-		var cid, notNull, pk int
-		var name, colType string
-		var dflt *string
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			continue
-		}
-		if name == "required_reason" {
-			hasRequiredReason = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if !hasRequiredReason {
-		if _, err := db.ExecContext(ctx,
-			`ALTER TABLE smeldr_transitions ADD COLUMN required_reason BOOLEAN NOT NULL DEFAULT FALSE`,
-		); err != nil {
-			return fmt.Errorf("smeldr: migrateTransitionReasonColumn: required_reason: %w", err)
-		}
-	}
-	return nil
+	return EnsureColumn(ctx, db, "smeldr_transitions", "required_reason", "BOOLEAN NOT NULL DEFAULT FALSE")
 }
 
 // migrateTransitionStrictColumn adds the strict column to smeldr_transitions
@@ -166,78 +187,17 @@ func migrateTransitionReasonColumn(ctx context.Context, db DB) error {
 // boot. A no-op on non-SQLite databases (PRAGMA not supported), same
 // precedent as migrateTransitionReasonColumn.
 func migrateTransitionStrictColumn(ctx context.Context, db DB) error {
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_transitions)")
-	if err != nil {
-		return nil // non-SQLite — assume schema is current
-	}
-	defer rows.Close()
-	var hasStrict bool
-	for rows.Next() {
-		var cid, notNull, pk int
-		var name, colType string
-		var dflt *string
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			continue
-		}
-		if name == "strict" {
-			hasStrict = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if !hasStrict {
-		if _, err := db.ExecContext(ctx,
-			`ALTER TABLE smeldr_transitions ADD COLUMN strict BOOLEAN NOT NULL DEFAULT FALSE`,
-		); err != nil {
-			return fmt.Errorf("smeldr: migrateTransitionStrictColumn: strict: %w", err)
-		}
-	}
-	return nil
+	return EnsureColumn(ctx, db, "smeldr_transitions", "strict", "BOOLEAN NOT NULL DEFAULT FALSE")
 }
 
 // migrateStateFlowConflictColumns adds the active_state and conflict_policy
 // columns to smeldr_state_flows when they are absent. Idempotent — safe to
 // call on every boot. A no-op on non-SQLite databases (PRAGMA not supported).
 func migrateStateFlowConflictColumns(ctx context.Context, db DB) error {
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_state_flows)")
-	if err != nil {
-		return nil // non-SQLite — assume schema is current
-	}
-	defer rows.Close()
-	var hasActiveState, hasConflictPolicy bool
-	for rows.Next() {
-		var cid, notNull, pk int
-		var name, colType string
-		var dflt *string
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			continue
-		}
-		switch name {
-		case "active_state":
-			hasActiveState = true
-		case "conflict_policy":
-			hasConflictPolicy = true
-		}
-	}
-	if err := rows.Err(); err != nil {
+	if err := EnsureColumn(ctx, db, "smeldr_state_flows", "active_state", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	if !hasActiveState {
-		if _, err := db.ExecContext(ctx,
-			`ALTER TABLE smeldr_state_flows ADD COLUMN active_state TEXT NOT NULL DEFAULT ''`,
-		); err != nil {
-			return fmt.Errorf("smeldr: migrateStateFlowConflictColumns: active_state: %w", err)
-		}
-	}
-	if !hasConflictPolicy {
-		if _, err := db.ExecContext(ctx,
-			`ALTER TABLE smeldr_state_flows ADD COLUMN conflict_policy TEXT NOT NULL DEFAULT ''`,
-		); err != nil {
-			return fmt.Errorf("smeldr: migrateStateFlowConflictColumns: conflict_policy: %w", err)
-		}
-	}
-	return nil
+	return EnsureColumn(ctx, db, "smeldr_state_flows", "conflict_policy", "TEXT NOT NULL DEFAULT ''")
 }
 
 // migrateLegacyTableNames renames any forge_* tables that still exist in the

@@ -375,3 +375,136 @@ an endpoint to the new event names). MINOR bump. Coverage: 96.2%.
 `go test -race ./...` clean. Level 2 amendment.
 
 ---
+
+## A264 — EnsureColumn, a general schema-migration path (T246)
+
+### Problem
+
+No schema migration mechanism existed. Every `Create*Table` function
+(`CreateAuditTable`, `CreateBlockTables`, `CreateSiteConfigTable`, …) uses
+`CREATE TABLE IF NOT EXISTS`, which does nothing to a table that already
+exists in an older shape — confirmed directly in source, `blocks.go:68`'s
+own comment already said so. Cited incident: `CreateSiteConfigTable` (core
+v1.58.4) shipped missing columns `SQLRepo.Save` requires, hand-patched
+twice in two downstream repos with no framework fix produced either time.
+Named as a real risk from M6 onward — a pilot instance upgrading to a core
+release with a changed table has no path that doesn't involve someone
+opening a SQL client on their own box.
+
+### The mechanism already existed, four times, unnamed
+
+Grepped every `Create*Table`/`migrate*` function before designing
+anything. Four independently implement the identical idiom by hand:
+`MigrateNodeRevColumn` (`storage.go`, A158, exported, parameterized on
+table, hardcoded to column `rev`), `migrateTransitionReasonColumn` (A220),
+`migrateTransitionStrictColumn` (A234), `migrateStateFlowConflictColumns`
+(A186) — all four: `PRAGMA table_info(table)`, scan for the column,
+`ALTER TABLE … ADD COLUMN` if absent, no-op on non-SQLite (`PRAGMA`
+unsupported — an existing, already-accepted boundary, unchanged here).
+Additive only, none ever drops a column.
+
+**Directly answers the "argue against the no-build-pipeline principle"
+requirement.** The conventional answer — an ordered migration-file list
+with a version table — is foreign to this codebase: no `migrations/`
+directory, no `schema_version` table, no codegen step exists anywhere in
+the project today. Importing one now would be new machinery for a problem
+this codebase has already been solving correctly by hand, four times.
+**Rejected in favour of naming and centralizing the idiom that already
+works**, not replacing it — the task's own explicit instruction not to
+"bundle a rewrite of `Create*Table`'s existing behaviour."
+
+### The mechanism
+
+New exported `EnsureColumn(ctx context.Context, db DB, table, column,
+columnDDL string) error` (`migrate.go`). Idempotent, additive-only,
+SQLite-only (matching every function it generalizes). The four existing
+functions became thin wrappers over it — behaviour-preserving; every one
+of their own existing tests passes unmodified, confirmed before writing
+anything new.
+
+### Answering the task's four required questions
+
+1. **Mechanism** — `EnsureColumn`, argued above against the ordered-list
+   alternative with direct evidence (four working hand-written precedents
+   already in the codebase), not a general appeal to principle.
+2. **Ownership** — whoever declares the field calls `EnsureColumn` for it,
+   at their own startup, the same way `Create*Table` already works today.
+   No central registry. An application extending a framework-provided
+   table (the `SiteConfig` incident's own shape) calls `EnsureColumn`
+   itself instead of hand-writing `ALTER TABLE` twice in two repos.
+3. **Downgrade** — explicitly unsupported, stated in `EnsureColumn`'s own
+   doc comment: additive-only, so a downgrade leaves one unused column
+   present, never lost data, never a broken older schema.
+4. **Startup detection** — `EnsureColumn` runs and fixes eagerly wherever
+   it is called, always at application startup (matching every existing
+   call site's own established timing), never deferred to first request.
+   A real `ALTER` failure surfaces as a real Go `error` from the startup
+   call chain. No separate detect-only mode: an additive `ALTER COLUMN`
+   is safe and idempotent, so eager auto-fix strictly dominates
+   eager-detect-then-manual-fix for this class of change. A framework
+   mechanism cannot detect a third party's own undeclared schema
+   requirement it was never told about — that remains the caller's own
+   responsibility per the ownership answer, the same as every other
+   opt-in Smeldr subsystem.
+
+### Live bug found during investigation, not assumed — the flagship fix
+
+Re-read `CreateSiteConfigTable`'s current DDL directly rather than
+trusting the task's own "already caused hand-patching twice" framing as
+historical only. Its `CREATE TABLE` text declared no `scheduled_at` and no
+`rev` column; `SiteConfig` embeds `Node`, which declares both
+unconditionally (`ScheduledAt *time.Time db:"scheduled_at"`, `Rev int
+db:"rev"`) — `SQLRepo.Save`'s `dbFields` reflection expects both
+regardless.
+
+**Reproduced live, not hypothetical:** a throwaway test —
+`CreateSiteConfigTable(db)` then `Save` on a *freshly created* table —
+failed immediately: `no such column: scheduled_at`. Broader than the
+task's own framing ("an instance that already has the table"): a
+brand-new instance was broken too, not only an upgrading one.
+`site_config_test.go`'s two existing tests never called `.Save()`, which
+is why this shipped unnoticed since v1.58.4.
+
+Direct fix-shape precedent found in `docs/ARCHITECTURE.md`'s own history:
+**A221** hit the identical bug class (`required_reason` added only via
+the SQLite-only migration, never in the `CREATE TABLE` text, so a fresh
+Postgres install never got it — caught by CI's pgx integration job). Same
+fix here: declare both columns in the `CREATE TABLE` text directly (fixes
+fresh installs) *and* call `EnsureColumn` for both right after (fixes
+pre-existing installs that already ran the broken DDL).
+
+### What stays out of scope, named not silently dropped
+
+`DynamicTypeRepo.setStatus`'s own identical gap for runtime-defined
+content types is not addressed — `DynamicTypeRepo` holds no
+`*WebhookStore`-style reference to a migration mechanism today, and
+wiring one through is separate work. Non-SQLite column migration remains
+out of scope, matching the existing boundary every generalized function
+already had. No other `Create*Table` function's own possible
+missing-column bugs were investigated beyond the one the task's own text
+names as the confirmed incident.
+
+### Tests
+
+4 new in `migrate_test.go` (`TestEnsureColumn_AddsColumn`, `_Idempotent`,
+`_NonSQLite`, `_AlterFails`); 5 new in `site_config_test.go`
+(`TestCreateSiteConfigTable_SaveSucceeds` — the regression pin for the
+live bug — `_MigratesPreexistingTable`, `_CreateFails`,
+`_ScheduledAtMigrationFails`, `_RevMigrationFails`, the last two using a
+fixture recreating the pre-fix table shape since `EnsureColumn`'s own
+`ALTER` branch is only reached when a column is genuinely missing).
+Existing tests for all four retrofitted functions pass unmodified.
+
+### Versioning
+
+New exported symbol (`EnsureColumn`); `CreateSiteConfigTable` behaviour
+fixed (a real bug, not a new capability, but consumer-observable —
+`SiteConfig` now actually works). No existing exported signature changes.
+MINOR bump, matching A262's own precedent (new exported symbol → MINOR).
+Coverage: 96.3%; `CreateSiteConfigTable` 100%, `EnsureColumn` 88.2% (the
+`rows.Scan`/`rows.Err` iteration-error branches are the same
+structurally-hard-to-trigger class already accepted elsewhere in this
+package, now consolidated into one place instead of duplicated
+uncovered across four). `go test -race ./...` clean. Level 2 amendment.
+
+---

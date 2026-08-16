@@ -263,7 +263,20 @@ smeldr.dev/
 │                     (state.go) both fall back to it, via a new orchestration.go humanIDColumns
 │                     map, when a slug lookup misses on a type with a human-facing identifier (e.g.
 │                     Task.TaskID) — so get_task("T203") and transition_item resolve the same way
-│                     slug already did (Amendment A262, T253)
+│                     slug already did (Amendment A262, T253);
+│                     MigrateNodeRevColumn(db, table) now a thin wrapper over migrate.go's new
+│                     EnsureColumn(ctx, db, table, column, columnDDL) error — generalizes four
+│                     independently hand-duplicated PRAGMA-probe-then-ALTER functions found across
+│                     this package into one; additive-only column migration for any table, called
+│                     by the application (or the framework) at its own startup, no central registry
+│                     of known columns. migrateTransitionReasonColumn/migrateTransitionStrictColumn/
+│                     migrateStateFlowConflictColumns (migrate.go) all now thin wrappers too,
+│                     behaviour-preserving. Live bug found and fixed: CreateSiteConfigTable's
+│                     (site_config.go) own CREATE TABLE text was missing scheduled_at/rev — Node
+│                     declares both, so SQLRepo.Save failed against any table it created, fresh
+│                     install or not; fixed by declaring both columns directly plus an EnsureColumn
+│                     call for pre-existing installs that already ran the old DDL, matching A221's
+│                     own precedent shape (Amendment A264, T246)
 ├── state.go          StateFlow, State, Transition — data-driven state machine types;
 │                     ConflictPolicy type (ConflictReject, ConflictSupersede constants);
 │                     StateFlow.ActiveState + StateFlow.ConflictPolicy optional fields;

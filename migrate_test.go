@@ -5,6 +5,65 @@ import (
 	"testing"
 )
 
+// — EnsureColumn (T246) ————————————————————————————————————————————————————
+
+func TestEnsureColumn_AddsColumn(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE ensure_column_test (
+			id   TEXT NOT NULL PRIMARY KEY,
+			slug TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	if err := EnsureColumn(ctx, db, "ensure_column_test", "note", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		t.Fatalf("EnsureColumn: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO ensure_column_test (id, slug, note) VALUES ('1', 'test', 'hi')`,
+	); err != nil {
+		t.Errorf("note column should exist after EnsureColumn, got: %v", err)
+	}
+}
+
+func TestEnsureColumn_Idempotent(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE ensure_column_idempotent_test (
+			id   TEXT NOT NULL PRIMARY KEY,
+			note TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	if err := EnsureColumn(ctx, db, "ensure_column_idempotent_test", "note", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := EnsureColumn(ctx, db, "ensure_column_idempotent_test", "note", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+}
+
+func TestEnsureColumn_NonSQLite(t *testing.T) {
+	db := &queryFailDB{}
+	if err := EnsureColumn(context.Background(), db, "any_table", "any_column", "TEXT"); err != nil {
+		t.Fatalf("non-SQLite: expected nil, got %v", err)
+	}
+}
+
+func TestEnsureColumn_AlterFails(t *testing.T) {
+	// Empty SQLite DB with no target table: PRAGMA returns empty rows (no
+	// error), column absent, then ALTER TABLE fails (no such table).
+	db := newSQLiteDB(t)
+	if err := EnsureColumn(context.Background(), db, "no_such_table", "note", "TEXT"); err == nil {
+		t.Error("expected error when ALTER TABLE has no target table, got nil")
+	}
+}
+
 // TestMigrateLegacyTableNames_destinationExists verifies that when both the
 // source (forge_*) and destination (smeldr_*) tables already exist — indicating
 // a partial migration from a previous run — the function returns nil and skips

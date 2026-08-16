@@ -43,8 +43,15 @@ func NewSiteConfigModule(db DB) *Module[SiteConfig] {
 
 // CreateSiteConfigTable creates the smeldr_site_configs table if it does not
 // exist. Call once at application startup before [NewSiteConfigModule].
+//
+// Also ensures the scheduled_at and rev columns [Node] requires, via
+// [EnsureColumn], for any table created before they were added to this
+// function's own CREATE TABLE text (T246) — without it, [SQLRepo.Save]
+// fails on every call, fresh install or not, since [Node] declares both
+// unconditionally.
 func CreateSiteConfigTable(db DB) error {
-	_, err := db.ExecContext(context.Background(), `
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS smeldr_site_configs (
 	id               TEXT NOT NULL PRIMARY KEY,
 	slug             TEXT NOT NULL DEFAULT 'site-config',
@@ -52,11 +59,18 @@ CREATE TABLE IF NOT EXISTS smeldr_site_configs (
 	created_at       DATETIME NOT NULL,
 	updated_at       DATETIME NOT NULL,
 	published_at     DATETIME,
+	scheduled_at     DATETIME,
+	rev              INTEGER NOT NULL DEFAULT 0,
 	site_name        TEXT NOT NULL DEFAULT '',
 	title_separator  TEXT NOT NULL DEFAULT '',
 	og_image         TEXT NOT NULL DEFAULT '',
 	x_handle         TEXT NOT NULL DEFAULT '',
 	head_script      TEXT NOT NULL DEFAULT ''
-)`)
-	return err
+)`); err != nil {
+		return err
+	}
+	if err := EnsureColumn(ctx, db, "smeldr_site_configs", "scheduled_at", "DATETIME"); err != nil {
+		return err
+	}
+	return EnsureColumn(ctx, db, "smeldr_site_configs", "rev", "INTEGER NOT NULL DEFAULT 0")
 }

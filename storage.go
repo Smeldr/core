@@ -910,30 +910,11 @@ func (r *SQLRepo[T]) Delete(ctx context.Context, id string) error {
 //
 //	smeldr.MigrateNodeRevColumn(db, "posts")
 //	smeldr.MigrateNodeRevColumn(db, "stories")
+//
+// A thin wrapper over the more general [EnsureColumn] (T246) — kept as its
+// own exported function for its existing callers' stability.
 func MigrateNodeRevColumn(db DB, table string) error {
-	ctx := context.Background()
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
-	if err != nil {
-		return nil // non-SQLite; assume schema is current
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid, notNull, pk int
-		var name, colType string
-		var dflt *string
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			continue
-		}
-		if name == "rev" {
-			return nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	_, err = db.ExecContext(ctx,
-		"ALTER TABLE "+quoteIdent(table)+" ADD COLUMN rev INTEGER NOT NULL DEFAULT 0")
-	return err
+	return EnsureColumn(context.Background(), db, table, "rev", "INTEGER NOT NULL DEFAULT 0")
 }
 
 func (r *SQLRepo[T]) tableName() string { return r.table }
