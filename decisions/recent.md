@@ -684,3 +684,142 @@ exported signature changes. MINOR bump. Coverage: 96.3%;
 `resolveItem` 100%. `go test -race ./...` clean. Level 2 amendment.
 
 ---
+
+## A263 — Webhook event coverage for orchestration Signals (T231)
+
+### Problem
+
+`App.TransitionItemWithReason` (`state.go:801`) called `fireAsyncTriggers`
+and nothing else — no webhook fired on any orchestration-type (`Task`,
+`Decision`, `Amendment`, `Goal`, `Signal`) state transition, so no agent or
+architect could learn a state changed except by asking. The same gap
+existed in `recordAuthorizationRequiredSignal` (`state.go:966`), the
+D42-class Signal insert recorded when an automated transition hits a
+role-gated boundary — a raw `INSERT` with no dispatch.
+
+**Priority raised 2026-08-14** — the desktop doorbell was assumed to cover
+interactive delivery, leaving this task for headless automation only. That
+premise did not survive the day: the doorbell's content did not reach brand
+at all, twice; both pings coincided with the receiving session hanging,
+five and ten minutes; and most directly, the doorbell tells the architect
+nothing — it is a thing architect sends, not a thing architect receives.
+T211's approval sitting unseen in the plan file for two days, with neither
+side aware, was the measured cost this closes.
+
+### Mechanism, argued not assumed
+
+The task's own text warned against assuming the existing `App.OnSignal` bus
+was the right delivery path just because webhooks already hang off it.
+Investigated at source before designing:
+
+`App.OnSignal`/`dispatchBus` (`smeldr.go:1101-1133`) is keyed on
+`LifecycleEvent`, a fixed, closed vocabulary — `AfterCreate`/`AfterUpdate`/
+`AfterPublish`/`AfterUnpublish`/`AfterArchive`/`AfterSchedule`/`AfterDelete`
+(`signals.go:19-56`). `webhookDispatch`'s own `signalToEventSuffix`
+(`webhook.go:253-272`) is a `switch` over exactly those seven constants.
+Orchestration compiled types run on `StateFlow`-declared, per-type,
+arbitrary-named states (`backlog`, `waiting-plan`, `plan-reviewing`,
+`commit-reviewing`, `resolved`, …) with no relationship to Draft/Published/
+Archived at all — there is no `AfterX` constant a `waiting-plan →
+plan-reviewing` transition could map to, and states are declared per-flow
+via `define_state_flow` (itself an MCP tool), not a fixed enum that a core
+release could keep pace with.
+
+Second, independent mismatch: `webhookDispatch`'s payload builder,
+`buildWebhookPayload` (`webhook.go:290`), requires a typed Go item
+(`extractNode(item)`). `TransitionItemWithReason` never loads one — it
+operates entirely at the raw-SQL layer (`resolveItemTable` + `id`/`slug`/
+`status` columns by name) because it handles both compiled and
+dynamic-content types generically without importing every registered Go
+struct. `recordAuthorizationRequiredSignal` is the same — a raw `INSERT`,
+no Go value in hand.
+
+**Conclusion: a dedicated dispatch beside `fireAsyncTriggers`**, not a bus
+emit — both mismatches are structural (closed vocabulary; typed-item
+requirement), verified against source rather than assumed from "webhooks
+already work that way."
+
+### Scope boundary against A258/D42, checked not relitigated
+
+`DrainEvalQueue`'s own successful automated-transition branch
+(`state.go`) applies a raw `UPDATE` directly — it does not call
+`TransitionItemWithReason` — and A258 already ruled that path
+provenance-only: firing publish-class signals for an automated transition
+would activate every human-publish subscriber with no operator decision
+behind it. This Amendment does not touch that branch or reopen that
+ruling. What it does wire is `recordAuthorizationRequiredSignal`'s own
+Signal-creation path — different in kind, since a Signal exists
+specifically to be seen and acted on by a human, so leaving it silent on
+the delivery side undermines D42's own purpose. Confirmed by grep: it is
+the only `INSERT INTO smeldr_signals` outside the normal `Module[T]`
+create path.
+
+### What stays out of scope, named not silently dropped
+
+`DynamicTypeRepo.setStatus` (`dynamic.go:228`) has the identical gap —
+`fireAsyncTriggers` only, no webhook — for runtime-defined content types'
+own custom state flows. `DynamicTypeRepo` holds no `*WebhookStore`/pool
+reference today (only `db`, `rs`, `typeName`), and wiring that through is
+separate, real work this task's own title ("webhook event coverage for
+orchestration Signals") did not ask for.
+
+### Implementation
+
+`webhook.go`: the endpoint-lookup + enqueue tail extracted out of
+`webhookDispatch` into a new shared `enqueueWebhookEvent(ctx, store, pool,
+eventName, payload []byte)` — no behaviour change to `webhookDispatch`
+itself, pure extraction, its own existing tests pass unchanged. New
+`transitionWebhookData` struct (`Type`, `ID`, `Slug`, `FromState`,
+`ToState`, `Reason`) and `dispatchTransitionWebhook(ctx, store, pool,
+eventName string, data transitionWebhookData)` — nil-safe no-op when
+`store`/`pool` are nil, matching `App.Webhooks` being opt-in.
+
+`state.go`: `TransitionItemWithReason` calls `dispatchTransitionWebhook`
+immediately after `fireAsyncTriggers`, event name `strings.ToLower(typeName)
++ ".transitioned"` (e.g. `task.transitioned`), carrying `from_state`/
+`to_state`/`reason`. `recordAuthorizationRequiredSignal` gains two new
+unexported params, `store *WebhookStore, pool *workerPool` (its one call
+site, in `DrainEvalQueue`, already holds `a.webhookStore`/`a.webhookPool`)
+— fires `"signal.created"` right after its own successful `INSERT`, the
+exact event name a human-created Signal already produces via the normal
+create path, so a D42-triggered Signal is indistinguishable from a
+human-created one to a webhook subscriber.
+
+`orchestration.go`: folded in per D50 same cycle — `orchTaskFlow`'s
+`Name: "architect-task"` → `"agent-task"`, generic behaviour under a
+role-specific name was the layering smell.
+
+### Docs
+
+`docs/REFERENCE.md`: new "Orchestration transition events (T231)" section
+documenting the `"{type}.transitioned"` convention and `signal.created`
+reuse; `agent-task (9 states)` rename (state count unchanged by D58).
+`docs/FEATURELIST.md`: `agent-task flow` rename. `docs/ARCHITECTURE.md`:
+`state.go` package-map entry extended. `AGENTS.md`: webhook-rules bullet
+added naming the new event convention for AI assistants wiring
+`create_webhook`.
+
+### Tests
+
+New in `webhook_test.go`: `TestEnqueueWebhookEvent_success`,
+`_lookupError`, `_enqueueError`; `TestDispatchTransitionWebhook_nilStore`,
+`_nilPool`, `_success`. New in `state_transition_item_test.go`:
+`TestApp_TransitionItemWithReason_FiresTransitionWebhook`,
+`_NoWebhookStore`, `TestDrainEvalQueue_AuthorizationRequiredSignal_FiresWebhook`
+(all through the real entry points, not the dispatch functions directly).
+Two existing tests (`TestRecordAuthorizationRequiredSignal_Success`,
+`_InsertError`) updated for the new signature. One existing test
+(`TestTaskFlow_definition`) updated for the renamed flow name.
+
+### Versioning
+
+No exported Go symbol added or changed — every new identifier
+(`enqueueWebhookEvent`, `transitionWebhookData`, `dispatchTransitionWebhook`)
+is unexported, and `recordAuthorizationRequiredSignal`'s signature change
+is internal (its one call site updated in the same commit). New webhook
+event types becoming deliverable is a real, consumer-observable capability
+for anyone with `App.Webhooks` wired, opt-in (an operator must subscribe
+an endpoint to the new event names). MINOR bump. Coverage: 96.2%.
+`go test -race ./...` clean. Level 2 amendment.
+
+---

@@ -299,7 +299,19 @@ smeldr.dev/
 │                     second query would be redundant); "" (fail-open) when none registered.
 │                     Used by module.go's applyDefaultStatus to default an omitted create-time
 │                     status to the type's real initial state instead of the literal Draft
-│                     constant (Amendment A225, T180)
+│                     constant (Amendment A225, T180);
+│                     TransitionItemWithReason now calls dispatchTransitionWebhook (webhook.go)
+│                     right after fireAsyncTriggers — a dedicated delivery path beside it, not a
+│                     bus emit, because App.OnSignal's LifecycleEvent vocabulary is fixed to
+│                     Draft/Published/Archived semantics and buildWebhookPayload requires a typed
+│                     Go item, neither of which fits a StateFlow-driven transition on an
+│                     arbitrary named state or the D42-class Signal recordAuthorizationRequiredSignal
+│                     inserts by raw SQL; event name convention "{type}.transitioned", nil-safe
+│                     when App.Webhooks was never wired; recordAuthorizationRequiredSignal gained
+│                     store/pool params and fires "signal.created" — the same event name a
+│                     human-created Signal already produces — so a D42-triggered Signal is
+│                     indistinguishable from a human-created one to a webhook subscriber
+│                     (Amendment A263, T231)
 ├── audit.go          AuditRecord, AuditFilter, AuditStore interface, NewAuditStore(DB), CreateAuditTable(DB),
 │                     newAuditHandler (unexported); GET /_audit mounted by App.Handler() (Amendment A97)
 ├── provenance.go     ProvenanceRecord, ProvenanceFilter, ProvenanceStore interface, NewProvenanceStore(DB),

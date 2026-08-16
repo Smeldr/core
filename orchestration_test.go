@@ -72,11 +72,11 @@ func TestSignalFlow_definition(t *testing.T) {
 	}
 }
 
-// TestTaskFlow_definition verifies the architect-task flow definition.
+// TestTaskFlow_definition verifies the agent-task flow definition.
 func TestTaskFlow_definition(t *testing.T) {
 	f := orchTaskFlow()
-	if f.Name != "architect-task" {
-		t.Errorf("Name = %q, want %q", f.Name, "architect-task")
+	if f.Name != "agent-task" {
+		t.Errorf("Name = %q, want %q", f.Name, "agent-task")
 	}
 	if f.TypeName != "Task" {
 		t.Errorf("TypeName = %q, want %q", f.TypeName, "Task")

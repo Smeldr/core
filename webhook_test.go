@@ -509,3 +509,109 @@ func TestWebhookDispatch_enqueueError(t *testing.T) {
 		t.Errorf("expected nil, got %v", err)
 	}
 }
+
+// — dispatchTransitionWebhook / enqueueWebhookEvent (T231) ——————————————————
+
+func TestEnqueueWebhookEvent_success(t *testing.T) {
+	pool, store := outboundTestDB(t)
+	createWebhookEndpointsTable(t, store.db)
+	ctx := context.Background()
+	_, _, err := store.Create(ctx, "https://8.8.8.8/hook", []string{"task.transitioned"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	enqueueWebhookEvent(ctx, store, pool, "task.transitioned", []byte(`{"event":"task.transitioned"}`))
+	endpoints, err := store.EndpointsForEvent(ctx, "task.transitioned")
+	if err != nil {
+		t.Fatalf("EndpointsForEvent: %v", err)
+	}
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
+	}
+	jobs, err := pool.ListJobsForEndpoint(ctx, endpoints[0].ID)
+	if err != nil {
+		t.Fatalf("ListJobsForEndpoint: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 enqueued job, got %d", len(jobs))
+	}
+	if jobs[0].Event != "task.transitioned" {
+		t.Errorf("Event = %q, want %q", jobs[0].Event, "task.transitioned")
+	}
+}
+
+func TestEnqueueWebhookEvent_lookupError(t *testing.T) {
+	store := NewWebhookStore(&errQueryDB{}, []byte("k"))
+	pool := newWorkerPool(&errExecDB{}, store, realClock{}, 1)
+	// EndpointsForEvent fails — function logs and returns, no panic.
+	enqueueWebhookEvent(context.Background(), store, pool, "task.transitioned", []byte(`{}`))
+}
+
+func TestEnqueueWebhookEvent_enqueueError(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	createWebhookEndpointsTable(t, db)
+	store := NewWebhookStore(db, []byte("test-key-32bytes-xxxxxxxxxxxx!!!"))
+	enc, _ := store.encryptSecret([]byte("plain"))
+	_, _ = db.ExecContext(ctx,
+		`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, active, created_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+		"ep-1", `["task.transitioned"]`, "https://8.8.8.8/hook", enc, 1, time.Now().UTC(),
+	)
+	// Pool uses errExecDB → Enqueue always fails (INSERT into smeldr_outbound_jobs errors).
+	pool := newWorkerPool(&errExecDB{}, store, realClock{}, 1)
+	// Enqueue error is logged, not returned — no panic.
+	enqueueWebhookEvent(ctx, store, pool, "task.transitioned", []byte(`{}`))
+}
+
+func TestDispatchTransitionWebhook_nilStore(t *testing.T) {
+	// nil store — no-op, no panic.
+	dispatchTransitionWebhook(context.Background(), nil, nil, "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
+}
+
+func TestDispatchTransitionWebhook_nilPool(t *testing.T) {
+	store := NewWebhookStore(nil, []byte("k"))
+	// nil pool — no-op, no panic.
+	dispatchTransitionWebhook(context.Background(), store, nil, "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
+}
+
+func TestDispatchTransitionWebhook_success(t *testing.T) {
+	pool, store := outboundTestDB(t)
+	createWebhookEndpointsTable(t, store.db)
+	ctx := context.Background()
+	_, _, err := store.Create(ctx, "https://8.8.8.8/hook", []string{"task.transitioned"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	dispatchTransitionWebhook(ctx, store, pool, "task.transitioned", transitionWebhookData{
+		Type: "task", ID: "task-1", Slug: "t231", FromState: "active", ToState: "waiting-plan", Reason: "",
+	})
+	endpoints, err := store.EndpointsForEvent(ctx, "task.transitioned")
+	if err != nil {
+		t.Fatalf("EndpointsForEvent: %v", err)
+	}
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
+	}
+	jobs, err := pool.ListJobsForEndpoint(ctx, endpoints[0].ID)
+	if err != nil {
+		t.Fatalf("ListJobsForEndpoint: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 enqueued job, got %d", len(jobs))
+	}
+	var payload WebhookEventPayload
+	if err := json.Unmarshal(jobs[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.Event != "task.transitioned" {
+		t.Errorf("Event = %q, want %q", payload.Event, "task.transitioned")
+	}
+	var data transitionWebhookData
+	if err := json.Unmarshal(payload.Data, &data); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if data.Type != "task" || data.ID != "task-1" || data.Slug != "t231" ||
+		data.FromState != "active" || data.ToState != "waiting-plan" {
+		t.Errorf("data = %+v, unexpected", data)
+	}
+}

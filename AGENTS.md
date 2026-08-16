@@ -499,6 +499,12 @@ These tools are available when the site has `App.Webhooks(store)` configured:
 - The signing secret is returned once at creation — deliver it securely
 - `list_webhooks` never returns secrets
 - Use `list_webhooks` before `delete_webhook` to confirm the ID
+- Orchestration state transitions (`Task`/`Decision`/`Amendment`/`Goal`/`Signal`, via
+  the `transition_item` tool) fire a separate `{type}.transitioned` event
+  (e.g. `task.transitioned`) — subscribe to it, not `created`/`updated`/`published`,
+  to observe orchestration state changes; a `Signal` created automatically when a
+  role-gated automated transition is blocked fires `signal.created`, same as a
+  human-created Signal
 
 ### Redirect management tools (Editor role required)
 

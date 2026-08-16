@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.68.0] — 2026-08-16
+
+### Added
+- Webhook event coverage for orchestration state transitions: `App.TransitionItem`/`TransitionItemWithReason` now fire a `"{type}.transitioned"` webhook event (e.g. `task.transitioned`) after a successful state-flow transition on a compiled orchestration type (`Task`, `Decision`, `Amendment`, `Goal`, `Signal`), carrying `from_state`/`to_state`/`reason` in the payload. A `Signal` created by `DrainEvalQueue` when an automated transition hits a role-gated boundary (D42) now fires `"signal.created"` — the same event name a human-created Signal already produces. This is a dedicated delivery path beside `fireAsyncTriggers`, not the `App.OnSignal` bus — the bus's `LifecycleEvent` vocabulary is fixed to Draft/Published/Archived semantics and its payload builder requires a typed Go item, neither of which fits a `StateFlow`-driven transition on an arbitrary named state. No exported Go symbol added — entirely opt-in via existing `App.Webhooks`/`create_webhook` subscription. (A263, T231)
+
+### Changed
+- `orchTaskFlow`'s flow name renamed `"architect-task"` → `"agent-task"` — generic behaviour under a role-specific name was the layering smell. (A263, D50, T231)
+
 ## [1.67.0] — 2026-08-16
 
 ### Added

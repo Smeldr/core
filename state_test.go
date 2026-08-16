@@ -3528,7 +3528,7 @@ func TestRecordAuthorizationRequiredSignal_Success(t *testing.T) {
 		t.Fatalf("CreateOrchestrationTables: %v", err)
 	}
 	ctx := context.Background()
-	if err := recordAuthorizationRequiredSignal(ctx, db, "GateItem", "item-8", "reviewing", "approved", "reviewer"); err != nil {
+	if err := recordAuthorizationRequiredSignal(ctx, db, nil, nil, "GateItem", "item-8", "reviewing", "approved", "reviewer"); err != nil {
 		t.Fatalf("recordAuthorizationRequiredSignal: %v", err)
 	}
 	var sender, receiver, signalType, status string
@@ -3546,7 +3546,7 @@ func TestRecordAuthorizationRequiredSignal_Success(t *testing.T) {
 func TestRecordAuthorizationRequiredSignal_InsertError(t *testing.T) {
 	db := newMigratedDB(t)
 	// smeldr_signals table deliberately not created.
-	err := recordAuthorizationRequiredSignal(context.Background(), db, "GateItem", "item-9", "reviewing", "approved", "reviewer")
+	err := recordAuthorizationRequiredSignal(context.Background(), db, nil, nil, "GateItem", "item-9", "reviewing", "approved", "reviewer")
 	if err == nil {
 		t.Fatal("expected error from INSERT into missing smeldr_signals, got nil")
 	}

@@ -2579,6 +2579,24 @@ Fires after a node transitions to `Scheduled` status via `MCPSchedule`.
 Subscribe with `m.On(smeldr.AfterSchedule, ...)` or use it as a webhook
 event name suffix (`"mytype.scheduled"`).
 
+### Orchestration transition events (T231)
+
+`App.TransitionItem`/`TransitionItemWithReason` — the mechanism behind the
+MCP `transition_item` tool — fire a `"{type}.transitioned"` webhook event
+after a successful state-flow transition on a compiled orchestration type
+(`Task`, `Decision`, `Amendment`, `Goal`, `Signal`), e.g. `task.transitioned`.
+The payload's `data` object carries `type`, `id`, `slug`, `from_state`,
+`to_state`, and `reason` (when supplied). This is a separate delivery path
+from the `App.OnSignal` bus above — the bus's `LifecycleEvent` vocabulary
+(created/updated/published/…) doesn't fit an arbitrary per-flow state name,
+so subscribe to `"{type}.transitioned"` specifically, not the created/
+updated/… events, to observe orchestration state changes.
+
+A `Signal` created by `DrainEvalQueue` when an automated transition hits a
+role-gated boundary (D42) fires the same `"signal.created"` event a
+human-created Signal already produces via the normal create path — a
+webhook subscriber cannot distinguish the two by event name.
+
 ### Webhook delivery
 
 - **Signing:** HMAC-SHA256 of `"<unix_ts>.<body>"`. Preferred header:
@@ -3628,7 +3646,7 @@ smeldr.RegisterOrchestrationTypes(app, db)
 | Type | Table | State flow | Key fields |
 |------|-------|------------|------------|
 | `Signal` | `smeldr_signals` | signal-protocol (4 states) | sender, receiver, signal_type, message, task_ref, sequence |
-| `Task` | `smeldr_tasks` | architect-task (9 states) | task_id, priority, band, size, description, note_ref |
+| `Task` | `smeldr_tasks` | agent-task (9 states) | task_id, priority, band, size, description, note_ref |
 | `Decision` | `smeldr_decisions` | governance-decision (5 states) | decision_number, scope, body, next_eval_at, eval_note |
 | `Amendment` | `smeldr_amendments` | amendment-lifecycle (6 states) | amendment_number, amendment_type, version, commit_hash, pilot, summary |
 | `Goal` | `smeldr_goals` | goal-lifecycle (4 states) | goal_id, priority, band, size, description |

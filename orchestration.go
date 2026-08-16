@@ -616,7 +616,7 @@ func orchSignalFlow() StateFlow {
 // into "resolved" with no explanation is the same problem one level down.
 func orchTaskFlow() StateFlow {
 	return StateFlow{
-		Name:     "architect-task",
+		Name:     "agent-task",
 		TypeName: "Task",
 		States: []State{
 			{Name: "backlog", IsInitial: true},

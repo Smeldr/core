@@ -274,7 +274,7 @@ MCP resource subscriptions (Beta):
 ## Orchestration types — Experimental
 
 - `Signal` content type — protocol message between pilots and the architect (signal-protocol flow: pending -> read -> acknowledged/expired)
-- `Task` content type — work item in the architect/pilot state machine (architect-task flow: backlog -> active -> ... -> done/deferred)
+- `Task` content type — work item in the architect/pilot state machine (agent-task flow: backlog -> active -> ... -> done/deferred)
 - `Decision` content type — ratified architectural decision with re-evaluation cycle (governance-decision flow: proposed -> ratified -> ... -> superseded/archived)
 - `Amendment` content type — committed changeset linking a Task to its code implementation (amendment-lifecycle flow: scoped -> in-progress -> commit-ready -> committed -> merged/rejected)
 - `Goal` content type — work goal with priority, band, and size; linked to Decisions and Tasks via the relation graph (goal-lifecycle flow: open -> in-progress -> done/resolved, open <-> parked, parked -> resolved)

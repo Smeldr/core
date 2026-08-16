@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -454,5 +455,175 @@ func TestApp_TransitionItemWithReason_Dynamic_RequiredReason(t *testing.T) {
 	}
 	if result["status"] != "published" {
 		t.Errorf("result status = %v, want \"published\"", result["status"])
+	}
+}
+
+// — webhook event coverage for orchestration transitions (T231) ————————————
+
+// wireWebhooksForTest creates the three webhook-delivery tables and calls
+// app.Webhooks(store) — TransitionItemWithReason's dispatchTransitionWebhook
+// call reads a.webhookStore/a.webhookPool, both nil until this runs.
+func wireWebhooksForTest(t *testing.T, app *App, db *sql.DB) *WebhookStore {
+	t.Helper()
+	ctx := context.Background()
+	createWebhookEndpointsTable(t, db)
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_outbound_jobs (
+			id TEXT PRIMARY KEY, endpoint_id TEXT NOT NULL, target_url TEXT NOT NULL,
+			secret_enc TEXT NOT NULL, payload BLOB NOT NULL, event TEXT NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0, next_retry_at TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending'
+		)`); err != nil {
+		t.Fatalf("create smeldr_outbound_jobs: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_delivery_logs (
+			id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempted_at TIMESTAMPTZ NOT NULL,
+			status_code INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		t.Fatalf("create smeldr_delivery_logs: %v", err)
+	}
+	store := NewWebhookStore(db, []byte(transitionItemTestSecret))
+	app.Webhooks(store)
+	return store
+}
+
+// TestApp_TransitionItemWithReason_FiresTransitionWebhook confirms the real
+// entry point (App.TransitionItemWithReason, not dispatchTransitionWebhook
+// directly) enqueues a "signal.transitioned" job when a subscribed endpoint
+// exists — the end-to-end path T231/A263 adds.
+func TestApp_TransitionItemWithReason_FiresTransitionWebhook(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	insertSignal(t, db, "sig-2", "sig-2-slug", "pending")
+	store := wireWebhooksForTest(t, app, db)
+	ctx := context.Background()
+
+	_, _, err := store.Create(ctx, "https://8.8.8.8/hook", []string{"signal.transitioned"})
+	if err != nil {
+		t.Fatalf("Create webhook endpoint: %v", err)
+	}
+
+	result, err := app.TransitionItemWithReason(ctx, "Signal", "sig-2-slug", "read", "because")
+	if err != nil {
+		t.Fatalf("TransitionItemWithReason: %v", err)
+	}
+	if result["status"] != "read" {
+		t.Fatalf("result status = %v, want \"read\"", result["status"])
+	}
+
+	endpoints, err := store.EndpointsForEvent(ctx, "signal.transitioned")
+	if err != nil {
+		t.Fatalf("EndpointsForEvent: %v", err)
+	}
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
+	}
+	jobs, err := app.WebhookPool().ListJobsForEndpoint(ctx, endpoints[0].ID)
+	if err != nil {
+		t.Fatalf("ListJobsForEndpoint: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 enqueued job, got %d", len(jobs))
+	}
+	var payload WebhookEventPayload
+	if err := json.Unmarshal(jobs[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	var data transitionWebhookData
+	if err := json.Unmarshal(payload.Data, &data); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if data.Type != "signal" || data.ID != "sig-2" || data.Slug != "sig-2-slug" ||
+		data.FromState != "pending" || data.ToState != "read" || data.Reason != "because" {
+		t.Errorf("data = %+v, unexpected", data)
+	}
+}
+
+// TestApp_TransitionItemWithReason_NoWebhookStore confirms the transition
+// still succeeds, with no panic, when App.Webhooks was never called —
+// dispatchTransitionWebhook's nil-safety exercised through the real entry
+// point rather than only unit-tested directly.
+func TestApp_TransitionItemWithReason_NoWebhookStore(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	insertSignal(t, db, "sig-3", "sig-3-slug", "pending")
+
+	result, err := app.TransitionItemWithReason(context.Background(), "Signal", "sig-3-slug", "read", "")
+	if err != nil {
+		t.Fatalf("TransitionItemWithReason: %v", err)
+	}
+	if result["status"] != "read" {
+		t.Errorf("result status = %v, want \"read\"", result["status"])
+	}
+}
+
+// TestDrainEvalQueue_AuthorizationRequiredSignal_FiresWebhook confirms the
+// D42-class Signal recorded by recordAuthorizationRequiredSignal (via
+// DrainEvalQueue's role-gated branch) fires the same "signal.created" event
+// a human-created Signal already produces — T231/A263's second delivery
+// path, exercised end-to-end through DrainEvalQueue rather than calling
+// recordAuthorizationRequiredSignal directly.
+func TestDrainEvalQueue_AuthorizationRequiredSignal_FiresWebhook(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	store := wireWebhooksForTest(t, app, db)
+	ctx := context.Background()
+
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "gate-item-flow",
+		TypeName: "GateItem",
+		States:   []State{{Name: "reviewing", IsInitial: true}, {Name: "approved"}},
+		Transitions: []Transition{
+			{From: "reviewing", To: "approved", RequiredRole: "reviewer"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE gate_items (
+			id TEXT PRIMARY KEY, slug TEXT NOT NULL, status TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+		)`); err != nil {
+		t.Fatalf("create gate_items: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO gate_items (id, slug, status, created_at, updated_at) VALUES ($1,$2,$3,$4,$5)`,
+		"gi-1", "gi-1-slug", "reviewing", now, now,
+	); err != nil {
+		t.Fatalf("insert gate_items row: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES ($1,$2,$3,$4,$5)`,
+		"eq-1", "GateItem", "gi-1", "approved", now,
+	); err != nil {
+		t.Fatalf("insert smeldr_eval_queue row: %v", err)
+	}
+
+	if _, _, err := store.Create(ctx, "https://8.8.8.8/hook", []string{"signal.created"}); err != nil {
+		t.Fatalf("Create webhook endpoint: %v", err)
+	}
+
+	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 0 || skipped != 1 {
+		t.Fatalf("triggered=%d skipped=%d, want 0,1 (role-gated)", triggered, skipped)
+	}
+
+	endpoints, err := store.EndpointsForEvent(ctx, "signal.created")
+	if err != nil {
+		t.Fatalf("EndpointsForEvent: %v", err)
+	}
+	jobs, err := app.WebhookPool().ListJobsForEndpoint(ctx, endpoints[0].ID)
+	if err != nil {
+		t.Fatalf("ListJobsForEndpoint: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 enqueued job, got %d", len(jobs))
+	}
+	if jobs[0].Event != "signal.created" {
+		t.Errorf("Event = %q, want %q", jobs[0].Event, "signal.created")
 	}
 }

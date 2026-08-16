@@ -317,8 +317,8 @@ func buildWebhookPayload(typeName string, item any, sig LifecycleEvent) ([]byte,
 // webhookDispatch is the [App.OnSignal] handler registered by [App.Webhooks].
 // It builds the webhook event payload from ev and enqueues an [OutboundJob]
 // for each active endpoint subscribed to the event. Errors during payload
-// build or endpoint lookup are logged but not returned, because the bus logs
-// handler errors at Warn level; returning nil avoids double-logging.
+// build are logged but not returned, because the bus logs handler errors at
+// Warn level; returning nil avoids double-logging.
 func webhookDispatch(ctx context.Context, ev SignalEvent, sig LifecycleEvent, store *WebhookStore, pool *workerPool) error {
 	eventName, ok := buildEventName(ev.Type, sig)
 	if !ok {
@@ -329,10 +329,23 @@ func webhookDispatch(ctx context.Context, ev SignalEvent, sig LifecycleEvent, st
 		slog.WarnContext(ctx, "webhook payload build failed", "error", err, "signal", sig, "type", ev.Type)
 		return nil
 	}
+	enqueueWebhookEvent(ctx, store, pool, eventName, payload)
+	return nil
+}
+
+// enqueueWebhookEvent looks up endpoints subscribed to eventName and enqueues
+// an [OutboundJob] carrying payload for each. Shared by [webhookDispatch]
+// (content lifecycle events, [App.OnSignal]-driven) and
+// [dispatchTransitionWebhook] (state-flow transitions and D42-class Signal
+// emissions, T231) — same delivery tail, two different payload-building
+// paths, because [buildWebhookPayload] requires a typed Go item that neither
+// caller of the transition path has in hand. Errors during endpoint lookup
+// or enqueue are logged but not returned — delivery is always best-effort.
+func enqueueWebhookEvent(ctx context.Context, store *WebhookStore, pool *workerPool, eventName string, payload []byte) {
 	endpoints, err := store.EndpointsForEvent(ctx, eventName)
 	if err != nil {
 		slog.WarnContext(ctx, "webhook endpoints lookup failed", "error", err, "event", eventName)
-		return nil
+		return
 	}
 	now := time.Now().UTC()
 	for _, ep := range endpoints {
@@ -352,7 +365,50 @@ func webhookDispatch(ctx context.Context, ev SignalEvent, sig LifecycleEvent, st
 			slog.WarnContext(ctx, "webhook enqueue failed", "error", err, "endpoint", ep.ID)
 		}
 	}
-	return nil
+}
+
+// transitionWebhookData is the Data payload for a state-flow transition or
+// D42-class Signal-emission webhook event (T231) — distinct from
+// [webhookEventData] because these callers never load a typed Go item; they
+// operate on raw id/slug/status columns for a type the registry names only
+// by string.
+type transitionWebhookData struct {
+	Type      string `json:"type"`
+	ID        string `json:"id"`
+	Slug      string `json:"slug"`
+	FromState string `json:"from_state,omitempty"`
+	ToState   string `json:"to_state"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// dispatchTransitionWebhook enqueues a webhook delivery for eventName when a
+// [WebhookStore]/worker pool are wired (nil-safe no-op otherwise — matches
+// [App.Webhooks] being opt-in). A dedicated path beside [fireAsyncTriggers]
+// rather than the [App.OnSignal] bus (T231): the bus's [LifecycleEvent]
+// vocabulary is fixed to content-module Draft/Published/Archived semantics
+// and [buildWebhookPayload] requires a typed Go item — neither fits a
+// [StateFlow]-driven transition on an arbitrary named state, or a Signal
+// inserted by raw SQL with no corresponding Go value in hand.
+func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *workerPool, eventName string, data transitionWebhookData) {
+	if store == nil || pool == nil {
+		return
+	}
+	dataJSON, err := json.Marshal(data)
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: transition webhook payload build failed", "error", err, "event", eventName)
+		return
+	}
+	payload, err := json.Marshal(WebhookEventPayload{
+		ID:        NewID(),
+		Event:     eventName,
+		Timestamp: time.Now().UTC(),
+		Data:      dataJSON,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: transition webhook payload marshal failed", "error", err, "event", eventName)
+		return
+	}
+	enqueueWebhookEvent(ctx, store, pool, eventName, payload)
 }
 
 // validateWebhookURL validates rawURL for SSRF safety. Returns a
