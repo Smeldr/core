@@ -366,6 +366,21 @@ Guest   →  read Published content only (unauthenticated)
 Higher roles inherit all permissions below them.
 `smeldr.Write(smeldr.Author)` means Author, Editor, and Admin.
 
+### RoleStore vs. an organization-membership model (Non-Decision, T151)
+
+`RoleStore`/the built-in hierarchy above answers one question only: what
+can this actor do to *this instance's own content*. It is deliberately
+not a model of organization membership, billing authority, or
+account-level access — `smeldr.dev/cloud`'s own `pilotorg.Role`
+(`Owner`/`Admin`/`Member`) answers that different question, for its own
+multi-tenant layer sitting above however many Smeldr instances an
+organization owns. The two are not reconciled into one shared vocabulary,
+and should not be: checking "can this actor read/write this instance's
+own content" always means `RoleStore`; checking "can this actor act on an
+organization or its instances" is a `pilotorg.Role`-shaped question that
+does not belong in core at all. Do not translate one into the other —
+check whichever question the call site is actually asking.
+
 ### Custom roles
 
 ```go

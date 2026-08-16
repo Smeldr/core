@@ -188,3 +188,58 @@ No exported Go symbols added, removed, or renamed.
 No build, vet, or test changes required.
 
 ---
+
+## Non-Decision — Unified RoleStore/pilotorg.Role model (T151)
+
+**Date:** 2026-08-16
+**Status:** Declined — deliberately separate axes, no reconciliation needed
+**Level:** 1 (docs-only — no code change)
+
+### What was considered
+
+Whether core's `RoleStore` (`Guest < Author < Editor < Admin`, a
+per-instance content-permission hierarchy) and Cloud's `pilotorg.Role`
+(`Owner > Admin > Member`, a per-org membership/billing hierarchy) should
+be reconciled into one shared model. Open since 2026-07-18, deliberately
+left unreconciled at the time; cited as actively blocking T226 (cloud
+read-route auth) a month later.
+
+### Decision
+
+Smeldr will not unify `RoleStore` and `pilotorg.Role` into a single model.
+
+### Rationale
+
+The two answer genuinely different questions. `RoleStore` governs what an
+actor can do to a single Smeldr instance's own content — read a draft,
+publish, configure the app. `pilotorg.Role` governs what an actor can do
+to the *organization*, across however many instances it owns — invite a
+member, manage billing, take an account-level irreversible action.
+Neither question is a special case of the other; forcing them into one
+shared vocabulary would lose the distinction that makes either one
+meaningful. Same shape as D56's `Standing`/`Status` separation: two axes
+answering two different questions stay two axes.
+
+T226's own blocker — auth on Cloud's `/cloud/read/trace/*` and
+`/cloud/read/pulse/*` routes — never actually needed a unified model.
+Both routes read a single instance's own `db`/`rs` handles directly (no
+`orgID` parameter), so the real question is "is this caller a member of
+the org that owns this instance," which `pilotorg.Role` already answers
+and already checks elsewhere in the same repo
+(`internal/authapi/routes.go:186,200`). T226 is unblocked, retargeted to
+its own real fix (wire that existing check onto the two routes directly)
+— no core change, no reconciliation required.
+
+### Developer pattern
+
+Checking "can this actor read/write this instance's own content" →
+`RoleStore`. Checking "can this actor act on this organization or its
+instances" → `pilotorg.Role` (Cloud only). Do not translate one into the
+other — check whichever question the call site is actually asking.
+
+### Consequences
+
+No exported Go symbols added, removed, or renamed.
+No build, vet, or test changes required.
+
+---
