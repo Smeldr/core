@@ -276,7 +276,13 @@ smeldr.dev/
 │                     declares both, so SQLRepo.Save failed against any table it created, fresh
 │                     install or not; fixed by declaring both columns directly plus an EnsureColumn
 │                     call for pre-existing installs that already ran the old DDL, matching A221's
-│                     own precedent shape (Amendment A264, T246)
+│                     own precedent shape (Amendment A264, T246); sortItems/sortPair gain numeric
+│                     sort support via new sortFieldValue (deliberately separate from stringField,
+│                     whose 7 other call sites — ID/Slug/Status/FindByColumn — are correctly
+│                     string-only and unchanged) — ListOptions.OrderBy previously only sorted
+│                     exported string fields for MemoryRepo (SQLRepo's own real SQL ORDER BY
+│                     already worked for any column type); an int field like Task.Priority
+│                     silently compared as always-equal, a no-op sort (Amendment A267, T262)
 ├── state.go          StateFlow, State, Transition — data-driven state machine types;
 │                     ConflictPolicy type (ConflictReject, ConflictSupersede constants);
 │                     StateFlow.ActiveState + StateFlow.ConflictPolicy optional fields;
@@ -563,7 +569,14 @@ smeldr.dev/
                         optional), so this closes the gap for every Module[T] type, not only the
                         four with a humanIDColumns entry; a real Node.ID passed via mcp's identArg
                         "id" key previously resolved nothing despite identArg's own doc comment
-                        claiming id support (Amendment A266, T214)
+                        claiming id support (Amendment A266, T214); new DefaultListOrder(field
+                        string, desc bool) Option — sorts a module's list results (both MCPList and
+                        listHandler, via new withDefaultOrder helper) by field, ascending unless
+                        desc; RegisterOrchestrationTypes (orchestration.go) wires it onto Task/Goal
+                        only (Priority, ascending) — the two orchestration types with a Priority
+                        field; MCPList's own exported signature is unchanged, zero mcp changes
+                        needed, matching T214's own "reuse the funnel, no breaking change" shape
+                        (Amendment A267, T262)
 ├── forge.go          Config, MustConfig, New, App (Use/Content/Handle/Run/Handler/SEO),
 │                     Registrator, SEOOption, seoState (robots/ogDefaults/appSchema), httpsRedirect,
 │                     standaloneDispatcher internal interface (A101),

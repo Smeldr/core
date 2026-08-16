@@ -568,30 +568,77 @@ func stringField[T any](v T, name string) string {
 }
 
 // sortPair bundles an item with its pre-extracted sort key to avoid
-// repeated reflection calls inside the sort comparator.
+// repeated reflection calls inside the sort comparator. Exactly one of
+// key/intKey is meaningful per pair, selected by isInt — set together by
+// sortFieldValue (T262).
 type sortPair[T any] struct {
-	item T
-	key  string
+	item   T
+	key    string
+	intKey int64
+	isInt  bool
 }
 
-// sortItems sorts items in-place by the named string field.
-// Non-string fields and missing fields sort to the end.
-// Uses a stable sort so equal elements preserve insertion order.
-// Each item's sort key is extracted once before sorting, avoiding O(N log N)
-// reflection calls in the comparator.
+// sortFieldValue extracts field's sort key from v: a string for a string
+// field, an int64 for any signed-integer-width field, or a zero value with
+// isInt=false for any other kind (unknown field, non-comparable type such
+// as a struct or slice) — matching sortItems' own existing fail-quiet-to-
+// equal behaviour for a field it can't compare. Deliberately separate from
+// stringField, which has 7 other call sites (ID/Slug/Status/FindByColumn
+// lookups) that are correctly string-only by construction and must not
+// change behaviour (T262).
+func sortFieldValue[T any](v T, name string) (s string, i int64, isInt bool) {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return "", 0, false
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return "", 0, false
+	}
+	path := goFieldPath(rv.Type(), name)
+	if path == nil {
+		return "", 0, false
+	}
+	f := rv.FieldByIndex(path)
+	switch f.Kind() {
+	case reflect.String:
+		return f.String(), 0, false
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return "", f.Int(), true
+	default:
+		return "", 0, false
+	}
+}
+
+// sortItems sorts items in-place by the named string or integer field
+// (T262 — previously string-only). An unknown field, or a field of any
+// other kind, sorts as equal for every item (a no-op, not an error) —
+// matching the pre-numeric-support behaviour for every kind that was
+// never a string. Uses a stable sort so equal elements preserve insertion
+// order. Each item's sort key is extracted once before sorting, avoiding
+// O(N log N) reflection calls in the comparator.
 func sortItems[T any](items []T, field string, desc bool) {
 	if len(items) == 0 {
 		return
 	}
 	pairs := make([]sortPair[T], len(items))
 	for i, item := range items {
-		pairs[i] = sortPair[T]{item: item, key: stringField(item, field)}
+		s, n, isInt := sortFieldValue(item, field)
+		pairs[i] = sortPair[T]{item: item, key: s, intKey: n, isInt: isInt}
 	}
 	slices.SortStableFunc(pairs, func(a, b sortPair[T]) int {
-		if desc {
-			return cmp.Compare(b.key, a.key)
+		var c int
+		if a.isInt {
+			c = cmp.Compare(a.intKey, b.intKey)
+		} else {
+			c = cmp.Compare(a.key, b.key)
 		}
-		return cmp.Compare(a.key, b.key)
+		if desc {
+			return -c
+		}
+		return c
 	})
 	for i, p := range pairs {
 		items[i] = p.item

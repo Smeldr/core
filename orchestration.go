@@ -496,6 +496,7 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 	))
 	app.Content(NewModule[*Task]((*Task)(nil),
 		At("/tasks"), Repo(NewSQLRepo[*Task](db, Table("smeldr_tasks"))), MCP(MCPRead, MCPWrite),
+		DefaultListOrder("Priority", false), // T262: lower Priority sorts first
 	))
 	app.Content(NewModule[*Decision]((*Decision)(nil),
 		At("/decisions"), Repo(NewSQLRepo[*Decision](db, Table("smeldr_decisions"))), MCP(MCPRead, MCPWrite),
@@ -505,6 +506,7 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 	))
 	app.Content(NewModule[*Goal]((*Goal)(nil),
 		At("/goals"), Repo(NewSQLRepo[*Goal](db, Table("smeldr_goals"))), MCP(MCPRead, MCPWrite),
+		DefaultListOrder("Priority", false), // T262: lower Priority sorts first
 	))
 	// Run gets no entry in the flows slice above — D38 requires no
 	// StateFlow (see Run's own doc comment). MCP(MCPRead, MCPWrite) is not

@@ -3696,6 +3696,32 @@ slug/ID-only. `get_task("T203")` and `get_task("<real slug>")` and `get_task("<r
 Node.ID>")` all work identically (A262/T253, A266/T214). The response always reports the
 item's own real slug, never the identifier you passed in.
 
+`Task` and `Goal` list results (`list_task`/`list_goal` via MCP, `GET /tasks`/`GET /goals`
+via HTTP) are sorted by `Priority` ascending by default (lower number is higher priority) —
+`smeldr.DefaultListOrder("Priority", false)`, set once at registration (A267/T262). `Signal`,
+`Decision`, `Amendment`, `Run` have no `Priority` field and keep the repository's own natural
+order, unchanged.
+
+### `DefaultListOrder` (A267, T262)
+
+```go
+func DefaultListOrder(field string, desc bool) Option
+```
+
+A `Module[T]` option that sorts that module's list results — both the MCP `list_*` tool and
+the HTTP `GET {prefix}` route — by `field`, ascending unless `desc` is `true`. `field` must
+name an exported string or integer field on `T`; any other kind sorts as equal for every
+item (a no-op, not an error). A module with no `DefaultListOrder` keeps the repository's own
+natural order, exactly as before this option existed.
+
+```go
+smeldr.NewModule((*Task)(nil),
+    smeldr.At("/tasks"),
+    smeldr.Repo(repo),
+    smeldr.DefaultListOrder("Priority", false), // lower Priority first
+)
+```
+
 ### `GoalContext` and `QueryGoalContext`
 
 ```go

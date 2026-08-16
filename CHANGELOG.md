@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.71.0] — 2026-08-16
+
+### Added
+- `DefaultListOrder(field string, desc bool) Option` — sorts a module's list results (both the MCP `list_*` tool and the HTTP `GET {prefix}` route) by an exported string or integer field, ascending unless `desc` is `true`. `RegisterOrchestrationTypes` wires `DefaultListOrder("Priority", false)` onto `Task`/`Goal`, so `list_task`/`list_goal` and `GET /tasks`/`GET /goals` now return items priority-ordered by default (T262). A module with no `DefaultListOrder` keeps the repository's own natural order, unchanged.
+
+### Fixed
+- `sortItems` (the sort behind `ListOptions.OrderBy` for `MemoryRepo`) previously only compared exported string fields — sorting by an integer field like `Task.Priority` silently treated every item as equal, a no-op. New `sortFieldValue` adds signed-integer support, deliberately separate from `stringField` (whose other 7 call sites are correctly string-only and unchanged). `SQLRepo`'s own real SQL `ORDER BY` was already correct for any column type; this fix was specifically for `MemoryRepo`-backed deployments. (A267, T262)
+
 ## [1.70.1] — 2026-08-16
 
 ### Fixed

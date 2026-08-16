@@ -284,9 +284,10 @@ func TestListOptionsOffset(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type repoItem struct {
-	ID    string
-	Slug  string
-	Title string
+	ID       string
+	Slug     string
+	Title    string
+	Priority int
 }
 
 func TestMemoryRepoSaveAndFindByID(t *testing.T) {
@@ -395,6 +396,62 @@ func TestMemoryRepoFindAll(t *testing.T) {
 			t.Errorf("unexpected order: %v", all)
 		}
 	})
+}
+
+// TestSortItems_IntField is the direct regression pin for T262:
+// stringField's own string-only check previously made sorting by an int
+// field a silent no-op (every item compared as equal). Priority mirrors
+// Task.Priority's own convention: lower number sorts first (ascending).
+func TestSortItems_IntField(t *testing.T) {
+	r := NewMemoryRepo[repoItem]()
+	ctx := context.Background()
+	_ = r.Save(ctx, repoItem{ID: "a", Slug: "a", Title: "A", Priority: 3})
+	_ = r.Save(ctx, repoItem{ID: "b", Slug: "b", Title: "B", Priority: 1})
+	_ = r.Save(ctx, repoItem{ID: "c", Slug: "c", Title: "C", Priority: 2})
+
+	t.Run("ascending", func(t *testing.T) {
+		all, err := r.FindAll(ctx, ListOptions{OrderBy: "Priority"})
+		if err != nil {
+			t.Fatalf("FindAll: %v", err)
+		}
+		if all[0].Priority != 1 || all[1].Priority != 2 || all[2].Priority != 3 {
+			t.Errorf("unexpected order: %v", all)
+		}
+	})
+
+	t.Run("descending", func(t *testing.T) {
+		all, err := r.FindAll(ctx, ListOptions{OrderBy: "Priority", Desc: true})
+		if err != nil {
+			t.Fatalf("FindAll: %v", err)
+		}
+		if all[0].Priority != 3 || all[1].Priority != 2 || all[2].Priority != 1 {
+			t.Errorf("unexpected order: %v", all)
+		}
+	})
+}
+
+// TestSortFieldValue_UnknownField confirms an unknown field name fails
+// quiet (isInt=false, empty string) rather than panicking or erroring —
+// matching stringField's own established fallback shape.
+func TestSortFieldValue_UnknownField(t *testing.T) {
+	s, i, isInt := sortFieldValue(repoItem{Title: "x"}, "NoSuchField")
+	if s != "" || i != 0 || isInt {
+		t.Errorf("sortFieldValue(unknown) = (%q, %d, %v), want (\"\", 0, false)", s, i, isInt)
+	}
+}
+
+// TestSortFieldValue_NonComparableKind confirms a field of a kind that is
+// neither string nor integer (e.g. a slice) fails quiet the same way —
+// sortItems' own existing "sorts as equal, not an error" contract for any
+// kind it can't compare.
+func TestSortFieldValue_NonComparableKind(t *testing.T) {
+	type withSlice struct {
+		Tags []string
+	}
+	s, i, isInt := sortFieldValue(withSlice{Tags: []string{"a"}}, "Tags")
+	if s != "" || i != 0 || isInt {
+		t.Errorf("sortFieldValue(slice field) = (%q, %d, %v), want (\"\", 0, false)", s, i, isInt)
+	}
 }
 
 func TestMemoryRepoDelete(t *testing.T) {

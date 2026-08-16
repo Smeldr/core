@@ -128,6 +128,25 @@ if err := app.Run(":8080"); err != nil {
 }
 ```
 
+### Default list order
+
+`smeldr.DefaultListOrder(field string, desc bool)` sorts a module's list
+results — both the MCP `list_*` tool and the HTTP `GET {prefix}` route —
+by an exported string or integer field on `T`, ascending unless `desc` is
+`true`. Without it, list results return in the repository's own natural
+order (arbitrary, not guaranteed):
+
+```go
+smeldr.NewModule((*Task)(nil),
+    smeldr.At("/tasks"),
+    smeldr.Repo(repo),
+    smeldr.DefaultListOrder("Priority", false), // lower number first
+)
+```
+
+Core's own `Task`/`Goal` orchestration types are wired with
+`DefaultListOrder("Priority", false)` (A267, T262).
+
 ### Adding MCP support
 
 Add `smeldr.MCP(smeldr.MCPRead, smeldr.MCPWrite)` to the module options:

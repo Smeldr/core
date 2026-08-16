@@ -1998,9 +1998,131 @@ func TestMCPCreate_saveError(t *testing.T) {
 // newTaskModule builds a *Module[*Task] with a real MemoryRepo, so
 // m.contentTypeName is genuinely "Task" (derived from the type, NewModule's
 // own convention) and humanIDColumns["Task"] applies for real, not a
-// fixture standing in for it.
-func newTaskModule(repo Repository[*Task]) *Module[*Task] {
-	return NewModule((*Task)(nil), Repo(repo))
+// fixture standing in for it. Extra opts are appended after Repo(repo) —
+// e.g. DefaultListOrder for T262's own tests.
+func newTaskModule(repo Repository[*Task], opts ...Option) *Module[*Task] {
+	return NewModule((*Task)(nil), append([]Option{Repo(repo)}, opts...)...)
+}
+
+// — DefaultListOrder (T262) ——————————————————————————————————————————————
+
+func seedTaskWithPriority(t *testing.T, repo Repository[*Task], slug string, priority int) {
+	t.Helper()
+	tk := &Task{Node: Node{ID: NewID(), Slug: slug, Status: Status("backlog")}, Priority: priority}
+	if err := repo.Save(context.Background(), tk); err != nil {
+		t.Fatalf("seedTaskWithPriority: %v", err)
+	}
+}
+
+// TestModule_MCPList_DefaultOrder proves DefaultListOrder reaches the real
+// MCPList entry point, not just ListOptions/sortItems in isolation.
+func TestModule_MCPList_DefaultOrder(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	seedTaskWithPriority(t, mem, "c", 3)
+	seedTaskWithPriority(t, mem, "a", 1)
+	seedTaskWithPriority(t, mem, "b", 2)
+
+	m := newTaskModule(mem, DefaultListOrder("Priority", false))
+	items, err := m.MCPList(NewTestContext(editorUser()))
+	if err != nil {
+		t.Fatalf("MCPList: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(items))
+	}
+	if items[0].(*Task).Priority != 1 || items[1].(*Task).Priority != 2 || items[2].(*Task).Priority != 3 {
+		t.Errorf("unexpected order: priorities %d, %d, %d",
+			items[0].(*Task).Priority, items[1].(*Task).Priority, items[2].(*Task).Priority)
+	}
+}
+
+// TestModule_MCPList_NoDefaultOrder_Unchanged is the regression pin for
+// every other registered type: a module without DefaultListOrder behaves
+// identically to before this task — no OrderBy applied, natural repo order.
+func TestModule_MCPList_NoDefaultOrder_Unchanged(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	seedTaskWithPriority(t, mem, "c", 3)
+	seedTaskWithPriority(t, mem, "a", 1)
+
+	m := newTaskModule(mem) // no DefaultListOrder
+	items, err := m.MCPList(NewTestContext(editorUser()))
+	if err != nil {
+		t.Fatalf("MCPList: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+}
+
+// TestModule_listHandler_DefaultOrder proves the same default order applies
+// through the real HTTP list path, not only MCPList — MCP and HTTP must
+// agree on order for the same type (T262).
+func TestModule_listHandler_DefaultOrder(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	seedTaskWithPriority(t, mem, "c", 3)
+	seedTaskWithPriority(t, mem, "a", 1)
+	seedTaskWithPriority(t, mem, "b", 2)
+	for _, tk := range []string{"a", "b", "c"} {
+		item, _ := mem.FindBySlug(context.Background(), tk)
+		item.Status = Published
+		_ = mem.Save(context.Background(), item)
+	}
+
+	m := newTaskModule(mem, DefaultListOrder("Priority", false))
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodGet, "/tasks", nil), editorUser())
+	m.listHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+	}
+	var items []*Task
+	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(items))
+	}
+	if items[0].Priority != 1 || items[1].Priority != 2 || items[2].Priority != 3 {
+		t.Errorf("unexpected order: priorities %d, %d, %d", items[0].Priority, items[1].Priority, items[2].Priority)
+	}
+}
+
+// TestRegisterOrchestrationTypes_TaskGoalDefaultOrder confirms Task/Goal are
+// wired with DefaultListOrder("Priority", false) and the other four
+// orchestration types are not — a scope check, not assumed from reading
+// the source alone.
+func TestRegisterOrchestrationTypes_TaskGoalDefaultOrder(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("default-list-order-test-secret1"),
+		DB:      db,
+	}))
+	RegisterOrchestrationTypes(app, db)
+
+	seedTaskWithPriority(t, NewSQLRepo[*Task](db, Table("smeldr_tasks")), "t-c", 3)
+	seedTaskWithPriority(t, NewSQLRepo[*Task](db, Table("smeldr_tasks")), "t-a", 1)
+
+	var taskModule *Module[*Task]
+	for _, hm := range app.hookableModules {
+		if tm, ok := hm.(*Module[*Task]); ok {
+			taskModule = tm
+		}
+	}
+	if taskModule == nil {
+		t.Fatal("Task module not found in app.hookableModules")
+	}
+	items, err := taskModule.MCPList(NewTestContext(editorUser()))
+	if err != nil {
+		t.Fatalf("MCPList: %v", err)
+	}
+	if len(items) != 2 || items[0].(*Task).Priority != 1 {
+		t.Errorf("Task's own DefaultListOrder not applied: %+v", items)
+	}
 }
 
 func TestResolveItem_BySlug(t *testing.T) {

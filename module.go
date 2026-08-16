@@ -104,6 +104,26 @@ func (moduleCacheOption) isOption() {}
 // or delete operation. The cache holds at most 1000 entries (LRU eviction).
 func Cache(ttl time.Duration) Option { return moduleCacheOption{ttl: ttl} }
 
+// defaultListOrderOption carries a module's own default sort field/direction
+// for its list results. Use [DefaultListOrder] to create one.
+type defaultListOrderOption struct {
+	field string
+	desc  bool
+}
+
+func (defaultListOrderOption) isOption() {}
+
+// DefaultListOrder returns an [Option] that sorts this module's list
+// results — both the MCP list_* tool and the HTTP GET {prefix} route — by
+// field, ascending unless desc is true. field must name an exported string
+// or integer field on T (see [ListOptions.OrderBy]); any other kind sorts
+// as equal for every item, not an error. A module with no DefaultListOrder
+// set keeps today's behaviour — the repository's own natural order —
+// unchanged (T262).
+func DefaultListOrder(field string, desc bool) Option {
+	return defaultListOrderOption{field: field, desc: desc}
+}
+
 // middlewareModuleOption carries per-module middleware. Use [Middleware] to
 // create one.
 type middlewareModuleOption struct {
@@ -492,6 +512,9 @@ type Module[T any] struct {
 	apiOnly        bool // true when APIOnly() option was given
 	blockHost      bool // true when BlockHost() option was given
 
+	defaultOrderBy   string // "" when no DefaultListOrder() option was given
+	defaultOrderDesc bool   // ignored when defaultOrderBy == ""
+
 	contextFunc func(Context, any) (any, error) // nil when no ContextFunc option given
 
 	navTree       *NavTree       // non-nil when App.NavTree is active; set by App.Handler via setNavTree
@@ -612,6 +635,9 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 			m.apiOnly = true
 		case blockHostOption:
 			m.blockHost = true
+		case defaultListOrderOption:
+			m.defaultOrderBy = v.field
+			m.defaultOrderDesc = v.desc
 		}
 		// repoOption[T] requires a concrete type assertion — handled separately.
 		if ro, ok := o.(repoOption[T]); ok {
@@ -1616,7 +1642,7 @@ func (m *Module[T]) listHandler(w http.ResponseWriter, r *http.Request) {
 	if !m.canReadDrafts(ctx) {
 		statuses = []Status{Published}
 	}
-	items, err := m.repo.FindAll(ctx, ListOptions{Status: statuses})
+	items, err := m.repo.FindAll(ctx, m.withDefaultOrder(ListOptions{Status: statuses}))
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -2189,13 +2215,26 @@ func (m *Module[T]) MCPSchema() []MCPField {
 	return fields
 }
 
+// withDefaultOrder applies this module's own DefaultListOrder, if any, to
+// opts — shared by MCPList and listHandler so both surfaces return a
+// module's items in the same order (T262).
+func (m *Module[T]) withDefaultOrder(opts ListOptions) ListOptions {
+	if m.defaultOrderBy != "" {
+		opts.OrderBy = m.defaultOrderBy
+		opts.Desc = m.defaultOrderDesc
+	}
+	return opts
+}
+
 // MCPList returns all content items matching the given statuses. If no
-// statuses are provided, items of all statuses are returned.
+// statuses are provided, items of all statuses are returned. Items are
+// sorted per this module's own [DefaultListOrder], if one was set (T262).
 func (m *Module[T]) MCPList(ctx Context, status ...Status) ([]any, error) {
 	opts := ListOptions{}
 	if len(status) > 0 {
 		opts.Status = status
 	}
+	opts = m.withDefaultOrder(opts)
 	items, err := m.repo.FindAll(ctx, opts)
 	if err != nil {
 		return nil, err

@@ -702,3 +702,111 @@ symbol → PATCH bump), not A262's (new exported symbol → MINOR). Coverage:
 amendment.
 
 ---
+
+## A267 — DefaultListOrder module option; sortItems gains numeric support (T262)
+
+### Problem
+
+`Task.Priority`/`Goal.Priority` (int, lower = higher priority) existed
+and were stored but nothing read them. `list_task`/`list_goal` (and every
+other compiled-type list tool) had no sort parameter at all, so a caller
+always got whatever order the underlying query happened to return.
+Discovered when two Tasks' own priority numbers contradicted their
+intended sequencing, with nothing surfacing the mismatch.
+
+### Investigation — real work found in both directions, per the task's own instruction
+
+**mcp side:** there is no separate `list_tasks` tool — `"list"` is a
+generic op dispatched by type name, calling `lm.MCPList(ctx,
+statuses...)` for whatever type the tool resolves to. `MCPList` is part
+of the **exported `MCPModule` interface** — confirmed one external
+implementer, `smeldr.dev/media`. Changing its signature to accept a
+caller-supplied `orderBy` would break every implementer, the identical
+class of concern D49 solved for `TransitionItem` by adding a new `App`
+method instead of changing the interface. A caller-supplied parameter is
+real, legitimate design space — a new optional extension interface,
+matching `SeqRepository`/`ColumnLookupRepository`'s own established
+pattern — but bigger than this task's own scope and the concrete problem
+actually reported.
+
+**The other direction — a real, deeper bug found, not assumed already
+fixed:** `ListOptions.OrderBy`'s own doc comment already said sorting
+applies only to exported *string* fields. Traced the actual
+implementation: `SQLRepo`'s path builds a real SQL `ORDER BY <column>`,
+correct for an `INTEGER` column — a live SQLite/Postgres-backed instance
+would sort correctly once `OrderBy` is set. `MemoryRepo`'s path
+(`sortItems`/`stringField`) is different: `stringField` explicitly
+returns `""` for any non-string kind, so sorting a `MemoryRepo` by
+`"Priority"` treated every item as equal — a silent no-op sort, not a
+partial fix. **"Just wire the existing machinery through" would not have
+delivered real sorting for any `MemoryRepo`-backed deployment** — a real
+prerequisite fix, not scope creep. `stringField` has 7 other call sites
+(`ID`/`Slug`/`Status`/`FindByColumn` lookups) that are correctly
+string-only by construction — left untouched; a new, separate
+`sortFieldValue` used only by `sortItems`.
+
+### Design — no breaking change anywhere, in either repo
+
+Rejected a caller-supplied `orderBy` parameter (above). Chosen: a
+**module-level default list order**, applied identically to both the MCP
+and HTTP list surfaces of a type, set once at registration:
+
+```go
+func DefaultListOrder(field string, desc bool) Option
+```
+
+Solves the actual complaint with zero interface changes anywhere —
+`MCPList`'s own exported signature and behavioural contract (returns
+matching items) is unchanged; it simply returns them in a more useful
+order for types that opt in. `mcp` needs zero changes, matching T214's
+own precedent shape.
+
+New unexported `Module[T]` fields (`defaultOrderBy`, `defaultOrderDesc`)
+set via the existing option-parsing switch. New `withDefaultOrder`
+helper, shared by `MCPList` and `listHandler`, so both surfaces agree on
+order for the same type — avoiding the asymmetry of "MCP shows priority
+order, HTTP doesn't" for identical underlying data.
+
+`RegisterOrchestrationTypes`'s `Task`/`Goal` module construction each
+gain `DefaultListOrder("Priority", false)`. `Signal`, `Decision`,
+`Amendment`, `Run` are untouched — none have a `Priority` field.
+
+### `storage.go` — numeric sort support, additive
+
+New `sortFieldValue[T any](v T, name string) (s string, i int64, isInt bool)`
+— a string for a string field, an int64 for any signed-integer-width
+field, a zero value with `isInt=false` for any other kind (unknown field,
+non-comparable type) — matching `sortItems`' own existing fail-quiet-to-
+equal behaviour. `sortPair[T]` gains `intKey`/`isInt` alongside its
+existing `key`; `sortItems` compares whichever key is populated. Every
+existing string-field sort is unaffected — same comparison path, same
+result, confirmed by re-running the existing tests unmodified, not
+assumed.
+
+### Tests
+
+8 new: `TestSortItems_IntField` (ascending/descending, the direct
+regression pin), `TestSortFieldValue_UnknownField`,
+`_NonComparableKind` (fail-quiet cases), `TestModule_MCPList_DefaultOrder`,
+`_NoDefaultOrder_Unchanged` (every other registered type's own
+regression pin), `TestModule_listHandler_DefaultOrder` (MCP/HTTP
+consistency, not asserted from `MCPList` alone),
+`TestRegisterOrchestrationTypes_TaskGoalDefaultOrder` (scope check — the
+wiring is real, not just designed). All existing `OrderBy`/sort tests
+(string path) re-run and pass unmodified.
+
+### Versioning
+
+New exported symbol: `DefaultListOrder`. `sortFieldValue` unexported.
+Real consumer-observable behaviour change: `get_task`/`get_goal` (MCP)
+and `GET /tasks`/`GET /goals` (HTTP) now return items priority-ordered by
+default. MINOR bump, matching A262's own precedent (new exported symbol
+→ MINOR). Coverage: 96.3%; `MCPList`/`listHandler`/`withDefaultOrder`
+100%; `sortFieldValue` 86.7%/`sortItems` 93.8% (uncovered branches are
+the nil-pointer guard, non-struct `T`, and `Int8`/`Int16`/`Int32` kinds —
+no content type in this codebase uses those kinds or ever passes a nil
+pointer through this path; the same structurally-defensive-only class
+already accepted elsewhere this session, named not chased). `go test
+-race ./...` clean. Level 2 amendment.
+
+---
