@@ -508,3 +508,104 @@ package, now consolidated into one place instead of duplicated
 uncovered across four). `go test -race ./...` clean. Level 2 amendment.
 
 ---
+
+## A265 — PATCH route for typed items over REST (T242)
+
+### Problem
+
+Dynamic-content REST (`PATCH /_content/{type}/{id}`) and typed MCP
+(`MCPUpdate`) both already had real partial-update semantics. Typed
+`Module[T]` REST only had `PUT` — full-replace, so any field absent from
+the body silently takes its Go zero value. Found by Peter asking whether
+he could ratify a Decision with `curl`: no `PATCH` route exists for a
+typed item at all, only `PUT`.
+
+### Design — reuse MCPUpdate's own logic, don't reimplement it
+
+`MCPUpdate` already is the exact logic a `PATCH` route needs: partial
+merge onto the existing item, identity/lifecycle restored after the
+merge, validated, saved, `notifyAfter`'d. The new `patchHandler` decodes
+the body as a `map[string]any` (matching the dynamic-content `PATCH`
+handler's own simpler pattern — no typed struct to overflow the same way
+`updateHandler`'s `MaxBytesError` handling guards against) and calls the
+same merge logic `MCPUpdate` calls, gated by `checkWriteOp(ctx, "update",
+m.writeRole)` — the identical call `updateHandler` already makes for
+`PUT`, so `PATCH` and `PUT` require the same authority. Registered in
+`Register` mirroring `PUT`'s own middleware-chain wrapping exactly.
+
+**Role tier, the plan's own open question, settled by the architect:**
+same as `PUT`, not a narrower tier. `PATCH` and `PUT` are the same
+write-authority question with a different body shape; nothing in this
+codebase's existing role model treats a partial update as inherently
+lower-risk than a full replace.
+
+**State-change question, answered by construction, not chosen freshly:**
+since the new route goes through the same identity/lifecycle-restore
+logic `MCPUpdate` already has, a `Status`/`ID`/`Slug` field in the `PATCH`
+body is silently discarded — identical to `MCPUpdate`'s own existing
+contract. `transition_item`/`PUT` remain the only ways to change state.
+
+**Does the dynamic-content PATCH handler's shape generalise? No —
+argued, not assumed.** `newUpdateContentHandler` operates on
+`DynamicNode`'s JSON-blob storage via `DynamicTypeRepo.UpdateFields` — a
+fundamentally different representation from `Module[T]`'s strongly-typed
+Go structs reached via reflection. Sharing one handler would need a new
+interface abstracting over both storage shapes for one call site's
+benefit — not worth building when `MCPUpdate` already provides the
+complete, tested typed-side logic with nothing to abstract over. Each
+surface keeps its own handler; the *pattern* (decode a fields map,
+restore identity/lifecycle, validate, save) is shared in spirit, not in
+code, because the underlying merge mechanics genuinely differ.
+
+### Real bug caught during implementation — not part of the approved plan's own text
+
+The plan, as approved, said "the new route calls `MCPUpdate` directly."
+Reading `MCPUpdate`'s own body closely before wiring it up surfaced a
+real consequence the plan hadn't examined: `MCPUpdate`'s `notifyAfter`
+call hardcodes `surfaceMCP` — every caller of `MCPUpdate`, regardless of
+its own transport, gets recorded as MCP-originated. `updateHandler`'s own
+`PUT` call site, by contrast, already correctly passes `surfaceHTTP` at
+the equivalent point (`module.go:1960`), confirming this is a real
+mismatch, not a hypothetical one: calling `MCPUpdate` directly from the
+new `PATCH` route would have misreported every REST-originated partial
+update as MCP-originated, in a project that has previously done real,
+careful work threading `Surface` accurately through 14 separate call
+sites (A260).
+
+**Fix:** extracted `MCPUpdate`'s own body into a new unexported
+`updateFields(ctx, slug, fields, surface string) (any, error)`,
+parameterized on the calling surface. `MCPUpdate` becomes a one-line
+wrapper passing `surfaceMCP` — behaviour-preserving, confirmed by running
+its own full existing test suite unmodified before writing anything new.
+The new `patchHandler` calls `updateFields` directly with `surfaceHTTP`,
+bypassing `MCPUpdate` entirely. Verified with a dedicated test going
+through the real HTTP handler end-to-end (wiring `App.Provenance`, a real
+`OnSignal` subscription, and asserting the recorded `Surface` — not by
+calling `notifyAfter` directly, which would only prove the plumbing
+exists, not that the new route actually uses it correctly).
+
+### Tests
+
+7 new (6 planned + 1 for the Surface fix found during implementation):
+`TestModule_PatchHandler_PartialUpdate_PreservesAbsentFields` (the direct
+regression pin — an omitted field keeps its value, unlike `PUT`),
+`_RestoresIdentityAndStatus`, `_Forbidden_WithoutWriteRole`,
+`_BadRequest_InvalidJSON`, `_NotFound_UnknownSlug`,
+`_SurfaceIsHTTP_NotMCP` (the fix above, end-to-end),
+`TestModule_Register_MountsPatchRoute` (a route that compiles but never
+mounts is the exact class of gap this task itself is). All existing
+`MCPUpdate`/`MCPPublish`/`resolveItem` tests pass unmodified.
+
+### Versioning
+
+New route, no exported symbol added, no existing signature changed
+(`patchHandler`/`updateFields` both unexported, matching
+`updateHandler`/`createHandler`/`deleteHandler`'s own visibility). New
+consumer-visible REST capability — a route that returned 404/405 now
+responds. MINOR bump. Coverage: 96.3%; `patchHandler` 100%, `MCPUpdate`
+100%, `updateFields` 96.3% (the `syncSaveHook` error branch is a
+pre-existing gap carried over unchanged from `MCPUpdate`'s own prior
+coverage, not introduced by this extraction). `go test -race ./...`
+clean. Level 2 amendment.
+
+---

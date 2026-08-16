@@ -1040,6 +1040,209 @@ func TestModule_deleteHandler_notFound(t *testing.T) {
 	}
 }
 
+// — Patch handler tests (T242) ———————————————————————————————————————————
+
+// TestModule_PatchHandler_PartialUpdate_PreservesAbsentFields is the direct
+// regression pin for the defect T242 closes: a field omitted from the PATCH
+// body keeps its existing value, unlike PUT's full-replace (which would
+// zero it).
+func TestModule_PatchHandler_PartialUpdate_PreservesAbsentFields(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	p := &testPost{
+		Node:  Node{ID: NewID(), Slug: "existing-post", Status: Published},
+		Title: "Original Title",
+		Body:  "Original Body",
+	}
+	if err := repo.Save(context.Background(), p); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	m := newTestModule(repo)
+	body, _ := json.Marshal(map[string]any{"Title": "New Title"}) // Body omitted
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPatch, "/testposts/existing-post", bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", "existing-post")
+	m.patchHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+	}
+	var got testPost
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if got.Title != "New Title" {
+		t.Errorf("Title = %q, want %q", got.Title, "New Title")
+	}
+	if got.Body != "Original Body" {
+		t.Errorf("Body = %q, want preserved %q (PATCH must not zero an omitted field)", got.Body, "Original Body")
+	}
+}
+
+// TestModule_PatchHandler_RestoresIdentityAndStatus mirrors MCPUpdate's own
+// existing identity-restoration test, through the real HTTP path this time
+// — ID/Slug/Status in the PATCH body are silently discarded.
+func TestModule_PatchHandler_RestoresIdentityAndStatus(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	p := &testPost{
+		Node:  Node{ID: NewID(), Slug: "existing-post", Status: Published},
+		Title: "Original Title",
+	}
+	if err := repo.Save(context.Background(), p); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	m := newTestModule(repo)
+	body, _ := json.Marshal(map[string]any{
+		"ID": "evil-id", "Slug": "evil-slug", "Status": "draft", "Title": "New Title",
+	})
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPatch, "/testposts/existing-post", bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", "existing-post")
+	m.patchHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+	}
+	var got testPost
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if got.ID != p.ID || got.Slug != "existing-post" || got.Status != Published {
+		t.Errorf("identity/status = (%q,%q,%q), want (%q,%q,%q) — a PATCH body must never change these",
+			got.ID, got.Slug, got.Status, p.ID, "existing-post", Published)
+	}
+}
+
+// TestModule_PatchHandler_Forbidden_WithoutWriteRole confirms PATCH requires
+// the same role tier as PUT, verified independently rather than assumed
+// from shared code.
+func TestModule_PatchHandler_Forbidden_WithoutWriteRole(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	p := seedPost(t, repo, "Existing Post", Published)
+
+	m := newTestModule(repo)
+	body, _ := json.Marshal(map[string]any{"Title": "Updated"})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPatch, "/testposts/"+p.Slug, bytes.NewReader(body))
+	r.SetPathValue("slug", p.Slug)
+	// No user → GuestUser; default writeRole is Author.
+	m.patchHandler(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", w.Code)
+	}
+}
+
+// TestModule_PatchHandler_BadRequest_InvalidJSON matches the dynamic-content
+// PATCH handler's own precedent: malformed body → ErrBadRequest.
+func TestModule_PatchHandler_BadRequest_InvalidJSON(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	p := seedPost(t, repo, "Existing Post", Published)
+
+	m := newTestModule(repo)
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPatch, "/testposts/"+p.Slug, strings.NewReader("{not json")), editorUser())
+	r.SetPathValue("slug", p.Slug)
+	m.patchHandler(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// TestModule_PatchHandler_NotFound_UnknownSlug confirms updateFields'
+// (MCPUpdate's own) ErrNotFound propagates unchanged through the HTTP path.
+func TestModule_PatchHandler_NotFound_UnknownSlug(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := newTestModule(repo)
+
+	body, _ := json.Marshal(map[string]any{"Title": "x"})
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPatch, "/testposts/missing", bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", "missing")
+	m.patchHandler(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+// TestModule_PatchHandler_SurfaceIsHTTP_NotMCP confirms the real defect
+// caught while implementing T242: patchHandler shares MCPUpdate's own
+// merge/identity-restore logic via the new updateFields, but must record
+// Surface "http" (matching updateHandler's own PUT call site), never "mcp"
+// just because the logic underneath is the same. Verified end-to-end
+// through the real HTTP entry point, not by calling notifyAfter directly.
+func TestModule_PatchHandler_SurfaceIsHTTP_NotMCP(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	p := &testPost{Node: Node{ID: NewID(), Slug: "existing-post", Status: Published}, Title: "Original"}
+	if err := repo.Save(context.Background(), p); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	m := newTestModule(repo)
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("patch-surface-test-secret-123456"),
+	}))
+	store := &fakeProvenanceStore{appendedCh: make(chan struct{}, 1)}
+	app.Provenance(store)
+	app.hookableModules = append(app.hookableModules, m)
+	app.wireSignalBus()
+
+	body, _ := json.Marshal(map[string]any{"Title": "New Title"})
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPatch, "/testposts/existing-post", bytes.NewReader(body)), editorUser())
+	r.SetPathValue("slug", "existing-post")
+	m.patchHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+	}
+
+	select {
+	case <-store.appendedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("afterHook goroutine never appended")
+	}
+	appended := store.Appended()
+	if len(appended) != 1 {
+		t.Fatalf("got %d appended, want 1", len(appended))
+	}
+	if appended[0].Surface != "http" {
+		t.Errorf("Surface = %q, want %q — a PATCH-over-REST update must not be misreported as MCP-originated",
+			appended[0].Surface, "http")
+	}
+}
+
+// TestModule_Register_MountsPatchRoute confirms PATCH {prefix}/{slug} is
+// actually registered on the mux — a route that compiles but never mounts
+// is the exact class of gap T242 itself is.
+func TestModule_Register_MountsPatchRoute(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	p := &testPost{
+		Node:  Node{ID: NewID(), Slug: "existing-post", Status: Published},
+		Title: "Original Title",
+	}
+	if err := repo.Save(context.Background(), p); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	m := newTestModule(repo)
+	mux := http.NewServeMux()
+	m.Register(mux)
+
+	body, _ := json.Marshal(map[string]any{"Title": "New Title"})
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPatch, "/testposts/existing-post", bytes.NewReader(body)), editorUser())
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (PATCH route not mounted?), body: %s", w.Code, w.Body.String())
+	}
+}
+
 // — Middleware applied in Register ————————————————————————————————————————
 
 func TestModule_Middleware_appliedOnRegister(t *testing.T) {

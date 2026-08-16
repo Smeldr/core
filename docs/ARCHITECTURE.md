@@ -546,7 +546,18 @@ smeldr.dev/
                         unrestored: Save/notifyAfter's other three effects (Signal dispatch, cache
                         invalidation, rebuild triggers) — argued out, not bundled in, since the
                         drain's only current target (D40's Decision re-evaluation) would activate
-                        every human-publish subscriber with no operator decision behind it
+                        every human-publish subscriber with no operator decision behind it;
+                        MCPUpdate's own body extracted into new updateFields(ctx, slug, fields,
+                        surface string) (any, error) — identical merge/identity-restore logic,
+                        parameterized on the calling surface; MCPUpdate is now a one-line wrapper
+                        passing surfaceMCP (behaviour-preserving, its own existing tests pass
+                        unmodified). New patchHandler + PATCH {prefix}/{slug} route in Register
+                        (T242) — partial update over REST for typed Module[T] items, the typed
+                        counterpart to dynamic content's own PATCH route; calls updateFields with
+                        surfaceHTTP, not MCPUpdate directly — calling MCPUpdate itself would have
+                        misreported every PATCH-over-REST update as MCP-originated, since it
+                        hardcodes surfaceMCP; caught during implementation, not in the original
+                        plan (Amendment A265, T242)
 ├── forge.go          Config, MustConfig, New, App (Use/Content/Handle/Run/Handler/SEO),
 │                     Registrator, SEOOption, seoState (robots/ogDefaults/appSchema), httpsRedirect,
 │                     standaloneDispatcher internal interface (A101),

@@ -57,7 +57,8 @@ app.Run(":8080")
 - `GET /posts` — list published posts (JSON or HTML)
 - `GET /posts/{slug}` — single post
 - `POST /posts` — create (Author+)
-- `PUT /posts/{slug}` — update (Author+)
+- `PUT /posts/{slug}` — update, full replace (Author+)
+- `PATCH /posts/{slug}` — update, partial — a field omitted from the body keeps its existing value (Author+, same tier as `PUT`) (T242)
 - `DELETE /posts/{slug}` — delete (Author+)
 - `GET /posts/sitemap.xml` — auto-generated, always fresh
 - Draft posts never visible to unauthenticated requests

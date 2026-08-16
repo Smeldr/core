@@ -20,7 +20,7 @@ Or coordinate your entire pipeline and automated workflow, AI actions and human 
 
 Directly from chat.
 
-**v1.69.0 — stable.** Public APIs are stable within v1.
+**v1.70.0 — stable.** Public APIs are stable within v1.
 See [CHANGELOG.md](CHANGELOG.md).
 
 ## 30-second start
@@ -153,7 +153,7 @@ func main() {
 ```
 
 Routes: `GET /posts`, `GET /posts/{slug}`, `POST /posts`, `PUT /posts/{slug}`,
-`DELETE /posts/{slug}`, `GET /sitemap.xml`. Draft posts return 404 for guests.
+`PATCH /posts/{slug}`, `DELETE /posts/{slug}`, `GET /sitemap.xml`. Draft posts return 404 for guests.
 
 ---
 

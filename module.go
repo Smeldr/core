@@ -904,11 +904,13 @@ func (m *Module[T]) notifyAfter(ctx Context, sig LifecycleEvent, prevState, surf
 func (m *Module[T]) Register(mux *http.ServeMux) {
 	create := http.HandlerFunc(m.createHandler)
 	update := http.HandlerFunc(m.updateHandler)
+	patch := http.HandlerFunc(m.patchHandler)
 	del := http.HandlerFunc(m.deleteHandler)
 
 	if len(m.middlewares) > 0 {
 		create = http.HandlerFunc(Chain(create, m.middlewares...).ServeHTTP)
 		update = http.HandlerFunc(Chain(update, m.middlewares...).ServeHTTP)
+		patch = http.HandlerFunc(Chain(patch, m.middlewares...).ServeHTTP)
 		del = http.HandlerFunc(Chain(del, m.middlewares...).ServeHTTP)
 	}
 
@@ -935,6 +937,7 @@ func (m *Module[T]) Register(mux *http.ServeMux) {
 
 	mux.Handle("POST "+m.prefix, create)
 	mux.Handle("PUT "+m.prefix+"/{slug}", update)
+	mux.Handle("PATCH "+m.prefix+"/{slug}", patch)
 	mux.Handle("DELETE "+m.prefix+"/{slug}", del)
 	// A33: guard on sitemapCfg only — sitemapStore is injected by App.Content
 	// after Register returns, so the store is always nil at mount time.
@@ -2373,6 +2376,16 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 // Node.ID, Node.Slug, and Node.Status are always restored after the merge —
 // use the dedicated lifecycle methods to change status.
 func (m *Module[T]) MCPUpdate(ctx Context, slug string, fields map[string]any) (any, error) {
+	return m.updateFields(ctx, slug, fields, surfaceMCP)
+}
+
+// updateFields is the shared partial-update merge/identity-restore/save
+// logic behind both MCPUpdate and the PATCH-over-REST route (patchHandler,
+// T242) — surface-parameterized so a PATCH-originated update is recorded
+// as surfaceHTTP (matching updateHandler's own PUT call site) rather than
+// being misreported as surfaceMCP just because it reuses MCPUpdate's own
+// merge logic.
+func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any, surface string) (any, error) {
 	existing, err := m.resolveItem(ctx, slug)
 	if err != nil {
 		return nil, err
@@ -2413,9 +2426,40 @@ func (m *Module[T]) MCPUpdate(ctx Context, slug string, fields map[string]any) (
 			return nil, err
 		}
 	}
-	m.notifyAfter(ctx, AfterUpdate, string(nodeStatusOf(existing)), surfaceMCP, "", item)
+	m.notifyAfter(ctx, AfterUpdate, string(nodeStatusOf(existing)), surface, "", item)
 	m.invalidateCache()
 	return item, nil
+}
+
+// patchHandler implements PATCH {prefix}/{slug} — partial update over REST
+// (T242), the typed-Module[T] counterpart to the dynamic-content PATCH
+// route. Decodes the body as a fields map and delegates to updateFields
+// (MCPUpdate's own merge/identity-restore logic, surfaceHTTP here) rather
+// than reimplementing it: absent fields keep their existing value (unlike
+// PUT's full-replace), and ID/Slug/Status in the body are silently
+// restored to their pre-update values, identical to MCPUpdate's own
+// existing contract.
+func (m *Module[T]) patchHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := ContextFrom(w, r)
+
+	if !m.checkWriteOp(ctx, "update", m.writeRole) {
+		WriteError(w, r, ErrForbidden)
+		return
+	}
+
+	slug := r.PathValue("slug")
+	var fields map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
+		WriteError(w, r, ErrBadRequest)
+		return
+	}
+
+	item, err := m.updateFields(ctx, slug, fields, surfaceHTTP)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }
 
 // MCPPublish transitions the item with the given slug to Published, sets

@@ -23,6 +23,11 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.70.0] — 2026-08-16
+
+### Added
+- `PATCH {prefix}/{slug}` — partial update over REST for typed `Module[T]` items (T242): a field omitted from the body keeps its existing value, unlike `PUT`'s full-replace. Same role tier as `PUT` (`m.writeRole`/`"update"` op). Reuses `MCPUpdate`'s own merge/identity-restore logic (extracted into new unexported `updateFields`) rather than reimplementing it — a `Status`/`ID`/`Slug` field in the body is silently discarded, identical to `MCPUpdate`'s own existing contract. Recorded with `Surface: "http"`, not `"mcp"`, despite sharing `MCPUpdate`'s own logic underneath. No exported symbol added. (A265, T242)
+
 ## [1.69.0] — 2026-08-16
 
 ### Added
