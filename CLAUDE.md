@@ -494,8 +494,14 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       and include it in the commit sequence when:
       new public API (new module options, new MCP tools, new CLI commands);
       new routing variant or behaviour change that affects developers;
-      bug fix that reveals a non-obvious pattern (a fix that teaches the reader something).
-      Not required for: docs-only commits, patch bumps without behaviour change, internal refactors.
+      bug fix that reveals a non-obvious pattern (a fix that teaches the reader something);
+      a new user-facing capability with no Go API change — a new CI/release
+      mechanism, a new setup or operational capability, anything that changes
+      what an external reader (self-hoster, evaluator) can now go do, even
+      when the commit itself is "docs/CI config only, no exported symbol."
+      Not required for: a genuinely trivial docs-only fix (a typo, a stale
+      line corrected, no new capability described), a patch bump with no
+      behaviour change, an internal refactor.
 
 **M-number milestone commits — additionally mandatory:**
 - [ ] Module `README.md` updated to reflect shipped behaviour.
