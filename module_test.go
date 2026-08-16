@@ -2097,6 +2097,71 @@ func TestResolveItem_RepoLacksColumnLookup(t *testing.T) {
 	}
 }
 
+// TestResolveItem_ByID is the direct regression pin for T214: a real
+// Node.ID passed as ident — the exact value mcp's identArg returns for its
+// "id" key — resolves via FindByID after the slug lookup misses.
+func TestResolveItem_ByID(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	tk := &Task{Node: Node{ID: "real-uuid-1", Slug: "some-task-slug"}, TaskID: "T203"}
+	if err := mem.Save(context.Background(), tk); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	m := newTaskModule(mem)
+	got, err := m.resolveItem(NewTestContext(editorUser()), "real-uuid-1")
+	if err != nil {
+		t.Fatalf("resolveItem by ID: %v", err)
+	}
+	if got.Slug != "some-task-slug" {
+		t.Errorf("Slug = %q, want %q", got.Slug, "some-task-slug")
+	}
+}
+
+// TestResolveItem_ByID_NonOrchestrationType confirms the new ID fallback
+// works for a type with no humanIDColumns entry at all — the actual scope
+// difference T214 adds over T253's own humanID-only fallback, which never
+// reaches a type without an entry in that map.
+func TestResolveItem_ByID_NonOrchestrationType(t *testing.T) {
+	mem := NewMemoryRepo[*testPost]()
+	p := &testPost{Node: Node{ID: "post-real-id", Slug: "different-slug"}, Title: "Some Title"}
+	if err := mem.Save(context.Background(), p); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	m := newTestModule(mem)
+	got, err := m.resolveItem(NewTestContext(editorUser()), "post-real-id")
+	if err != nil {
+		t.Fatalf("resolveItem by ID (non-orchestration type): %v", err)
+	}
+	if got.Slug != "different-slug" {
+		t.Errorf("Slug = %q, want %q", got.Slug, "different-slug")
+	}
+}
+
+// slugMissIDErrorRepo returns ErrNotFound from FindBySlug (so resolveItem
+// proceeds past the first check) and a non-ErrNotFound error from FindByID
+// — isolates FindByID's own error-propagation branch specifically, which
+// TestResolveItem_NonErrNotFoundPropagates does not reach (that test's own
+// errorRepo fails at the FindBySlug check first, never exercising this
+// line). Flagged in architect review as a genuinely new branch needing its
+// own dedicated test, not covered by an existing one reached later.
+type slugMissIDErrorRepo[T any] struct{ notFoundOnlyRepo[T] }
+
+func (r slugMissIDErrorRepo[T]) FindByID(_ context.Context, _ string) (T, error) {
+	var zero T
+	return zero, errRepoError
+}
+
+// TestResolveItem_ByID_NonErrNotFoundPropagates confirms a FindByID error
+// other than ErrNotFound short-circuits resolveItem before the humanID
+// fallback is ever attempted — mirrors TestResolveItem_NonErrNotFoundPropagates
+// but for the new FindByID branch specifically (architect review, T214).
+func TestResolveItem_ByID_NonErrNotFoundPropagates(t *testing.T) {
+	m := newTaskModule(slugMissIDErrorRepo[*Task]{})
+	_, err := m.resolveItem(NewTestContext(editorUser()), "T203")
+	if err == nil || errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want the underlying FindByID error to propagate unchanged", err)
+	}
+}
+
 // TestModule_MCPGet_ByHumanID proves the fix end to end through the real
 // MCP dispatch method, not just resolveItem in isolation.
 func TestModule_MCPGet_ByHumanID(t *testing.T) {
@@ -2109,6 +2174,26 @@ func TestModule_MCPGet_ByHumanID(t *testing.T) {
 	got, err := m.MCPGet(NewTestContext(editorUser()), "T203")
 	if err != nil {
 		t.Fatalf("MCPGet by human ID: %v", err)
+	}
+	if got.(*Task).Slug != "task-t203" {
+		t.Errorf("Slug = %q, want %q", got.(*Task).Slug, "task-t203")
+	}
+}
+
+// TestModule_MCPGet_ByID proves T214's fix end to end through the real MCP
+// entry point, not just resolveItem in isolation — this is exactly the
+// path mcp's identArg's "id" key reaches (get/update/publish/schedule/
+// archive/delete all route through resolveItem the same way).
+func TestModule_MCPGet_ByID(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	tk := &Task{Node: Node{ID: "task-real-uuid", Slug: "task-t203"}, TaskID: "T203"}
+	if err := mem.Save(context.Background(), tk); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	m := newTaskModule(mem)
+	got, err := m.MCPGet(NewTestContext(editorUser()), "task-real-uuid")
+	if err != nil {
+		t.Fatalf("MCPGet by real ID: %v", err)
 	}
 	if got.(*Task).Slug != "task-t203" {
 		t.Errorf("Slug = %q, want %q", got.(*Task).Slug, "task-t203")

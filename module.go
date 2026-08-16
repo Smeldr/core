@@ -2208,19 +2208,31 @@ func (m *Module[T]) MCPList(ctx Context, status ...Status) ([]any, error) {
 }
 
 // resolveItem resolves ident against slug first — the common case, costs
-// nothing extra — then, only for a type with a registered
-// [humanIDColumns] entry, falls back to that human-facing identifier
-// column on a slug miss (e.g. "T203" for a Task). Every MCP method that
-// takes a caller-supplied identifier routes through this instead of calling
-// m.repo.FindBySlug directly, so a caller can supply either interchangeably
-// (T253). HTTP handlers deliberately do not use this — a URL path segment
-// is a slug by REST convention, not a candidate for this fallback.
+// nothing extra — then against the item's own real ID (T214: FindByID is
+// a required Repository[T] method, safe to try for every type, not only
+// ones with a humanIDColumns entry — a caller-supplied Node.ID, e.g. via
+// mcp's identArg "id" key, previously resolved nothing), then, only for a
+// type with a registered [humanIDColumns] entry, falls back to that
+// human-facing identifier column on a further miss (e.g. "T203" for a
+// Task). Every MCP method that takes a caller-supplied identifier routes
+// through this instead of calling m.repo.FindBySlug directly, so a caller
+// can supply a slug, a real ID, or (for orchestration types) a
+// human-facing identifier interchangeably (T253, T214). HTTP handlers
+// deliberately do not use this — a URL path segment is a slug by REST
+// convention, not a candidate for this fallback.
 func (m *Module[T]) resolveItem(ctx Context, ident string) (T, error) {
 	item, err := m.repo.FindBySlug(ctx, ident)
 	if err == nil {
 		return item, nil
 	}
 	var zero T
+	if !errors.Is(err, ErrNotFound) {
+		return zero, err
+	}
+	item, err = m.repo.FindByID(ctx, ident)
+	if err == nil {
+		return item, nil
+	}
 	if !errors.Is(err, ErrNotFound) {
 		return zero, err
 	}

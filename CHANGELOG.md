@@ -23,6 +23,11 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.70.1] — 2026-08-16
+
+### Fixed
+- `Module.resolveItem` (the funnel behind every `Module[T]` MCP tool's `id`/`slug` argument) now also resolves a real `Node.ID`, tried after the slug lookup and before the human-facing-identifier fallback (T253/A262). Previously a real `Node.ID` passed via mcp's `identArg` "id" key resolved nothing, despite `identArg`'s own doc comment implying real ID support — `FindByID` is a required `Repository[T]` method, so this fallback now applies to every registered type, not only the four with a human-facing identifier. No exported symbol changed. (A266, T214)
+
 ## [1.70.0] — 2026-08-16
 
 ### Added

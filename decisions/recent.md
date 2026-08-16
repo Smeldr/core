@@ -609,3 +609,96 @@ coverage, not introduced by this extraction). `go test -race ./...`
 clean. Level 2 amendment.
 
 ---
+
+## A266 — resolveItem gains a FindByID fallback (T214)
+
+### Problem
+
+`mcp/tool.go`'s `identArg` returns whichever of `"id"`/`"slug"` is present
+in the caller's args, but every one of its six call sites (`update`,
+`publish`, `schedule`, `archive`, `delete`, `get`) named the result `slug`
+and passed it into a slug-resolution path — `"id"` was an alias for the
+*key name* only, never for the *identifier type*. A real `Node.ID` passed
+under `"id"` resolved nothing, despite `identArg`'s own doc comment
+("accepting both id and slug") reading as genuine ID support.
+
+### Investigation — the fix belongs in core, mcp needs zero changes
+
+Traced all six `identArg` call sites directly. Every one already passes
+its resolved string into a core `Module[T]` MCP method
+(`MCPUpdate`/`MCPGet`/`MCPPublish`/`MCPSchedule`/`MCPArchive`/`MCPDelete`),
+and all six already route through `Module.resolveItem` (T253) as their
+single resolution funnel — which tries `FindBySlug`, then, only for a
+type with a registered `humanIDColumns` entry, `FindByColumn`.
+`resolveItem` never tried `FindByID` — the actual gap.
+
+**`FindByID` is already a required method on `Repository[T]`**
+(`storage.go`) — every `SQLRepo[T]`/`MemoryRepo[T]` implements it, unlike
+`ColumnLookupRepository`, which is an optional extension. Trying it is
+therefore safe and universal for *every* `Module[T]` type, not only the
+four with a `humanIDColumns` entry — this closes a strictly wider gap
+than T253's own humanID-only fallback. Confirmed both `Repository[T]`
+implementations return `ErrNotFound` on a miss, matching `FindBySlug`'s
+own contract exactly.
+
+**Confirmed `transition_item` is out of scope.** Checked its own mcp-side
+tool directly: its schema requires `"slug"` specifically, uses
+`stringArg(args, "slug")`, never calls `identArg` at all.
+`App.TransitionItem`'s own separate raw-SQL resolution path (`state.go`)
+never claimed `"id"` support in the first place — a different tool with
+an honest, narrower contract, not this bug.
+
+**Conclusion: extend `resolveItem`'s own fallback chain with one new
+step, `FindByID`, between the existing slug lookup and the humanID
+fallback — mcp needs zero changes.** `identArg`'s own doc comment becomes
+true rather than needing correction, once this lands.
+
+### Design
+
+Ordering argued, not arbitrary: slug stays first (unchanged existing
+behaviour/performance for the common case — every existing caller and
+test keeps working identically), `FindByID` second (universal, required
+by the interface, no type-specific gate), `humanIDColumns` fallback last
+(the most specialized, only four types). A slug string colliding with a
+different item's real UUID is not a realistic concern (`NewID()` is a
+UUID v7).
+
+### Caught in architect review before implementation
+
+The plan's own test list didn't include a dedicated test for `FindByID`'s
+own non-`ErrNotFound`-error branch — a genuinely new line, distinct from
+`FindBySlug`'s identical-looking check one step earlier, which the
+existing `TestResolveItem_NonErrNotFoundPropagates` test never reaches
+(its own `errorRepo` fails at the `FindBySlug` check first). Added
+`TestResolveItem_ByID_NonErrNotFoundPropagates` with a new dedicated test
+double (`slugMissIDErrorRepo`, ErrNotFound from `FindBySlug`, a real error
+from `FindByID`). Also confirmed, not assumed, that the two "existing
+test, same branch, reached later" cases
+(`TestResolveItem_NonOrchestrationType_NoFallback`,
+`TestResolveItem_RepoLacksColumnLookup`) still exercise their intended
+branches post-change — both test doubles already implemented `FindByID`
+returning `ErrNotFound` (a required interface method since T253), so both
+correctly fall through the new step unchanged.
+
+### Tests
+
+4 new: `TestResolveItem_ByID` (the direct regression pin — a real
+`Node.ID` resolves after a slug miss), `TestResolveItem_ByID_NonOrchestrationType`
+(the new fallback works for a type with *no* `humanIDColumns` entry at
+all — the actual scope difference over T253's own fallback),
+`TestResolveItem_ByID_NonErrNotFoundPropagates` (architect-review catch,
+above), `TestModule_MCPGet_ByID` (end-to-end through the real MCP entry
+point, mirroring `TestModule_MCPGet_ByHumanID`'s own T253 pattern). All 6
+existing `TestResolveItem_*` tests (T253) re-run and pass unmodified.
+
+### Versioning
+
+`resolveItem` is unexported — no exported Go symbol added or changed.
+Real consumer-observable behaviour change: every `Module[T]` MCP tool now
+resolves a real `Node.ID`, where it previously silently failed with "not
+found." Matches A261's own precedent (behaviour change, no exported
+symbol → PATCH bump), not A262's (new exported symbol → MINOR). Coverage:
+96.3%; `resolveItem` 100%. `go test -race ./...` clean. Level 2
+amendment.
+
+---

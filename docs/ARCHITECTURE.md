@@ -557,7 +557,13 @@ smeldr.dev/
                         surfaceHTTP, not MCPUpdate directly — calling MCPUpdate itself would have
                         misreported every PATCH-over-REST update as MCP-originated, since it
                         hardcodes surfaceMCP; caught during implementation, not in the original
-                        plan (Amendment A265, T242)
+                        plan (Amendment A265, T242); resolveItem gains a FindByID fallback between
+                        the slug lookup and the humanIDColumns fallback (T214) — FindByID is a
+                        required Repository[T] method (unlike ColumnLookupRepository, which is
+                        optional), so this closes the gap for every Module[T] type, not only the
+                        four with a humanIDColumns entry; a real Node.ID passed via mcp's identArg
+                        "id" key previously resolved nothing despite identArg's own doc comment
+                        claiming id support (Amendment A266, T214)
 ├── forge.go          Config, MustConfig, New, App (Use/Content/Handle/Run/Handler/SEO),
 │                     Registrator, SEOOption, seoState (robots/ogDefaults/appSchema), httpsRedirect,
 │                     standaloneDispatcher internal interface (A101),

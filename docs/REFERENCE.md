@@ -3688,6 +3688,14 @@ smeldr.RegisterOrchestrationTypes(app, db)
 All five types embed `Node` and receive auto-generated MCP tools (`create_*`, `get_*`,
 `list_*`, `update_*`, `publish_*`, `archive_*`, `delete_*`) via `MCP(MCPRead, MCPWrite)`.
 
+Every one of those tools' `id`/`slug` argument resolves against, in order: the item's real
+`slug`; then its real `Node.ID`; then, for `Task`/`Goal`/`Decision`/`Amendment` (which have
+one), its own human-facing identifier (`Task.TaskID`, `Goal.GoalID`,
+`Decision.DecisionNumber`, `Amendment.AmendmentNumber`) — `Signal` has none and stays
+slug/ID-only. `get_task("T203")` and `get_task("<real slug>")` and `get_task("<real
+Node.ID>")` all work identically (A262/T253, A266/T214). The response always reports the
+item's own real slug, never the identifier you passed in.
+
 ### `GoalContext` and `QueryGoalContext`
 
 ```go
