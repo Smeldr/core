@@ -1619,11 +1619,31 @@ func (a *App) ServeDynamicContent() *App {
 // The leading "v" is stripped from version strings ("v1.1.5" → "1.1.5").
 // Returns nil when build info is unavailable or no smeldr modules are found.
 func smeldrVersions() map[string]string {
-	const base = "smeldr.dev/"
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return nil
 	}
+	return parseSmeldrVersions(info)
+}
+
+// parseSmeldrVersions contains smeldrVersions' actual logic, taking a
+// *debug.BuildInfo directly so it's testable with a hand-constructed one —
+// core has zero dependencies of its own, so debug.ReadBuildInfo() run
+// inside a core package test can never naturally exercise a replace
+// directive to verify against (T219).
+//
+// A dependency under an active replace (go.mod's `replace X => ./local` —
+// e.g. example/server's own `replace smeldr.dev/core => ../..`) reports
+// dep.Version as the stale, nominal require-line version regardless of
+// what's actually linked; the real build source is dep.Replace, whose own
+// Version is Go's standard "(devel)" marker for an unversioned local path,
+// never empty. Preferring dep.Replace.Version when set stops /_health from
+// silently reporting a version that was never actually built (T219) —
+// "(devel)" is passed through verbatim, matching the same marker Go
+// already uses for info.Main.Version on any locally-built binary, rather
+// than inventing different wording for the same underlying state.
+func parseSmeldrVersions(info *debug.BuildInfo) map[string]string {
+	const base = "smeldr.dev/"
 	result := make(map[string]string)
 	add := func(path, version string) {
 		if !strings.HasPrefix(path, base) || version == "" {
@@ -1635,7 +1655,11 @@ func smeldrVersions() map[string]string {
 	}
 	add(info.Main.Path, info.Main.Version)
 	for _, dep := range info.Deps {
-		add(dep.Path, dep.Version)
+		version := dep.Version
+		if dep.Replace != nil {
+			version = dep.Replace.Version
+		}
+		add(dep.Path, version)
 	}
 	if len(result) == 0 {
 		return nil

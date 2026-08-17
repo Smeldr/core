@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.72.2] — 2026-08-17
+
+### Fixed
+- `smeldrVersions` (the read behind `GET /_health` and the startup log line) reported a `replace`-built binary's stale, nominal `go.mod` require-line version rather than what was actually linked — `/_health` could silently lie about the running version for any binary built under a `replace` directive (e.g. `example/server`'s own `replace smeldr.dev/core => ../..`). Now prefers the replace's own version when active; reports Go's own `"(devel)"` marker for an unversioned local-path replace instead of a stale version number. No exported symbol. (A273, T219)
+
+---
+
 ## [1.72.1] — 2026-08-17
 
 ### Fixed

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -464,6 +465,81 @@ func TestApp_health_coreVersion(t *testing.T) {
 	// The version may be "(devel)" in local builds but the key must exist.
 	if !strings.Contains(body, `"core":`) {
 		t.Fatalf("body missing core version key, got %q", body)
+	}
+}
+
+// — parseSmeldrVersions (T219) —————————————————————————————————————————————
+//
+// core has zero dependencies of its own, so debug.ReadBuildInfo() run
+// inside a core package test can never naturally exercise a replace
+// directive — these tests construct *debug.BuildInfo by hand instead.
+
+func TestParseSmeldrVersions_NoReplace(t *testing.T) {
+	info := &debug.BuildInfo{
+		Main: debug.Module{Path: "smeldr.dev/core", Version: "v1.72.1"},
+		Deps: []*debug.Module{
+			{Path: "smeldr.dev/mcp", Version: "v1.31.0"},
+			{Path: "github.com/example/other", Version: "v2.0.0"}, // non-smeldr.dev, ignored
+		},
+	}
+	got := parseSmeldrVersions(info)
+	if got["core"] != "1.72.1" {
+		t.Errorf(`core = %q, want "1.72.1"`, got["core"])
+	}
+	if got["mcp"] != "1.31.0" {
+		t.Errorf(`mcp = %q, want "1.31.0"`, got["mcp"])
+	}
+	if _, ok := got["other"]; ok {
+		t.Errorf("non-smeldr.dev dependency should be ignored, got key %q", "other")
+	}
+}
+
+func TestParseSmeldrVersions_ReplaceWithVersion(t *testing.T) {
+	info := &debug.BuildInfo{
+		Main: debug.Module{Path: "smeldr.dev/core", Version: "v1.72.1"},
+		Deps: []*debug.Module{
+			{
+				Path:    "smeldr.dev/mcp",
+				Version: "v1.29.0", // stale nominal require-line version
+				Replace: &debug.Module{Path: "smeldr.dev/mcp", Version: "v1.31.0"},
+			},
+		},
+	}
+	got := parseSmeldrVersions(info)
+	if got["mcp"] != "1.31.0" {
+		t.Errorf(`mcp = %q, want "1.31.0" (the replace's own version, not the stale nominal one)`, got["mcp"])
+	}
+}
+
+// TestParseSmeldrVersions_ReplaceLocalPath_ReportsDevel is the direct
+// regression pin for T219: a local filesystem replace (e.g. example/server's
+// own "replace smeldr.dev/core => ../.."), confirmed empirically to report
+// dep.Replace.Version = "(devel)", must surface that honest marker instead
+// of the stale nominal require-line version.
+func TestParseSmeldrVersions_ReplaceLocalPath_ReportsDevel(t *testing.T) {
+	info := &debug.BuildInfo{
+		Main: debug.Module{Path: "example.com/server", Version: "(devel)"},
+		Deps: []*debug.Module{
+			{
+				Path:    "smeldr.dev/core",
+				Version: "v1.66.1", // stale — what T219 was actually seeing live
+				Replace: &debug.Module{Path: "../..", Version: "(devel)"},
+			},
+		},
+	}
+	got := parseSmeldrVersions(info)
+	if got["core"] != "(devel)" {
+		t.Errorf(`core = %q, want "(devel)" (not the stale "1.66.1")`, got["core"])
+	}
+}
+
+func TestParseSmeldrVersions_EmptyVersionSkipped(t *testing.T) {
+	info := &debug.BuildInfo{
+		Main: debug.Module{Path: "smeldr.dev/core", Version: ""},
+	}
+	got := parseSmeldrVersions(info)
+	if got != nil {
+		t.Errorf("want nil for empty main version and no deps, got %v", got)
 	}
 }
 
