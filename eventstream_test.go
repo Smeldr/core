@@ -77,49 +77,41 @@ func TestEventBroadcaster_BroadcastNoSubscribers(t *testing.T) {
 }
 
 func TestEventBroadcaster_FullBufferDropsWithoutBlocking(t *testing.T) {
+	// Deliberately single-goroutine and lockstep, not a background drainer
+	// racing the broadcast loop: an earlier version drained `fast` from a
+	// separate goroutine, which is exactly the kind of race that passes on
+	// a fast local machine and flakes on a loaded CI runner — `fast`'s own
+	// buffer could fill before the drainer got scheduled, undermining the
+	// very thing this test exists to prove. Draining `fast` synchronously,
+	// once per broadcast, in the same goroutine that calls broadcast,
+	// removes the race entirely while still proving the same two things:
+	// broadcast doesn't block on `slow`'s full buffer, and `fast` — a
+	// healthy sibling — is unaffected by it.
 	b := newEventBroadcaster()
 
 	slow := b.subscribe() // deliberately never drained
 	defer b.unsubscribe(slow)
 
 	fast := b.subscribe()
-	drained := make(chan []byte, 1000)
-	go func() {
-		for p := range fast {
-			drained <- p
-		}
-	}()
 	defer b.unsubscribe(fast)
 
 	const n = eventStreamSubscriberBuffer + 5 // deliberately overflows slow's buffer
 
-	done := make(chan struct{})
-	go func() {
-		for i := 0; i < n; i++ {
-			b.broadcast([]byte("x"))
-		}
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("broadcast blocked despite a full subscriber buffer")
-	}
-
-	received := 0
-	deadline := time.After(time.Second)
-loop:
-	for received < n {
+	start := time.Now()
+	for i := 0; i < n; i++ {
+		b.broadcast([]byte("x"))
 		select {
-		case <-drained:
-			received++
-		case <-deadline:
-			break loop
+		case <-fast:
+		case <-time.After(time.Second):
+			t.Fatalf("fast subscriber did not receive broadcast %d/%d — a wedged sibling must not affect it", i+1, n)
 		}
 	}
-	if received != n {
-		t.Errorf("fast (drained) subscriber received %d/%d broadcasts, want all — a wedged sibling must not affect it", received, n)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("broadcast took %v for %d calls despite a full subscriber buffer — looks blocked", elapsed, n)
+	}
+
+	if got := len(slow); got != eventStreamSubscriberBuffer {
+		t.Errorf("slow subscriber buffer len = %d, want %d (full, overflow dropped)", got, eventStreamSubscriberBuffer)
 	}
 }
 
