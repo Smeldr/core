@@ -753,6 +753,52 @@ func TestApp_Handler_logsHandler(t *testing.T) {
 }
 
 // ——————————————————————————————————————————————————————————————
+// Handler — event stream handler registration
+// ——————————————————————————————————————————————————————————————
+
+func TestApp_Handler_eventStreamHandler(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	app.EventStream()
+	h := app.Handler()
+
+	// /_events/stream is protected by auth; unauthenticated request gets 401,
+	// not 404 — proves the route is registered.
+	req := httptest.NewRequest("GET", "/_events/stream", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code == http.StatusNotFound {
+		t.Error("/_events/stream route not registered (got 404)")
+	}
+}
+
+func TestApp_EventStream_RouteAbsentWithoutCall(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	h := app.Handler()
+
+	req := httptest.NewRequest("GET", "/_events/stream", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 when App.EventStream was never called", w.Code)
+	}
+}
+
+func TestApp_EventStream_HandlerIdempotentDoubleRegistration(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	app.EventStream()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Handler() called twice panicked: %v", r)
+		}
+	}()
+	app.Handler()
+	app.Handler()
+}
+
+// ——————————————————————————————————————————————————————————————
 // Handler — cookie manifest registration
 // ——————————————————————————————————————————————————————————————
 

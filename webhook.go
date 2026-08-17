@@ -381,16 +381,22 @@ type transitionWebhookData struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-// dispatchTransitionWebhook enqueues a webhook delivery for eventName when a
-// [WebhookStore]/worker pool are wired (nil-safe no-op otherwise — matches
-// [App.Webhooks] being opt-in). A dedicated path beside [fireAsyncTriggers]
-// rather than the [App.OnSignal] bus (T231): the bus's [LifecycleEvent]
-// vocabulary is fixed to content-module Draft/Published/Archived semantics
-// and [buildWebhookPayload] requires a typed Go item — neither fits a
+// dispatchTransitionWebhook builds the payload for a state-flow transition
+// or D42-class Signal-emission event (T231) and fans it out to whichever
+// sinks are configured: enqueues a webhook delivery when a [WebhookStore]/
+// worker pool are wired, and/or broadcasts to the event-stream broadcaster
+// when one is wired (T269) — the two sinks are independent, so a caller with
+// only one configured still gets that one. Nil-safe no-op when neither sink
+// is configured (matches [App.Webhooks]/[App.EventStream] both being
+// opt-in). A dedicated path beside [fireAsyncTriggers] rather than the
+// [App.OnSignal] bus (T231): the bus's [LifecycleEvent] vocabulary is fixed
+// to content-module Draft/Published/Archived semantics and
+// [buildWebhookPayload] requires a typed Go item — neither fits a
 // [StateFlow]-driven transition on an arbitrary named state, or a Signal
 // inserted by raw SQL with no corresponding Go value in hand.
-func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *workerPool, eventName string, data transitionWebhookData) {
-	if store == nil || pool == nil {
+func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, eventName string, data transitionWebhookData) {
+	webhooksConfigured := store != nil && pool != nil
+	if !webhooksConfigured && broadcaster == nil {
 		return
 	}
 	dataJSON, err := json.Marshal(data)
@@ -408,7 +414,12 @@ func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *w
 		slog.WarnContext(ctx, "smeldr: transition webhook payload marshal failed", "error", err, "event", eventName)
 		return
 	}
-	enqueueWebhookEvent(ctx, store, pool, eventName, payload)
+	if webhooksConfigured {
+		enqueueWebhookEvent(ctx, store, pool, eventName, payload)
+	}
+	if broadcaster != nil {
+		broadcaster.broadcast(payload)
+	}
 }
 
 // validateWebhookURL validates rawURL for SSRF safety. Returns a

@@ -2,7 +2,9 @@ package smeldr
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -274,6 +276,73 @@ func TestSignalBus_HandlerCalled(t *testing.T) {
 	}
 	if got.URL == "" {
 		t.Errorf("SignalEvent.URL is empty")
+	}
+}
+
+// TestDispatchBus_BroadcastsToEventStreamOnAfterCreate proves the T269
+// decoupling decision: App.EventStream() alone (no App.Webhooks() call) is
+// enough for a fired signal to reach the event-stream broadcaster.
+func TestDispatchBus_BroadcastsToEventStreamOnAfterCreate(t *testing.T) {
+	app, mod := newBusApp(t, "test-secret-bus-broadcast")
+	app.EventStream()
+	app.wireSignalBus()
+
+	ch := app.eventBroadcaster.subscribe()
+	defer app.eventBroadcaster.unsubscribe(ch)
+
+	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
+	if _, err := mod.MCPCreate(userCtx, map[string]any{"title": "Stream test"}); err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+
+	select {
+	case payload := <-ch:
+		var got WebhookEventPayload
+		if err := json.Unmarshal(payload, &got); err != nil {
+			t.Fatalf("unmarshal broadcast payload: %v", err)
+		}
+		if !strings.HasSuffix(got.Event, ".created") {
+			t.Errorf("Event = %q, want suffix %q", got.Event, ".created")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("no broadcast received within deadline — App.EventStream() alone should be enough")
+	}
+}
+
+// TestDispatchBus_NoBroadcastWhenEventStreamNotConfigured confirms dispatchBus
+// stays nil-safe when App.EventStream was never called.
+func TestDispatchBus_NoBroadcastWhenEventStreamNotConfigured(t *testing.T) {
+	app, mod := newBusApp(t, "test-secret-bus-no-stream")
+	app.wireSignalBus()
+
+	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
+	if _, err := mod.MCPCreate(userCtx, map[string]any{"title": "No stream"}); err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+	// Nothing to assert beyond "no panic" — app.eventBroadcaster is nil.
+	time.Sleep(50 * time.Millisecond)
+}
+
+// TestDispatchBus_SkipsBroadcastForUnmappedSignal confirms a signal outside
+// buildEventName's fixed webhook vocabulary (AfterRelationCascade, in this
+// case) is silently skipped rather than broadcast or erroring — matching
+// webhookDispatch's own handling of the identical case.
+func TestDispatchBus_SkipsBroadcastForUnmappedSignal(t *testing.T) {
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte("test-secret-unmapped-signal"),
+	}))
+	app.EventStream()
+
+	ch := app.eventBroadcaster.subscribe()
+	defer app.eventBroadcaster.unsubscribe(ch)
+
+	app.dispatchBus(context.Background(), SignalEvent{Type: "Post"}, AfterRelationCascade)
+
+	select {
+	case payload := <-ch:
+		t.Fatalf("expected no broadcast for an unmapped signal, got %s", payload)
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 

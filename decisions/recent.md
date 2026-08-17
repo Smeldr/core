@@ -294,3 +294,117 @@ A266/A269/A270/A272's own precedent. Coverage: 96.2% package-wide;
 zero findings. v1.72.1 → **v1.72.2**.
 
 ---
+
+## A274 — GET /_events/stream: NDJSON push transport for agent orchestration events (T269)
+
+### Problem
+
+Every implementing agent session tonight runs on Peter's own machine,
+behind NAT with no public IP. Smeldr's own outbound webhook (T231/A263)
+is an HTTP POST *from* the server *to* a URL Smeldr provides — nothing
+can POST into a machine with no public address to POST into. The
+self-hosting design's own "N listeners" webhook-to-local-listener model
+(`design/self-hosting-the-architect-process.md` §7) only reaches a
+listener co-located on the same public box as `process.smeldr.dev`
+itself — never a listener on a home machine. Full rationale and the
+rejected alternatives (Claude Code Routines, a hosted webhook relay,
+WebSocket) are in `design/agent-event-signaling.md`, an addendum to §7
+approved 2026-08-17; this Amendment implements it, not re-argues it.
+
+### Fix
+
+New `App.EventStream()` (opt-in, matches `App.CaptureLogs`/`App.Webhooks`)
+installs an unexported in-memory `eventBroadcaster` (`eventstream.go`) — a
+set of subscriber channels, non-blocking `broadcast` (a full subscriber
+buffer is dropped, logged at `Warn`, never blocks the caller or its
+siblings) — and mounts `GET /_events/stream`: Author role, bearer auth
+(same `AuthFunc` contract as `GET /_logs`/`GET /_audit`), each connection
+held open and receiving one NDJSON line per event (`http.Flusher`,
+`"\n"`-terminated, flushed immediately), a `{"type":"ping"}` heartbeat
+every 25s (`eventStreamHeartbeat`, an injectable `var` for tests, not a
+`const`) to survive idle-timing reverse proxies. Delivery is at-most-once
+by design — no replay/backfill in this first cut (the design doc's own
+lean, confirmed not re-argued); every subscriber receives every event,
+filtered client-side only (also the design doc's own lean).
+
+Two broadcast call sites, reusing the exact payload-building code already
+used for webhook delivery rather than a second implementation:
+
+1. **`App.dispatchBus`** (content lifecycle — `AfterCreate`…`AfterSchedule`)
+   gains a broadcast check using `buildWebhookPayload`, inserted *before*
+   the existing `OnSignal`-handler dispatch and its own early-return —
+   deliberately unconditional on whether any `OnSignal` handler (including
+   `App.Webhooks`) is registered.
+2. **`dispatchTransitionWebhook`** (state-flow transitions, T231's
+   `"signal.created"`) gains a `broadcaster *eventBroadcaster` parameter;
+   its nil-guard changed from "return unless store+pool both set" to
+   "return unless store+pool **or** broadcaster is set" — payload building
+   happens once, then each configured sink (webhook enqueue, stream
+   broadcast) fires independently. `recordAuthorizationRequiredSignal`
+   (`state.go`) threads the same new parameter through to its own call.
+
+### Decoupling decision — the one judgment call this Amendment adds
+
+The design doc's own Shape §1 names both broadcast call sites but doesn't
+settle whether the stream should work when `App.Webhooks()` was never
+called. Decided: **yes, independently** — the stream is in-memory only,
+with no relationship to whether an external webhook target exists; making
+it silently require `App.Webhooks()` would defeat much of its own point
+(an agent that wants live events without standing up webhook
+infrastructure). Two tests exist specifically to *prove* this rather than
+only cover current behaviour:
+`TestDispatchBus_BroadcastsToEventStreamOnAfterCreate` and
+`TestDispatchTransitionWebhook_nilStoreNilPoolBroadcasterSet`, both with
+`EventStream()` configured and `Webhooks()` never called.
+
+**Role: Author.** Not pre-decided in the design doc. Chosen by analogy —
+`list_signals`, `get_valid_transitions`, `list_items_by_state` (the MCP
+tools reading the identical event classes this stream carries) are all
+Author-role; gating the push path higher than its own pull-based
+equivalent would make it harder to use than the polling it exists to
+replace. Kept deliberately separate from webhook *configuration*'s Admin
+bar — "read a live feed of events that already happened" and "point
+delivery at an arbitrary external URL" are different questions.
+
+### Real, unplanned finding — `App.wireSignalBus` was itself gating the stream shut
+
+`App.wireSignalBus`'s own early-return (`if !hasBus &&
+len(a.signalListeners) == 0 { return }`) meant the afterHook closure that
+calls `dispatchBus` was never wired at all when zero `OnSignal` handlers
+existed — `EventStream()` alone, with no `OnSignal`/`Webhooks()` call,
+would have wired the broadcaster but never actually fired it, silently
+contradicting the decoupling decision above. Caught by the plan's own
+test for that decision failing on first run, not found by inspection.
+Fixed by adding `a.eventBroadcaster == nil` as a third condition to the
+same early-return — the closure now wires whenever any of the three
+sinks (bus handlers, legacy listeners, event stream) is configured.
+
+### Tests
+
+19 new tests (`eventstream_test.go`, plus additions to `signals_test.go`,
+`smeldr_test.go`, `webhook_test.go`, `state_test.go`) — a named
+`-race`-covered concurrent-subscriber test
+(`TestEventBroadcaster_ConcurrentSubscribeBroadcastUnsubscribe`), a
+non-blocking-drop test under a deliberately overflowed buffer, separate
+write-error tests for the event-payload and heartbeat write call sites
+(two distinct `select` cases), route-absent-without-`EventStream()` and
+double-`Handler()`-registration-is-idempotent pins, and the two
+decoupling-proof tests named above. Five existing call sites (
+`dispatchTransitionWebhook`/`recordAuthorizationRequiredSignal`
+signature changes) updated as mechanical regression pins, not new
+coverage. `newEventStreamHandler`'s one uncovered branch (a subscriber
+channel closed while still subscribed, distinct from the handler's own
+deferred `unsubscribe`) is genuinely unreachable via the public API —
+named, not chased, matching this session's own precedent for
+structurally-unreachable branches (A219/A273).
+
+### Versioning
+
+New exported symbol (`App.EventStream`) + new consumer-visible route.
+Coverage: 96.3% package-wide; every new function in `eventstream.go`
+100% except `newEventStreamHandler` (97.0%, the one named-unreachable
+branch above). `go test -race ./...` clean. `golangci-lint` zero
+findings. MINOR bump, matching A265/A271's own precedent for "new
+capability, no breaking change". v1.72.2 → **v1.73.0**.
+
+---

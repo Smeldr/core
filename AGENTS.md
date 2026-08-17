@@ -293,6 +293,27 @@ newest-first). Query params: `level` (min, inclusive), `limit` (most recent N),
 `since` (RFC3339). Route is absent (404) unless `CaptureLogs` was called. There is no
 MCP tool for logs by design — the path must not depend on MCP. Use `smeldr-cli logs`.
 
+### Event stream (EventStream + /_events/stream, v1.73.0+)
+
+Opt-in, in-memory push of live content-lifecycle and state-flow-transition
+events — for an agent/listener process that cannot receive an inbound webhook
+(behind NAT, no public IP) and wants live events without polling.
+
+```go
+app.EventStream() // mounts GET /_events/stream; independent of app.Webhooks(...)
+```
+
+`GET /_events/stream` (Author role, bearer auth) holds the connection open and
+writes one NDJSON line per event — same payload shape as an outbound webhook
+delivery (`{"id","event","timestamp","data"}`), covering the same event names
+(`"{type}.created"` … `"{type}.transitioned"`, `"signal.created"`). A
+`{"type":"ping"}` line arrives every 25s while idle. At-most-once delivery —
+no replay on reconnect — and no server-side event-type filtering; a listener
+filters client-side. Route is absent (404) unless `EventStream` was called.
+There is no MCP tool for this by design, same reasoning as `/_logs` — the
+whole point is working when an agent has only this one HTTP connection to
+rely on.
+
 ### Generic reference server (example/server)
 
 `example/server/main.go` is a deployable binary with no custom Go content types.

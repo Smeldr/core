@@ -2672,6 +2672,103 @@ forge webhook retry <job-id>
 
 ---
 
+## Event stream
+
+### GET /_events/stream
+
+Live event stream delivering content-lifecycle and state-flow events as
+NDJSON over a held-open chunked HTTP response — not the `text/event-stream`
+SSE protocol, and explicitly not a WebSocket (100% standard library,
+matching core's zero-third-party-dependency principle). Auth is enforced;
+requires the **Author** role.
+
+**Request:**
+
+```
+GET /_events/stream HTTP/1.1
+Authorization: Bearer <token>
+```
+
+**Response on success (200 OK):**
+
+```
+Content-Type: application/x-ndjson
+Cache-Control: no-cache
+Connection: keep-alive
+X-Accel-Buffering: no
+```
+
+Headers are flushed immediately. The connection is held open and each event
+is delivered as one line of JSON (NDJSON format), flushed immediately after
+each write. A periodic `{"type":"ping"}` heartbeat is sent every 25 seconds
+while idle to keep the connection alive through reverse proxies.
+
+The connection ends when the client disconnects, or if a write to the client
+fails (e.g. broken pipe).
+
+**Response on auth failure:**
+
+401 Unauthorized (missing or invalid token) or 403 Forbidden (insufficient role).
+
+### EventStream app wiring
+
+```go
+app.EventStream()  // mounts GET /_events/stream; returns *App (chainable)
+```
+
+`App.EventStream` is optional and independent of `App.Webhooks()`. Calling
+it installs an in-memory broadcaster and mounts the stream route. Without
+calling it, the route does not exist (404). Both can be configured on the
+same `App` instance to deliver the same events to both webhooks (outbound POST)
+and stream consumers (persistent connection).
+
+### Events delivered
+
+Every content-lifecycle signal and state-flow-transition event already mapped
+to a webhook event name is delivered to the stream:
+
+- Content lifecycle: `AfterCreate`, `AfterUpdate`, `AfterPublish`,
+  `AfterUnpublish`, `AfterArchive`, `AfterDelete`, `AfterSchedule`
+  → `"{type}.created"`, `"{type}.updated"`, `"{type}.published"`,
+  `"{type}.unpublished"`, `"{type}.archived"`, `"{type}.deleted"`,
+  `"{type}.scheduled"`
+- State transitions: `"{type}.transitioned"` (item moves between states)
+- Signals: `"signal.created"` (new explicit signal)
+
+The JSON payload shape is identical to webhook event payloads — a
+`WebhookEventPayload` envelope with `id`, `event`, `timestamp`, and `data` fields.
+
+### Delivery semantics
+
+- **At-most-once:** If a client is disconnected when an event fires, the event
+  is not delivered to that client. Reconnecting starts fresh with no catch-up
+  or backfill.
+- **No server-side filtering:** Every connected subscriber receives every event.
+  A listener that only cares about certain event types must filter client-side.
+- **Client buffer:** A subscriber whose local event buffer fills (32 events,
+  not configurable in this version) has further events silently dropped for
+  that subscriber only (logged server-side at Warn level) rather than blocking
+  event delivery to other connected subscribers.
+
+### Example
+
+Client connecting with curl:
+
+```bash
+curl -N -H "Authorization: Bearer <token>" https://example.com/_events/stream
+```
+
+Output (NDJSON):
+
+```
+{"id":"e1","event":"task.created","timestamp":"2026-08-17T12:00:00Z","data":{"type":"task","id":"t1","slug":"t001-example"}}
+{"type":"ping"}
+{"id":"e2","event":"task.transitioned","timestamp":"2026-08-17T12:00:05Z","data":{"type":"task","id":"t1","slug":"t001-example","from_state":"active","to_state":"waiting-plan"}}
+{"id":"e3","event":"signal.created","timestamp":"2026-08-17T12:00:10Z","data":{"type":"signal","id":"s1","slug":"plan-ready"}}
+```
+
+---
+
 ## Search engine indexing
 
 Smeldr does not provide built-in sitemap ping. Google deprecated their ping

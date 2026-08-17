@@ -314,6 +314,9 @@ type App struct {
 		setAfterHook(func(Context, LifecycleEvent, afterHookMeta, any))
 	} // modules whose afterHook is wired at Run time
 
+	eventBroadcaster      *eventBroadcaster // non-nil when App.EventStream() was called; backs GET /_events/stream
+	eventStreamHandlerReg bool              // true once GET /_events/stream is registered
+
 	routeReg []routeEntry // in-memory route registry; populated by App.Route and app.Content
 }
 
@@ -765,6 +768,27 @@ func (a *App) Webhooks(store *WebhookStore) *App {
 	return a
 }
 
+// EventStream installs an in-memory broadcaster and mounts GET
+// /_events/stream, which streams every content-lifecycle and state-flow-
+// transition event as one NDJSON line per event, held open until the
+// client disconnects. Opt-in and additive — without this call nothing
+// changes and the route is absent (404).
+//
+// Requires the Author role over bearer auth (or Config.Auth, if set) — same
+// contract as GET /_logs and GET /_audit.
+//
+// Delivery is at-most-once and client-side-filtered: a dropped connection
+// misses whatever fired in the gap (no replay), and every subscriber
+// receives every event regardless of type — the listener filters for what
+// it cares about. Independent of [App.Webhooks]: broadcasting works whether
+// or not outbound webhook delivery is also configured.
+//
+// EventStream returns the App for chaining.
+func (a *App) EventStream() *App {
+	a.eventBroadcaster = newEventBroadcaster()
+	return a
+}
+
 // PageMeta wires store as the per-path SEO override store for this application.
 // When wired, [renderListHTML] automatically looks up the request path in store
 // and uses the stored values for Title, Description, and og:image when no
@@ -1108,12 +1132,25 @@ func (a *App) OnSignal(sig LifecycleEvent, h func(context.Context, SignalEvent) 
 	return a
 }
 
-// dispatchBus dispatches ev to all handlers registered for sig via [App.OnSignal].
+// dispatchBus dispatches ev to all handlers registered for sig via [App.OnSignal],
+// and, when [App.EventStream] has been called, broadcasts the same payload
+// [webhookDispatch] would build to the event-stream broadcaster — deliberately
+// unconditional on whether any [App.OnSignal] handler exists for sig, so the
+// stream works independently of whether [App.Webhooks] was also configured
+// (T269). A sig with no webhook-event mapping ([buildWebhookPayload] erroring)
+// is silently skipped, matching [webhookDispatch]'s own handling of the same
+// case via [buildEventName]'s ok check.
+//
 // Called from the wireSignalBus closure inside the afterHook goroutine.
 // Each handler runs with a fresh context derived from context.WithoutCancel(ctx)
 // and a 100 ms timeout so that client disconnects do not abort delivery.
 // Handler errors are logged; nothing is returned or propagated.
 func (a *App) dispatchBus(ctx context.Context, ev SignalEvent, sig LifecycleEvent) {
+	if a.eventBroadcaster != nil {
+		if payload, err := buildWebhookPayload(ev.Type, ev.raw, sig); err == nil {
+			a.eventBroadcaster.broadcast(payload)
+		}
+	}
 	a.busMu.RLock()
 	handlers := a.busHandlers[sig]
 	a.busMu.RUnlock()
@@ -1155,12 +1192,17 @@ func (a *App) emitSignal(ctx context.Context, sig LifecycleEvent, ev SignalEvent
 // of Handler()'s other one-time setups, so there is no double-registration
 // panic risk to guard against. The closure builds a [SignalEvent], dispatches
 // it to all registered [App.OnSignal] handlers, then calls any legacy
-// [App.AddSignalListener] callbacks.
+// [App.AddSignalListener] callbacks. Also gated on [App.EventStream] (T269):
+// dispatchBus is where the event-stream broadcast happens, so the afterHook
+// must be wired even when zero [App.OnSignal] handlers and zero legacy
+// listeners exist, as long as a broadcaster is configured — otherwise
+// EventStream() alone (no OnSignal/Webhooks) would never see a single
+// content-lifecycle event, defeating its own decoupling from App.Webhooks.
 func (a *App) wireSignalBus() {
 	a.busMu.RLock()
 	hasBus := len(a.busHandlers) > 0
 	a.busMu.RUnlock()
-	if !hasBus && len(a.signalListeners) == 0 {
+	if !hasBus && len(a.signalListeners) == 0 && a.eventBroadcaster == nil {
 		return
 	}
 	app := a
@@ -1381,6 +1423,14 @@ func (a *App) Handler() http.Handler {
 			logsAuth = BearerHMAC(string(a.cfg.Secret))
 		}
 		a.mux.Handle("GET /_logs", newLogsHandler(logsAuth, a.logRing))
+	}
+	if a.eventBroadcaster != nil && !a.eventStreamHandlerReg {
+		a.eventStreamHandlerReg = true
+		esAuth := a.cfg.Auth
+		if esAuth == nil {
+			esAuth = BearerHMAC(string(a.cfg.Secret))
+		}
+		a.mux.Handle("GET /_events/stream", newEventStreamHandler(esAuth, a.eventBroadcaster))
 	}
 	// A66: probe smeldr_tokens table at startup when a TokenStore is configured.
 	// A83: auto-create a bootstrap admin token when smeldr_tokens is empty.

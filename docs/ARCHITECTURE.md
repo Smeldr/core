@@ -1225,6 +1225,56 @@ SitemapRegenerate
 
 ---
 
+## Event stream *(v1.73.0+, T269)*
+
+`App.EventStream()` installs an in-memory `eventBroadcaster` and mounts
+`GET /_events/stream` — a held-open NDJSON connection (`http.Flusher`,
+100% stdlib, not a WebSocket) that pushes every content-lifecycle and
+state-flow-transition event to connected listeners instead of requiring
+them to poll. Built for agent sessions on a NAT'd machine (no public IP)
+that cannot receive an inbound webhook.
+
+```
+Two broadcast call sites, both nil-safe on a.eventBroadcaster:
+
+  App.dispatchBus (content lifecycle — AfterCreate…AfterSchedule)
+      → broadcasts buildWebhookPayload(ev.Type, ev.raw, sig) BEFORE the
+        existing OnSignal-handler dispatch, unconditionally — independent
+        of whether any OnSignal handler (including App.Webhooks) is wired
+
+  dispatchTransitionWebhook (state-flow transitions, "signal.created")
+      → same payload build already used for webhook delivery; enqueues to
+        the webhook pool when App.Webhooks() is configured AND broadcasts
+        to the stream when App.EventStream() is configured — independent
+        sinks, either may be absent
+
+Route: GET /_events/stream
+    → Author role, bearer auth (same AuthFunc as every other admin route)
+    → one NDJSON line per event, "\n"-terminated, flushed immediately
+    → {"type":"ping"} heartbeat every 25s (keeps idle-timing reverse
+      proxies from closing the connection)
+    → at-most-once delivery — no replay/backfill; a dropped connection
+      misses whatever fired in the gap
+    → every subscriber receives every event; filtering is client-side only
+    → absent (404) unless App.EventStream() was called
+```
+
+**Decoupled from `App.Webhooks()` by design** — the stream's whole purpose
+is letting a listener receive live events without standing up external
+webhook infrastructure. `App.wireSignalBus()`'s own early-return is gated
+on `a.eventBroadcaster != nil` in addition to the pre-existing
+`OnSignal`/legacy-listener checks, specifically so `EventStream()` alone
+(zero `OnSignal` handlers) still wires the afterHook closure that calls
+`dispatchBus`.
+
+**In-memory only** — subscriber channels live in process memory, never
+persisted; a process restart drops every connection (clients are expected
+to reconnect) and a broadcast to zero subscribers is a no-op. A
+subscriber whose buffer fills (32 events, non-configurable) is dropped
+non-blocking rather than stalling the broadcaster or its siblings.
+
+---
+
 ## Scheduler *(Milestone 8)*
 
 The scheduled publishing loop runs as a goroutine started by `app.Run()`.

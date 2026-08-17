@@ -564,14 +564,36 @@ func TestEnqueueWebhookEvent_enqueueError(t *testing.T) {
 }
 
 func TestDispatchTransitionWebhook_nilStore(t *testing.T) {
-	// nil store — no-op, no panic.
-	dispatchTransitionWebhook(context.Background(), nil, nil, "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
+	// nil store and nil broadcaster — no-op, no panic.
+	dispatchTransitionWebhook(context.Background(), nil, nil, nil, "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
 }
 
 func TestDispatchTransitionWebhook_nilPool(t *testing.T) {
 	store := NewWebhookStore(nil, []byte("k"))
-	// nil pool — no-op, no panic.
-	dispatchTransitionWebhook(context.Background(), store, nil, "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
+	// nil pool and nil broadcaster — no-op, no panic.
+	dispatchTransitionWebhook(context.Background(), store, nil, nil, "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
+}
+
+func TestDispatchTransitionWebhook_nilStoreNilPoolBroadcasterSet(t *testing.T) {
+	// Store/pool both nil but a broadcaster is wired (App.EventStream() only,
+	// no App.Webhooks()) — the broadcast sink must still fire independently
+	// of the webhook sink (T269 decoupling decision).
+	b := newEventBroadcaster()
+	ch := b.subscribe()
+	defer b.unsubscribe(ch)
+	dispatchTransitionWebhook(context.Background(), nil, nil, b, "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
+	select {
+	case payload := <-ch:
+		var got WebhookEventPayload
+		if err := json.Unmarshal(payload, &got); err != nil {
+			t.Fatalf("unmarshal broadcast payload: %v", err)
+		}
+		if got.Event != "task.transitioned" {
+			t.Fatalf("expected event %q, got %q", "task.transitioned", got.Event)
+		}
+	default:
+		t.Fatal("expected broadcast payload, got none")
+	}
 }
 
 func TestDispatchTransitionWebhook_success(t *testing.T) {
@@ -582,9 +604,17 @@ func TestDispatchTransitionWebhook_success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	dispatchTransitionWebhook(ctx, store, pool, "task.transitioned", transitionWebhookData{
+	b := newEventBroadcaster()
+	streamCh := b.subscribe()
+	defer b.unsubscribe(streamCh)
+	dispatchTransitionWebhook(ctx, store, pool, b, "task.transitioned", transitionWebhookData{
 		Type: "task", ID: "task-1", Slug: "t231", FromState: "active", ToState: "waiting-plan", Reason: "",
 	})
+	select {
+	case <-streamCh:
+	default:
+		t.Fatal("expected broadcast to fire alongside webhook enqueue")
+	}
 	endpoints, err := store.EndpointsForEvent(ctx, "task.transitioned")
 	if err != nil {
 		t.Fatalf("EndpointsForEvent: %v", err)

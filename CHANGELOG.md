@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.73.0] — 2026-08-17
+
+### Added
+- `App.EventStream()` — new exported method for opt-in event subscription. Installs an in-memory event broadcaster and mounts `GET /_events/stream` to stream all content-lifecycle events (AfterCreate, AfterUpdate, AfterPublish, AfterUnpublish, AfterArchive, AfterDelete, AfterSchedule) and state-flow-transition events as NDJSON, one event per line, with a periodic `{"type":"ping"}` heartbeat every 25 seconds to keep connections alive through idle-timing reverse proxies. Requires Author role via bearer auth (same contract as `GET /_logs` and `GET /_audit`). At-most-once delivery, no replay or backfill; filtering is entirely client-side. Works independently of `App.Webhooks()` — stream route is absent (404) unless `App.EventStream()` is explicitly called. Enables agents and listeners behind NAT to subscribe via persistent outbound connection instead of polling or receiving inbound webhook POSTs. New file `eventstream.go`. (A274, T269)
+
+---
+
 ## [1.72.2] — 2026-08-17
 
 ### Fixed

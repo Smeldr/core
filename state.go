@@ -886,7 +886,7 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 		return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
 	}
 	fireAsyncTriggers(ctx, db, typeName, currentStatus, toState, id)
-	dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool,
+	dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster,
 		strings.ToLower(typeName)+".transitioned",
 		transitionWebhookData{
 			Type:      strings.ToLower(typeName),
@@ -968,14 +968,15 @@ func drainAuthorizationGate(ctx context.Context, db DB, table, typeName, itemID,
 // never a hardcoded role, since RequiredRole is free-form and a Signal
 // naming the wrong authority would be a false statement about who may act.
 //
-// store/pool deliver a "signal.created" webhook event for this Signal (T231)
-// — the same event name a human-created Signal already produces via the
-// normal [Module.MCPCreate] path's AfterCreate signal, so a webhook
-// subscriber cannot distinguish a D42-triggered Signal from a human-created
-// one by event name, which is the correct behaviour: a Signal is a Signal.
-// [dispatchTransitionWebhook] is nil-safe, so a caller with webhooks unwired
-// passes nil for both.
-func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *WebhookStore, pool *workerPool, typeName, itemID, fromState, toState, requiredRole string) error {
+// store/pool deliver a "signal.created" webhook event for this Signal (T231);
+// broadcaster additionally streams it (T269) — the same event name a
+// human-created Signal already produces via the normal [Module.MCPCreate]
+// path's AfterCreate signal, so a subscriber cannot distinguish a
+// D42-triggered Signal from a human-created one by event name, which is the
+// correct behaviour: a Signal is a Signal. [dispatchTransitionWebhook] is
+// nil-safe, so a caller with webhooks/streaming unwired passes nil for
+// whichever it lacks.
+func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, typeName, itemID, fromState, toState, requiredRole string) error {
 	id := NewID()
 	now := time.Now().UTC()
 	message := fmt.Sprintf("%s %s: %s→%s requires role %q", typeName, itemID, fromState, toState, requiredRole)
@@ -989,7 +990,7 @@ func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *Webhoo
 	if err != nil {
 		return fmt.Errorf("smeldr: recordAuthorizationRequiredSignal: %w", err)
 	}
-	dispatchTransitionWebhook(ctx, store, pool, "signal.created", transitionWebhookData{
+	dispatchTransitionWebhook(ctx, store, pool, broadcaster, "signal.created", transitionWebhookData{
 		Type: "signal", ID: id, Slug: id, ToState: "pending",
 	})
 	return nil
@@ -1066,7 +1067,7 @@ func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err e
 			// Automation may never cross a role-gated boundary itself —
 			// the authority half of T211. Emit the loud-failure Signal
 			// instead of applying the transition.
-			if sigErr := recordAuthorizationRequiredSignal(ctx, db, a.webhookStore, a.webhookPool, r.typeName, r.itemID, fromState, r.toState, requiredRole); sigErr != nil {
+			if sigErr := recordAuthorizationRequiredSignal(ctx, db, a.webhookStore, a.webhookPool, a.eventBroadcaster, r.typeName, r.itemID, fromState, r.toState, requiredRole); sigErr != nil {
 				slog.WarnContext(ctx, "smeldr: DrainEvalQueue: authorization-required signal failed",
 					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "required_role", requiredRole, "error", sigErr)
 			}
