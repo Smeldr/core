@@ -656,15 +656,12 @@ func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, typeName
 	}
 
 	// Detect whether items live in a typed table or in smeldr_dynamic_content.
-	staticTable := camelToSnake(typeName) + "s"
-	isDynamic := false
-	var tableExists int
-	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$1`, staticTable,
-	).Scan(&tableExists); err != nil || tableExists == 0 {
-		staticTable = "smeldr_dynamic_content"
-		isDynamic = true
-	}
+	// Reuses resolveItemTable rather than re-probing sqlite_master directly —
+	// its own probe order (smeldr_<snake>s, then <snake>s, then
+	// smeldr_dynamic_content) is what every other item-resolution path in
+	// this package already relies on (T229).
+	staticTable := resolveItemTable(ctx, db, typeName)
+	isDynamic := staticTable == "smeldr_dynamic_content"
 
 	switch ConflictPolicy(conflictPolicy) {
 	case ConflictReject:

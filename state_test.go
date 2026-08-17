@@ -2356,6 +2356,51 @@ func TestApplyConflictPolicy_reject_conflict(t *testing.T) {
 	}
 }
 
+// TestApplyConflictPolicy_smeldrPrefixedTable pins T229: applyConflictPolicy
+// previously probed only <snake>s (e.g. "tasks"), never smeldr_<snake>s (e.g.
+// "smeldr_tasks") — the table every orchestration type actually uses. A
+// missed probe silently fell through to isDynamic=true, checking conflicts
+// against smeldr_dynamic_content instead of the type's own real table —
+// harmless while no orchestration type used a conflict policy, but silently
+// wrong the day one does. Uses "Task"/"smeldr_tasks" directly (not the
+// registerConflictFlow fixture, whose own "conflict_types" bare-form table
+// happened to already match the pre-fix probe and would not have caught
+// this regression).
+func TestApplyConflictPolicy_smeldrPrefixedTable(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS smeldr_tasks (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create smeldr_tasks: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:           "task-conflict-flow",
+		TypeName:       "Task",
+		ActiveState:    "published",
+		ConflictPolicy: ConflictReject,
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published"},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "published"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_tasks (id, status) VALUES (?, ?)`, "existing-task", "published",
+	); err != nil {
+		t.Fatalf("insert existing task: %v", err)
+	}
+	err := applyConflictPolicy(ctx, db, nil, "Task", "published", "new-task")
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("smeldr_-prefixed table: want ErrConflict (real conflict against smeldr_tasks), got %v", err)
+	}
+}
+
 func TestApplyConflictPolicy_reject_dbError(t *testing.T) {
 	// Mock DB whose QueryContext fails — simulates DB error on COUNT query.
 	// The PRAGMA probe must succeed first (SQLite identity check).

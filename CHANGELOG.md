@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.71.2] — 2026-08-17
+
+### Fixed
+- `applyConflictPolicy`'s own static-table probe checked only the bare `<snake>s` form of a type's table name, never the `smeldr_<snake>s` form every one of the six orchestration types' real tables actually uses. A miss silently fell through to treating the type as dynamic content, checking conflicts against `smeldr_dynamic_content` instead of the type's own table — harmless while no orchestration type used a conflict policy, wrong the day one does. Fixed by reusing the already-correct `resolveItemTable` instead of re-implementing a narrower probe. No exported symbol. (A270, T229)
+
+---
+
 ## [1.71.1] — 2026-08-17
 
 ### Fixed

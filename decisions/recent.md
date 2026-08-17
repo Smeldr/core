@@ -479,3 +479,71 @@ exposed a latent test-fixture gap, not as independent work). Coverage:
 v1.71.0 → **v1.71.1**.
 
 ---
+
+## A270 — applyConflictPolicy resolves the real smeldr_-prefixed table (T229)
+
+### Problem
+
+`applyConflictPolicy`'s own static-table probe (`state.go`) checked only
+the bare `<snake>s` form of a type's table name (e.g. `typeName="Task"` →
+`"tasks"`) — never the `smeldr_<snake>s` form every one of the six
+orchestration types' real tables actually uses (`smeldr_tasks`,
+`smeldr_goals`, `smeldr_decisions`, `smeldr_amendments`, `smeldr_signals`,
+`smeldr_runs`, confirmed directly against `orchestration.go`). A miss
+silently fell through to treating the type as dynamic content, checking
+conflicts against `smeldr_dynamic_content` instead of the type's own real
+table — harmless while no orchestration type used a conflict policy, wrong
+the day one does. Flagged in an earlier backlog audit, tracked as its own
+Task (T229).
+
+### Investigation
+
+The already-correct reference implementation for this exact resolution
+already existed in the same file: `resolveItemTable`, used by
+`App.TransitionItem` and elsewhere, probes in order `smeldr_<snake>s`,
+then `<snake>s`, then falls back to `smeldr_dynamic_content`. Existing
+tests never caught the bug because `applyConflictPolicy`'s own test
+fixture (`registerConflictFlow`) creates a table literally named
+`conflict_types` — the bare form, matching the bug's own assumption on
+both sides, never exercising the `smeldr_`-prefixed path at all.
+
+### Fix
+
+Replaced the inline probe with a direct call to `resolveItemTable` — DRY
+reuse of the already-correct function rather than a second bespoke fix,
+matching CLAUDE.md's own "check whether the logic already exists
+elsewhere" directive:
+
+```go
+staticTable := resolveItemTable(ctx, db, typeName)
+isDynamic := staticTable == "smeldr_dynamic_content"
+```
+
+`camelToSnake` remains used elsewhere (`state.go`, inside
+`resolveItemTable` itself, `storage.go`) — not left dangling by the
+removal of its third call site.
+
+### Tests
+
+New `TestApplyConflictPolicy_smeldrPrefixedTable`: creates a real
+`smeldr_tasks` table (not the fixture's bare `conflict_types`), registers
+a `ConflictReject` flow for `TypeName: "Task"`, inserts one row already in
+the active state, and asserts `applyConflictPolicy("Task", ...)` returns
+`ErrConflict` — proving the fix finds the real table instead of silently
+checking `smeldr_dynamic_content`. All 18 pre-existing
+`TestApplyConflictPolicy_*` tests re-run unmodified and pass — the
+bare-form `conflict_types` fixture still resolves correctly under
+`resolveItemTable`'s own fallback order (probe `smeldr_conflict_types`
+first, miss, fall through to `conflict_types`, hit).
+
+### Versioning
+
+No exported symbol changed (`applyConflictPolicy`/`resolveItemTable` both
+unexported). Real consumer-observable behaviour change: a conflict-policy
+check against an orchestration type now correctly enforces against that
+type's own real table instead of silently checking the wrong one. PATCH
+bump, matching A266/A269's own precedent. Coverage: 96.3% package-wide;
+`applyConflictPolicy` itself 95.5%. `go test -race ./...` clean. `golangci-
+lint` zero findings. v1.71.1 → **v1.71.2**.
+
+---

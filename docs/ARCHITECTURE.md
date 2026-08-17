@@ -325,7 +325,13 @@ smeldr.dev/
 │                     (unexported) — ConflictReject/ConflictSupersede enforcement after
 │                     validateTransition; conflictRejectCheck, conflictSupersede,
 │                     conflictIDs (unexported helpers); all DB errors fail-open
-│                     (Amendments A175, A176, A186, T23, A193, A220, A234);
+│                     (Amendments A175, A176, A186, T23, A193, A220, A234); its own static-table
+│                     detection now calls resolveItemTable directly instead of re-probing
+│                     sqlite_master with a narrower <snake>s-only check — the narrower probe never
+│                     tried the smeldr_<snake>s form every orchestration type's real table actually
+│                     uses (e.g. smeldr_tasks), silently falling through to the
+│                     smeldr_dynamic_content branch instead; harmless while no orchestration type
+│                     used a conflict policy, wrong the day one does (T229, A270);
 │                     defaultInitialState(ctx, db, typeName) string — returns typeName's own
 │                     registered IsInitial state (queries smeldr_states directly, does not fall
 │                     back to the default flow — its own initial state is always "draft", so a
