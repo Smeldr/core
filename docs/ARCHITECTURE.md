@@ -1257,6 +1257,11 @@ Route: GET /_events/stream
       misses whatever fired in the gap
     → every subscriber receives every event; filtering is client-side only
     → absent (404) unless App.EventStream() was called
+    → max 4 concurrent connections per token (v1.73.1+, T271); a 5th
+      attempt returns 429 (ErrTooManyRequests) before any header is
+      written — bounds a runaway reconnect loop or a compromised token
+      without capping legitimate multi-listener growth (a global cap
+      would do one or the other, never both)
 ```
 
 **Decoupled from `App.Webhooks()` by design** — the stream's whole purpose
@@ -1272,6 +1277,15 @@ persisted; a process restart drops every connection (clients are expected
 to reconnect) and a broadcast to zero subscribers is a no-op. A
 subscriber whose buffer fills (32 events, non-configurable) is dropped
 non-blocking rather than stalling the broadcaster or its siblings.
+
+**Per-token connection cap (T271)** — `eventBroadcaster` tracks concurrent
+subscriber count keyed by `User.ID` (the same identity `ActorID`/provenance
+recording already uses, sourced from the token's own signed `id` claim).
+`subscribe` is checked and rejected *before* `newEventStreamHandler` writes
+any header, since a `200` status line cannot be un-written once sent. The
+limit (4) is deliberately above the steady-state of 1 connection per
+token/listener — headroom for a listener's own reconnect overlap, not a
+number a caller is expected to approach in normal operation.
 
 ---
 

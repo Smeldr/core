@@ -579,7 +579,10 @@ func TestDispatchTransitionWebhook_nilStoreNilPoolBroadcasterSet(t *testing.T) {
 	// no App.Webhooks()) — the broadcast sink must still fire independently
 	// of the webhook sink (T269 decoupling decision).
 	b := newEventBroadcaster()
-	ch := b.subscribe()
+	ch, err := b.subscribe("u1")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
 	defer b.unsubscribe(ch)
 	dispatchTransitionWebhook(context.Background(), nil, nil, b, "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
 	select {
@@ -605,7 +608,10 @@ func TestDispatchTransitionWebhook_success(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	b := newEventBroadcaster()
-	streamCh := b.subscribe()
+	streamCh, subErr := b.subscribe("u1")
+	if subErr != nil {
+		t.Fatalf("subscribe: %v", subErr)
+	}
 	defer b.unsubscribe(streamCh)
 	dispatchTransitionWebhook(ctx, store, pool, b, "task.transitioned", transitionWebhookData{
 		Type: "task", ID: "task-1", Slug: "t231", FromState: "active", ToState: "waiting-plan", Reason: "",

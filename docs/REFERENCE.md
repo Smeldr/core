@@ -2710,6 +2710,15 @@ fails (e.g. broken pipe).
 
 401 Unauthorized (missing or invalid token) or 403 Forbidden (insufficient role).
 
+**Response on connection-cap exceeded (v1.73.1+, T271):**
+
+429 Too Many Requests — returned when the calling token already holds 4
+concurrent `/_events/stream` connections (`eventStreamMaxSubscribersPerToken`,
+not configurable in this version). Returned before any header is written, so
+the response is a normal error body, not a truncated stream. Bounds a runaway
+reconnect loop or a compromised token; a well-behaved listener holding its
+one normal connection never approaches this limit.
+
 ### EventStream app wiring
 
 ```go

@@ -11,37 +11,63 @@ import (
 // [eventBroadcaster.subscribe].
 const eventStreamSubscriberBuffer = 32
 
+// eventStreamMaxSubscribersPerToken bounds how many concurrent
+// GET /_events/stream connections a single token may hold open at once.
+// The design's own listener model is one long-lived connection per
+// machine per token (design/agent-event-signaling.md) — steady-state is
+// exactly 1. Set to 4, not 1, to tolerate a listener's own reconnect
+// overlap (old connection still tearing down while a new one opens)
+// without rejecting normal operation; a token past this is treated as a
+// runaway reconnect loop or a compromised token, not legitimate use (T271).
+const eventStreamMaxSubscribersPerToken = 4
+
 // eventBroadcaster fans a broadcast payload out to every currently-connected
 // subscriber channel. In-memory only — no persistence, no replay; a
 // subscriber that connects after a broadcast simply never sees it
 // (at-most-once, per design/agent-event-signaling.md's own lean).
 type eventBroadcaster struct {
-	mu   sync.Mutex
-	subs map[chan []byte]struct{}
+	mu      sync.Mutex
+	subs    map[chan []byte]string // channel -> owning token ID
+	byToken map[string]int         // token ID -> concurrent subscriber count
 }
 
 // newEventBroadcaster returns an empty [eventBroadcaster].
 func newEventBroadcaster() *eventBroadcaster {
-	return &eventBroadcaster{subs: make(map[chan []byte]struct{})}
+	return &eventBroadcaster{
+		subs:    make(map[chan []byte]string),
+		byToken: make(map[string]int),
+	}
 }
 
-// subscribe registers a new subscriber channel and returns it. The caller
-// must eventually call unsubscribe with the same channel.
-func (b *eventBroadcaster) subscribe() chan []byte {
-	ch := make(chan []byte, eventStreamSubscriberBuffer)
+// subscribe registers a new subscriber channel for tokenID and returns it.
+// Returns [ErrTooManyRequests] without subscribing when tokenID already
+// holds eventStreamMaxSubscribersPerToken concurrent connections (T271).
+// The caller must eventually call unsubscribe with the same channel on
+// success.
+func (b *eventBroadcaster) subscribe(tokenID string) (chan []byte, error) {
 	b.mu.Lock()
-	b.subs[ch] = struct{}{}
-	b.mu.Unlock()
-	return ch
+	defer b.mu.Unlock()
+	if b.byToken[tokenID] >= eventStreamMaxSubscribersPerToken {
+		return nil, ErrTooManyRequests
+	}
+	ch := make(chan []byte, eventStreamSubscriberBuffer)
+	b.subs[ch] = tokenID
+	b.byToken[tokenID]++
+	return ch, nil
 }
 
-// unsubscribe deregisters ch and closes it. Safe to call on an
+// unsubscribe deregisters ch, closes it, and frees its slot in the owning
+// token's concurrent-connection count. Safe to call on an
 // already-unsubscribed channel (no-op) — defensive, though the only real
 // caller (newEventStreamHandler's defer) never double-calls it.
 func (b *eventBroadcaster) unsubscribe(ch chan []byte) {
 	b.mu.Lock()
-	if _, ok := b.subs[ch]; ok {
+	if tokenID, ok := b.subs[ch]; ok {
 		delete(b.subs, ch)
+		b.byToken[tokenID]--
+		if b.byToken[tokenID] <= 0 {
+			delete(b.byToken, tokenID)
+		}
 		close(ch)
 	}
 	b.mu.Unlock()
@@ -71,6 +97,14 @@ func (b *eventBroadcaster) count() int {
 	return len(b.subs)
 }
 
+// tokenCount reports the current subscriber count for tokenID. Test-only
+// introspection — mirrors count()'s own pattern.
+func (b *eventBroadcaster) tokenCount(tokenID string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.byToken[tokenID]
+}
+
 // eventStreamHeartbeat is the interval between keepalive ping lines sent to
 // an idle stream connection — a var, not a const, so tests can shrink it
 // rather than waiting out a real interval (same injectable-timing idiom
@@ -91,9 +125,10 @@ var eventStreamHeartbeat = 25 * time.Second
 // replay/backfill in this first cut (design/agent-event-signaling.md, open
 // question 1).
 //
-// A malformed/missing token yields 401; wrong role 403; a ResponseWriter
-// that does not implement http.Flusher (never true for a real HTTP/1.1+
-// connection) yields 500.
+// A malformed/missing token yields 401; wrong role 403; a token already
+// holding eventStreamMaxSubscribersPerToken concurrent connections 429
+// (T271); a ResponseWriter that does not implement http.Flusher (never true
+// for a real HTTP/1.1+ connection) yields 500.
 func newEventStreamHandler(auth AuthFunc, b *eventBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
@@ -111,15 +146,22 @@ func newEventStreamHandler(auth AuthFunc, b *eventBroadcaster) http.Handler {
 			return
 		}
 
+		// subscribe before any header is written — headers cannot be
+		// unwritten, so a 429 rejection (T271) has to happen before the
+		// status line commits to 200.
+		ch, err := b.subscribe(user.ID)
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		defer b.unsubscribe(ch)
+
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("X-Accel-Buffering", "no") // nginx: disable proxy buffering on this route
 		w.WriteHeader(http.StatusOK)
 		fl.Flush()
-
-		ch := b.subscribe()
-		defer b.unsubscribe(ch)
 
 		ticker := time.NewTicker(eventStreamHeartbeat)
 		defer ticker.Stop()

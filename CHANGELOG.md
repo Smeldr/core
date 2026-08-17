@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.73.1] — 2026-08-17
+
+### Added
+- `example/server/main.go` now wires `App.EventStream()` behind a new `EnableEventStream` config field / `ENABLE_EVENT_STREAM` env var, following the existing `EnableWebhooks` pattern exactly. Deliberately independent of `EnableOrchestration` — `dispatchBus`'s broadcast fires for every registered content type's lifecycle events, not only the five orchestration types, so coupling it to orchestration would wrongly block a CMS-only deployment from ever using the stream. (A275, T271)
+
+### Fixed
+- `GET /_events/stream` had no cap on concurrent connections per token — a valid Author-role token stuck in a reconnect loop, or a compromised token, could hold unbounded concurrent long-lived connections open. `eventBroadcaster` now tracks subscriber count per `User.ID` (the same identity already used for `ActorID`/provenance elsewhere in the package) and `subscribe` returns `ErrTooManyRequests` (429) once a token already holds 4 concurrent connections, checked before any HTTP header is written so a rejected caller gets a normal error body, not a truncated stream. 4, not 1, because the design's own steady-state is exactly one connection per token — capping at 1 would reject a listener's own ordinary reconnect (old connection still tearing down while a new one opens); 4 tolerates that overlap while still bounding a genuine runaway loop. No exported symbol. (A275, T271)
+
+---
+
 ## [1.73.0] — 2026-08-17
 
 ### Added

@@ -450,4 +450,31 @@ func TestServerToggles(t *testing.T) {
 			t.Errorf("GET /packet/bad-type/x: got %d, want 404 (route must not mount without ENABLE_RELATIONS)", got)
 		}
 	})
+
+	t.Run("off/noEventStream", func(t *testing.T) {
+		cfg := baseConfig()
+		// EnableEventStream deliberately left false.
+		ts := buildTestServer(t, cfg)
+		token := createToken(t, ts, "author", "author")
+
+		if got := getStatus(t, ts.URL, token, "/_events/stream"); got != http.StatusNotFound {
+			t.Errorf("GET /_events/stream: got %d, want 404 when ENABLE_EVENT_STREAM=false", got)
+		}
+	})
+
+	t.Run("on/eventStream", func(t *testing.T) {
+		cfg := baseConfig()
+		cfg.EnableEventStream = true
+		ts := buildTestServer(t, cfg)
+		token := createToken(t, ts, "author", "author")
+
+		if got := getStatus(t, ts.URL, token, "/_events/stream"); got != http.StatusOK {
+			t.Errorf("GET /_events/stream: got %d, want 200 when ENABLE_EVENT_STREAM=true", got)
+		}
+		// A request with no token must still be rejected — EnableEventStream
+		// does not relax auth.
+		if got := getStatus(t, ts.URL, "", "/_events/stream"); got != http.StatusUnauthorized {
+			t.Errorf("GET /_events/stream (no token): got %d, want 401", got)
+		}
+	})
 }

@@ -2,7 +2,9 @@ package smeldr
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -14,7 +16,10 @@ import (
 
 func TestEventBroadcaster_SubscribeReceivesBroadcast(t *testing.T) {
 	b := newEventBroadcaster()
-	ch := b.subscribe()
+	ch, err := b.subscribe("u1")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
 	defer b.unsubscribe(ch)
 
 	b.broadcast([]byte(`{"event":"x"}`))
@@ -33,7 +38,12 @@ func TestEventBroadcaster_MultipleSubscribersAllReceive(t *testing.T) {
 	b := newEventBroadcaster()
 	var chans []chan []byte
 	for i := 0; i < 3; i++ {
-		ch := b.subscribe()
+		// distinct token per subscriber — this test exercises fan-out
+		// across subscribers, not the per-token cap.
+		ch, err := b.subscribe(fmt.Sprintf("u%d", i))
+		if err != nil {
+			t.Fatalf("subscribe: %v", err)
+		}
 		chans = append(chans, ch)
 		defer b.unsubscribe(ch)
 	}
@@ -51,7 +61,10 @@ func TestEventBroadcaster_MultipleSubscribersAllReceive(t *testing.T) {
 
 func TestEventBroadcaster_UnsubscribeStopsDelivery(t *testing.T) {
 	b := newEventBroadcaster()
-	ch := b.subscribe()
+	ch, err := b.subscribe("u1")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
 	b.unsubscribe(ch)
 
 	if got := b.count(); got != 0 {
@@ -89,10 +102,16 @@ func TestEventBroadcaster_FullBufferDropsWithoutBlocking(t *testing.T) {
 	// healthy sibling — is unaffected by it.
 	b := newEventBroadcaster()
 
-	slow := b.subscribe() // deliberately never drained
+	slow, err := b.subscribe("u-slow") // deliberately never drained
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
 	defer b.unsubscribe(slow)
 
-	fast := b.subscribe()
+	fast, err := b.subscribe("u-fast")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
 	defer b.unsubscribe(fast)
 
 	const n = eventStreamSubscriberBuffer + 5 // deliberately overflows slow's buffer
@@ -136,6 +155,12 @@ func TestEventBroadcaster_ConcurrentSubscribeBroadcastUnsubscribe(t *testing.T) 
 	}
 
 	for i := 0; i < 4; i++ {
+		// Distinct token per goroutine — this test's own purpose is proving
+		// no deadlock/panic under concurrent subscribe/broadcast/unsubscribe,
+		// not exercising the per-token cap (covered separately); a shared
+		// token here would make occasional ErrTooManyRequests rejections a
+		// race in the test itself, not a signal about the code under test.
+		tokenID := fmt.Sprintf("concurrent-%d", i)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -144,7 +169,10 @@ func TestEventBroadcaster_ConcurrentSubscribeBroadcastUnsubscribe(t *testing.T) 
 				case <-stop:
 					return
 				default:
-					ch := b.subscribe()
+					ch, err := b.subscribe(tokenID)
+					if err != nil {
+						continue
+					}
 					for j := 0; j < 3; j++ {
 						select {
 						case <-ch:
@@ -166,6 +194,103 @@ func TestEventBroadcaster_ConcurrentSubscribeBroadcastUnsubscribe(t *testing.T) 
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("goroutines did not finish — possible deadlock")
+	}
+}
+
+func TestEventBroadcaster_SubscribePerTokenCapRejectsPastLimit(t *testing.T) {
+	b := newEventBroadcaster()
+	var chans []chan []byte
+	for i := 0; i < eventStreamMaxSubscribersPerToken; i++ {
+		ch, err := b.subscribe("u1")
+		if err != nil {
+			t.Fatalf("subscribe %d/%d: %v", i+1, eventStreamMaxSubscribersPerToken, err)
+		}
+		chans = append(chans, ch)
+	}
+	defer func() {
+		for _, ch := range chans {
+			b.unsubscribe(ch)
+		}
+	}()
+
+	if _, err := b.subscribe("u1"); !errors.Is(err, ErrTooManyRequests) {
+		t.Fatalf("subscribe past cap: err = %v, want ErrTooManyRequests", err)
+	}
+	if got := b.tokenCount("u1"); got != eventStreamMaxSubscribersPerToken {
+		t.Errorf("tokenCount(u1) = %d, want %d (rejected attempt must not register)", got, eventStreamMaxSubscribersPerToken)
+	}
+}
+
+func TestEventBroadcaster_SubscribeDifferentTokensIndependentCaps(t *testing.T) {
+	b := newEventBroadcaster()
+	// u1 fills its own cap entirely.
+	var u1chans []chan []byte
+	for i := 0; i < eventStreamMaxSubscribersPerToken; i++ {
+		ch, err := b.subscribe("u1")
+		if err != nil {
+			t.Fatalf("subscribe u1 %d/%d: %v", i+1, eventStreamMaxSubscribersPerToken, err)
+		}
+		u1chans = append(u1chans, ch)
+	}
+	defer func() {
+		for _, ch := range u1chans {
+			b.unsubscribe(ch)
+		}
+	}()
+
+	// u2 is unaffected by u1 being at its own cap.
+	u2ch, err := b.subscribe("u2")
+	if err != nil {
+		t.Fatalf("subscribe u2: %v — a different token must not be affected by u1's own cap", err)
+	}
+	defer b.unsubscribe(u2ch)
+}
+
+func TestEventBroadcaster_UnsubscribeFreesTokenSlot(t *testing.T) {
+	b := newEventBroadcaster()
+	var chans []chan []byte
+	for i := 0; i < eventStreamMaxSubscribersPerToken; i++ {
+		ch, err := b.subscribe("u1")
+		if err != nil {
+			t.Fatalf("subscribe %d/%d: %v", i+1, eventStreamMaxSubscribersPerToken, err)
+		}
+		chans = append(chans, ch)
+	}
+	if _, err := b.subscribe("u1"); !errors.Is(err, ErrTooManyRequests) {
+		t.Fatalf("subscribe at cap: err = %v, want ErrTooManyRequests", err)
+	}
+
+	b.unsubscribe(chans[0])
+	chans = chans[1:]
+
+	freed, err := b.subscribe("u1")
+	if err != nil {
+		t.Fatalf("subscribe after freeing a slot: %v", err)
+	}
+	chans = append(chans, freed)
+
+	for _, ch := range chans {
+		b.unsubscribe(ch)
+	}
+}
+
+func TestEventBroadcaster_UnsubscribeCleansByTokenEntry(t *testing.T) {
+	b := newEventBroadcaster()
+	ch, err := b.subscribe("u1")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	if got := b.tokenCount("u1"); got != 1 {
+		t.Fatalf("tokenCount(u1) = %d, want 1", got)
+	}
+
+	b.unsubscribe(ch)
+
+	if got := b.tokenCount("u1"); got != 0 {
+		t.Errorf("tokenCount(u1) = %d, want 0 — stale zero-entry left behind", got)
+	}
+	if _, ok := b.byToken["u1"]; ok {
+		t.Error("byToken still holds a key for u1 after its last subscriber unsubscribed")
 	}
 }
 
@@ -465,5 +590,147 @@ func TestEventStreamHandler_ClientDisconnectUnregisters(t *testing.T) {
 	}
 	if got := b.count(); got != 0 {
 		t.Errorf("count = %d, want 0 after client disconnect", got)
+	}
+}
+
+// openEventStream opens a real GET /_events/stream connection against srv
+// for the given token and waits until the broadcaster has actually
+// registered it (not just until the HTTP round trip returns), so a caller
+// can rely on b.count()/b.tokenCount() reflecting this connection
+// immediately after openEventStream returns. Returns the response for the
+// caller to close (releasing the connection's slot) when done.
+func openEventStream(t *testing.T, srv *httptest.Server, b *eventBroadcaster, tok string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	return resp
+}
+
+func TestEventStreamHandler_TooManyConnectionsPerToken429(t *testing.T) {
+	b := newEventBroadcaster()
+	auth := BearerHMAC(eventStreamTestSecret)
+	srv := httptest.NewServer(newEventStreamHandler(auth, b))
+	defer srv.Close()
+
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Author}}, eventStreamTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+
+	var conns []*http.Response
+	for i := 0; i < eventStreamMaxSubscribersPerToken; i++ {
+		conns = append(conns, openEventStream(t, srv, b, tok))
+	}
+	defer func() {
+		for _, c := range conns {
+			c.Body.Close()
+		}
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for b.tokenCount("u1") != eventStreamMaxSubscribersPerToken && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := b.tokenCount("u1"); got != eventStreamMaxSubscribersPerToken {
+		t.Fatalf("tokenCount(u1) = %d, want %d before the rejected attempt", got, eventStreamMaxSubscribersPerToken)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error body: %v — expected the standard smeldr error envelope, not a half-written stream", err)
+	}
+}
+
+func TestEventStreamHandler_DifferentTokensNotCapped(t *testing.T) {
+	b := newEventBroadcaster()
+	auth := BearerHMAC(eventStreamTestSecret)
+	srv := httptest.NewServer(newEventStreamHandler(auth, b))
+	defer srv.Close()
+
+	tok1, err := SignToken(User{ID: "u1", Roles: []Role{Author}}, eventStreamTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken u1: %v", err)
+	}
+	tok2, err := SignToken(User{ID: "u2", Roles: []Role{Author}}, eventStreamTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken u2: %v", err)
+	}
+
+	var conns []*http.Response
+	for i := 0; i < eventStreamMaxSubscribersPerToken; i++ {
+		conns = append(conns, openEventStream(t, srv, b, tok1))
+	}
+	defer func() {
+		for _, c := range conns {
+			c.Body.Close()
+		}
+	}()
+
+	// u1 is now at its own cap; u2 must be entirely unaffected.
+	u2conn := openEventStream(t, srv, b, tok2)
+	defer u2conn.Body.Close()
+}
+
+func TestEventStreamHandler_CapReleasedOnDisconnect(t *testing.T) {
+	b := newEventBroadcaster()
+	auth := BearerHMAC(eventStreamTestSecret)
+	srv := httptest.NewServer(newEventStreamHandler(auth, b))
+	defer srv.Close()
+
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Author}}, eventStreamTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+
+	var conns []*http.Response
+	for i := 0; i < eventStreamMaxSubscribersPerToken; i++ {
+		conns = append(conns, openEventStream(t, srv, b, tok))
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for b.tokenCount("u1") != eventStreamMaxSubscribersPerToken && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Release one connection client-side and wait for the broadcaster to
+	// notice — proves the release path end-to-end through the real
+	// handler, not just eventBroadcaster.unsubscribe in isolation.
+	conns[0].Body.Close()
+	deadline = time.Now().Add(2 * time.Second)
+	for b.tokenCount("u1") == eventStreamMaxSubscribersPerToken && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := b.tokenCount("u1"); got != eventStreamMaxSubscribersPerToken-1 {
+		t.Fatalf("tokenCount(u1) = %d, want %d after releasing one connection", got, eventStreamMaxSubscribersPerToken-1)
+	}
+
+	newConn := openEventStream(t, srv, b, tok)
+	defer newConn.Body.Close()
+	for _, c := range conns[1:] {
+		defer c.Body.Close()
 	}
 }

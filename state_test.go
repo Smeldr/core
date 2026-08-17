@@ -3745,7 +3745,10 @@ func TestRecordAuthorizationRequiredSignal_Success(t *testing.T) {
 	}
 	ctx := context.Background()
 	b := newEventBroadcaster()
-	streamCh := b.subscribe()
+	streamCh, subErr := b.subscribe("u1")
+	if subErr != nil {
+		t.Fatalf("subscribe: %v", subErr)
+	}
 	defer b.unsubscribe(streamCh)
 	if err := recordAuthorizationRequiredSignal(ctx, db, nil, nil, b, "GateItem", "item-8", "reviewing", "approved", "reviewer"); err != nil {
 		t.Fatalf("recordAuthorizationRequiredSignal: %v", err)

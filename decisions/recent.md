@@ -408,3 +408,93 @@ findings. MINOR bump, matching A265/A271's own precedent for "new
 capability, no breaking change". v1.72.2 → **v1.73.0**.
 
 ---
+
+## A275 — GET /_events/stream: example/server wiring and a per-token connection cap (T271)
+
+### Problem
+
+Two gaps found reviewing A274/T269 the same day, both closed in this
+Amendment. First: `App.EventStream()` existed in the library, but
+nothing in `example/server/main.go` ever called it — the endpoint was
+unreachable from the one binary this project actually deploys. Second:
+neither `eventBroadcaster` nor `newEventStreamHandler` capped the number
+of concurrent subscriber connections a single token could hold open. A
+valid Author-role token stuck in a reconnect loop (a listener bug, not
+malice) or a compromised token could hold unbounded concurrent
+long-lived connections, each with its own goroutine and 32-slot buffer.
+
+### Fix — example/server wiring
+
+New `EnableEventStream bool` / `ENABLE_EVENT_STREAM` env var, matching
+`EnableWebhooks`'s exact existing pattern (`main.go`). Deliberately
+**not** tied to `EnableOrchestration` — verified directly against
+`dispatchBus`'s source before writing the plan: its broadcast fires for
+every registered `Module[T]`'s content-lifecycle events, not only the
+five orchestration types, so coupling gating to orchestration would
+wrongly block a CMS-only deployment from ever using the stream for its
+own content events.
+
+### Fix — per-token connection cap
+
+Mechanism argued, not guessed. Rejected `RateLimit`/`NewRateLimiter`
+(`middleware.go`) — that bounds *request rate* over a time window, the
+right tool for bursty short requests; this is a *concurrency* question
+(one connection held open for its entire lifetime), a different
+mechanism for a different quantity. Rejected a pure global cap — it
+can't distinguish "several well-behaved listeners, one connection each"
+(the design's own steady-state, `design/agent-event-signaling.md`'s "N
+listeners, not one") from "one runaway token holding dozens"; set low
+enough to matter, it blocks legitimate multi-listener growth, set high
+enough not to, it stops bounding the actual risk.
+
+New `eventStreamMaxSubscribersPerToken = 4` (not 1): the steady-state is
+exactly one connection per token/listener, so capping at the literal
+steady-state would reject the ordinary case of a listener reconnecting
+before its old connection finishes tearing down — a false-positive on
+normal operation. 4 gives headroom for that overlap while still
+rejecting a genuine runaway within a handful of iterations.
+
+Identity key: `User.ID`, verified directly against `auth.go`'s
+`decodeToken` — the `id` claim baked into the token at signing time,
+already the exact identity `ActorID`/provenance recording uses elsewhere
+in this package, not a second notion of "who is this."
+`eventBroadcaster` gains a `byToken map[string]int` alongside the
+existing `subs` map; `subscribe` changes from `subscribe() chan []byte`
+to `subscribe(tokenID string) (chan []byte, error)`, returning the
+already-existing `ErrTooManyRequests` sentinel (429) once a token is at
+its cap. The check happens in `newEventStreamHandler` *before* the `200`
+header is written — headers cannot be un-written once sent, so a
+rejection has to happen before the status line commits.
+
+### Tests
+
+16 new tests: `TestEventBroadcaster_SubscribePerTokenCapRejectsPastLimit`,
+`_SubscribeDifferentTokensIndependentCaps`, `_UnsubscribeFreesTokenSlot`,
+`_UnsubscribeCleansByTokenEntry` at the broadcaster-unit level;
+`TestEventStreamHandler_TooManyConnectionsPerToken429`,
+`_DifferentTokensNotCapped`, `_CapReleasedOnDisconnect` proving the same
+through the real HTTP handler end-to-end, not just the broadcaster in
+isolation; two `example/server` toggle tests
+(`off/noEventStream`/`on/eventStream`) extending the existing
+`TestServerToggles` table. Five existing call sites
+(`eventBroadcaster.subscribe`'s changed signature, in
+`signals_test.go`/`state_test.go`/`webhook_test.go`) updated as
+mechanical regression pins, not new coverage.
+
+### Versioning
+
+No new exported symbol (`subscribe`'s changed signature is unexported),
+but a real consumer-observable behaviour change on `GET /_events/stream`
+(a 429 case that didn't exist before), which CLAUDE.md's own versioning
+rule treats as tag-worthy regardless of exported-symbol status — matching
+A266/A269/A270/A272's own precedent for this exact class. v1.73.0 itself
+has not been tagged/released yet; this still gets its own version number
+rather than folding backward into it, matching the established
+precedent of one Amendment, one version, even within the same unreleased
+session. Coverage: 96.3% package-wide; `subscribe`/`unsubscribe`/
+`tokenCount`/`newEventBroadcaster` all 100%, `newEventStreamHandler`
+97.2% (the one pre-existing, genuinely-unreachable branch named in A274,
+unchanged). `go test -race ./...` clean. `golangci-lint` zero findings.
+PATCH bump: v1.73.0 → **v1.73.1**.
+
+---

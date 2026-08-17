@@ -293,7 +293,7 @@ newest-first). Query params: `level` (min, inclusive), `limit` (most recent N),
 `since` (RFC3339). Route is absent (404) unless `CaptureLogs` was called. There is no
 MCP tool for logs by design — the path must not depend on MCP. Use `smeldr-cli logs`.
 
-### Event stream (EventStream + /_events/stream, v1.73.0+)
+### Event stream (EventStream + /_events/stream, v1.73.1+)
 
 Opt-in, in-memory push of live content-lifecycle and state-flow-transition
 events — for an agent/listener process that cannot receive an inbound webhook
@@ -312,7 +312,9 @@ no replay on reconnect — and no server-side event-type filtering; a listener
 filters client-side. Route is absent (404) unless `EventStream` was called.
 There is no MCP tool for this by design, same reasoning as `/_logs` — the
 whole point is working when an agent has only this one HTTP connection to
-rely on.
+rely on. Each token may hold at most 4 concurrent connections — a 5th
+attempt gets 429, not a hang; a well-behaved listener holding its one normal
+connection never approaches this.
 
 ### Generic reference server (example/server)
 
@@ -349,6 +351,7 @@ SECRET=changeme go run .
 | `ENABLE_MEDIA` | boolean | wire local media upload and management |
 | `ENABLE_SOCIAL` | boolean | wire Mastodon social publishing |
 | `ENABLE_WEBHOOKS` | boolean | wire outbound webhook delivery |
+| `ENABLE_EVENT_STREAM` | boolean | wire `GET /_events/stream` (opt-in agent event push); independent of `ENABLE_ORCHESTRATION` |
 | `ENABLE_AGENTS` | boolean | wire the agent job system |
 | `AGENT_MCP_URL` | when ENABLE_AGENTS | agent MCP endpoint (default: `http://127.0.0.1:PORT/mcp/message`) |
 | `AGENT_MCP_TOKEN` | when ENABLE_AGENTS | bearer token for agent MCP calls |

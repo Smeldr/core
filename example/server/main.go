@@ -34,6 +34,7 @@
 //	MASTODON_CLIENT_SECRET Mastodon OAuth client secret (required when ENABLE_SOCIAL)
 //	MASTODON_INSTANCE_URL  Mastodon instance base URL (required when ENABLE_SOCIAL)
 //	ENABLE_WEBHOOKS       wire outbound webhook delivery
+//	ENABLE_EVENT_STREAM   wire GET /_events/stream (opt-in agent event push, T269)
 //	ENABLE_PROVENANCE     wire transition-provenance recording (App.Provenance)
 //	ENABLE_AGENTS         wire the agent job system (connects to this server's own /mcp endpoint)
 //	AGENT_MCP_URL         agent MCP endpoint (default: http://127.0.0.1:PORT/mcp/message)
@@ -80,6 +81,7 @@ type ServerConfig struct {
 	MastodonClientSecret string
 	MastodonInstanceURL  string
 	EnableWebhooks       bool
+	EnableEventStream    bool
 	EnableProvenance     bool
 	EnableAgents         bool
 	AgentMCPURL          string
@@ -121,6 +123,7 @@ func parseConfig() ServerConfig {
 		MastodonClientSecret: os.Getenv("MASTODON_CLIENT_SECRET"),
 		MastodonInstanceURL:  os.Getenv("MASTODON_INSTANCE_URL"),
 		EnableWebhooks:       os.Getenv("ENABLE_WEBHOOKS") != "",
+		EnableEventStream:    os.Getenv("ENABLE_EVENT_STREAM") != "",
 		EnableProvenance:     os.Getenv("ENABLE_PROVENANCE") != "",
 		EnableAgents:         os.Getenv("ENABLE_AGENTS") != "",
 		AgentMCPURL:          envOr("AGENT_MCP_URL", "http://127.0.0.1:"+port+"/mcp/message"),
@@ -254,6 +257,10 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 
 	if cfg.EnableWebhooks {
 		app.Webhooks(smeldr.NewWebhookStore(db, []byte(cfg.Secret)))
+	}
+
+	if cfg.EnableEventStream {
+		app.EventStream()
 	}
 
 	// ENABLE_AGENTS must register before mcp.New so AgentJob appears in MCP tools.

@@ -287,7 +287,10 @@ func TestDispatchBus_BroadcastsToEventStreamOnAfterCreate(t *testing.T) {
 	app.EventStream()
 	app.wireSignalBus()
 
-	ch := app.eventBroadcaster.subscribe()
+	ch, err := app.eventBroadcaster.subscribe("u1")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
 	defer app.eventBroadcaster.unsubscribe(ch)
 
 	userCtx := NewTestContext(User{ID: "u1", Roles: []Role{Author}})
@@ -334,7 +337,10 @@ func TestDispatchBus_SkipsBroadcastForUnmappedSignal(t *testing.T) {
 	}))
 	app.EventStream()
 
-	ch := app.eventBroadcaster.subscribe()
+	ch, err := app.eventBroadcaster.subscribe("u1")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
 	defer app.eventBroadcaster.unsubscribe(ch)
 
 	app.dispatchBus(context.Background(), SignalEvent{Type: "Post"}, AfterRelationCascade)
