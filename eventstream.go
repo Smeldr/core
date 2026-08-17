@@ -145,6 +145,7 @@ func newEventStreamHandler(auth AuthFunc, b *eventBroadcaster) http.Handler {
 			WriteError(w, r, ErrInternal)
 			return
 		}
+		rc := http.NewResponseController(w)
 
 		// subscribe before any header is written — headers cannot be
 		// unwritten, so a 429 rejection (T271) has to happen before the
@@ -174,11 +175,24 @@ func newEventStreamHandler(auth AuthFunc, b *eventBroadcaster) http.Handler {
 				if !ok {
 					return
 				}
+				// Config.WriteTimeout is a fixed deadline set once when this
+				// connection's headers were read, never reset by an
+				// intermediate Flush() — wrong for a deliberately long-lived
+				// stream. Refreshing it here (rather than disabling it once)
+				// still bounds a genuinely wedged write, matching T271's own
+				// bounded-resource reasoning applied to connection duration
+				// instead of connection count.
+				if err := rc.SetWriteDeadline(time.Now().Add(2 * eventStreamHeartbeat)); err != nil {
+					slog.WarnContext(r.Context(), "smeldr: event stream: SetWriteDeadline unsupported", "error", err)
+				}
 				if _, err := w.Write(append(payload, '\n')); err != nil {
 					return
 				}
 				fl.Flush()
 			case <-ticker.C:
+				if err := rc.SetWriteDeadline(time.Now().Add(2 * eventStreamHeartbeat)); err != nil {
+					slog.WarnContext(r.Context(), "smeldr: event stream: SetWriteDeadline unsupported", "error", err)
+				}
 				if _, err := w.Write([]byte(`{"type":"ping"}` + "\n")); err != nil {
 					return
 				}

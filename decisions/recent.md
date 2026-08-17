@@ -498,3 +498,94 @@ unchanged). `go test -race ./...` clean. `golangci-lint` zero findings.
 PATCH bump: v1.73.0 → **v1.73.1**.
 
 ---
+
+## A276 — GET /_events/stream: write-timeout was killing every connection
+
+### Problem
+
+`GET /_events/stream` (A274) never actually delivered events in
+production. Devops confirmed this live via three independent tests,
+including one made from the box's own SSH session straight to loopback
+`127.0.0.1:8081`, bypassing Caddy and the network entirely — this rules
+out proxy, TLS-inspecting antivirus, and network causes, isolating the
+failure to the application's own write-timeout handling.
+
+Root cause, confirmed directly in source: `smeldr.go`'s
+`defaultWriteTimeout = 10 * time.Second` is wired into the shared
+`http.Server.WriteTimeout`. Per Go's own documentation, `WriteTimeout` is
+"the maximum duration before timing out writes of the response. It is
+reset whenever a new request's header is read" — for one held-open
+streaming response there is no second request to reset it, and an
+intermediate `Flush()` does not push it back either. The stream's initial
+`200` header and first flush happen immediately on connect, well inside
+the 10s window; the connection then sits idle until the *first* heartbeat
+fires at `eventStreamHeartbeat` (25s). By then the fixed 10s deadline has
+already passed — that first heartbeat `Write` is the one that hits the
+expired deadline and the stdlib force-closes the connection. No event
+payload could ever arrive before that either, for the identical reason.
+
+### Fix
+
+`newEventStreamHandler` now constructs `rc := http.NewResponseController(w)`
+(stdlib, Go 1.20+) once, and calls `rc.SetWriteDeadline(time.Now().Add(2 *
+eventStreamHeartbeat))` immediately before every write — both the
+event-delivery branch and the heartbeat branch — refreshing the deadline
+to roughly 50s in the future at the default 25s heartbeat interval. Go's
+`net.Conn` deadlines are checked lazily, only at the moment an I/O call is
+attempted, not enforced by a background timer — so the deadline in effect
+at write-time is always the freshly-set one, including for the very first
+heartbeat that used to trigger the bug.
+
+### Alternatives rejected
+
+- **A second `http.Server`/listener with `WriteTimeout: 0`, dedicated to
+  this route.** Every other opt-in feature in this codebase
+  (`CaptureLogs`, `Webhooks`, `Audit`, `PageMeta`, A275's own connection
+  cap) mounts its route on the app's single existing `*http.ServeMux`,
+  sharing one `http.Server`/one graceful-shutdown path. A second listener
+  for one route breaks that pattern, doubles the surface `App.Run`'s
+  shutdown logic has to reason about, and removes write-timeout
+  protection from the *entire* route rather than scoping the removal to
+  the one thing that actually needs it.
+- **Disable the deadline entirely** (`SetWriteDeadline(time.Time{})` once,
+  at connection start) — simpler, but removes all protection against a
+  genuinely wedged write (a TCP connection alive at the OS level, peer not
+  reading, no FIN ever received) for the connection's whole lifetime.
+  `r.Context().Done()` already catches a *clean* client disconnect
+  independently of any write; a half-dead peer that never sends FIN/RST is
+  a different, real failure mode a fully-unbounded deadline leaves
+  unguarded — the same class of "unbounded resource held by one bad
+  actor" A275 already argued for and fixed on the connection-*count* axis.
+  Leaving connection *duration* unbounded in the same Amendment family
+  would have been inconsistent.
+
+`SetWriteDeadline`'s own error is deliberately non-fatal: a
+`ResponseWriter` that doesn't support write deadlines (returns
+`http.ErrNotSupported` — true only for a custom/test `ResponseWriter`,
+never a real HTTP/1.1+ connection) is logged at `Warn` and the write is
+still attempted rather than aborting the connection over it.
+
+### Tests
+
+`TestEventStreamHandler_SurvivesWriteTimeout` uses
+`httptest.NewUnstartedServer` rather than `httptest.NewServer` specifically
+so `Config.WriteTimeout` can be set to a real, short value (100ms) before
+`.Start()` — reproducing the exact stdlib mechanism, not a proxy for it.
+Verified to fail against the pre-fix code (closes the connection after 3
+of 5 expected lines, `unexpected EOF`) before confirming it passes with
+the fix — a genuine regression test, not just new coverage.
+`TestEventStreamHandler_SetWriteDeadlineUnsupported_StillWrites` covers
+the graceful-degradation branch with a new `deadlineUnsupportedWriter`
+test double (implements `http.Flusher` but not the unexported shape
+`ResponseController.SetWriteDeadline` looks for).
+
+### Versioning
+
+No new exported symbol; a real consumer-observable behaviour change (the
+feature now actually delivers events past 10s, which it structurally
+could not before). Coverage: 96.3% package-wide; `newEventStreamHandler`
+97.6% (up from 97.2% — the new graceful-degradation branch is now
+covered). `go test -race ./...` clean. `golangci-lint` zero findings.
+PATCH bump: v1.73.1 → **v1.73.2**.
+
+---

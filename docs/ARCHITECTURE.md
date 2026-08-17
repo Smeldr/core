@@ -1287,6 +1287,15 @@ limit (4) is deliberately above the steady-state of 1 connection per
 token/listener — headroom for a listener's own reconnect overlap, not a
 number a caller is expected to approach in normal operation.
 
+**Write-deadline handling, distinct from `Config.WriteTimeout`** — the
+server-wide `WriteTimeout` (10s default) is a fixed deadline set once when
+a connection's headers are read, never reset by an intermediate `Flush()`,
+which force-closes this deliberately long-lived stream on its first write
+past that mark. `newEventStreamHandler` refreshes its own deadline via
+`http.ResponseController.SetWriteDeadline` before every write (to
+`2 × eventStreamHeartbeat`), scoped to this one route rather than disabling
+`Config.WriteTimeout` server-wide or standing up a second listener.
+
 ---
 
 ## Scheduler *(Milestone 8)*

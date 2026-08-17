@@ -2,6 +2,8 @@ package smeldr
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -732,5 +734,136 @@ func TestEventStreamHandler_CapReleasedOnDisconnect(t *testing.T) {
 	defer newConn.Body.Close()
 	for _, c := range conns[1:] {
 		defer c.Body.Close()
+	}
+}
+
+// TestEventStreamHandler_SurvivesWriteTimeout is a regression test for a
+// real production bug: Config.WriteTimeout is an absolute deadline set once
+// when the connection's headers are read, never reset by an intermediate
+// Flush() — wrong for this deliberately long-lived stream. Without the fix,
+// the first write attempted after the deadline (the first heartbeat, since
+// nothing else is written until then) force-closes the connection. Uses a
+// real httptest.NewUnstartedServer so Config.WriteTimeout is actually wired
+// into a real net/http.Server, reproducing the exact mechanism — httptest.
+// NewServer's default Config has no WriteTimeout set, which would not catch
+// this bug.
+func TestEventStreamHandler_SurvivesWriteTimeout(t *testing.T) {
+	orig := eventStreamHeartbeat
+	eventStreamHeartbeat = 30 * time.Millisecond
+	defer func() { eventStreamHeartbeat = orig }()
+
+	b := newEventBroadcaster()
+	auth := BearerHMAC(eventStreamTestSecret)
+	srv := httptest.NewUnstartedServer(newEventStreamHandler(auth, b))
+	srv.Config.WriteTimeout = 100 * time.Millisecond
+	srv.Start()
+	defer srv.Close()
+
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Author}}, eventStreamTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	const wantLines = 5 // spans well past the 100ms WriteTimeout at a 30ms heartbeat
+	for i := 0; i < wantLines; i++ {
+		if !scanner.Scan() {
+			t.Fatalf("connection closed prematurely after %d/%d lines (write-timeout bug): %v", i, wantLines, scanner.Err())
+		}
+	}
+}
+
+// deadlineUnsupportedWriter satisfies http.ResponseWriter + http.Flusher but
+// not the unexported shape http.ResponseController.SetWriteDeadline looks
+// for — proves newEventStreamHandler degrades gracefully (logs, still
+// writes) rather than aborting when the underlying ResponseWriter can't
+// support a write deadline at all.
+type deadlineUnsupportedWriter struct {
+	header  http.Header
+	mu      sync.Mutex
+	written []byte
+}
+
+func (w *deadlineUnsupportedWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+func (w *deadlineUnsupportedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.written = append(w.written, p...)
+	return len(p), nil
+}
+func (w *deadlineUnsupportedWriter) WriteHeader(int) {}
+func (w *deadlineUnsupportedWriter) Flush()          {}
+
+func (w *deadlineUnsupportedWriter) snapshot() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]byte, len(w.written))
+	copy(out, w.written)
+	return out
+}
+
+func TestEventStreamHandler_SetWriteDeadlineUnsupported_StillWrites(t *testing.T) {
+	b := newEventBroadcaster()
+	auth := BearerHMAC(eventStreamTestSecret)
+	h := newEventStreamHandler(auth, b)
+
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Author}}, eventStreamTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/_events/stream", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	w := &deadlineUnsupportedWriter{}
+
+	done := make(chan struct{})
+	go func() {
+		h.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for b.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if b.count() == 0 {
+		t.Fatal("handler never subscribed to the broadcaster")
+	}
+	b.broadcast([]byte(`{"event":"x"}`))
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if bytes.Contains(w.snapshot(), []byte(`{"event":"x"}`)) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !bytes.Contains(w.snapshot(), []byte(`{"event":"x"}`)) {
+		t.Fatal("event was not written despite SetWriteDeadline being unsupported — handler should degrade gracefully, not abort")
+	}
+
+	cancel() // end the handler goroutine
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return after context cancellation")
 	}
 }
