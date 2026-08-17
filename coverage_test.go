@@ -175,8 +175,15 @@ func (d *failOnNthExecDB) ExecContext(_ context.Context, _ string, _ ...any) (sq
 	}
 	return nil, nil
 }
-func (d *failOnNthExecDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
-	return nil, nil
+func (d *failOnNthExecDB) QueryContext(ctx context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	// A real driver never returns (nil, nil) from QueryContext — always a
+	// valid *Rows or a non-nil error. Returning a real empty result set
+	// (matching QueryRowContext's own guardRowConn{noRow: true} pattern
+	// immediately below) keeps this fake honest for any caller that issues
+	// a query before/between the ExecContext calls this fake exists to test
+	// (T160: EnsureColumn's own PRAGMA table_info probe).
+	conn := &guardRowConn{noRow: true}
+	return sql.OpenDB(conn).QueryContext(ctx, "SELECT v")
 }
 func (d *failOnNthExecDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
 	conn := &guardRowConn{noRow: true}

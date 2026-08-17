@@ -61,6 +61,80 @@ func TestUpsertKind_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestUpsertKind_ReverseLabel_RoundTrip pins T160: ReverseLabel persists
+// through Upsert, GetKind, ListKinds, and a fresh re-hydration of the
+// registry from the database (loadRegistry, not just the in-memory write).
+func TestUpsertKind_ReverseLabel_RoundTrip(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateRelationTables(db); err != nil {
+		t.Fatalf("CreateRelationTables: %v", err)
+	}
+	store, err := NewRelationStore(db)
+	if err != nil {
+		t.Fatalf("NewRelationStore: %v", err)
+	}
+	ctx := context.Background()
+
+	def := RelationKindDef{
+		TypeName:     "supersedes_test",
+		Label:        "Supersedes",
+		ReverseLabel: "Superseded By",
+		Mode:         "asserted",
+	}
+	if err := store.UpsertKind(ctx, def); err != nil {
+		t.Fatalf("UpsertKind: %v", err)
+	}
+
+	got, ok := store.GetKind("supersedes_test")
+	if !ok {
+		t.Fatal("GetKind: not found after upsert")
+	}
+	if got.ReverseLabel != "Superseded By" {
+		t.Errorf("GetKind: ReverseLabel = %q, want %q", got.ReverseLabel, "Superseded By")
+	}
+
+	kinds := store.ListKinds()
+	if len(kinds) != 1 || kinds[0].ReverseLabel != "Superseded By" {
+		t.Errorf("ListKinds: ReverseLabel = %q, want %q", kinds[0].ReverseLabel, "Superseded By")
+	}
+
+	// Re-hydrate from the database directly — confirms the column round-trips
+	// through the real SELECT/Scan path (loadRegistry), not just the
+	// in-memory registry write UpsertKind also performs.
+	reloaded, err := NewRelationStore(db)
+	if err != nil {
+		t.Fatalf("NewRelationStore (reload): %v", err)
+	}
+	got, ok = reloaded.GetKind("supersedes_test")
+	if !ok {
+		t.Fatal("GetKind after reload: not found")
+	}
+	if got.ReverseLabel != "Superseded By" {
+		t.Errorf("after reload: ReverseLabel = %q, want %q", got.ReverseLabel, "Superseded By")
+	}
+}
+
+// TestUpsertKind_ReverseLabel_ZeroValue confirms an unset ReverseLabel
+// persists as "" (optional, matching Label's own already-optional
+// treatment) rather than requiring a value or erroring.
+func TestUpsertKind_ReverseLabel_ZeroValue(t *testing.T) {
+	store := setupRelationStore(t)
+	ctx := context.Background()
+
+	if err := store.UpsertKind(ctx, RelationKindDef{
+		TypeName: "no_reverse_label", Mode: "asserted",
+	}); err != nil {
+		t.Fatalf("UpsertKind: %v", err)
+	}
+	got, ok := store.GetKind("no_reverse_label")
+	if !ok {
+		t.Fatal("GetKind: not found after upsert")
+	}
+	if got.ReverseLabel != "" {
+		t.Errorf("ReverseLabel = %q, want empty string", got.ReverseLabel)
+	}
+}
+
 func TestUpsertKind_Update(t *testing.T) {
 	store := setupRelationStore(t)
 	ctx := context.Background()

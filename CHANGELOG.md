@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.72.0] — 2026-08-17
+
+### Added
+- `RelationKindDef.ReverseLabel string` — names the same relation from the target's own point of view (e.g. `Label` "Supersedes", `ReverseLabel` "Superseded By"), closing a gap cloud previously worked around with its own local map. Optional and unvalidated, matching `Label`'s own treatment — `""` means no reverse phrasing established yet. `CreateRelationTables` migrates existing installs automatically. Passes through `MCPUpsertRelationKind`/`MCPListRelationKinds` unchanged, no `smeldr.dev/mcp` update needed. Seeded for `supersedes` → `"Superseded By"` in `RegisterOrchestrationRelationKinds`; the other three registered kinds are left unset rather than guessed. (A271, T160)
+
+---
+
 ## [1.71.2] — 2026-08-17
 
 ### Fixed

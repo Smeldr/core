@@ -547,3 +547,104 @@ bump, matching A266/A269's own precedent. Coverage: 96.3% package-wide;
 lint` zero findings. v1.71.1 → **v1.71.2**.
 
 ---
+
+## A271 — RelationKindDef.ReverseLabel (T160)
+
+### Problem
+
+`RelationKindDef` had one `Label` field and no counterpart for the same
+relation viewed from the target's own side (e.g. `"supersedes"` vs.
+`"superseded by"`) — cloud maintained its own local workaround map rather
+than a real field on the shared type.
+
+### Investigation
+
+Traced the full blast radius before proposing anything: the DDL
+(`CreateRelationTables`), the shared `relationKindColumns` const used by
+both `SELECT` and `INSERT`, `scanRelationKind`, `UpsertKind`'s
+`INSERT ... ON CONFLICT DO UPDATE`, `ValidateRelationKindDef` (`Label`
+itself is never validated — empty is valid), and
+`RegisterOrchestrationRelationKinds` (`orchestration.go`), the one place in
+this repo that actually defines relation-kind labels for the four seeded
+kinds (`derives_from`, `depends_on`, `ships_as`, `supersedes`).
+
+Confirmed `MCPUpsertRelationKind`/`MCPListRelationKinds` pass
+`RelationKindDef` straight through with no separate mcp-repo param struct
+— a new field reaches mcp automatically, no `smeldr.dev/mcp` change
+needed (matching T214's own precedent shape).
+
+### Design
+
+`ReverseLabel string` (`db:"reverse_label"`), identical treatment to
+`Label` in every respect: optional, unvalidated, zero-value = "not
+provided," no requirement that it be set even when `Directional` is true.
+Matching `Label`'s own already-optional character keeps this additive
+rather than introducing an inconsistency between two sibling fields.
+
+**Whether to populate the four seeded kinds — presented for review rather
+than decided alone.** The Task's own example (`supersedes` →
+`"superseded by"`) is concrete and directly actionable; the other three
+kinds' correct reverse phrasing isn't stated anywhere in the Task or the
+design docs, and inventing business terminology unprompted is exactly the
+kind of unilateral call this session's own plan-first correction (T229)
+exists to prevent. **Architect confirmed**: seed `supersedes` →
+`"Superseded By"` only; leave the other three at the zero-value ("no
+reverse label established yet" is the honest state until someone actually
+decides the wording) — not a question for Peter to adjudicate three
+placeholder strings, squarely an architect-level call.
+
+### Migration
+
+`CreateRelationTables` declares `reverse_label TEXT NOT NULL DEFAULT ''`
+directly in its `CREATE TABLE` text (fresh installs) plus a paired
+`EnsureColumn(ctx, db, "smeldr_relation_kinds", "reverse_label", "TEXT NOT
+NULL DEFAULT ''")` call (pre-existing installs) — the same
+declare-and-migrate-together shape established twice already this session
+(A221's own precedent, reused by A264/T246). `CreateRelationTables` is the
+single production entry point for these tables (confirmed via a full
+call-site search: every test and `example/server/main.go` route through
+it), so the migration call lives inside it once, not duplicated per
+caller.
+
+**Real, unplanned bug found and fixed along the way, in a shared test
+double, not this Task's own code:** `failOnNthExecDB` (`coverage_test.go`,
+used broadly for `CreateRelationTables`'s own `ExecContext`-failure test
+suite) had a `QueryContext` stub returning `(nil, nil)` — a contract no
+real driver ever honors (`database/sql` always returns either a valid
+`*Rows` or a non-nil error). Harmless until now, because nothing in
+`CreateRelationTables`'s call graph ever called `QueryContext` before
+`EnsureColumn`'s own `PRAGMA table_info` probe. Caused a real nil-pointer
+panic in `TestCreateRelationTables_ExecError2` (confirmed by actually
+running the test, not assumed from reading the code — `sql.Rows.Close()`/
+`.Next()` on a nil receiver panic). Fixed by making the stub return a real,
+valid empty result set (`sql.OpenDB(&guardRowConn{noRow: true})`, the exact
+pattern its own sibling `QueryRowContext` method already used one line
+below) instead of `(nil, nil)`. This shifted `CreateRelationTables`'s own
+`ExecContext` call count from 5 to 6 against this fake (it always reports
+the column missing, so `EnsureColumn`'s `ALTER` always fires against it) —
+added `TestCreateRelationTables_ExecError6` to keep every real statement's
+own failure path covered, since the fake's own position-6 statement
+(`idx_relations_governance_temporal`) would otherwise have gone untested
+after the shift.
+
+### Tests
+
+`TestUpsertKind_ReverseLabel_RoundTrip` (Upsert → GetKind/ListKinds → a
+fresh `NewRelationStore` re-hydration from the database, not only the
+in-memory registry write), `TestUpsertKind_ReverseLabel_ZeroValue`
+(unset persists as `""`), `TestCreateRelationTables_ExecError6` (see
+above), `TestRegisterOrchestrationRelationKinds_RoundTrip` extended with
+`ReverseLabel` assertions for all four kinds, `TestMCPUpsertRelationKind_OK`
+extended to confirm `ReverseLabel` passes through the mcp surface
+unchanged.
+
+### Versioning
+
+New exported field (`RelationKindDef.ReverseLabel`). MINOR bump, matching
+A262/A267's own precedent (new exported symbol → MINOR). Coverage: 96.3%
+package-wide; `CreateRelationTables`/`UpsertKind`/
+`RegisterOrchestrationRelationKinds`/`MCPUpsertRelationKind` all 100%.
+`go test -race ./...` clean. `golangci-lint` zero findings. v1.71.2 →
+**v1.72.0**.
+
+---

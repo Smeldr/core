@@ -75,6 +75,20 @@ func TestCreateRelationTables_ExecError5(t *testing.T) {
 	}
 }
 
+// TestCreateRelationTables_ExecError6 pins the 6th ExecContext call site
+// CreateRelationTables gained when EnsureColumn's own ALTER TABLE (T160,
+// reverse_label) was inserted between the smeldr_relation_kinds CREATE and
+// the smeldr_relations CREATE — failOnNthExecDB's QueryContext always
+// reports the column missing (an empty result set, not real schema state),
+// so EnsureColumn's ALTER always runs against this fake, shifting every
+// later statement's own position by one.
+func TestCreateRelationTables_ExecError6(t *testing.T) {
+	err := CreateRelationTables(&failOnNthExecDB{failAt: 6})
+	if err == nil {
+		t.Error("want error on sixth ExecContext, got nil")
+	}
+}
+
 // — NewRelationStore / loadRegistry error paths ————————————————————————————
 
 func TestNewRelationStore_LoadRegistryQueryError(t *testing.T) {

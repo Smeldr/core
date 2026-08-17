@@ -9,9 +9,10 @@ func TestMCPUpsertRelationKind_OK(t *testing.T) {
 	store := setupMCPRelations(t)
 
 	def := RelationKindDef{
-		TypeName: "tagged",
-		Label:    "Tagged",
-		Mode:     "asserted",
+		TypeName:     "tagged",
+		Label:        "Tagged",
+		ReverseLabel: "Tags",
+		Mode:         "asserted",
 	}
 	got, err := store.MCPUpsertRelationKind(context.Background(), def)
 	if err != nil {
@@ -25,6 +26,12 @@ func TestMCPUpsertRelationKind_OK(t *testing.T) {
 	}
 	if got.CreatedAt.IsZero() {
 		t.Error("want non-zero CreatedAt")
+	}
+	// T160: ReverseLabel passes through MCPUpsertRelationKind unchanged —
+	// no separate mcp-repo param struct exists, so a new RelationKindDef
+	// field flows through automatically. Confirmed, not assumed.
+	if got.ReverseLabel != "Tags" {
+		t.Errorf("want ReverseLabel=Tags, got %q", got.ReverseLabel)
 	}
 }
 

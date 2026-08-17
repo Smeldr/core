@@ -938,13 +938,14 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 	}
 
 	want := map[string]struct {
-		label     string
-		typePairs string
+		label        string
+		reverseLabel string
+		typePairs    string
 	}{
-		"derives_from": {"Derives From", `[{"source_type":"Task","target_type":"Goal"}]`},
-		"depends_on":   {"Depends On", `[{"source_type":"Task","target_type":"Task"}]`},
-		"ships_as":     {"Ships As", `[{"source_type":"Task","target_type":"Amendment"}]`},
-		"supersedes":   {"Supersedes", `[{"source_type":"Decision","target_type":"Decision"}]`},
+		"derives_from": {"Derives From", "", `[{"source_type":"Task","target_type":"Goal"}]`},
+		"depends_on":   {"Depends On", "", `[{"source_type":"Task","target_type":"Task"}]`},
+		"ships_as":     {"Ships As", "", `[{"source_type":"Task","target_type":"Amendment"}]`},
+		"supersedes":   {"Supersedes", "Superseded By", `[{"source_type":"Decision","target_type":"Decision"}]`},
 	}
 
 	kinds := store.ListKinds()
@@ -959,6 +960,9 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 		}
 		if k.Label != w.label {
 			t.Errorf("%s: Label = %q, want %q", k.TypeName, k.Label, w.label)
+		}
+		if k.ReverseLabel != w.reverseLabel {
+			t.Errorf("%s: ReverseLabel = %q, want %q", k.TypeName, k.ReverseLabel, w.reverseLabel)
 		}
 		if k.Mode != "asserted" {
 			t.Errorf("%s: Mode = %q, want %q", k.TypeName, k.Mode, "asserted")

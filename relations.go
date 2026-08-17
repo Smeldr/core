@@ -15,16 +15,21 @@ import (
 // It governs whether edges are asserted (operator) or derived/inferable (agent/rule),
 // whether they are directional, and which source→target type pairs are valid.
 type RelationKindDef struct {
-	ID          string          `db:"id"`
-	TypeName    string          `db:"type_name"`
-	Label       string          `db:"label"`
-	Mode        string          `db:"mode"` // "derived" | "asserted" | "inferable"
-	Directional bool            `db:"directional"`
-	Weighted    bool            `db:"weighted"`
-	TypePairs   json.RawMessage `db:"type_pairs"` // JSON: [{source_type, target_type}]
-	Attributes  json.RawMessage `db:"attributes"`
-	CreatedAt   time.Time       `db:"created_at"`
-	UpdatedAt   time.Time       `db:"updated_at"`
+	ID       string `db:"id"`
+	TypeName string `db:"type_name"`
+	Label    string `db:"label"`
+	// ReverseLabel names the same relation from the target's point of view
+	// (e.g. Label "supersedes", ReverseLabel "superseded by") — optional and
+	// unvalidated, matching Label's own treatment; "" means no reverse
+	// phrasing has been established yet, not an error (T160).
+	ReverseLabel string          `db:"reverse_label"`
+	Mode         string          `db:"mode"` // "derived" | "asserted" | "inferable"
+	Directional  bool            `db:"directional"`
+	Weighted     bool            `db:"weighted"`
+	TypePairs    json.RawMessage `db:"type_pairs"` // JSON: [{source_type, target_type}]
+	Attributes   json.RawMessage `db:"attributes"`
+	CreatedAt    time.Time       `db:"created_at"`
+	UpdatedAt    time.Time       `db:"updated_at"`
 }
 
 // RelationEdge is a single typed adjacency between two content items.
@@ -73,7 +78,7 @@ func (s *RelationStore) setProvenanceStore(store ProvenanceStore) {
 }
 
 // Column order constants — scan order must match SELECT order exactly.
-const relationKindColumns = `id, type_name, label, mode, directional, weighted, type_pairs, attributes, created_at, updated_at`
+const relationKindColumns = `id, type_name, label, reverse_label, mode, directional, weighted, type_pairs, attributes, created_at, updated_at`
 const relationColumns = `id, source_type, source_id, target_type, target_id, relation_kind, edge_class, confidence, valid_at, invalid_at, created_by_job, attributes, created_at, updated_at`
 
 // CreateRelationTables creates the smeldr_relation_kinds and smeldr_relations tables and
@@ -83,17 +88,21 @@ func CreateRelationTables(db DB) error {
 
 	if _, err := db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS smeldr_relation_kinds (
-    id            TEXT NOT NULL PRIMARY KEY,
-    type_name     TEXT NOT NULL UNIQUE,
-    label         TEXT NOT NULL DEFAULT '',
-    mode          TEXT NOT NULL,
-    directional   INTEGER NOT NULL DEFAULT 1,
-    weighted      INTEGER NOT NULL DEFAULT 0,
-    type_pairs    TEXT NOT NULL DEFAULT '[]',
-    attributes    TEXT NOT NULL DEFAULT '{}',
-    created_at    DATETIME NOT NULL,
-    updated_at    DATETIME NOT NULL
+    id             TEXT NOT NULL PRIMARY KEY,
+    type_name      TEXT NOT NULL UNIQUE,
+    label          TEXT NOT NULL DEFAULT '',
+    reverse_label  TEXT NOT NULL DEFAULT '',
+    mode           TEXT NOT NULL,
+    directional    INTEGER NOT NULL DEFAULT 1,
+    weighted       INTEGER NOT NULL DEFAULT 0,
+    type_pairs     TEXT NOT NULL DEFAULT '[]',
+    attributes     TEXT NOT NULL DEFAULT '{}',
+    created_at     DATETIME NOT NULL,
+    updated_at     DATETIME NOT NULL
 )`); err != nil {
+		return err
+	}
+	if err := EnsureColumn(ctx, db, "smeldr_relation_kinds", "reverse_label", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 
@@ -247,16 +256,17 @@ func (s *RelationStore) UpsertKind(ctx context.Context, def RelationKindDef) err
 
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO smeldr_relation_kinds (`+relationKindColumns+`)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (type_name) DO UPDATE SET
-    label       = EXCLUDED.label,
-    mode        = EXCLUDED.mode,
-    directional = EXCLUDED.directional,
-    weighted    = EXCLUDED.weighted,
-    type_pairs  = EXCLUDED.type_pairs,
-    attributes  = EXCLUDED.attributes,
-    updated_at  = EXCLUDED.updated_at`,
-		def.ID, def.TypeName, def.Label, def.Mode,
+    label         = EXCLUDED.label,
+    reverse_label = EXCLUDED.reverse_label,
+    mode          = EXCLUDED.mode,
+    directional   = EXCLUDED.directional,
+    weighted      = EXCLUDED.weighted,
+    type_pairs    = EXCLUDED.type_pairs,
+    attributes    = EXCLUDED.attributes,
+    updated_at    = EXCLUDED.updated_at`,
+		def.ID, def.TypeName, def.Label, def.ReverseLabel, def.Mode,
 		intOf(def.Directional), intOf(def.Weighted),
 		string(def.TypePairs), string(def.Attributes),
 		def.CreatedAt, def.UpdatedAt,
@@ -563,7 +573,7 @@ func scanRelationKind(rows *sql.Rows) (RelationKindDef, error) {
 	var directional, weighted int
 	var typePairs, attributes string
 	err := rows.Scan(
-		&d.ID, &d.TypeName, &d.Label, &d.Mode,
+		&d.ID, &d.TypeName, &d.Label, &d.ReverseLabel, &d.Mode,
 		&directional, &weighted,
 		&typePairs, &attributes,
 		&d.CreatedAt, &d.UpdatedAt,

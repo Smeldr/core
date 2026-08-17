@@ -377,6 +377,16 @@ smeldr.dev/
 ├── relations.go       RelationKindDef, RelationEdge (not Node-embedding), RelationKindRegistry,
 │                     RelationStore; CreateRelationTables(db), NewRelationStore(db),
 │                     ValidateRelationKindDef, UpsertKind, GetKind, ListKinds, Assert,
+│                     RelationKindDef.ReverseLabel string — names the same relation from the
+│                     target's own point of view (e.g. Label "Supersedes", ReverseLabel
+│                     "Superseded By"); optional/unvalidated, matching Label's own treatment; ""
+│                     means no reverse phrasing established yet, not an error. CreateRelationTables
+│                     declares the column directly plus a paired EnsureColumn call (pre-existing
+│                     installs), same declare-and-migrate-together shape as A221/A264. Seeded only
+│                     for "supersedes" → "Superseded By" in RegisterOrchestrationRelationKinds
+│                     (orchestration.go) — the other three registered kinds' correct reverse
+│                     phrasing isn't established anywhere, left at the zero-value rather than
+│                     guessed (Amendment A271, T160);
 │                     GetBySource, GetByTarget, Delete; App.Relations/RelationStore (Amendment A159, T06);
 │                     RelationStore.provenanceStore field + setProvenanceStore (unexported), wired at
 │                     App.Handler() time when both App.Relations and App.Provenance are configured;

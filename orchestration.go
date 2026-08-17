@@ -549,11 +549,12 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			TypePairs:   json.RawMessage(`[{"source_type":"Task","target_type":"Amendment"}]`),
 		},
 		{
-			TypeName:    "supersedes",
-			Label:       "Supersedes",
-			Mode:        "asserted",
-			Directional: true,
-			TypePairs:   json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"}]`),
+			TypeName:     "supersedes",
+			Label:        "Supersedes",
+			ReverseLabel: "Superseded By",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"}]`),
 		},
 	}
 	for _, k := range kinds {
