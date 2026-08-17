@@ -379,3 +379,103 @@ could break. Applies to `smeldr/core` only; the six standalone repos with
 their own release automation are unaffected and out of scope for T265.
 
 ---
+
+## A269 — resolveFlowID fails closed on a real DB error; CreateStateFlowTables exported (T249)
+
+### Problem
+
+`resolveFlowID` (`state.go`) collapsed a genuine DB error resolving a
+type's state flow — SQLITE_BUSY, a cancelled context, a corrupted or
+missing table — into `found=false, err=nil`, indistinguishable from "no
+flow was ever registered for this type." `validateTransition` then
+discarded that error entirely (`flowID, flowFound, _ :=
+resolveFlowID(...)`) and returned `nil` when `!flowFound` — permitting the
+transition with zero checks, including the required-role gate below it.
+This directly contradicted D34's own fail-closed principle, already
+correctly applied one call later for `lookupTransitionGate`'s identical
+class of error (`gateErr != nil` returns `ErrInternal`). Named by the
+architect during T243's own review, tracked as its own Task (T249).
+
+### Investigation
+
+Confirmed `transitionIsGated` (`provenance.go`), the second caller of
+`resolveFlowID`, does **not** share the bug before assuming it did. Its own
+contract is the opposite fail-closed direction from `validateTransition`'s
+(withhold the actor on uncertainty, not reject the transition) — traced
+`SubjectProvenance`'s use of `Gated` (`Gated: true` is what exposes
+`ActorKind`/`ActorID`/`Surface`/`Reason`; `false` leaves them withheld).
+`transitionIsGated` already returns `false` on any `resolveFlowID` error
+today, and `false` is the safe, correct outcome for its own documented
+contract (pinned by the existing
+`TestTransitionIsGated_UnresolvableGate_FailsClosedNoActor`). No change
+needed there.
+
+### Fix
+
+`resolveFlowID` distinguishes `sql.ErrNoRows` (legitimate "not found," the
+type-specific lookup falls back to the default flow, or the default lookup
+itself legitimately misses) from any other error (now propagated instead
+of swallowed). `validateTransition` checks the new error and fails closed
+with the same `ErrInternal` shape already used for `lookupTransitionGate`'s
+sibling error path, immediately below it in the same function.
+
+### A real, unplanned scope question surfaced during implementation
+
+The fix correctly turned "no such table: smeldr_state_flows" from a
+silently-ignored condition into a real, propagated error — which broke 7
+pre-existing tests across `dynamic_test.go` and `relations_sweep_test.go`
+that build a `DynamicTypeRepo`/status-transition path directly against a
+raw `*sql.DB`, bypassing `smeldr.New` (which always calls
+`migrateStateFlows` unconditionally when `Config.DB` is set), and so never
+had the `smeldr_state_flows` table at all. These tests were never
+exercising state-flow validation; they relied on the swallowed error to
+skip it entirely, invisibly, until this fix.
+
+Stopped and asked the architect before touching a file outside `state.go`/
+`state_test.go`, presenting two options: route the shared test-DB helper
+through `smeldr.New` (more coupling to unrelated App-bootstrap machinery
+for one migration side effect), or export a narrow
+`CreateStateFlowTables(db DB) error`, matching `CreateBlockTables`/
+`CreateSchemaTable`'s own precedent as targeted, single-purpose exported
+setup calls already used by the same test helper. **Architect's decision:
+the latter, scoped narrowly** — extracted the five `CREATE TABLE IF NOT
+EXISTS` statements out of `migrateStateFlows` into `CreateStateFlowTables`;
+`migrateStateFlows` now calls it first, then proceeds with its own
+unexported default-flow seeding, so there is exactly one place the schema
+is defined. `openDynDB` (`dynamic_test.go`) and
+`TestAppSweepStructural_DefaultChecker` (`relations_sweep_test.go`) both
+call it in their setup now, matching every other `migrateStateFlows`-using
+test in the package. `migrateStateFlows`'s own doc comment corrected in the
+same edit ("four" → accurately describes the five tables via
+`CreateStateFlowTables`).
+
+### Tests
+
+`TestResolveFlowID_QueryError` (type-specific query's real error is
+propagated without falling through to the default-flow query — a DB error
+is not "keep trying," unlike a legitimate miss),
+`TestResolveFlowID_DefaultQueryError` (type-specific query legitimately
+misses, default-flow query then hits a real error — also propagated),
+`TestValidateTransition_flowResolutionError` (the direct regression pin:
+`validateTransition` returns `ErrInternal`, not `nil`, when `resolveFlowID`
+errors). All pre-existing `TestValidateTransition_*`/
+`TestTransitionIsGated_*`/`TestSubjectProvenance_*` tests re-run unmodified
+and pass — both legitimate-miss paths are unaffected by this fix. The 7
+tests broken by the fix's own correctness (listed above) fixed by adding
+`CreateStateFlowTables(db)` to their setup, not by weakening the fix.
+
+### Versioning
+
+`resolveFlowID`/`validateTransition` remain unexported — real
+consumer-observable behaviour change (a transition attempted during a
+genuine DB error previously succeeded silently; now correctly returns
+`ErrInternal`), matching A266's own precedent (behaviour change, no
+exported symbol → PATCH). `CreateStateFlowTables` is a new exported symbol,
+Level 2 on its own merit, folded into this same Amendment per the
+architect's own instruction (it exists strictly because this fix correctly
+exposed a latent test-fixture gap, not as independent work). Coverage:
+96.3% package-wide; `resolveFlowID`/`validateTransition`/
+`CreateStateFlowTables` all 100%. `go test -race ./...` clean. PATCH bump:
+v1.71.0 → **v1.71.1**.
+
+---

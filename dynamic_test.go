@@ -28,6 +28,9 @@ func openDynDB(t *testing.T) *sql.DB {
 	if err := smeldr.CreateSchemaTable(db); err != nil {
 		t.Fatalf("CreateSchemaTable: %v", err)
 	}
+	if err := smeldr.CreateStateFlowTables(db); err != nil {
+		t.Fatalf("CreateStateFlowTables: %v", err)
+	}
 	return db
 }
 

@@ -7,11 +7,20 @@ import (
 	"log/slog"
 )
 
-// migrateStateFlows creates the four state-flow tables and seeds the default
-// flow (draft→scheduled→published→archived). All operations are idempotent:
-// tables use CREATE TABLE IF NOT EXISTS; inserts use ON CONFLICT DO NOTHING.
-// Called once at startup from [New] when [Config.DB] is non-nil.
-func migrateStateFlows(ctx context.Context, db DB) error {
+// CreateStateFlowTables creates the five state-flow tables
+// (smeldr_state_flows, smeldr_states, smeldr_transitions,
+// smeldr_transition_triggers, smeldr_eval_queue) if they do not already
+// exist. Idempotent (CREATE TABLE IF NOT EXISTS), safe to call on every
+// boot. It does not seed the default flow — [New] does that via
+// [migrateStateFlows], which calls this function first. Exported for tests
+// and any caller building a [DynamicTypeRepo] or [Module] directly against a
+// raw [DB] without going through [New] (matching [CreateBlockTables]/
+// [CreateSchemaTable]'s own precedent for the block-system and schema
+// tables) — anything using state-flow validation without a full [App]
+// otherwise sees "no such table" errors from [validateTransition] instead of
+// the flow simply not applying.
+func CreateStateFlowTables(db DB) error {
+	ctx := context.Background()
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS smeldr_state_flows (
 			id              TEXT NOT NULL PRIMARY KEY,
@@ -60,8 +69,20 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 	}
 	for _, s := range stmts {
 		if _, err := db.ExecContext(ctx, s); err != nil {
-			return fmt.Errorf("smeldr: migrateStateFlows: %w", err)
+			return fmt.Errorf("smeldr: CreateStateFlowTables: %w", err)
 		}
+	}
+	return nil
+}
+
+// migrateStateFlows creates the state-flow tables (via
+// [CreateStateFlowTables]) and seeds the default flow
+// (draft→scheduled→published→archived). All operations are idempotent:
+// tables use CREATE TABLE IF NOT EXISTS; inserts use ON CONFLICT DO NOTHING.
+// Called once at startup from [New] when [Config.DB] is non-nil.
+func migrateStateFlows(ctx context.Context, db DB) error {
+	if err := CreateStateFlowTables(db); err != nil {
+		return fmt.Errorf("smeldr: migrateStateFlows: %w", err)
 	}
 
 	// Seed the default flow — mirrors the compile-time enum.

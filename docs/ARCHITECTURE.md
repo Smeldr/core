@@ -297,13 +297,27 @@ smeldr.dev/
 │                     IGNORE + SELECT id + UPDATE conflict fields); validateFlowItems
 │                     (unexported) — SQLite-only unknown-state check; validateTransition
 │                     (ctx, db, rs *RoleStore, actorID, typeName, from, to, reason) —
-│                     fail-open zone (structural: nil DB, non-SQLite, no flow) plus one
-│                     fail-CLOSED structural branch (D34): the smeldr_transitions row query
-│                     erroring for a reason other than sql.ErrNoRows now returns ErrInternal
-│                     instead of silently allowing through — this branch runs before Strict is
-│                     ever consulted, for every transition, so a transient DB error can no
-│                     longer bypass a role gate regardless of that transition's own Strict
-│                     value; fail-closed gates: required_reason (unconditional — ErrBadRequest
+│                     fail-open zone (structural: nil DB, non-SQLite, no flow) plus two
+│                     fail-CLOSED structural branches (D34; T249/A269): the smeldr_transitions
+│                     row query erroring for a reason other than sql.ErrNoRows now returns
+│                     ErrInternal instead of silently allowing through — this branch runs before
+│                     Strict is ever consulted, for every transition, so a transient DB error can
+│                     no longer bypass a role gate regardless of that transition's own Strict
+│                     value; resolveFlowID's own smeldr_state_flows lookup erroring for a reason
+│                     other than sql.ErrNoRows (T249/A269) also now returns ErrInternal instead of
+│                     collapsing to found=false — previously indistinguishable from "no flow
+│                     registered", which permitted the transition with zero checks including the
+│                     required_role gate below. CreateStateFlowTables(db) error (migrate.go) — new
+│                     exported grouped idempotent creator for the five state-flow tables
+│                     (smeldr_state_flows, smeldr_states, smeldr_transitions,
+│                     smeldr_transition_triggers, smeldr_eval_queue), extracted out of
+│                     migrateStateFlows (which now calls it, then seeds the default flow) so a
+│                     caller building a DynamicTypeRepo/Module directly against a raw DB without
+│                     New can create just these tables — matching CreateBlockTables/
+│                     CreateSchemaTable's own precedent; a real test-fixture gap this exposed
+│                     (T249/A269): tests that never called it saw "no such table" from
+│                     validateTransition once resolveFlowID stopped swallowing that error;
+│                     fail-closed gates: required_reason (unconditional — ErrBadRequest
 │                     when required_reason=true and reason==""), then required_role (rs wired,
 │                     actorID non-empty → RoleGranted; error or !ok → ErrForbidden; rs==nil or
 │                     actorID=="" → ErrForbidden when Strict, otherwise skip check and allow,

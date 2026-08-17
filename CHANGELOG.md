@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.71.1] — 2026-08-17
+
+### Fixed
+- `resolveFlowID` (`state.go`, the lookup behind `validateTransition`'s state-flow resolution) previously collapsed a genuine DB error — SQLITE_BUSY, a cancelled context, a missing or corrupted table — into `found=false, err=nil`, indistinguishable from "no flow registered." `validateTransition` discarded that error and returned `nil`, permitting the transition with zero checks (no role gate), contradicting D34's fail-closed principle already correctly applied one call later for a sibling error path. Fixed: `resolveFlowID` now distinguishes `sql.ErrNoRows` (legitimate miss) from any other error (propagated); `validateTransition` fails closed with `ErrInternal`. No exported symbol on either function. (A269, T249)
+
+### Added
+- `CreateStateFlowTables(db DB) error` — a new exported, idempotent creator for the five state-flow tables, extracted out of `migrateStateFlows` (which now calls it, then seeds the default flow), matching `CreateBlockTables`/`CreateSchemaTable`'s own precedent. For a caller building a `DynamicTypeRepo`/`Module[T]` directly against a raw `DB` without going through `smeldr.New` (which always creates these tables). (A269, T249)
+
+---
+
 ## [1.71.0] — 2026-08-16
 
 ### Added

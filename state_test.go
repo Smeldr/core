@@ -650,6 +650,93 @@ func (c *queryErrDriverConn) Query(_ []driver.Value) (driver.Rows, error) {
 	return nil, c.err
 }
 
+// flowResolveFailDB simulates a real DB error while resolving a state
+// flow's smeldr_state_flows lookup, for T249's fail-open regression
+// coverage. failTypeQuery makes the type-specific lookup return a real
+// error; failDefaultQuery makes the default-flow fallback return a real
+// error (only reached when the type-specific lookup legitimately misses).
+// typeQueried/defaultQueried record whether each query actually ran, so a
+// test can assert resolveFlowID did not fall through to the default query
+// after a real (non-ErrNoRows) error on the type-specific one.
+type flowResolveFailDB struct {
+	failTypeQuery, failDefaultQuery bool
+	typeQueried, defaultQueried     bool
+}
+
+func (d *flowResolveFailDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (d *flowResolveFailDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, nil
+}
+func (d *flowResolveFailDB) QueryRowContext(ctx context.Context, query string, _ ...any) *sql.Row {
+	if strings.HasPrefix(query, "SELECT COUNT(*) FROM sqlite_master") {
+		conn := &guardRowConn{val: int64(0)}
+		return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+	}
+	if strings.Contains(query, "type_name = $1") {
+		d.typeQueried = true
+		if d.failTypeQuery {
+			return sql.OpenDB(&queryErrConnector{err: errors.New("simulated flow lookup error")}).QueryRowContext(ctx, "SELECT v")
+		}
+		return sql.OpenDB(&guardRowConn{noRow: true}).QueryRowContext(ctx, "SELECT v")
+	}
+	// default-flow fallback query (type_name IS NULL AND name = 'default')
+	d.defaultQueried = true
+	if d.failDefaultQuery {
+		return sql.OpenDB(&queryErrConnector{err: errors.New("simulated default flow lookup error")}).QueryRowContext(ctx, "SELECT v")
+	}
+	return sql.OpenDB(&guardRowConn{noRow: true}).QueryRowContext(ctx, "SELECT v")
+}
+
+// TestResolveFlowID_QueryError pins T249: a real error on the type-specific
+// smeldr_state_flows query must be propagated, not swallowed into
+// found=false — and must not fall through to the default-flow query, since
+// a DB error is not "keep trying," unlike a legitimate miss.
+func TestResolveFlowID_QueryError(t *testing.T) {
+	db := &flowResolveFailDB{failTypeQuery: true}
+	_, found, err := resolveFlowID(context.Background(), db, "Post")
+	if err == nil {
+		t.Fatal("type-specific query error: want non-nil err, got nil")
+	}
+	if found {
+		t.Error("type-specific query error: want found=false")
+	}
+	if db.defaultQueried {
+		t.Error("type-specific query error: must not fall through to the default-flow query")
+	}
+}
+
+// TestResolveFlowID_DefaultQueryError pins T249: the type-specific query
+// legitimately misses (sql.ErrNoRows), then a real error on the
+// default-flow fallback query must also be propagated, not swallowed.
+func TestResolveFlowID_DefaultQueryError(t *testing.T) {
+	db := &flowResolveFailDB{failDefaultQuery: true}
+	_, found, err := resolveFlowID(context.Background(), db, "Post")
+	if err == nil {
+		t.Fatal("default-flow query error: want non-nil err, got nil")
+	}
+	if found {
+		t.Error("default-flow query error: want found=false")
+	}
+	if !db.typeQueried {
+		t.Error("default-flow query error: type-specific query should have run first")
+	}
+}
+
+// TestValidateTransition_flowResolutionError is the direct regression pin
+// for T249: validateTransition must fail CLOSED (ErrInternal) when
+// resolveFlowID itself errors, not silently permit the transition as it
+// did before this fix (the error was discarded and treated as "no flow
+// registered — no validation").
+func TestValidateTransition_flowResolutionError(t *testing.T) {
+	db := &flowResolveFailDB{failTypeQuery: true}
+	err := validateTransition(context.Background(), db, nil, "", "Post", "draft", "published", "")
+	if !errors.Is(err, ErrInternal) {
+		t.Errorf("flow resolution error: want ErrInternal (fail closed), got %v", err)
+	}
+}
+
 // — validateInitialState tests ——————————————————————————————————————————————————
 
 func TestValidateInitialState_nilDB(t *testing.T) {

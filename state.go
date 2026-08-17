@@ -377,7 +377,11 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 		return nil
 	}
 
-	flowID, flowFound, _ := resolveFlowID(ctx, db, typeName)
+	flowID, flowFound, flowErr := resolveFlowID(ctx, db, typeName)
+	if flowErr != nil {
+		return fmt.Errorf("%w: could not resolve state flow for type %q: %s",
+			ErrInternal, typeName, flowErr)
+	}
 	if !flowFound {
 		return nil // no flow registered — no validation
 	}
@@ -461,11 +465,17 @@ func resolveFlowID(ctx context.Context, db DB, typeName string) (flowID string, 
 	if e == nil {
 		return flowID, true, nil
 	}
+	if !errors.Is(e, sql.ErrNoRows) {
+		return "", false, e
+	}
 	e = db.QueryRowContext(ctx,
 		`SELECT id FROM smeldr_state_flows WHERE type_name IS NULL AND name = 'default' LIMIT 1`,
 	).Scan(&flowID)
 	if e != nil {
-		return "", false, nil
+		if errors.Is(e, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, e
 	}
 	return flowID, true, nil
 }

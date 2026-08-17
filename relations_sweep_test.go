@@ -206,6 +206,9 @@ func TestAppSweepStructural_DefaultChecker(t *testing.T) {
 	if err := CreateRelationTables(db); err != nil {
 		t.Fatalf("CreateRelationTables: %v", err)
 	}
+	if err := CreateStateFlowTables(db); err != nil {
+		t.Fatalf("CreateStateFlowTables: %v", err)
+	}
 	rs, err := NewRelationStore(db)
 	if err != nil {
 		t.Fatalf("NewRelationStore: %v", err)
