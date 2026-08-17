@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.72.1] — 2026-08-17
+
+### Fixed
+- `RegisterFlow`'s upsert keyed on `Name`, not `TypeName` — a rename (e.g. `architect-task` → `agent-task`, T231) inserted a second `smeldr_state_flows` row instead of updating the existing one, leaving the old row orphaned. `resolveFlowID`'s own unordered query could then pick the stale row over the correct one — a real production incident on `process.smeldr.dev`, found during a deploy verification. Now re-keyed `ON CONFLICT (type_name)`, matching `UpsertKind`'s own established pattern; a new `idx_state_flows_type_name` unique index enforces the one-row-per-type invariant `resolveFlowID` already assumed. `description` now also updates on re-registration (previously frozen after first insert). A new self-healing migration (`migrateDuplicateStateFlowRows`) removes any pre-existing duplicate row on startup, keeping the most recently created one. No exported symbol. (A272, T268)
+
+---
+
 ## [1.72.0] — 2026-08-17
 
 ### Added

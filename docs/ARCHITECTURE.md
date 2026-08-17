@@ -293,8 +293,24 @@ smeldr.dev/
 │                     instead of allowing through; false (zero value) keeps every pre-existing
 │                     transition's lenient behaviour unchanged; only meaningful alongside a
 │                     non-empty RequiredRole;
-│                     App.RegisterFlow(StateFlow) error — idempotent upsert (INSERT OR
-│                     IGNORE + SELECT id + UPDATE conflict fields); validateFlowItems
+│                     App.RegisterFlow(StateFlow) error — idempotent upsert keyed on
+│                     TypeName (ON CONFLICT(type_name) DO UPDATE SET name/description),
+│                     backed by a new idx_state_flows_type_name UNIQUE index — matches
+│                     resolveFlowID's own one-row-per-type assumption and UpsertKind's
+│                     existing precedent for smeldr_relation_kinds; a rename (same TypeName,
+│                     new Name) now updates the existing row in place instead of orphaning
+│                     it (T268, a real production incident: the architect-task→agent-task
+│                     rename, T231, left an orphaned smeldr_state_flows row that
+│                     resolveFlowID's own unordered query sometimes picked over the correct
+│                     one). description now also updates on re-registration (previously
+│                     frozen after first insert) — a deliberate, flagged behavioural
+│                     upgrade, not incidental. New migrateDuplicateStateFlowRows
+│                     (unexported, migrate.go), called from migrateStateFlows before the
+│                     new unique index is created — self-heals any pre-existing duplicate
+│                     type_name row (this or any other affected install) by keeping the
+│                     row with the latest created_at and removing the rest along with their
+│                     own orphaned states/transitions/transition_triggers, logged at
+│                     slog.Warn per removal (Amendment A272, T268); validateFlowItems
 │                     (unexported) — SQLite-only unknown-state check; validateTransition
 │                     (ctx, db, rs *RoleStore, actorID, typeName, from, to, reason) —
 │                     fail-open zone (structural: nil DB, non-SQLite, no flow) plus two

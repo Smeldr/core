@@ -184,17 +184,22 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	}
 	ctx := context.Background()
 
-	// Upsert the flow row — INSERT does nothing when flow already exists;
-	// SELECT id reads the canonical ID regardless of whether the row was new.
+	// Upsert the flow row keyed on TypeName — the real identity resolveFlowID
+	// already assumes (its own query is "one row per type_name", enforced
+	// here by idx_state_flows_type_name). A rename (changed Name, same
+	// TypeName) updates the existing row in place instead of orphaning it
+	// (T268) — matching UpsertKind's own established ON CONFLICT(type_name)
+	// shape for smeldr_relation_kinds.
 	if _, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_state_flows(id, name, type_name, description) VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO NOTHING`,
+		`INSERT INTO smeldr_state_flows(id, name, type_name, description) VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (type_name) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description`,
 		NewID(), flow.Name, flow.TypeName, flow.Description,
 	); err != nil {
 		return fmt.Errorf("smeldr: RegisterFlow %q: upsert flow: %w", flow.Name, err)
 	}
 	var flowID string
 	if err := db.QueryRowContext(ctx,
-		`SELECT id FROM smeldr_state_flows WHERE name = $1`, flow.Name,
+		`SELECT id FROM smeldr_state_flows WHERE type_name = $1`, flow.TypeName,
 	).Scan(&flowID); err != nil {
 		return fmt.Errorf("smeldr: RegisterFlow %q: read flow id: %w", flow.Name, err)
 	}
@@ -202,8 +207,8 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	// Store ActiveState and ConflictPolicy — runs after the INSERT so it
 	// also updates an existing flow when the policy changes.
 	if _, err := db.ExecContext(ctx,
-		`UPDATE smeldr_state_flows SET active_state = $1, conflict_policy = $2 WHERE name = $3`,
-		flow.ActiveState, string(flow.ConflictPolicy), flow.Name,
+		`UPDATE smeldr_state_flows SET active_state = $1, conflict_policy = $2 WHERE id = $3`,
+		flow.ActiveState, string(flow.ConflictPolicy), flowID,
 	); err != nil {
 		return fmt.Errorf("smeldr: RegisterFlow %q: update conflict policy: %w", flow.Name, err)
 	}

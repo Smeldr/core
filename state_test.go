@@ -138,6 +138,90 @@ func TestRegisterFlow_idempotent(t *testing.T) {
 	}
 }
 
+// TestRegisterFlow_rename_updatesInPlace is the direct regression pin for
+// T268: a rename (same TypeName, new Name) must update the existing row in
+// place, not orphan it. Before the fix, this exact shape — RegisterFlow
+// called twice with the same TypeName but a different Name — produced two
+// rows for the same type, and resolveFlowID's own unordered query could
+// pick either one; that's precisely what happened live (architect-task ->
+// agent-task, T231).
+func TestRegisterFlow_rename_updatesInPlace(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+
+	original := StateFlow{
+		Name:        "old-name",
+		TypeName:    "RenameTestType",
+		Description: "original description",
+		States:      []State{{Name: "draft", IsInitial: true}, {Name: "done", IsTerminal: true}},
+		Transitions: []Transition{{From: "draft", To: "done"}},
+	}
+	if err := app.RegisterFlow(original); err != nil {
+		t.Fatalf("RegisterFlow (original): %v", err)
+	}
+
+	renamed := StateFlow{
+		Name:        "new-name",
+		TypeName:    "RenameTestType", // same type, different name — the rename shape
+		Description: "updated description",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "done", IsTerminal: true},
+			{Name: "resolved", IsTerminal: true},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "done"},
+			{From: "draft", To: "resolved"},
+		},
+	}
+	if err := app.RegisterFlow(renamed); err != nil {
+		t.Fatalf("RegisterFlow (renamed): %v", err)
+	}
+
+	var flowCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_state_flows WHERE type_name = 'RenameTestType'`,
+	).Scan(&flowCount); err != nil {
+		t.Fatalf("count flows: %v", err)
+	}
+	if flowCount != 1 {
+		t.Fatalf("flow count for type after rename = %d, want 1 (no orphaned row)", flowCount)
+	}
+
+	flowID, found, err := resolveFlowID(ctx, db, "RenameTestType")
+	if err != nil || !found {
+		t.Fatalf("resolveFlowID: found=%v err=%v", found, err)
+	}
+	var name, description string
+	if err := db.QueryRowContext(ctx,
+		`SELECT name, description FROM smeldr_state_flows WHERE id = $1`, flowID,
+	).Scan(&name, &description); err != nil {
+		t.Fatalf("select name/description: %v", err)
+	}
+	if name != "new-name" {
+		t.Errorf("resolved flow's name = %q, want %q", name, "new-name")
+	}
+	if description != "updated description" {
+		t.Errorf("description = %q, want %q (must update on re-registration too)", description, "updated description")
+	}
+
+	// The old row's own states must be gone too — not silently orphaned
+	// rows still occupying the table under a different, unreachable id.
+	var stateCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_states WHERE flow_id = $1`, flowID,
+	).Scan(&stateCount); err != nil {
+		t.Fatalf("count states: %v", err)
+	}
+	if stateCount != 3 {
+		t.Errorf("state count after rename = %d, want 3 (draft/done/resolved)", stateCount)
+	}
+}
+
 func TestRegisterFlow_unknownStateError(t *testing.T) {
 	db := newSQLiteDB(t)
 	ctx := context.Background()

@@ -75,6 +75,116 @@ func CreateStateFlowTables(db DB) error {
 	return nil
 }
 
+// migrateDuplicateStateFlowRows removes duplicate smeldr_state_flows rows
+// for the same non-null type_name, keeping only the row with the latest
+// created_at and deleting the rest along with their own now-orphaned
+// states/transitions/transition_triggers (no ON DELETE CASCADE exists in
+// this schema, and SQLite doesn't enforce foreign keys by default here, so
+// child rows would otherwise survive silently).
+//
+// A duplicate type_name is always a bug state, never a legitimate design —
+// [resolveFlowID] already assumes exactly one row per type via its own
+// unqualified LIMIT 1 query, so a second row was already silently
+// unreachable through the correct code path even before this fix existed.
+//
+// "Latest created_at wins" is a purely data-driven rule, not special-cased
+// to any one incident: RegisterFlow's own INSERT never sets created_at
+// explicitly, relying on the DDL's own DEFAULT CURRENT_TIMESTAMP, so the
+// latest row is precisely the one the most recent successful RegisterFlow
+// call actually created — for a rename, that is always the current,
+// correct definition.
+//
+// Root cause (T268, a real production incident found 2026-08-17 during a
+// live deploy verification): RegisterFlow's own upsert keyed on Name, not
+// TypeName — a flow rename left the old row orphaned instead of updating
+// it in place, and resolveFlowID's own unordered query picked the stale
+// row on a live instance. RegisterFlow itself is fixed separately (now
+// keys on TypeName); this migration heals any row a pre-fix binary already
+// left behind, on this or any other affected install, the next time
+// migrateStateFlows runs.
+func migrateDuplicateStateFlowRows(ctx context.Context, db DB) error {
+	groups, err := db.QueryContext(ctx, `
+		SELECT type_name FROM smeldr_state_flows
+		WHERE type_name IS NOT NULL
+		GROUP BY type_name
+		HAVING COUNT(*) > 1`)
+	if err != nil {
+		return fmt.Errorf("migrateDuplicateStateFlowRows: find duplicate groups: %w", err)
+	}
+	var typeNames []string
+	for groups.Next() {
+		var tn string
+		if err := groups.Scan(&tn); err != nil {
+			groups.Close()
+			return fmt.Errorf("migrateDuplicateStateFlowRows: scan type_name: %w", err)
+		}
+		typeNames = append(typeNames, tn)
+	}
+	if err := groups.Err(); err != nil {
+		groups.Close()
+		return fmt.Errorf("migrateDuplicateStateFlowRows: %w", err)
+	}
+	groups.Close()
+
+	for _, tn := range typeNames {
+		idRows, err := db.QueryContext(ctx,
+			`SELECT id FROM smeldr_state_flows WHERE type_name = $1 ORDER BY created_at DESC`, tn)
+		if err != nil {
+			return fmt.Errorf("migrateDuplicateStateFlowRows: list rows for type %q: %w", tn, err)
+		}
+		var ids []string
+		for idRows.Next() {
+			var id string
+			if err := idRows.Scan(&id); err != nil {
+				idRows.Close()
+				return fmt.Errorf("migrateDuplicateStateFlowRows: scan id for type %q: %w", tn, err)
+			}
+			ids = append(ids, id)
+		}
+		if err := idRows.Err(); err != nil {
+			idRows.Close()
+			return fmt.Errorf("migrateDuplicateStateFlowRows: %w", err)
+		}
+		idRows.Close()
+
+		// ids[0] has the latest created_at (ORDER BY ... DESC) — the
+		// survivor. Everything else is an orphan to remove.
+		kept := ids[0]
+		for _, orphanID := range ids[1:] {
+			if err := deleteOrphanedStateFlow(ctx, db, orphanID); err != nil {
+				return fmt.Errorf("migrateDuplicateStateFlowRows: remove orphan %q for type %q: %w", orphanID, tn, err)
+			}
+			slog.Warn("smeldr: migrateDuplicateStateFlowRows: removed orphaned duplicate flow row",
+				"type_name", tn, "removed_id", orphanID, "kept_id", kept)
+		}
+	}
+	return nil
+}
+
+// deleteOrphanedStateFlow removes flowID and every row that references it
+// (transition triggers, transitions, states) — in that order, since none
+// of the REFERENCES in this schema declare ON DELETE CASCADE.
+func deleteOrphanedStateFlow(ctx context.Context, db DB, flowID string) error {
+	if _, err := db.ExecContext(ctx,
+		`DELETE FROM smeldr_transition_triggers WHERE transition_id IN (SELECT id FROM smeldr_transitions WHERE flow_id = $1)`,
+		flowID); err != nil {
+		return fmt.Errorf("delete transition_triggers: %w", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`DELETE FROM smeldr_transitions WHERE flow_id = $1`, flowID); err != nil {
+		return fmt.Errorf("delete transitions: %w", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`DELETE FROM smeldr_states WHERE flow_id = $1`, flowID); err != nil {
+		return fmt.Errorf("delete states: %w", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`DELETE FROM smeldr_state_flows WHERE id = $1`, flowID); err != nil {
+		return fmt.Errorf("delete flow row: %w", err)
+	}
+	return nil
+}
+
 // migrateStateFlows creates the state-flow tables (via
 // [CreateStateFlowTables]) and seeds the default flow
 // (draft→scheduled→published→archived). All operations are idempotent:
@@ -83,6 +193,14 @@ func CreateStateFlowTables(db DB) error {
 func migrateStateFlows(ctx context.Context, db DB) error {
 	if err := CreateStateFlowTables(db); err != nil {
 		return fmt.Errorf("smeldr: migrateStateFlows: %w", err)
+	}
+	if err := migrateDuplicateStateFlowRows(ctx, db); err != nil {
+		return fmt.Errorf("smeldr: migrateStateFlows: %w", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_state_flows_type_name ON smeldr_state_flows(type_name)`,
+	); err != nil {
+		return fmt.Errorf("smeldr: migrateStateFlows: create type_name index: %w", err)
 	}
 
 	// Seed the default flow — mirrors the compile-time enum.

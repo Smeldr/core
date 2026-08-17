@@ -3512,7 +3512,7 @@ type Transition struct {
 func (a *App) RegisterFlow(flow StateFlow) error
 ```
 
-Registers a state flow for a content type. Idempotent — safe to call on every startup. The flow is stored in `smeldr_state_flows`; states in `smeldr_flow_states`; transitions in `smeldr_flow_transitions`. `ActiveState` and `ConflictPolicy` are updated on every call.
+Registers a state flow for a content type. Idempotent — safe to call on every startup, upserted by `TypeName` (not `Name`), so renaming a flow updates the existing row in place rather than orphaning it (T268). The flow is stored in `smeldr_state_flows`; states in `smeldr_states`; transitions in `smeldr_transitions`. `ActiveState`, `ConflictPolicy`, and `Description` are updated on every call.
 
 ### `App.TransitionItem` (D49)
 

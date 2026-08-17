@@ -35,308 +35,7 @@ Archived 2026-08-13: D48-D49, A252-A255 → phase26-archive.md
 Archived 2026-08-15: D50-D56, A256-A257 → phase27-archive.md
 Archived 2026-08-16: A258-A260, D57-D58 → phase28-archive.md
 Archived 2026-08-17: A261-A264 → phase29-archive.md
----
-
-## A265 — PATCH route for typed items over REST (T242)
-
-### Problem
-
-Dynamic-content REST (`PATCH /_content/{type}/{id}`) and typed MCP
-(`MCPUpdate`) both already had real partial-update semantics. Typed
-`Module[T]` REST only had `PUT` — full-replace, so any field absent from
-the body silently takes its Go zero value. Found by Peter asking whether
-he could ratify a Decision with `curl`: no `PATCH` route exists for a
-typed item at all, only `PUT`.
-
-### Design — reuse MCPUpdate's own logic, don't reimplement it
-
-`MCPUpdate` already is the exact logic a `PATCH` route needs: partial
-merge onto the existing item, identity/lifecycle restored after the
-merge, validated, saved, `notifyAfter`'d. The new `patchHandler` decodes
-the body as a `map[string]any` (matching the dynamic-content `PATCH`
-handler's own simpler pattern — no typed struct to overflow the same way
-`updateHandler`'s `MaxBytesError` handling guards against) and calls the
-same merge logic `MCPUpdate` calls, gated by `checkWriteOp(ctx, "update",
-m.writeRole)` — the identical call `updateHandler` already makes for
-`PUT`, so `PATCH` and `PUT` require the same authority. Registered in
-`Register` mirroring `PUT`'s own middleware-chain wrapping exactly.
-
-**Role tier, the plan's own open question, settled by the architect:**
-same as `PUT`, not a narrower tier. `PATCH` and `PUT` are the same
-write-authority question with a different body shape; nothing in this
-codebase's existing role model treats a partial update as inherently
-lower-risk than a full replace.
-
-**State-change question, answered by construction, not chosen freshly:**
-since the new route goes through the same identity/lifecycle-restore
-logic `MCPUpdate` already has, a `Status`/`ID`/`Slug` field in the `PATCH`
-body is silently discarded — identical to `MCPUpdate`'s own existing
-contract. `transition_item`/`PUT` remain the only ways to change state.
-
-**Does the dynamic-content PATCH handler's shape generalise? No —
-argued, not assumed.** `newUpdateContentHandler` operates on
-`DynamicNode`'s JSON-blob storage via `DynamicTypeRepo.UpdateFields` — a
-fundamentally different representation from `Module[T]`'s strongly-typed
-Go structs reached via reflection. Sharing one handler would need a new
-interface abstracting over both storage shapes for one call site's
-benefit — not worth building when `MCPUpdate` already provides the
-complete, tested typed-side logic with nothing to abstract over. Each
-surface keeps its own handler; the *pattern* (decode a fields map,
-restore identity/lifecycle, validate, save) is shared in spirit, not in
-code, because the underlying merge mechanics genuinely differ.
-
-### Real bug caught during implementation — not part of the approved plan's own text
-
-The plan, as approved, said "the new route calls `MCPUpdate` directly."
-Reading `MCPUpdate`'s own body closely before wiring it up surfaced a
-real consequence the plan hadn't examined: `MCPUpdate`'s `notifyAfter`
-call hardcodes `surfaceMCP` — every caller of `MCPUpdate`, regardless of
-its own transport, gets recorded as MCP-originated. `updateHandler`'s own
-`PUT` call site, by contrast, already correctly passes `surfaceHTTP` at
-the equivalent point (`module.go:1960`), confirming this is a real
-mismatch, not a hypothetical one: calling `MCPUpdate` directly from the
-new `PATCH` route would have misreported every REST-originated partial
-update as MCP-originated, in a project that has previously done real,
-careful work threading `Surface` accurately through 14 separate call
-sites (A260).
-
-**Fix:** extracted `MCPUpdate`'s own body into a new unexported
-`updateFields(ctx, slug, fields, surface string) (any, error)`,
-parameterized on the calling surface. `MCPUpdate` becomes a one-line
-wrapper passing `surfaceMCP` — behaviour-preserving, confirmed by running
-its own full existing test suite unmodified before writing anything new.
-The new `patchHandler` calls `updateFields` directly with `surfaceHTTP`,
-bypassing `MCPUpdate` entirely. Verified with a dedicated test going
-through the real HTTP handler end-to-end (wiring `App.Provenance`, a real
-`OnSignal` subscription, and asserting the recorded `Surface` — not by
-calling `notifyAfter` directly, which would only prove the plumbing
-exists, not that the new route actually uses it correctly).
-
-### Tests
-
-7 new (6 planned + 1 for the Surface fix found during implementation):
-`TestModule_PatchHandler_PartialUpdate_PreservesAbsentFields` (the direct
-regression pin — an omitted field keeps its value, unlike `PUT`),
-`_RestoresIdentityAndStatus`, `_Forbidden_WithoutWriteRole`,
-`_BadRequest_InvalidJSON`, `_NotFound_UnknownSlug`,
-`_SurfaceIsHTTP_NotMCP` (the fix above, end-to-end),
-`TestModule_Register_MountsPatchRoute` (a route that compiles but never
-mounts is the exact class of gap this task itself is). All existing
-`MCPUpdate`/`MCPPublish`/`resolveItem` tests pass unmodified.
-
-### Versioning
-
-New route, no exported symbol added, no existing signature changed
-(`patchHandler`/`updateFields` both unexported, matching
-`updateHandler`/`createHandler`/`deleteHandler`'s own visibility). New
-consumer-visible REST capability — a route that returned 404/405 now
-responds. MINOR bump. Coverage: 96.3%; `patchHandler` 100%, `MCPUpdate`
-100%, `updateFields` 96.3% (the `syncSaveHook` error branch is a
-pre-existing gap carried over unchanged from `MCPUpdate`'s own prior
-coverage, not introduced by this extraction). `go test -race ./...`
-clean. Level 2 amendment.
-
----
-
-## A266 — resolveItem gains a FindByID fallback (T214)
-
-### Problem
-
-`mcp/tool.go`'s `identArg` returns whichever of `"id"`/`"slug"` is present
-in the caller's args, but every one of its six call sites (`update`,
-`publish`, `schedule`, `archive`, `delete`, `get`) named the result `slug`
-and passed it into a slug-resolution path — `"id"` was an alias for the
-*key name* only, never for the *identifier type*. A real `Node.ID` passed
-under `"id"` resolved nothing, despite `identArg`'s own doc comment
-("accepting both id and slug") reading as genuine ID support.
-
-### Investigation — the fix belongs in core, mcp needs zero changes
-
-Traced all six `identArg` call sites directly. Every one already passes
-its resolved string into a core `Module[T]` MCP method
-(`MCPUpdate`/`MCPGet`/`MCPPublish`/`MCPSchedule`/`MCPArchive`/`MCPDelete`),
-and all six already route through `Module.resolveItem` (T253) as their
-single resolution funnel — which tries `FindBySlug`, then, only for a
-type with a registered `humanIDColumns` entry, `FindByColumn`.
-`resolveItem` never tried `FindByID` — the actual gap.
-
-**`FindByID` is already a required method on `Repository[T]`**
-(`storage.go`) — every `SQLRepo[T]`/`MemoryRepo[T]` implements it, unlike
-`ColumnLookupRepository`, which is an optional extension. Trying it is
-therefore safe and universal for *every* `Module[T]` type, not only the
-four with a `humanIDColumns` entry — this closes a strictly wider gap
-than T253's own humanID-only fallback. Confirmed both `Repository[T]`
-implementations return `ErrNotFound` on a miss, matching `FindBySlug`'s
-own contract exactly.
-
-**Confirmed `transition_item` is out of scope.** Checked its own mcp-side
-tool directly: its schema requires `"slug"` specifically, uses
-`stringArg(args, "slug")`, never calls `identArg` at all.
-`App.TransitionItem`'s own separate raw-SQL resolution path (`state.go`)
-never claimed `"id"` support in the first place — a different tool with
-an honest, narrower contract, not this bug.
-
-**Conclusion: extend `resolveItem`'s own fallback chain with one new
-step, `FindByID`, between the existing slug lookup and the humanID
-fallback — mcp needs zero changes.** `identArg`'s own doc comment becomes
-true rather than needing correction, once this lands.
-
-### Design
-
-Ordering argued, not arbitrary: slug stays first (unchanged existing
-behaviour/performance for the common case — every existing caller and
-test keeps working identically), `FindByID` second (universal, required
-by the interface, no type-specific gate), `humanIDColumns` fallback last
-(the most specialized, only four types). A slug string colliding with a
-different item's real UUID is not a realistic concern (`NewID()` is a
-UUID v7).
-
-### Caught in architect review before implementation
-
-The plan's own test list didn't include a dedicated test for `FindByID`'s
-own non-`ErrNotFound`-error branch — a genuinely new line, distinct from
-`FindBySlug`'s identical-looking check one step earlier, which the
-existing `TestResolveItem_NonErrNotFoundPropagates` test never reaches
-(its own `errorRepo` fails at the `FindBySlug` check first). Added
-`TestResolveItem_ByID_NonErrNotFoundPropagates` with a new dedicated test
-double (`slugMissIDErrorRepo`, ErrNotFound from `FindBySlug`, a real error
-from `FindByID`). Also confirmed, not assumed, that the two "existing
-test, same branch, reached later" cases
-(`TestResolveItem_NonOrchestrationType_NoFallback`,
-`TestResolveItem_RepoLacksColumnLookup`) still exercise their intended
-branches post-change — both test doubles already implemented `FindByID`
-returning `ErrNotFound` (a required interface method since T253), so both
-correctly fall through the new step unchanged.
-
-### Tests
-
-4 new: `TestResolveItem_ByID` (the direct regression pin — a real
-`Node.ID` resolves after a slug miss), `TestResolveItem_ByID_NonOrchestrationType`
-(the new fallback works for a type with *no* `humanIDColumns` entry at
-all — the actual scope difference over T253's own fallback),
-`TestResolveItem_ByID_NonErrNotFoundPropagates` (architect-review catch,
-above), `TestModule_MCPGet_ByID` (end-to-end through the real MCP entry
-point, mirroring `TestModule_MCPGet_ByHumanID`'s own T253 pattern). All 6
-existing `TestResolveItem_*` tests (T253) re-run and pass unmodified.
-
-### Versioning
-
-`resolveItem` is unexported — no exported Go symbol added or changed.
-Real consumer-observable behaviour change: every `Module[T]` MCP tool now
-resolves a real `Node.ID`, where it previously silently failed with "not
-found." Matches A261's own precedent (behaviour change, no exported
-symbol → PATCH bump), not A262's (new exported symbol → MINOR). Coverage:
-96.3%; `resolveItem` 100%. `go test -race ./...` clean. Level 2
-amendment.
-
----
-
-## A267 — DefaultListOrder module option; sortItems gains numeric support (T262)
-
-### Problem
-
-`Task.Priority`/`Goal.Priority` (int, lower = higher priority) existed
-and were stored but nothing read them. `list_task`/`list_goal` (and every
-other compiled-type list tool) had no sort parameter at all, so a caller
-always got whatever order the underlying query happened to return.
-Discovered when two Tasks' own priority numbers contradicted their
-intended sequencing, with nothing surfacing the mismatch.
-
-### Investigation — real work found in both directions, per the task's own instruction
-
-**mcp side:** there is no separate `list_tasks` tool — `"list"` is a
-generic op dispatched by type name, calling `lm.MCPList(ctx,
-statuses...)` for whatever type the tool resolves to. `MCPList` is part
-of the **exported `MCPModule` interface** — confirmed one external
-implementer, `smeldr.dev/media`. Changing its signature to accept a
-caller-supplied `orderBy` would break every implementer, the identical
-class of concern D49 solved for `TransitionItem` by adding a new `App`
-method instead of changing the interface. A caller-supplied parameter is
-real, legitimate design space — a new optional extension interface,
-matching `SeqRepository`/`ColumnLookupRepository`'s own established
-pattern — but bigger than this task's own scope and the concrete problem
-actually reported.
-
-**The other direction — a real, deeper bug found, not assumed already
-fixed:** `ListOptions.OrderBy`'s own doc comment already said sorting
-applies only to exported *string* fields. Traced the actual
-implementation: `SQLRepo`'s path builds a real SQL `ORDER BY <column>`,
-correct for an `INTEGER` column — a live SQLite/Postgres-backed instance
-would sort correctly once `OrderBy` is set. `MemoryRepo`'s path
-(`sortItems`/`stringField`) is different: `stringField` explicitly
-returns `""` for any non-string kind, so sorting a `MemoryRepo` by
-`"Priority"` treated every item as equal — a silent no-op sort, not a
-partial fix. **"Just wire the existing machinery through" would not have
-delivered real sorting for any `MemoryRepo`-backed deployment** — a real
-prerequisite fix, not scope creep. `stringField` has 7 other call sites
-(`ID`/`Slug`/`Status`/`FindByColumn` lookups) that are correctly
-string-only by construction — left untouched; a new, separate
-`sortFieldValue` used only by `sortItems`.
-
-### Design — no breaking change anywhere, in either repo
-
-Rejected a caller-supplied `orderBy` parameter (above). Chosen: a
-**module-level default list order**, applied identically to both the MCP
-and HTTP list surfaces of a type, set once at registration:
-
-```go
-func DefaultListOrder(field string, desc bool) Option
-```
-
-Solves the actual complaint with zero interface changes anywhere —
-`MCPList`'s own exported signature and behavioural contract (returns
-matching items) is unchanged; it simply returns them in a more useful
-order for types that opt in. `mcp` needs zero changes, matching T214's
-own precedent shape.
-
-New unexported `Module[T]` fields (`defaultOrderBy`, `defaultOrderDesc`)
-set via the existing option-parsing switch. New `withDefaultOrder`
-helper, shared by `MCPList` and `listHandler`, so both surfaces agree on
-order for the same type — avoiding the asymmetry of "MCP shows priority
-order, HTTP doesn't" for identical underlying data.
-
-`RegisterOrchestrationTypes`'s `Task`/`Goal` module construction each
-gain `DefaultListOrder("Priority", false)`. `Signal`, `Decision`,
-`Amendment`, `Run` are untouched — none have a `Priority` field.
-
-### `storage.go` — numeric sort support, additive
-
-New `sortFieldValue[T any](v T, name string) (s string, i int64, isInt bool)`
-— a string for a string field, an int64 for any signed-integer-width
-field, a zero value with `isInt=false` for any other kind (unknown field,
-non-comparable type) — matching `sortItems`' own existing fail-quiet-to-
-equal behaviour. `sortPair[T]` gains `intKey`/`isInt` alongside its
-existing `key`; `sortItems` compares whichever key is populated. Every
-existing string-field sort is unaffected — same comparison path, same
-result, confirmed by re-running the existing tests unmodified, not
-assumed.
-
-### Tests
-
-8 new: `TestSortItems_IntField` (ascending/descending, the direct
-regression pin), `TestSortFieldValue_UnknownField`,
-`_NonComparableKind` (fail-quiet cases), `TestModule_MCPList_DefaultOrder`,
-`_NoDefaultOrder_Unchanged` (every other registered type's own
-regression pin), `TestModule_listHandler_DefaultOrder` (MCP/HTTP
-consistency, not asserted from `MCPList` alone),
-`TestRegisterOrchestrationTypes_TaskGoalDefaultOrder` (scope check — the
-wiring is real, not just designed). All existing `OrderBy`/sort tests
-(string path) re-run and pass unmodified.
-
-### Versioning
-
-New exported symbol: `DefaultListOrder`. `sortFieldValue` unexported.
-Real consumer-observable behaviour change: `get_task`/`get_goal` (MCP)
-and `GET /tasks`/`GET /goals` (HTTP) now return items priority-ordered by
-default. MINOR bump, matching A262's own precedent (new exported symbol
-→ MINOR). Coverage: 96.3%; `MCPList`/`listHandler`/`withDefaultOrder`
-100%; `sortFieldValue` 86.7%/`sortItems` 93.8% (uncovered branches are
-the nil-pointer guard, non-struct `T`, and `Int8`/`Int16`/`Int32` kinds —
-no content type in this codebase uses those kinds or ever passes a nil
-pointer through this path; the same structurally-defensive-only class
-already accepted elsewhere this session, named not chased). `go test
--race ./...` clean. Level 2 amendment.
-
+Archived 2026-08-17: A265-A267 → phase30-archive.md
 ---
 
 ## A268 — release.yml retries "confirm release exists" instead of failing outright (T265)
@@ -646,5 +345,159 @@ package-wide; `CreateRelationTables`/`UpsertKind`/
 `RegisterOrchestrationRelationKinds`/`MCPUpsertRelationKind` all 100%.
 `go test -race ./...` clean. `golangci-lint` zero findings. v1.71.2 →
 **v1.72.0**.
+
+---
+
+## A272 — RegisterFlow no longer orphans a row on rename; live duplicate self-heals (T268)
+
+### Problem
+
+A live production incident, found 2026-08-17 during T260's own deploy
+verification: `get_valid_transitions` on a real `Task` still didn't list
+`resolved` (T255/A261), even though the deployed binary was confirmed
+`v1.71.0` and `orchTaskFlow()` in that code correctly defines it.
+
+Confirmed against the live database (read-only queries):
+`smeldr_state_flows.type_name='Task'` had **two** rows — the old
+`architect-task` (9 states, no `resolved`) and the new `agent-task` (10
+states, `resolved` present and correct). `Goal`'s own flow, never renamed,
+had exactly one row and `resolved` worked correctly there — isolating this
+as a rename-collision, not a broader bug.
+
+### Root cause
+
+`RegisterFlow`'s upsert (`INSERT ... ON CONFLICT (name) DO NOTHING`) keyed
+on `name`, not `type_name`. The D50-era flow rename `architect-task` →
+`agent-task` (T231) changed `flow.Name` in code while `flow.TypeName`
+stayed `"Task"` — on the first deploy after that rename, `RegisterFlow` saw
+a genuinely new `name` value and **inserted a second row** instead of
+updating the existing one. The old row was never cleaned up.
+`resolveFlowID`'s own query (`SELECT id FROM smeldr_state_flows WHERE
+type_name = $1 LIMIT 1`, no `ORDER BY`) picked whichever row SQLite
+happened to return first — on the live instance, the stale one.
+
+### Design — two parts, both required together
+
+**Part 1, prevent recurrence.** `RegisterFlow`'s upsert re-keyed on
+`type_name`:
+
+```sql
+INSERT INTO smeldr_state_flows(id, name, type_name, description)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (type_name) DO UPDATE SET
+    name        = EXCLUDED.name,
+    description = EXCLUDED.description
+```
+
+matching `UpsertKind`'s own already-correct, already-established pattern
+for `smeldr_relation_kinds` (`type_name TEXT NOT NULL UNIQUE`, `ON CONFLICT
+(type_name)`) — the architect named this precedent directly during T160's
+own review, before T268 was even dispatched. The flow-ID read and the
+`active_state`/`conflict_policy` `UPDATE` immediately after both switched
+off of `name` too (`WHERE type_name = $1` and `WHERE id = $3` using the
+already-fetched `flowID`, respectively) — removes every remaining reliance
+on `name` as an identity lookup in this function.
+
+New `CREATE UNIQUE INDEX IF NOT EXISTS idx_state_flows_type_name ON
+smeldr_state_flows(type_name)` — required for `ON CONFLICT (type_name)` to
+be valid SQLite at all. `RegisterFlow` always requires a non-empty
+`TypeName` (rejects `""` on entry); the default flow (`type_name IS NULL,
+name='default'`) is seeded by a completely separate raw `INSERT` inside
+`migrateStateFlows`, never through `RegisterFlow` — confirmed, not
+assumed, so this index never has to reconcile with a NULL `type_name` row
+from `RegisterFlow`'s own path, and standard SQL treats NULLs as mutually
+non-conflicting in a UNIQUE index regardless.
+
+**A real behavioural upgrade, flagged explicitly rather than left implicit
+in the diff**: the old `ON CONFLICT (name) DO NOTHING` never updated
+`description` on a re-registration (only `active_state`/`conflict_policy`
+were kept current via a separate `UPDATE`). `DO UPDATE SET description =
+EXCLUDED.description` now keeps `description` current too, matching the
+same "code's own current definition wins" philosophy already applied to
+the other two fields — a strict improvement, not a risk, since nothing in
+the codebase depends on `description` staying frozen after first insert.
+
+**Part 2, heal existing duplicates — including the live one, and any other
+install carrying the same pattern, not just this one database.** A
+duplicate `type_name` is *always* a bug state, never a legitimate design:
+`resolveFlowID` already assumes exactly one row per type via its own
+unqualified `LIMIT 1`, so a second row was already silently unreachable
+through the correct code path even before this fix — just still occupying
+space and, as this incident showed, at risk of being the one that wins an
+undefined-order race.
+
+New unexported `migrateDuplicateStateFlowRows(ctx, db) error`
+(`migrate.go`), called from `migrateStateFlows` right after
+`CreateStateFlowTables(db)` succeeds and **before** the new unique index —
+ordering is load-bearing: the index creation would otherwise fail against
+any install still carrying the duplicate, not merely a stylistic choice.
+
+1. Finds every `type_name` with more than one row.
+2. For each, keeps the row with the **latest `created_at`**, removes the
+   rest. Argued, not guessed: `RegisterFlow`'s own `INSERT` never sets
+   `created_at` explicitly, relying on the DDL's own `DEFAULT
+   CURRENT_TIMESTAMP` — so "latest `created_at`" means precisely "the row
+   the most recent successful `RegisterFlow` call actually created," which
+   for a rename is exactly the new, correct definition. Checked against
+   the actual live incident before trusting the rule in the abstract:
+   `agent-task` (the correct survivor) really was created after
+   `architect-task` by construction, since the rename happened later — the
+   rule is also deliberately general rather than special-cased to that one
+   fact, so it holds for any future duplicate regardless of whether a
+   rename happens to add states too.
+3. Deletes each orphan's own `smeldr_transition_triggers` (via a subquery
+   on `smeldr_transitions.flow_id`), then `smeldr_transitions`, then
+   `smeldr_states`, then the `smeldr_state_flows` row itself, in that
+   order — no `ON DELETE CASCADE` exists in this schema and SQLite doesn't
+   enforce foreign keys by default here, so orphaned child rows would
+   otherwise survive silently.
+4. Logs each removal at `slog.Warn` (`type_name`, `removed_id`,
+   `kept_id`) — a real defect existed and was silently corrected, which an
+   operator should notice, matching D34's own fail-loud lineage rather
+   than staying quiet about a self-healing data change.
+
+**Deliberately not done**: a one-off manual `DELETE` against the live
+instance — T268's own dispatch explicitly ruled this out (the same
+collision would recur on the next rename anywhere in the codebase without
+the underlying fix); the migration above is general enough to self-heal
+this instance (and any other affected install) on its next restart, which
+T260's own redeploy will perform anyway.
+
+### Tests
+
+`TestRegisterFlow_rename_updatesInPlace` (the direct regression pin — same
+`TypeName`, new `Name`, asserts exactly one row survives, the old row's own
+states are gone, `description` updated too), `TestMigrateDuplicateStateFlowRows_KeepsLatest`
+(reproduces the live incident's exact shape at the SQL level, confirms the
+newer row survives and every one of the orphan's own child rows —
+triggers, transitions, states — are gone), `_NoDuplicates_NoOp`,
+`_MultipleGroups` (two independent duplicate groups handled
+independently), `_FindGroupsError`, `_ListRowsError`,
+`TestDeleteOrphanedStateFlow_ExecErrors` (table-driven, all four sequential
+deletes), `TestMigrateStateFlows_DuplicateCleanupError`,
+`_CreateIndexError`, `_HealsExistingDuplicate` (through the real
+`migrateStateFlows` entry point, not the unexported function directly —
+confirms sequencing, not just the function in isolation, and that the
+unique index is genuinely enforced afterward). All 19 pre-existing
+`TestRegisterFlow_*` tests re-run unmodified and pass — checked before
+implementing, not after, that their fault-injection fakes are content-blind
+to the SQL text changes (call-count-based, not query-string-based).
+
+### Versioning
+
+`RegisterFlow`/`resolveFlowID`/`migrateStateFlows`/
+`migrateDuplicateStateFlowRows` all unexported or unchanged exported
+signatures — no new exported symbol. Real consumer-observable behaviour
+change (a rename no longer orphans a row; `description` now updates on
+re-registration). PATCH bump, matching A266/A269/A270's own precedent.
+Coverage: 96.2% package-wide; `RegisterFlow` 97.2%,
+`deleteOrphanedStateFlow` 100%. `migrateDuplicateStateFlowRows`'s remaining
+gap (`Scan`/`.Err()` post-iteration checks on `groups`/`idRows`) is the
+same structurally-hard-to-trigger-with-a-real-driver class already accepted
+elsewhere this session (A264, A267, T249) — named, not chased.
+`migrateStateFlows`'s own 75.0% is unchanged from T249's own already-
+accepted baseline; both of this Amendment's own new lines inside it are
+covered. `go test -race ./...` clean. `golangci-lint` zero findings.
+v1.72.0 → **v1.72.1**.
 
 ---
