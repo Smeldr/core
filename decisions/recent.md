@@ -667,3 +667,72 @@ blocked on v1.74.0 actually being tagged/released first, not part of this
 entry's own scope.
 
 ---
+
+## A278 — smeldr.dev/mcp: create_signal wired to App.NotifySignalCreated
+
+### Problem
+
+The `mcp`-side half of the two-repo fix begun in A277. `create_signal`'s
+own `handleSignalTool` case did the raw `db.ExecContext` INSERT described
+in A277 and returned — no call to the newly-exported
+`App.NotifySignalCreated`, since that method didn't exist in any
+`mcp`-resolvable `core` version until this session's own v1.74.0 release.
+
+### Fix
+
+One new line in `signal_tools.go`, immediately after the INSERT succeeds
+and before the `toolResult` return:
+
+```go
+s.app.NotifySignalCreated(ctx, id, slug)
+```
+
+Required a `smeldr.dev/core` dependency pin bump — `mcp/go.mod` was
+pinned at `v1.65.0`, 8+ minor versions behind the now-current `v1.74.0`
+(same staleness class T217, still unclaimed in the backlog, exists to
+catch systematically). Confirmed real before starting: `go mod download
+-json smeldr.dev/core@v1.74.0`'s own `Origin.Hash` matched the exact
+committed `core` SHA (`e916984`) — the version genuinely resolves on the
+real proxy, not assumed from the tag having been pushed.
+
+### Verifying the pin jump itself, not just the new line
+
+None of the intervening `core` versions crossed a major (still v1.x,
+covered by the API stability promise), but a jump this large was checked
+directly rather than trusted on that promise alone, per the standing
+standalone-module pre-tag checklist:
+
+- `go mod tidy` — no diff
+- `go build ./...` / `go vet ./...` — clean
+- `go test ./...` — green, `mcp`'s own **full** suite, not only the
+  signal-tool tests
+- `go test -race ./...` — green
+
+**Two pre-existing `golangci-lint` findings, confirmed not mine.**
+`mcp_test.go`/`node_tools.go` each carry one finding (`errcheck` on an
+unchecked `pw.Write`, `ineffassign` on a dead `n++`). Confirmed via `git
+stash` that both already exist on `mcp`'s own `main`, in files this
+Amendment never touches — reported for the record, not fixed (out of
+this Amendment's own scope; fixing an unrelated file crosses the same
+file-boundary rule that turns a fix into a separate Amendment).
+
+### Tests
+
+`TestHandleSignalTool_CreateSignal_NotifiesApp` — proves the wiring
+end-to-end, not just that the call is present in source. `mcp` has no
+access to `core`'s own unexported `eventBroadcaster` to inspect directly
+(the same constraint A277 itself exists to work around), so the test
+connects a real `GET /_events/stream` client (`httptest.NewServer(app.
+Handler())`, a signed `Author`-role bearer token) and asserts the
+`"signal.created"` NDJSON line actually arrives after calling
+`create_signal` through the real MCP tool handler.
+
+### Versioning
+
+`create_signal`'s own request/response shape is unchanged — this adds a
+side effect (a notification that should have always fired), not a new
+parameter or response field. Coverage: 96.0% package-wide (mcp's own
+established target), `handleSignalTool` 93.5%. `go test -race ./...`
+clean. PATCH bump (mcp): v1.31.0 → **v1.31.1**.
+
+---
