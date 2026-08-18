@@ -1011,16 +1011,21 @@ func defaultTargetChecker(db DB) TargetChecker {
 
 // SweepStructural runs a structural premise sweep using [defaultTargetChecker].
 // It fires [AfterRelationCascade] for each stale source edge via [App.emitSignal].
-// Returns (0, 0, nil) immediately if no [RelationStore] is configured.
+// Returns (0, 0, 0, nil) immediately if no [RelationStore] is configured.
+//
+// walked is the total relation rows examined this run (T223) — record it
+// alongside flagged/skipped via a [SweepRunStore] so a clean sweep leaves a
+// trace distinguishable from no sweep having run at all; see
+// [SweepRunStore]'s own doc comment for the wiring pattern.
 //
 // See [defaultTargetChecker] for what "alive" means for a compiled
 // [Module] type versus a runtime-defined one, and for the narrowed cases
 // where an application still needs to supply its own [TargetChecker] via
 // [RelationStore.SweepStructural] directly.
-func (a *App) SweepStructural(ctx context.Context) (flagged, skipped int, err error) {
+func (a *App) SweepStructural(ctx context.Context) (walked, flagged, skipped int, err error) {
 	rs := a.RelationStore()
 	if rs == nil {
-		return 0, 0, nil
+		return 0, 0, 0, nil
 	}
 	check := defaultTargetChecker(a.cfg.DB)
 	onStale := func(ctx context.Context, e RelationEdge) {

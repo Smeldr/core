@@ -44,9 +44,9 @@ func noopOnStale(_ context.Context, _ RelationEdge) {}
 
 func TestSweepStructural_NoRelations(t *testing.T) {
 	store := setupSweepStore(t)
-	f, sk, err := store.SweepStructural(context.Background(), aliveChecker, noopOnStale)
-	if err != nil || f != 0 || sk != 0 {
-		t.Errorf("want (0,0,nil), got (%d,%d,%v)", f, sk, err)
+	w, f, sk, err := store.SweepStructural(context.Background(), aliveChecker, noopOnStale)
+	if err != nil || w != 0 || f != 0 || sk != 0 {
+		t.Errorf("want (0,0,0,nil), got (%d,%d,%d,%v)", w, f, sk, err)
 	}
 }
 
@@ -54,9 +54,9 @@ func TestSweepStructural_AliveTarget(t *testing.T) {
 	store := setupSweepStore(t)
 	edge := assertEdge(t, store, "art-1", "page-1")
 
-	f, sk, err := store.SweepStructural(context.Background(), aliveChecker, noopOnStale)
-	if err != nil || f != 0 || sk != 0 {
-		t.Errorf("want (0,0,nil), got (%d,%d,%v)", f, sk, err)
+	w, f, sk, err := store.SweepStructural(context.Background(), aliveChecker, noopOnStale)
+	if err != nil || w != 1 || f != 0 || sk != 0 {
+		t.Errorf("want (1,0,0,nil), got (%d,%d,%d,%v)", w, f, sk, err)
 	}
 	// invalid_at must remain unset.
 	edges, _ := store.GetBySource(context.Background(), "article", "art-1", "linked")
@@ -72,12 +72,12 @@ func TestSweepStructural_StaleTarget(t *testing.T) {
 	onStaleCalls := 0
 	onStale := func(_ context.Context, _ RelationEdge) { onStaleCalls++ }
 
-	f, sk, err := store.SweepStructural(context.Background(), staleChecker, onStale)
+	w, f, sk, err := store.SweepStructural(context.Background(), staleChecker, onStale)
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if f != 1 || sk != 0 {
-		t.Errorf("want (1,0), got (%d,%d)", f, sk)
+	if w != 1 || f != 1 || sk != 0 {
+		t.Errorf("want (1,1,0), got (%d,%d,%d)", w, f, sk)
 	}
 	if onStaleCalls != 1 {
 		t.Errorf("want onStale called 1×, got %d", onStaleCalls)
@@ -104,12 +104,12 @@ func TestSweepStructural_TargetDedup(t *testing.T) {
 	onStaleCalls := 0
 	onStale := func(_ context.Context, _ RelationEdge) { onStaleCalls++ }
 
-	f, sk, err := store.SweepStructural(context.Background(), check, onStale)
+	w, f, sk, err := store.SweepStructural(context.Background(), check, onStale)
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if f != 3 || sk != 0 {
-		t.Errorf("want (3,0), got (%d,%d)", f, sk)
+	if w != 3 || f != 3 || sk != 0 {
+		t.Errorf("want (3,3,0), got (%d,%d,%d)", w, f, sk)
 	}
 	if checkCalls != 1 {
 		t.Errorf("want check called 1× (dedup), got %d", checkCalls)
@@ -123,9 +123,9 @@ func TestSweepStructural_CheckerError(t *testing.T) {
 	store := setupSweepStore(t)
 	edge := assertEdge(t, store, "art-1", "page-1")
 
-	f, sk, err := store.SweepStructural(context.Background(), errChecker, noopOnStale)
-	if err != nil || f != 0 || sk != 1 {
-		t.Errorf("want (0,1,nil), got (%d,%d,%v)", f, sk, err)
+	w, f, sk, err := store.SweepStructural(context.Background(), errChecker, noopOnStale)
+	if err != nil || w != 1 || f != 0 || sk != 1 {
+		t.Errorf("want (1,0,1,nil), got (%d,%d,%d,%v)", w, f, sk, err)
 	}
 	// Edge must be untouched (not invalidated).
 	edges, _ := store.GetBySource(context.Background(), "article", "art-1", "linked")
@@ -149,9 +149,9 @@ func TestSweepStructural_AlreadyInvalid(t *testing.T) {
 		return false, nil
 	}
 
-	f, sk, err := store.SweepStructural(context.Background(), check, noopOnStale)
-	if err != nil || f != 0 || sk != 0 {
-		t.Errorf("want (0,0,nil), got (%d,%d,%v)", f, sk, err)
+	w, f, sk, err := store.SweepStructural(context.Background(), check, noopOnStale)
+	if err != nil || w != 0 || f != 0 || sk != 0 {
+		t.Errorf("want (0,0,0,nil), got (%d,%d,%d,%v)", w, f, sk, err)
 	}
 	if checkCalls != 0 {
 		t.Errorf("want check not called for already-invalid edge, got %d", checkCalls)
@@ -178,12 +178,12 @@ func TestSweepStructural_MixedTargets(t *testing.T) {
 	onStaleCalls := 0
 	onStale := func(_ context.Context, _ RelationEdge) { onStaleCalls++ }
 
-	f, sk, err := store.SweepStructural(context.Background(), check, onStale)
+	w, f, sk, err := store.SweepStructural(context.Background(), check, onStale)
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if f != 1 || sk != 1 {
-		t.Errorf("want (1,1), got (%d,%d)", f, sk)
+	if w != 3 || f != 1 || sk != 1 {
+		t.Errorf("want (3,1,1), got (%d,%d,%d)", w, f, sk)
 	}
 	if onStaleCalls != 1 {
 		t.Errorf("want onStale 1×, got %d", onStaleCalls)
@@ -192,9 +192,9 @@ func TestSweepStructural_MixedTargets(t *testing.T) {
 
 func TestAppSweepStructural_NilStore(t *testing.T) {
 	app := &App{}
-	f, sk, err := app.SweepStructural(context.Background())
-	if err != nil || f != 0 || sk != 0 {
-		t.Errorf("want (0,0,nil) for nil store, got (%d,%d,%v)", f, sk, err)
+	w, f, sk, err := app.SweepStructural(context.Background())
+	if err != nil || w != 0 || f != 0 || sk != 0 {
+		t.Errorf("want (0,0,0,nil) for nil store, got (%d,%d,%d,%v)", w, f, sk, err)
 	}
 }
 
@@ -255,24 +255,24 @@ func TestAppSweepStructural_DefaultChecker(t *testing.T) {
 	app.Relations(rs)
 
 	// Published target → not stale → flagged=0.
-	f, sk, err := app.SweepStructural(ctx)
+	w, f, sk, err := app.SweepStructural(ctx)
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if f != 0 || sk != 0 {
-		t.Errorf("want (0,0) for published target, got (%d,%d)", f, sk)
+	if w != 1 || f != 0 || sk != 0 {
+		t.Errorf("want (1,0,0) for published target, got (%d,%d,%d)", w, f, sk)
 	}
 
 	// Now set status to draft → target no longer published → flagged=1.
 	if err := repo.SetStatus(ctx, "tgt-published", Draft); err != nil {
 		t.Fatalf("SetStatus draft: %v", err)
 	}
-	f, sk, err = app.SweepStructural(ctx)
+	w, f, sk, err = app.SweepStructural(ctx)
 	if err != nil {
 		t.Fatalf("SweepStructural after draft: %v", err)
 	}
-	if f != 1 || sk != 0 {
-		t.Errorf("want (1,0) for draft target, got (%d,%d)", f, sk)
+	if w != 1 || f != 1 || sk != 0 {
+		t.Errorf("want (1,1,0) for draft target, got (%d,%d,%d)", w, f, sk)
 	}
 }
 
@@ -313,11 +313,11 @@ func TestAppSweepStructural_DefaultChecker_RegisteredTypeRowMissing(t *testing.T
 	app := &App{cfg: Config{DB: db}}
 	app.Relations(rs)
 
-	f, sk, err := app.SweepStructural(ctx)
+	w, f, sk, err := app.SweepStructural(ctx)
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if f != 1 || sk != 0 {
-		t.Errorf("want (1,0) for a registered type whose row was never created, got (%d,%d)", f, sk)
+	if w != 1 || f != 1 || sk != 0 {
+		t.Errorf("want (1,1,0) for a registered type whose row was never created, got (%d,%d,%d)", w, f, sk)
 	}
 }

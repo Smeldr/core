@@ -604,7 +604,7 @@ func TestDrainEvalQueue_AuthorizationRequiredSignal_FiresWebhook(t *testing.T) {
 		t.Fatalf("Create webhook endpoint: %v", err)
 	}
 
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("DrainEvalQueue: %v", err)
 	}

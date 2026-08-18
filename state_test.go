@@ -3228,12 +3228,12 @@ func TestResolveItemTable_fallback(t *testing.T) {
 
 func TestDrainEvalQueue_nilDB(t *testing.T) {
 	app := &App{cfg: Config{DB: nil}}
-	triggered, skipped, err := app.DrainEvalQueue(context.Background())
+	walked, triggered, skipped, err := app.DrainEvalQueue(context.Background())
 	if err != nil {
 		t.Fatalf("nil DB: expected nil error, got %v", err)
 	}
-	if triggered != 0 || skipped != 0 {
-		t.Errorf("nil DB: expected (0,0), got (%d,%d)", triggered, skipped)
+	if walked != 0 || triggered != 0 || skipped != 0 {
+		t.Errorf("nil DB: expected (0,0,0), got (%d,%d,%d)", walked, triggered, skipped)
 	}
 }
 
@@ -3241,12 +3241,12 @@ func TestDrainEvalQueue_noTable(t *testing.T) {
 	// Fresh SQLite with no tables → "no such table" → fail-open.
 	db := newSQLiteDB(t)
 	app := &App{cfg: Config{DB: db}}
-	triggered, skipped, err := app.DrainEvalQueue(context.Background())
+	walked, triggered, skipped, err := app.DrainEvalQueue(context.Background())
 	if err != nil {
 		t.Fatalf("no table: expected nil (fail-open), got %v", err)
 	}
-	if triggered != 0 || skipped != 0 {
-		t.Errorf("no table: expected (0,0), got (%d,%d)", triggered, skipped)
+	if walked != 0 || triggered != 0 || skipped != 0 {
+		t.Errorf("no table: expected (0,0,0), got (%d,%d,%d)", walked, triggered, skipped)
 	}
 }
 
@@ -3274,12 +3274,12 @@ func TestDrainEvalQueue_happy(t *testing.T) {
 	}
 
 	app := &App{cfg: Config{DB: db}}
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	walked, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("DrainEvalQueue: %v", err)
 	}
-	if triggered != 1 || skipped != 0 {
-		t.Errorf("happy: expected (1,0), got (%d,%d)", triggered, skipped)
+	if walked != 1 || triggered != 1 || skipped != 0 {
+		t.Errorf("happy: expected (1,1,0), got (%d,%d,%d)", walked, triggered, skipped)
 	}
 
 	// Item must have new status.
@@ -3341,7 +3341,7 @@ func TestDrainEvalQueue_RecordsProvenance_OnSuccessfulTransition(t *testing.T) {
 	app := &App{cfg: Config{DB: db}}
 	app.Provenance(store)
 
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("DrainEvalQueue: %v", err)
 	}
@@ -3395,7 +3395,7 @@ func TestDrainEvalQueue_NoProvenanceStore_NoOp(t *testing.T) {
 	}
 
 	app := &App{cfg: Config{DB: db}} // provenanceStore never set
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("DrainEvalQueue: %v", err)
 	}
@@ -3432,7 +3432,7 @@ func TestDrainEvalQueue_ProvenanceWriteFails_QueueRowStillDeleted(t *testing.T) 
 	app := &App{cfg: Config{DB: db}}
 	app.Provenance(&failingProvenanceStore{})
 
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("DrainEvalQueue: %v", err)
 	}
@@ -3459,7 +3459,7 @@ func TestDrainEvalQueue_notDueYet(t *testing.T) {
 		t.Fatalf("insert: %v", err)
 	}
 	app := &App{cfg: Config{DB: db}}
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("DrainEvalQueue: %v", err)
 	}
@@ -3483,7 +3483,7 @@ func TestDrainEvalQueue_transitionFail(t *testing.T) {
 		t.Fatalf("insert queue: %v", err)
 	}
 	app := &App{cfg: Config{DB: db}}
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("DrainEvalQueue: %v", err)
 	}
@@ -3506,7 +3506,7 @@ func TestDrainEvalQueue_selectFail(t *testing.T) {
 	ctx := context.Background()
 	wrapped := &evalQueueQueryFailDB{DB: db}
 	app := &App{cfg: Config{DB: wrapped}}
-	_, _, err := app.DrainEvalQueue(ctx)
+	_, _, _, err := app.DrainEvalQueue(ctx)
 	if err == nil {
 		t.Error("selectFail: expected error from QueryContext, got nil")
 	}
@@ -3533,7 +3533,7 @@ func TestDrainEvalQueue_rowsError(t *testing.T) {
 	ctx := context.Background()
 	wrapped := &evalQueueRowsErrDB{DB: db}
 	app := &App{cfg: Config{DB: wrapped}}
-	_, _, err := app.DrainEvalQueue(ctx)
+	_, _, _, err := app.DrainEvalQueue(ctx)
 	if err == nil {
 		t.Error("rowsError: expected error from rows.Err(), got nil")
 	}
@@ -3567,13 +3567,16 @@ func TestDrainEvalQueue_scanFail(t *testing.T) {
 	}
 	wrapped := &evalQueueScanFailDB{DB: db}
 	app := &App{cfg: Config{DB: wrapped}}
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	walked, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("scanFail: unexpected error: %v", err)
 	}
-	// scan failed → skipped++ (row still deleted)
-	if triggered != 0 || skipped != 1 {
-		t.Errorf("scanFail: expected (0,1), got (%d,%d)", triggered, skipped)
+	// scan failed → skipped++ (row still deleted); walked still counts the
+	// row (T223 — walked is "rows examined," incremented before Scan is
+	// attempted, so a scan failure is still an examined row, not a skipped
+	// examination).
+	if walked != 1 || triggered != 0 || skipped != 1 {
+		t.Errorf("scanFail: expected (1,0,1), got (%d,%d,%d)", walked, triggered, skipped)
 	}
 }
 
@@ -3821,7 +3824,7 @@ func TestDrainEvalQueue_AuthorizationGate_NoProvenanceWrite(t *testing.T) {
 		t.Fatalf("insert queue: %v", err)
 	}
 
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("DrainEvalQueue: %v", err)
 	}
@@ -3861,7 +3864,7 @@ func TestDrainEvalQueue_GatedTransition_SignalEmittedNotApplied(t *testing.T) {
 		t.Fatalf("insert queue: %v", err)
 	}
 
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("DrainEvalQueue: %v", err)
 	}
@@ -3936,7 +3939,7 @@ func TestDrainEvalQueue_GatedTransition_SignalRecordFails(t *testing.T) {
 		t.Fatalf("insert queue: %v", err)
 	}
 
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("DrainEvalQueue: %v", err)
 	}
@@ -4006,7 +4009,7 @@ func TestDrainEvalQueue_UngatedTransition_UpdateFails(t *testing.T) {
 
 	wrapped := &nthExecFailDB{DB: db, fail: 1} // 1st ExecContext inside DrainEvalQueue = the UPDATE
 	app := &App{cfg: Config{DB: wrapped}}
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("DrainEvalQueue: %v", err)
 	}
@@ -4042,7 +4045,7 @@ func TestDrainEvalQueue_DeleteFails(t *testing.T) {
 
 	wrapped := &nthExecFailDB{DB: db, fail: 2} // 1st = UPDATE (succeeds), 2nd = DELETE (fails)
 	app := &App{cfg: Config{DB: wrapped}}
-	triggered, skipped, err := app.DrainEvalQueue(ctx)
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
 	if err != nil {
 		t.Fatalf("DrainEvalQueue: %v", err)
 	}

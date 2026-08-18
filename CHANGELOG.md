@@ -30,6 +30,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.75.0] — 2026-08-18
+
+### Added
+- New file `sweep_run.go`: `SweepRunRecord` struct, `SweepRunStore` interface, `NewSweepRunStore(db DB) SweepRunStore`, `CreateSweepRunTable(db DB) error`. This is a new persistence layer — one immutable record per completed scheduled detector run (e.g. `App.SweepStructural`, `App.DrainEvalQueue`), modeled directly on the existing `AuditRecord`/`AuditStore` pattern. It closes a real gap: a clean structural sweep previously logged one Debug-level line and persisted nothing, which was indistinguishable from the sweep never having run at all. `SweepRunRecord` fields: `ID`, `Detector` (e.g. `"structural"`, `"eval-queue"`), `RanAt`, `Interval` (the detector's own cron schedule string), `Walked`, `Flagged`, `Skipped`, `Err`. There is deliberately no HTTP endpoint and no MCP tool for this store — `Last`/`List` are plain Go methods for a future staleness-derivation caller, not for human browsing. (A279)
+- **Breaking change** (no known external importers of `smeldr.dev/core`, so treated as in-workspace-only cost): `App.SweepStructural(ctx) (walked, flagged, skipped int, err error)` and `RelationStore.SweepStructural(...)` (same signature) and `App.DrainEvalQueue(ctx) (walked, triggered, skipped int, err error)` all gained a new leading `walked int` return value — the total number of items examined during that run. Without this count, a result of `flagged=0, skipped=0` could not be distinguished between "nothing needed checking" and "everything was checked and found clean" — exactly the ambiguity this release exists to close. Companion change in the separate `smeldr.dev/agent` module (not part of this repo's own release, mention only briefly as context): `agent.SweepFunc`'s type and `agent.NewEvalQueueScheduler`'s interface were updated to match this new `walked` return value in that module's own v0.8.0 release. No new HTTP routes, no new MCP tools were added by this Amendment. (A279)
+
+---
+
 ## [1.73.2] — 2026-08-17
 
 ### Fixed

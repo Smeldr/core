@@ -715,14 +715,17 @@ type TargetChecker func(ctx context.Context, targetType, targetID string) (alive
 // AND valid_at IS NULL OR valid_at <= now) and calls check for each unique target.
 // When a target is not alive, the sweep sets invalid_at = now on each source edge
 // pointing to that target and calls onStale(ctx, edge).
-// Returns (flagged, skipped, error): flagged = relations whose target was not alive;
-// skipped = relations where check returned an error (logged, not fatal);
-// error = only on fatal DB errors that abort the sweep.
+// Returns (walked, flagged, skipped, error): walked = total relation rows examined
+// (T223 — the count that makes flagged/skipped meaningful: without it, "flagged=0,
+// skipped=0" cannot be told apart from "nothing to check" versus "checked everything,
+// found nothing"); flagged = relations whose target was not alive; skipped = relations
+// where check returned an error (logged, not fatal); error = only on fatal DB errors
+// that abort the sweep.
 func (s *RelationStore) SweepStructural(
 	ctx context.Context,
 	check TargetChecker,
 	onStale func(ctx context.Context, edge RelationEdge),
-) (flagged int, skipped int, err error) {
+) (walked int, flagged int, skipped int, err error) {
 	now := time.Now().UTC()
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT "+relationColumns+" FROM smeldr_relations "+
@@ -731,7 +734,7 @@ func (s *RelationStore) SweepStructural(
 		now, now,
 	)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	defer rows.Close()
 
@@ -740,13 +743,14 @@ func (s *RelationStore) SweepStructural(
 	for rows.Next() {
 		e, scanErr := scanEdge(rows)
 		if scanErr != nil {
-			return 0, 0, scanErr
+			return 0, 0, 0, scanErr
 		}
+		walked++
 		k := targetKey{e.TargetType, e.TargetID}
 		byTarget[k] = append(byTarget[k], e)
 	}
 	if err := rows.Err(); err != nil {
-		return 0, 0, err
+		return walked, 0, 0, err
 	}
 
 	for k, edges := range byTarget {
@@ -765,14 +769,14 @@ func (s *RelationStore) SweepStructural(
 				"UPDATE smeldr_relations SET invalid_at=$1 WHERE id=$2",
 				now, e.ID,
 			); updateErr != nil {
-				return flagged, skipped, updateErr
+				return walked, flagged, skipped, updateErr
 			}
 			e.InvalidAt = &now
 			onStale(ctx, e)
 			flagged++
 		}
 	}
-	return flagged, skipped, nil
+	return walked, flagged, skipped, nil
 }
 
 // computeRelationDiff returns the IDs to delete and edges to insert given the

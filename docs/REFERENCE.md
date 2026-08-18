@@ -2978,6 +2978,76 @@ type ProvenanceStore interface {
 
 ---
 
+## Scheduled sweep run records
+
+`App.SweepStructural(ctx) (walked, flagged, skipped int, err error)` and `App.DrainEvalQueue(ctx) (walked, triggered, skipped int, err error)` run detectors at scheduled intervals to maintain data consistency — structural validation, eval-queue draining, relation invalidation. Previously, a successful clean run logged one Debug line and persisted nothing, making it indistinguishable from "the sweep never ran". `SweepRunStore` records every scheduled sweep, so staleness can be derived by Go code (e.g. a future alerting task). There is deliberately **no HTTP endpoint and no MCP tool** for browsing runs — `Last` and `List` are plain Go methods meant for programmatic staleness checks, not operator dashboards.
+
+### Setup
+
+```go
+// 1. Create the table once at startup
+smeldr.CreateSweepRunTable(db)
+
+// 2. Wire the sweep run store (optional)
+runStore := smeldr.NewSweepRunStore(db)
+
+// 3. Wrap a detector to record runs
+sweepFn := func(ctx context.Context) (int, int, int, error) {
+    walked, flagged, skipped, err := app.SweepStructural(ctx)
+    errStr := ""
+    if err != nil {
+        errStr = err.Error()
+    }
+    _ = runStore.Append(ctx, smeldr.SweepRunRecord{
+        ID: smeldr.NewID(), Detector: "structural", RanAt: time.Now().UTC(),
+        Interval: "0 * * * *", Walked: walked, Flagged: flagged, Skipped: skipped, Err: errStr,
+    })
+    return walked, flagged, skipped, err
+}
+```
+
+DDL (also created by `CreateSweepRunTable`):
+
+```sql
+CREATE TABLE IF NOT EXISTS smeldr_sweep_runs (
+    id       TEXT PRIMARY KEY,
+    detector TEXT NOT NULL,
+    ran_at   TIMESTAMPTZ NOT NULL,
+    interval TEXT NOT NULL,
+    walked   INTEGER NOT NULL,
+    flagged  INTEGER NOT NULL,
+    skipped  INTEGER NOT NULL,
+    err      TEXT NOT NULL
+);
+```
+
+### SweepRunRecord fields
+
+| Field | JSON | Description |
+|-------|------|-------------|
+| `ID` | `id` | Unique record ID (UUIDv7) |
+| `Detector` | `detector` | Stable name, e.g. `"structural"`, `"eval-queue"` |
+| `RanAt` | `ran_at` | UTC time the sweep ran |
+| `Interval` | `interval` | The detector's own declared cron schedule, e.g. `"0 * * * *"` |
+| `Walked` | `walked` | Total items examined this run |
+| `Flagged` | `flagged` | Items with issues (e.g. relations invalidated, items transitioned) |
+| `Skipped` | `skipped` | Items the detector could not fully check this run (e.g. a target-checker error in `SweepStructural`, or a role-gated/erroring item in `DrainEvalQueue`) — logged, not fatal to the run |
+| `Err` | `err` | Non-empty when the run itself returned an error; empty string for success |
+
+### Custom store
+
+Implement `SweepRunStore` to use a different backend:
+
+```go
+type SweepRunStore interface {
+    Append(ctx context.Context, r SweepRunRecord) error
+    Last(ctx context.Context, detector string) (r SweepRunRecord, found bool, err error)
+    List(ctx context.Context, detector string, limit int) ([]SweepRunRecord, error)
+}
+```
+
+---
+
 ## MCP resource subscriptions
 
 Available in `smeldr.dev/mcp` when `App.AddSignalListener` is wired (set up

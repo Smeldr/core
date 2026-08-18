@@ -1006,13 +1006,15 @@ func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *Webhoo
 // transitions are not re-queued — they are logged/recorded and counted as
 // skipped).
 //
-// Returns the number of items transitioned (triggered) and items skipped due
-// to errors or a role gate. Returns (0, 0, nil) when Config.DB is nil or the
-// table does not yet exist (fail-open).
-func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err error) {
+// Returns walked (total eligible rows read from smeldr_eval_queue, T223 — the
+// count that makes triggered/skipped meaningful on a clean run), the number
+// of items transitioned (triggered), and items skipped due to errors or a
+// role gate. Returns (0, 0, 0, nil) when Config.DB is nil or the table does
+// not yet exist (fail-open).
+func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped int, err error) {
 	db := a.cfg.DB
 	if db == nil {
-		return 0, 0, nil
+		return 0, 0, 0, nil
 	}
 
 	type queueRow struct {
@@ -1027,15 +1029,16 @@ func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err e
 		time.Now().UTC(),
 	)
 	if isNoSuchTable(queryErr) {
-		return 0, 0, nil
+		return 0, 0, 0, nil
 	}
 	if queryErr != nil {
-		return 0, 0, fmt.Errorf("smeldr: DrainEvalQueue: query: %w", queryErr)
+		return 0, 0, 0, fmt.Errorf("smeldr: DrainEvalQueue: query: %w", queryErr)
 	}
 	defer rows.Close()
 
 	var pending []queueRow
 	for rows.Next() {
+		walked++
 		var r queueRow
 		if err := rows.Scan(&r.id, &r.typeName, &r.itemID, &r.toState); err != nil {
 			slog.WarnContext(ctx, "smeldr: DrainEvalQueue: scan", "error", err)
@@ -1045,7 +1048,7 @@ func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err e
 		pending = append(pending, r)
 	}
 	if rowsErr := rows.Err(); rowsErr != nil {
-		return 0, skipped, fmt.Errorf("smeldr: DrainEvalQueue: rows: %w", rowsErr)
+		return walked, 0, skipped, fmt.Errorf("smeldr: DrainEvalQueue: rows: %w", rowsErr)
 	}
 	rows.Close()
 
@@ -1123,7 +1126,7 @@ func (a *App) DrainEvalQueue(ctx context.Context) (triggered, skipped int, err e
 				"queue_id", r.id, "error", delErr)
 		}
 	}
-	return triggered, skipped, nil
+	return walked, triggered, skipped, nil
 }
 
 // conflictIDs returns the IDs of all items of typeName in activeState.

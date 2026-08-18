@@ -736,3 +736,150 @@ established target), `handleSignalTool` 93.5%. `go test -race ./...`
 clean. PATCH bump (mcp): v1.31.0 → **v1.31.1**.
 
 ---
+
+## A279 — SweepRunRecord/SweepRunStore: a scheduled detector run leaves a record
+
+### Problem
+
+`App.SweepStructural` (a structural sweep, detecting unused/broken Relations)
+or `App.DrainEvalQueue` (an eval-queue drain, processing pending orchestration)
+previously logged one Debug-level line on a clean run and persisted nothing —
+"the sweep ran and found nothing" was indistinguishable from "no sweep has ever
+run" to any external observer. A scheduled detector needs to record *when* and
+*what* it examined, whether or not it found anything, so a downstream caller
+(e.g. a staleness-derivation task) can establish whether the sweep has run
+recently enough to trust its absence of findings.
+
+### Design — pattern-matched, not invented
+
+`SweepRunRecord` (fields: `ID`, `Detector` string — e.g. `"structural"`,
+`"eval-queue"` — `RanAt` time.Time, `Interval` string — the detector's own cron
+schedule, `Walked`/`Flagged`/`Skipped` int, `Err` string) and `SweepRunStore`
+interface (`Append`, `Last`, `List` methods) are modeled **directly on**
+the existing `AuditRecord`/`AuditStore` pattern — the same immutable-record-plus-
+store shape, established, tested, and proven in production. Both are new types,
+not extensions of `Run` or `Finding` (both D38 and D51 settled these boundaries
+explicitly: `Run` is a heavier, user-facing claim/lease/worktree object for M3
+headless coding sessions; `Finding` is a detector-owned, subject-keyed record of
+one detected condition; neither is the shape of a "one row per execution,
+ordered by time, existing whether or not anything was found"). 
+
+### Fix — signature change, explicitly confirmed
+
+**Breaking signature change, confirmed in plan review, not taken unilaterally:**
+`RelationStore.SweepStructural` and `App.SweepStructural` (both `relations.go`,
+`smeldr.go`) and `App.DrainEvalQueue` (`state.go`) all gained a new leading
+`walked int` return value — the total items examined that run. Without this, the
+combination `flagged=0, skipped=0` cannot be told apart from "nothing to check"
+versus "checked everything, found nothing," a real ambiguity that `walked` alone
+resolves.
+
+**No HTTP or MCP surface by design.** `Last`/`List` are Go-level only, leaving
+a public read surface (e.g. an `/_sweep-runs` route or `list_sweep_runs` MCP
+tool) to a future task if one turns out to need it — same reasoning as the
+existing `/_logs` route having no MCP tool (the design's own lean, not a gap).
+
+**Deliberately no built-in wiring of `SweepRunStore.Append` into
+`agent.NewSweepScheduler`'s own signature.** The base `smeldr.dev/agent` package
+is MIT-licensed and carries zero dependency on `smeldr.dev/core` by design
+(verified directly — `NewEvalQueueScheduler` already takes an anonymous
+interface rather than a concrete `*smeldr.App` type specifically for this reason;
+only the separate `smeldr.dev/agent/flow` AGPL sub-package imports core). Adding
+a `SweepRunStore` parameter to `NewSweepScheduler` would have broken that
+boundary. Recording a run belongs in the **caller's own wrapping closure**
+instead, with an example documented as a godoc usage comment on `SweepRunStore`
+itself.
+
+### Tests
+
+10 new tests: `TestCreateSweepRunTable_Idempotent` (called twice, second is a
+no-op); `TestSweepRunStore_AppendAndLast` (round-trip — Append then Last
+retrieves the same record); `TestSweepRunStore_AppendError`/`_LastError`/
+`_ListError` (DB-double-injected failures on each method); `TestSweepRunStore_LastNotFound`
+(Last on a detector with no run recorded returns `found=false, err=nil`);
+`TestSweepRunStore_ListOrderAndLimit` (three runs for one detector plus one for
+a different detector — proves newest-first ordering, `limit` truncation, and
+detector isolation all in one fixture); `TestSweepRunStore_ListEmpty`;
+`TestSweepRunStore_LastScanError`/`_ListScanError` (a DB double swaps in a
+wrong-column-count row so `Scan` itself fails, proving the error is wrapped
+and returned, not swallowed). All pre-existing `SweepStructural` and
+`DrainEvalQueue` tests updated for the new leading-return
+arity, each asserting the correct `walked` count for its own scenario (clean run,
+flagged case, skipped case, error case) with the new return value wired to the
+assertion. Coverage: 96.3% package-wide; `sweep_run.go`'s own functions 100%;
+`RelationStore.SweepStructural` 87.1% (four fatal-DB-error branches — initial
+query error, initial scan error, `rows.Err()` post-iteration, per-edge UPDATE
+error — remain uncovered, the same structurally-hard-to-trigger-with-a-real-driver
+class already accepted elsewhere this session; named, not chased).
+
+### Versioning
+
+New exported symbols (`SweepRunRecord`, `SweepRunStore`, `NewSweepRunStore`,
+`CreateSweepRunTable`) + breaking signature change (`walked int` return added).
+No exported symbols removed. Coverage: 96.3% package-wide; `sweep_run.go` 100%.
+`go test -race ./...` clean. `golangci-lint` zero findings. MINOR bump:
+v1.74.0 → **v1.75.0**.
+
+---
+
+## A280 — smeldr.dev/agent: SweepFunc/NewEvalQueueScheduler widen for walked
+
+### Problem
+
+The `smeldr.dev/agent` package implements `smeldr.dev/core`'s scheduled detector
+contracts. A279 widened the signature that `smeldr.dev/core` exports for
+`App.SweepStructural` and `App.DrainEvalQueue` to include a leading `walked int`
+return. The agent-side contract functions must match.
+
+### Fix
+
+**`SweepFunc` type widened:**
+```go
+// Old signature
+type SweepFunc func(ctx context.Context) (flagged, skipped int, err error)
+
+// New signature
+type SweepFunc func(ctx context.Context) (walked, flagged, skipped int, err error)
+```
+
+**`NewEvalQueueScheduler`'s anonymous interface parameter widened to match:**
+The scheduler's own internal `DrainEvalQueue` check changed from
+```go
+DrainEvalQueue(ctx context.Context) (triggered, skipped int, err error)
+```
+to
+```go
+DrainEvalQueue(ctx context.Context) (walked, triggered, skipped int, err error)
+```
+
+**Log-level branch improvement:** The scheduler's own `NewSweepScheduler`'s
+`gocron.NewTask` closure previously checked `if flagged == 0 && skipped == 0`
+to decide between Debug and Info logging. Now, any sweep where `walked > 0`
+triggers Info-level logging even when `flagged` and `skipped` are both zero —
+a `walked > 0` result is itself informative (it proves the sweep actually
+examined something). The log line now includes the `walked` count for visibility.
+
+### Tests
+
+All existing scheduler tests in `sweep_test.go` updated for the new 4-return
+arity — mechanical regression pins. One new test, `TestSweepScheduler_WalkedNonZeroLogsInfo`,
+confirms the new log-level behavior by capturing `slog` output into a buffer
+and asserting an Info-level line (not Debug) for `walked=3, flagged=0, skipped=0`.
+Synchronization happens via the scheduler's own documented `Stop()` "waits for
+in-flight runs" guarantee rather than a sleep, eliminating a race between the
+test's own buffer read and the scheduler's still-in-flight log write.
+`go test -race ./...` clean on both `smeldr.dev/agent` and `smeldr.dev/agent/flow`.
+
+### Versioning
+
+No exported symbols removed. `SweepFunc` and `NewEvalQueueScheduler`'s changed
+signatures are exported, constituting a breaking change for any direct caller of
+the scheduler constructor — but this package is pre-1.0 (v0.7.1) and the breaking
+change is intentional, matching A279's own design. Coverage unchanged at this
+package's own pre-existing baseline (41.4% `smeldr.dev/agent`, 56.2%
+`smeldr.dev/agent/flow` — no 96% gate applies to this repo, per T105's own
+backlog note). `go test -race ./...` clean. `golangci-lint` zero
+findings. MINOR bump (pre-1.0, breaking change to exported function type):
+v0.7.1 → **v0.8.0**.
+
+---

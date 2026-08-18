@@ -91,12 +91,12 @@ func TestAppSweepStructural_CompiledTarget_Alive(t *testing.T) {
 	seedDecision(t, app.cfg.DB, "decision-1", "proposed")
 	assertTaskDependsOnDecision(t, rs, "task-1", "decision-1")
 
-	f, sk, err := app.SweepStructural(context.Background())
+	w, f, sk, err := app.SweepStructural(context.Background())
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if f != 0 || sk != 0 {
-		t.Errorf("want (0,0) for a live compiled target, got (%d,%d)", f, sk)
+	if w != 1 || f != 0 || sk != 0 {
+		t.Errorf("want (1,0,0) for a live compiled target, got (%d,%d,%d)", w, f, sk)
 	}
 	edgeSurvives(t, rs, "task-1")
 }
@@ -112,12 +112,12 @@ func TestAppSweepStructural_CompiledTarget_Deleted(t *testing.T) {
 		t.Fatalf("delete Decision: %v", err)
 	}
 
-	f, sk, err := app.SweepStructural(context.Background())
+	w, f, sk, err := app.SweepStructural(context.Background())
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if f != 1 || sk != 0 {
-		t.Errorf("want (1,0) for a hard-deleted compiled target, got (%d,%d)", f, sk)
+	if w != 1 || f != 1 || sk != 0 {
+		t.Errorf("want (1,1,0) for a hard-deleted compiled target, got (%d,%d,%d)", w, f, sk)
 	}
 	edges, err := rs.GetBySource(context.Background(), "Task", "task-1", "depends_on")
 	if err != nil {
@@ -139,12 +139,12 @@ func TestAppSweepStructural_SupersededDecisionSurvives(t *testing.T) {
 	seedDecision(t, db, "decision-1", "superseded")
 	assertTaskDependsOnDecision(t, rs, "task-1", "decision-1")
 
-	f, sk, err := app.SweepStructural(context.Background())
+	w, f, sk, err := app.SweepStructural(context.Background())
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if f != 0 || sk != 0 {
-		t.Errorf("want (0,0) for a superseded-but-existing Decision, got (%d,%d)", f, sk)
+	if w != 1 || f != 0 || sk != 0 {
+		t.Errorf("want (1,0,0) for a superseded-but-existing Decision, got (%d,%d,%d)", w, f, sk)
 	}
 	edgeSurvives(t, rs, "task-1")
 }
@@ -158,12 +158,12 @@ func TestAppSweepStructural_ArchivedDecisionSurvives(t *testing.T) {
 	seedDecision(t, db, "decision-1", "archived")
 	assertTaskDependsOnDecision(t, rs, "task-1", "decision-1")
 
-	f, sk, err := app.SweepStructural(context.Background())
+	w, f, sk, err := app.SweepStructural(context.Background())
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if f != 0 || sk != 0 {
-		t.Errorf("want (0,0) for an archived-but-existing Decision, got (%d,%d)", f, sk)
+	if w != 1 || f != 0 || sk != 0 {
+		t.Errorf("want (1,0,0) for an archived-but-existing Decision, got (%d,%d,%d)", w, f, sk)
 	}
 	edgeSurvives(t, rs, "task-1")
 }
@@ -191,12 +191,12 @@ func TestAppSweepStructural_CompiledTarget_QueryError(t *testing.T) {
 
 	app.cfg.DB = &targetCheckerQueryFailDB{DB: db, failOn: "smeldr_decisions"}
 
-	f, sk, err := app.SweepStructural(context.Background())
+	w, f, sk, err := app.SweepStructural(context.Background())
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if f != 0 || sk != 1 {
-		t.Errorf("want (0,1) when the compiled-table query fails, got (%d,%d)", f, sk)
+	if w != 1 || f != 0 || sk != 1 {
+		t.Errorf("want (1,0,1) when the compiled-table query fails, got (%d,%d,%d)", w, f, sk)
 	}
 	edgeSurvives(t, rs, "task-1")
 }
@@ -263,12 +263,12 @@ func TestAppSweepStructural_UnregisteredType_NoTable_Errors(t *testing.T) {
 		t.Fatalf("MCPAssertRelation: %v", err)
 	}
 
-	f, sk, err := app.SweepStructural(context.Background())
+	w, f, sk, err := app.SweepStructural(context.Background())
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if f != 0 || sk != 1 {
-		t.Errorf("want (0,1) for an unrecognized type with no table, got (%d,%d)", f, sk)
+	if w != 1 || f != 0 || sk != 1 {
+		t.Errorf("want (1,0,1) for an unrecognized type with no table, got (%d,%d,%d)", w, f, sk)
 	}
 	edgeSurvives(t, rs, "task-1")
 }
@@ -307,12 +307,12 @@ func TestAppSweepStructural_SchemaRegistryTableMissing_Errors(t *testing.T) {
 		t.Fatalf("MCPAssertRelation: %v", err)
 	}
 
-	f, sk, err := app.SweepStructural(context.Background())
+	w, f, sk, err := app.SweepStructural(context.Background())
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if f != 0 || sk != 1 {
-		t.Errorf("want (0,1) when the schema registry table itself is missing, got (%d,%d)", f, sk)
+	if w != 1 || f != 0 || sk != 1 {
+		t.Errorf("want (1,0,1) when the schema registry table itself is missing, got (%d,%d,%d)", w, f, sk)
 	}
 	edgeSurvives(t, rs, "task-1")
 }
