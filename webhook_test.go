@@ -651,3 +651,86 @@ func TestDispatchTransitionWebhook_success(t *testing.T) {
 		t.Errorf("data = %+v, unexpected", data)
 	}
 }
+
+// — App.NotifySignalCreated — ———————————————————————————————————————————
+//
+// For a raw-SQL Signal insert made outside core entirely (mcp's own
+// create_signal tool, which has no App/Module access of its own to route
+// through the normal lifecycle hooks).
+
+func TestApp_NotifySignalCreated_BroadcastsToEventStream(t *testing.T) {
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte("test-secret-notify-signal-stream"),
+	}))
+	app.EventStream()
+
+	ch, err := app.eventBroadcaster.subscribe("u1")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(ch)
+
+	app.NotifySignalCreated(context.Background(), "sig-1", "sig-1-slug")
+
+	select {
+	case payload := <-ch:
+		var got WebhookEventPayload
+		if err := json.Unmarshal(payload, &got); err != nil {
+			t.Fatalf("unmarshal broadcast payload: %v", err)
+		}
+		if got.Event != "signal.created" {
+			t.Fatalf("Event = %q, want %q", got.Event, "signal.created")
+		}
+		var data transitionWebhookData
+		if err := json.Unmarshal(got.Data, &data); err != nil {
+			t.Fatalf("unmarshal data: %v", err)
+		}
+		if data.Type != "signal" || data.ID != "sig-1" || data.Slug != "sig-1-slug" || data.ToState != "pending" {
+			t.Errorf("data = %+v, unexpected", data)
+		}
+	default:
+		t.Fatal("expected broadcast payload, got none — App.EventStream() alone should be enough")
+	}
+}
+
+func TestApp_NotifySignalCreated_EnqueuesWebhook(t *testing.T) {
+	db := newSQLiteDB(t)
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte("test-secret-notify-signal-webhook"),
+		DB:      db,
+	}))
+	store := wireWebhooksForTest(t, app, db)
+	ctx := context.Background()
+
+	if _, _, err := store.Create(ctx, "https://8.8.8.8/hook", []string{"signal.created"}); err != nil {
+		t.Fatalf("Create webhook endpoint: %v", err)
+	}
+
+	app.NotifySignalCreated(ctx, "sig-2", "sig-2-slug")
+
+	endpoints, err := store.EndpointsForEvent(ctx, "signal.created")
+	if err != nil {
+		t.Fatalf("EndpointsForEvent: %v", err)
+	}
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
+	}
+	jobs, err := app.webhookPool.ListJobsForEndpoint(ctx, endpoints[0].ID)
+	if err != nil {
+		t.Fatalf("ListJobsForEndpoint: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 enqueued job, got %d", len(jobs))
+	}
+}
+
+func TestApp_NotifySignalCreated_NilSafeWhenNeitherConfigured(t *testing.T) {
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte("test-secret-notify-signal-noop"),
+	}))
+	// Neither App.Webhooks() nor App.EventStream() called — must not panic.
+	app.NotifySignalCreated(context.Background(), "sig-3", "sig-3-slug")
+}

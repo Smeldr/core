@@ -422,6 +422,22 @@ func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *w
 	}
 }
 
+// NotifySignalCreated broadcasts a "signal.created" webhook/event-stream
+// notification for a Signal record created outside the normal Module[T]
+// lifecycle — e.g. mcp's own create_signal tool, a bespoke handler that
+// writes directly to smeldr_signals and has no typed Go item to route
+// through [buildWebhookPayload]. Mirrors [recordAuthorizationRequiredSignal]'s
+// own identical call (state.go, A263) for the same reason: a raw-SQL
+// Signal insert needs its own explicit notification, since no lifecycle
+// hook fires for it otherwise. id and slug identify the newly created
+// Signal. Nil-safe — a no-op unless [App.Webhooks] and/or [App.EventStream]
+// has been configured, same contract as [dispatchTransitionWebhook] itself.
+func (a *App) NotifySignalCreated(ctx context.Context, id, slug string) {
+	dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, "signal.created", transitionWebhookData{
+		Type: "signal", ID: id, Slug: slug, ToState: "pending",
+	})
+}
+
 // validateWebhookURL validates rawURL for SSRF safety. Returns a
 // [*ValidationError] describing the rejection reason when the URL fails any
 // check.

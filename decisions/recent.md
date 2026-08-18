@@ -589,3 +589,81 @@ covered). `go test -race ./...` clean. `golangci-lint` zero findings.
 PATCH bump: v1.73.1 → **v1.73.2**.
 
 ---
+
+## A277 — App.NotifySignalCreated: exported hook for raw-SQL Signal creation paths
+
+### Problem
+
+`smeldr.dev/mcp`'s `create_signal` tool performs a direct `db.ExecContext`
+SQL INSERT into the `smeldr_signals` table instead of using
+`Module[Signal].MCPCreate`. This bypasses core's entire typed lifecycle
+machinery — `notifyAfter` hooks, `wireSignalBus`, `dispatchBus` — with the
+result that creating a Signal via `create_signal` produces no webhook
+delivery and no `GET /_events/stream` broadcast, even when those systems
+are configured and working. This is the identical shape of gap
+`recordAuthorizationRequiredSignal` (an internal core function in
+`state.go`) already had: a raw-SQL item insert with no typed Go item in
+hand, so it cannot reach the normal `buildWebhookPayload` codepath. The
+fix applied there was to call `dispatchTransitionWebhook` directly after
+the INSERT succeeds (A263). However, `mcp` is a separate Go module that
+sees only core's exported API surface — it has no access to that
+unexported function. A277 solves this by exporting a thin wrapper.
+
+### Fix
+
+New exported method `App.NotifySignalCreated(ctx context.Context, id,
+slug string)` in `webhook.go`, immediately after `dispatchTransitionWebhook`:
+
+```go
+dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, "signal.created", transitionWebhookData{
+	Type: "signal", ID: id, Slug: slug, ToState: "pending",
+})
+```
+
+Mirrors `recordAuthorizationRequiredSignal`'s own internal call shape
+exactly. Nil-safe — a no-op if neither `App.Webhooks()` nor
+`App.EventStream()` has been configured, inherited directly from
+`dispatchTransitionWebhook`'s own existing nil-guard.
+
+### Deliberately narrow scope — one caller, not a generic escape hatch
+
+The method exists for exactly one known real caller: `mcp`'s
+`create_signal`. It is not a generic "fire an arbitrary event from
+outside core" mechanism. If a second bespoke raw-SQL creation path (e.g.
+a CLI direct-insert command, or another tool in another module) needs the
+same treatment later, that is a real second data point worth a new
+Amendment to generalize from — not speculative framework-building now.
+Mirrors A271's own per-token-cap-number reasoning: one specific decision
+based on one real known requirement.
+
+### Tests
+
+Three new tests in `webhook_test.go`:
+
+- `TestApp_NotifySignalCreated_BroadcastsToEventStream` — `App.EventStream()`
+  configured, no `App.Webhooks()` — asserts the event-stream broadcaster
+  receives a `"signal.created"` payload with the correct id/slug, proving
+  the same decoupling T269's own tests verified for the general path.
+- `TestApp_NotifySignalCreated_EnqueuesWebhook` — `App.Webhooks()`
+  configured with a real endpoint subscribed to `"signal.created"`
+  (`App.EventStream()` deliberately not called in this test — proves the
+  webhook sink alone is sufficient, not that both sinks are required
+  together) — asserts a delivery job is enqueued.
+- `TestApp_NotifySignalCreated_NilSafeWhenNeitherConfigured` — neither
+  configured — no panic.
+
+### Versioning
+
+Coverage: 96.3% package-wide; `NotifySignalCreated` itself 100%. `go test
+-race ./...` clean. `golangci-lint` zero findings. MINOR bump (new
+exported symbol): v1.73.2 → **v1.74.0**.
+
+**This Amendment covers the `core`-side hook export only.** The `mcp`-side
+call site (a new invocation of `App.NotifySignalCreated` in
+`signal_tools.go`'s own `create_signal` handler) plus the required
+dependency-pin bump from `mcp`'s current stale v1.65.0 up to this new
+v1.74.0 is tracked separately as **Amendment A278** in the `mcp` repo —
+blocked on v1.74.0 actually being tagged/released first, not part of this
+entry's own scope.
+
+---

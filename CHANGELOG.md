@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.74.0] — 2026-08-18
+
+### Added
+- `App.NotifySignalCreated(ctx context.Context, id, slug string)`: new exported method to fire a `signal.created` webhook and event-stream broadcast for raw-SQL Signal creation paths that bypass core's normal typed lifecycle hooks. Core's own `recordAuthorizationRequiredSignal` already uses this pattern internally — `smeldr.dev/mcp`'s `create_signal` tool performs a direct `db.ExecContext` INSERT instead of calling `Module[Signal].MCPCreate`, so it never reaches core's `notifyAfter`/`wireSignalBus`/`dispatchBus` machinery and produces no webhook or event-stream event today. This method is nil-safe (no-op unless webhooks and/or the event stream is configured) and deliberately narrow in scope (one known real caller, not a generic escape hatch). This is the `core`-side half of a two-repo fix — the `mcp`-side call site and its own required core version pin bump is separate, not-yet-shipped follow-up work, tracked as Amendment A278. (A277)
+
+---
+
 ## [1.73.2] — 2026-08-17
 
 ### Fixed

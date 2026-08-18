@@ -314,7 +314,11 @@ There is no MCP tool for this by design, same reasoning as `/_logs` — the
 whole point is working when an agent has only this one HTTP connection to
 rely on. Each token may hold at most 4 concurrent connections — a 5th
 attempt gets 429, not a hang; a well-behaved listener holding its one normal
-connection never approaches this.
+connection never approaches this. A raw-SQL creation path with no typed Go
+item in hand (e.g. a bespoke MCP tool in another module writing directly
+to its own table) won't fire the normal lifecycle hooks — call
+`App.NotifySignalCreated(ctx, id, slug)` explicitly for a `Signal` created
+that way (mirrors core's own `recordAuthorizationRequiredSignal`).
 
 ### Generic reference server (example/server)
 
