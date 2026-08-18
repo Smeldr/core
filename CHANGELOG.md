@@ -38,6 +38,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.75.1] — 2026-08-18
+
+### Fixed
+- `RoleStore.Grant`/`RoleStore.Revoke` (in `governance.go`) previously wrote only to `GovernanceAuditStore` (a full before/after diff of the grant), and `TokenStore.Revoke` (in `auth.go`) wrote to neither `GovernanceAuditStore` nor `ProvenanceStore` at all — just a bare `UPDATE` with no record of any kind. All three now also record a `ProvenanceRecord` (in addition to, not instead of, the existing `GovernanceAuditStore` write for Grant/Revoke), closing a real gap where a UI design mockup had already assumed admin objects flowed through the unified provenance history like every other subject, and they didn't.
+- Two new `SubjectType` values now exist for `ProvenanceRecord`: `"RoleGrant"` (Grant/Revoke) and `"Token"` (TokenStore.Revoke) — the first non-`Node`, non-`RelationEdge` subjects the provenance system has ever carried. `Verb` values reused rather than expanded: `"assert"` for a grant, `"invalidate"` for a revoke (the same pair `RelationEdge` already uses for its own create/remove shape).
+- These entries always render fully attributed when read back through `SubjectProvenance` — neither `RoleGrant` nor `Token` has a `StateFlow`, so the existing gating check (which hides actor identity behind a role-gated transition) never applies to them, matching `GovernanceAuditStore`'s own already-transparent posture for admin actions rather than contradicting it.
+- Wiring is additive and opt-in by configuration: `RoleStore`/`TokenStore` only record provenance when both `App.Provenance(...)` and (respectively) `App.Governance(...)` or `Config.TokenStore` are configured on the same `App` — otherwise these are silent no-ops, same as every other provenance call site in the package. No HTTP or MCP surface was added; these entries are read only through the existing `SubjectProvenance` function.
+- 13 new tests across `governance_test.go`/`auth_test.go`: correct `SubjectType`/`Verb`/actor recorded for each of the three writes; fail-open when no provenance store is wired or when the write itself fails; a plain `context.Context` leaves actor fields empty without panicking; two end-to-end tests driving the real `App.Handler()` wiring path rather than calling the setter directly. No exported Go symbols were added or removed.
+- Coverage: 96.3% package-wide. `go test -race ./...` clean. `golangci-lint` clean. PATCH bump (no new exported symbol, but a real consumer-observable behaviour change — `SubjectProvenance` can now return two new `SubjectType`s it never produced before, matching how the `[1.73.1]` 429-cap entry above was also a PATCH for the same reason): v1.75.0 → v1.75.1. (A281, T203)
+
+---
+
 ## [1.73.2] — 2026-08-17
 
 ### Fixed

@@ -611,6 +611,112 @@ func TestTokenStoreRevoke(t *testing.T) {
 	}
 }
 
+// --- TokenStore.Revoke provenance-wiring tests (T203/A281) ---
+
+func TestTokenStore_Revoke_RecordsProvenance(t *testing.T) {
+	secret := "test-secret-32-bytes-xxxxxxxxxxxx"
+	db := &stubDB{}
+	store := NewTokenStore(db, secret)
+	if _, err := store.Create(context.Background(), "Bot", "author", 24*time.Hour); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	id := db.rows[0].id
+
+	fake := &fakeProvenanceStore{}
+	store.setProvenanceStore(fake)
+	ctx := NewTestContext(User{ID: "u3", Roles: []Role{Admin}})
+	if err := store.Revoke(ctx, id); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if len(fake.appended) != 1 {
+		t.Fatalf("appended %d ProvenanceRecords, want 1", len(fake.appended))
+	}
+	rec := fake.appended[0]
+	if rec.SubjectType != "Token" || rec.SubjectID != id || rec.Verb != "invalidate" {
+		t.Errorf("got %+v, want SubjectType=Token SubjectID=%s Verb=invalidate", rec, id)
+	}
+	if rec.ActorID != "u3" || rec.ActorKind != "human" {
+		t.Errorf("got ActorID=%q ActorKind=%q, want u3/human", rec.ActorID, rec.ActorKind)
+	}
+}
+
+func TestTokenStore_Revoke_NilProvenanceStore_NoOp(t *testing.T) {
+	secret := "test-secret-32-bytes-xxxxxxxxxxxx"
+	db := &stubDB{}
+	store := NewTokenStore(db, secret) // provenanceStore left nil, matching default construction
+	if _, err := store.Create(context.Background(), "Bot", "author", 24*time.Hour); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := store.Revoke(context.Background(), db.rows[0].id); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+}
+
+func TestTokenStore_Revoke_ProvenanceAppendFails_RevokeStillSucceeds(t *testing.T) {
+	secret := "test-secret-32-bytes-xxxxxxxxxxxx"
+	db := &stubDB{}
+	store := NewTokenStore(db, secret)
+	if _, err := store.Create(context.Background(), "Bot", "author", 24*time.Hour); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	store.setProvenanceStore(&failingProvenanceStore{})
+	if err := store.Revoke(context.Background(), db.rows[0].id); err != nil {
+		t.Fatalf("Revoke: %v (a provenance Append failure must not fail the revoke)", err)
+	}
+	if db.rows[0].revokedAt == nil {
+		t.Error("expected revokedAt to be set despite provenance Append failure")
+	}
+}
+
+func TestTokenStore_Revoke_PlainContext_ActorEmpty(t *testing.T) {
+	secret := "test-secret-32-bytes-xxxxxxxxxxxx"
+	db := &stubDB{}
+	store := NewTokenStore(db, secret)
+	if _, err := store.Create(context.Background(), "Bot", "author", 24*time.Hour); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	fake := &fakeProvenanceStore{}
+	store.setProvenanceStore(fake)
+	if err := store.Revoke(context.Background(), db.rows[0].id); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if len(fake.appended) != 1 {
+		t.Fatalf("appended %d ProvenanceRecords, want 1", len(fake.appended))
+	}
+	if rec := fake.appended[0]; rec.ActorID != "" || rec.ActorKind != "" {
+		t.Errorf("got ActorID=%q ActorKind=%q for a plain context.Context, want both empty", rec.ActorID, rec.ActorKind)
+	}
+}
+
+func TestAppHandler_WiresProvenanceIntoTokenStore(t *testing.T) {
+	db := newTestTokensDB(t)
+	secret := "test-secret-32-bytes-xxxxxxxxxxxx"
+	tokenStore := NewTokenStore(db, secret)
+	fake := &fakeProvenanceStore{}
+	app := New(MustConfig(Config{
+		BaseURL:    "https://example.com",
+		Secret:     []byte(secret),
+		DB:         db,
+		TokenStore: tokenStore,
+	}))
+	app.Provenance(fake)
+	app.Handler() // triggers App.Handler()'s own wiring block
+
+	_, id, err := tokenStore.CreateWithID(context.Background(), "Bot", "author", 24*time.Hour)
+	if err != nil {
+		t.Fatalf("CreateWithID: %v", err)
+	}
+	if err := tokenStore.Revoke(context.Background(), id); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if len(fake.appended) != 1 {
+		t.Fatalf("appended %d ProvenanceRecords via the real App wiring, want 1", len(fake.appended))
+	}
+	if fake.appended[0].SubjectType != "Token" {
+		t.Errorf("SubjectType = %q, want Token", fake.appended[0].SubjectType)
+	}
+}
+
 // — VerifyBearerToken with store ——————————————————————————————————————————
 
 // rowDB implements smeldr.DB with a QueryRowContext that returns a pre-built

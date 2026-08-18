@@ -1413,6 +1413,12 @@ func (a *App) Handler() http.Handler {
 	if a.provenanceStore != nil && a.relationStore != nil {
 		a.relationStore.setProvenanceStore(a.provenanceStore)
 	}
+	if a.provenanceStore != nil && a.governance != nil {
+		a.governance.setProvenanceStore(a.provenanceStore)
+	}
+	if a.provenanceStore != nil && a.tokenStore != nil {
+		a.tokenStore.setProvenanceStore(a.provenanceStore)
+	}
 	if a.auditStore != nil && !a.auditHandlerReg {
 		a.auditHandlerReg = true
 		auditAuth := a.cfg.Auth

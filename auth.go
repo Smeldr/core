@@ -391,8 +391,9 @@ type TokenRecord struct {
 //	    created_at TEXT NOT NULL      -- RFC3339 UTC
 //	);
 type TokenStore struct {
-	db     DB
-	secret string
+	db              DB
+	secret          string
+	provenanceStore ProvenanceStore // nil unless App.Provenance was also wired (T203)
 }
 
 // NewTokenStore creates a [TokenStore] backed by db using secret as the HMAC
@@ -400,6 +401,14 @@ type TokenStore struct {
 // here are verifiable by [VerifyBearerToken].
 func NewTokenStore(db DB, secret string) *TokenStore {
 	return &TokenStore{db: db, secret: secret}
+}
+
+// setProvenanceStore wires store for Revoke's own ProvenanceRecord write
+// (T203/A281). Called from [App.Handler] when both [App.Provenance] and a
+// [TokenStore] are configured, mirroring [RelationStore]'s own
+// setProvenanceStore wiring exactly.
+func (ts *TokenStore) setProvenanceStore(store ProvenanceStore) {
+	ts.provenanceStore = store
 }
 
 // probeTable verifies the smeldr_tokens table is accessible. Called at startup
@@ -558,6 +567,21 @@ func (ts *TokenStore) Revoke(ctx context.Context, id string) error {
 	)
 	if err != nil {
 		return ErrInternal
+	}
+	if ts.provenanceStore != nil {
+		var actorID string
+		var roles []Role
+		if sc, ok := ctx.(Context); ok {
+			actorID = sc.User().ID
+			roles = sc.User().Roles
+		}
+		recordProvenance(ctx, ts.provenanceStore, ProvenanceRecord{
+			SubjectType: "Token",
+			SubjectID:   id,
+			Verb:        "invalidate",
+			ActorKind:   actorKindFor(actorID, roles),
+			ActorID:     actorID,
+		})
 	}
 	return nil
 }

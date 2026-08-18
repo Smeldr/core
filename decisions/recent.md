@@ -883,3 +883,116 @@ findings. MINOR bump (pre-1.0, breaking change to exported function type):
 v0.7.1 → **v0.8.0**.
 
 ---
+
+## A281 — RoleStore.Grant/Revoke and TokenStore.Revoke now write ProvenanceRecord too
+
+### Problem
+
+Task T202 identified a gap: `RoleStore.Grant` and `RoleStore.Revoke` wrote to
+`GovernanceAuditStore` only (full before/after diff record), while
+`TokenStore.Revoke` wrote to neither `GovernanceAuditStore` nor
+`ProvenanceStore` — just a bare `UPDATE smeldr_tokens SET revoked_at = $1
+WHERE id = $2`. A UI design mockup for orchestration features assumed admin
+objects (grants, revokes, token revocations) flowed through the unified
+`SubjectProvenance` history that every other subject type (`RelationEdge`,
+`Decision`, etc.) already uses, bridging the same actor-attribution and
+state-transition visibility that D43/D44 establish for content — but the admin
+side was missing that bridge entirely.
+
+### Design
+
+**Verified against prior decisions:** D44's boundary ("governance audit answers
+who was given the right to act, ProvenanceRecord answers who then acted; a gap
+in one is never argued away by pointing at the other") forbids *substituting*
+one record for the other, not forbidding *both* from describing the same event.
+`GovernanceAuditStore` remains the sole authoritative full-diff record,
+unchanged by this Amendment. `ProvenanceRecord` adds a second, narrower entry
+compatible with the same `SubjectProvenance` read mechanism. T243's
+actor-gating model (where `SubjectProvenance` hides actor identity behind a
+role-gated `StateFlow` transition) degrades safely to "always fully visible"
+for these subjects, because neither a `RoleGrant` nor a `Token` has (or should
+have) a registered `StateFlow` for `transitionIsGated` to check. This matches,
+not contradicts, `GovernanceAuditStore`'s own already-transparent posture for
+admin actions — an admin action is supposed to be fully attributed to whoever
+can already see it, unlike a content transition where actor identity is
+deliberately hidden from less-privileged viewers.
+
+**Implementation approach:**
+`RoleStore` (`governance.go`) and `TokenStore` (`auth.go`) each gained an
+unexported `provenanceStore ProvenanceStore` field and a `setProvenanceStore(store
+ProvenanceStore)` setter method — the exact pattern `RelationStore`'s own
+existing wiring already follows. These are wired at `App.Handler()` time
+(in `smeldr.go`) when both `App.Provenance(...)` and `App.Governance(...)`
+are configured (for `RoleStore`), or both `App.Provenance(...)` and
+`Config.TokenStore` are configured (for `TokenStore`).
+
+`RoleStore.Grant` and `RoleStore.Revoke` each call a new unexported helper
+`recordGrantProvenance(ctx, grantID, verb string)` after their existing DB
+write succeeds. `TokenStore.Revoke` calls `recordProvenance` directly (inline,
+no separate helper) after its own `UPDATE` succeeds. Both reuse the exact
+actor-recovery pattern `RelationStore.recordAssertProvenance` already
+established: a `ctx.(Context)` type assertion recovers `actorID`/`roles` when
+the caller passed a concrete `smeldr.Context` (every real caller does);
+`actorKindFor(actorID, roles)` derives `ActorKind`. Deliberately NOT using
+`RoleStore.actorTokenID` (the field `WithAudit` sets) for `ProvenanceRecord.ActorID`
+— that field is a token fingerprint for `GovernanceAuditRecord`'s own actor slot,
+a different identity space than `ProvenanceRecord.ActorID`'s user/job/agent-identifier
+contract.
+
+New `SubjectType` values: `"RoleGrant"` (used by both `Grant` and `Revoke`) and
+`"Token"` (used by `TokenStore.Revoke`) — the first non-`Node`, non-`RelationEdge`
+subject types `ProvenanceRecord` has ever carried. `Verb` values reused rather
+than added: `"assert"` for `Grant`, `"invalidate"` for both `Revoke` calls —
+mirroring `RelationEdge`'s own existing assert/invalidate pair for a structurally
+identical create/remove shape, rather than growing the `Verb` enum with new
+`"grant"`/`"revoke"` values for one more subject kind.
+
+Fail-open throughout, matching every other `recordProvenance` call site in the
+package: `recordProvenance` itself already logs-and-swallows an `Append` failure,
+so a provenance write failure never fails the grant/revoke/token-revoke operation
+itself.
+
+### Tests
+
+13 new tests total, covering success paths, nil-store no-op, append-failure graceful
+fail-open, plain-context empty-actor cases, and real end-to-end `App.Handler()` wiring:
+
+In `governance_test.go`:
+1. `TestRoleStore_Grant_RecordsProvenance`
+2. `TestRoleStore_Grant_NilProvenanceStore_NoOp`
+3. `TestRoleStore_Grant_ProvenanceAppendFails_GrantStillSucceeds`
+4. `TestRoleStore_Grant_PlainContext_ActorEmpty`
+5. `TestRoleStore_Revoke_RecordsProvenance`
+6. `TestRoleStore_Revoke_NilProvenanceStore_NoOp`
+7. `TestRoleStore_Revoke_ProvenanceAppendFails_RevokeStillSucceeds`
+8. `TestAppHandler_WiresProvenanceIntoGovernance` (end-to-end test driving the real
+   `App.Handler()` wiring, not calling `setProvenanceStore` directly)
+
+In `auth_test.go`:
+9. `TestTokenStore_Revoke_RecordsProvenance`
+10. `TestTokenStore_Revoke_NilProvenanceStore_NoOp`
+11. `TestTokenStore_Revoke_ProvenanceAppendFails_RevokeStillSucceeds`
+12. `TestTokenStore_Revoke_PlainContext_ActorEmpty`
+13. `TestAppHandler_WiresProvenanceIntoTokenStore` (end-to-end test driving the real
+    `App.Handler()` wiring)
+
+### Versioning
+
+No new exported Go symbols were added or removed (`provenanceStore` field and
+`setProvenanceStore` method are both unexported; `recordGrantProvenance` is
+unexported). No HTTP or MCP surface was added. Real consumer-observable behaviour
+change: `SubjectProvenance` can now return two new `SubjectType` values
+(`"RoleGrant"` and `"Token"`) that it never produced before — matching how
+Amendment A275's own 429-connection-cap change was also classified as PATCH for
+the same reason: no new exported symbol, but tag-worthy consumer-observable
+behaviour on a read path. PATCH bump: v1.75.0 → **v1.75.1**.
+
+Coverage: 96.3% package-wide (`go test -race -count=1 -coverprofile=coverage.out
+./... ; go tool cover -func=coverage.out`). `setProvenanceStore` on both
+`RoleStore` and `TokenStore`, and `recordGrantProvenance`, are all 100% covered.
+`Grant`/`Revoke` themselves remain unchanged from their pre-existing baseline
+coverage (96.4%/95.1% respectively) — the new code paths inside them are fully
+covered; the small gap is pre-existing and unrelated to this change. `go test
+-race ./...` clean. `golangci-lint run ./...` zero findings.
+
+---

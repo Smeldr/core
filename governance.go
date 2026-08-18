@@ -510,14 +510,23 @@ func appendAuditRecord(ctx context.Context, exec DB, r GovernanceAuditRecord) er
 // [migrateGovernance]. Obtain one via [NewRoleStore] and wire it into the
 // application with [App.Governance].
 type RoleStore struct {
-	db           DB
-	actorTokenID string               // "" unless WithAudit called
-	auditStore   GovernanceAuditStore // nil unless WithAudit called
+	db              DB
+	actorTokenID    string               // "" unless WithAudit called
+	auditStore      GovernanceAuditStore // nil unless WithAudit called
+	provenanceStore ProvenanceStore      // nil unless App.Provenance was also wired (T203)
 }
 
 // NewRoleStore returns a new [RoleStore] backed by db.
 func NewRoleStore(db DB) *RoleStore {
 	return &RoleStore{db: db}
+}
+
+// setProvenanceStore wires store for Grant/Revoke's own ProvenanceRecord
+// writes (T203/A281). Called from [App.Handler] when both [App.Provenance]
+// and [App.Governance] are configured, mirroring [RelationStore]'s own
+// setProvenanceStore wiring exactly.
+func (s *RoleStore) setProvenanceStore(store ProvenanceStore) {
+	s.provenanceStore = store
 }
 
 // WithAudit returns a shallow copy of s configured to record every governance
@@ -778,7 +787,36 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 	if err := commit(); err != nil {
 		return "", fmt.Errorf("smeldr: Grant: commit: %w", err)
 	}
+	s.recordGrantProvenance(ctx, grantID, "assert")
 	return grantID, nil
+}
+
+// recordGrantProvenance records a ProvenanceRecord for a Grant or Revoke
+// mutation on a RoleGrant (T203/A281). Fail-open and best-effort, exactly
+// like [RelationStore.recordAssertProvenance]: does nothing if
+// s.provenanceStore is nil, and recovers the actor only when ctx is a
+// concrete smeldr.Context — every real caller (smeldr.dev/mcp's grant_role/
+// revoke_grant tool handlers) passes one through unwrapped. actorTokenID
+// (WithAudit's own actor slot for GovernanceAuditRecord) is a token
+// fingerprint, a different identity space than ProvenanceRecord.ActorID's
+// user/job/agent identifier contract — deliberately not reused here.
+func (s *RoleStore) recordGrantProvenance(ctx context.Context, grantID, verb string) {
+	if s.provenanceStore == nil {
+		return
+	}
+	var actorID string
+	var roles []Role
+	if sc, ok := ctx.(Context); ok {
+		actorID = sc.User().ID
+		roles = sc.User().Roles
+	}
+	recordProvenance(ctx, s.provenanceStore, ProvenanceRecord{
+		SubjectType: "RoleGrant",
+		SubjectID:   grantID,
+		Verb:        verb,
+		ActorKind:   actorKindFor(actorID, roles),
+		ActorID:     actorID,
+	})
 }
 
 // Revoke removes the grant identified by grantID. It is not an error if the
@@ -869,6 +907,7 @@ func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
 	if err := commit(); err != nil {
 		return fmt.Errorf("smeldr: Revoke: commit: %w", err)
 	}
+	s.recordGrantProvenance(ctx, grantID, "invalidate")
 	return nil
 }
 

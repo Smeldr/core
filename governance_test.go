@@ -2190,6 +2190,152 @@ func setupGovernanceAuditTable(t *testing.T) *sql.DB {
 	return db
 }
 
+// --- Grant/Revoke provenance-wiring tests (T203/A281) ---
+
+func TestRoleStore_Grant_RecordsProvenance(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	fake := &fakeProvenanceStore{}
+	store.setProvenanceStore(fake)
+	ctx := NewTestContext(User{ID: "u1", Roles: []Role{Editor}})
+
+	grantID, err := store.Grant(ctx, RoleGrant{TokenID: NewID(), RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	if len(fake.appended) != 1 {
+		t.Fatalf("appended %d ProvenanceRecords, want 1", len(fake.appended))
+	}
+	rec := fake.appended[0]
+	if rec.SubjectType != "RoleGrant" || rec.SubjectID != grantID || rec.Verb != "assert" {
+		t.Errorf("got %+v, want SubjectType=RoleGrant SubjectID=%s Verb=assert", rec, grantID)
+	}
+	if rec.ActorID != "u1" || rec.ActorKind != "human" {
+		t.Errorf("got ActorID=%q ActorKind=%q, want u1/human", rec.ActorID, rec.ActorKind)
+	}
+}
+
+func TestRoleStore_Grant_NilProvenanceStore_NoOp(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db) // provenanceStore left nil, matching default construction
+	if _, err := store.Grant(context.Background(), RoleGrant{TokenID: NewID(), RoleName: "author"}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	// No assertion beyond "did not panic" — nil provenanceStore is the
+	// default for every other Grant test in this file; this test names
+	// the case explicitly rather than leaving it merely implicit.
+}
+
+func TestRoleStore_Grant_ProvenanceAppendFails_GrantStillSucceeds(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	store.setProvenanceStore(&failingProvenanceStore{})
+	grantID, err := store.Grant(context.Background(), RoleGrant{TokenID: NewID(), RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v (a provenance Append failure must not fail the grant)", err)
+	}
+	if grantID == "" {
+		t.Error("expected non-empty grant ID despite provenance Append failure")
+	}
+}
+
+func TestRoleStore_Grant_PlainContext_ActorEmpty(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	fake := &fakeProvenanceStore{}
+	store.setProvenanceStore(fake)
+
+	if _, err := store.Grant(context.Background(), RoleGrant{TokenID: NewID(), RoleName: "author"}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	if len(fake.appended) != 1 {
+		t.Fatalf("appended %d ProvenanceRecords, want 1", len(fake.appended))
+	}
+	if rec := fake.appended[0]; rec.ActorID != "" || rec.ActorKind != "" {
+		t.Errorf("got ActorID=%q ActorKind=%q for a plain context.Context, want both empty", rec.ActorID, rec.ActorKind)
+	}
+}
+
+func TestRoleStore_Revoke_RecordsProvenance(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := NewTestContext(User{ID: "u2", Roles: []Role{Admin}})
+	grantID, err := store.Grant(ctx, RoleGrant{TokenID: NewID(), RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	fake := &fakeProvenanceStore{}
+	store.setProvenanceStore(fake)
+	if err := store.Revoke(ctx, grantID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if len(fake.appended) != 1 {
+		t.Fatalf("appended %d ProvenanceRecords, want 1", len(fake.appended))
+	}
+	rec := fake.appended[0]
+	if rec.SubjectType != "RoleGrant" || rec.SubjectID != grantID || rec.Verb != "invalidate" {
+		t.Errorf("got %+v, want SubjectType=RoleGrant SubjectID=%s Verb=invalidate", rec, grantID)
+	}
+	if rec.ActorID != "u2" || rec.ActorKind != "human" {
+		t.Errorf("got ActorID=%q ActorKind=%q, want u2/human", rec.ActorID, rec.ActorKind)
+	}
+}
+
+func TestRoleStore_Revoke_NilProvenanceStore_NoOp(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	grantID, err := store.Grant(context.Background(), RoleGrant{TokenID: NewID(), RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	if err := store.Revoke(context.Background(), grantID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+}
+
+func TestRoleStore_Revoke_ProvenanceAppendFails_RevokeStillSucceeds(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	grantID, err := store.Grant(context.Background(), RoleGrant{TokenID: NewID(), RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	store.setProvenanceStore(&failingProvenanceStore{})
+	if err := store.Revoke(context.Background(), grantID); err != nil {
+		t.Fatalf("Revoke: %v (a provenance Append failure must not fail the revoke)", err)
+	}
+	if n := countGrants(t, db); n != 0 {
+		t.Errorf("grant count = %d, want 0 (revoke must still have deleted the row)", n)
+	}
+}
+
+func TestAppHandler_WiresProvenanceIntoGovernance(t *testing.T) {
+	db := setupGovernanceDB(t)
+	roleStore := NewRoleStore(db)
+	fake := &fakeProvenanceStore{}
+	app := New(MustConfig(Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("test-secret-32-bytes-xxxxxxxxxxxx"),
+		DB:      db,
+	}))
+	app.Provenance(fake)
+	if err := app.Governance(roleStore); err != nil {
+		t.Fatalf("Governance: %v", err)
+	}
+	app.Handler() // triggers App.Handler()'s own wiring block
+
+	if _, err := roleStore.Grant(context.Background(), RoleGrant{TokenID: NewID(), RoleName: "author"}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	if len(fake.appended) != 1 {
+		t.Fatalf("appended %d ProvenanceRecords via the real App wiring, want 1", len(fake.appended))
+	}
+	if fake.appended[0].SubjectType != "RoleGrant" {
+		t.Errorf("SubjectType = %q, want RoleGrant", fake.appended[0].SubjectType)
+	}
+}
+
 // --- ToolPolicy tests ---
 
 func TestRoleStore_ToolPolicy_Hit(t *testing.T) {

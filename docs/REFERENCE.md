@@ -2939,6 +2939,16 @@ app.Provenance(smeldr.NewProvenanceStore(db))
 | `Surface` | `surface` | `"http"` \| `"mcp"` \| `"cli"` \| `"trigger"`; `"cli"` has no current producer — nothing distinguishes a `smeldr-cli` HTTP request from any other |
 | `Reason` | `reason` | Free text, empty unless the caller supplied one — most acts carry none |
 
+### Admin objects also write provenance
+
+As of Amendment A281 (Task T203), `RoleStore.Grant`, `RoleStore.Revoke`, and `TokenStore.Revoke` each write a `ProvenanceRecord` in addition to their existing `GovernanceAuditStore` write. Two new `SubjectType` values exist as a result: `"RoleGrant"` (for grant/revoke actions) and `"Token"` (for revoked tokens) — the first non-`Node`, non-`RelationEdge` subjects the provenance system has carried.
+
+The verb values are `"assert"` when a role is granted and `"invalidate"` when a grant or token is revoked — reusing the same pair `RelationEdge` already employs for its own create/remove shape.
+
+These entries are always fully attributed (carrying `ActorKind`, `ActorID`, `Surface`, and `Reason`) when read back through `SubjectProvenance`, because neither `RoleGrant` nor `Token` has a registered `StateFlow` — this mirrors `GovernanceAuditStore`'s already-transparent posture for admin actions.
+
+Provenance writes only activate when both stores are configured on the same `App` instance — otherwise all `recordProvenance` call sites are silent no-ops.
+
 ### Reading the trail — `SubjectProvenance`, not a route or tool
 
 There is **no HTTP endpoint and no MCP tool** for reading provenance, by
