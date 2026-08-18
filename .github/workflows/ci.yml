@@ -72,6 +72,31 @@ jobs:
       - name: Run golangci-lint
         run: golangci-lint run ./...
 
+  examples:
+    name: Build examples (clean clone)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dir: [example/api, example/blog, example/docs, example/server]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.dir }}/go.mod
+
+      - name: Build
+        working-directory: ${{ matrix.dir }}
+        env:
+          GOWORK: 'off'
+        run: go build ./...
+
+      - name: Vet
+        working-directory: ${{ matrix.dir }}
+        env:
+          GOWORK: 'off'
+        run: go vet ./...
+
   integration:
     name: Test (pgx integration)
     runs-on: ubuntu-latest

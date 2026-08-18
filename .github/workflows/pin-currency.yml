@@ -1,0 +1,23 @@
+name: Pin currency
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # every Monday 06:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    name: Check smeldr.dev/* pins are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: scripts/checkpins/go.mod
+
+      - name: Run checkpins
+        working-directory: scripts/checkpins
+        env:
+          GOWORK: 'off'
+        run: go run . ../../example/api ../../example/blog ../../example/docs ../../example/server

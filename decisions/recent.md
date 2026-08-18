@@ -996,3 +996,158 @@ covered; the small gap is pre-existing and unrelated to this change. `go test
 -race ./...` clean. `golangci-lint run ./...` zero findings.
 
 ---
+
+## A282 — clean-clone build check + pin-currency check (T217)
+
+### Problem
+
+No periodic check existed for (a) building fresh with no `go.work`/sibling
+repos, or (b) whether declared `smeldr.dev/*` pins are current — both
+distinct, both real, traced to three incidents in one week: an untagged
+release, a near-miss stale `mcp` pin blocking a deploy (T266), and
+`example/server` unbuildable from a clean clone for a month (A245),
+invisible because every real build in this project went through
+`go.work`'s local override.
+
+Confirmed directly: `.github/workflows/ci.yml`'s existing `test` job runs
+`go test`/`go vet` at repo root only — it never enters `example/api`,
+`example/blog`, `example/docs`, or `example/server`, each its own Go module.
+`release.yml` builds `example/server` only, only on a pushed tag, with
+`GOWORK: off` already set — the one place this project already did a
+clean-clone-style build, confirming the pattern to reuse rather than invent.
+
+### Fix — two checks
+
+**Check 1, `ci.yml`'s new `examples` matrix job**, same triggers as the
+existing `test` job (`push: [main]`, `pull_request: [main]`), so a broken
+example is caught on the commit that breaks it:
+
+```yaml
+examples:
+  name: Build examples (clean clone)
+  runs-on: ubuntu-latest
+  strategy:
+    matrix:
+      dir: [example/api, example/blog, example/docs, example/server]
+  steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ matrix.dir }}/go.mod
+    - working-directory: ${{ matrix.dir }}
+      env: { GOWORK: 'off' }
+      run: go build ./...
+    - working-directory: ${{ matrix.dir }}
+      env: { GOWORK: 'off' }
+      run: go vet ./...
+```
+
+A matrix job, not a loop in one job, so which example broke is visible at a
+glance in the Actions UI. Deliberately validates every example against
+core's current checked-out HEAD (every example replaces `smeldr.dev/core =>
+../..`, confirmed below) — not against any published core version. Argued,
+not assumed: this is strictly the right and sufficient scope for what this
+check exists to catch (A245's own incident — a core-repo commit that breaks
+an example, caught on that same commit, before any tag ships), and strictly
+stronger than a published-pin build would be for that purpose. A
+published-pin build would be a different, real check (does the *last
+released* core version still build against the *last released* pin) that
+belongs to pin-currency's own territory, not this one's.
+
+**Check 2, new `.github/workflows/pin-currency.yml`**, cron-triggered
+(`0 6 * * 1`, every Monday) plus `workflow_dispatch` for on-demand runs —
+staleness accrues from an external release, not a commit to this repo, so a
+push-triggered check alone can go stale for weeks against a fully green
+`main`. New `scripts/checkpins` — its own Go module (`golang.org/x/mod/modfile`
+beyond stdlib; a CI-tooling-only import, never part of the `smeldr` package's
+own zero-dependency module graph), run via `go run . <dir>...`:
+
+1. Parse each `<dir>/go.mod`'s `require`/`replace` directives.
+2. For each `smeldr.dev/*` requirement that is **direct** (not `// indirect`)
+   and **not** covered by an active `replace`, run `go list -m -versions
+   <module>` against the real proxy.
+3. Compare the highest listed version to the pinned one; collect every
+   mismatch across every directory given.
+4. Exit non-zero, printing every stale pin, if any were found; exit 0
+   (silent) otherwise.
+
+`checkModule(dir, data, latest)` is the testable core — pure parsing plus
+comparison, `latest` injected as a `func(module string) (string, error)` so
+unit tests never make a live network call; `goListLatestVersion` (the real,
+`exec.Command`-backed implementation) and `main` (CLI plumbing, `os.Exit`)
+are deliberately untested — the real proxy call is an integration concern
+the scheduled workflow itself exercises after merge, not something to fake
+convincingly in a unit test.
+
+**Indirect requires are skipped by design**, discovered mid-implementation
+to matter for a real reason, not decided in the abstract: T217's own three
+motivating incidents are all about a *direct* dependency missing a
+capability a caller actually reaches (a tool, an exported symbol) — an
+indirect pin's staleness is a different, lower-signal risk class, and `go
+mod tidy` already manages indirect versions on its own without a human
+needing to track them individually.
+
+### Two plan-time assumptions corrected by actually running the tool, not by inspection
+
+Running `checkpins` for real against all four examples during grounding
+disagreed with the plan's own written assumptions on two of the (then)
+"four known-stale pins," in both directions:
+
+- **`example/server`'s `smeldr.dev/agent v0.7.1` is not actually stale.**
+  The plan assumed the real current version was `v0.8.0`, based on this
+  same session's own earlier work (T223) landing that version on `main` —
+  but `main` and *tagged* are different facts, and `v0.8.0` was pushed
+  without a tag (no fresh explicit release approval yet, per this project's
+  own standing "stop after push, no tag/release without a fresh explicit
+  yes" discipline). `go list -m -versions smeldr.dev/agent` against the
+  real proxy still correctly reports `v0.7.1` as latest. Bumping the pin to
+  `v0.8.0` here would have pinned a version that does not exist as an
+  installable tag — the tool's own correct, proxy-grounded behavior caught
+  this before it became a real mistake, not after.
+- **`example/blog`'s `smeldr.dev/oauth v0.2.0` (indirect) was found stale**
+  (real current: `v0.4.0`) — a pin entirely outside the plan's own original
+  two-pin scope, surfaced only by actually running the comparison against
+  every requirement in the file rather than the two the plan had
+  specifically named in advance. Resolved as a side effect of the design
+  decision above (indirect requires skipped) rather than bumped by hand —
+  `go mod tidy` is what already owns this class of drift.
+
+### Pin bump shipped in this same task
+
+`example/blog`'s `smeldr.dev/mcp v1.30.0 → v1.31.1`, via `go get
+smeldr.dev/mcp@v1.31.1 && go mod tidy` (never hand-edited version strings,
+matching this project's own standing discipline) — verified with
+`GOWORK=off go build ./...`/`go vet ./...`/`go test ./...` all clean in
+`example/blog` afterward, and a full re-run of `checkpins` against all four
+examples confirming zero stale pins remain. `example/server`'s `agent` pin
+is **not** touched, per the correction above.
+
+### Tests
+
+9 new tests in `scripts/checkpins/main_test.go`:
+`TestCheckModule_SkipsReplaced`, `TestCheckModule_ReportsStalePin`,
+`TestCheckModule_CurrentPinNotReported`, `TestCheckModule_SkipsIndirect`,
+`TestCheckModule_IgnoresNonSmeldrModules`,
+`TestCheckModule_MultiplePinsSomeStale`, `TestCheckModule_LatestLookupError`,
+`TestCheckModule_MalformedGoMod`, `TestCheckDir_ReadError`. `checkModule`
+itself 100% covered; `main`/`goListLatestVersion` untested by design (see
+above). This is a standalone tooling module with its own `go.mod`, not part
+of the `smeldr` package's own 96% coverage gate.
+
+`ci.yml`'s new `examples` job verified by actually running each example's
+`go build ./...`/`go vet ./...` locally with `GOWORK=off` before proposing
+this commit — the same commands the workflow itself runs.
+`pin-currency.yml` cannot be verified before merge (GitHub Actions does not
+run an unmerged workflow file's own `schedule`/`workflow_dispatch` triggers
+against a branch) — flagged as a real limitation, not glossed over: the
+first real proof this works end-to-end is a manual `gh workflow run` after
+this lands on `main`.
+
+### Versioning
+
+No `smeldr` package code touched — `smeldr.dev/core` itself is not
+released by this change. Level 1 amendment: config/tooling-only, no
+version bump, no tag, matching A245/A246's own precedent for exactly this
+class of change.
+
+---
