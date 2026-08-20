@@ -35,6 +35,8 @@
 //	MASTODON_INSTANCE_URL  Mastodon instance base URL (required when ENABLE_SOCIAL)
 //	ENABLE_WEBHOOKS       wire outbound webhook delivery
 //	ENABLE_EVENT_STREAM   wire GET /_events/stream (opt-in agent event push, T269)
+//	ENABLE_CONTEXT_PACKET wire GET /packet/{type}/{slug} (Editor role required; requires
+//	                      ENABLE_RELATIONS and ENABLE_ORCHESTRATION, T159)
 //	ENABLE_PROVENANCE     wire transition-provenance recording (App.Provenance)
 //	ENABLE_AGENTS         wire the agent job system (connects to this server's own /mcp endpoint)
 //	AGENT_MCP_URL         agent MCP endpoint (default: http://127.0.0.1:PORT/mcp/message)
@@ -82,6 +84,7 @@ type ServerConfig struct {
 	MastodonInstanceURL  string
 	EnableWebhooks       bool
 	EnableEventStream    bool
+	EnableContextPacket  bool
 	EnableProvenance     bool
 	EnableAgents         bool
 	AgentMCPURL          string
@@ -124,6 +127,7 @@ func parseConfig() ServerConfig {
 		MastodonInstanceURL:  os.Getenv("MASTODON_INSTANCE_URL"),
 		EnableWebhooks:       os.Getenv("ENABLE_WEBHOOKS") != "",
 		EnableEventStream:    os.Getenv("ENABLE_EVENT_STREAM") != "",
+		EnableContextPacket:  os.Getenv("ENABLE_CONTEXT_PACKET") != "",
 		EnableProvenance:     os.Getenv("ENABLE_PROVENANCE") != "",
 		EnableAgents:         os.Getenv("ENABLE_AGENTS") != "",
 		AgentMCPURL:          envOr("AGENT_MCP_URL", "http://127.0.0.1:"+port+"/mcp/message"),
@@ -207,7 +211,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.RegisterOrchestrationRelationKinds(context.Background(), rs); err != nil {
 			return ServerResult{}, fmt.Errorf("register orchestration relation kinds: %w", err)
 		}
-		app.ContextPacketHandler(rs, cfg.InstanceName)
+		if cfg.EnableContextPacket {
+			app.ContextPacketHandler(rs, cfg.InstanceName)
+		}
 	}
 
 	if cfg.EnableRedirects {

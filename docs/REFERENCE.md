@@ -3058,6 +3058,52 @@ type SweepRunStore interface {
 
 ---
 
+## Context packets
+
+`App.ContextPacketHandler(rs *RelationStore, sourceName string)` mounts
+`GET /packet/{type}/{slug}` — a bounded, relation-graph-traversed snapshot
+of one of the five orchestration anchor types (`goal`, `decision`,
+`amendment`, `task`, `signal`) plus its directly linked items, built by
+`BuildContextPacket`. Requires **Editor role** via bearer auth — same
+contract as `GET /_audit`/`GET /_logs`/`GET /_events/stream`.
+
+### Setup
+
+```go
+app.ContextPacketHandler(relationStore, "my-instance-name")
+```
+
+`example/server` gates this behind its own `ENABLE_CONTEXT_PACKET` flag, in
+addition to (not instead of) `ENABLE_RELATIONS`/`ENABLE_ORCHESTRATION` — all
+three must be set for the route to mount. `ENABLE_CONTEXT_PACKET` is not
+implied by the other two: an operator who only wants the relation/
+orchestration MCP tools does not silently also get this HTTP route.
+
+### Request
+
+`GET /packet/{type}/{slug}?depth={1|2}` — `type` is one of
+`goal`/`decision`/`amendment`/`task`/`signal`; `depth` defaults to `1`
+(direct links only) and accepts `2` (one further hop). Any other value
+returns `400`.
+
+### Status codes
+
+| Status | Meaning |
+|---|---|
+| `200` | Packet returned |
+| `400` | Unknown `type`, or `depth` outside `1`–`2` |
+| `401` | No valid bearer token |
+| `403` | Valid token, role below `Editor` |
+| `404` | No item of `type` with that `slug` |
+
+There is no status-based visibility gate beyond the role check above — a
+`Task` anchor in any state (`backlog`, `active`, `done`, ...) resolves
+identically; `Status` never carries lifecycle vocabulary for these five
+types (see [State flows](#state-flows)), only their own governed-flow state
+names.
+
+---
+
 ## MCP resource subscriptions
 
 Available in `smeldr.dev/mcp` when `App.AddSignalListener` is wired (set up

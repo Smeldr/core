@@ -1151,3 +1151,158 @@ version bump, no tag, matching A245/A246's own precedent for exactly this
 class of change.
 
 ---
+
+## A283 — BuildContextPacket's Published-only gate removed, GET /packet/{type}/{slug} now requires Editor role (T159)
+
+### Problem
+
+`context_packet.go:233`/`:335` both required `Status == Published` before
+including an orchestration item in a context packet. `BuildContextPacket`
+exists only for the five orchestration anchor types (`goal`, `decision`,
+`amendment`, `task`, `signal`); none of their registered `StateFlow`
+states is ever the literal string `"published"` — `applyDefaultStatus`
+sets a new item's `Status` to its flow's own initial state (`"backlog"`
+for `Task`, `"open"` for `Goal`, `"proposed"` for `Decision`, `"scoped"`
+for `Amendment`, `"pending"` for `Signal`), and every later transition
+writes the same column with the flow's own state names, never lifecycle
+vocabulary. The gate has had a 0% pass rate for its entire domain,
+unconditionally, since it shipped (A214, T145, 2026-07-12) — over a
+month. Every existing test passed regardless, because the shared
+`insertTest*` fixtures hardcode `Status: Published` directly, bypassing
+the real creation path and never exercising the actual bug.
+
+### Fix, part 1 — remove both gates
+
+No narrowing, no swapping `Published` for a different constant — D56
+already settled that "governed state" (what these five types have) and
+"lifecycle" (a CMS-content-visibility question) are two independent axes,
+and there is no lifecycle-Status concept that means anything for a `Task`
+or `Decision`. Matches D47's own precedent directly: for a compiled type,
+alive means the row exists, no status consulted — applied here to packet
+visibility instead of structural-sweep liveness. An archived `Decision`
+or a `done` `Task` is still real, legitimate operational history.
+
+`Run`'s absence from `anchorTypeTable` is a related but distinct gap, left
+out of scope: `BuildContextPacket`'s own doc comment already scopes itself
+to the five orchestration anchor types, and D38 is explicit that `Run`
+deliberately carries no `StateFlow` at all.
+
+### Fix, part 2 — held twice, then the access-model layer
+
+**First hold (2026-08-16).** Removing the gate as designed would have
+shipped a real, live exposure: `GET /packet/{type}/{slug}` was designed
+unauthenticated for an isolated demo instance (A214's own text: "intended
+for isolated demo instance with public read access") that has never been
+deployed — but the handler is mounted on the real, live instance today
+whenever `ENABLE_RELATIONS && ENABLE_ORCHESTRATION` are both set, which
+they are. Removing the status gate would have made every orchestration
+item on the real instance publicly readable with a guessable,
+human-readable slug (`t255-orchestration-flows-...`, not an opaque ID) —
+a live enumeration risk, not theoretical. Held for Peter's own access-model
+decision rather than either implementer deciding alone overnight on a live
+instance carrying real data.
+
+**Peter's decision (2026-08-16):** require login. Proposed default,
+confirmed in this task: gate behind a valid token, `Editor` role minimum —
+matches every MCP tool's own baseline for reading the same class of data
+(`get_task`/`get_decision`/etc.), not `Guest` (equivalent to no gate) and
+not `Admin`-only (this is a read of already-permitted-in-principle
+operational context, not an authority-bearing act).
+
+**Second hold (2026-08-20).** The plan sat at `plan-reviewing` for four
+days with Peter's answer never actually turned into a design — the text
+on file was still the pre-hold, no-auth version. Held again rather than
+approved as written, with three specific points named for the replan:
+the `Editor`-role gate itself, the mechanism (raw handler, no existing
+`readRole`/`checkWriteOp` to reuse), and whether `example/server`'s
+wiring needed its own flag now that "on" means "on the real instance."
+
+### Fix, part 3 — the actual design
+
+**Auth mechanism.** `ContextPacketHandler` is a raw
+`http.HandlerFunc` registration, structurally identical to three existing
+raw handlers that already gate on role: `newAuditHandler`, `newLogsHandler`,
+`newEventStreamHandler`. All three resolve `auth := a.cfg.Auth; if auth ==
+nil { auth = BearerHMAC(string(a.cfg.Secret)) }` once at registration time,
+then inside the handler: `user, ok := auth.authenticate(r)` →
+`ErrUnauth` if not ok; `user.HasRole(Editor)` → `ErrForbidden` if not.
+Applied the identical five-line pattern directly to `ContextPacketHandler`
+rather than extracting a shared helper — this would be the fourth use of
+the identical shape (a real argument for extraction), but the first three
+shipped it inline three separate times without factoring it out, so
+inlining a fourth time follows this codebase's own established convention
+rather than introducing a new one unprompted mid-fix. `AuthFunc.authenticate`
+is intentionally unexported (prevents accidental direct calls, only
+callable from inside the `smeldr` package) — matches `ContextPacketHandler`'s
+own location in the same package. Extraction is a real, reasonable future
+refactor once a fifth raw handler needs the same check, not this one.
+
+`user.HasRole(Editor)` is hierarchical (`roles.go`: "Admin satisfies a
+check for Editor") — `Editor` and `Admin` tokens both pass, `Author` and
+`Guest` both 403.
+
+**`example/server` wiring.** New `EnableContextPacket bool` /
+`ENABLE_CONTEXT_PACKET` field, checked in addition to (not instead of) the
+existing `EnableRelations`/`EnableOrchestration` prerequisites:
+`cfg.EnableRelations && cfg.EnableOrchestration && cfg.EnableContextPacket`.
+Every other optional HTTP surface in this binary — `EnableWebhooks`,
+`EnableEventStream`, `EnableProvenance`, `EnableMedia`, etc. — already gets
+its own explicit flag, one feature one flag, even where a feature has its
+own structural prerequisites. Bundling `ContextPacketHandler` under the
+side effect of two unrelated flags being true together was the one place
+this binary's own config surface broke its own established convention —
+worth fixing now that the risk conversation is already open, not just once
+auth exists. Authentication lowers the risk of the route existing; it does
+not change whether an operator who only wanted relation-assertion MCP
+tools should also, silently, get a new HTTP GET surface mounted. The new
+flag defaults off, so upgrading with the old two-flag combination already
+set does not silently re-enable the route.
+
+### Tests
+
+Two existing tests inverted (not just re-asserted): `TestBuildContextPacket_draftAnchor`
+(a `Draft` anchor now resolves, was `ErrNotFound`) and
+`TestBuildContextPacket_draftLinkedItemExcluded` → renamed
+`_draftLinkedItemIncluded` (a `Draft` linked item now appears in `Items`,
+was silently skipped). Two new tests build items with real flow-state
+values directly (`"backlog"`, `"open"`, `"proposed"`, `"active"`) instead
+of changing the shared `insertTest*` helpers' hardcoded `Published` —
+`TestBuildContextPacket_realisticFlowStatus_taskAnchor` reproduces the
+literal reported bug (a `Task` anchor with `Status: "backlog"`);
+`_linkedItems` covers a `Goal` anchor with a linked `Decision` and `Task`,
+neither `Published`. Four new handler-level auth tests: `_Unauthorized`
+(no token, 401), `_ForbiddenForAuthor` (403, below `Editor`), `_OKForAdmin`
+(200, proving the hierarchical check), `_200_realisticFlowStatus`
+(end-to-end through the real HTTP handler with a `"backlog"` Task anchor —
+reproduces T159's own reported symptom and proves it now returns 200, not
+404). The three pre-existing handler tests (`_200`, `_400_invalidDepth`,
+`_404_unknownSlug`) each gained a real `Editor`-role bearer token, now
+required to reach what they were already testing. `example/server` gains
+`off/contextPacketWithoutOwnFlag`, proving the route stays unmounted with
+`EnableContextPacket` false even when the other two prerequisites are true;
+the existing `on/contextPacket` test updated to set all three flags and
+carry a token, plus a new no-token sub-assertion (401) proving the new
+flag does not relax auth.
+
+The shared `insertTest*` fixtures' hardcoded `Status: Published` — the
+reason this bug went undetected for over a month — is flagged, not fixed:
+these helpers are shared across many unrelated tests well beyond this
+bug's own scope, and auditing every caller for an unintended assertion
+dependency is a separate, larger piece of work.
+
+### Versioning
+
+No exported Go symbol changed — `BuildContextPacket`'s signature and every
+exported type are unchanged; `ContextPacketHandler`'s signature is
+unchanged (the auth resolution happens inside, using existing `Config`
+fields already read by other handlers). Real, significant
+consumer-observable behaviour change on both counts (gate removed, auth
+added) on the same route. Coverage: 96.3% package-wide (`ContextPacketHandler`
+92.6% — one pre-existing, unrelated gap: a valid custom `?depth=2` value
+at the HTTP-handler level was never covered before this change either,
+named not chased). `go test -race ./...` clean. `golangci-lint` zero
+findings. PATCH bump, matching A247/A253/A261/A281's own precedent
+(behaviour fix, no new exported symbol, still versioned): v1.75.1 →
+**v1.75.2**.
+
+---

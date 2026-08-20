@@ -555,8 +555,9 @@ func TestBuildContextPacket_draftAnchor(t *testing.T) {
 	db, rs := setupPacketDB(t)
 	ctx := context.Background()
 
-	// Draft anchor must return ErrNotFound — same convention as every other
-	// public-facing read path in this codebase.
+	// T159: the Published-only gate is removed — Status never holds lifecycle
+	// vocabulary for orchestration types (D56), so no status value excludes an
+	// anchor any more. A Draft anchor now resolves successfully.
 	g := &Goal{
 		Node:   Node{ID: NewID(), Slug: GenerateSlug("goal-draft"), Status: Draft},
 		GoalID: "TDRAFT",
@@ -568,17 +569,21 @@ func TestBuildContextPacket_draftAnchor(t *testing.T) {
 		t.Fatalf("Save draft goal: %v", err)
 	}
 
-	_, err := BuildContextPacket(ctx, db, rs, "http://localhost", "test", "goal", g.Slug, 1)
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("draft anchor: got %v, want ErrNotFound", err)
+	pkt, err := BuildContextPacket(ctx, db, rs, "http://localhost", "test", "goal", g.Slug, 1)
+	if err != nil {
+		t.Fatalf("BuildContextPacket: %v", err)
+	}
+	if pkt.Anchor.Status != string(Draft) {
+		t.Errorf("anchor.status = %q, want %q", pkt.Anchor.Status, Draft)
 	}
 }
 
-func TestBuildContextPacket_draftLinkedItemExcluded(t *testing.T) {
+func TestBuildContextPacket_draftLinkedItemIncluded(t *testing.T) {
 	db, rs := setupPacketDB(t)
 	ctx := context.Background()
 
-	// Published anchor with one Draft linked task — task must not appear in Items.
+	// T159: a Draft linked item is no longer excluded — the gate that used to
+	// filter it out never meant anything for these types (D56).
 	anchorID := insertTestGoal(t, db, "TPUB1", "P0", "S")
 	anchorSlug := mustSlugForID(t, db, "smeldr_goals", anchorID)
 
@@ -596,16 +601,102 @@ func TestBuildContextPacket_draftLinkedItemExcluded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildContextPacket: %v", err)
 	}
-	if len(pkt.Items) != 0 {
-		t.Errorf("items len = %d, want 0 (draft item silently excluded)", len(pkt.Items))
+	if len(pkt.Items) != 1 {
+		t.Fatalf("items len = %d, want 1 (draft item no longer excluded)", len(pkt.Items))
 	}
-	// Draft item omission is silent — Boundary.Omitted must be nil.
-	if pkt.Boundary.Omitted != nil {
-		t.Errorf("boundary.omitted = %v, want nil (draft exclusion is not a cap)", pkt.Boundary.Omitted)
+	if pkt.Items[0].Status != string(Draft) {
+		t.Errorf("items[0].status = %q, want %q", pkt.Items[0].Status, Draft)
+	}
+}
+
+func TestBuildContextPacket_realisticFlowStatus_taskAnchor(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	ctx := context.Background()
+
+	// The literal reported bug: a Task anchor carrying its own real
+	// orchTaskFlow initial state ("backlog"), never "published" — this is
+	// what every real Task on the live instance actually has.
+	tk := &Task{
+		Node:   Node{ID: NewID(), Slug: GenerateSlug("task-realistic"), Status: "backlog"},
+		TaskID: "TREALISTIC",
+	}
+	repo := NewSQLRepo[*Task](db, Table("smeldr_tasks"))
+	if err := repo.Save(ctx, tk); err != nil {
+		t.Fatalf("Save task: %v", err)
+	}
+
+	pkt, err := BuildContextPacket(ctx, db, rs, "http://localhost", "test", "task", tk.Slug, 1)
+	if err != nil {
+		t.Fatalf("BuildContextPacket: %v", err)
+	}
+	if pkt.Anchor.Status != "backlog" {
+		t.Errorf("anchor.status = %q, want backlog", pkt.Anchor.Status)
+	}
+}
+
+func TestBuildContextPacket_realisticFlowStatus_linkedItems(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	ctx := context.Background()
+
+	// A Goal anchor ("open") with a linked Decision ("proposed") and Task
+	// ("active") — three realistic non-Published flow states, all real
+	// orchTaskFlow/orchDecisionFlow/orchGoalFlow states, none "published".
+	g := &Goal{
+		Node:     Node{ID: NewID(), Slug: GenerateSlug("goal-realistic"), Status: "open"},
+		GoalID:   "GREALISTIC",
+		Priority: 1,
+		Band:     "P0",
+		Size:     "S",
+	}
+	goalRepo := NewSQLRepo[*Goal](db, Table("smeldr_goals"))
+	if err := goalRepo.Save(ctx, g); err != nil {
+		t.Fatalf("Save goal: %v", err)
+	}
+
+	d := &Decision{
+		Node:           Node{ID: NewID(), Slug: GenerateSlug("decision-realistic"), Status: "proposed"},
+		DecisionNumber: "DREALISTIC",
+		Scope:          "core",
+	}
+	decisionRepo := NewSQLRepo[*Decision](db, Table("smeldr_decisions"))
+	if err := decisionRepo.Save(ctx, d); err != nil {
+		t.Fatalf("Save decision: %v", err)
+	}
+
+	tk := &Task{
+		Node:   Node{ID: NewID(), Slug: GenerateSlug("task-realistic2"), Status: "active"},
+		TaskID: "TREALISTIC2",
+	}
+	taskRepo := NewSQLRepo[*Task](db, Table("smeldr_tasks"))
+	if err := taskRepo.Save(ctx, tk); err != nil {
+		t.Fatalf("Save task: %v", err)
+	}
+
+	insertTestEdge(t, rs, "Goal", g.ID, "Decision", d.ID, "tracks")
+	insertTestEdge(t, rs, "Goal", g.ID, "Task", tk.ID, "tracks")
+
+	pkt, err := BuildContextPacket(ctx, db, rs, "http://localhost", "test", "goal", g.Slug, 1)
+	if err != nil {
+		t.Fatalf("BuildContextPacket: %v", err)
+	}
+	if len(pkt.Items) != 2 {
+		t.Fatalf("items len = %d, want 2", len(pkt.Items))
+	}
+	statuses := map[string]bool{}
+	for _, it := range pkt.Items {
+		statuses[it.Status] = true
+	}
+	if !statuses["proposed"] || !statuses["active"] {
+		t.Errorf("items statuses = %v, want both proposed and active present", statuses)
 	}
 }
 
 // — HTTP handler ——————————————————————————————————————————————————————————————
+
+// contextPacketTestSecret is shared by every handler-level test below —
+// long enough for BearerHMAC/SignToken, matching this file's own
+// pre-existing secret literal.
+const contextPacketTestSecret = "testsecret16chars"
 
 func TestContextPacketHandler_200(t *testing.T) {
 	db, rs := setupPacketDB(t)
@@ -614,12 +705,17 @@ func TestContextPacketHandler_200(t *testing.T) {
 
 	app := New(Config{
 		BaseURL: "http://localhost",
-		Secret:  []byte("testsecret16chars"),
+		Secret:  []byte(contextPacketTestSecret),
 		DB:      db,
 	})
 	app.ContextPacketHandler(rs, "unit-test")
 
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Editor}}, contextPacketTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/packet/goal/"+slug, nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
 	w := httptest.NewRecorder()
 	app.Handler().ServeHTTP(w, req)
 
@@ -648,12 +744,17 @@ func TestContextPacketHandler_400_invalidDepth(t *testing.T) {
 
 	app := New(Config{
 		BaseURL: "http://localhost",
-		Secret:  []byte("testsecret16chars"),
+		Secret:  []byte(contextPacketTestSecret),
 		DB:      db,
 	})
 	app.ContextPacketHandler(rs, "unit-test")
 
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Editor}}, contextPacketTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/packet/goal/"+slug+"?depth=5", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
 	w := httptest.NewRecorder()
 	app.Handler().ServeHTTP(w, req)
 
@@ -667,16 +768,142 @@ func TestContextPacketHandler_404_unknownSlug(t *testing.T) {
 
 	app := New(Config{
 		BaseURL: "http://localhost",
-		Secret:  []byte("testsecret16chars"),
+		Secret:  []byte(contextPacketTestSecret),
 		DB:      db,
 	})
 	app.ContextPacketHandler(rs, "unit-test")
 
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Editor}}, contextPacketTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/packet/goal/no-such-slug", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
 	w := httptest.NewRecorder()
 	app.Handler().ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+// — auth (T159/A283) ————————————————————————————————————————————————————————
+
+func TestContextPacketHandler_Unauthorized(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	goalID := insertTestGoal(t, db, "T162", "P0", "S")
+	slug := mustSlugForID(t, db, "smeldr_goals", goalID)
+
+	app := New(Config{
+		BaseURL: "http://localhost",
+		Secret:  []byte(contextPacketTestSecret),
+		DB:      db,
+	})
+	app.ContextPacketHandler(rs, "unit-test")
+
+	req := httptest.NewRequest(http.MethodGet, "/packet/goal/"+slug, nil)
+	w := httptest.NewRecorder()
+	app.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestContextPacketHandler_ForbiddenForAuthor(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	goalID := insertTestGoal(t, db, "T163", "P0", "S")
+	slug := mustSlugForID(t, db, "smeldr_goals", goalID)
+
+	app := New(Config{
+		BaseURL: "http://localhost",
+		Secret:  []byte(contextPacketTestSecret),
+		DB:      db,
+	})
+	app.ContextPacketHandler(rs, "unit-test")
+
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Author}}, contextPacketTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/packet/goal/"+slug, nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	w := httptest.NewRecorder()
+	app.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", w.Code)
+	}
+}
+
+func TestContextPacketHandler_OKForAdmin(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	goalID := insertTestGoal(t, db, "T164", "P0", "S")
+	slug := mustSlugForID(t, db, "smeldr_goals", goalID)
+
+	app := New(Config{
+		BaseURL: "http://localhost",
+		Secret:  []byte(contextPacketTestSecret),
+		DB:      db,
+	})
+	app.ContextPacketHandler(rs, "unit-test")
+
+	// Admin (level 40) satisfies an Editor (level 30) requirement —
+	// hierarchical, not exact-match (roles.go's own HasRole contract).
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Admin}}, contextPacketTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/packet/goal/"+slug, nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	w := httptest.NewRecorder()
+	app.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestContextPacketHandler_200_realisticFlowStatus(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	ctx := context.Background()
+
+	// Reproduces T159's own reported symptom end-to-end: a Task anchor
+	// carrying its real orchTaskFlow initial state ("backlog"), through the
+	// real HTTP handler — must return 200, not 404.
+	tk := &Task{
+		Node:   Node{ID: NewID(), Slug: GenerateSlug("task-http-realistic"), Status: "backlog"},
+		TaskID: "THTTPREALISTIC",
+	}
+	repo := NewSQLRepo[*Task](db, Table("smeldr_tasks"))
+	if err := repo.Save(ctx, tk); err != nil {
+		t.Fatalf("Save task: %v", err)
+	}
+
+	app := New(Config{
+		BaseURL: "http://localhost",
+		Secret:  []byte(contextPacketTestSecret),
+		DB:      db,
+	})
+	app.ContextPacketHandler(rs, "unit-test")
+
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Editor}}, contextPacketTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/packet/task/"+tk.Slug, nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	w := httptest.NewRecorder()
+	app.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var pkt ContextPacket
+	if err := json.NewDecoder(w.Body).Decode(&pkt); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if pkt.Anchor.Status != "backlog" {
+		t.Errorf("anchor.status = %q, want backlog", pkt.Anchor.Status)
 	}
 }

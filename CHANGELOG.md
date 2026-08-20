@@ -23,6 +23,17 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.75.2] — 2026-08-20
+
+### Fixed
+- `BuildContextPacket`'s Published-only status gate (`context_packet.go`) had a 0% pass rate for its entire domain since it shipped (A214, over a month): `Status` never holds lifecycle vocabulary for the five orchestration anchor types (`goal`, `decision`, `amendment`, `task`, `signal`) — it holds each type's own governed-flow state name instead (e.g. `"backlog"` for a `Task`), never the literal string `"published"`. Both the anchor gate and the linked-item gate are removed entirely — an item's status no longer excludes it from a context packet, matching D47's own "for a compiled type, alive means the row exists, no status consulted" principle applied here to packet visibility.
+- `GET /packet/{type}/{slug}` now requires **Editor role** via bearer auth, added in the same fix. The route was originally designed unauthenticated for an isolated demo instance (A214) that was never deployed — but it is mounted on the real, live instance today, and removing the status gate above would have made every orchestration item on that instance publicly readable with a guessable, human-readable slug. Uses the same inline auth pattern already established by `GET /_audit`/`GET /_logs`/`GET /_events/stream` (`auth.authenticate(r)` then `user.HasRole(Editor)`), not a new mechanism.
+- `example/server` gates the route behind a new, explicit `ENABLE_CONTEXT_PACKET` flag, in addition to the existing `ENABLE_RELATIONS`/`ENABLE_ORCHESTRATION` prerequisites, not implied by them — matches this binary's own one-flag-per-feature convention (every other optional HTTP surface already gets its own flag) and defaults off, so upgrading with the old two-flag combination already set does not silently re-enable the route.
+- New tests: two existing `TestBuildContextPacket_draftAnchor`/`_draftLinkedItemExcluded` inverted (a `Draft` anchor/linked item now included, not excluded); two new tests build anchors/linked items with real flow-state values (`"backlog"`, `"open"`, `"proposed"`, `"active"`) instead of the hardcoded `Published` every existing fixture used, reproducing the actual reported bug; four new handler-level auth tests (401 no token, 403 below `Editor`, 200 for `Editor`/`Admin` via the hierarchical role check); `example/server` gains a flag-combination test proving the route needs all three flags together. No exported Go symbol changed.
+- Coverage: 96.3% package-wide. `go test -race ./...` clean. `golangci-lint` clean. PATCH bump (behaviour fix plus a real, tag-worthy consumer-observable change — the route now requires auth — no new exported symbol, matching A247/A253/A261/A281's own precedent for this class): v1.75.1 → v1.75.2. (A283, T159)
+
+---
+
 ## [1.74.0] — 2026-08-18
 
 ### Added

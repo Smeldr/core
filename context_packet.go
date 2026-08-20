@@ -230,9 +230,6 @@ func BuildContextPacket(
 	if err != nil {
 		return nil, err
 	}
-	if anchorNode.Status != Published {
-		return nil, ErrNotFound
-	}
 
 	pkt := &ContextPacket{
 		PacketVersion: packetVersion,
@@ -332,9 +329,6 @@ func BuildContextPacket(
 					"type", lowerType, "id", ref.nodeID, "error", fetchErr)
 				continue
 			}
-			if nd.Status != Published {
-				continue
-			}
 			pkt.Items = append(pkt.Items, PacketItem{
 				Type:   lowerType,
 				ID:     cid,
@@ -379,8 +373,23 @@ func BuildContextPacket(
 // ContextPacketHandler registers GET /packet/{type}/{slug} on the app's mux.
 // The optional ?depth= query parameter controls traversal depth (1 or 2;
 // defaults to 1). sourceName identifies the instance in the packet's Source field.
+// Requires Editor role via bearer auth — same contract as [App.Audit]'s own
+// GET /_audit and the other raw, non-Module[T] admin/operational routes.
 func (a *App) ContextPacketHandler(rs *RelationStore, sourceName string) {
+	auth := a.cfg.Auth
+	if auth == nil {
+		auth = BearerHMAC(string(a.cfg.Secret))
+	}
 	a.mux.Handle("GET /packet/{type}/{slug}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, ok := auth.authenticate(r)
+		if !ok {
+			WriteError(w, r, ErrUnauth)
+			return
+		}
+		if !user.HasRole(Editor) {
+			WriteError(w, r, ErrForbidden)
+			return
+		}
 		anchorType := r.PathValue("type")
 		anchorSlug := r.PathValue("slug")
 		depth := 1

@@ -422,18 +422,27 @@ func TestServerToggles(t *testing.T) {
 	})
 
 	t.Run("on/contextPacket", func(t *testing.T) {
-		// Both ENABLE_RELATIONS and ENABLE_ORCHESTRATION must be set for the
-		// packet endpoint to mount. Probe /packet/<bad-type>/x: a mounted handler
-		// returns 400 (ErrBadRequest for unknown type); the ServeMux returns 404
-		// if the route is not registered — so 400 proves the route is wired.
+		// All three of ENABLE_RELATIONS, ENABLE_ORCHESTRATION, and (T159/A283)
+		// ENABLE_CONTEXT_PACKET must be set for the packet endpoint to mount.
+		// Probe /packet/<bad-type>/x with a valid Editor token: a mounted
+		// handler returns 400 (ErrBadRequest for unknown type) once past the
+		// auth gate; the ServeMux returns 404 if the route is not registered
+		// at all — so 400 proves the route is wired and auth passed.
 		cfg := baseConfig()
 		cfg.EnableRelations = true
 		cfg.EnableOrchestration = true
+		cfg.EnableContextPacket = true
 		cfg.InstanceName = "test"
 		ts := buildTestServer(t, cfg)
+		token := createToken(t, ts, "editor", "editor")
 
-		if got := getStatus(t, ts.URL, "", "/packet/bad-type/x"); got != http.StatusBadRequest {
-			t.Errorf("GET /packet/bad-type/x: got %d, want 400 (route must be mounted when both flags are set)", got)
+		if got := getStatus(t, ts.URL, token, "/packet/bad-type/x"); got != http.StatusBadRequest {
+			t.Errorf("GET /packet/bad-type/x: got %d, want 400 (route must be mounted when all three flags are set)", got)
+		}
+		// No token must still be rejected before reaching the bad-type check —
+		// EnableContextPacket does not relax auth.
+		if got := getStatus(t, ts.URL, "", "/packet/bad-type/x"); got != http.StatusUnauthorized {
+			t.Errorf("GET /packet/bad-type/x (no token): got %d, want 401", got)
 		}
 	})
 
@@ -443,11 +452,28 @@ func TestServerToggles(t *testing.T) {
 		cfg := baseConfig()
 		cfg.EnableRelations = false
 		cfg.EnableOrchestration = true
+		cfg.EnableContextPacket = true
 		cfg.InstanceName = "test"
 		ts := buildTestServer(t, cfg)
 
 		if got := getStatus(t, ts.URL, "", "/packet/bad-type/x"); got != http.StatusNotFound {
 			t.Errorf("GET /packet/bad-type/x: got %d, want 404 (route must not mount without ENABLE_RELATIONS)", got)
+		}
+	})
+
+	t.Run("off/contextPacketWithoutOwnFlag", func(t *testing.T) {
+		// T159/A283: EnableContextPacket is its own explicit third gate, not
+		// implied by the other two — an operator who only wanted relation and
+		// orchestration MCP tools must not silently also get this HTTP route.
+		cfg := baseConfig()
+		cfg.EnableRelations = true
+		cfg.EnableOrchestration = true
+		cfg.EnableContextPacket = false
+		cfg.InstanceName = "test"
+		ts := buildTestServer(t, cfg)
+
+		if got := getStatus(t, ts.URL, "", "/packet/bad-type/x"); got != http.StatusNotFound {
+			t.Errorf("GET /packet/bad-type/x: got %d, want 404 (route must not mount without its own ENABLE_CONTEXT_PACKET)", got)
 		}
 	})
 
