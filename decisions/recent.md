@@ -1548,3 +1548,55 @@ number's only purpose left to serve here is giving the fix a tag to hang
 a green CI check on: v1.76.0 → **v1.76.1**.
 
 ---
+
+## A287 — remove legacy X-Forge-* webhook headers (T87)
+
+### Problem
+
+`httpDeliver` (`outbound.go`) dual-emitted the preferred `X-Smeldr-*`
+webhook headers alongside the legacy `X-Forge-*` set, a deprecation
+window opened at the Forge→Smeldr rename (T86) and originally deferred
+behind a major version bump. D53 (2026-08-14) established that a
+breaking change is taken inside v1 as soon as no external importer
+exists to protect — checked against the real module proxy's importers
+index, not assumed. Peter's own explicit go-ahead extended that
+reasoning past core's exported Go API to this class of wire-protocol
+compatibility on 2026-08-15 ("let's delete them now,"
+`backlog-audit-2026-08-14.md#T87`), closing the live Task
+`t87-remove-forge-compat-shims`.
+
+### Fix
+
+`httpDeliver`'s four `X-Forge-*` `req.Header.Set` calls removed; only
+`X-Smeldr-Signature`/`X-Smeldr-Timestamp`/`X-Smeldr-Event`/
+`X-Smeldr-Delivery` are set now. `signPayload`'s own doc comment
+(previously citing both header names) updated to reference only
+`X-Smeldr-Signature`. `outbound_test.go`'s `X-Forge-*` assertions and
+its `X-Smeldr-Signature == X-Forge-Signature` equality check removed —
+the `X-Smeldr-*` assertions are now the test's only header checks.
+`docs/REFERENCE.md` and `docs/SECURITY.md` updated to describe only the
+current, single header set; `docs/ARCHITECTURE.md`'s own dated
+changelog entry from A223 (2026-07-28) — which documented the
+dual-emission as a then-current, deliberate preservation — is left
+untouched, being a historical record of that commit's own state, not
+live documentation.
+
+### Companion Amendments
+
+This is the `smeldr.dev/core` half of a three-repo task (D54: two-or-more
+-repo Amendment cycles are still one Task, not necessarily separate
+ones, when Peter's own go-ahead already covers all three at once).
+`smeldr.dev/mcp` removes the legacy `forge://` MCP resource URI scheme
+(own CHANGELOG v1.32.1). `smeldr.dev/cli` removes the legacy `FORGE_*`
+env var fallbacks and the `.forge-cli.env` file fallback (own
+CHANGELOG, version TBD — checked before tagging, not assumed here).
+
+### Versioning
+
+No exported symbol changed. Coverage unaffected (existing tests
+exercise the same code paths, minus the removed assertions). `go build`/
+`go vet`/`go test ./...` clean. PATCH bump, matching A226/A281/A283/
+A286's own precedent for a real, consumer-observable behaviour change
+with no new exported symbol: v1.76.1 → **v1.76.2**.
+
+---

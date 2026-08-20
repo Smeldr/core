@@ -2640,10 +2640,9 @@ webhook subscriber cannot distinguish the two by event name.
 
 ### Webhook delivery
 
-- **Signing:** HMAC-SHA256 of `"<unix_ts>.<body>"`. Preferred header:
-  `X-Smeldr-Signature: sha256=<hex>` (legacy `X-Forge-Signature` also emitted — T87 removes it).
-- **Headers (preferred):** `X-Smeldr-Event`, `X-Smeldr-Delivery` (UUIDv4), `X-Smeldr-Timestamp`.
-  Legacy `X-Forge-*` equivalents are emitted alongside during the deprecation window.
+- **Signing:** HMAC-SHA256 of `"<unix_ts>.<body>"`. Header:
+  `X-Smeldr-Signature: sha256=<hex>`.
+- **Headers:** `X-Smeldr-Event`, `X-Smeldr-Delivery` (UUIDv4), `X-Smeldr-Timestamp`.
 - **Backoff:** `4^attempt` seconds ± 20% jitter, capped at 1 hour.
 - **Circuit breaker:** endpoint skipped after 5 consecutive failures for 5 minutes.
 - **Dead-letter:** job marked `"dead"` after 7 attempts.

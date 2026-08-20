@@ -41,7 +41,7 @@ Smeldr enforces the following security properties automatically:
 - **SSRF-safe outbound** — webhook endpoints must be HTTPS and must not resolve
   to private/loopback addresses. Validation runs at registration and at delivery.
 - **Webhook HMAC signing** — all outbound webhook payloads are signed with
-  HMAC-SHA256. The signature is transmitted in the `X-Forge-Signature` header.
+  HMAC-SHA256. The signature is transmitted in the `X-Smeldr-Signature` header.
 - **AES-256-GCM credential encryption** — smeldr.dev/social stores OAuth app
   credentials encrypted at rest using AES-256-GCM.
 - **Path traversal prevention** — smeldr.dev/media uses `os.Root` (Go 1.24+) to
@@ -90,7 +90,7 @@ Outbound webhooks are signed using HMAC-SHA256.
 
 **Header:**
 ```
-X-Forge-Signature: sha256=<hex-encoded-HMAC>
+X-Smeldr-Signature: sha256=<hex-encoded-HMAC>
 ```
 
 **Verification (Go example):**

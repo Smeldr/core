@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.76.2] — 2026-08-20
+
+### Removed
+- `httpDeliver` no longer dual-emits the legacy `X-Forge-Signature`/`X-Forge-Timestamp`/`X-Forge-Event`/`X-Forge-Delivery` webhook headers — `X-Smeldr-*` only now. Extends D53's reasoning (no compatibility twin for a caller that does not exist) from core's exported Go API to this wire-protocol compatibility, per Peter's own explicit 2026-08-15 go-ahead (T87). (A287)
+
+---
+
 ## [1.76.1] — 2026-08-20
 
 ### Fixed

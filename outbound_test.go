@@ -371,21 +371,6 @@ func TestHTTPDeliver_Success(t *testing.T) {
 	if gotHeaders.Get("Content-Type") != "application/json" {
 		t.Errorf("Content-Type: got %q", gotHeaders.Get("Content-Type"))
 	}
-	// Legacy X-Forge-* headers — must still be present during deprecation window (T86).
-	if gotHeaders.Get("X-Forge-Event") != "post.published" {
-		t.Errorf("X-Forge-Event: got %q", gotHeaders.Get("X-Forge-Event"))
-	}
-	if gotHeaders.Get("X-Forge-Delivery") != "job-1" {
-		t.Errorf("X-Forge-Delivery: got %q", gotHeaders.Get("X-Forge-Delivery"))
-	}
-	if sig := gotHeaders.Get("X-Forge-Signature"); len(sig) < 8 || sig[:7] != "sha256=" {
-		t.Errorf("X-Forge-Signature: got %q", sig)
-	}
-	ts := gotHeaders.Get("X-Forge-Timestamp")
-	if ts == "" {
-		t.Error("X-Forge-Timestamp missing")
-	}
-	// New X-Smeldr-* headers — preferred, same values as X-Forge-* (T86).
 	if gotHeaders.Get("X-Smeldr-Event") != "post.published" {
 		t.Errorf("X-Smeldr-Event: got %q", gotHeaders.Get("X-Smeldr-Event"))
 	}
@@ -397,9 +382,6 @@ func TestHTTPDeliver_Success(t *testing.T) {
 	}
 	if gotHeaders.Get("X-Smeldr-Timestamp") == "" {
 		t.Error("X-Smeldr-Timestamp missing")
-	}
-	if gotHeaders.Get("X-Smeldr-Signature") != gotHeaders.Get("X-Forge-Signature") {
-		t.Error("X-Smeldr-Signature and X-Forge-Signature must be identical")
 	}
 	if string(gotBody) != string(payload) {
 		t.Errorf("body: got %q want %q", gotBody, payload)
