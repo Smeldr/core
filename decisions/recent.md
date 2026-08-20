@@ -1431,3 +1431,95 @@ this Amendment both state it in the text a person reads before upgrading):
 v1.75.2 → **v1.76.0**.
 
 ---
+
+## A285 — App.SweepStructural wired on a real cron schedule (sweep-structural-wired-on-schedule)
+
+### Problem
+
+Zero detectors ran on the live `process.smeldr.dev` instance. `App.SweepStructural`
+and `App.DrainEvalQueue` both existed, tested, and (T223/A279) left a
+`SweepRunRecord` when run — but nothing called either on a schedule.
+Deliberately left unwired twice before: A240 named four blockers for
+`DrainEvalQueue` (provenance, Signal dispatch, cache invalidation,
+authority-check); T223/A279 gave the same caution for `SweepStructural`
+("no observability, no silent automated authority"). This task's own
+dispatch: verify each of A240's four blockers directly before wiring
+anything, rather than assuming they're closed or still open either way.
+
+### The two detectors are not in the same state
+
+`App.SweepStructural` (`smeldr.go:1025`) already has exactly the shape
+`agent.SweepFunc` expects. Its own `onStale` callback already fires
+`AfterRelationCascade` via `a.emitSignal` → `a.dispatchBus` — the same
+central dispatch path webhook delivery and the event stream already use.
+All four of A240's concerns, applied to this detector, are closed:
+observability (T223's `SweepRunRecord`), Signal dispatch (already wired
+through `dispatchBus`), and authority — this detector mutates a relation
+edge's `invalid_at`, never a content item's own governed `Status`, so
+`validateTransition`/`RoleGranted` were never the relevant gate here.
+
+`App.DrainEvalQueue` (`state.go:1014`) is different: T211/A258 closed two
+of A240's four (`drainAuthorizationGate` — a role-gated transition is
+never applied automatically, an `authorization-required` Signal is
+recorded instead; `recordProvenance` on every successful automated
+transition). The other two remain open by explicit, current-source
+design, quoting `state.go:1088-1103` directly: *"signal dispatch, cache
+invalidation and rebuild triggers are deliberately out of scope... firing
+`AfterPublish`-class signals for an automated transition would activate
+every human-publish subscriber with no operator decision that background
+automation should trigger them."* Wiring `DrainEvalQueue` on a schedule
+today would mean a ratified `Decision` can flip to `pending-re-evaluation`
+with zero Signal dispatch and zero cache invalidation — exactly the class
+of silent effect A240 refused to ship. **Deliberately not wired this
+cycle** — reversing T211's own scope decision is a real design call with
+its own consequences, left for its own future Task rather than bundled
+into this one as a side effect.
+
+### Design
+
+`example/server/main.go`: new `EnableStructuralSweep`/
+`ENABLE_STRUCTURAL_SWEEP` toggle (requires `EnableRelations` explicitly —
+fails loudly via a config error, matching the file's own existing
+`EnableRelations && EnableOrchestration` compound-gate precedent, rather
+than silently no-op through `App.SweepStructural`'s own `(0,0,0,nil)`
+short-circuit for a nil `RelationStore`) and `StructuralSweepSchedule`/
+`STRUCTURAL_SWEEP_SCHEDULE` (5-field cron, default `"0 * * * *"` —
+hourly). `smeldr.dev/agent` bumped from v0.7.1 to v0.8.0 in
+`example/server/go.mod` (v0.7.1 predates A280's own `walked`-widening,
+so `agent.NewSweepScheduler`'s current signature doesn't exist there).
+`smeldr.CreateSweepRunTable`/`smeldr.NewSweepRunStore` wired at startup;
+a wrapping closure calls `app.SweepStructural(ctx)` then records a
+`SweepRunRecord` — the exact pattern `sweep_run.go`'s own doc comment
+already specifies, since the dependency-free `smeldr.dev/agent` package
+can't record one itself without importing `smeldr.dev/core`. `buildApp`
+falls back to the `"0 * * * *"` default itself when
+`cfg.StructuralSweepSchedule` is empty (not just relying on
+`parseConfig`'s own `envOr` default) — matches `agent.NewEvalQueueScheduler`'s
+own established default-fallback pattern, protecting any caller
+constructing `ServerConfig` directly rather than only through `parseConfig`;
+caught by a real test failure during implementation
+(`TestServerToggles/on/structuralSweep` failed with a `gocron` crontab
+parse error against `baseConfig()`'s own zero-value schedule field before
+this fix), not assumed.
+
+### Tests
+
+3 new subtests in `example/server/main_test.go`'s `TestServerToggles`:
+`off/noStructuralSweep` (table not created when the flag is off),
+`on/structuralSweepRequiresRelations` (calls `buildApp` directly, asserts
+an error when `EnableRelations` is false), `on/structuralSweep` (table
+created when both flags are set). Testing depth matches this file's own
+established level for background-goroutine/infrastructure toggles
+(structural — is it wired — not a deep behavioural check of a fired
+scheduled run, since the fastest real cron granularity is one minute,
+impractical for a unit test; the scheduler mechanism itself is already
+tested in `smeldr.dev/agent`'s own repo).
+
+### Versioning
+
+No `smeldr` package file touched — `example/server`-only (config,
+wiring, its own `go.mod` pin, its own tests). No version bump, no tag,
+matching A245/A246/A282's own precedent for example-directory-only
+changes. Level 1 amendment.
+
+---

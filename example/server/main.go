@@ -35,6 +35,10 @@
 //	MASTODON_INSTANCE_URL  Mastodon instance base URL (required when ENABLE_SOCIAL)
 //	ENABLE_WEBHOOKS       wire outbound webhook delivery
 //	ENABLE_EVENT_STREAM   wire GET /_events/stream (opt-in agent event push, T269)
+//	ENABLE_STRUCTURAL_SWEEP  wire a scheduled relation-staleness sweep (requires
+//	                      ENABLE_RELATIONS; App.SweepStructural on a cron schedule,
+//	                      recorded via SweepRunStore)
+//	STRUCTURAL_SWEEP_SCHEDULE  5-field cron expression for the sweep (default: "0 * * * *", hourly)
 //	ENABLE_CONTEXT_PACKET wire GET /packet/{type}/{slug} (Editor role required; requires
 //	                      ENABLE_RELATIONS and ENABLE_ORCHESTRATION, T159)
 //	ENABLE_PROVENANCE     wire transition-provenance recording (App.Provenance)
@@ -51,8 +55,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	_ "modernc.org/sqlite"
+	agent "smeldr.dev/agent"
 	agentflow "smeldr.dev/agent/flow"
 	smeldr "smeldr.dev/core"
 	"smeldr.dev/mcp"
@@ -64,34 +70,36 @@ import (
 // ServerConfig holds all configuration derived from environment variables.
 // Construct it via [parseConfig] for production use, or set fields directly in tests.
 type ServerConfig struct {
-	Secret               string
-	BaseURL              string
-	Port                 string
-	Addr                 string
-	EnableTokens         bool
-	EnableGovernance     bool
-	EnableRelations      bool
-	EnableDynamicContent bool
-	EnableBlocks         bool
-	EnableOrchestration  bool
-	EnableRedirects      bool
-	EnablePageMeta       bool
-	EnableMedia          bool
-	MediaBackend         string
-	EnableSocial         bool
-	MastodonClientID     string
-	MastodonClientSecret string
-	MastodonInstanceURL  string
-	EnableWebhooks       bool
-	EnableEventStream    bool
-	EnableContextPacket  bool
-	EnableProvenance     bool
-	EnableAgents         bool
-	AgentMCPURL          string
-	AgentMCPToken        string
-	OAuthIssuer          string
-	OAuthDBPath          string
-	InstanceName         string
+	Secret                  string
+	BaseURL                 string
+	Port                    string
+	Addr                    string
+	EnableTokens            bool
+	EnableGovernance        bool
+	EnableRelations         bool
+	EnableDynamicContent    bool
+	EnableBlocks            bool
+	EnableOrchestration     bool
+	EnableRedirects         bool
+	EnablePageMeta          bool
+	EnableMedia             bool
+	MediaBackend            string
+	EnableSocial            bool
+	MastodonClientID        string
+	MastodonClientSecret    string
+	MastodonInstanceURL     string
+	EnableWebhooks          bool
+	EnableEventStream       bool
+	EnableStructuralSweep   bool
+	StructuralSweepSchedule string
+	EnableContextPacket     bool
+	EnableProvenance        bool
+	EnableAgents            bool
+	AgentMCPURL             string
+	AgentMCPToken           string
+	OAuthIssuer             string
+	OAuthDBPath             string
+	InstanceName            string
 }
 
 // ServerResult holds the live components returned by [buildApp].
@@ -107,34 +115,36 @@ type ServerResult struct {
 func parseConfig() ServerConfig {
 	port := envOr("PORT", "8080")
 	return ServerConfig{
-		Secret:               requireEnv("SECRET"),
-		BaseURL:              os.Getenv("BASE_URL"),
-		Port:                 port,
-		Addr:                 envOr("ADDR", "127.0.0.1:"+port),
-		EnableTokens:         os.Getenv("ENABLE_TOKENS") != "",
-		EnableGovernance:     os.Getenv("ENABLE_GOVERNANCE") != "",
-		EnableRelations:      os.Getenv("ENABLE_RELATIONS") != "",
-		EnableDynamicContent: os.Getenv("ENABLE_DYNAMIC_CONTENT") != "",
-		EnableBlocks:         os.Getenv("ENABLE_BLOCKS") != "",
-		EnableOrchestration:  os.Getenv("ENABLE_ORCHESTRATION") != "",
-		EnableRedirects:      os.Getenv("ENABLE_REDIRECTS") != "",
-		EnablePageMeta:       os.Getenv("ENABLE_PAGE_META") != "",
-		EnableMedia:          os.Getenv("ENABLE_MEDIA") != "",
-		MediaBackend:         envOr("MEDIA_STORE_BACKEND", "local"),
-		EnableSocial:         os.Getenv("ENABLE_SOCIAL") != "",
-		MastodonClientID:     os.Getenv("MASTODON_CLIENT_ID"),
-		MastodonClientSecret: os.Getenv("MASTODON_CLIENT_SECRET"),
-		MastodonInstanceURL:  os.Getenv("MASTODON_INSTANCE_URL"),
-		EnableWebhooks:       os.Getenv("ENABLE_WEBHOOKS") != "",
-		EnableEventStream:    os.Getenv("ENABLE_EVENT_STREAM") != "",
-		EnableContextPacket:  os.Getenv("ENABLE_CONTEXT_PACKET") != "",
-		EnableProvenance:     os.Getenv("ENABLE_PROVENANCE") != "",
-		EnableAgents:         os.Getenv("ENABLE_AGENTS") != "",
-		AgentMCPURL:          envOr("AGENT_MCP_URL", "http://127.0.0.1:"+port+"/mcp/message"),
-		AgentMCPToken:        os.Getenv("AGENT_MCP_TOKEN"),
-		OAuthIssuer:          os.Getenv("OAUTH_ISSUER"),
-		OAuthDBPath:          envOr("OAUTH_DB_PATH", "./oauth.db"),
-		InstanceName:         envOr("INSTANCE_NAME", "smeldr-dogfood"),
+		Secret:                  requireEnv("SECRET"),
+		BaseURL:                 os.Getenv("BASE_URL"),
+		Port:                    port,
+		Addr:                    envOr("ADDR", "127.0.0.1:"+port),
+		EnableTokens:            os.Getenv("ENABLE_TOKENS") != "",
+		EnableGovernance:        os.Getenv("ENABLE_GOVERNANCE") != "",
+		EnableRelations:         os.Getenv("ENABLE_RELATIONS") != "",
+		EnableDynamicContent:    os.Getenv("ENABLE_DYNAMIC_CONTENT") != "",
+		EnableBlocks:            os.Getenv("ENABLE_BLOCKS") != "",
+		EnableOrchestration:     os.Getenv("ENABLE_ORCHESTRATION") != "",
+		EnableRedirects:         os.Getenv("ENABLE_REDIRECTS") != "",
+		EnablePageMeta:          os.Getenv("ENABLE_PAGE_META") != "",
+		EnableMedia:             os.Getenv("ENABLE_MEDIA") != "",
+		MediaBackend:            envOr("MEDIA_STORE_BACKEND", "local"),
+		EnableSocial:            os.Getenv("ENABLE_SOCIAL") != "",
+		MastodonClientID:        os.Getenv("MASTODON_CLIENT_ID"),
+		MastodonClientSecret:    os.Getenv("MASTODON_CLIENT_SECRET"),
+		MastodonInstanceURL:     os.Getenv("MASTODON_INSTANCE_URL"),
+		EnableWebhooks:          os.Getenv("ENABLE_WEBHOOKS") != "",
+		EnableEventStream:       os.Getenv("ENABLE_EVENT_STREAM") != "",
+		EnableStructuralSweep:   os.Getenv("ENABLE_STRUCTURAL_SWEEP") != "",
+		StructuralSweepSchedule: envOr("STRUCTURAL_SWEEP_SCHEDULE", "0 * * * *"),
+		EnableContextPacket:     os.Getenv("ENABLE_CONTEXT_PACKET") != "",
+		EnableProvenance:        os.Getenv("ENABLE_PROVENANCE") != "",
+		EnableAgents:            os.Getenv("ENABLE_AGENTS") != "",
+		AgentMCPURL:             envOr("AGENT_MCP_URL", "http://127.0.0.1:"+port+"/mcp/message"),
+		AgentMCPToken:           os.Getenv("AGENT_MCP_TOKEN"),
+		OAuthIssuer:             os.Getenv("OAUTH_ISSUER"),
+		OAuthDBPath:             envOr("OAUTH_DB_PATH", "./oauth.db"),
+		InstanceName:            envOr("INSTANCE_NAME", "smeldr-dogfood"),
 	}
 }
 
@@ -267,6 +277,54 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 
 	if cfg.EnableEventStream {
 		app.EventStream()
+	}
+
+	if cfg.EnableStructuralSweep {
+		if !cfg.EnableRelations {
+			return ServerResult{}, fmt.Errorf("ENABLE_STRUCTURAL_SWEEP requires ENABLE_RELATIONS")
+		}
+		runStore := smeldr.NewSweepRunStore(db)
+		if err := smeldr.CreateSweepRunTable(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create sweep run table: %w", err)
+		}
+		// Fall back to the hourly default when ServerConfig is constructed
+		// directly rather than via parseConfig's own envOr default (e.g. a
+		// caller building ServerConfig by hand) — matches
+		// agent.NewEvalQueueScheduler's own established default-fallback
+		// pattern rather than passing an invalid empty cron expression
+		// through.
+		schedule := cfg.StructuralSweepSchedule
+		if schedule == "" {
+			schedule = "0 * * * *"
+		}
+		// Wrapping closure records each run via SweepRunStore — the
+		// dependency-free smeldr.dev/agent package cannot do this itself
+		// without importing smeldr.dev/core (SweepRunStore's own doc
+		// comment, sweep_run.go).
+		sweepFn := func(ctx context.Context) (int, int, int, error) {
+			walked, flagged, skipped, sweepErr := app.SweepStructural(ctx)
+			errStr := ""
+			if sweepErr != nil {
+				errStr = sweepErr.Error()
+			}
+			_ = runStore.Append(ctx, smeldr.SweepRunRecord{
+				ID:       smeldr.NewID(),
+				Detector: "structural",
+				RanAt:    time.Now().UTC(),
+				Interval: schedule,
+				Walked:   walked,
+				Flagged:  flagged,
+				Skipped:  skipped,
+				Err:      errStr,
+			})
+			return walked, flagged, skipped, sweepErr
+		}
+		sweep, err := agent.NewSweepScheduler(schedule, "UTC", sweepFn)
+		if err != nil {
+			return ServerResult{}, fmt.Errorf("structural sweep scheduler: %w", err)
+		}
+		sweep.Start()
+		stopFuncs = append(stopFuncs, sweep.Stop)
 	}
 
 	// ENABLE_AGENTS must register before mcp.New so AgentJob appears in MCP tools.

@@ -503,4 +503,49 @@ func TestServerToggles(t *testing.T) {
 			t.Errorf("GET /_events/stream (no token): got %d, want 401", got)
 		}
 	})
+
+	t.Run("off/noStructuralSweep", func(t *testing.T) {
+		cfg := baseConfig()
+		// EnableStructuralSweep deliberately left false.
+		ts := buildTestServer(t, cfg)
+
+		var name string
+		err := ts.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='smeldr_sweep_runs'`).Scan(&name)
+		if err != sql.ErrNoRows {
+			t.Errorf("smeldr_sweep_runs table exists (err=%v), want no such table when ENABLE_STRUCTURAL_SWEEP=false", err)
+		}
+	})
+
+	t.Run("on/structuralSweepRequiresRelations", func(t *testing.T) {
+		// Config validation must fail loudly, not silently no-op via
+		// App.SweepStructural's own (0,0,0,nil) short-circuit for a
+		// nil RelationStore.
+		cfg := baseConfig()
+		cfg.EnableStructuralSweep = true
+		cfg.EnableRelations = false
+
+		db, err := sql.Open("sqlite", ":memory:")
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		defer db.Close()
+		db.SetMaxOpenConns(1)
+
+		_, err = buildApp(cfg, db)
+		if err == nil {
+			t.Fatal("buildApp: want error when ENABLE_STRUCTURAL_SWEEP=true without ENABLE_RELATIONS")
+		}
+	})
+
+	t.Run("on/structuralSweep", func(t *testing.T) {
+		cfg := baseConfig()
+		cfg.EnableRelations = true
+		cfg.EnableStructuralSweep = true
+		ts := buildTestServer(t, cfg)
+
+		var name string
+		if err := ts.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='smeldr_sweep_runs'`).Scan(&name); err != nil {
+			t.Errorf("smeldr_sweep_runs table: %v, want it created when ENABLE_STRUCTURAL_SWEEP=true", err)
+		}
+	})
 }
