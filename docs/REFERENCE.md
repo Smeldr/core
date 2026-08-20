@@ -3739,11 +3739,14 @@ type State struct {
 
 ```go
 type Transition struct {
-    From         string
-    To           string
-    RequiredRole string // empty = any authenticated role
+    From           string
+    To             string
+    RequiredRole   string // empty = any authenticated role
+    RequiredReason bool   // A220: caller must supply a non-empty reason
 }
 ```
+
+`RequiredReason` gates on the `reason` argument threaded by `App.TransitionItemWithReason`, `Module[T]`'s `MCPPublish`/`MCPSchedule`/`MCPArchive`, and `updateHandler`'s `Smeldr-Reason` request header (T237) — an empty reason against a `RequiredReason` transition returns `ErrBadRequest`.
 
 ### `App.RegisterFlow`
 

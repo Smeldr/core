@@ -95,11 +95,17 @@ type MCPModule interface {
 	// MCPUpdate applies a partial update to the item with the given slug.
 	MCPUpdate(ctx Context, slug string, fields map[string]any) (any, error)
 	// MCPPublish transitions the item with the given slug to Published.
-	MCPPublish(ctx Context, slug string) error
-	// MCPSchedule sets the item with the given slug to publish at the given time.
-	MCPSchedule(ctx Context, slug string, at time.Time) error
+	// reason is passed through to the transition's own audit trail
+	// (validateTransition's RequiredReason gate); "" means none supplied.
+	// Breaking change taken under D53 (Task T237) — no compatibility twin,
+	// since no external importer of this interface exists yet.
+	MCPPublish(ctx Context, slug, reason string) error
+	// MCPSchedule sets the item with the given slug to publish at the given
+	// time. reason: see MCPPublish.
+	MCPSchedule(ctx Context, slug string, at time.Time, reason string) error
 	// MCPArchive transitions the item with the given slug to Archived.
-	MCPArchive(ctx Context, slug string) error
+	// reason: see MCPPublish.
+	MCPArchive(ctx Context, slug, reason string) error
 	// MCPDelete permanently deletes the item with the given slug.
 	MCPDelete(ctx Context, slug string) error
 }

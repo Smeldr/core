@@ -157,7 +157,9 @@ smeldr.dev/
 ├── mcp.go            MCPOperation type, MCPRead/MCPWrite constants, MCP() option,
 │                     MCPMeta struct (Prefix, TypeName, Operations, SingleInstance), MCPField struct
 │                     (incl. Format/Description — D27), MCPModule interface
-│                     (Amendment A49)
+│                     (Amendment A49); MCPPublish/MCPSchedule/MCPArchive each gained a trailing
+│                     reason string parameter, threaded to validateTransition's RequiredReason
+│                     gate — breaking change taken under D53 (Amendment A284, T237)
 ├── node.go           Node (incl. Rev int — optimistic-concurrency token, Amendment A158), Status,
 │                     lifecycle constants, NewID(), GenerateSlug(), UniqueSlug(), ValidateStruct()
 │                     GetSlug(), GetPublishedAt(), GetStatus() getter methods (Amendment A2)
@@ -657,6 +659,21 @@ smeldr.dev/
                         field; MCPList's own exported signature is unchanged, zero mcp changes
                         needed, matching T214's own "reuse the funnel, no breaking change" shape
                         (Amendment A267, T262)
+│                     MCPPublish/MCPSchedule/MCPArchive each gained a trailing reason string
+                        parameter, threaded into their existing validateTransition call in place
+                        of the hardcoded "" every call site previously passed — closes the gap
+                        A256 named and deferred as T237: Transition.RequiredReason (A220) has been
+                        unreachable from any REST/MCP entry point since it shipped. updateHandler
+                        reads a new Smeldr-Reason request header (guarded by the same
+                        prevStatus != newStatus check already wrapping its validateTransition
+                        call) rather than a body field — a reserved body key would collide with a
+                        caller's own "Reason" field on the decoded item struct, an out-of-band
+                        header does not. Breaking change to the exported MCPModule interface taken
+                        under D53 (no compatibility twin — no external importer exists yet, per
+                        D53's checked-fact requirement); smeldr.dev/mcp's own dispatch code and
+                        smeldr/media's/smeldr/social's MCPModule implementations are each deferred
+                        to their own future Task per D54, out of this task's core-only scope
+                        (Amendment A284, T237)
 ├── forge.go          Config, MustConfig, New, App (Use/Content/Handle/Run/Handler/SEO),
 │                     Registrator, SEOOption, seoState (robots/ogDefaults/appSchema), httpsRedirect,
 │                     standaloneDispatcher internal interface (A101),

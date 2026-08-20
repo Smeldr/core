@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.76.0] — 2026-08-20
+
+### Changed
+- **BREAKING:** `MCPModule.MCPPublish`, `MCPModule.MCPSchedule`, and `MCPModule.MCPArchive` each gain a trailing `reason string` parameter, threaded into `Module[T]`'s existing `validateTransition` call in place of the hardcoded `""` every call site previously passed. Closes a gap A256 named and deferred as T237: `Transition.RequiredReason` (A220) has been unreachable from any REST or MCP entry point since it shipped — an empty reason against a `RequiredReason`-gated transition now correctly returns `ErrBadRequest` through these methods, not just through `App.TransitionItemWithReason`. Breaking change to the exported `MCPModule` interface, taken inside v1 with no compatibility twin under D53 — no external importer of this interface exists yet (checked against the module proxy's importers index, T217/A282's pin-currency mechanism). `smeldr.dev/mcp`'s own dispatch code and `smeldr/media`'s/`smeldr/social`'s `MCPModule` implementations are each their own future Task under D54, out of this task's core-only scope — until that lands, `publish_{type}`/`schedule_{type}`/`archive_{type}` MCP tools continue to pass an empty reason, same as before this release.
+- `Module[T]`'s `updateHandler` reads a new `Smeldr-Reason` request header (guarded by the same `prevStatus != newStatus` check already wrapping its `validateTransition` call) rather than a body field — a reserved body key would collide with a caller's own `Reason` field on the decoded item struct, an out-of-band header does not.
+- 6 new tests (`state_test.go`): `TestModule_MCPPublish_ThreadsReason`, `TestModule_MCPSchedule_ThreadsReason`, `TestModule_MCPArchive_ThreadsReason` each prove the gate rejects an empty reason and accepts a real one; `TestModule_updateHandler_ReasonHeader_ThreadsToValidateTransition`, `TestModule_updateHandler_RequiredReason_MissingHeader_StillRejected`, `TestModule_updateHandler_NoReasonHeader_SameStatusUnaffected` cover the HTTP header path end-to-end via a real `App`/`Module[T]`/SQLite-backed flow.
+- Coverage: 96.3% package-wide. `go test -race ./...` clean. `golangci-lint` clean. MINOR bump per D53's addendum (a breaking change inside v1 takes the largest signal version numbers can carry — PATCH would be actively misleading): v1.75.2 → **v1.76.0**. (A284, T237)
+
+---
+
 ## [1.75.2] — 2026-08-20
 
 ### Fixed

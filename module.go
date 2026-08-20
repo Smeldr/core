@@ -1923,7 +1923,12 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	newStatus := nodeStatusOf(item)
 
 	if prevStatus != newStatus {
-		if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(newStatus), ""); err != nil {
+		// T237: an out-of-band header, never a body field — the decoded item
+		// struct above is free to declare its own "Reason" field, so any
+		// reserved body key would be a live collision (serveblocks.go's own
+		// buildData/Status precedent), not merely a theoretical one.
+		reason := r.Header.Get("Smeldr-Reason")
+		if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(newStatus), reason); err != nil {
 			WriteError(w, r, err)
 			return
 		}
@@ -2515,7 +2520,8 @@ func (m *Module[T]) patchHandler(w http.ResponseWriter, r *http.Request) {
 
 // MCPPublish transitions the item with the given slug to Published, sets
 // PublishedAt to now, fires AfterPublish, and triggers derived-content rebuild.
-func (m *Module[T]) MCPPublish(ctx Context, slug string) error {
+// reason is threaded into validateTransition's own RequiredReason gate (T237).
+func (m *Module[T]) MCPPublish(ctx Context, slug, reason string) error {
 	item, err := m.resolveItem(ctx, slug)
 	if err != nil {
 		return err
@@ -2527,7 +2533,7 @@ func (m *Module[T]) MCPPublish(ctx Context, slug string) error {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
-	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Published), ""); err != nil {
+	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Published), reason); err != nil {
 		return err
 	}
 	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Published), nodeIDOf(item)); err != nil {
@@ -2549,14 +2555,15 @@ func (m *Module[T]) MCPPublish(ctx Context, slug string) error {
 }
 
 // MCPSchedule sets the item with the given slug to Scheduled and records
-// the time at which it will be automatically published.
-func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time) error {
+// the time at which it will be automatically published. reason is threaded
+// into validateTransition's own RequiredReason gate (T237).
+func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time, reason string) error {
 	item, err := m.resolveItem(ctx, slug)
 	if err != nil {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
-	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Scheduled), ""); err != nil {
+	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Scheduled), reason); err != nil {
 		return err
 	}
 	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Scheduled), nodeIDOf(item)); err != nil {
@@ -2576,14 +2583,15 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time) error {
 }
 
 // MCPArchive transitions the item with the given slug to Archived, fires
-// AfterArchive, and triggers derived-content rebuild.
-func (m *Module[T]) MCPArchive(ctx Context, slug string) error {
+// AfterArchive, and triggers derived-content rebuild. reason is threaded
+// into validateTransition's own RequiredReason gate (T237).
+func (m *Module[T]) MCPArchive(ctx Context, slug, reason string) error {
 	item, err := m.resolveItem(ctx, slug)
 	if err != nil {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
-	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Archived), ""); err != nil {
+	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Archived), reason); err != nil {
 		return err
 	}
 	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Archived), nodeIDOf(item)); err != nil {

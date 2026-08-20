@@ -37,7 +37,7 @@ func TestSlugCollision_BlocksPublishInAggregate(t *testing.T) {
 	}
 
 	sctx := newTestContext(t)
-	err := m1.MCPPublish(sctx, "hello")
+	err := m1.MCPPublish(sctx, "hello", "")
 	if err == nil {
 		t.Fatal("expected slug collision error, got nil")
 	}
@@ -80,7 +80,7 @@ func TestSlugCollision_AllowsPublishWhenNoConflict(t *testing.T) {
 	}
 
 	sctx := newTestContext(t)
-	if err := m1.MCPPublish(sctx, "unique"); err != nil {
+	if err := m1.MCPPublish(sctx, "unique", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestSlugCollision_NoCheckForNonAggregateModule(t *testing.T) {
 	}
 
 	sctx := newTestContext(t)
-	if err := m.MCPPublish(sctx, "free"); err != nil {
+	if err := m.MCPPublish(sctx, "free", ""); err != nil {
 		t.Fatalf("unexpected error for non-aggregate module: %v", err)
 	}
 }

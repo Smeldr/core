@@ -2407,7 +2407,7 @@ func TestModule_MCPPublish_ByHumanID(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 	m := newTaskModule(mem)
-	if err := m.MCPPublish(NewTestContext(editorUser()), "T203"); err != nil {
+	if err := m.MCPPublish(NewTestContext(editorUser()), "T203", ""); err != nil {
 		t.Fatalf("MCPPublish by human ID: %v", err)
 	}
 	got, err := mem.FindBySlug(context.Background(), "task-t203")
@@ -2422,7 +2422,7 @@ func TestModule_MCPPublish_ByHumanID(t *testing.T) {
 func TestMCPPublish_findBySlugError(t *testing.T) {
 	m := newTestModule(errorRepo[*testPost]{})
 	ctx := NewTestContext(editorUser())
-	if err := m.MCPPublish(ctx, "any-slug"); err == nil {
+	if err := m.MCPPublish(ctx, "any-slug", ""); err == nil {
 		t.Error("MCPPublish should return error when FindBySlug fails")
 	}
 }
@@ -2432,7 +2432,7 @@ func TestMCPPublish_saveError(t *testing.T) {
 	p := seedPost(t, mem, "Test", Draft)
 	m := newTestModule(savefailRepo[*testPost]{inner: mem})
 	ctx := NewTestContext(editorUser())
-	if err := m.MCPPublish(ctx, p.Slug); err == nil {
+	if err := m.MCPPublish(ctx, p.Slug, ""); err == nil {
 		t.Error("MCPPublish should return error when Save fails")
 	}
 }
@@ -2442,7 +2442,7 @@ func TestMCPPublish_saveError(t *testing.T) {
 func TestMCPSchedule_findBySlugError(t *testing.T) {
 	m := newTestModule(errorRepo[*testPost]{})
 	ctx := NewTestContext(editorUser())
-	if err := m.MCPSchedule(ctx, "any-slug", time.Now().Add(time.Hour)); err == nil {
+	if err := m.MCPSchedule(ctx, "any-slug", time.Now().Add(time.Hour), ""); err == nil {
 		t.Error("MCPSchedule should return error when FindBySlug fails")
 	}
 }
@@ -2452,7 +2452,7 @@ func TestMCPSchedule_saveError(t *testing.T) {
 	p := seedPost(t, mem, "Test", Draft)
 	m := newTestModule(savefailRepo[*testPost]{inner: mem})
 	ctx := NewTestContext(editorUser())
-	if err := m.MCPSchedule(ctx, p.Slug, time.Now().Add(time.Hour)); err == nil {
+	if err := m.MCPSchedule(ctx, p.Slug, time.Now().Add(time.Hour), ""); err == nil {
 		t.Error("MCPSchedule should return error when Save fails")
 	}
 }
@@ -2462,7 +2462,7 @@ func TestMCPSchedule_saveError(t *testing.T) {
 func TestMCPArchive_findBySlugError(t *testing.T) {
 	m := newTestModule(errorRepo[*testPost]{})
 	ctx := NewTestContext(editorUser())
-	if err := m.MCPArchive(ctx, "any-slug"); err == nil {
+	if err := m.MCPArchive(ctx, "any-slug", ""); err == nil {
 		t.Error("MCPArchive should return error when FindBySlug fails")
 	}
 }
@@ -2472,7 +2472,7 @@ func TestMCPArchive_saveError(t *testing.T) {
 	p := seedPost(t, mem, "Test", Draft)
 	m := newTestModule(savefailRepo[*testPost]{inner: mem})
 	ctx := NewTestContext(editorUser())
-	if err := m.MCPArchive(ctx, p.Slug); err == nil {
+	if err := m.MCPArchive(ctx, p.Slug, ""); err == nil {
 		t.Error("MCPArchive should return error when Save fails")
 	}
 }

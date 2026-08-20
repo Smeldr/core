@@ -310,7 +310,7 @@ func TestMCPModuleInterface(t *testing.T) {
 	}
 
 	// Publish.
-	if err := m.MCPPublish(ctx, slug); err != nil {
+	if err := m.MCPPublish(ctx, slug, ""); err != nil {
 		t.Fatalf("MCPPublish: %v", err)
 	}
 	published, _ := m.MCPGet(ctx, slug)
@@ -322,7 +322,7 @@ func TestMCPModuleInterface(t *testing.T) {
 	}
 
 	// Archive.
-	if err := m.MCPArchive(ctx, slug); err != nil {
+	if err := m.MCPArchive(ctx, slug, ""); err != nil {
 		t.Fatalf("MCPArchive: %v", err)
 	}
 	archived, _ := m.MCPGet(ctx, slug)
@@ -332,7 +332,7 @@ func TestMCPModuleInterface(t *testing.T) {
 
 	// Schedule.
 	when := time.Now().Add(24 * time.Hour).UTC()
-	if err := m.MCPSchedule(ctx, slug, when); err != nil {
+	if err := m.MCPSchedule(ctx, slug, when, ""); err != nil {
 		t.Fatalf("MCPSchedule: %v", err)
 	}
 	scheduled, _ := m.MCPGet(ctx, slug)

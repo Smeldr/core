@@ -1306,3 +1306,128 @@ findings. PATCH bump, matching A247/A253/A261/A281's own precedent
 **v1.75.2**.
 
 ---
+
+## A284 — MCPModule.MCPPublish/MCPSchedule/MCPArchive gain a reason parameter (T237)
+
+### Problem
+
+A220 added `Transition.RequiredReason bool` and threaded a `reason string`
+parameter into `validateTransition`'s own signature, but A256's own
+investigation (2026-08-13) found every real call site in `module.go` —
+`updateHandler`, `MCPPublish`, `MCPSchedule`, `MCPArchive` — passed a
+hardcoded `""`. A `RequiredReason`-gated transition has been structurally
+unreachable through any REST or MCP entry point since A220 shipped:
+declaring the gate on a `StateFlow.Transitions` entry had no observable
+effect anywhere except `App.TransitionItemWithReason`, A256's own new
+method for the `transition_item` MCP tool. A256 deliberately narrowed its
+own scope to that one method rather than the four `module.go` call sites,
+tracking the gap as T237 — "a wire-format question, not a
+parameter-threading one," since `MCPPublish`/`MCPSchedule`/`MCPArchive`
+are methods on the exported `MCPModule` interface (changing their
+signature is a breaking change to every implementer), while
+`updateHandler` needed a design decision about where an HTTP `PUT` caller
+supplies a reason without colliding with the request body's own decoded
+fields.
+
+### Design
+
+`MCPModule`'s three methods (`mcp.go`) each gain a trailing
+`reason string` parameter:
+
+```go
+MCPPublish(ctx Context, slug, reason string) error
+MCPSchedule(ctx Context, slug string, at time.Time, reason string) error
+MCPArchive(ctx Context, slug, reason string) error
+```
+
+`Module[T]`'s three implementations (`module.go`) thread `reason` into
+their existing `validateTransition(...)` call, replacing the hardcoded
+`""` argument — no new logic, the gate itself (`RequiredReason` check
+inside `validateTransition`) already existed and already worked correctly
+whenever it was actually reached; the whole gap was that no caller ever
+supplied a real value.
+
+`updateHandler` reads a new `Smeldr-Reason` request header rather than a
+body field, guarded by the same `if prevStatus != newStatus` condition
+already wrapping its `validateTransition` call (so a same-status content
+edit never reads the header at all — matches `updateHandler`'s own
+existing pattern of only paying the `validateTransition` cost on an actual
+transition). A reserved JSON body key (e.g. `"reason"` or `"Reason"`) was
+considered and rejected: `updateHandler` decodes the request body directly
+into the caller's own struct type via `json.Unmarshal`, so any content
+type that happens to declare its own `Reason` field (plausible — it is not
+an unusual word) would collide with a reserved key silently, not with a
+compile error. An out-of-band header cannot collide with a decoded field
+by construction. `serveblocks.go`'s own `buildData`/`Status` handling was
+checked as the closest existing precedent for a reserved-body-key
+collision risk in this codebase and confirmed as a live, not merely
+theoretical, concern.
+
+### Breaking change (D53)
+
+This is a breaking change to the exported `MCPModule` interface — any
+independent implementer (not just `Module[T]`) must update its own method
+signatures to keep compiling against the new `smeldr.dev/core` version. No
+compatibility twin (e.g. an `MCPPublishWithReason` sibling method
+preserving the old three-argument signature) is added, per D53: breaking
+changes are taken inside v1 as long as no external importer exists yet,
+checked against the module proxy's own importers index (T217/A282's
+pin-currency mechanism), not assumed. `smeldr.dev/mcp`, `smeldr/media`,
+and `smeldr/social` are the three known implementers, all `smeldr.dev/*`
+ourselves — updating each of their own `MCPModule` implementations to the
+new three-parameter shape is out of this task's core-only scope, tracked
+as separate future Tasks per D54 (two-repo Amendment cycles split: core
+ships and tags first, downstream repos get their own Task once core is
+tagged and proxy-verified). Until that lands, `smeldr.dev/mcp`'s own
+`publish_{type}`/`schedule_{type}`/`archive_{type}` tool dispatch code
+cannot compile against this core version at all — pinning to v1.76.0 in
+that repo is itself part of the deferred downstream Task, not a
+consequence discovered after the fact.
+
+### Tests
+
+6 new tests in `state_test.go`. `requiredReasonPostFlow` registers a
+`StateFlow` for `testPost` whose three draft-originating transitions
+(`draft→published`, `draft→scheduled`, `draft→archived`) all require a
+reason — reused by all six new tests rather than three separate fixtures.
+`TestModule_MCPPublish_ThreadsReason`/`_MCPSchedule_ThreadsReason`/
+`_MCPArchive_ThreadsReason` each call the method once with `""` (asserts
+`ErrBadRequest` — proves the gate is actually live for this flow before
+testing satisfaction) and once with a real reason string (asserts `nil`
+error — proves the parameter reaches `validateTransition`'s own last
+argument, not merely that it compiles).
+`TestModule_updateHandler_ReasonHeader_ThreadsToValidateTransition` builds
+a real `App` via `New(MustConfig(Config{DB: sqlDB, ...}))` + `app.Content(m)`
+and drives a real `httptest` `PUT` request with `Smeldr-Reason` set,
+asserting 200.
+`TestModule_updateHandler_RequiredReason_MissingHeader_StillRejected` is
+the same request with the header omitted, asserting 400 — this test
+caught a real bug during implementation, not merely confirmed the design:
+`App.Content` unconditionally calls `dbs.setDB(a.cfg.DB)` on any module
+implementing `setDB`, which silently overwrote an `m.setDB(sqlDB)` call
+made *before* `app.Content(m)` with `nil` (since `Config.DB` was left
+unset), making `validateTransition` unable to find the registered flow at
+all and passing both the reason-present and reason-missing requests
+through as 200s. Fixed by passing `DB: sqlDB` in the `Config` literal
+itself, letting `App.Content`'s existing wiring do what it already does
+for every other `Module[T]` test elsewhere in this file, rather than
+racing it. `TestModule_updateHandler_NoReasonHeader_SameStatusUnaffected`
+pins the common case (a same-status content edit) never reaching the gate
+at all, regardless of the header's absence.
+
+### Versioning
+
+No exported symbol removed; three exported interface methods changed
+signature (breaking). Coverage: 96.3% package-wide. `go build ./...`,
+`go vet ./...` (catches the 25 call-site compile errors across
+`state_test.go`, `module_test.go`, `slug_collision_test.go`, `mcp_test.go`,
+`integration_full_test.go` that `go build` alone does not, since it never
+compiles `_test.go` files), `go test -race -count=1 ./...`, `gofmt -l .`,
+and `golangci-lint run ./...` all clean. MINOR bump per D53's own addendum
+(a breaking change inside v1 takes the largest signal version numbers can
+carry within v1 — PATCH would be actively misleading, and the version
+number alone cannot state `BREAKING`, which is why the CHANGELOG entry and
+this Amendment both state it in the text a person reads before upgrading):
+v1.75.2 → **v1.76.0**.
+
+---

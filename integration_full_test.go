@@ -2283,7 +2283,7 @@ func TestFull_G22_MCPCreatePublishLifecycle(t *testing.T) {
 	slug := got.Slug
 
 	// MCPPublish: Draft -> Published.
-	if err := mod.MCPPublish(ctx, slug); err != nil {
+	if err := mod.MCPPublish(ctx, slug, ""); err != nil {
 		t.Fatalf("MCPPublish: %v", err)
 	}
 
@@ -2647,7 +2647,7 @@ func TestFull_G26_SignalEnqueue(t *testing.T) {
 		t.Fatalf("MCPCreate: %v", err)
 	}
 	post := item.(*g26Post)
-	if err := mod.MCPPublish(userCtx, post.Slug); err != nil {
+	if err := mod.MCPPublish(userCtx, post.Slug, ""); err != nil {
 		t.Fatalf("MCPPublish: %v", err)
 	}
 
@@ -2973,7 +2973,7 @@ func TestFull_G30_MCPScheduleWebhook(t *testing.T) {
 	post := item.(*g30Post)
 
 	// Schedule it for 1 hour from now.
-	if err := mod.MCPSchedule(userCtx, post.Slug, time.Now().Add(time.Hour)); err != nil {
+	if err := mod.MCPSchedule(userCtx, post.Slug, time.Now().Add(time.Hour), ""); err != nil {
 		t.Fatalf("MCPSchedule: %v", err)
 	}
 
@@ -3217,7 +3217,7 @@ func TestFull_G32_OnSignalAndWebhookCoexist(t *testing.T) {
 		t.Fatalf("MCPCreate: %v", err)
 	}
 	post := item.(*g32Post)
-	if err := mod.MCPPublish(userCtx, post.Slug); err != nil {
+	if err := mod.MCPPublish(userCtx, post.Slug, ""); err != nil {
 		t.Fatalf("MCPPublish: %v", err)
 	}
 
@@ -3326,7 +3326,7 @@ func TestFull_G33_AuditTrailLifecycle(t *testing.T) {
 	}
 
 	// MCPPublish: AfterPublish fires -> AuditRecord must be appended.
-	if err := m.MCPPublish(editorCtx, post.Slug); err != nil {
+	if err := m.MCPPublish(editorCtx, post.Slug, ""); err != nil {
 		t.Fatalf("MCPPublish: %v", err)
 	}
 

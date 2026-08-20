@@ -1031,7 +1031,7 @@ func TestMCPPublish_invalidTransition(t *testing.T) {
 	m.setDB(sqlDB)
 
 	ctx := NewTestContext(editorUser())
-	err := m.MCPPublish(ctx, p.Slug)
+	err := m.MCPPublish(ctx, p.Slug, "")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("MCPPublish on invalid transition: want ErrConflict, got %v", err)
 	}
@@ -1048,7 +1048,7 @@ func TestMCPArchive_invalidTransition(t *testing.T) {
 	m.setDB(sqlDB)
 
 	ctx := NewTestContext(editorUser())
-	err := m.MCPArchive(ctx, p.Slug)
+	err := m.MCPArchive(ctx, p.Slug, "")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("MCPArchive on invalid transition: want ErrConflict, got %v", err)
 	}
@@ -1065,9 +1065,193 @@ func TestMCPSchedule_invalidTransition(t *testing.T) {
 	m.setDB(sqlDB)
 
 	ctx := NewTestContext(editorUser())
-	err := m.MCPSchedule(ctx, p.Slug, time.Now().Add(time.Hour))
+	err := m.MCPSchedule(ctx, p.Slug, time.Now().Add(time.Hour), "")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("MCPSchedule on invalid transition: want ErrConflict, got %v", err)
+	}
+}
+
+// — reason threading (T237) ————————————————————————————————————————————————
+
+// requiredReasonPostFlow registers a flow for "testPost" whose three
+// draft-originating transitions all require a reason — enough to prove
+// MCPPublish/MCPSchedule/MCPArchive's own new reason parameter actually
+// reaches validateTransition's RequiredReason gate, not just that the
+// parameter compiles.
+func requiredReasonPostFlow(t *testing.T, db DB) {
+	t.Helper()
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	flow := StateFlow{
+		Name:     "reason-required-post",
+		TypeName: "testPost",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published"},
+			{Name: "scheduled"},
+			{Name: "archived", IsTerminal: true},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "published", RequiredReason: true},
+			{From: "draft", To: "scheduled", RequiredReason: true},
+			{From: "draft", To: "archived", RequiredReason: true},
+		},
+	}
+	if err := app.RegisterFlow(flow); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+}
+
+func TestModule_MCPPublish_ThreadsReason(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	requiredReasonPostFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	ctx := NewTestContext(editorUser())
+	// No reason: RequiredReason gate rejects — proves the gate is actually
+	// wired for this flow before testing that the real argument satisfies it.
+	if err := m.MCPPublish(ctx, p.Slug, ""); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("MCPPublish with no reason: want ErrBadRequest, got %v", err)
+	}
+	// A real reason: the gate is satisfied — this only happens if MCPPublish's
+	// own reason parameter actually reaches validateTransition's last argument.
+	if err := m.MCPPublish(ctx, p.Slug, "scheduled release window closed early"); err != nil {
+		t.Errorf("MCPPublish with reason: want nil, got %v", err)
+	}
+}
+
+func TestModule_MCPSchedule_ThreadsReason(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	requiredReasonPostFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPSchedule(ctx, p.Slug, time.Now().Add(time.Hour), ""); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("MCPSchedule with no reason: want ErrBadRequest, got %v", err)
+	}
+	if err := m.MCPSchedule(ctx, p.Slug, time.Now().Add(time.Hour), "coordinated with marketing"); err != nil {
+		t.Errorf("MCPSchedule with reason: want nil, got %v", err)
+	}
+}
+
+func TestModule_MCPArchive_ThreadsReason(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	requiredReasonPostFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+
+	m := newTestModule(mem)
+	m.setDB(sqlDB)
+
+	ctx := NewTestContext(editorUser())
+	if err := m.MCPArchive(ctx, p.Slug, ""); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("MCPArchive with no reason: want ErrBadRequest, got %v", err)
+	}
+	if err := m.MCPArchive(ctx, p.Slug, "superseded by rewrite"); err != nil {
+		t.Errorf("MCPArchive with reason: want nil, got %v", err)
+	}
+}
+
+func TestModule_updateHandler_ReasonHeader_ThreadsToValidateTransition(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	requiredReasonPostFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+
+	m := newTestModule(mem)
+	app := New(MustConfig(Config{DB: sqlDB, BaseURL: "https://example.com", Secret: []byte("update-handler-reason-test-secret1")}))
+	app.Content(m)
+
+	body, _ := json.Marshal(map[string]any{
+		"Title":  p.Title,
+		"Body":   p.Body,
+		"Status": "published",
+	})
+	req := httptest.NewRequest(http.MethodPut, m.prefix+"/"+p.Slug, bytes.NewReader(body))
+	req.Header.Set("Smeldr-Reason", "editorial sign-off received")
+	tok, _ := SignToken(editorUser(), "update-handler-reason-test-secret1", 0)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	w := httptest.NewRecorder()
+	app.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestModule_updateHandler_RequiredReason_MissingHeader_StillRejected(t *testing.T) {
+	sqlDB := newSQLiteDB(t)
+	requiredReasonPostFlow(t, sqlDB)
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+
+	m := newTestModule(mem)
+	app := New(MustConfig(Config{DB: sqlDB, BaseURL: "https://example.com", Secret: []byte("update-handler-reason-test-secret2")}))
+	app.Content(m)
+
+	body, _ := json.Marshal(map[string]any{
+		"Title":  p.Title,
+		"Body":   p.Body,
+		"Status": "published",
+	})
+	req := httptest.NewRequest(http.MethodPut, m.prefix+"/"+p.Slug, bytes.NewReader(body))
+	// Smeldr-Reason deliberately not set.
+	tok, _ := SignToken(editorUser(), "update-handler-reason-test-secret2", 0)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	w := httptest.NewRecorder()
+	app.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestModule_updateHandler_NoReasonHeader_SameStatusUnaffected(t *testing.T) {
+	// A plain-content update with no status change never reaches the
+	// RequiredReason gate at all — regression pin that reading an absent
+	// Smeldr-Reason header (empty string) does not disturb the common,
+	// same-status edit path most PUT calls actually are.
+	sqlDB := newSQLiteDB(t)
+	if err := migrateStateFlows(context.Background(), sqlDB); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+
+	mem := NewMemoryRepo[*testPost]()
+	p := seedPost(t, mem, "Test", Draft)
+
+	m := newTestModule(mem)
+	app := New(MustConfig(Config{DB: sqlDB, BaseURL: "https://example.com", Secret: []byte("update-handler-reason-test-secret3")}))
+	app.Content(m)
+
+	body, _ := json.Marshal(map[string]any{
+		"Title":  "Updated Title",
+		"Body":   p.Body,
+		"Status": "draft",
+	})
+	req := httptest.NewRequest(http.MethodPut, m.prefix+"/"+p.Slug, bytes.NewReader(body))
+	tok, _ := SignToken(editorUser(), "update-handler-reason-test-secret3", 0)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	w := httptest.NewRecorder()
+	app.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", w.Code, w.Body.String())
 	}
 }
 
@@ -1908,7 +2092,7 @@ func TestModule_MCPPublish_firesAsyncTrigger(t *testing.T) {
 	buf := captureAsyncTriggerLog(t)
 
 	ctx := NewTestContext(editorUser())
-	if err := m.MCPPublish(ctx, p.Slug); err != nil {
+	if err := m.MCPPublish(ctx, p.Slug, ""); err != nil {
 		t.Fatalf("MCPPublish: %v", err)
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -1937,7 +2121,7 @@ func TestModule_MCPPublish_firesAsyncTriggerEvenOnSameStatus(t *testing.T) {
 	buf := captureAsyncTriggerLog(t)
 
 	ctx := NewTestContext(editorUser())
-	if err := m.MCPPublish(ctx, p.Slug); err != nil {
+	if err := m.MCPPublish(ctx, p.Slug, ""); err != nil {
 		t.Fatalf("MCPPublish (republish): %v", err)
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -1959,7 +2143,7 @@ func TestModule_MCPSchedule_firesAsyncTrigger(t *testing.T) {
 	buf := captureAsyncTriggerLog(t)
 
 	ctx := NewTestContext(editorUser())
-	if err := m.MCPSchedule(ctx, p.Slug, time.Now().Add(time.Hour)); err != nil {
+	if err := m.MCPSchedule(ctx, p.Slug, time.Now().Add(time.Hour), ""); err != nil {
 		t.Fatalf("MCPSchedule: %v", err)
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -1981,7 +2165,7 @@ func TestModule_MCPArchive_firesAsyncTrigger(t *testing.T) {
 	buf := captureAsyncTriggerLog(t)
 
 	ctx := NewTestContext(editorUser())
-	if err := m.MCPArchive(ctx, p.Slug); err != nil {
+	if err := m.MCPArchive(ctx, p.Slug, ""); err != nil {
 		t.Fatalf("MCPArchive: %v", err)
 	}
 	time.Sleep(50 * time.Millisecond)
