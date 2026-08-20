@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.76.3] — 2026-08-20
+
+### Fixed
+- `scanDest` gains `nullTimeScanner`, handling a nullable `*time.Time` struct field's own `**time.Time` scan destination — the case the existing `*time.Time` handling (A200) didn't match. `Node.ScheduledAt` (embedded in every compiled `Module[T]` type) previously failed with a hard Scan error on any real `SQLRepo`-backed round-trip with a non-nil value; now works. `RelationEdge.ValidAt`/`InvalidAt` checked and confirmed unaffected (own hand-written scanner, never routed through `scanDest`). (A288)
+
+---
+
 ## [1.76.2] — 2026-08-20
 
 ### Removed

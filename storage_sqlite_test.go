@@ -251,6 +251,59 @@ func TestSQLRepo_Save_WritesBackTimestamps(t *testing.T) {
 	}
 }
 
+// TestSQLRepo_ScheduledAt_nonNil_roundTrips is the actual regression this
+// task exists for (T210): a Save+FindBySlug round-trip on a Node.ScheduledAt
+// field, a nullable *time.Time, previously failed with "sql: Scan error on
+// column index N, name \"scheduled_at\": unsupported Scan, storing
+// driver.Value type string into type *time.Time" — scanDest's *time.Time
+// case does not match a nullable field's own **time.Time address. Fixed via
+// nullTimeScanner.
+func TestSQLRepo_ScheduledAt_nonNil_roundTrips(t *testing.T) {
+	db := newSQLiteDB(t)
+	createRevNodesTable(t, db)
+	repo := NewSQLRepo[*revNode](db, Table("rev_nodes"))
+	ctx := context.Background()
+
+	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	item := &revNode{Node: Node{ID: "sched-1", Slug: "sched", ScheduledAt: &at}}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := repo.FindBySlug(ctx, "sched")
+	if err != nil {
+		t.Fatalf("FindBySlug: %v", err)
+	}
+	if got.ScheduledAt == nil {
+		t.Fatal("got.ScheduledAt is nil, want non-nil")
+	}
+	if !got.ScheduledAt.Equal(at) {
+		t.Errorf("got.ScheduledAt = %v, want %v", got.ScheduledAt, at)
+	}
+}
+
+// TestSQLRepo_ScheduledAt_nil_roundTrips pins the already-working nil case —
+// the fix must not regress it.
+func TestSQLRepo_ScheduledAt_nil_roundTrips(t *testing.T) {
+	db := newSQLiteDB(t)
+	createRevNodesTable(t, db)
+	repo := NewSQLRepo[*revNode](db, Table("rev_nodes"))
+	ctx := context.Background()
+
+	item := &revNode{Node: Node{ID: "unsched-1", Slug: "unsched"}}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := repo.FindBySlug(ctx, "unsched")
+	if err != nil {
+		t.Fatalf("FindBySlug: %v", err)
+	}
+	if got.ScheduledAt != nil {
+		t.Errorf("got.ScheduledAt = %v, want nil", got.ScheduledAt)
+	}
+}
+
 func TestMigrateNodeRevColumn_AddsColumn(t *testing.T) {
 	db := newSQLiteDB(t)
 	_, err := db.ExecContext(context.Background(), `
@@ -363,6 +416,87 @@ func TestTimeScanner(t *testing.T) {
 		var dst time.Time
 		ts := timeScanner{dst: &dst}
 		err := ts.Scan(3.14)
+		if err == nil {
+			t.Error("Scan: expected error for float64 src, got nil")
+		}
+	})
+}
+
+// TestNullTimeScanner covers the SQL-scanner wrapper for nullable *time.Time
+// destinations (T210) — the same value shapes TestTimeScanner covers, plus
+// the nil-means-nil-pointer case timeScanner itself does not have (its own
+// nil case sets a zero time.Time, not a nil pointer).
+func TestNullTimeScanner(t *testing.T) {
+	ref := time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	t.Run("time.Time_src", func(t *testing.T) {
+		var dst *time.Time
+		ns := nullTimeScanner{dst: &dst}
+		if err := ns.Scan(ref); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if dst == nil || !dst.Equal(ref) {
+			t.Errorf("dst = %v, want %v", dst, ref)
+		}
+	})
+
+	t.Run("RFC3339Nano_string", func(t *testing.T) {
+		var dst *time.Time
+		ns := nullTimeScanner{dst: &dst}
+		if err := ns.Scan(ref.Format(time.RFC3339Nano)); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if dst == nil || !dst.Equal(ref) {
+			t.Errorf("dst = %v, want %v", dst, ref)
+		}
+	})
+
+	t.Run("bytes_src", func(t *testing.T) {
+		var dst *time.Time
+		ns := nullTimeScanner{dst: &dst}
+		if err := ns.Scan([]byte(ref.Format(time.RFC3339Nano))); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if dst == nil || !dst.Equal(ref) {
+			t.Errorf("dst = %v, want %v", dst, ref)
+		}
+	})
+
+	t.Run("int64_unix_src", func(t *testing.T) {
+		var dst *time.Time
+		ns := nullTimeScanner{dst: &dst}
+		if err := ns.Scan(ref.Unix()); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if dst == nil || !dst.Equal(ref) {
+			t.Errorf("dst = %v, want %v", dst, ref)
+		}
+	})
+
+	t.Run("nil_src_nil_pointer", func(t *testing.T) {
+		dst := &ref // deliberately non-nil beforehand, to prove Scan(nil) resets it
+		ns := nullTimeScanner{dst: &dst}
+		if err := ns.Scan(nil); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if dst != nil {
+			t.Errorf("dst = %v, want nil", dst)
+		}
+	})
+
+	t.Run("unparseable_string_error", func(t *testing.T) {
+		var dst *time.Time
+		ns := nullTimeScanner{dst: &dst}
+		err := ns.Scan("not-a-date")
+		if err == nil {
+			t.Error("Scan: expected error, got nil")
+		}
+	})
+
+	t.Run("unsupported_type_error", func(t *testing.T) {
+		var dst *time.Time
+		ns := nullTimeScanner{dst: &dst}
+		err := ns.Scan(3.14)
 		if err == nil {
 			t.Error("Scan: expected error for float64 src, got nil")
 		}

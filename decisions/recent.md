@@ -1600,3 +1600,89 @@ A286's own precedent for a real, consumer-observable behaviour change
 with no new exported symbol: v1.76.1 → **v1.76.2**.
 
 ---
+
+## A288 — nullable *time.Time scan bug: nullTimeScanner (T210)
+
+### Problem
+
+Confirmed real and reproducible: a `Node.ScheduledAt` round-trip
+(`Save` + `FindBySlug`) through a real `SQLRepo`-backed repo failed
+with `sql: Scan error on column index N, name "scheduled_at":
+unsupported Scan, storing driver.Value type string into type
+*time.Time`.
+
+Root cause, verified against `storage.go`: `scanDest` (A200) special-
+cases a scan destination whose address is `*time.Time` — exactly what
+taking the address of a plain `time.Time` struct field gives you
+(`Node.PublishedAt`, `webhook.go`'s `CreatedAt`, etc.). `Node.ScheduledAt`
+is declared `*time.Time` (nullable — nil for every non-scheduled state)
+— its own field address is `**time.Time`, unmatched by `scanDest`'s
+existing case, falling through unwrapped to `database/sql`'s generic
+pointer-to-pointer path, which cannot parse SQLite's string-formatted
+timestamps.
+
+**Scope corrected during grounding, not assumed**: `TIMESTAMPTZ` is not
+an orchestration-specific mistake — it's used project-wide (`webhook.go`,
+`outbound.go`, `audit.go`, `provenance.go`, `sweep_run.go`), all already
+correctly handled by A200 since every one of those is a non-nullable
+`time.Time` field. `Node.ScheduledAt` is the one genuinely distinct
+gap, and it isn't orchestration-specific either — `Node` is embedded by
+every compiled `Module[T]` type, so any content type using `SQLRepo`
+and setting a non-nil `ScheduledAt` hits this.
+
+**Checked, confirmed unaffected**: `relations.go`'s `RelationEdge.ValidAt`/
+`InvalidAt` are also nullable `*time.Time` fields, but `scanEdge` already
+scans them through its own hand-written `sql.NullTime` locals, never
+through `scanDest`'s generic reflection path.
+
+**A genuinely striking find during review**: `Run.AcknowledgedAt`
+(`orchestration.go`) is declared `time.Time`, not `*time.Time` — its own
+doc comment states this was a deliberate workaround for this *exact*
+bug, discovered and empirically reproduced independently during an
+earlier task, then explicitly flagged "to the architect as its own
+follow-up — not fixed here." That flag sat unactioned until this task's
+own independent rediscovery. Confirms this is a real, previously-known
+gap, not a novel theory.
+
+### Fix
+
+`nullTimeScanner{dst **time.Time}` added to `storage.go`, reusing
+`timeScanner`'s own parsing logic rather than duplicating it — `nil`
+sets the destination to a nil pointer; any other value is parsed via a
+scratch `timeScanner` and the result's address stored. `scanDest`
+gains a second type-assertion branch for `**time.Time`. Fixed at the
+single shared entry point every `SQLRepo[T]`'s generic scan path
+already calls (`storage.go`, two call sites) — not a per-type
+workaround, matching A200's own fix shape for the non-nullable case.
+
+**Not touched, flagged forward**: `Run.AcknowledgedAt`'s own type
+choice is now a stale workaround for a bug that no longer exists —
+changing it is a real, separate API-shape decision (nullable-time vs. a
+bool+timestamp pair) worth its own future cleanup Task, not bundled
+into this one.
+
+### Tests
+
+9 new: `TestNullTimeScanner`'s 7 subtests directly mirror
+`TestTimeScanner`'s own existing shape (`time.Time` src, RFC3339Nano
+string, `[]byte`, `int64` unix, nil, unparseable string error,
+unsupported type error) — the nil case differs meaningfully from
+`timeScanner`'s own (sets a nil pointer, not a zero `time.Time`).
+`TestSQLRepo_ScheduledAt_nonNil_roundTrips` and `_nil_roundTrips`
+exercise the actual regression end-to-end through a real `SQLRepo`
+(`revNode`/`rev_nodes`, an existing fixture already carrying a
+`scheduled_at` column — no new fixture needed) — the non-nil test is
+the literal reported failure, the nil test pins the already-working
+case against regression.
+
+### Versioning
+
+No exported symbol changed (`scanDest`/`timeScanner`/`nullTimeScanner`
+all unexported). Coverage: 96.3% package-wide, unchanged. `go build`/
+`go vet`/`go test -race -count=1 ./...` clean; `golangci-lint` clean.
+PATCH bump — a real, consumer-observable bug fix (any caller using
+`SQLRepo` with a non-nil `Node.ScheduledAt` previously got a hard Scan
+error; now works), no new exported symbol, matching A226/A281/A283/
+A286/A287's own precedent: v1.76.2 → **v1.76.3**.
+
+---

@@ -50,12 +50,36 @@ func (ts timeScanner) Scan(src any) error {
 	return fmt.Errorf("smeldr: cannot scan %T into time.Time", src)
 }
 
+// nullTimeScanner wraps a **time.Time scan destination — a nullable
+// *time.Time struct field's own address — the case scanDest's *time.Time
+// branch does not match (T210). NULL sets the destination to nil; any
+// other value is parsed via timeScanner and the result's address is
+// stored.
+type nullTimeScanner struct{ dst **time.Time }
+
+func (ns nullTimeScanner) Scan(src any) error {
+	if src == nil {
+		*ns.dst = nil
+		return nil
+	}
+	var t time.Time
+	if err := (timeScanner{dst: &t}).Scan(src); err != nil {
+		return err
+	}
+	*ns.dst = &t
+	return nil
+}
+
 // scanDest returns the scan destination for a struct field. For time.Time
 // fields it wraps the address in a timeScanner so string values from SQLite
-// are parsed correctly.
+// are parsed correctly; for nullable *time.Time fields it wraps the address
+// in a nullTimeScanner (T210).
 func scanDest(addr any) any {
 	if tp, ok := addr.(*time.Time); ok {
 		return timeScanner{dst: tp}
+	}
+	if tpp, ok := addr.(**time.Time); ok {
+		return nullTimeScanner{dst: tpp}
 	}
 	return addr
 }
