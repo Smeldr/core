@@ -139,7 +139,6 @@ func (s *sqlProvenanceStore) List(ctx context.Context, f ProvenanceFilter) ([]Pr
 	if f.ActorID != "" {
 		query += fmt.Sprintf(" AND actor_id = $%d", n)
 		args = append(args, f.ActorID)
-		n++
 	}
 	query += " ORDER BY timestamp DESC"
 

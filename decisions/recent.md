@@ -1523,3 +1523,28 @@ matching A245/A246/A282's own precedent for example-directory-only
 changes. Level 1 amendment.
 
 ---
+
+## A286 — provenance.go List's dead increment (SA4006)
+
+Caught blocking a green `main` CI while closing out the T237 tag/release
+cascade (core v1.76.0 → mcp/social/media → `example/*` pin bumps) —
+`staticcheck`'s SA4006 flagged `provenance.go`'s `List` function: after
+the last of five optional filter branches (`f.ActorID != ""`), `n` is
+incremented one final time but never read again — dead code, no
+behavioural effect either way, since nothing downstream consults `n`'s
+post-increment value.
+
+Same bug class independently found and fixed the same session in
+`smeldr.dev/mcp`'s `node_tools.go` (`listNodes`, identical shape: a
+placeholder counter's final increment after the last conditional branch
+using it). Neither is a regression — both predate this session by weeks
+(`provenance.go`'s version since `9db0eaf`, `feat(provenance): add
+SubjectProvenance read mechanism`, Amendment A260).
+
+Fix: removed the dead `n++`. `gofmt`/`go vet`/`go build`/`go test
+./...`/`golangci-lint run ./...` all clean; coverage unchanged at 96.3%.
+No exported symbol changed, no behaviour change. PATCH bump — a version
+number's only purpose left to serve here is giving the fix a tag to hang
+a green CI check on: v1.76.0 → **v1.76.1**.
+
+---

@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.76.1] — 2026-08-20
+
+### Fixed
+- `provenance.go`'s `List` had a dead `n++` after its last optional filter branch (`f.ActorID`) — `staticcheck` SA4006, caught while closing out the T237 tag/release cascade. No behaviour change; `n`'s post-increment value was never read. (A286)
+
+---
+
 ## [1.76.0] — 2026-08-20
 
 ### Changed
