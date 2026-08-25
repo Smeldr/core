@@ -23,7 +23,7 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
-## [1.76.4] — Unreleased
+## [1.76.4] — 2026-08-25
 
 ### Added
 - `SweepRunRecord` gains `ActorKind`/`ActorID` fields, matching `ProvenanceRecord`'s own vocabulary (`"human"`/`"job"`/`"agent"`; empty only if truly unattributable). `example/server`'s `sweepFn` closure now records `ActorKind: "job"`, `ActorID: "sweep-structural"`, mirroring `App.DrainEvalQueue`'s own established `ActorID: "drain-eval-queue"` pattern. `CreateSweepRunTable` upgrades a pre-existing `smeldr_sweep_runs` table missing the two columns via `EnsureColumn` (T246 pattern). (A289)
