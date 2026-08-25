@@ -3109,7 +3109,11 @@ names.
 
 Both `PacketAnchor` and `PacketItem` carry `created_at`/`updated_at`,
 read through from the underlying content's own `Node.CreatedAt`/
-`Node.UpdatedAt` (A290).
+`Node.UpdatedAt` (A290). `PacketRelation` carries `created_at` (from
+the edge's own `RelationEdge.CreatedAt`) plus `label`/`reverse_label`,
+resolved from the edge's `RelationKind` via the registered
+`RelationKindDef` — both empty strings when the kind isn't registered,
+not an error (A291).
 
 ---
 

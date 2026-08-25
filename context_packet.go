@@ -79,11 +79,14 @@ type PacketItem struct {
 // PacketRelation is one edge from the relation graph included in the packet.
 // Only emitted when both endpoints are present as the Anchor or in Items.
 type PacketRelation struct {
-	SourceType string `json:"source_type"`
-	SourceID   string `json:"source_id"`
-	TargetType string `json:"target_type"`
-	TargetID   string `json:"target_id"`
-	Kind       string `json:"kind"`
+	SourceType   string    `json:"source_type"`
+	SourceID     string    `json:"source_id"`
+	TargetType   string    `json:"target_type"`
+	TargetID     string    `json:"target_id"`
+	Kind         string    `json:"kind"`
+	CreatedAt    time.Time `json:"created_at"`
+	Label        string    `json:"label"`
+	ReverseLabel string    `json:"reverse_label"`
 }
 
 type anchorTypeEntry struct {
@@ -366,12 +369,16 @@ func BuildContextPacket(
 		if !srcOK || !tgtOK {
 			continue
 		}
+		kindDef, _ := rs.GetKind(edge.RelationKind)
 		pkt.Relations = append(pkt.Relations, PacketRelation{
-			SourceType: strings.ToLower(edge.SourceType),
-			SourceID:   srcCID,
-			TargetType: strings.ToLower(edge.TargetType),
-			TargetID:   tgtCID,
-			Kind:       edge.RelationKind,
+			SourceType:   strings.ToLower(edge.SourceType),
+			SourceID:     srcCID,
+			TargetType:   strings.ToLower(edge.TargetType),
+			TargetID:     tgtCID,
+			Kind:         edge.RelationKind,
+			CreatedAt:    edge.CreatedAt,
+			Label:        kindDef.Label,
+			ReverseLabel: kindDef.ReverseLabel,
 		})
 	}
 

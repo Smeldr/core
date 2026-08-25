@@ -287,7 +287,56 @@ func TestBuildContextPacket_decisionAnchor(t *testing.T) {
 			pkt.Items[0].CreatedAt, pkt.Items[0].UpdatedAt)
 	}
 	if len(pkt.Relations) != 1 {
-		t.Errorf("relations len = %d, want 1", len(pkt.Relations))
+		t.Fatalf("relations len = %d, want 1", len(pkt.Relations))
+	}
+	if pkt.Relations[0].CreatedAt.IsZero() {
+		t.Error("relations[0] CreatedAt is zero, want a real timestamp")
+	}
+	// insertTestEdge's own UpsertKind sets only TypeName/Mode — no Label —
+	// so this exercises the fail-open path: unregistered label stays "".
+	if pkt.Relations[0].Label != "" || pkt.Relations[0].ReverseLabel != "" {
+		t.Errorf("relations[0] Label/ReverseLabel = %q/%q, want both empty (kind has no label registered)",
+			pkt.Relations[0].Label, pkt.Relations[0].ReverseLabel)
+	}
+}
+
+// TestBuildContextPacket_relationLabelResolution proves PacketRelation.Label/
+// ReverseLabel resolve from the registered RelationKindDef, not just the
+// fail-open empty default TestBuildContextPacket_decisionAnchor exercises.
+func TestBuildContextPacket_relationLabelResolution(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	ctx := context.Background()
+
+	decID := insertTestDecision(t, db, "D199")
+	slug := mustSlugForID(t, db, "smeldr_decisions", decID)
+	goalID := insertTestGoal(t, db, "T199", "P0", "S")
+
+	if err := rs.UpsertKind(ctx, RelationKindDef{
+		TypeName: "supersedes", Mode: "asserted",
+		Label: "supersedes", ReverseLabel: "superseded by",
+	}); err != nil {
+		t.Fatalf("UpsertKind: %v", err)
+	}
+	if err := rs.Assert(ctx, RelationEdge{
+		ID: NewID(), SourceType: "Decision", SourceID: decID,
+		TargetType: "Goal", TargetID: goalID,
+		RelationKind: "supersedes", EdgeClass: "asserted",
+	}); err != nil {
+		t.Fatalf("Assert: %v", err)
+	}
+
+	pkt, err := BuildContextPacket(ctx, db, rs, "http://localhost", "test", "decision", slug, 1)
+	if err != nil {
+		t.Fatalf("BuildContextPacket: %v", err)
+	}
+	if len(pkt.Relations) != 1 {
+		t.Fatalf("relations len = %d, want 1", len(pkt.Relations))
+	}
+	if pkt.Relations[0].Label != "supersedes" {
+		t.Errorf("relations[0].Label = %q, want %q", pkt.Relations[0].Label, "supersedes")
+	}
+	if pkt.Relations[0].ReverseLabel != "superseded by" {
+		t.Errorf("relations[0].ReverseLabel = %q, want %q", pkt.Relations[0].ReverseLabel, "superseded by")
 	}
 }
 

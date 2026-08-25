@@ -1794,3 +1794,65 @@ version number. Tag/release for the combined A289+A290 batch pending
 Peter's own fresh explicit go-ahead, separate from commit approval.
 
 ---
+
+## A291 — ContextPacket relation metadata: CreatedAt/Label/ReverseLabel on PacketRelation
+
+### Problem
+
+Requested by cloud-implementer, third additive gap in the same series
+as A289/A290 — found while mapping every field `internal/read/
+thread.go` reads off a `RelationEdge` against `PacketRelation`'s
+current shape (`SourceType`/`SourceID`/`TargetType`/`TargetID`/`Kind`
+only). Confirmed directly against source:
+
+- `thread.go:196` reads `edge.CreatedAt.Unix()` to date relation-driven
+  thread rows — `PacketRelation` carried no `CreatedAt`.
+- `thread.go:174-175` reads `rs.GetKind(edge.RelationKind).Label` to
+  resolve the display word — `PacketRelation.Kind` alone is only the
+  raw `relation_kind` type_name, not the resolved label.
+
+Once this lands and releases, cloud-implementer's `ContextPacket` call
+becomes fully sufficient for Trace's rewrite — anchor, items, and
+relations resolved in one call, no further core-side gaps expected for
+Trace specifically.
+
+### Fix
+
+`PacketRelation` gains `CreatedAt time.Time`, `Label string`,
+`ReverseLabel string` — positioned after `Kind`, keeping the existing
+"edge identity → resolved meaning" grouping. `CreatedAt` is a direct
+read-through from `RelationEdge.CreatedAt`, already in scope as the
+loop variable at the one construction site
+(`context_packet.go:363-379`). `Label`/`ReverseLabel` resolve via
+`rs.GetKind(edge.RelationKind)` — `rs *RelationStore` is already a
+`BuildContextPacket` parameter. Fail-open on an unregistered kind:
+both stay `""`, matching `thread.go`'s own `eventFromEdge` precedent
+for the identical situation — no error, no item dropped.
+
+`EdgeClass` confirmed NOT needed — cloud-implementer verified it is
+only read off `Reachability`'s own ring items in Pulse's `computeTension`
+path, out of scope per the architect's prior decision on this same
+Task's "second gap" (`Reachability` has no remote path, split into its
+own follow-up Task).
+
+### Tests
+
+`TestBuildContextPacket_decisionAnchor` extended: asserts
+`Relations[0].CreatedAt` is non-zero, and that `Label`/`ReverseLabel`
+are both empty — this test's own `insertTestEdge` registers a kind
+with no `Label`, so it correctly exercises the fail-open path. New
+`TestBuildContextPacket_relationLabelResolution` registers a kind with
+both `Label`/`ReverseLabel` set and asserts the packet's
+`PacketRelation` carries the resolved words exactly — proves the
+non-fail-open path is also correct, not just the default.
+
+### Versioning
+
+New exported struct fields on an existing type, no new top-level
+exported symbol, no breaking change — same shape as A289/A290. v1.76.4
+is already tagged and released (Peter's own fresh go-ahead, earlier
+this session) — this change lands in a fresh `[1.76.5] — Unreleased`
+section. PATCH bump: v1.76.4 → **v1.76.5**. Tag/release pending
+Peter's own fresh explicit go-ahead, separate from commit approval.
+
+---

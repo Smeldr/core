@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.76.5] — Unreleased
+
+### Added
+- `PacketRelation` gains `CreatedAt`/`Label`/`ReverseLabel` fields. `CreatedAt` is a read-through from `RelationEdge.CreatedAt`; `Label`/`ReverseLabel` resolve from the edge's `RelationKind` via `RelationStore.GetKind` — both empty strings when the kind isn't registered, not an error. Third additive gap in the same series as A289/A290, unblocking smeldr/cloud's multi-tenant rewrite (`internal/read/thread.go` needs both for dating and labeling relation-driven thread rows). (A291)
+
+---
+
 ## [1.76.4] — 2026-08-25
 
 ### Added
