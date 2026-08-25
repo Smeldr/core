@@ -225,7 +225,10 @@ smeldr.dev/
 │                     reachable from open/in-progress/parked, all RequiredReason=true
 │                     (Amendment A261, T255)
 ├── context_packet.go ContextPacket, PacketSource, PacketAnchor, PacketBoundary, PacketOmission,
-│                     PacketItem, PacketRelation exported types;
+│                     PacketItem, PacketRelation exported types; PacketAnchor/PacketItem carry
+│                     CreatedAt/UpdatedAt, read through from the underlying content's own
+│                     Node.CreatedAt/Node.UpdatedAt (Amendment A290, for cloud's own
+│                     multi-tenant rewrite);
 │                     BuildContextPacket(ctx, DB, *RelationStore, baseURL, sourceName, anchorType,
 │                     anchorSlug string, depth int) (*ContextPacket, error) — breadth-first
 │                     traversal over all 5 orchestration anchor types, depth 1–2, per-type cap 25;

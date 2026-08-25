@@ -226,6 +226,12 @@ func TestBuildContextPacket_goalAnchor(t *testing.T) {
 	if pkt.Anchor.URL != "http://localhost/goals/"+slug {
 		t.Errorf("anchor URL = %q", pkt.Anchor.URL)
 	}
+	if pkt.Anchor.CreatedAt.IsZero() {
+		t.Error("anchor CreatedAt is zero, want a real timestamp")
+	}
+	if pkt.Anchor.UpdatedAt.IsZero() {
+		t.Error("anchor UpdatedAt is zero, want a real timestamp")
+	}
 	if pkt.PacketVersion != "1.0" {
 		t.Errorf("packet_version = %q, want %q", pkt.PacketVersion, "1.0")
 	}
@@ -271,6 +277,14 @@ func TestBuildContextPacket_decisionAnchor(t *testing.T) {
 	}
 	if pkt.Items[0].Type != "goal" {
 		t.Errorf("items[0].type = %q, want goal", pkt.Items[0].Type)
+	}
+	if pkt.Anchor.CreatedAt.IsZero() || pkt.Anchor.UpdatedAt.IsZero() {
+		t.Errorf("anchor CreatedAt/UpdatedAt = %v/%v, want both non-zero",
+			pkt.Anchor.CreatedAt, pkt.Anchor.UpdatedAt)
+	}
+	if pkt.Items[0].CreatedAt.IsZero() || pkt.Items[0].UpdatedAt.IsZero() {
+		t.Errorf("items[0] CreatedAt/UpdatedAt = %v/%v, want both non-zero",
+			pkt.Items[0].CreatedAt, pkt.Items[0].UpdatedAt)
 	}
 	if len(pkt.Relations) != 1 {
 		t.Errorf("relations len = %d, want 1", len(pkt.Relations))

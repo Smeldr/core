@@ -3107,6 +3107,10 @@ identically; `Status` never carries lifecycle vocabulary for these five
 types (see [State flows](#state-flows)), only their own governed-flow state
 names.
 
+Both `PacketAnchor` and `PacketItem` carry `created_at`/`updated_at`,
+read through from the underlying content's own `Node.CreatedAt`/
+`Node.UpdatedAt` (A290).
+
 ---
 
 ## MCP resource subscriptions

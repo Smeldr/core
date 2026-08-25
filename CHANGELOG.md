@@ -27,6 +27,7 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ### Added
 - `SweepRunRecord` gains `ActorKind`/`ActorID` fields, matching `ProvenanceRecord`'s own vocabulary (`"human"`/`"job"`/`"agent"`; empty only if truly unattributable). `example/server`'s `sweepFn` closure now records `ActorKind: "job"`, `ActorID: "sweep-structural"`, mirroring `App.DrainEvalQueue`'s own established `ActorID: "drain-eval-queue"` pattern. `CreateSweepRunTable` upgrades a pre-existing `smeldr_sweep_runs` table missing the two columns via `EnsureColumn` (T246 pattern). (A289)
+- `PacketAnchor`/`PacketItem` gain `CreatedAt`/`UpdatedAt` fields, read through from the underlying content's own `Node.CreatedAt`/`Node.UpdatedAt`. Unblocks smeldr/cloud's multi-tenant rewrite, which needs both for `AgeDays`/elapsed-time framing once its fetch layer reads from `ContextPacket` instead of local SQL. (A290)
 
 ---
 

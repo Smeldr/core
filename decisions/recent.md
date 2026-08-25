@@ -1747,3 +1747,50 @@ exported type. PATCH bump: v1.76.3 → **v1.76.4**. Tag/release pending
 Peter's own fresh explicit go-ahead, separate from commit approval.
 
 ---
+
+## A290 — ContextPacket actor concept: CreatedAt/UpdatedAt on PacketAnchor/PacketItem
+
+### Problem
+
+Requested by cloud-implementer, blocking `cloud-multi-tenant-instrument-
+reads` (Wave 0 of `design/cloud-machine-implementation-plan-v1.md`).
+`PacketAnchor` and `PacketItem` (`context_packet.go`) carried no
+timestamps — fields were `Type`/`ID`/`Slug`/`Status`/`Rev`/`URL`/
+`Fields`. `internal/read` (smeldr/cloud) needs both for `AgeDays`/
+elapsed-time framing once its own fetch layer is rewired to read from
+`ContextPacket` instead of local SQL. cloud-implementer already ruled
+out the alternative (reading a compiled type's own typed
+`GET /{prefix}/{slug}`) because that route's auth gate varies per-
+tenant depending on whether governance/RoleStore is wired, unlike
+`ContextPacketHandler`'s uniform `HasRole(Editor)` check.
+
+### Fix
+
+`PacketAnchor`/`PacketItem` gain `CreatedAt time.Time` / `UpdatedAt
+time.Time` (`json:"created_at"`/`json:"updated_at"`), positioned
+between `Rev` and `URL` — keeping the existing identity → lifecycle →
+payload grouping intact. Both are a pure read-through from the
+underlying content's own `Node.CreatedAt`/`Node.UpdatedAt`
+(`node.go:72-76`), already present on every orchestration type — no
+new data, no new storage. `BuildContextPacket`'s two struct literals
+(the anchor build and the linked-item build inside the traversal loop)
+both populate the fields from `anchorNode`/`nd` respectively, both
+already in scope at each call site.
+
+### Tests
+
+`TestBuildContextPacket_goalAnchor` extended to assert the anchor's
+`CreatedAt`/`UpdatedAt` are non-zero. `TestBuildContextPacket_
+decisionAnchor` (already exercising one linked item) extended to
+assert non-zero timestamps on both the anchor and `Items[0]`,
+confirming both structs populate correctly, not just the anchor.
+
+### Versioning
+
+New exported struct fields on two existing types, no new top-level
+exported symbol, no breaking change — same shape as A289, additive to
+the same already-open `[1.76.4] — Unreleased` batch, not a separate
+version number. Tag/release for the combined A289+A290 batch pending
+Peter's own fresh explicit go-ahead, separate from commit approval.
+
+---

@@ -39,13 +39,15 @@ type PacketSource struct {
 // Carries the same content fields as [PacketItem]; the anchor is never
 // duplicated into Items.
 type PacketAnchor struct {
-	Type   string         `json:"type"`
-	ID     string         `json:"id"`
-	Slug   string         `json:"slug"`
-	Status string         `json:"status"`
-	Rev    int            `json:"rev"`
-	URL    string         `json:"url"`
-	Fields map[string]any `json:"fields"`
+	Type      string         `json:"type"`
+	ID        string         `json:"id"`
+	Slug      string         `json:"slug"`
+	Status    string         `json:"status"`
+	Rev       int            `json:"rev"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	URL       string         `json:"url"`
+	Fields    map[string]any `json:"fields"`
 }
 
 // PacketBoundary declares how the packet was assembled.
@@ -63,13 +65,15 @@ type PacketOmission struct {
 
 // PacketItem is one linked content node in the packet, not the anchor.
 type PacketItem struct {
-	Type   string         `json:"type"`
-	ID     string         `json:"id"`
-	Slug   string         `json:"slug"`
-	Status string         `json:"status"`
-	Rev    int            `json:"rev"`
-	URL    string         `json:"url"`
-	Fields map[string]any `json:"fields"`
+	Type      string         `json:"type"`
+	ID        string         `json:"id"`
+	Slug      string         `json:"slug"`
+	Status    string         `json:"status"`
+	Rev       int            `json:"rev"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	URL       string         `json:"url"`
+	Fields    map[string]any `json:"fields"`
 }
 
 // PacketRelation is one edge from the relation graph included in the packet.
@@ -236,13 +240,15 @@ func BuildContextPacket(
 		GeneratedAt:   time.Now().UTC(),
 		Source:        PacketSource{Name: sourceName, URL: baseURL},
 		Anchor: PacketAnchor{
-			Type:   anchorType,
-			ID:     anchorCID,
-			Slug:   anchorNode.Slug,
-			Status: string(anchorNode.Status),
-			Rev:    anchorNode.Rev,
-			URL:    packetItemURL(baseURL, entry.path, anchorNode.Slug),
-			Fields: anchorFields,
+			Type:      anchorType,
+			ID:        anchorCID,
+			Slug:      anchorNode.Slug,
+			Status:    string(anchorNode.Status),
+			Rev:       anchorNode.Rev,
+			CreatedAt: anchorNode.CreatedAt,
+			UpdatedAt: anchorNode.UpdatedAt,
+			URL:       packetItemURL(baseURL, entry.path, anchorNode.Slug),
+			Fields:    anchorFields,
 		},
 		Boundary:  PacketBoundary{Method: "relations", Depth: depth},
 		Items:     []PacketItem{},
@@ -330,13 +336,15 @@ func BuildContextPacket(
 				continue
 			}
 			pkt.Items = append(pkt.Items, PacketItem{
-				Type:   lowerType,
-				ID:     cid,
-				Slug:   nd.Slug,
-				Status: string(nd.Status),
-				Rev:    nd.Rev,
-				URL:    packetItemURL(baseURL, linkedEntry.path, nd.Slug),
-				Fields: f,
+				Type:      lowerType,
+				ID:        cid,
+				Slug:      nd.Slug,
+				Status:    string(nd.Status),
+				Rev:       nd.Rev,
+				CreatedAt: nd.CreatedAt,
+				UpdatedAt: nd.UpdatedAt,
+				URL:       packetItemURL(baseURL, linkedEntry.path, nd.Slug),
+				Fields:    f,
 			})
 			resolvedItems[ref.relType+ref.nodeID] = cid
 			included++
