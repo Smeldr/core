@@ -52,14 +52,16 @@ func TestSweepRunStore_AppendAndLast(t *testing.T) {
 	ctx := context.Background()
 
 	r := SweepRunRecord{
-		ID:       "run-1",
-		Detector: "structural",
-		RanAt:    time.Now().UTC().Truncate(time.Second),
-		Interval: "0 * * * *",
-		Walked:   5,
-		Flagged:  1,
-		Skipped:  0,
-		Err:      "",
+		ID:        "run-1",
+		Detector:  "structural",
+		RanAt:     time.Now().UTC().Truncate(time.Second),
+		Interval:  "0 * * * *",
+		Walked:    5,
+		Flagged:   1,
+		Skipped:   0,
+		Err:       "",
+		ActorKind: "job",
+		ActorID:   "sweep-structural",
 	}
 	if err := store.Append(ctx, r); err != nil {
 		t.Fatalf("Append: %v", err)
@@ -73,7 +75,8 @@ func TestSweepRunStore_AppendAndLast(t *testing.T) {
 		t.Fatal("Last: found = false, want true")
 	}
 	if got.ID != r.ID || got.Detector != r.Detector || got.Interval != r.Interval ||
-		got.Walked != r.Walked || got.Flagged != r.Flagged || got.Skipped != r.Skipped || got.Err != r.Err {
+		got.Walked != r.Walked || got.Flagged != r.Flagged || got.Skipped != r.Skipped || got.Err != r.Err ||
+		got.ActorKind != r.ActorKind || got.ActorID != r.ActorID {
 		t.Errorf("Last: got %+v, want %+v", got, r)
 	}
 	if !got.RanAt.Equal(r.RanAt) {
@@ -127,7 +130,9 @@ func TestSweepRunStore_ListOrderAndLimit(t *testing.T) {
 	for i, id := range []string{"run-1", "run-2", "run-3"} {
 		r := SweepRunRecord{
 			ID: id, Detector: "structural",
-			RanAt: base.Add(time.Duration(i) * time.Hour),
+			RanAt:     base.Add(time.Duration(i) * time.Hour),
+			ActorKind: "job",
+			ActorID:   "sweep-structural",
 		}
 		if err := store.Append(ctx, r); err != nil {
 			t.Fatalf("Append %s: %v", id, err)
@@ -150,6 +155,10 @@ func TestSweepRunStore_ListOrderAndLimit(t *testing.T) {
 	for i, want := range wantOrder {
 		if all[i].ID != want {
 			t.Errorf("List[%d].ID = %q, want %q", i, all[i].ID, want)
+		}
+		if all[i].ActorKind != "job" || all[i].ActorID != "sweep-structural" {
+			t.Errorf("List[%d]: ActorKind/ActorID = %q/%q, want job/sweep-structural",
+				i, all[i].ActorKind, all[i].ActorID)
 		}
 	}
 
@@ -231,5 +240,69 @@ func TestSweepRunStore_ListScanError(t *testing.T) {
 	_, err := badStore.List(context.Background(), "structural", 0)
 	if err == nil {
 		t.Fatal("List: want scan error, got nil")
+	}
+}
+
+// TestCreateSweepRunTable_MigratesActorColumns verifies CreateSweepRunTable
+// upgrades a pre-A289 smeldr_sweep_runs table (missing actor_kind/actor_id)
+// via EnsureColumn, and that a row inserted before the migration reads back
+// with both columns defaulting to "" — not a fabricated actor (T246 pattern,
+// same shape as TestEnsureColumn_AddsColumn applied to this table).
+func TestCreateSweepRunTable_MigratesActorColumns(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+
+	// Pre-A289 shape: no actor_kind/actor_id columns.
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_sweep_runs (
+			id       TEXT PRIMARY KEY,
+			detector TEXT NOT NULL,
+			ran_at   TIMESTAMPTZ NOT NULL,
+			interval TEXT NOT NULL,
+			walked   INTEGER NOT NULL,
+			flagged  INTEGER NOT NULL,
+			skipped  INTEGER NOT NULL,
+			err      TEXT NOT NULL
+		)`); err != nil {
+		t.Fatalf("create pre-migration table: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_sweep_runs (id, detector, ran_at, interval, walked, flagged, skipped, err)
+		 VALUES ('pre-1', 'structural', '2026-01-01T00:00:00Z', '0 * * * *', 1, 0, 0, '')`,
+	); err != nil {
+		t.Fatalf("insert pre-migration row: %v", err)
+	}
+
+	if err := CreateSweepRunTable(db); err != nil {
+		t.Fatalf("CreateSweepRunTable (migration): %v", err)
+	}
+
+	store := NewSweepRunStore(db)
+	got, found, err := store.Last(ctx, "structural")
+	if err != nil {
+		t.Fatalf("Last: %v", err)
+	}
+	if !found {
+		t.Fatal("Last: found = false, want true")
+	}
+	if got.ActorKind != "" || got.ActorID != "" {
+		t.Errorf("pre-migration row: ActorKind/ActorID = %q/%q, want empty/empty",
+			got.ActorKind, got.ActorID)
+	}
+
+	// New rows after migration still write/read actor fields correctly.
+	if err := store.Append(ctx, SweepRunRecord{
+		ID: "post-1", Detector: "structural", RanAt: time.Now().UTC(),
+		ActorKind: "job", ActorID: "sweep-structural",
+	}); err != nil {
+		t.Fatalf("Append after migration: %v", err)
+	}
+	got2, _, err := store.Last(ctx, "structural")
+	if err != nil {
+		t.Fatalf("Last after Append: %v", err)
+	}
+	if got2.ActorKind != "job" || got2.ActorID != "sweep-structural" {
+		t.Errorf("post-migration row: ActorKind/ActorID = %q/%q, want job/sweep-structural",
+			got2.ActorKind, got2.ActorID)
 	}
 }

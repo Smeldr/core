@@ -547,5 +547,11 @@ func TestServerToggles(t *testing.T) {
 		if err := ts.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='smeldr_sweep_runs'`).Scan(&name); err != nil {
 			t.Errorf("smeldr_sweep_runs table: %v, want it created when ENABLE_STRUCTURAL_SWEEP=true", err)
 		}
+		rows, err := ts.db.Query(`SELECT actor_kind, actor_id FROM smeldr_sweep_runs LIMIT 0`)
+		if err != nil {
+			t.Errorf("smeldr_sweep_runs table: actor_kind/actor_id columns missing: %v", err)
+		} else {
+			rows.Close()
+		}
 	})
 }

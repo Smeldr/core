@@ -308,14 +308,16 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 				errStr = sweepErr.Error()
 			}
 			_ = runStore.Append(ctx, smeldr.SweepRunRecord{
-				ID:       smeldr.NewID(),
-				Detector: "structural",
-				RanAt:    time.Now().UTC(),
-				Interval: schedule,
-				Walked:   walked,
-				Flagged:  flagged,
-				Skipped:  skipped,
-				Err:      errStr,
+				ID:        smeldr.NewID(),
+				Detector:  "structural",
+				RanAt:     time.Now().UTC(),
+				Interval:  schedule,
+				Walked:    walked,
+				Flagged:   flagged,
+				Skipped:   skipped,
+				Err:       errStr,
+				ActorKind: "job",
+				ActorID:   "sweep-structural",
 			})
 			return walked, flagged, skipped, sweepErr
 		}

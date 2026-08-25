@@ -18,6 +18,15 @@ type SweepRunRecord struct {
 	Flagged  int       `json:"flagged"`  // e.g. relations invalidated / items transitioned
 	Skipped  int       `json:"skipped"`
 	Err      string    `json:"err"` // non-empty when the run itself returned an error
+
+	// ActorKind and ActorID identify what triggered this run, matching
+	// [ProvenanceRecord]'s own vocabulary ("human" | "job" | "agent"; empty
+	// only if truly unattributable). A scheduled detector is a fixed,
+	// non-enumerable mechanism, not a per-request actor — see
+	// [App.DrainEvalQueue]'s own ActorKind:"job" write (state.go) for the
+	// established precedent this generalises (A289).
+	ActorKind string `json:"actor_kind"`
+	ActorID   string `json:"actor_id"`
 }
 
 // SweepRunStore is the persistence interface for scheduled detector run
@@ -47,6 +56,7 @@ type SweepRunRecord struct {
 //	    _ = runStore.Append(ctx, smeldr.SweepRunRecord{
 //	        ID: smeldr.NewID(), Detector: "structural", RanAt: time.Now().UTC(),
 //	        Interval: "0 * * * *", Walked: walked, Flagged: flagged, Skipped: skipped, Err: errStr,
+//	        ActorKind: "job", ActorID: "sweep-structural",
 //	    })
 //	    return walked, flagged, skipped, err
 //	}
@@ -73,14 +83,16 @@ type sqlSweepRunStore struct {
 // [CreateSweepRunTable], or run the following DDL directly:
 //
 //	CREATE TABLE IF NOT EXISTS smeldr_sweep_runs (
-//	    id       TEXT PRIMARY KEY,
-//	    detector TEXT NOT NULL,
-//	    ran_at   TIMESTAMPTZ NOT NULL,
-//	    interval TEXT NOT NULL,
-//	    walked   INTEGER NOT NULL,
-//	    flagged  INTEGER NOT NULL,
-//	    skipped  INTEGER NOT NULL,
-//	    err      TEXT NOT NULL
+//	    id         TEXT PRIMARY KEY,
+//	    detector   TEXT NOT NULL,
+//	    ran_at     TIMESTAMPTZ NOT NULL,
+//	    interval   TEXT NOT NULL,
+//	    walked     INTEGER NOT NULL,
+//	    flagged    INTEGER NOT NULL,
+//	    skipped    INTEGER NOT NULL,
+//	    err        TEXT NOT NULL,
+//	    actor_kind TEXT NOT NULL DEFAULT '',
+//	    actor_id   TEXT NOT NULL DEFAULT ''
 //	);
 func NewSweepRunStore(db DB) SweepRunStore {
 	return &sqlSweepRunStore{db: db}
@@ -88,19 +100,33 @@ func NewSweepRunStore(db DB) SweepRunStore {
 
 // CreateSweepRunTable creates the smeldr_sweep_runs table if it does not
 // exist. Call once at application startup before [NewSweepRunStore].
+//
+// Also ensures the actor_kind and actor_id columns (A289) for any table
+// created before they were added to this function's own CREATE TABLE text —
+// without it, a pre-existing deployment's SweepRunStore.Append fails on
+// every call after upgrading, since Append unconditionally writes both
+// columns (same [EnsureColumn] pattern as [CreateSiteConfigTable]).
 func CreateSweepRunTable(db DB) error {
-	_, err := db.ExecContext(context.Background(), `
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS smeldr_sweep_runs (
-			id       TEXT PRIMARY KEY,
-			detector TEXT NOT NULL,
-			ran_at   TIMESTAMPTZ NOT NULL,
-			interval TEXT NOT NULL,
-			walked   INTEGER NOT NULL,
-			flagged  INTEGER NOT NULL,
-			skipped  INTEGER NOT NULL,
-			err      TEXT NOT NULL
-		)`)
-	return err
+			id         TEXT PRIMARY KEY,
+			detector   TEXT NOT NULL,
+			ran_at     TIMESTAMPTZ NOT NULL,
+			interval   TEXT NOT NULL,
+			walked     INTEGER NOT NULL,
+			flagged    INTEGER NOT NULL,
+			skipped    INTEGER NOT NULL,
+			err        TEXT NOT NULL,
+			actor_kind TEXT NOT NULL DEFAULT '',
+			actor_id   TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		return err
+	}
+	if err := EnsureColumn(ctx, db, "smeldr_sweep_runs", "actor_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return EnsureColumn(ctx, db, "smeldr_sweep_runs", "actor_id", "TEXT NOT NULL DEFAULT ''")
 }
 
 // Append persists r to the smeldr_sweep_runs table.
@@ -108,10 +134,10 @@ func CreateSweepRunTable(db DB) error {
 func (s *sqlSweepRunStore) Append(ctx context.Context, r SweepRunRecord) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO smeldr_sweep_runs
-		 (id, detector, ran_at, interval, walked, flagged, skipped, err)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		 (id, detector, ran_at, interval, walked, flagged, skipped, err, actor_kind, actor_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		r.ID, r.Detector, r.RanAt.UTC().Format(time.RFC3339), r.Interval,
-		r.Walked, r.Flagged, r.Skipped, r.Err,
+		r.Walked, r.Flagged, r.Skipped, r.Err, r.ActorKind, r.ActorID,
 	)
 	if err != nil {
 		return fmt.Errorf("smeldr: SweepRunStore.Append: %w", err)
@@ -123,7 +149,7 @@ func (s *sqlSweepRunStore) Append(ctx context.Context, r SweepRunRecord) error {
 // descending. found is false and err is nil when no record exists yet.
 func (s *sqlSweepRunStore) Last(ctx context.Context, detector string) (SweepRunRecord, bool, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, detector, ran_at, interval, walked, flagged, skipped, err
+		`SELECT id, detector, ran_at, interval, walked, flagged, skipped, err, actor_kind, actor_id
 		 FROM smeldr_sweep_runs WHERE detector = $1
 		 ORDER BY ran_at DESC LIMIT 1`,
 		detector,
@@ -145,7 +171,7 @@ func (s *sqlSweepRunStore) Last(ctx context.Context, detector string) (SweepRunR
 // List returns up to limit records for detector, newest first. limit <= 0
 // means no limit.
 func (s *sqlSweepRunStore) List(ctx context.Context, detector string, limit int) ([]SweepRunRecord, error) {
-	query := `SELECT id, detector, ran_at, interval, walked, flagged, skipped, err
+	query := `SELECT id, detector, ran_at, interval, walked, flagged, skipped, err, actor_kind, actor_id
 	          FROM smeldr_sweep_runs WHERE detector = $1 ORDER BY ran_at DESC`
 	args := []any{detector}
 	if limit > 0 {
@@ -182,7 +208,7 @@ func scanSweepRunRecord(row rowScanner) (SweepRunRecord, error) {
 	var r SweepRunRecord
 	var ranAtStr string
 	if err := row.Scan(&r.ID, &r.Detector, &ranAtStr, &r.Interval,
-		&r.Walked, &r.Flagged, &r.Skipped, &r.Err); err != nil {
+		&r.Walked, &r.Flagged, &r.Skipped, &r.Err, &r.ActorKind, &r.ActorID); err != nil {
 		return SweepRunRecord{}, err
 	}
 	r.RanAt, _ = time.Parse(time.RFC3339, ranAtStr)

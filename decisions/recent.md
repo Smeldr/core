@@ -1686,3 +1686,64 @@ error; now works), no new exported symbol, matching A226/A281/A283/
 A286/A287's own precedent: v1.76.2 → **v1.76.3**.
 
 ---
+
+## A289 — SweepRunRecord actor concept (Wave 4b, cloud-machine-implementation-plan-v1.md)
+
+### Problem
+
+`SweepRunRecord` (`sweep_run.go`) had no actor concept — its fields
+were `ID`/`Detector`/`RanAt`/`Interval`/`Walked`/`Flagged`/`Skipped`/
+`Err`, nothing naming who or what triggered the run. Every other
+background-job provenance record in core already carries `ActorKind`/
+`ActorID` (`ProvenanceRecord`; `App.DrainEvalQueue`'s own write,
+`state.go:1104-1114`) — `SweepRunRecord` predates that convention and
+was never brought in line with it. `state.go`'s own comment on the
+`DrainEvalQueue` write explicitly forecast this: "generalises to
+SweepStructural (T223) as the same pattern."
+
+**Sequencing constraint, real and non-reversible**: this ships before
+devops turns on `ENABLE_STRUCTURAL_SWEEP` on the live
+`process.smeldr.dev` deployment — a `SweepRunRecord`'s own fields
+can't be backfilled after the fact once real sweep runs start
+accumulating without actor data.
+
+### Fix
+
+`SweepRunRecord` gains `ActorKind string` / `ActorID string`, matching
+`ProvenanceRecord`'s existing vocabulary (`"human"`/`"job"`/`"agent"`;
+empty only if truly unattributable) rather than a new vocabulary for
+sweep runs specifically. `example/server`'s `sweepFn` closure
+populates `ActorKind: "job"`, `ActorID: "sweep-structural"` — a fixed,
+non-enumerable mechanism identifier, named after `App.SweepStructural`
+kebab-cased, exactly mirroring `drain-eval-queue`'s own derivation from
+`App.DrainEvalQueue`.
+
+`CreateSweepRunTable`'s DDL gains both columns
+(`TEXT NOT NULL DEFAULT ''`); a pre-existing `smeldr_sweep_runs` table
+from a deployment that already called `CreateSweepRunTable` (shipped
+since `sweep-structural-wired-on-schedule`, 2026-08-20) is upgraded via
+two `EnsureColumn` calls (T246 pattern, same shape as
+`CreateSiteConfigTable`'s own `scheduled_at`/`rev` migration calls) —
+a pre-migration row correctly reads back with both fields empty
+("unattributable"), not a fabricated actor. `Append`/`Last`/`List`/
+`scanSweepRunRecord` all updated to read/write both columns.
+
+### Tests
+
+`TestSweepRunStore_AppendAndLast` and `TestSweepRunStore_ListOrderAndLimit`
+extended to set and assert `ActorKind`/`ActorID`. New
+`TestCreateSweepRunTable_MigratesActorColumns` creates a pre-A289-shape
+table by hand, inserts a row before migrating, calls
+`CreateSweepRunTable` again, and asserts: the pre-migration row reads
+back with both fields empty, and a post-migration `Append` correctly
+writes and reads back real values.
+
+### Versioning
+
+New exported struct fields on an existing type (`SweepRunRecord`), no
+new top-level exported symbol, no breaking change — matches A275's own
+precedent for consumer-visible-but-additive changes to an existing
+exported type. PATCH bump: v1.76.3 → **v1.76.4**. Tag/release pending
+Peter's own fresh explicit go-ahead, separate from commit approval.
+
+---

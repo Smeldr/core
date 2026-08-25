@@ -409,11 +409,14 @@ smeldr.dev/
 │                     completed scheduled detector run (App.SweepStructural, App.DrainEvalQueue),
 │                     modeled on audit.go's AuditRecord/AuditStore shape; closes T223 — a clean
 │                     sweep previously logged one Debug line and persisted nothing, indistinguishable
-│                     from no sweep having run at all. No HTTP or MCP surface by design (Last/List
-│                     are for Go-level staleness derivation, same reasoning as /_logs); no shipped
-│                     wiring into agent.NewSweepScheduler (a store parameter there would force a
-│                     smeldr.dev/core import into the dependency-free MIT base smeldr.dev/agent
-│                     package) — record runs by wrapping the detector function at the call site
+│                     from no sweep having run at all. Records ActorKind/ActorID (A289), matching
+│                     ProvenanceRecord's own vocabulary — example/server's sweepFn closure writes
+│                     ActorKind:"job", ActorID:"sweep-structural"; CreateSweepRunTable upgrades a
+│                     pre-A289 table via EnsureColumn (T246 pattern). No HTTP or MCP surface by
+│                     design (Last/List are for Go-level staleness derivation, same reasoning as
+│                     /_logs); no shipped wiring into agent.NewSweepScheduler (a store parameter
+│                     there would force a smeldr.dev/core import into the dependency-free MIT base
+│                     smeldr.dev/agent package) — record runs by wrapping the detector function at the call site
 │                     instead, per SweepRunStore's own doc comment (Amendment A279, T223)
 ├── blocks.go          DynamicNode (embeds Node; TypeName, Fields json.RawMessage) + Head(),
 │                     NewDynamicContentRepo(db) *SQLRepo[*DynamicNode] (binds smeldr_dynamic_content),

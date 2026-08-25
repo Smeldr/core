@@ -3010,23 +3010,27 @@ sweepFn := func(ctx context.Context) (int, int, int, error) {
     _ = runStore.Append(ctx, smeldr.SweepRunRecord{
         ID: smeldr.NewID(), Detector: "structural", RanAt: time.Now().UTC(),
         Interval: "0 * * * *", Walked: walked, Flagged: flagged, Skipped: skipped, Err: errStr,
+        ActorKind: "job", ActorID: "sweep-structural",
     })
     return walked, flagged, skipped, err
 }
 ```
 
-DDL (also created by `CreateSweepRunTable`):
+DDL (also created by `CreateSweepRunTable`; a pre-existing table missing
+`actor_kind`/`actor_id` is upgraded in place via `EnsureColumn`):
 
 ```sql
 CREATE TABLE IF NOT EXISTS smeldr_sweep_runs (
-    id       TEXT PRIMARY KEY,
-    detector TEXT NOT NULL,
-    ran_at   TIMESTAMPTZ NOT NULL,
-    interval TEXT NOT NULL,
-    walked   INTEGER NOT NULL,
-    flagged  INTEGER NOT NULL,
-    skipped  INTEGER NOT NULL,
-    err      TEXT NOT NULL
+    id         TEXT PRIMARY KEY,
+    detector   TEXT NOT NULL,
+    ran_at     TIMESTAMPTZ NOT NULL,
+    interval   TEXT NOT NULL,
+    walked     INTEGER NOT NULL,
+    flagged    INTEGER NOT NULL,
+    skipped    INTEGER NOT NULL,
+    err        TEXT NOT NULL,
+    actor_kind TEXT NOT NULL DEFAULT '',
+    actor_id   TEXT NOT NULL DEFAULT ''
 );
 ```
 
@@ -3042,6 +3046,8 @@ CREATE TABLE IF NOT EXISTS smeldr_sweep_runs (
 | `Flagged` | `flagged` | Items with issues (e.g. relations invalidated, items transitioned) |
 | `Skipped` | `skipped` | Items the detector could not fully check this run (e.g. a target-checker error in `SweepStructural`, or a role-gated/erroring item in `DrainEvalQueue`) — logged, not fatal to the run |
 | `Err` | `err` | Non-empty when the run itself returned an error; empty string for success |
+| `ActorKind` | `actor_kind` | `"human"` \| `"job"` \| `"agent"`; empty only if truly unattributable, matching `ProvenanceRecord`'s own vocabulary (A289) |
+| `ActorID` | `actor_id` | Fixed mechanism identifier for a scheduled detector, e.g. `"sweep-structural"`, `"drain-eval-queue"` |
 
 ### Custom store
 
