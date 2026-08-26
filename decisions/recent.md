@@ -1856,3 +1856,88 @@ section. PATCH bump: v1.76.4 → **v1.76.5**. Tag/release pending
 Peter's own fresh explicit go-ahead, separate from commit approval.
 
 ---
+
+## D59 — Goals are places: a new `contains` relation kind gives Smeldr a first-class, user-defined taxonomy
+
+### Scope
+
+Raised by cloud-implementer's plan for `t204-navigator-instrument`
+(Wave 2 of `design/cloud-machine-implementation-plan-v1.md`). Navigator's
+own closed design (Turn 56/79/80) draws a containment hierarchy — domain
+to area to entries, e.g. "Halden Works" (1,284) containing "Pricing"
+(412) containing "Decisions" (54) — that does not correspond to
+anything in Smeldr's real data model. `orchestration.go` defines five
+flat content types (`Decision`/`Task`/`Goal`/`Amendment`/`Signal`), each
+with at most a flat category string (`Decision.Scope`, `Task.Band`), no
+nesting, no domain/area concept anywhere in core. Discussed directly
+with Peter before deciding — not resolved unilaterally.
+
+### Decision
+
+A Goal is a place. Any content item can relate to a Goal via a new
+RelationStore kind — working name `contains` (reverse label `part of`
+or similar; exact label left to the implementing Task) — and the tree
+Navigator walks is that relation, not a schema-level hierarchy. The
+taxonomy itself is user/org-defined: a Goal is already a freely created
+item with no fixed enum, so "Frontend," "Finance," or "Pricing" are
+just Goals someone created, not values baked into core's schema. This
+generalizes past Navigator: it is the answer to a real coordination
+need — with many agents and humans taking decisions across domains,
+being able to ask "what already exists in this area" before adding
+something new is a first-class discovery primitive, not a UI-only
+concern.
+
+### Why
+
+Three readings were on the table; two were rejected:
+
+- **Type as the only hierarchy level** (the five content types as flat
+  top-level "domains"). Cheapest, but doesn't match the design's own
+  worked examples (3+ levels) and makes realistic entry counts
+  implausible at this repo's actual scale.
+- **Reuse the existing `Scope`/`Band` fields directly.** Real data, zero
+  schema change — but each type's category vocabulary is its own,
+  unrelated to the others. A cross-type tree built from five
+  disconnected ad hoc vocabularies would be an artifact of the UI, not
+  a hierarchy the model actually asserts.
+
+A shared flat `Topic` field (one new field, present on all five types)
+was also considered and rejected: cheaper than a relation kind, but
+caps grouping at exactly one level, gives the domain itself no
+addressable identity of its own, and free-text values risk vocabulary
+drift fracturing the taxonomy ("frontend" vs "Frontend" vs
+"front-end") with no correction mechanism.
+
+The `contains`-relation reading wins because:
+
+1. It produces a real containment structure of arbitrary depth, not a
+   fixed-depth flattening or a single-level tag.
+2. Goals already function informally this way in this repo's own live
+   usage — Tasks and Decisions already reference the Goal they serve.
+3. The query this decision exists to serve — "what already exists in
+   domain X" — is not new engineering. `RelationStore`'s reachability
+   walk already exists and is proven in production today (Pulse's
+   `computeTension`); this decision reuses that primitive with a new
+   kind, it does not invent new query machinery.
+4. An initially sparse tree that fills in as `contains` edges get
+   asserted is consistent with the rest of the system's own posture on
+   absence — stated honestly, never fabricated to look complete (the
+   same posture behind Pulse's "not computed" states and Navigator's
+   own "surrendered count" handling).
+
+### Consequences
+
+- Navigator's tree-rendering work is now split: everything independent
+  of the place question (host contract extension, rack reorder,
+  fold/floor UI, hand-off wiring, empty-org and frozen-read handling)
+  proceeds now; real tree rendering against actual `contains` edges
+  waits on the relation kind existing.
+- A follow-up Task registers the `contains` kind (RelationKindDef,
+  `Label`/`ReverseLabel`) and settles what this decision deliberately
+  leaves open: **who asserts a `contains` edge, and when** — at
+  creation time, via a later curation pass, or both. Not decided here.
+- This is now a standing Smeldr capability, not a Navigator
+  implementation detail — other instruments or a future search surface
+  can query the same relation kind once it exists.
+
+---
