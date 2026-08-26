@@ -946,6 +946,11 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 		"depends_on":   {"Depends On", "", `[{"source_type":"Task","target_type":"Task"}]`},
 		"ships_as":     {"Ships As", "", `[{"source_type":"Task","target_type":"Amendment"}]`},
 		"supersedes":   {"Supersedes", "Superseded By", `[{"source_type":"Decision","target_type":"Decision"}]`},
+		"contains": {"Contains", "Part Of", `[{"source_type":"Goal","target_type":"Goal"},` +
+			`{"source_type":"Goal","target_type":"Task"},` +
+			`{"source_type":"Goal","target_type":"Decision"},` +
+			`{"source_type":"Goal","target_type":"Amendment"},` +
+			`{"source_type":"Goal","target_type":"Signal"}]`},
 	}
 
 	kinds := store.ListKinds()

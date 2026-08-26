@@ -556,6 +556,18 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			Directional:  true,
 			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"}]`),
 		},
+		{
+			TypeName:     "contains",
+			Label:        "Contains",
+			ReverseLabel: "Part Of",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs: json.RawMessage(`[{"source_type":"Goal","target_type":"Goal"},` +
+				`{"source_type":"Goal","target_type":"Task"},` +
+				`{"source_type":"Goal","target_type":"Decision"},` +
+				`{"source_type":"Goal","target_type":"Amendment"},` +
+				`{"source_type":"Goal","target_type":"Signal"}]`),
+		},
 	}
 	for _, k := range kinds {
 		if err := store.UpsertKind(ctx, k); err != nil {

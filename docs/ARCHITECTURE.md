@@ -215,8 +215,10 @@ smeldr.dev/
 │                     (Amendment A241, D40)
 │                     RegisterOrchestrationRelationKinds(ctx, *RelationStore) error — registers
 │                     derives_from (Task→Goal), depends_on (Task→Task), ships_as (Task→Amendment),
-│                     supersedes (Decision→Decision), all Mode="asserted"/Directional=true/
-│                     Weighted=false, per D36; idempotent via UpsertKind (Amendment A236, M0 step 2)
+│                     supersedes (Decision→Decision), contains (Goal→{Goal,Task,Decision,Amendment,
+│                     Signal} — a Goal is a place, D59), all Mode="asserted"/Directional=true/
+│                     Weighted=false, per D36; idempotent via UpsertKind (Amendment A236, M0 step 2;
+│                     contains added by A292)
 │                     orchTaskFlow/orchGoalFlow both gain "resolved" (IsTerminal), a fourth/third
 │                     outcome distinct from "done": the underlying need was met, but not by this
 │                     item's own tracked work (D58). Task: reachable from active/waiting-plan/

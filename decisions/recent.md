@@ -1941,3 +1941,76 @@ The `contains`-relation reading wins because:
   can query the same relation kind once it exists.
 
 ---
+
+## A292 — Register `contains` relation kind, settle D59's two open questions (D59 follow-up)
+
+### Problem
+
+D59 settled that a Goal is a place, but deliberately left the `contains`
+kind unregistered and two real questions open: who asserts a `contains`
+edge and when, and whether `RelationStore.Reachability`/`ContextPacket`
+are sufficient for cloud's own "what already exists in domain X" query.
+cloud-implementer is blocked on this for the second half of
+`t204-navigator-instrument` (real tree rendering).
+
+### Fix
+
+`RegisterOrchestrationRelationKinds` gains a fifth kind: `contains`
+(`Label: "Contains"`, `ReverseLabel: "Part Of"`, `Directional: true`,
+`Mode: "asserted"`), with five `TypePairs` entries —
+Goal→{Goal,Task,Decision,Amendment,Signal} — matching D59's own "any
+content item can relate to a Goal" language, including Goal→Goal for
+nested domains ("Halden Works" containing "Pricing").
+
+### Who asserts, and when
+
+**Convention now, no new core machinery.** Verified directly: `Task`
+carries no field referencing a Goal at all — its relation to a Goal
+today is asserted purely via `derives_from`, through a separate
+`assert_relation` call, never bundled into creation. No existing
+relation kind, including `derives_from`/`ships_as`, is ever
+auto-asserted by a `createHandler` as a side effect of creating an
+item — "architect asserts `derives_from` at dispatch" is a *process*
+convention (`AGENT_PROTOCOL.md`), not a core-level mechanism. `contains`
+follows the identical model: the creating actor asserts the edge via
+the existing `assert_relation` tool, same discipline, no new code.
+Building creation-time auto-assertion here would be new, unrequested
+machinery that also preempts T233's own holistic review of assert-time
+enforcement across every relation kind.
+
+Deferred, explicitly out of scope: a coverage-detection follow-up
+(flagging items with zero `contains` edges) is a different problem
+from `SweepStructural`'s existing staleness detection (D47) — it would
+need its own new mechanism, naturally tied to T126's still-unbuilt
+`Finding` type (D51). Not building it now.
+
+### Reachability / ContextPacket sufficiency
+
+**Confirmed insufficient — the same gap already known for Pulse, not a
+new one.** `RelationStore.Reachability` has zero remote/cross-tenant
+exposure (every call site is in `reachability_test.go`, no REST, no
+MCP). `ContextPacket`'s depth cap (2) and `packetPerTypeCap` (25) would
+silently undercount a real domain's contents for the same reason they
+can't substitute for Pulse's Tension. This gap had been referenced
+inline three times across this session (Pulse's `computeTension`,
+A291's own commit note, and this Task) without ever becoming its own
+Task — flagged to the architect rather than creating a fourth inline
+reference or a duplicate Task for what is the identical root cause. The
+architect has since created it as its own backlog item.
+
+### Tests
+
+`TestRegisterOrchestrationRelationKinds_RoundTrip` extended with a
+`"contains"` entry (Label, ReverseLabel, exact five-pair `TypePairs`
+JSON) — same assertions every other kind already gets, kind count now 5.
+
+### Versioning
+
+New relation-kind data registered by an existing function; no exported
+Go symbol/signature changed, no breaking change — same shape as
+A289/A290/A291's own precedent. v1.76.5 is already tagged and
+released — this lands in a fresh `[1.76.6] — Unreleased` section. PATCH
+bump: v1.76.5 → **v1.76.6**. Tag/release pending Peter's own fresh
+explicit go-ahead, given directly in chat, never relayed.
+
+---
