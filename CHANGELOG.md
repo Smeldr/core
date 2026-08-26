@@ -23,7 +23,7 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
-## [1.76.6] — Unreleased
+## [1.76.6] — 2026-08-26
 
 ### Added
 - `RegisterOrchestrationRelationKinds` registers a new `contains` relation kind (Goal→{Goal,Task,Decision,Amendment,Signal}) — a Goal is a place, per D59: any content item can relate to it, and the kind generalizes past Navigator's own tree-rendering need (unblocking `t204-navigator-instrument`'s second half) into a standing discovery primitive. Who asserts a `contains` edge, and when, is settled as convention — the same `assert_relation` mechanism already used for `derives_from`/`ships_as`, no new core machinery. (A292)
