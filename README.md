@@ -16,7 +16,7 @@ Start a chat with your favorite agent, create content together and then...
 
 ...manage multiple agents to react to signals with the built-in agent runtime
 
-...track decisions with a freshness cycle — propose, ratify, re-evaluate — so nothing silently goes stale
+...track decisions with a freshness cycle: propose, ratify, re-evaluate, so nothing silently goes stale
 
 Or coordinate your entire pipeline and automated workflow, AI actions and human review included.
 
