@@ -41,6 +41,8 @@
 //	STRUCTURAL_SWEEP_SCHEDULE  5-field cron expression for the sweep (default: "0 * * * *", hourly)
 //	ENABLE_CONTEXT_PACKET wire GET /packet/{type}/{slug} (Editor role required; requires
 //	                      ENABLE_RELATIONS and ENABLE_ORCHESTRATION, T159)
+//	ENABLE_REACHABILITY   wire GET /reachability/{type}/{id} (Author role required; requires
+//	                      ENABLE_RELATIONS only — not orchestration-specific, A293)
 //	ENABLE_PROVENANCE     wire transition-provenance recording (App.Provenance)
 //	ENABLE_AGENTS         wire the agent job system (connects to this server's own /mcp endpoint)
 //	AGENT_MCP_URL         agent MCP endpoint (default: http://127.0.0.1:PORT/mcp/message)
@@ -93,6 +95,7 @@ type ServerConfig struct {
 	EnableStructuralSweep   bool
 	StructuralSweepSchedule string
 	EnableContextPacket     bool
+	EnableReachability      bool
 	EnableProvenance        bool
 	EnableAgents            bool
 	AgentMCPURL             string
@@ -138,6 +141,7 @@ func parseConfig() ServerConfig {
 		EnableStructuralSweep:   os.Getenv("ENABLE_STRUCTURAL_SWEEP") != "",
 		StructuralSweepSchedule: envOr("STRUCTURAL_SWEEP_SCHEDULE", "0 * * * *"),
 		EnableContextPacket:     os.Getenv("ENABLE_CONTEXT_PACKET") != "",
+		EnableReachability:      os.Getenv("ENABLE_REACHABILITY") != "",
 		EnableProvenance:        os.Getenv("ENABLE_PROVENANCE") != "",
 		EnableAgents:            os.Getenv("ENABLE_AGENTS") != "",
 		AgentMCPURL:             envOr("AGENT_MCP_URL", "http://127.0.0.1:"+port+"/mcp/message"),
@@ -187,6 +191,10 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 		rs = store
 		app.Relations(store)
+
+		if cfg.EnableReachability {
+			app.ReachabilityHandler(rs)
+		}
 	}
 
 	if cfg.EnableProvenance {

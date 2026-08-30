@@ -631,3 +631,69 @@ the same git-blob check to be the identical pre-existing CRLF artifact,
 none actually dirty in git's own stored content, none touched.
 
 ---
+
+## A293 — Reachability remote-exposure: GET /reachability/{type}/{id}
+
+### Problem
+
+`RelationStore.Reachability` had zero remote/cross-tenant exposure — every
+call site was inside `reachability_test.go`, no REST, no MCP surface.
+D59's own stated motivation for the `contains` relation kind (A292) —
+cloud's "what already exists in domain X" query — needs this once
+`contains` edges exist. `ContextPacket` cannot substitute: its depth cap
+(2) and `packetPerTypeCap` (25) would silently undercount a real domain's
+contents, the identical reason it can't substitute for Pulse's Tension
+either. Referenced inline three times this session before the architect
+created this as its own Task.
+
+### Fix
+
+**New route: `GET /reachability/{type}/{id}`** (`?kind=&direction=&depth=`),
+registered by `App.ReachabilityHandler(rs *RelationStore)` — same shape as
+`ContextPacketHandler` minus the `sourceName` param (Reachability never
+builds URLs). No depth cap tighter than `MaxReachabilityDepth` (10) is
+imposed at the HTTP layer — this route exists specifically to do what
+`ContextPacket`'s own caps can't.
+
+**Role: Author**, not `ContextPacket`'s `Editor` — Reachability exposes
+graph structure only (type/id/edge_class/confidence, no item content),
+matching `MCPGetRelations`'s own existing Author+ bar for a structurally
+identical read.
+
+**Core-side MCP wrapper included, mcp-repo tool registration NOT
+included.** New `RelationStore.MCPReachability` — a bare passthrough,
+matching `MCPPreviewImpact`'s own established shape — so `smeldr.dev/mcp`
+can wire an actual tool in its own future Task without a core-side
+prerequisite. Actually registering the tool is that repo's own separate
+work, matching the established two-repo split for every prior
+`MCPXxx`-then-tool addition.
+
+`example/server` gates the route behind a new `ENABLE_REACHABILITY` flag,
+requiring `ENABLE_RELATIONS` only — deliberately not `ENABLE_ORCHESTRATION`,
+since `Reachability` operates on the generic relation graph, not the five
+orchestration anchor types `ContextPacket` is scoped to.
+
+**Flagged, not fixed**: `reachability.go`'s own doc comment claims to
+mirror `MCPGetRelations`'s direction vocabulary, but the two functions
+actually accept different literal strings (`"incoming"`/`"outgoing"`/
+`"both"` vs. `"source"`/`"target"`/`"both"`) — a genuine, pre-existing
+inconsistency, not introduced here, out of this Task's own scope.
+
+### Tests
+
+`TestMCPReachability_ThinWrapper` proves the passthrough. Five handler
+tests: 200 with real graph data, 400 invalid direction, 400 invalid depth
+string, 401 no token, 403 sub-Author role. Three `example/server`
+`TestServerToggles` subtests (on, off-without-relations, off-without-own-
+flag), matching `contextPacket`'s own established shape exactly.
+
+### Versioning
+
+New exported symbols (`App.ReachabilityHandler`, `RelationStore.
+MCPReachability`) and a new route — MINOR bump, matching A274/A279's own
+precedent for new-exported-API changes, not PATCH. v1.76.6 already
+tagged — lands in a fresh `[1.77.0] — Unreleased` section. MINOR bump:
+v1.76.6 → **v1.77.0**. Tag/release pending Peter's own fresh explicit
+go-ahead, given directly in chat, never relayed.
+
+---

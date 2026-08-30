@@ -172,6 +172,16 @@ func (s *RelationStore) Reachability(ctx context.Context, anchorType, anchorID, 
 	return result, nil
 }
 
+// MCPReachability is a thin passthrough to [RelationStore.Reachability],
+// added purely for mcp's own uniform MCPXxx naming convention — matching
+// [RelationStore.MCPPreviewImpact]'s and [RelationStore.MCPListRelationKinds]'s
+// own established shape. Registering an actual MCP tool that calls this is
+// smeldr.dev/mcp's own separate, not-yet-built Task (A293) — this method
+// exists so that future work has no core-side prerequisite blocking it.
+func (s *RelationStore) MCPReachability(ctx context.Context, anchorType, anchorID, kind, direction string, maxDepth int) (*Reachability, error) {
+	return s.Reachability(ctx, anchorType, anchorID, kind, direction, maxDepth)
+}
+
 // reachabilityNeighbors returns the distinct nodes directly connected to node via
 // kind (empty = all kinds), honoring direction, paired with the EdgeClass/Confidence
 // of the edge that connects them. Mirrors the direction vocabulary already used by

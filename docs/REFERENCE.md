@@ -3117,6 +3117,57 @@ not an error (A291).
 
 ---
 
+## Reachability
+
+`App.ReachabilityHandler(rs *RelationStore)` mounts `GET /reachability/
+{type}/{id}` — a bounded, breadth-first traversal of the relation graph
+from any anchor, not limited to the five orchestration types `ContextPacket`
+covers. A real remote-exposure path for `RelationStore.Reachability`
+(A293): `ContextPacket`'s own depth cap (2) and per-type cap (25) would
+silently undercount a real, densely-connected domain — this route has no
+depth cap tighter than `MaxReachabilityDepth` (10). Requires **Author
+role** via bearer auth — lower than `ContextPacket`'s `Editor` bar, since
+Reachability exposes graph structure only (type/id/edge_class/confidence),
+never item content.
+
+### Setup
+
+```go
+app.ReachabilityHandler(relationStore)
+```
+
+`example/server` gates this behind its own `ENABLE_REACHABILITY` flag, in
+addition to `ENABLE_RELATIONS` — unlike `ContextPacketHandler`, it does
+**not** require `ENABLE_ORCHESTRATION`, since Reachability operates on the
+generic relation graph, not the five orchestration anchor types.
+
+### Request
+
+`GET /reachability/{type}/{id}?kind=&direction=&depth=` — `kind` is
+optional (empty = all relation kinds); `direction` is `incoming`,
+`outgoing`, or `both` (default `both`); `depth` defaults to `1` and must be
+between `1` and `MaxReachabilityDepth` (10).
+
+### Status codes
+
+| Status | Meaning |
+|---|---|
+| `200` | Reachability result returned (JSON-encoded `Reachability`) |
+| `400` | Invalid `direction`, `depth` out of range, or `depth` not a number |
+| `401` | No valid bearer token |
+| `403` | Valid token, role below `Author` |
+
+There is no existence check on `{type}/{id}` — an anchor with no edges
+simply returns a result whose rings all have zero items, matching
+`Reachability`'s own "absence is a genuine result, not an error" design
+(see [reachability.go]'s own doc comment).
+
+`RelationStore.MCPReachability` is a thin passthrough to `Reachability`,
+added for `smeldr.dev/mcp`'s own future tool registration (not yet built —
+a separate repo and Task) — no MCP tool ships with this route.
+
+---
+
 ## MCP resource subscriptions
 
 Available in `smeldr.dev/mcp` when `App.AddSignalListener` is wired (set up

@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.77.0] — Unreleased
+
+### Added
+- `App.ReachabilityHandler(rs *RelationStore)` mounts `GET /reachability/{type}/{id}` — a real remote-exposure path for `RelationStore.Reachability`, unblocking cloud's cross-tenant "what already exists in domain X" query (D59's own motivation). Author role required; no depth cap tighter than `MaxReachabilityDepth` — `ContextPacket`'s own depth/per-type caps can't serve this. `RelationStore.MCPReachability` thin wrapper added for `smeldr.dev/mcp`'s own future tool registration (not built here). `example/server` gates the route behind a new `ENABLE_REACHABILITY` flag (requires `ENABLE_RELATIONS` only, not orchestration). (A293)
+
+---
+
 ## [1.76.6] — 2026-08-26
 
 ### Added

@@ -265,6 +265,13 @@ smeldr.dev/
 │                     reachabilityCandidate/edgeClassRank/betterCandidate (unexported) implement the
 │                     deterministic tie-break; previously the first edge processed silently won, with
 │                     no defined order (Amendment A231, T194)
+│                     RelationStore.MCPReachability(ctx, anchorType, anchorID, kind, direction string,
+│                     maxDepth int) (*Reachability, error) — thin passthrough, mcp-side tool
+│                     registration not yet built (Amendment A293); reachability_handler.go (new file):
+│                     App.ReachabilityHandler(rs *RelationStore) — mounts GET /reachability/{type}/{id}
+│                     [?kind=&direction=&depth=], Author role required via bearer auth, no depth cap
+│                     tighter than MaxReachabilityDepth — a real remote-exposure path ContextPacket's
+│                     own depth/per-type caps can't serve (Amendment A293)
 ├── lineage.go        LineageNode, LineageTrace exported types; MaxLineageDepth = 10 constant;
 │                     RelationStore.TraceLineage(ctx, anchorType, anchorID string, maxDepth int)
 │                     (*LineageTrace, error) — bounded, read-time upstream traversal over

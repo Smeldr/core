@@ -477,6 +477,52 @@ func TestServerToggles(t *testing.T) {
 		}
 	})
 
+	t.Run("on/reachability", func(t *testing.T) {
+		// A293: unlike contextPacket, reachability only needs ENABLE_RELATIONS
+		// — it operates on the generic relation graph, not the five
+		// orchestration anchor types specifically.
+		cfg := baseConfig()
+		cfg.EnableRelations = true
+		cfg.EnableReachability = true
+		ts := buildTestServer(t, cfg)
+		token := createToken(t, ts, "author", "author")
+
+		// An invalid direction proves the route is mounted and reaches
+		// Reachability's own validation (400), past auth.
+		if got := getStatus(t, ts.URL, token, "/reachability/x/y?direction=sideways"); got != http.StatusBadRequest {
+			t.Errorf("GET /reachability/x/y?direction=sideways: got %d, want 400 (route must be mounted when both flags are set)", got)
+		}
+		// No token must still be rejected before reaching validation —
+		// EnableReachability does not relax auth.
+		if got := getStatus(t, ts.URL, "", "/reachability/x/y?direction=sideways"); got != http.StatusUnauthorized {
+			t.Errorf("GET /reachability/x/y (no token): got %d, want 401", got)
+		}
+	})
+
+	t.Run("off/reachabilityWithoutRelations", func(t *testing.T) {
+		cfg := baseConfig()
+		cfg.EnableRelations = false
+		cfg.EnableReachability = true
+		ts := buildTestServer(t, cfg)
+
+		if got := getStatus(t, ts.URL, "", "/reachability/x/y"); got != http.StatusNotFound {
+			t.Errorf("GET /reachability/x/y: got %d, want 404 (route must not mount without ENABLE_RELATIONS)", got)
+		}
+	})
+
+	t.Run("off/reachabilityWithoutOwnFlag", func(t *testing.T) {
+		// EnableReachability is its own explicit second gate, not implied by
+		// ENABLE_RELATIONS alone — matches EnableContextPacket's own precedent.
+		cfg := baseConfig()
+		cfg.EnableRelations = true
+		cfg.EnableReachability = false
+		ts := buildTestServer(t, cfg)
+
+		if got := getStatus(t, ts.URL, "", "/reachability/x/y"); got != http.StatusNotFound {
+			t.Errorf("GET /reachability/x/y: got %d, want 404 (route must not mount without its own ENABLE_REACHABILITY)", got)
+		}
+	})
+
 	t.Run("off/noEventStream", func(t *testing.T) {
 		cfg := baseConfig()
 		// EnableEventStream deliberately left false.
