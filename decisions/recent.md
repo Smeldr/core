@@ -697,3 +697,86 @@ v1.76.6 → **v1.77.0**. Tag/release pending Peter's own fresh explicit
 go-ahead, given directly in chat, never relayed.
 
 ---
+
+## A295 — Public positioning accelerated to ledger-first: GitHub description, topics, README opening reordered
+
+Peter's own decision (Turn 11, `smeldr/common/reviews/smeldr-value-
+positioning-grok/discussion.md`): "Lad os accelerere det skarpere sprog.
+Men endelig ikke over claim." — accelerate past the gradual `.dev`
+warm-up pace deliberately, named on purpose per brand's own Turn 8
+condition for proceeding, under a standing constraint: never claim more
+than what's actually built and dogfooded today.
+
+### What changed
+
+**README.md opening** (replaces the old "AI-native content backend in Go"
+one-liner and the blog-first lead): a new three-sentence paragraph leading
+with the `Decision`/relation-sweep ledger capability, followed by one real
+`Decision` shown as it's actually stored (this repo's own D59, quoted from
+`DECISIONS.md`, not fabricated) and a corrected `ENABLE_ORCHESTRATION`
+wiring snippet. The existing five "start a chat...then" bullets (blog,
+social scheduling, apps, agent runtime, decision freshness cycle) are kept,
+not deleted — moved after the ledger example rather than leading, per
+brand's Turn 8 concern that the content use case stay visible. The
+Echo/Gin/Chi comparison table is removed outright, not replaced with an
+unverified competitor table — this repo cannot verify comparison claims
+about Mem0/Zep/Letta or session-audit tools firsthand.
+
+**GitHub repo description and topics** (`gh repo edit`, run after Peter's
+own direct chat confirmation of the exact final text — a separate,
+explicit public-content-change gate from this commit): description
+reworded to lead with the ledger framing; `content-management` topic
+dropped; `governance`, `audit-trail`, `self-hosted` added. Live and
+verified via `gh repo view` before this commit.
+
+### Corrected error
+
+Grok's own Turn 8 relay suggested leading the README with "the generic
+`ENABLE_GOVERNANCE` server." Verified directly against
+`example/server/main.go`: `ENABLE_GOVERNANCE` wires `RoleStore` (RBAC) only.
+The `Decision`/`Task`/`Amendment`/`Goal` ledger types are wired by the
+separate `ENABLE_ORCHESTRATION` flag. The shipped copy uses the correct flag.
+
+### Grounding (every claim checked against real code, not asserted)
+
+- "enforced lifecycle" — `StateFlow`/`RequiredRole`/`Strict` transition
+  gates (`orchestration.go`, `module.go`).
+- "a Decision moves proposed → ratified only when the right role approves
+  it" — `orchestration.go:688`, `RequiredRole: "admin", Strict: true`,
+  covered by `TestDefineOrchestrationDecisionFlow`.
+- "a background sweep flags connections that no longer hold" —
+  `RelationStore.SweepStructural` (`relations.go:724`), exercised by
+  `relations_sweep_test.go`.
+- `audit-trail` topic — `ENABLE_PROVENANCE` wires transition-provenance
+  recording (`App.Provenance`), verified in `example/server/main.go`.
+- `governance` topic — both `ENABLE_GOVERNANCE` (RBAC) and the Decision
+  ratification gate are real, shipped code.
+- `multi-agent` topic deliberately **not** added — the closest real hook
+  (`ENABLE_AGENTS`, one agent-job system) describes this org's own live
+  dogfood usage pattern, not a literal shipped multi-agent capability in
+  core's own package. Flagged for architect/brand to override if disagreed.
+
+### Process note
+
+Brand's own status signal (`brand-status-01a052c5`, sent to architect
+after the Task moved to `implementing`) caught a real house-style
+violation in the first draft: em dashes in public-facing copy, the same
+non-negotiable rule fixed across 11 live posts on 2026-08-28. Fixed before
+commit — the repo description and README opening paragraph now use colons
+instead of em dashes. Brand raised no objection to keeping D59 as the
+example, and no other substantive changes. Brand also flagged, as a
+process note rather than a blocker, that Turn 11's own promise ("brand
+reviews the actual draft copy before it ships") wasn't triggered by a
+signal before this Task moved to `implementing` — noted for next time, not
+re-blocking this Task since brand's actual review (via the plan file) has
+now happened and raised only the em-dash issue.
+
+### Consequences
+
+No exported Go symbol changed, no route or middleware behavior changed, no
+`Example` function in `example_test.go` broken (reorder and new
+illustrative snippets only, none compiled). No version bump — docs and
+public-metadata positioning only. Level 2 amendment (README structural
+reorder, cross-references DECISIONS.md/recent.md, external repo metadata).
+
+---

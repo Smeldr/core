@@ -1,10 +1,28 @@
 ﻿# Smeldr
 
-AI-native content backend in Go. Typed lifecycle (draft, publish, archive), native MCP tools for every type, zero runtime dependencies.
+Typed backend for decisions, tasks, and content that people and AI agents write to at the same time. Every item has an enforced lifecycle: a Decision moves `proposed → ratified` only when the right role approves it. Every relation between items is checked, not assumed: a background sweep flags connections that no longer hold.
 
 [![Go Reference](https://pkg.go.dev/badge/smeldr.dev/core.svg)](https://pkg.go.dev/smeldr.dev/core)
 [![codecov](https://codecov.io/gh/Smeldr/core/graph/badge.svg)](https://codecov.io/gh/Smeldr/core)
 [![Version](https://img.shields.io/github/v/release/smeldr/core?filter=v*&color=%2341A300)](https://github.com/smeldr/core/releases/latest)
+
+**A real decision, from this repo's own history:**
+
+```json
+{
+  "decision_number": "D59",
+  "state": "ratified",
+  "body": "Goals are places: new `contains` RelationStore kind (working name) gives Smeldr a first-class, user-defined taxonomy... Any item relates to a Goal via the new kind; the taxonomy is user/org-defined since Goals are already freely created, not a fixed enum.",
+  "next_eval_at": null
+}
+```
+
+Smeldr's own architecture decisions are tracked as `Decision` items and ratified the same way any Smeldr-hosted decision is. Full text: [DECISIONS.md](DECISIONS.md) (D59); excerpted above for length.
+
+```bash
+cd example/server
+SECRET=changeme ENABLE_ORCHESTRATION=1 go run .
+```
 
 Start a chat with your favorite agent, create content together and then...
 
@@ -80,23 +98,6 @@ for the full variable reference and wiring order.
 **Infrastructure**
 - **Graceful shutdown** — drains in-flight requests before exiting on SIGINT/SIGTERM
 - **Log capture** — opt-in `app.CaptureLogs()` keeps recent errors in memory and serves them at `GET /_logs` (Admin) for live debugging — over plain HTTP, so it works even when MCP is down
-
----
-
-| | Smeldr | Echo | Gin | Chi |
-|---|---|---|---|---|
-| Zero runtime dependencies¹ | ✓ | ✗ | ✗ | ~ |
-| Content lifecycle built-in | ✓ | ✗ | ✗ | ✗ |
-| Draft-safe by default | ✓ | ✗ | ✗ | ✗ |
-| SEO + structured data | ✓ | ✗ | ✗ | ✗ |
-| AI indexing (llms.txt + AIDoc) | ✓ | ✗ | ✗ | ✗ |
-| Cookie compliance built-in | ✓ | ✗ | ✗ | ✗ |
-| Social sharing built-in | ✓ | ✗ | ✗ | ✗ |
-| Role hierarchy built-in | ✓ | ✗ | ✗ | ✗ |
-
-> ¹ The test suite uses `modernc.org/sqlite` for in-process SQL integration tests. There are no runtime dependencies in the core package.
-
----
 
 ## Installation
 
