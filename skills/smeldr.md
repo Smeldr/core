@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.66.1 · smeldr.dev/mcp v1.31.0 · smeldr.dev/oauth v0.4.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.2 · smeldr.dev/social v0.10.1 · smeldr.dev/agent v0.7.1 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.74.0 · smeldr.dev/mcp v1.31.1 · smeldr.dev/oauth v0.4.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.2 · smeldr.dev/social v0.10.1 · smeldr.dev/agent v0.9.0 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -258,6 +258,51 @@ recent N), `since` (RFC3339). Route is absent (404) unless `CaptureLogs` was cal
 - **Zero-config** — when no custom handler is set, capture forwards to a stderr text
   handler (wrapping slog's built-in handler would deadlock via the log package).
 - **No MCP tool** by design — use `smeldr-cli logs` (calls `/_logs` over HTTP).
+
+---
+
+## Event stream (v1.73.1+)
+
+Opt-in, in-memory push of live content-lifecycle and state-flow-transition
+events over a held-open NDJSON connection — built for an agent/listener
+process that cannot receive an inbound webhook (behind NAT, no public IP)
+and wants live events without polling `list_signals`/`get_valid_transitions`
+on a timer.
+
+```go
+app.EventStream() // mounts GET /_events/stream
+```
+
+`GET /_events/stream` (Author role, bearer auth — same contract as `/_logs`/
+`/_audit`) holds the connection open and writes one NDJSON line per event,
+flushed immediately. Same payload envelope and event names as an outbound
+webhook delivery (`"{type}.created"` … `"{type}.transitioned"`,
+`"signal.created"`) — `{"id","event","timestamp","data"}` per line. A
+`{"type":"ping"}` heartbeat arrives every 25s while idle, to survive
+reverse-proxy idle timeouts.
+
+- **Independent of `app.Webhooks(...)`** — works whether or not outbound
+  webhook delivery is also configured; the two are separate consumers of
+  the same event data, either or both.
+- **At-most-once** — no replay/backfill on reconnect. A dropped connection
+  misses whatever fired in the gap.
+- **Client-side filtering only** — every subscriber receives every event
+  type; a listener that wants a subset filters on its own end.
+- Route is absent (404) unless `EventStream` was called. No MCP tool by
+  design, same reasoning as `/_logs` — this exists for exactly the
+  situation where an agent has only this one HTTP connection to lean on.
+- **Per-token connection cap (v1.73.1+)**: max 4 concurrent connections per
+  token — a 5th attempt gets 429 before any header is written, not a hang.
+  A normal listener holding its one connection never approaches this;
+  reconnect immediately rather than retrying in a tight loop if you ever
+  hit it.
+
+Example listener (any language, illustrating the shape — `curl -N` for a
+quick manual check):
+
+```bash
+curl -N -H "Authorization: Bearer <token>" https://example.com/_events/stream
+```
 
 ---
 
@@ -637,7 +682,7 @@ media_upload_token_expiry     duration
 
 ---
 
-## forge-agent (separate module)
+## smeldr-agent (separate module)
 
 `smeldr.dev/agent` v0.3.0 — minimal Go agent runtime with native MCP support.
 MIT license. Three dependencies: `anthropic-sdk-go` + `modelcontextprotocol/go-sdk` + `gocron/v2`.
@@ -649,14 +694,14 @@ cfg := agent.Config{
     SystemPrompt:  "You are a helpful assistant.",
     Model:         "claude-sonnet-4-6", // default
     MaxTurns:      10,                  // default
-    StreamableHTTP: false,              // false = SSE (forge-mcp), true = Streamable HTTP (GitHub MCP)
+    StreamableHTTP: false,              // false = SSE (smeldr-mcp), true = Streamable HTTP (GitHub MCP)
 }
 a := agent.New(cfg)
 result, err := a.Run(ctx, "List all published posts and summarize the site.")
 ```
 
 **Transport selection:**
-- `StreamableHTTP: false` — SSE transport (`/mcp` + `/mcp/message`). Use for forge-mcp.
+- `StreamableHTTP: false` — SSE transport (`/mcp` + `/mcp/message`). Use for smeldr-mcp.
 - `StreamableHTTP: true` — Streamable HTTP (MCP 2025-11-25 spec). Use for GitHub MCP
   (`https://api.githubcopilot.com/mcp/`) and other modern MCP servers.
 
@@ -675,13 +720,13 @@ Timezone validated at startup. Overlapping runs skipped. Missed jobs not caught 
 Add `import _ "time/tzdata"` to binaries on Alpine/scratch containers.
 
 **Example binaries in repo:**
-- `cmd/agent-forge` — `FORGE_MCP_URL` + `FORGE_TOKEN` (SSE)
+- `cmd/agent-smeldr` — `SMELDR_MCP_URL` + `SMELDR_TOKEN` (SSE)
 - `cmd/agent-github` — `GITHUB_MCP_URL` + `GITHUB_TOKEN` + `GITHUB_REPO` (Streamable HTTP)
 - `example/electricity-advisor/` — `ANTHROPIC_API_KEY` + `DISCORD_WEBHOOK_URL` (UC2: electricity prices → Discord)
 
-### forge-agent/flow — Forge integration (v0.3.0)
+### smeldr-agent/flow — Smeldr integration (v0.3.0)
 
-`smeldr.dev/agent/flow` — AGPL sub-package. Wires `AgentJob` as a Forge
+`smeldr.dev/agent/flow` — AGPL sub-package. Wires `AgentJob` as a Smeldr
 content type. Requires `smeldr.dev/core` as a dependency.
 
 ```go
@@ -690,7 +735,7 @@ import agentflow "smeldr.dev/agent/flow"
 agentflow.CreateTable(db) // run once at startup
 agentMod := agentflow.New(db, agentflow.Config{
     MCPURL:   "http://localhost:8080/mcp",
-    MCPToken: os.Getenv("FORGE_TOKEN"),
+    MCPToken: os.Getenv("SMELDR_TOKEN"),
 })
 agentMod.Register(app) // registers MCP tools + signal bus
 defer agentMod.Stop()
@@ -701,7 +746,7 @@ defer agentMod.Stop()
 | Field | Description |
 |-------|-------------|
 | `Name` | Human-readable identifier. Slug source. Required. |
-| `Trigger` | Cron expression (`"45 13 * * *"`) or forge signal (`"after_publish"`). Required. |
+| `Trigger` | Cron expression (`"45 13 * * *"`) or smeldr signal (`"after_publish"`). Required. |
 | `ContentTypeFilter` | Restrict signal trigger to content type (e.g. `"Post"`). Empty = all. |
 | `SystemPrompt` | System instruction for every run. Required. |
 | `Model` | Anthropic model ID. Defaults to `"claude-sonnet-4-6"`. |
@@ -714,7 +759,7 @@ defer agentMod.Stop()
 `create_agent_job`, `get_agent_job`, `list_agent_jobs`, `update_agent_job`,
 `publish_agent_job`, `archive_agent_job`, `delete_agent_job`
 
-**Signal triggers:** set `Trigger` to any forge signal string value:
+**Signal triggers:** set `Trigger` to any smeldr signal string value:
 `after_publish`, `after_create`, `after_update`, `after_unpublish`,
 `after_archive`, `after_schedule`, `after_delete`.
 

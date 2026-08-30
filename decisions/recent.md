@@ -536,3 +536,98 @@ never a person's name or job title (C36's own rule).
   org's shared bearer, can build on the same per-member token.
 
 ---
+
+## A294 — smeldr.dev/agent Forge→Smeldr rename (cross-repo: agent, common, core)
+
+### Problem
+
+`smeldr.dev/agent`'s README (and, confirmed by a full-repo grep, most of
+its source tree) was a genuinely unfinished Forge→Smeldr rename — the
+module itself was correctly `smeldr.dev/agent` in `go.mod`, but almost
+everything else still said "forge": env var names, the connector binary's
+own directory, the electricity-advisor example's scheduler binary/systemd
+unit/config path, the MCP client's own protocol-visible identity string,
+log message prefixes, and the README/CHANGELOG prose throughout.
+
+### Fix
+
+Renamed across three repos:
+
+- **`smeldr.dev/agent`**: `FORGE_MCP_URL`/`FORGE_TOKEN` → `SMELDR_MCP_URL`/
+  `SMELDR_TOKEN`; `cmd/agent-forge` → `cmd/agent-smeldr`; `example/
+  electricity-advisor`'s scheduler binary `forge-agent-scheduler` →
+  `smeldr-agent-scheduler`, its systemd unit file renamed to match (unit
+  `Description`/`EnvironmentFile`/`ExecStart` updated), `/etc/forge-agent/`
+  → `/etc/smeldr-agent/`; the MCP client's own `mcpsdk.Implementation.Name`
+  sent during the `initialize` handshake, `"forge-agent"` →
+  `"smeldr-agent"`; every `flow` package `slog` message prefix; README and
+  `CHANGELOG.md` title/prose. `cmd/agent-github`'s own `GITHUB_REPO`
+  example value updated to a real, current repo (`smeldr/core`).
+- **`common/agent/skills/smeldr.md`** (canonical skill file): its own
+  `## forge-agent (separate module)` section (header, binary path/env-var
+  references, `forge-mcp` mentions, the `flow` sub-section and its
+  `FORGE_TOKEN` example, the "forge signal"/"any forge signal string
+  value" phrasing in the `AgentJob` fields table and Signal triggers
+  section), plus the top `Current versions:` line's own `smeldr.dev/agent`
+  number (only this one module — the other six numbers on that same line
+  belong to the separate, still-open `docs-version-lines-stale-post-
+  cascade` Task).
+- **`smeldr.dev/core`**: `skills/smeldr.md` synced from `common` via the
+  mandated `Copy-Item` step — this also caught up an unrelated, pre-
+  existing sync gap (the file was missing the entire "Event stream
+  (v1.73.1+)" section already present in `common`'s own canonical copy),
+  a real consequence of running the sync unconditionally rather than a
+  scope leak.
+
+**Deliberately not touched, both flagged for a separate decision rather
+than silently fixed or silently bundled in:**
+1. The `flow` subpackage's own Go package identifier, `package
+   forgeagent` (`flow/agent_job.go`, `flow/module.go`,
+   `flow/agent_job_test.go`) — a materially larger breaking change than
+   this rename's own scope (breaks any *unaliased* external `import
+   "smeldr.dev/agent/flow"`; core's own `example/server/main.go` already
+   aliases it as `agentflow` and is unaffected). The original finding's
+   own "confirmed by direct grep" list never named the package
+   identifier.
+2. `flow/LICENSE`'s copyright holder, `Copyright (C) 2026 forge-cms` — a
+   legal/copyright attribution question, not a branding one, referred to
+   Peter directly rather than decided unilaterally as part of a
+   branding cleanup. **Resolved same session**: Peter's own explicit
+   decision, relayed via the architect — `Copyright (C) 2026 Peter Ravn
+   Thers`, matching this project's established commercial-identity model
+   (rights held individually, no company). Fixed in a follow-up commit on
+   the same feature branch rather than a separate Task, per the
+   architect's own instruction once confirmed.
+
+Preserved deliberately (historical narrative, not a miss): `README.md`'s
+"forge-social hit this in v0.4.0" sentence (a past incident, named as it
+actually was at the time, matching A121's own established exception);
+`docs/REFERENCE.md`'s and `docs/ARCHITECTURE.md`'s own mentions of legacy
+`FORGE_*` env var fallback support, which describe `smeldr.dev/cli`'s own
+real, currently-shipped backward-compat feature (T86/T87) — an unrelated
+module, would have been actively wrong to "fix" here.
+
+### Versioning
+
+`smeldr.dev/agent`: breaking rename of deployment artifacts (env vars,
+binary names, systemd unit, config path, MCP client identity) — no
+exported Go symbol changed (deliberately, per the flagged package-
+identifier question above), but real consumer-observable breaking
+behaviour for anyone with an existing deployment. MINOR bump under pre-1.0
+semantics, matching this repo's own `v0.7.1 → v0.8.0` precedent for a
+comparably-scoped breaking change (A280): **v0.8.0 → v0.9.0**. Migration
+note in `CHANGELOG.md` names every old→new artifact explicitly.
+
+`smeldr.dev/core`: docs-only (`skills/smeldr.md`), no version bump.
+
+### Tests
+
+`go build`/`go vet`/`go test ./...`/`go test -race ./...` all green in the
+agent repo (both `smeldr.dev/agent` and `smeldr.dev/agent/flow`); `go mod
+tidy` no real diff (the reported `go.mod` diff is a pre-existing CRLF/LF
+Windows-checkout artifact, verified via `git show HEAD:go.mod` carrying no
+CRLF at all — not touched). `gofmt -l .` flags four files, all verified via
+the same git-blob check to be the identical pre-existing CRLF artifact,
+none actually dirty in git's own stored content, none touched.
+
+---
