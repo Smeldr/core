@@ -453,3 +453,86 @@ bump: v1.76.5 → **v1.76.6**. Tag/release pending Peter's own fresh
 explicit go-ahead, given directly in chat, never relayed.
 
 ---
+
+## D60 — Per-member instance access is a real, separate credential; no personal-title concept anywhere in Smeldr
+
+### Scope
+
+Raised while scoping `cloud-workspace-instrument-zero-code` (Wave 3)'s
+own authority-ladder rendering — Workspace needs to show who holds
+`admin`, but cloud today holds exactly one shared bootstrap instance
+token per pilot org (`pilot_orgs.instance_token_enc`, confirmed via
+`scripts/seed-pilot-org`'s own documentation: "the tenant instance's
+own bootstrap bearer token"). Cloud can today only answer "does someone
+in this org hold admin," never "does this specific person." Discussed
+directly with Peter before deciding, in two parts.
+
+### Decision
+
+**Part 1 — build real per-member access.** An authorized pilotorg
+member may, as a deliberate, separate action (at invite time or
+later), assign an individual instance-level role (`author`/`editor`/
+`admin`) to another org member. Cloud mints a personal bearer token on
+the target instance for that member via `create_token` + `grant_role`,
+performed using the org's own already-held bootstrap token (itself
+admin-capable). The new personal token is stored encrypted on that
+member's own record — separate from the shared
+`pilot_orgs.instance_token_enc` field, which continues to serve
+whatever it already serves (org-wide/background reads not tied to a
+specific viewer). Default, if nothing is assigned: the member holds no
+instance access at all — org membership alone grants nothing. Later,
+an authorized member may change or revoke the assignment
+(`grant_role` again, or `revoke_grant`/`revoke_token`).
+
+**Part 2 — no personal-title concept, anywhere.** Confirmed directly
+against source (brand-expert's own investigation, not assumed):
+Smeldr has exactly two role vocabularies, both permission-based, never
+person/position-based — core's token role (`author`/`editor`/`admin`,
+`auth.go`) and Cloud's own org-membership role (`owner`/`admin`/
+`member`, `pilotorg/models.go`, its own code comment stating
+"Deliberately a separate, narrower vocabulary" from core's). Neither
+has room for a semantic job title ("CEO," "Senior," "Product
+Inspector"), and this is not an oversight: `OperatorSeat`'s own
+component takes a role as a raw string specifically to avoid assuming
+which role vocabulary applies, and `OPEN-ITEMS.md` states directly:
+"Grants point at tokens, not people... it may not invent a person from
+a TokenID." No personal-title field is introduced by this decision.
+Workspace's authority-ladder continues to render only role/credential,
+never a person's name or job title (C36's own rule).
+
+### Why
+
+- Cloud already knows real per-person identity (email, at the
+  `pilotorg.Member` level) — assigning that member their own personal
+  instance token doesn't conflict with core's own "grants point at
+  tokens, not people" principle. Core never learns or needs to learn
+  who's behind a given personal token; the identity-to-token mapping
+  lives entirely in Cloud's own tables, the same shape as how
+  architect/core/cloud/devops/brand's own named tokens work on
+  `process.smeldr.dev` today — the naming/identity association is
+  external to core's own data model, not inside it.
+- Reuses proven, already-shipped mechanism (`create_token`/
+  `grant_role`/`revoke_grant`) — no new core capability needed, only
+  new Cloud-side schema and API.
+- Rejected: inventing a personal-title field. Not a neutral omission to
+  fill in — it actively contradicts an established design principle in
+  two separate places (`OperatorSeat`, `OPEN-ITEMS.md`).
+- Rejected: continuing indefinitely with the shared-bootstrap-token
+  as everyone's shared identity. Peter's own explicit instruction: not
+  deferring security/authority granularity.
+
+### Consequences
+
+- Workspace's authority-ladder rendering can show real per-person "who
+  holds `admin`" once this lands, rather than an org-wide
+  approximation.
+- New cloud-band work: a per-member encrypted instance-token field on
+  `pilotorg.Member`, and an assign/change/revoke flow (API at minimum;
+  UI surface scoped separately) using the org's existing bootstrap
+  token to perform `create_token`/`grant_role`/`revoke_grant` on the
+  target instance.
+- This is a standing Cloud capability, not Workspace-specific — any
+  future Cloud feature needing to act as a specific member, not the
+  org's shared bearer, can build on the same per-member token.
+
+---
