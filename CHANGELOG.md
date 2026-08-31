@@ -28,7 +28,7 @@ under Milestone 10 and the v2+ Roadmap section.
 ### Changed
 - `Assert`/`MCPAssertRelation`/`MCPProposeRelation`/`MCPObserveRelation` now validate an asserted edge's `(SourceType, TargetType)` against the relation kind's own `TypePairs` when non-empty, and reject a violation — previously silently allowed. (A297)
 - `SweepStructural` now checks source-side existence as well as target-side (previously target-only) — completes the existing sweep model. `skipped` can now count a source-check failure as well as a target-check failure. (A297)
-- Edges asserted on a `Directional: false` relation kind are canonicalized `(source, target)` before storage, and a fresh edge (no caller-supplied ID) reuses an existing row's ID when one already matches `(source_type, source_id, target_type, target_id, relation_kind)` — the same fact asserted twice, or from either side of a symmetric kind, now produces one row instead of two. (A297)
+- Edges asserted on a `Directional: false` relation kind are canonicalized `(source, target)` before storage, and a fresh edge (no caller-supplied ID) reuses an existing row's ID when one already matches `(source_type, source_id, target_type, target_id, relation_kind, edge_class)` — the same fact asserted twice, or from either side of a symmetric kind, now produces one row instead of two; `edge_class` stays part of the key so a system-observed edge and a later human-asserted edge for the same tuple remain distinct rows. (A297)
 
 ---
 
