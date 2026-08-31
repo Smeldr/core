@@ -2,20 +2,20 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.54.0 (A202) + smeldr.dev/mcp v1.27.0 + smeldr.dev/cli v0.15.1 + smeldr.dev/oauth v0.3.0 + smeldr.dev/social v0.9.2 + smeldr.dev/agent v0.7.1 + smeldr.dev/media v1.6.0 + smeldr.dev/core/pgx v0.1.2.
+Last updated: v1.78.1 (A297) + smeldr.dev/mcp v1.32.1 + smeldr.dev/cli v0.15.3 + smeldr.dev/oauth v0.4.0 + smeldr.dev/social v0.10.2 + smeldr.dev/agent v0.9.0 + smeldr.dev/media v1.6.1 + smeldr.dev/core/pgx v0.2.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.53.0 | Stable |
-| `smeldr.dev/mcp` | v1.27.0 | Stable |
-| `smeldr.dev/oauth` | v0.3.0 | Beta |
-| `smeldr.dev/core/pgx` | v0.1.2 | Beta |
-| `smeldr.dev/media` | v1.6.0 | Beta |
-| `smeldr.dev/cli` | v0.15.1 | Beta |
-| `smeldr.dev/social` | v0.9.2 | Experimental |
-| `smeldr.dev/agent` | v0.7.1 | Experimental |
+| `smeldr.dev/core` | v1.78.1 | Stable |
+| `smeldr.dev/mcp` | v1.32.1 | Stable |
+| `smeldr.dev/oauth` | v0.4.0 | Beta |
+| `smeldr.dev/core/pgx` | v0.2.0 | Beta |
+| `smeldr.dev/media` | v1.6.1 | Beta |
+| `smeldr.dev/cli` | v0.15.3 | Beta |
+| `smeldr.dev/social` | v0.10.2 | Experimental |
+| `smeldr.dev/agent` | v0.9.0 | Experimental |
 
 **Stable** — API will not break without a deprecation notice.  
 **Beta** — Functional and tested; API may change in minor releases.  
