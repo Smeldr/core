@@ -1166,3 +1166,149 @@ not yet closed — T233 (`01a053ba`) stays open until it lands or is
 explicitly descoped.
 
 ---
+
+## D63 — Role-gating inventory, corrected: RequiredRole/RoleGranted and Authorized are two separate authorization mechanisms, and the custom-role capability the design session was raised to build mostly already exists
+
+### Scope
+
+Raised after a real governance incident: architect ratified D60/D61/D62
+on `process.smeldr.dev` unprompted, exposing that "admin" is one bundled,
+all-or-nothing tier with no way to hold token/grant administration
+without also holding every `RequiredRole` gate. Peter's own framing after
+the incident: "måske er vores rolle model ikke granuleret nok." This
+Decision records what's actually true today, re-verified directly against
+source, not narrated from the incident review alone — two of the
+originating design doc's own claims needed correction once checked.
+
+### Decision
+
+Three facts, established directly against `governance.go`, `state.go`,
+`smeldr.dev/mcp/tool.go`:
+
+1. **Two independent authorization mechanisms coexist, not one.**
+   `RoleStore.Authorized` (`governance.go:988`) — used by every real MCP
+   tool call via `authoriseTool` (`mcp/tool.go:116-139`) — matches by
+   *operation* (`slices.Contains(role.Operations, op)`), and already
+   supports full scoping (`ScopeGlobal`/`ScopeStatic`/`ScopeDynamic`,
+   `governance.go:17-29`, a per-*grant* property). `RoleStore.RoleGranted`
+   (`governance.go:1099`) — used only by `validateTransition`
+   (`state.go:449`) for `RequiredRole` transition gates — matches by
+   exact role *name* (`WHERE r.name = $2`), and is always called with a
+   zero `AuthTarget{}`: `validateTransition`'s own signature has no item
+   identity to populate one with, structurally, not by oversight.
+2. **The custom-role architecture the incident asked for mostly already
+   exists — for the `Authorized` path.** `RoleDefinition.Operations
+   []string` (`governance.go:347-349`) already lets an operator define a
+   role holding exactly the capability slice it needs (e.g. `Operations:
+   []string{"administer"}` without `"define-type"`), and grant-level
+   scoping is already general. The real gap is narrower than originally
+   framed: it is specifically that `RequiredRole` gates never adopted
+   this model, not that the model doesn't exist.
+3. **Inventory correction**: the design doc's own finding said Decision's
+   `proposed→ratified` is "the only `RequiredRole` gate anywhere in the
+   schema." Re-checked via a whole-package grep for `RequiredRole: "` in
+   non-test files: there are **four** gates
+   (`orchestration.go:758,761,762,763` — `proposed→ratified`,
+   `pending-re-evaluation→ratified`, `pending-re-evaluation→superseded`,
+   `ratified→superseded`), all on `Decision`'s own flow, all requiring
+   `"admin"`. The substantive point is unaffected — one role name, one
+   bundled tier, four gates not one — but the count itself was wrong and
+   is corrected here, per this same session's own T233 lesson about not
+   citing an inventory claim without re-counting it.
+
+### Why
+
+The incident's own diagnosis ("our role model isn't granular enough") is
+half right and half a category error, worth stating precisely rather
+than accepted on instinct: the *operation*-based half of the role model
+(`Authorized`, everything MCP tools use) is already granular. The
+*transition-gate* half (`RequiredRole`/`RoleGranted`) is not, because it
+was never brought onto the same model — not because granularity itself
+doesn't exist in this codebase. D64 (the follow-up) is scoped
+accordingly: bring one mechanism onto the other, not build a new one.
+
+### Consequences
+
+No code shipped by this Decision. D64 (below) carries the concrete shape.
+Both remain `proposed` — not self-ratified, per architect's own explicit
+instruction (Peter's own explicit ratification required in chat, same
+standing condition D62 set and this session has held for every tag/
+release).
+
+---
+
+## D64 — RequiredOperation replaces RequiredRole for transition gates; AuthTarget/itemID threaded through validateTransition; maintenance-process checklist; RequiredRelation stays ungated
+
+### Scope
+
+The concrete shape following from D63's own reframing, plus the two
+remaining parts of the role-gating design session (maintenance process,
+and whether D62's `RequiredRelation` needs its own role gate).
+
+### Decision
+
+1. **`Transition.RequiredRole string` (exact-name match via
+   `RoleGranted`) is replaced by `Transition.RequiredOperation string`
+   (operation match via `Authorized`-equivalent logic)** — a rename, not
+   a same-named field with silently changed semantics. Real,
+   consumer-observable behavior change to all four existing gates
+   (D63 §3). The four existing `RequiredRole: "admin"` gates migrate to
+   **`RequiredOperation: "approve"`** — `governance-model.md` §4/§6
+   already reserves `approve` for exactly this shape of act ("Authorize
+   [or reject] a pending Plan for execution," deliberately kept separate
+   from `manage`/`administer` so a Plan-approver isn't silently handed
+   token/webhook administration) — reusing it, not inventing a new word.
+   **Ruled explicitly**: Decision keeps its own direct
+   `RequiredOperation: "approve"` gate: this does *not* reopen or require
+   building `governance-model.md`'s own fuller, still-unbuilt
+   `Plan`/`review`/`approve` trust_level-2 workflow (T23 Step 14,
+   currently paused) — that stays a separate, larger, not-yet-scheduled
+   piece of work.
+2. **`validateTransition` gains `itemID string` + `rels *RelationStore`**
+   — the same signature change D62 already planned for its own existence
+   check, carrying real `AuthTarget{TypeName: typeName, ID: itemID}` into
+   the `RequiredOperation` check too. One signature change serves both
+   needs, not two separate breaking edits to the same function in close
+   succession.
+3. **Maintenance process**: a required checklist item at Task-dispatch
+   time — "if this Task adds a new MCP tool, a new state-flow transition,
+   or a new `RequiredOperation` gate: does `governance-model.md`'s own
+   operation vocabulary already cover it, or does a new operation word
+   need reserving?" — mirroring `seedToolPolicies`'s own existing comment
+   block (`governance.go:141-157`) as the closest thing to a living
+   registry this system already has. A checklist trigger, not new
+   enforcement machinery, matching this session's own D61-item-2
+   precedent (a concrete incident motivates strictness, not speculative
+   hardening).
+4. **`RequiredRelation` (D62) does not get its own role gate.**
+   Existence-check and authorization are orthogonal: `RequiredRelation`
+   answers "is this true about the item," `RequiredOperation` answers
+   "who may act" — a single `Transition` can already carry both
+   independently (the same way `RequiredReason` already composes with
+   `RequiredRole` today), and conflating "who asserted the edge" with
+   "does the edge exist" would misuse `RequiredRelation` for a trust-tier
+   question `edge_class` already answers. The signature change is shared
+   (both need `itemID`); the concerns stay structurally separate.
+
+### Why
+
+Each part traces to a concrete, re-verified gap, not a speculative
+redesign — see D63. The `approve` word choice specifically avoids
+inventing new vocabulary where `governance-model.md` already drew the
+right category before this session existed.
+
+### Consequences
+
+`Transition.RequiredRole` → `RequiredOperation`: breaking change to an
+exported struct field, MAJOR-class reasoning required in the
+implementing Amendment (same D53 checked-fact discipline as D61's own
+`Weighted` item — confirm which callers construct `Transition` literals
+directly before shipping). `validateTransition`'s signature change
+touches three call sites (`state.go`, `module.go`, `dynamic.go`) — the
+follow-up Task's own plan must confirm each site's actual access to a
+`*RelationStore`/item ID before implementation, not assume it, same
+condition D62 already set. No follow-up Task created yet — architect's
+own explicit instruction, pending Peter's ratification of D63/D64
+first. Both remain `proposed`.
+
+---
