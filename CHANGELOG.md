@@ -23,7 +23,7 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
-## [1.78.0] — Unreleased
+## [1.78.0] — 2026-08-31
 
 ### Added
 - `RegisterOrchestrationRelationKinds` registers two new relation kinds: `contradicts` (Decision↔Decision, symmetric — the vehicle for Workspace's own Asserted-provenance condition) and `investigates` (Task→Decision, delegation). (A296)
