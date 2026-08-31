@@ -218,7 +218,19 @@ smeldr.dev/
 │                     supersedes (Decision→Decision), contains (Goal→{Goal,Task,Decision,Amendment,
 │                     Signal} — a Goal is a place, D59), all Mode="asserted"/Directional=true/
 │                     Weighted=false, per D36; idempotent via UpsertKind (Amendment A236, M0 step 2;
-│                     contains added by A292)
+│                     contains added by A292); contradicts (Decision↔Decision, Directional=false,
+│                     symmetric, the vehicle for Workspace's own Asserted provenance) and
+│                     investigates (Task→Decision, delegation) added by A296
+│                     Signal gains SubjectType/SubjectID/FromState/ToState/RequiredRole (db-tagged,
+│                     mirroring ProvenanceRecord's own vocabulary for the same four shared concepts,
+│                     not a parallel name) — lets a Scheduled-provenance reader build a real row from
+│                     fields instead of parsing recordAuthorizationRequiredSignal's prose Message.
+│                     EnsureOrchestrationSignalColumns(ctx, DB) error migrates a pre-A296 database
+│                     via EnsureColumn (T246 pattern, five calls); CreateOrchestrationTables's own
+│                     smeldr_signals CREATE TABLE already has the columns for fresh installs.
+│                     recordAuthorizationRequiredSignal's raw-SQL INSERT (state.go) now populates all
+│                     five columns from its own existing parameters — TaskRef deliberately left
+│                     unchanged/empty, out of A296's own scope (Amendment A296)
 │                     orchTaskFlow/orchGoalFlow both gain "resolved" (IsTerminal), a fourth/third
 │                     outcome distinct from "done": the underlying need was met, but not by this
 │                     item's own tracked work (D58). Task: reachable from active/waiting-plan/
@@ -447,10 +459,15 @@ smeldr.dev/
 │                     means no reverse phrasing established yet, not an error. CreateRelationTables
 │                     declares the column directly plus a paired EnsureColumn call (pre-existing
 │                     installs), same declare-and-migrate-together shape as A221/A264. Seeded only
-│                     for "supersedes" → "Superseded By" in RegisterOrchestrationRelationKinds
-│                     (orchestration.go) — the other three registered kinds' correct reverse
-│                     phrasing isn't established anywhere, left at the zero-value rather than
-│                     guessed (Amendment A271, T160);
+│                     for "supersedes" → "Superseded By", "contains" → "Part Of", and
+│                     "investigates" → "Investigated By" in RegisterOrchestrationRelationKinds
+│                     (orchestration.go) — other registered kinds' correct reverse phrasing isn't
+│                     established anywhere, left at the zero-value rather than guessed (Amendment
+│                     A271, T160); RegisterOrchestrationRelationKinds also registers "contradicts"
+│                     (Decision↔Decision, Directional: false, symmetric — no ReverseLabel, since
+│                     "contradicts" reads the same from either endpoint) and "investigates"
+│                     (Task→Decision, delegation) — Amendment A296, per D59's own kind-registration
+│                     pattern;
 │                     GetBySource, GetByTarget, Delete; App.Relations/RelationStore (Amendment A159, T06);
 │                     RelationStore.provenanceStore field + setProvenanceStore (unexported), wired at
 │                     App.Handler() time when both App.Relations and App.Provenance are configured;
@@ -697,6 +714,19 @@ smeldr.dev/
                         smeldr/media's/smeldr/social's MCPModule implementations are each deferred
                         to their own future Task per D54, out of this task's core-only scope
                         (Amendment A284, T237)
+│                     TransitionOption struct {ToState, RequiredRole, RequiredReason, Strict} +
+                        App.ValidTransitions(ctx, typeName, fromState string) ([]TransitionOption,
+                        error) — exposes every legal transition out of fromState including its
+                        RequiredRole, the piece drainAuthorizationGate already read internally but
+                        no exported API surfaced until now; a caller like Workspace's own filter
+                        chain ("does this transition require a role") can use this for any item in
+                        any state, not only the auto-generated authorization-required Signal case.
+                        Flow resolution reuses resolveFlowID (T243's shared helper), not a third
+                        hand-rolled copy of drainAuthorizationGate's own two-query lookup. Returns
+                        nil, nil when Config.DB is nil or no flow is registered — does not fail-open
+                        on a genuine query error the way drainAuthorizationGate's own inline lookup
+                        does, since resolveFlowID distinguishes "not found" from a real DB error
+                        (Amendment A296)
 ├── forge.go          Config, MustConfig, New, App (Use/Content/Handle/Run/Handler/SEO),
 │                     Registrator, SEOOption, seoState (robots/ogDefaults/appSchema), httpsRedirect,
 │                     standaloneDispatcher internal interface (A101),

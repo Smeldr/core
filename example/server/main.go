@@ -222,6 +222,11 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.CreateOrchestrationTables(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create orchestration tables: %w", err)
 		}
+		// Additive migration for a pre-A296 database — CreateOrchestrationTables's
+		// own CREATE TABLE already has these columns for a fresh install.
+		if err := smeldr.EnsureOrchestrationSignalColumns(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure orchestration signal columns: %w", err)
+		}
 		smeldr.RegisterOrchestrationTypes(app, db)
 	}
 

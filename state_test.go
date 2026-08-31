@@ -3859,6 +3859,180 @@ func TestDrainAuthorizationGate_NoTransitionRow_NotGated(t *testing.T) {
 	}
 }
 
+// — ValidTransitions (A296) ——————————————————————————————————————————————————
+
+func TestValidTransitions(t *testing.T) {
+	db := newMigratedDB(t)
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "vt-flow",
+		TypeName: "VTItem",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "reviewing"},
+			{Name: "approved"},
+			{Name: "archived"},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "reviewing"},
+			{From: "reviewing", To: "approved", RequiredRole: "admin", Strict: true},
+			{From: "reviewing", To: "archived", RequiredReason: true},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	ctx := context.Background()
+
+	t.Run("multiple transitions, mixed gating", func(t *testing.T) {
+		got, err := app.ValidTransitions(ctx, "VTItem", "reviewing")
+		if err != nil {
+			t.Fatalf("ValidTransitions: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("got %d options, want 2: %+v", len(got), got)
+		}
+		byState := map[string]TransitionOption{}
+		for _, o := range got {
+			byState[o.ToState] = o
+		}
+		approved, ok := byState["approved"]
+		if !ok {
+			t.Fatal("missing \"approved\" option")
+		}
+		if approved.RequiredRole != "admin" || !approved.Strict || approved.RequiredReason {
+			t.Errorf("approved = %+v, want RequiredRole=admin Strict=true RequiredReason=false", approved)
+		}
+		archived, ok := byState["archived"]
+		if !ok {
+			t.Fatal("missing \"archived\" option")
+		}
+		if archived.RequiredRole != "" || archived.Strict || !archived.RequiredReason {
+			t.Errorf("archived = %+v, want RequiredRole=\"\" Strict=false RequiredReason=true", archived)
+		}
+	})
+
+	t.Run("non-gated transition", func(t *testing.T) {
+		got, err := app.ValidTransitions(ctx, "VTItem", "draft")
+		if err != nil {
+			t.Fatalf("ValidTransitions: %v", err)
+		}
+		if len(got) != 1 || got[0].ToState != "reviewing" || got[0].RequiredRole != "" {
+			t.Errorf("got %+v, want one ungated transition to \"reviewing\"", got)
+		}
+	})
+
+	t.Run("terminal state, no outgoing transitions", func(t *testing.T) {
+		got, err := app.ValidTransitions(ctx, "VTItem", "approved")
+		if err != nil {
+			t.Fatalf("ValidTransitions: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("got %d options, want 0: %+v", len(got), got)
+		}
+	})
+
+	t.Run("unknown fromState", func(t *testing.T) {
+		got, err := app.ValidTransitions(ctx, "VTItem", "no-such-state")
+		if err != nil {
+			t.Fatalf("ValidTransitions: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("got %d options, want 0: %+v", len(got), got)
+		}
+	})
+
+	t.Run("unknown typeName, no default flow", func(t *testing.T) {
+		// CreateStateFlowTables only, not migrateStateFlows/newMigratedDB —
+		// tables exist (so resolveFlowID's lookup gets sql.ErrNoRows, a
+		// real "not found", not a "no such table" error) but no default
+		// flow is seeded.
+		bareDB := newSQLiteDB(t)
+		if err := CreateStateFlowTables(bareDB); err != nil {
+			t.Fatalf("CreateStateFlowTables: %v", err)
+		}
+		bareApp := &App{cfg: Config{DB: bareDB}}
+		got, err := bareApp.ValidTransitions(ctx, "NoSuchType", "draft")
+		if err != nil {
+			t.Fatalf("ValidTransitions: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("got %d options, want 0: %+v", len(got), got)
+		}
+	})
+
+	t.Run("nil DB", func(t *testing.T) {
+		nilDBApp := &App{cfg: Config{}}
+		got, err := nilDBApp.ValidTransitions(ctx, "VTItem", "reviewing")
+		if err != nil || got != nil {
+			t.Errorf("got (%v, %v), want (nil, nil)", got, err)
+		}
+	})
+}
+
+func TestValidTransitions_ResolveFlowIDError(t *testing.T) {
+	db := newMigratedDB(t)
+	app := &App{cfg: Config{DB: &nthQueryRowFailDB{DB: db, fail: 1}}}
+	_, err := app.ValidTransitions(context.Background(), "VTItem", "reviewing")
+	if err == nil {
+		t.Fatal("expected error from resolveFlowID's underlying query failure, got nil")
+	}
+}
+
+// validTransitionsQueryFailDB makes the smeldr_transitions listing query
+// fail while leaving resolveFlowID's own QueryRowContext lookups alone —
+// isolates ValidTransitions's own QueryContext error branch.
+type validTransitionsQueryFailDB struct{ DB }
+
+func (d *validTransitionsQueryFailDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	if strings.Contains(q, "SELECT to_state, required_role, required_reason, strict") {
+		return nil, errors.New("injected QueryContext failure")
+	}
+	return d.DB.QueryContext(ctx, q, args...)
+}
+
+func TestValidTransitions_QueryError(t *testing.T) {
+	db := newMigratedDB(t)
+	app := &App{cfg: Config{DB: &validTransitionsQueryFailDB{DB: db}}}
+	if err := app.RegisterFlow(StateFlow{
+		Name: "vt-qfail-flow", TypeName: "VTQFail",
+		States:      []State{{Name: "draft", IsInitial: true}, {Name: "done"}},
+		Transitions: []Transition{{From: "draft", To: "done"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	_, err := app.ValidTransitions(context.Background(), "VTQFail", "draft")
+	if err == nil {
+		t.Fatal("expected error from injected QueryContext failure, got nil")
+	}
+}
+
+// validTransitionsScanFailDB swaps the smeldr_transitions listing query for
+// one with the wrong column count, so the caller's Scan fails.
+type validTransitionsScanFailDB struct{ DB }
+
+func (d *validTransitionsScanFailDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	if strings.Contains(q, "SELECT to_state, required_role, required_reason, strict") {
+		return d.DB.QueryContext(ctx, "SELECT 1")
+	}
+	return d.DB.QueryContext(ctx, q, args...)
+}
+
+func TestValidTransitions_ScanError(t *testing.T) {
+	db := newMigratedDB(t)
+	app := &App{cfg: Config{DB: &validTransitionsScanFailDB{DB: db}}}
+	if err := app.RegisterFlow(StateFlow{
+		Name: "vt-scanfail-flow", TypeName: "VTScanFail",
+		States:      []State{{Name: "draft", IsInitial: true}, {Name: "done"}},
+		Transitions: []Transition{{From: "draft", To: "done"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	_, err := app.ValidTransitions(context.Background(), "VTScanFail", "draft")
+	if err == nil {
+		t.Fatal("expected scan error from wrong column count, got nil")
+	}
+}
+
 func TestDrainAuthorizationGate_UngatedTransition(t *testing.T) {
 	db := newMigratedDB(t)
 	gatedItemFixture(t, db, "gate_items", "item-5", "reviewing")
@@ -3961,6 +4135,17 @@ func TestRecordAuthorizationRequiredSignal_Success(t *testing.T) {
 	if sender != "system" || receiver != "reviewer" || signalType != "authorization-required" || status != "pending" {
 		t.Errorf("Signal fields = (%q,%q,%q,%q), want (system,reviewer,authorization-required,pending)",
 			sender, receiver, signalType, status)
+	}
+	var subjectType, subjectID, fromState, toState, requiredRole string
+	if err := db.QueryRowContext(ctx,
+		`SELECT subject_type, subject_id, from_state, to_state, required_role FROM smeldr_signals`,
+	).Scan(&subjectType, &subjectID, &fromState, &toState, &requiredRole); err != nil {
+		t.Fatalf("SELECT smeldr_signals structured columns: %v", err)
+	}
+	if subjectType != "GateItem" || subjectID != "item-8" || fromState != "reviewing" ||
+		toState != "approved" || requiredRole != "reviewer" {
+		t.Errorf("structured fields = (%q,%q,%q,%q,%q), want (GateItem,item-8,reviewing,approved,reviewer)",
+			subjectType, subjectID, fromState, toState, requiredRole)
 	}
 }
 

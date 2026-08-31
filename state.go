@@ -960,6 +960,67 @@ func drainAuthorizationGate(ctx context.Context, db DB, table, typeName, itemID,
 	return fromState, role.String, nil
 }
 
+// TransitionOption describes one legal transition out of a given state in a
+// registered [StateFlow], including the role (if any) required to perform it.
+type TransitionOption struct {
+	ToState        string
+	RequiredRole   string // "" if the transition has no role gate
+	RequiredReason bool
+	Strict         bool
+}
+
+// ValidTransitions returns every legal transition out of fromState for
+// typeName's registered flow (or the default flow, if typeName has none),
+// including each transition's RequiredRole — the piece [drainAuthorizationGate]
+// already reads internally but no exported API surfaced until now (A296).
+// A caller like Workspace's own filter chain ("does this transition require
+// a role") can use this for any item in any state, not only the
+// auto-generated authorization-required Signal case drainAuthorizationGate
+// serves. Flow resolution reuses [resolveFlowID] (T243's own shared
+// helper), not a third hand-rolled copy of the same two-query lookup.
+//
+// Returns nil, nil (not an error) when Config.DB is nil, no flow is
+// registered for typeName (and no default flow exists either), or
+// fromState has no outgoing transitions in the flow.
+func (a *App) ValidTransitions(ctx context.Context, typeName, fromState string) ([]TransitionOption, error) {
+	db := a.cfg.DB
+	if db == nil {
+		return nil, nil
+	}
+
+	flowID, found, err := resolveFlowID(ctx, db, typeName)
+	if err != nil {
+		return nil, fmt.Errorf("smeldr: ValidTransitions: resolve flow: %w", err)
+	}
+	if !found {
+		return nil, nil // no flow registered — nothing to report
+	}
+
+	rows, err := db.QueryContext(ctx,
+		`SELECT to_state, required_role, required_reason, strict FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2`,
+		flowID, fromState,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("smeldr: ValidTransitions: %w", err)
+	}
+	defer rows.Close()
+
+	var options []TransitionOption
+	for rows.Next() {
+		var opt TransitionOption
+		var role sql.NullString
+		if err := rows.Scan(&opt.ToState, &role, &opt.RequiredReason, &opt.Strict); err != nil {
+			return nil, fmt.Errorf("smeldr: ValidTransitions: scan: %w", err)
+		}
+		opt.RequiredRole = role.String
+		options = append(options, opt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("smeldr: ValidTransitions: %w", err)
+	}
+	return options, nil
+}
+
 // recordAuthorizationRequiredSignal inserts a Signal recording that
 // typeName/itemID's fromState→toState transition requires a human holding
 // requiredRole — the loud-failure half of T211's authority answer
@@ -982,10 +1043,12 @@ func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *Webhoo
 	message := fmt.Sprintf("%s %s: %s→%s requires role %q", typeName, itemID, fromState, toState, requiredRole)
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO smeldr_signals
-			(id, slug, status, created_at, updated_at, sender, receiver, signal_type, message, task_ref, sequence)
+			(id, slug, status, created_at, updated_at, sender, receiver, signal_type, message, task_ref, sequence,
+			 subject_type, subject_id, from_state, to_state, required_role)
 		VALUES
-			($1, $2, 'pending', $3, $4, 'system', $5, 'authorization-required', $6, '', 0)`,
-		id, id, now, now, requiredRole, message,
+			($1, $2, 'pending', $3, $4, 'system', $5, 'authorization-required', $6, '', 0,
+			 $7, $8, $9, $10, $5)`,
+		id, id, now, now, requiredRole, message, typeName, itemID, fromState, toState,
 	)
 	if err != nil {
 		return fmt.Errorf("smeldr: recordAuthorizationRequiredSignal: %w", err)

@@ -780,3 +780,146 @@ public-metadata positioning only. Level 2 amendment (README structural
 reorder, cross-references DECISIONS.md/recent.md, external repo metadata).
 
 ---
+
+## A296 — contradicts/investigates relation kinds, structured Signal fields, ValidTransitions (RequiredRole exposure)
+
+Three related gaps found scoping cloud-workspace-instrument-zero-code
+(Wave 3), blocking cloud-implementer on Asserted-provenance rows and a
+fully-structured Scheduled-provenance row for Workspace. Mirrors D59/
+`contains`'s own pattern. All three grounded directly against source
+before the plan was written (`RegisterOrchestrationRelationKinds`, `Signal`,
+`recordAuthorizationRequiredSignal`, and a whole-package grep confirming no
+`ValidTransitions`-equivalent existed anywhere in core).
+
+### 1. Two new relation kinds
+
+`RegisterOrchestrationRelationKinds` (`orchestration.go`) gains:
+
+- `contradicts` — Decision↔Decision, `Directional: false` (symmetric — "A
+  contradicts B" reads the same as "B contradicts A"), no `ReverseLabel`
+  (unlike `contains`/"Part Of", a symmetric relation has no distinct
+  reverse phrasing). The entire vehicle for Workspace's own Asserted-
+  provenance condition, proposed in `workspace.md` §13.9e/13.10 but never
+  actually registered until now. `Directional: false` is honest metadata
+  — flagged directly in the code comment that no validation logic in this
+  package currently branches on `Directional`, so this does not by itself
+  make a query symmetric.
+- `investigates` — Task→Decision, directional, delegation (§13.10).
+
+Who-asserts is the same `assert_relation` convention already used for
+`derives_from`/`ships_as`/`contains` (A292 precedent) — no new core
+machinery. `TestRegisterOrchestrationRelationKinds_RoundTrip`'s own `want`
+map extended to 7 kinds, including a new `directional` field so the test
+can assert `contradicts`'s asymmetry rather than hardcoding `Directional
+== true` for every kind as it did before.
+
+### 2. Structured `Signal` fields
+
+`recordAuthorizationRequiredSignal` (`state.go`) baked `type_name`/
+`item_id`/`from_state`/`to_state`/`required_role` into one formatted prose
+`Message` sentence, leaving no structured way to read a Scheduled-
+provenance condition's real subject — reading meant parsing a formatted
+string for facts, conflicting with this repo's own "lenses never invent
+semantics" rule.
+
+`Signal` (`orchestration.go`) gains five fields, deliberately reusing
+`ProvenanceRecord`'s own vocabulary (`provenance.go`) for the four shared
+concepts rather than inventing parallel names: `SubjectType`, `SubjectID`,
+`FromState`, `ToState`, `RequiredRole` (all `db`-tagged, empty on an
+ordinary human-authored Signal). `recordAuthorizationRequiredSignal`'s raw
+SQL `INSERT` (it bypasses the generic `Module[Signal]` path entirely, so
+this fix is manual) now populates all five from its own existing
+parameters. `TaskRef` deliberately left unchanged/empty — out of this
+Amendment's own scope, architect-confirmed at plan review.
+
+Schema: `CreateOrchestrationTables`'s own `smeldr_signals` `CREATE TABLE`
+gains the five columns for fresh installs. New exported
+`EnsureOrchestrationSignalColumns(ctx, db) error` migrates a pre-A296
+database via `EnsureColumn` (T246's established pattern, five calls) —
+wired into `example/server`'s own `ENABLE_ORCHESTRATION` block, right
+after `CreateOrchestrationTables`, so the live `process.smeldr.dev`
+dogfood database picks up the new columns on next boot rather than
+`recordAuthorizationRequiredSignal`'s new `INSERT` breaking against an
+un-migrated table.
+
+Verified before writing the struct fields, not assumed: `SQLRepo[T]`'s
+generic scan/insert path (`storage.go`, `dbFields`/`collectDBFields`) is
+reflection-based against `db` tags with a per-type cache — the five new
+tagged fields round-trip automatically through `create_signal`/`get_signal`/
+etc.'s normal path; only the one raw-SQL bypass needed a manual fix.
+
+### 3. `App.ValidTransitions` — exposes `RequiredRole`
+
+No `GetValidTransitions`/`ValidTransitions`-equivalent existed anywhere in
+`smeldr.dev/core` (confirmed via a whole-package grep) — `smeldr.dev/mcp`'s
+own `get_valid_transitions` tool (a separate repo) computes legal to-states
+itself via raw SQL against `smeldr_state_flows`/`smeldr_transitions`,
+without `RequiredRole`. `drainAuthorizationGate` was core's only existing
+internal reader of `required_role` for a single from→to pair, and it's
+unexported.
+
+New:
+
+```go
+type TransitionOption struct {
+    ToState        string
+    RequiredRole   string
+    RequiredReason bool
+    Strict         bool
+}
+
+func (a *App) ValidTransitions(ctx context.Context, typeName, fromState string) ([]TransitionOption, error)
+```
+
+Returns every legal transition out of `fromState`, including `RequiredRole`
+— the piece `drainAuthorizationGate` already reads internally but no
+exported API had surfaced. Flow resolution reuses `resolveFlowID` (T243's
+own shared helper) rather than a third hand-rolled copy of
+`drainAuthorizationGate`'s two-query lookup — a genuine DRY improvement
+found while implementing, not planned in advance. One behavioral
+difference from `drainAuthorizationGate`'s own inline version, worth
+naming: `resolveFlowID` distinguishes "no flow found" from a real query
+error, so `ValidTransitions` surfaces a genuine DB error rather than
+silently fail-opening the way `drainAuthorizationGate`'s hand-rolled
+version does for any error.
+
+Explicitly out of scope for this Amendment: switching `smeldr.dev/mcp`'s
+own `get_valid_transitions` tool to call this and include `RequiredRole`
+in its response — a separate `smeldr.dev/mcp`-band Task, matching A293's
+own precedent (`ReachabilityHandler` built core-side, `smeldr.dev/mcp` tool
+registration left as its own future Task).
+
+### Tests
+
+`TestRegisterOrchestrationRelationKinds_RoundTrip` extended (7 kinds,
+`directional` field added to `want`). New:
+`TestEnsureOrchestrationSignalColumns_AddsColumns`/`_Idempotent`/
+`_AlterFails`; `TestRecordAuthorizationRequiredSignal_Success` extended to
+assert the five structured columns; `TestValidTransitions` (table-driven:
+mixed gating, non-gated, terminal state, unknown fromState, unknown
+typeName with no default flow, nil DB) plus
+`TestValidTransitions_ResolveFlowIDError`/`_QueryError`/`_ScanError`. 95.7%
+function coverage on `ValidTransitions` itself (only `rows.Err()`'s own
+defensive branch left untriggered — matches this package's own established
+practice of leaving that specific branch untested elsewhere, e.g.
+`sweep_run.go`, `provenance.go`). Package-wide: 96.3%, `go test -race
+./...` green.
+
+### Consequences
+
+New exported symbols (`App.ValidTransitions`, `TransitionOption`,
+`EnsureOrchestrationSignalColumns`) plus five new `Signal` fields and two
+new relation kinds — MINOR version bump, matching A274/A279/A293's own
+precedent for new exported API, not PATCH: v1.77.0 → **v1.78.0**. No route
+or middleware behavior changed. `docs/ARCHITECTURE.md` and
+`docs/REFERENCE.md` both updated in this same commit (relation-kind table,
+`Signal`'s new fields, `EnsureOrchestrationSignalColumns`,
+`ValidTransitions`). `example/server/main.go` gains one new call
+(`EnsureOrchestrationSignalColumns`), no new env var — folded into the
+existing `ENABLE_ORCHESTRATION` gate. `AGENTS.md` checked directly: neither
+`Signal`'s field list nor the relation-kind vocabulary is enumerated there
+today, so nothing is stale — no change needed, confirmed by reading, not
+assumed. Tag/release pending Peter's own fresh explicit go-ahead, given
+directly in chat, never relayed.
+
+---

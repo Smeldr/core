@@ -23,6 +23,15 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.78.0] — Unreleased
+
+### Added
+- `RegisterOrchestrationRelationKinds` registers two new relation kinds: `contradicts` (Decision↔Decision, symmetric — the vehicle for Workspace's own Asserted-provenance condition) and `investigates` (Task→Decision, delegation). (A296)
+- `Signal` gains `SubjectType`/`SubjectID`/`FromState`/`ToState`/`RequiredRole` fields, mirroring `ProvenanceRecord`'s own vocabulary — populated by `recordAuthorizationRequiredSignal`, previously only readable by parsing its formatted prose `Message`. New `EnsureOrchestrationSignalColumns(ctx, db) error` migrates a pre-A296 database. (A296)
+- `App.ValidTransitions(ctx, typeName, fromState string) ([]TransitionOption, error)` returns every legal transition out of a state including its `RequiredRole` — no equivalent existed anywhere in core until now. (A296)
+
+---
+
 ## [1.77.0] — 2026-08-30
 
 ### Added

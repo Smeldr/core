@@ -941,16 +941,19 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 		label        string
 		reverseLabel string
 		typePairs    string
+		directional  bool
 	}{
-		"derives_from": {"Derives From", "", `[{"source_type":"Task","target_type":"Goal"}]`},
-		"depends_on":   {"Depends On", "", `[{"source_type":"Task","target_type":"Task"}]`},
-		"ships_as":     {"Ships As", "", `[{"source_type":"Task","target_type":"Amendment"}]`},
-		"supersedes":   {"Supersedes", "Superseded By", `[{"source_type":"Decision","target_type":"Decision"}]`},
+		"derives_from": {"Derives From", "", `[{"source_type":"Task","target_type":"Goal"}]`, true},
+		"depends_on":   {"Depends On", "", `[{"source_type":"Task","target_type":"Task"}]`, true},
+		"ships_as":     {"Ships As", "", `[{"source_type":"Task","target_type":"Amendment"}]`, true},
+		"supersedes":   {"Supersedes", "Superseded By", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
 		"contains": {"Contains", "Part Of", `[{"source_type":"Goal","target_type":"Goal"},` +
 			`{"source_type":"Goal","target_type":"Task"},` +
 			`{"source_type":"Goal","target_type":"Decision"},` +
 			`{"source_type":"Goal","target_type":"Amendment"},` +
-			`{"source_type":"Goal","target_type":"Signal"}]`},
+			`{"source_type":"Goal","target_type":"Signal"}]`, true},
+		"contradicts":  {"Contradicts", "", `[{"source_type":"Decision","target_type":"Decision"}]`, false},
+		"investigates": {"Investigates", "Investigated By", `[{"source_type":"Task","target_type":"Decision"}]`, true},
 	}
 
 	kinds := store.ListKinds()
@@ -972,8 +975,8 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 		if k.Mode != "asserted" {
 			t.Errorf("%s: Mode = %q, want %q", k.TypeName, k.Mode, "asserted")
 		}
-		if !k.Directional {
-			t.Errorf("%s: Directional = false, want true", k.TypeName)
+		if k.Directional != w.directional {
+			t.Errorf("%s: Directional = %v, want %v", k.TypeName, k.Directional, w.directional)
 		}
 		if k.Weighted {
 			t.Errorf("%s: Weighted = true, want false", k.TypeName)
@@ -989,6 +992,66 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 	}
 	if got := len(store.ListKinds()); got != len(want) {
 		t.Errorf("after second call: got %d kinds, want %d", got, len(want))
+	}
+}
+
+// — EnsureOrchestrationSignalColumns (A296) ——————————————————————————————————
+
+func TestEnsureOrchestrationSignalColumns_AddsColumns(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	// Old schema, pre-A296: smeldr_signals without the five structured columns.
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_signals (
+			id          TEXT PRIMARY KEY,
+			slug        TEXT NOT NULL UNIQUE,
+			status      TEXT NOT NULL DEFAULT 'draft',
+			created_at  TIMESTAMPTZ NOT NULL,
+			updated_at  TIMESTAMPTZ NOT NULL,
+			sender      TEXT NOT NULL DEFAULT '',
+			receiver    TEXT NOT NULL DEFAULT '',
+			signal_type TEXT NOT NULL DEFAULT '',
+			message     TEXT NOT NULL DEFAULT '',
+			task_ref    TEXT NOT NULL DEFAULT '',
+			sequence    INTEGER NOT NULL DEFAULT 0
+		)`); err != nil {
+		t.Fatalf("create old-schema table: %v", err)
+	}
+
+	if err := EnsureOrchestrationSignalColumns(ctx, db); err != nil {
+		t.Fatalf("EnsureOrchestrationSignalColumns: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_signals
+			(id, slug, created_at, updated_at, subject_type, subject_id, from_state, to_state, required_role)
+		VALUES ('1', 'test', '2025-01-01', '2025-01-01', 'GateItem', 'item-1', 'a', 'b', 'reviewer')`,
+	); err != nil {
+		t.Errorf("structured columns should exist after migration, got: %v", err)
+	}
+}
+
+func TestEnsureOrchestrationSignalColumns_Idempotent(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	// Fresh install already has the columns via CREATE TABLE — a second
+	// migration call over an already-current schema must still succeed.
+	if err := EnsureOrchestrationSignalColumns(ctx, db); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := EnsureOrchestrationSignalColumns(ctx, db); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+}
+
+func TestEnsureOrchestrationSignalColumns_AlterFails(t *testing.T) {
+	db := newSQLiteDB(t)
+	// smeldr_signals table deliberately not created.
+	if err := EnsureOrchestrationSignalColumns(context.Background(), db); err == nil {
+		t.Error("expected error when smeldr_signals does not exist, got nil")
 	}
 }
 
