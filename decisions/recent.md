@@ -923,3 +923,126 @@ assumed. Tag/release pending Peter's own fresh explicit go-ahead, given
 directly in chat, never relayed.
 
 ---
+
+## D61 — Relation-store enforcement gaps closed: TypePairs validated, sweep completed, non-directional edges canonicalized, Weighted removed
+
+### Scope
+
+Raised by T233 (`01a053ba`), a design session re-verifying six loose ends
+in `RelationStore`'s own enforcement model directly against current
+source. Three of the six are decided and shipped here; the sixth
+(RequiredRelation) gets its own decision, D62, given its own strategic
+weight.
+
+### Decision
+
+Four fixes, all same-function, no signature changes except where noted:
+
+1. `Assert`/`insertEdge` (`relations.go:286`) now validates
+   `(edge.SourceType, edge.TargetType)` against the relation kind's own
+   `TypePairs` when non-empty; an empty `TypePairs` stays permissive,
+   matching `extractRelationEdges`'s own existing treatment of
+   "unconstrained." Closes a real gap: asserting a `contains` edge between
+   two `Task`s previously succeeded despite `contains`'s own registered
+   `TypePairs` never declaring Task→Task valid.
+2. `SweepStructural` (`relations.go:724`), which already groups every live
+   edge by target and drops edges whose target no longer exists, is
+   extended to perform the same check by source. This completes the
+   existing sweep model rather than adding new assert-time strictness —
+   same `TargetChecker` interface, same blast radius, no new mechanism.
+3. Edges asserted on a `Directional: false` relation kind are canonicalized
+   at assert time: `(source, target)` ordered lexicographically by
+   `(type, id)` before storage, so the same symmetric fact asserted from
+   either side produces one canonical row. Paired with a new `ON CONFLICT`
+   dedup on `(source_type, source_id, target_type, target_id,
+   relation_kind)` for all kinds, directional or not. Read-side asymmetry
+   (`GetBySource`/`GetByTarget` still only query their own named side) is a
+   known, deliberately separate follow-up — a new `GetRelated(ctx, typ, id,
+   kind)` method checking both sides, matching `Reachability`'s own
+   existing `direction` parameter precedent, not built here.
+4. `Weighted bool` on `RelationKindDef` removed — written to and read from
+   the DB, asserted false in one test, otherwise dead: no `Weight` value
+   exists anywhere on `RelationEdge`, nothing in the package reads it. This
+   is a breaking change to an exported field on `smeldr.dev/core`'s public
+   API; shipped anyway under this project's own D53 precedent (also used
+   by A284/T237) — core-implementer must confirm no external importer of
+   the module exists before removal, the same checked-fact requirement D53
+   established.
+
+### Why
+
+Each of these is a real, reachable gap or a genuinely dead field, not
+speculative hardening — see T233's own plan
+(`architect/plans/core-next-plan.md`, architect review section) for the
+concrete failure case each item closes.
+
+### Alternatives considered
+
+Bundling all six of T233's loose ends (including RequiredRelation) into a
+single decision — rejected, split instead, matching D59/A292's own
+precedent of a strategically significant item getting its own decision
+separate from the smaller implementing fixes around it.
+
+### Consequences
+
+`Weighted`'s removal is a breaking API change — MAJOR-class reasoning
+required in the implementing Amendment, per D53. No other signature
+changes. Implementing Amendment number assigned at commit time by
+core-implementer.
+
+---
+
+## D62 — RequiredRelation: transition-gated relation requirement, proposed shape
+
+### Scope
+
+T233's sixth and strategically most significant loose end: today nothing
+in core can require that an item hold a specific relation edge before a
+state transition proceeds. `validateTransition` (`state.go:372`) enforces
+`RequiredRole`/`RequiredReason`/`Strict` but takes no item ID and no
+`*RelationStore` at all, so it has no way to ask "does this item have edge
+X." This is the concrete mechanism behind the product's own stated
+differentiator, "enforcement scope tied to state" — today only followed by
+convention (architect asserts `derives_from` at dispatch, `ships_as` at
+close), never enforced.
+
+### Decision
+
+Shape agreed, not yet built. This decision seeds a dedicated follow-up
+Task (Level 2), deliberately not bundled into D61's smaller same-function
+fixes:
+
+- New `Transition.RequiredRelation string`, naming a relation kind. When
+  non-empty, the transition requires at least one edge of that kind with
+  this item as **source** before it may proceed, matching the existing
+  `derives_from`/`ships_as` convention (always asserted with the acting
+  item as source).
+- Enforcement point: `validateTransition` gains `itemID string` and
+  `rels *RelationStore` parameters, threaded from all three call sites
+  (`state.go`, `module.go`, `dynamic.go`). Whether `module.go`/`dynamic.go`
+  already have a reachable `RelationStore` at their own call sites, or
+  whether wiring one through is itself a bigger change than the signature
+  edit alone, is left for the follow-up Task's own investigation.
+- Same `Strict`-gated fail-open shape `RequiredRole` already uses
+  (`state.go:428-437`): an unset `RelationStore` fails open unless
+  `Strict` is also set on that `Transition` — reusing the one existing
+  gate with this exact shape, not inventing a new pattern.
+
+### Why
+
+This is where the "convention becomes enforcement" gap actually closes —
+named directly by T233's own plan as the item the original loose-end list
+undersold once actually verified against source. Deciding the shape now,
+separately from D61's smaller fixes, keeps it legible on its own and gives
+the follow-up Task a settled starting point rather than a re-litigated
+one.
+
+### Consequences
+
+No code shipped by this decision. A follow-up Task (band=core, Level 2)
+referencing this decision is created alongside it. `validateTransition`'s
+signature change touches three call sites — the follow-up Task's own plan
+must confirm each site's actual access to a `*RelationStore` before
+implementation, not assume it.
+
+---
