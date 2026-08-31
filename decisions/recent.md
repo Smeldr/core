@@ -1046,3 +1046,123 @@ must confirm each site's actual access to a `*RelationStore` before
 implementation, not assume it.
 
 ---
+
+## A297 — D61 implemented: TypePairs validated, sweep completes source-side, non-directional edges canonicalized+deduped; Weighted removal deferred
+
+Implements D61 (T233, `01a053ba`). Three of D61's four items ship here as
+approved; the fourth (`Weighted` removal) does not — see below.
+
+### What shipped
+
+1. **TypePairs validation** — new unexported `validateTypePairs(kind,
+   edge)`, called from `insertEdge` (the shared write path behind
+   `Assert`/`MCPAssertRelation`/`MCPProposeRelation`/`MCPObserveRelation`,
+   not `Assert` alone — D61's own text names both). Checks
+   `(edge.SourceType, edge.TargetType)` against the kind's own registered
+   `TypePairs` when non-empty; empty `TypePairs` stays permissive,
+   matching `extractRelationEdges`'s (`smeldr.go`) own existing treatment.
+2. **SweepStructural completes its own model** — now groups and checks
+   by source as well as by target (previously target-only). An edge whose
+   source or target is dead is flagged once, not twice, if both are dead
+   (`staled` map keyed on edge ID inside a shared `flagEdge` closure).
+3. **Non-directional canonicalization + dedup** — new unexported
+   `canonicalizeNonDirectional(kind, edge)`: when the kind's `Directional`
+   is `false`, reorders `(source, target)` to a lexicographic-by-`(type,
+   id)` canonical form before storage, so the same symmetric fact
+   asserted from either side produces one row. Paired with a dedup
+   lookup in `insertEdge`: a fresh edge (no caller-supplied `ID`) reuses
+   an existing row's ID when one already matches `(source_type,
+   source_id, target_type, target_id, relation_kind)` — deliberately
+   **not** including `edge_class`, matching D61's own ratified text
+   exactly as written. An explicit `edge.ID` from the caller always
+   bypasses this lookup, preserving the pre-existing update-by-id
+   contract unchanged.
+
+**Found during implementation, refined after architect review:** the
+dedup key includes `edge_class` — `(source_type, source_id, target_type,
+target_id, relation_kind, edge_class)`. D61's own literal text omitted
+it; initially implemented that way and flagged as a real concern (an
+`"observed"` edge and a later `"asserted"` edge for the identical tuple
+would collapse onto the same row, whichever written last silently
+winning `edge_class` — a previously human-asserted edge downgraded to
+`"observed"` the next time a webhook reports the same fact). Architect
+reviewed the flagged concern directly and confirmed it as a real
+trust-integrity regression worth including now, not deferring, given
+this project's own ledger positioning — a refinement within D61's own
+intent (dedup the same fact asserted twice), not a reversal of it. New
+test `TestInsertEdge_Dedup_DifferentEdgeClass_NotCollapsed` proves an
+observed edge and a later asserted edge for the same tuple remain two
+distinct rows.
+
+**Found during implementation, real regression avoided:** wiring
+canonicalization to `Directional == false` exposed that `bool`'s own Go
+zero-value is indistinguishable from "deliberately non-directional" —
+roughly 25 pre-existing `RelationKindDef{...}` test literals across 7
+files never set `Directional` explicitly, since the field was previously
+inert. Measured the actual blast radius by running the full suite rather
+than assuming from the grep count: only 2 tests actually broke
+(`TestAssert_OptionalFields_RoundTrip`'s `co_authored` kind,
+`TestReachabilityHandler_200`'s `links` kind) — both genuinely directional
+relationships that simply never bothered declaring it. Fixed both by
+adding `Directional: true`, stating their own real intent rather than
+relying on an accidentally-permissive zero value. The other ~23 omitted
+occurrences don't exercise direction-sensitive assertions, so they were
+left untouched — not a blanket sweep across files outside this Amendment's
+own real regression surface.
+
+### What did NOT ship: `Weighted` removal (D61 item 4)
+
+D61's own approval was explicit and conditional: "confirm no external
+importer of `smeldr.dev/core` exists... before removing the field." Ran
+the check — found the opposite. `smeldr.dev/mcp`'s own
+`relation_tools.go` (`upsert_relation_kind`, `list_relation_kinds`)
+actively reads and writes `Weighted`. Confirmed concretely, not just via
+grep: building `example/server` (this repo's own example, `replace
+smeldr.dev/core => ../..` in its `go.mod`) fails to compile the moment
+`Weighted` is removed, since the replace directive forces every
+`smeldr.dev/core` reference in the build graph — including inside
+`smeldr.dev/mcp`'s own already-tagged `v1.32.1` source — onto the local,
+modified core package.
+
+Reverted the removal in full: the field, its DDL write (`UpsertKind`) and
+read (`scanRelationKind`), and the test assertion in
+`TestRegisterOrchestrationRelationKinds_RoundTrip` are all back to their
+pre-Task state. `Weighted` carries a new doc comment recording this
+finding (confirmed dead, not removed, why, and what unblocks removal) so
+whoever picks up the eventual removal doesn't have to re-derive it.
+Removal deferred to its own follow-up — either an `smeldr.dev/mcp`-band
+fix first (drop `weighted` from both the tool argument and the response
+map), or an explicit decision to accept the temporary breakage the way
+A284 did, architect/Peter's call, not decided unilaterally here.
+
+### Tests
+
+New `relations_enforcement_test.go`: TypePairs violation/allowed/empty-
+permissive (`Assert` and `MCPAssertRelation`), canonicalization
+(non-directional canonicalized, directional kind unaffected), dedup (same
+tuple collapses to one row, explicit ID bypasses the lookup, a failed
+lookup query propagates its error). `relations_sweep_test.go`'s five
+existing `SweepStructural` tests updated for the now-real source-check
+call count/skip count; `TestAppSweepStructural_DefaultChecker` gained a
+published source row so its own "nothing flagged" case still means that.
+`orchestration_test.go`'s `Weighted` assertion restored unchanged.
+
+### Consequences
+
+New exported symbols: none (`validateTypePairs`/`canonicalizeNonDirectional`
+are unexported). `SweepStructural`'s own behavior changes (more calls to
+`check`, `skipped` can now count source-check failures too) — a real,
+consumer-observable behavior change for anyone wrapping it directly, not
+just an internal refactor. `Assert`/`MCPAssertRelation`/
+`MCPProposeRelation`/`MCPObserveRelation` can now reject a call that
+previously succeeded (TypePairs violation) and can now return an existing
+edge's ID instead of minting a new one (dedup) — both real, intentional
+behavior changes per D61. PATCH bump — no new exported symbol, matching
+A226/A281/A283/A286/A287/A288's own precedent for a real,
+consumer-observable behavior change with no new exported API: v1.78.0 →
+**v1.78.1**. `docs/ARCHITECTURE.md` and `docs/REFERENCE.md` updated in
+this same commit. `Weighted`'s own removal remains D61's fourth item,
+not yet closed — T233 (`01a053ba`) stays open until it lands or is
+explicitly descoped.
+
+---

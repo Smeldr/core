@@ -111,8 +111,10 @@ func TestSweepStructural_TargetDedup(t *testing.T) {
 	if w != 3 || f != 3 || sk != 0 {
 		t.Errorf("want (3,3,0), got (%d,%d,%d)", w, f, sk)
 	}
-	if checkCalls != 1 {
-		t.Errorf("want check called 1× (dedup), got %d", checkCalls)
+	// 1 unique target (page-1, deduped across all 3 edges) + 3 unique sources
+	// (art-1/2/3, D61 item 2 — sweep now checks source existence too).
+	if checkCalls != 4 {
+		t.Errorf("want check called 4× (1 target + 3 sources, deduped), got %d", checkCalls)
 	}
 	if onStaleCalls != 3 {
 		t.Errorf("want onStale called 3×, got %d", onStaleCalls)
@@ -123,9 +125,11 @@ func TestSweepStructural_CheckerError(t *testing.T) {
 	store := setupSweepStore(t)
 	edge := assertEdge(t, store, "art-1", "page-1")
 
+	// errChecker always errors — target check and source check (D61 item 2)
+	// each contribute one skip for this single edge.
 	w, f, sk, err := store.SweepStructural(context.Background(), errChecker, noopOnStale)
-	if err != nil || w != 1 || f != 0 || sk != 1 {
-		t.Errorf("want (1,0,1,nil), got (%d,%d,%d,%v)", w, f, sk, err)
+	if err != nil || w != 1 || f != 0 || sk != 2 {
+		t.Errorf("want (1,0,2,nil), got (%d,%d,%d,%v)", w, f, sk, err)
 	}
 	// Edge must be untouched (not invalidated).
 	edges, _ := store.GetBySource(context.Background(), "article", "art-1", "linked")
@@ -182,8 +186,14 @@ func TestSweepStructural_MixedTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SweepStructural: %v", err)
 	}
-	if w != 3 || f != 1 || sk != 1 {
-		t.Errorf("want (3,1,1), got (%d,%d,%d)", w, f, sk)
+	// Target checks: page-alive alive, page-stale dead (flags art-stale's
+	// edge), page-err errors (1 skip). Source checks (D61 item 2): none of
+	// art-alive/art-stale/art-err match the checker's own switch, so all
+	// three fall to its default case and error too (3 more skips). Total
+	// skipped = 1 + 3 = 4; flagged unchanged at 1 (art-stale's edge, already
+	// flagged via its dead target, is not double-flagged).
+	if w != 3 || f != 1 || sk != 4 {
+		t.Errorf("want (3,1,4), got (%d,%d,%d)", w, f, sk)
 	}
 	if onStaleCalls != 1 {
 		t.Errorf("want onStale 1×, got %d", onStaleCalls)
@@ -236,7 +246,10 @@ func TestAppSweepStructural_DefaultChecker(t *testing.T) {
 		t.Fatalf("MCPAssertRelation: %v", err)
 	}
 
-	// Insert a published dynamic content row for tgt-published.
+	// Insert a published dynamic content row for tgt-published, and one for
+	// src-1 (D61 item 2 — sweep now checks source existence too, so the
+	// edge's source needs a real, alive row for this test's own "nothing
+	// should be flagged" case to actually mean that).
 	repo := &DynamicTypeRepo{db: db, typeName: "article"}
 	node, err := repo.CreateDraft(ctx, map[string]any{"title": "target"})
 	if err != nil {
@@ -249,6 +262,17 @@ func TestAppSweepStructural_DefaultChecker(t *testing.T) {
 	}
 	if err := repo.SetStatus(ctx, "tgt-published", Published); err != nil {
 		t.Fatalf("SetStatus published: %v", err)
+	}
+	srcNode, err := repo.CreateDraft(ctx, map[string]any{"title": "source"})
+	if err != nil {
+		t.Fatalf("CreateDraft (source): %v", err)
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE smeldr_dynamic_content SET id=$1 WHERE id=$2",
+		"src-1", srcNode.ID); err != nil {
+		t.Fatalf("UPDATE id (source): %v", err)
+	}
+	if err := repo.SetStatus(ctx, "src-1", Published); err != nil {
+		t.Fatalf("SetStatus published (source): %v", err)
 	}
 
 	app := &App{cfg: Config{DB: db}}

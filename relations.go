@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -22,14 +23,24 @@ type RelationKindDef struct {
 	// (e.g. Label "supersedes", ReverseLabel "superseded by") — optional and
 	// unvalidated, matching Label's own treatment; "" means no reverse
 	// phrasing has been established yet, not an error (T160).
-	ReverseLabel string          `db:"reverse_label"`
-	Mode         string          `db:"mode"` // "derived" | "asserted" | "inferable"
-	Directional  bool            `db:"directional"`
-	Weighted     bool            `db:"weighted"`
-	TypePairs    json.RawMessage `db:"type_pairs"` // JSON: [{source_type, target_type}]
-	Attributes   json.RawMessage `db:"attributes"`
-	CreatedAt    time.Time       `db:"created_at"`
-	UpdatedAt    time.Time       `db:"updated_at"`
+	ReverseLabel string `db:"reverse_label"`
+	Mode         string `db:"mode"` // "derived" | "asserted" | "inferable"
+	Directional  bool   `db:"directional"`
+	// Weighted is confirmed dead (D61, item 4: written and read back but
+	// consulted by no production logic anywhere in this package) but is NOT
+	// removed in this commit — smeldr.dev/mcp's own relation_tools.go
+	// (upsert_relation_kind, list_relation_kinds) actively reads and writes
+	// this field, confirmed by building example/server against it via its
+	// local `replace smeldr.dev/core => ../..` directive, which fails to
+	// compile without this field. D61's own text required confirming "no
+	// external importer exists" before removal — that check found the
+	// opposite. Removal deferred to its own follow-up, sequenced after (or
+	// alongside) an smeldr.dev/mcp-band fix, not shipped here.
+	Weighted   bool            `db:"weighted"`
+	TypePairs  json.RawMessage `db:"type_pairs"` // JSON: [{source_type, target_type}]
+	Attributes json.RawMessage `db:"attributes"`
+	CreatedAt  time.Time       `db:"created_at"`
+	UpdatedAt  time.Time       `db:"updated_at"`
 }
 
 // RelationEdge is a single typed adjacency between two content items.
@@ -294,13 +305,98 @@ func (s *RelationStore) Assert(ctx context.Context, edge RelationEdge) error {
 	return err
 }
 
+// validateTypePairs checks edge's (SourceType, TargetType) against kind's own
+// registered TypePairs, when TypePairs is non-empty. An empty (or malformed —
+// already validated at registration time by ValidateRelationKindDef, so this
+// should not happen in practice) TypePairs means the kind is unconstrained,
+// matching extractRelationEdges's (smeldr.go) own existing treatment of
+// "no TypePairs declared" as permissive rather than an error (D61).
+func validateTypePairs(kind RelationKindDef, edge RelationEdge) error {
+	var pairs []struct {
+		SourceType string `json:"source_type"`
+		TargetType string `json:"target_type"`
+	}
+	if err := json.Unmarshal(kind.TypePairs, &pairs); err != nil || len(pairs) == 0 {
+		return nil
+	}
+	for _, p := range pairs {
+		if p.SourceType == edge.SourceType && p.TargetType == edge.TargetType {
+			return nil
+		}
+	}
+	return Err("type_pairs", fmt.Sprintf("relation kind %q does not permit %s→%s",
+		edge.RelationKind, edge.SourceType, edge.TargetType))
+}
+
+// canonicalizeNonDirectional reorders edge's (source, target) when kind is
+// registered Directional: false, so the same symmetric fact asserted from
+// either side produces one canonical row instead of two — (type, id) ordered
+// lexicographically, the smaller pair always stored as source (D61). A
+// directional kind's edge is returned unchanged.
+func canonicalizeNonDirectional(kind RelationKindDef, edge RelationEdge) RelationEdge {
+	if kind.Directional {
+		return edge
+	}
+	srcKey := edge.SourceType + "\x00" + edge.SourceID
+	tgtKey := edge.TargetType + "\x00" + edge.TargetID
+	if srcKey > tgtKey {
+		edge.SourceType, edge.TargetType = edge.TargetType, edge.SourceType
+		edge.SourceID, edge.TargetID = edge.TargetID, edge.SourceID
+	}
+	return edge
+}
+
 // insertEdge persists edge to smeldr_relations, generating an ID and timestamps
 // as needed. Returns the populated edge with all fields set. Called by Assert,
-// MCPAssertRelation, and MCPProposeRelation.
+// MCPAssertRelation, MCPProposeRelation, and MCPObserveRelation.
+//
+// When edge's own relation kind is registered, edge is checked against the
+// kind's own TypePairs and canonicalized if the kind is non-directional
+// (D61, items 1 and 3) before anything is written. An unregistered kind is
+// left unvalidated here — every real caller already checks GetKind itself
+// and returns its own error first; this is defense in depth, not the
+// primary gate.
+//
+// A fresh edge (edge.ID == "") reuses an existing row's ID when one already
+// matches (source, target, kind, edge_class) exactly, rather than creating a
+// duplicate (D61, item 3's dedup half) — an explicit edge.ID from the caller
+// is never overridden, preserving the existing update-by-id contract.
 func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (RelationEdge, error) {
 	now := time.Now().UTC()
+
+	if kind, ok := s.GetKind(edge.RelationKind); ok {
+		if err := validateTypePairs(kind, edge); err != nil {
+			return RelationEdge{}, err
+		}
+		edge = canonicalizeNonDirectional(kind, edge)
+	}
+
 	if edge.ID == "" {
-		edge.ID = NewID()
+		// Dedup key: (source, target, relation_kind, edge_class). D61's own
+		// literal text omitted edge_class, but that would let an "observed"
+		// edge and a later "asserted" edge for the identical tuple collapse
+		// onto the same row — whichever is written last silently wins
+		// edge_class, which could downgrade a previously human-asserted edge
+		// to "observed" the next time a webhook reports the same fact. Found
+		// during implementation, flagged, and confirmed by architect review
+		// as a real trust-integrity concern worth including now rather than
+		// deferring — a refinement within D61's own intent (dedup the same
+		// fact asserted twice), not a reversal of it (A297).
+		var existingID string
+		lookupErr := s.db.QueryRowContext(ctx,
+			`SELECT id FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 `+
+				`AND target_type=$3 AND target_id=$4 AND relation_kind=$5 AND edge_class=$6`,
+			edge.SourceType, edge.SourceID, edge.TargetType, edge.TargetID,
+			edge.RelationKind, edge.EdgeClass,
+		).Scan(&existingID)
+		switch {
+		case lookupErr == nil:
+			edge.ID = existingID
+		case errors.Is(lookupErr, sql.ErrNoRows):
+			edge.ID = NewID()
+		default:
+			return RelationEdge{}, lookupErr
+		}
 	}
 	if edge.CreatedAt.IsZero() {
 		edge.CreatedAt = now
@@ -712,15 +808,18 @@ func (s *RelationStore) BulkRecompute(ctx context.Context, items []RelationSourc
 type TargetChecker func(ctx context.Context, targetType, targetID string) (alive bool, err error)
 
 // SweepStructural iterates all active relations (invalid_at IS NULL OR invalid_at > now,
-// AND valid_at IS NULL OR valid_at <= now) and calls check for each unique target.
-// When a target is not alive, the sweep sets invalid_at = now on each source edge
-// pointing to that target and calls onStale(ctx, edge).
+// AND valid_at IS NULL OR valid_at <= now) and calls check for each unique target AND
+// each unique source (D61, item 2 — the sweep previously checked target existence only;
+// an edge whose source was deleted was never revisited). When either side is not alive,
+// the sweep sets invalid_at = now on the edge and calls onStale(ctx, edge) — once per
+// edge even if both its source and target are dead, not twice.
 // Returns (walked, flagged, skipped, error): walked = total relation rows examined
 // (T223 — the count that makes flagged/skipped meaningful: without it, "flagged=0,
 // skipped=0" cannot be told apart from "nothing to check" versus "checked everything,
-// found nothing"); flagged = relations whose target was not alive; skipped = relations
-// where check returned an error (logged, not fatal); error = only on fatal DB errors
-// that abort the sweep.
+// found nothing"); flagged = relations whose source or target was not alive; skipped =
+// relations where check returned an error for their target and/or source (logged, not
+// fatal — an edge whose target check fails but whose source check flags it is still
+// counted flagged, not skipped); error = only on fatal DB errors that abort the sweep.
 func (s *RelationStore) SweepStructural(
 	ctx context.Context,
 	check TargetChecker,
@@ -738,22 +837,24 @@ func (s *RelationStore) SweepStructural(
 	}
 	defer rows.Close()
 
-	type targetKey struct{ typ, id string }
-	byTarget := map[targetKey][]RelationEdge{}
+	type sideKey struct{ typ, id string }
+	byTarget := map[sideKey][]RelationEdge{}
+	bySource := map[sideKey][]RelationEdge{}
 	for rows.Next() {
 		e, scanErr := scanEdge(rows)
 		if scanErr != nil {
 			return 0, 0, 0, scanErr
 		}
 		walked++
-		k := targetKey{e.TargetType, e.TargetID}
-		byTarget[k] = append(byTarget[k], e)
+		byTarget[sideKey{e.TargetType, e.TargetID}] = append(byTarget[sideKey{e.TargetType, e.TargetID}], e)
+		bySource[sideKey{e.SourceType, e.SourceID}] = append(bySource[sideKey{e.SourceType, e.SourceID}], e)
 	}
 	if err := rows.Err(); err != nil {
 		return walked, 0, 0, err
 	}
 
-	for k, edges := range byTarget {
+	deadTargets := map[sideKey]bool{}
+	for k := range byTarget {
 		alive, checkErr := check(ctx, k.typ, k.id)
 		if checkErr != nil {
 			slog.WarnContext(ctx, "SweepStructural: target check error",
@@ -761,19 +862,54 @@ func (s *RelationStore) SweepStructural(
 			skipped++
 			continue
 		}
-		if alive {
+		if !alive {
+			deadTargets[k] = true
+		}
+	}
+	deadSources := map[sideKey]bool{}
+	for k := range bySource {
+		alive, checkErr := check(ctx, k.typ, k.id)
+		if checkErr != nil {
+			slog.WarnContext(ctx, "SweepStructural: source check error",
+				"source_type", k.typ, "source_id", k.id, "err", checkErr)
+			skipped++
 			continue
 		}
-		for _, e := range edges {
-			if _, updateErr := s.db.ExecContext(ctx,
-				"UPDATE smeldr_relations SET invalid_at=$1 WHERE id=$2",
-				now, e.ID,
-			); updateErr != nil {
-				return walked, flagged, skipped, updateErr
+		if !alive {
+			deadSources[k] = true
+		}
+	}
+
+	staled := map[string]bool{} // edge ID — flagged once even if both sides are dead
+	flagEdge := func(e RelationEdge) error {
+		if staled[e.ID] {
+			return nil
+		}
+		if _, updateErr := s.db.ExecContext(ctx,
+			"UPDATE smeldr_relations SET invalid_at=$1 WHERE id=$2",
+			now, e.ID,
+		); updateErr != nil {
+			return updateErr
+		}
+		e.InvalidAt = &now
+		onStale(ctx, e)
+		staled[e.ID] = true
+		flagged++
+		return nil
+	}
+
+	for k := range deadTargets {
+		for _, e := range byTarget[k] {
+			if err := flagEdge(e); err != nil {
+				return walked, flagged, skipped, err
 			}
-			e.InvalidAt = &now
-			onStale(ctx, e)
-			flagged++
+		}
+	}
+	for k := range deadSources {
+		for _, e := range bySource[k] {
+			if err := flagEdge(e); err != nil {
+				return walked, flagged, skipped, err
+			}
 		}
 	}
 	return walked, flagged, skipped, nil

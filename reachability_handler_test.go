@@ -15,7 +15,7 @@ import (
 func TestMCPReachability_ThinWrapper(t *testing.T) {
 	store := setupRelationStore(t)
 	ctx := context.Background()
-	if err := store.UpsertKind(ctx, RelationKindDef{TypeName: "links", Mode: "asserted"}); err != nil {
+	if err := store.UpsertKind(ctx, RelationKindDef{TypeName: "links", Mode: "asserted", Directional: true}); err != nil {
 		t.Fatalf("UpsertKind: %v", err)
 	}
 	if err := store.Assert(ctx, RelationEdge{
@@ -47,7 +47,7 @@ const reachabilityTestSecret = "testsecret16chars"
 func TestReachabilityHandler_200(t *testing.T) {
 	db, rs := setupPacketDB(t)
 	ctx := context.Background()
-	if err := rs.UpsertKind(ctx, RelationKindDef{TypeName: "links", Mode: "asserted"}); err != nil {
+	if err := rs.UpsertKind(ctx, RelationKindDef{TypeName: "links", Mode: "asserted", Directional: true}); err != nil {
 		t.Fatalf("UpsertKind: %v", err)
 	}
 	if err := rs.Assert(ctx, RelationEdge{

@@ -3044,7 +3044,7 @@ CREATE TABLE IF NOT EXISTS smeldr_sweep_runs (
 | `Interval` | `interval` | The detector's own declared cron schedule, e.g. `"0 * * * *"` |
 | `Walked` | `walked` | Total items examined this run |
 | `Flagged` | `flagged` | Items with issues (e.g. relations invalidated, items transitioned) |
-| `Skipped` | `skipped` | Items the detector could not fully check this run (e.g. a target-checker error in `SweepStructural`, or a role-gated/erroring item in `DrainEvalQueue`) — logged, not fatal to the run |
+| `Skipped` | `skipped` | Items the detector could not fully check this run (e.g. a target- or source-checker error in `SweepStructural` — D61/T233 extended the sweep to check source existence as well as target, not target-only — or a role-gated/erroring item in `DrainEvalQueue`) — logged, not fatal to the run |
 | `Err` | `err` | Non-empty when the run itself returned an error; empty string for success |
 | `ActorKind` | `actor_kind` | `"human"` \| `"job"` \| `"agent"`; empty only if truly unattributable, matching `ProvenanceRecord`'s own vocabulary (A289) |
 | `ActorID` | `actor_id` | Fixed mechanism identifier for a scheduled detector, e.g. `"sweep-structural"`, `"drain-eval-queue"` |

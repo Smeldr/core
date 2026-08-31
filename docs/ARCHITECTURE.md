@@ -485,6 +485,30 @@ smeldr.dev/
 │                     from RecomputeAsserted/BulkRecompute's asserted-only diff scope — a system-
 │                     witnessed fact is not automatically the same trust tier as a deliberate human
 │                     grant (design/edge-class-observed-spike.md, T193) (Amendment A232, T196)
+│                     insertEdge (the shared write path behind Assert/MCPAssertRelation/
+│                     MCPProposeRelation/MCPObserveRelation) now validates and canonicalizes before
+│                     writing (D61, T233): validateTypePairs checks (SourceType, TargetType) against
+│                     the kind's own registered TypePairs when non-empty (empty stays permissive,
+│                     matching extractRelationEdges's own treatment); canonicalizeNonDirectional
+│                     reorders (source, target) to a lexicographic-by-(type,id) canonical form when
+│                     the kind is Directional: false, so a symmetric fact asserted from either side
+│                     produces one row; a fresh edge (no caller-supplied ID) reuses an existing row's
+│                     ID when one already matches (source_type, source_id, target_type, target_id,
+│                     relation_kind, edge_class) — edge_class included (a refinement over D61's own
+│                     literal text, found during implementation and confirmed by architect review,
+│                     A297): omitting it would let an "observed" edge and a later "asserted" edge for
+│                     the same tuple collapse onto one row, silently downgrading a previously human-
+│                     asserted edge's trust tier the next time a webhook reports the same fact. An
+│                     edge.ID from the caller always bypasses the dedup lookup, preserving the
+│                     pre-existing update-by-id contract. SweepStructural now groups and checks by
+│                     source as well as by target (previously target-only) — completes the sweep
+│                     model itself rather than adding new assert-time strictness; an edge whose
+│                     source or target is dead is flagged once, not twice, if both sides are dead.
+│                     Weighted bool on RelationKindDef confirmed dead (written/read, consulted by
+│                     nothing) but NOT removed — smeldr.dev/mcp's own relation_tools.go
+│                     (upsert_relation_kind, list_relation_kinds) actively reads/writes it, confirmed
+│                     by building example/server against its local core replace directive; removal
+│                     deferred to its own follow-up once smeldr.dev/mcp no longer references it.
 ├── edges.go           ContentEdge, ContentEdgeStore, NewContentEdgeStore(db); AddChild/Children/
 │                     ChildrenOf (batch IN())/RemoveChild/Reorder (atomic CASE); scanEdges, edgeColumns;
 │                     one composition-edge table for page→block + collection→item (Amendment A116, T32)

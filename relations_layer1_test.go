@@ -315,7 +315,7 @@ func TestExtractRelationEdges_EmptyTypePairs(t *testing.T) {
 
 func TestAssert_OptionalFields_RoundTrip(t *testing.T) {
 	store := setupRelationStore(t)
-	if err := store.UpsertKind(context.Background(), RelationKindDef{TypeName: "co_authored", Mode: "asserted"}); err != nil {
+	if err := store.UpsertKind(context.Background(), RelationKindDef{TypeName: "co_authored", Mode: "asserted", Directional: true}); err != nil {
 		t.Fatalf("UpsertKind: %v", err)
 	}
 
