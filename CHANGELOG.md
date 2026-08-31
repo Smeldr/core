@@ -23,7 +23,7 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
-## [1.78.1] — Unreleased
+## [1.78.1] — 2026-08-31
 
 ### Changed
 - `Assert`/`MCPAssertRelation`/`MCPProposeRelation`/`MCPObserveRelation` now validate an asserted edge's `(SourceType, TargetType)` against the relation kind's own `TypePairs` when non-empty, and reject a violation — previously silently allowed. (A297)
