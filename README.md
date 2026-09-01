@@ -40,7 +40,7 @@ Or coordinate your entire pipeline and automated workflow, AI actions and human 
 
 Directly from chat.
 
-**v1.78.1 — stable.** Public APIs are stable within v1.
+**v1.78.2 — stable.** Public APIs are stable within v1.
 See [CHANGELOG.md](CHANGELOG.md).
 
 ## 30-second start

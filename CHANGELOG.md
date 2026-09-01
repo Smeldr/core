@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.78.2] — 2026-09-01
+
+### Changed
+- `seedToolPolicies` now seeds a new row for `{"get_sweep_run", "read"}` — the same treatment as existing framework-level read tools like `get_goal_context` and `list_type_tools`. `get_sweep_run` has no backing `MCPModule` (it's a framework tool in smeldr.dev/mcp), so it falls outside the mcp-side D48 verb-derived policy fallback and requires an explicit row, or every governance-enabled caller would be silently forbidden calling it. (A298)
+
+---
+
 ## [1.78.1] — 2026-08-31
 
 ### Changed

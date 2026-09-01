@@ -271,6 +271,10 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// other framework tool.
 		{"get_goal_context", "read"},
 		{"list_type_tools", "read"},
+		// Sweep run status tool (Author+). Same "not module-generated" reason
+		// as the two rows above — get_sweep_run reads SweepRunStore directly,
+		// no MCPModule backs it.
+		{"get_sweep_run", "read"},
 	}
 
 	for _, p := range policies {

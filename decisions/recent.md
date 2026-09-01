@@ -1312,3 +1312,58 @@ own explicit instruction, pending Peter's ratification of D63/D64
 first. Both remain `proposed`.
 
 ---
+
+## A298 — Seed `get_sweep_run` tool policy row (core-sweep-run-remote-exposure prerequisite)
+
+### What shipped
+
+`governance.go`'s `seedToolPolicies` gains one row: `{"get_sweep_run",
+"read"}`, appended directly after the existing `get_goal_context`/
+`list_type_tools` pair with the same rationale comment extended — not a
+module-generated tool, so the mcp-side D48 verb-derived fallback
+(`deriveToolPolicy`) can never rescue a missing row for it; it needs an
+explicit seeded row like every other framework tool in this category.
+`TestRoleStore_ToolPolicy_OrchestrationDiscoveryTools` extended to cover
+the new tool name alongside the existing two.
+
+**Found during implementation, not part of the original plan:** the
+`core-sweep-run-remote-exposure` Task's plan (`smeldr.dev/mcp`, new
+`get_sweep_run` MCP tool) stated "no core Go changes are required," on
+the reasoning that `SweepRunStore`/`NewSweepRunStore` were already
+exported. That reasoning covered the *data* path but missed the
+*authorization* path — running `smeldr.dev/mcp`'s own
+`TestAuthoriseTool_PolicyCoverage_Enumerated` locally (via the repo's
+`go.work` link to this local core checkout) failed immediately:
+`get_sweep_run` parses as op=`get`/type=`sweep_run`, no `MCPModule`
+named `SweepRun` exists to derive against, so every governance-enabled
+caller would be silently forbidden — T224's own original failure mode,
+the exact case `TestAuthoriseTool_PolicyCoverage_Enumerated` exists to
+catch before it reaches a live instance. Corrected in the same
+implementing pass rather than looping back through plan-reviewing for a
+single precedented row: matches `seedToolPolicies`'s own existing
+`get_goal_context`/`list_type_tools` comment, which already generalizes
+to "any other framework tool" in this shape.
+
+### Why
+
+Same reasoning as the `get_goal_context`/`list_type_tools` rows this
+extends: a framework-level read tool with no backing `MCPModule` falls
+outside D48's verb-derived fallback by design (that fallback exists
+specifically to save a seed row for genuine per-type CRUD tools, not to
+paper over every tool name that happens to parse as `verb_noun`).
+
+### Consequences
+
+New exported symbols: none — `seedToolPolicies` is unexported, the
+change is one data row. Real, consumer-observable behavior change for
+any governance-enabled deployment: `get_sweep_run` becomes callable by
+an Author-role token once this ships, previously would have been
+unconditionally forbidden. PATCH bump, matching A292/A297's own
+precedent for a real behavior change with no new exported symbol:
+v1.78.1 → **v1.78.2**. Ships in the same commit as
+`core-sweep-run-remote-exposure`'s `docs/REFERENCE.md` update (the
+sibling correction to that same file's stale "no HTTP endpoint and no
+MCP tool" line) — both are prerequisites the mcp-side tool needs to be
+real and usable, not two independent changes. Level 1 amendment.
+
+---

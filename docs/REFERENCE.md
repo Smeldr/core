@@ -2989,7 +2989,7 @@ type ProvenanceStore interface {
 
 ## Scheduled sweep run records
 
-`App.SweepStructural(ctx) (walked, flagged, skipped int, err error)` and `App.DrainEvalQueue(ctx) (walked, triggered, skipped int, err error)` run detectors at scheduled intervals to maintain data consistency — structural validation, eval-queue draining, relation invalidation. Previously, a successful clean run logged one Debug line and persisted nothing, making it indistinguishable from "the sweep never ran". `SweepRunStore` records every scheduled sweep, so staleness can be derived by Go code (e.g. a future alerting task). There is deliberately **no HTTP endpoint and no MCP tool** for browsing runs — `Last` and `List` are plain Go methods meant for programmatic staleness checks, not operator dashboards.
+`App.SweepStructural(ctx) (walked, flagged, skipped int, err error)` and `App.DrainEvalQueue(ctx) (walked, triggered, skipped int, err error)` run detectors at scheduled intervals to maintain data consistency — structural validation, eval-queue draining, relation invalidation. Previously, a successful clean run logged one Debug line and persisted nothing, making it indistinguishable from "the sweep never ran". `SweepRunStore` records every scheduled sweep, so staleness can be derived by Go code (e.g. a future alerting task). `SweepRunStore` itself has no HTTP or MCP surface in core (A279) — `Last` and `List` are plain Go methods. `smeldr.dev/mcp` exposes a remote-callable read on top of them: the `get_sweep_run` tool (Author role) wraps `SweepRunStore.Last`, added for exactly the "public read surfaces deferred via future task if needed" case A279 anticipated.
 
 ### Setup
 

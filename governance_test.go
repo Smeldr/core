@@ -2356,7 +2356,7 @@ func TestRoleStore_ToolPolicy_Hit(t *testing.T) {
 func TestRoleStore_ToolPolicy_OrchestrationDiscoveryTools(t *testing.T) {
 	db := setupGovernanceDB(t)
 	store := NewRoleStore(db)
-	for _, tool := range []string{"get_goal_context", "list_type_tools"} {
+	for _, tool := range []string{"get_goal_context", "list_type_tools", "get_sweep_run"} {
 		op, found, err := store.ToolPolicy(context.Background(), tool)
 		if err != nil {
 			t.Fatalf("ToolPolicy(%q): %v", tool, err)
