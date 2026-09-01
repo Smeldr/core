@@ -5,8 +5,8 @@ go 1.26.5
 require (
 	modernc.org/sqlite v1.50.1
 	smeldr.dev/agent v0.8.0
-	smeldr.dev/core v1.76.0
-	smeldr.dev/mcp v1.32.1
+	smeldr.dev/core v1.78.2
+	smeldr.dev/mcp v1.33.0
 	smeldr.dev/media v1.6.1
 	smeldr.dev/oauth v0.4.0
 	smeldr.dev/social v0.10.2
