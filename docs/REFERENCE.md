@@ -2991,6 +2991,8 @@ type ProvenanceStore interface {
 
 `App.SweepStructural(ctx) (walked, flagged, skipped int, err error)` and `App.DrainEvalQueue(ctx) (walked, triggered, skipped int, err error)` run detectors at scheduled intervals to maintain data consistency — structural validation, eval-queue draining, relation invalidation. Previously, a successful clean run logged one Debug line and persisted nothing, making it indistinguishable from "the sweep never ran". `SweepRunStore` records every scheduled sweep, so staleness can be derived by Go code (e.g. a future alerting task). `SweepRunStore` itself has no HTTP or MCP surface in core (A279) — `Last` and `List` are plain Go methods. `smeldr.dev/mcp` exposes a remote-callable read on top of them: the `get_sweep_run` tool (Author role) wraps `SweepRunStore.Last`, added for exactly the "public read surfaces deferred via future task if needed" case A279 anticipated.
 
+`SweepStructural` also stamps a **per-edge** confirmation, distinct from `SweepRunStore`'s per-run aggregate: `RelationEdge.LastConfirmedAt` (A299) is set to the sweep's own `now` for every edge whose source and target were both checked and found alive that run — nil until an edge's first successful sweep, and never touched by `Assert`/`Propose`/`Observe`. It answers "was this specific edge part of the most recent successful walk," which `SweepRunRecord.Walked`'s aggregate count cannot — the field a witness certificate needs for "confirmed by the system, on a schedule," as opposed to any deliberate `ProvenanceRecord` action. Exposed via `smeldr.dev/mcp`'s `get_relations` (`last_confirmed_at`, omitted when nil).
+
 ### Setup
 
 ```go

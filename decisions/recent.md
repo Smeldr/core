@@ -1367,3 +1367,115 @@ MCP tool" line) — both are prerequisites the mcp-side tool needs to be
 real and usable, not two independent changes. Level 1 amendment.
 
 ---
+
+## A299 — RelationEdge.LastConfirmedAt: per-edge sweep confirmation, for Trace's witness certificate
+
+### What shipped
+
+Found while planning cloud's Trace witness-certificate rebuild (`01a05eb7`,
+Turn 55 `#55a`/`#55d`). The certificate's own worked example: *"Last
+confirmed 2026-08-01 03:00Z, by the system, on a schedule"* — a per-entry
+timestamp for the most recent successful scheduled reconfirmation,
+distinct from any `ProvenanceRecord` verb (create/update/transition/
+assert/invalidate are all deliberate actions on an item; none represent
+"a scheduled process looked at this and it was still true").
+
+`SweepRunRecord`/`SweepRunStore` records one row per completed *run* —
+`Walked`/`Flagged` are aggregate counts, no way to ask "was subject X
+part of the most recent successful walk." The "subject" a witness
+certificate is about is a relation edge — the same unit
+`RelationStore.SweepStructural` already walks every run, checking both
+its source and target for liveness.
+
+1. **`RelationEdge.LastConfirmedAt *time.Time`** (`db:"last_confirmed_at"`)
+   — nil until an edge's first successful sweep confirmation, set only by
+   `SweepStructural`, never by `Assert`/`Propose`/`Observe`. Chosen over
+   a per-run subject list (a new table, or a JSON/array column on
+   `SweepRunRecord`): a certificate only ever needs the single most
+   recent confirmation, never a history, so a per-edge column gives O(1)
+   read (the field is already fetched everywhere an edge is fetched) at
+   no storage-growth cost, versus a per-run list's unbounded row growth
+   for no read benefit this consumer needs.
+2. **`SweepStructural`**: after its existing flag loops finish, every
+   walked edge that was neither flagged nor left unresolved by a skipped
+   check gets `LastConfirmedAt` advanced to the sweep's own `now`, in one
+   batched `UPDATE ... WHERE id IN (...)` per run (new unexported
+   `confirmEdges`) — not one `UPDATE` per confirmed edge. This write now
+   touches the dominant case each run (everything still alive), unlike
+   `flagEdge`'s existing per-row `UPDATE`, which only ever touches the
+   typically-small flagged set; copying that per-row shape for the
+   dominant case would have meant N writes where one query already does
+   the job.
+3. **Skip-vs-confirm distinction**: a new `skippedKeys` set tracks every
+   side (as target or as source) whose liveness check errored this run —
+   an edge with a skipped side is excluded from the confirmed set, same
+   as it's excluded from being flagged. "Checked and found alive" and
+   "couldn't check" must never collapse into the same state; a witness
+   certificate asserting confirmation on an edge nobody actually managed
+   to check would be a false claim, not a conservative one.
+4. **Migration**: `smeldr_relations` gains `last_confirmed_at DATETIME`
+   (nullable, matches `valid_at`/`invalid_at`'s own shape) in
+   `CreateRelationTables`'s CREATE TABLE, plus a paired `EnsureColumn`
+   call for a table created before this ships — same declare-and-migrate-
+   together shape already used for `reverse_label` three lines above it.
+5. **`smeldr.dev/mcp`**: `relation_tools.go`'s `relationEdgeMap` gains
+   `last_confirmed_at` (omitted when nil), matching `valid_at`/
+   `invalid_at`'s own optional-pointer pattern exactly. `get_relations`
+   is the established remote-read path cloud's own `remoteAnchorFetcher`
+   already uses (`core-sweep-run-remote-exposure`, this session) — no new
+   tool needed.
+
+**Found during implementation, not part of the original plan:** both
+existing `INSERT INTO smeldr_relations` call sites (`insertEdge` and
+`applyRelationDiff`'s own bulk insert loop) reused
+`relationColumns` directly with a fixed `VALUES ($1,...,$14)` placeholder
+count. Appending `last_confirmed_at` to `relationColumns` for the SELECT
+paths would have silently broken both INSERTs — a 15-column list against
+a 14-placeholder VALUES clause — the moment this shipped, not caught by
+any existing test since none of them exercise a column-count mismatch
+directly. Caught by re-reading every call site of the constant before
+relying on it, not by a failing test. Fixed by splitting into two
+constants: `relationColumns` (SELECT, all 15 columns) and
+`relationInsertColumns` (INSERT, the original 14 — `last_confirmed_at`
+is never set on insert or re-assert, consistent with an
+`INSERT ... ON CONFLICT DO UPDATE` whose own SET clause already omits it,
+preserving an existing row's confirmation history across a re-assert).
+
+### Tests
+
+`smeldr_target_checker_test.go` (real compiled-type edges via
+`App.SweepStructural`, not the store method in isolation — matching this
+file's own established principle that a checker correct in isolation but
+never reached by the real entry point is the same defect class as what
+it was written to catch): a confirmed-alive edge gains `LastConfirmedAt`;
+a flagged (newly invalidated) edge's stays nil; a skipped (could-not-
+check) edge's stays nil (extends the existing query-error test); a
+freshly asserted edge has `LastConfirmedAt == nil` before any sweep; two
+sweep runs in sequence advance `LastConfirmedAt` past the first run's
+value, proving it's a live reconfirmation, not a write-once stamp.
+
+### Consequences
+
+New exported field on an existing public struct — MINOR bump: core
+v1.78.2 → **v1.79.0**. `smeldr.dev/mcp`: additive response field only,
+no new Go symbol — PATCH bump, v1.33.0 → **v1.33.1**, after core's tag
+exists and mcp's `go.mod` is bumped to require it (same two-step
+sequence as `core-sweep-run-remote-exposure`). `docs/REFERENCE.md` and
+`docs/ARCHITECTURE.md` updated in this same commit.
+
+**Not in scope, explicitly deferred:** `context_packet.go`/
+`PacketRelation` propagation (a separate read path, not named in this
+Task). Cloud's own consumer wiring (`remoteGetRelations`/
+`AnchorFetcher`/witness-field rendering) — a separate follow-up Task,
+same split this session already established for
+`core-sweep-run-remote-exposure`. Architect flagged one open question for
+that future Task during plan review, recorded here so it isn't lost:
+Trace's certificate is per-*anchor* (one Decision, one Goal), but this
+field lives per-*edge* — an anchor with zero relations never gets a
+`LastConfirmedAt` at all, and an anchor with several may have several,
+possibly-differing timestamps. How an anchor-level "last confirmed"
+derives from that (max across edges? none shown if zero edges?) is not
+answered here — it needs an explicit answer from whichever Task wires
+this into Trace, not an assumed one.
+
+---

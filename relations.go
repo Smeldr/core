@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -60,6 +61,15 @@ type RelationEdge struct {
 	Attributes   json.RawMessage `db:"attributes"`
 	CreatedAt    time.Time       `db:"created_at"`
 	UpdatedAt    time.Time       `db:"updated_at"`
+
+	// LastConfirmedAt is the most recent time [RelationStore.SweepStructural]
+	// walked this edge and found both its source and target alive. It is nil
+	// until the edge's first successful sweep confirmation, and is never set
+	// by Assert/Propose/Observe — only a scheduled structural sweep advances
+	// it, matching the "confirmed by the system, on a schedule" provenance a
+	// witness certificate needs (distinct from any [ProvenanceRecord] verb,
+	// all of which are deliberate actions on an item).
+	LastConfirmedAt *time.Time `db:"last_confirmed_at"`
 }
 
 // RelationKindRegistry is an in-memory thread-safe store of relation kind definitions,
@@ -90,7 +100,14 @@ func (s *RelationStore) setProvenanceStore(store ProvenanceStore) {
 
 // Column order constants — scan order must match SELECT order exactly.
 const relationKindColumns = `id, type_name, label, reverse_label, mode, directional, weighted, type_pairs, attributes, created_at, updated_at`
-const relationColumns = `id, source_type, source_id, target_type, target_id, relation_kind, edge_class, confidence, valid_at, invalid_at, created_by_job, attributes, created_at, updated_at`
+const relationColumns = `id, source_type, source_id, target_type, target_id, relation_kind, edge_class, confidence, valid_at, invalid_at, created_by_job, attributes, created_at, updated_at, last_confirmed_at`
+
+// relationInsertColumns excludes last_confirmed_at — it is only ever set by
+// [RelationStore.SweepStructural]'s own confirm-write, never on insert or
+// re-assert (an INSERT ... ON CONFLICT re-assert also leaves an existing
+// row's last_confirmed_at untouched, since it is absent from both the
+// column list and the ON CONFLICT SET clause below).
+const relationInsertColumns = `id, source_type, source_id, target_type, target_id, relation_kind, edge_class, confidence, valid_at, invalid_at, created_by_job, attributes, created_at, updated_at`
 
 // CreateRelationTables creates the smeldr_relation_kinds and smeldr_relations tables and
 // their indexes if they do not already exist. Idempotent — safe to call on every boot.
@@ -132,8 +149,12 @@ CREATE TABLE IF NOT EXISTS smeldr_relations (
     created_by_job  TEXT,
     attributes      TEXT NOT NULL DEFAULT '{}',
     created_at      DATETIME NOT NULL,
-    updated_at      DATETIME NOT NULL
+    updated_at      DATETIME NOT NULL,
+    last_confirmed_at DATETIME
 )`); err != nil {
+		return err
+	}
+	if err := EnsureColumn(ctx, db, "smeldr_relations", "last_confirmed_at", "DATETIME"); err != nil {
 		return err
 	}
 
@@ -407,7 +428,7 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO smeldr_relations (`+relationColumns+`)
+INSERT INTO smeldr_relations (`+relationInsertColumns+`)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 ON CONFLICT (id) DO UPDATE SET
     source_type    = EXCLUDED.source_type,
@@ -687,7 +708,7 @@ func scanRelationKind(rows *sql.Rows) (RelationKindDef, error) {
 func scanEdge(rows *sql.Rows) (RelationEdge, error) {
 	var e RelationEdge
 	var confidence sql.NullFloat64
-	var validAt, invalidAt sql.NullTime
+	var validAt, invalidAt, lastConfirmedAt sql.NullTime
 	var createdByJob sql.NullString
 	var attributes string
 	err := rows.Scan(
@@ -698,6 +719,7 @@ func scanEdge(rows *sql.Rows) (RelationEdge, error) {
 		&createdByJob,
 		&attributes,
 		&e.CreatedAt, &e.UpdatedAt,
+		&lastConfirmedAt,
 	)
 	if err != nil {
 		return RelationEdge{}, err
@@ -713,6 +735,9 @@ func scanEdge(rows *sql.Rows) (RelationEdge, error) {
 	}
 	if createdByJob.Valid {
 		e.CreatedByJob = &createdByJob.String
+	}
+	if lastConfirmedAt.Valid {
+		e.LastConfirmedAt = &lastConfirmedAt.Time
 	}
 	e.Attributes = json.RawMessage(attributes)
 	return e, nil
@@ -838,6 +863,7 @@ func (s *RelationStore) SweepStructural(
 	defer rows.Close()
 
 	type sideKey struct{ typ, id string }
+	var allEdges []RelationEdge
 	byTarget := map[sideKey][]RelationEdge{}
 	bySource := map[sideKey][]RelationEdge{}
 	for rows.Next() {
@@ -846,12 +872,18 @@ func (s *RelationStore) SweepStructural(
 			return 0, 0, 0, scanErr
 		}
 		walked++
+		allEdges = append(allEdges, e)
 		byTarget[sideKey{e.TargetType, e.TargetID}] = append(byTarget[sideKey{e.TargetType, e.TargetID}], e)
 		bySource[sideKey{e.SourceType, e.SourceID}] = append(bySource[sideKey{e.SourceType, e.SourceID}], e)
 	}
 	if err := rows.Err(); err != nil {
 		return walked, 0, 0, err
 	}
+
+	// skippedKeys records every side (as target or as source) whose liveness
+	// check errored — a checked-and-alive side and a could-not-check side must
+	// never collapse into the same "confirmed" state below.
+	skippedKeys := map[sideKey]bool{}
 
 	deadTargets := map[sideKey]bool{}
 	for k := range byTarget {
@@ -860,6 +892,7 @@ func (s *RelationStore) SweepStructural(
 			slog.WarnContext(ctx, "SweepStructural: target check error",
 				"target_type", k.typ, "target_id", k.id, "err", checkErr)
 			skipped++
+			skippedKeys[k] = true
 			continue
 		}
 		if !alive {
@@ -873,6 +906,7 @@ func (s *RelationStore) SweepStructural(
 			slog.WarnContext(ctx, "SweepStructural: source check error",
 				"source_type", k.typ, "source_id", k.id, "err", checkErr)
 			skipped++
+			skippedKeys[k] = true
 			continue
 		}
 		if !alive {
@@ -912,7 +946,48 @@ func (s *RelationStore) SweepStructural(
 			}
 		}
 	}
+
+	// Every edge that was neither flagged nor left unresolved by a skipped
+	// check — i.e. both its source and target were actually checked and
+	// found alive — gets last_confirmed_at advanced to now. One batched
+	// UPDATE per sweep run, not one per edge: this write now touches the
+	// dominant case each run (everything still alive), unlike flagEdge's
+	// per-row UPDATE above, which only ever touches the typically-small
+	// flagged set.
+	confirmedIDs := make([]string, 0, len(allEdges))
+	for _, e := range allEdges {
+		if staled[e.ID] {
+			continue
+		}
+		if skippedKeys[sideKey{e.TargetType, e.TargetID}] || skippedKeys[sideKey{e.SourceType, e.SourceID}] {
+			continue
+		}
+		confirmedIDs = append(confirmedIDs, e.ID)
+	}
+	if len(confirmedIDs) > 0 {
+		if err := s.confirmEdges(ctx, confirmedIDs, now); err != nil {
+			return walked, flagged, skipped, err
+		}
+	}
+
 	return walked, flagged, skipped, nil
+}
+
+// confirmEdges sets last_confirmed_at = at on every edge in ids, in one
+// batched UPDATE. Called only by SweepStructural for edges whose source and
+// target were both checked and found alive this run.
+func (s *RelationStore) confirmEdges(ctx context.Context, ids []string, at time.Time) error {
+	placeholders := make([]string, len(ids))
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, at)
+	for i, id := range ids {
+		placeholders[i] = fmt.Sprintf("$%d", i+2)
+		args = append(args, id)
+	}
+	query := "UPDATE smeldr_relations SET last_confirmed_at=$1 WHERE id IN (" +
+		strings.Join(placeholders, ",") + ")"
+	_, err := s.db.ExecContext(ctx, query, args...)
+	return err
 }
 
 // computeRelationDiff returns the IDs to delete and edges to insert given the
@@ -989,7 +1064,7 @@ func (s *RelationStore) applyRelationDiff(ctx context.Context, db edgeExecer, to
 			e.Attributes = json.RawMessage("{}")
 		}
 		_, err := exec.ExecContext(ctx,
-			"INSERT INTO smeldr_relations ("+relationColumns+") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+			"INSERT INTO smeldr_relations ("+relationInsertColumns+") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
 			e.ID, e.SourceType, e.SourceID,
 			e.TargetType, e.TargetID,
 			e.RelationKind, e.EdgeClass,

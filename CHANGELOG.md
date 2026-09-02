@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.79.0] — 2026-09-02
+
+### Added
+- `RelationEdge` gains a new exported field `LastConfirmedAt *time.Time` — set only by `RelationStore.SweepStructural`, to the sweep's own current time, for every edge whose source and target were both checked and found alive during that sweep run. It stays nil until an edge's first successful sweep confirmation, and is never set by `Assert`, `Propose`, or `Observe` — only a scheduled structural sweep advances it. This answers "was this specific edge part of the most recent successful walk," which `SweepRunRecord`'s own per-run `Walked`/`Flagged` aggregate counts cannot answer on their own. Needed for Smeldr Cloud's Trace witness-certificate feature, which shows a per-entry "last confirmed by the system, on a schedule" timestamp. The `smeldr_relations` table gains a new nullable `last_confirmed_at` column (migrated automatically for existing databases). (A299)
+
+---
+
 ## [1.78.2] — 2026-09-01
 
 ### Changed

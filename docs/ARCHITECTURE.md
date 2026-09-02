@@ -504,6 +504,20 @@ smeldr.dev/
 │                     source as well as by target (previously target-only) — completes the sweep
 │                     model itself rather than adding new assert-time strictness; an edge whose
 │                     source or target is dead is flagged once, not twice, if both sides are dead.
+│                     RelationEdge.LastConfirmedAt *time.Time — set only by SweepStructural, to the
+│                     sweep's own now, for every edge whose source and target were both checked and
+│                     found alive that run; nil until an edge's first successful sweep, untouched by
+│                     Assert/Propose/Observe. A single batched UPDATE ... WHERE id IN (...) per sweep
+│                     run (confirmEdges, unexported), not one UPDATE per confirmed edge like
+│                     flagEdge's own per-row shape — this write now touches the dominant case each
+│                     run (everything still alive), not the typically-small flagged set. A skipped
+│                     (could-not-check) edge is tracked via skippedKeys and excluded from the
+│                     confirmed set — "checked and found alive" and "couldn't check" never collapse.
+│                     Answers "was this edge part of the most recent successful walk," which
+│                     SweepRunRecord's own per-run Walked/Flagged aggregate cannot (Amendment A299,
+│                     Turn 55 witness-certificate design). relationColumns (SELECT) vs
+│                     relationInsertColumns (INSERT — excludes last_confirmed_at, which is never set
+│                     on insert or re-assert) are now two separate constants.
 │                     Weighted bool on RelationKindDef confirmed dead (written/read, consulted by
 │                     nothing) but NOT removed — smeldr.dev/mcp's own relation_tools.go
 │                     (upsert_relation_kind, list_relation_kinds) actively reads/writes it, confirmed

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"strings"
 	"testing"
+	"time"
 )
 
 // setupTargetCheckerDB creates a DB with relation tables, orchestration
@@ -99,6 +100,64 @@ func TestAppSweepStructural_CompiledTarget_Alive(t *testing.T) {
 		t.Errorf("want (1,0,0) for a live compiled target, got (%d,%d,%d)", w, f, sk)
 	}
 	edgeSurvives(t, rs, "task-1")
+
+	edges, err := rs.GetBySource(context.Background(), "Task", "task-1", "depends_on")
+	if err != nil {
+		t.Fatalf("GetBySource: %v", err)
+	}
+	if len(edges) != 1 || edges[0].LastConfirmedAt == nil {
+		t.Errorf("expected LastConfirmedAt set on a confirmed-alive edge, got %+v", edges)
+	}
+}
+
+// TestAppSweepStructural_LastConfirmedAt_NilBeforeAnySweep proves
+// LastConfirmedAt is never set by Assert itself — only a sweep advances it.
+func TestAppSweepStructural_LastConfirmedAt_NilBeforeAnySweep(t *testing.T) {
+	db, rs, _ := setupTargetCheckerDB(t)
+	seedTask(t, db, "task-1")
+	seedDecision(t, db, "decision-1", "proposed")
+	edge := assertTaskDependsOnDecision(t, rs, "task-1", "decision-1")
+
+	if edge.LastConfirmedAt != nil {
+		t.Errorf("expected LastConfirmedAt nil immediately after Assert, got %v", edge.LastConfirmedAt)
+	}
+}
+
+// TestAppSweepStructural_LastConfirmedAt_AdvancesAcrossRuns proves the field
+// is not write-once: a second sweep run advances it past the first run's
+// value, matching a scheduled reconfirmation rather than a one-time stamp.
+func TestAppSweepStructural_LastConfirmedAt_AdvancesAcrossRuns(t *testing.T) {
+	db, rs, app := setupTargetCheckerDB(t)
+	seedTask(t, db, "task-1")
+	seedDecision(t, db, "decision-1", "proposed")
+	assertTaskDependsOnDecision(t, rs, "task-1", "decision-1")
+
+	if _, _, _, err := app.SweepStructural(context.Background()); err != nil {
+		t.Fatalf("first SweepStructural: %v", err)
+	}
+	first, err := rs.GetBySource(context.Background(), "Task", "task-1", "depends_on")
+	if err != nil {
+		t.Fatalf("GetBySource: %v", err)
+	}
+	if len(first) != 1 || first[0].LastConfirmedAt == nil {
+		t.Fatalf("expected LastConfirmedAt set after first sweep, got %+v", first)
+	}
+	firstConfirmed := *first[0].LastConfirmedAt
+
+	time.Sleep(50 * time.Millisecond)
+	if _, _, _, err := app.SweepStructural(context.Background()); err != nil {
+		t.Fatalf("second SweepStructural: %v", err)
+	}
+	second, err := rs.GetBySource(context.Background(), "Task", "task-1", "depends_on")
+	if err != nil {
+		t.Fatalf("GetBySource: %v", err)
+	}
+	if len(second) != 1 || second[0].LastConfirmedAt == nil {
+		t.Fatalf("expected LastConfirmedAt set after second sweep, got %+v", second)
+	}
+	if !second[0].LastConfirmedAt.After(firstConfirmed) {
+		t.Errorf("expected LastConfirmedAt to advance: first=%v second=%v", firstConfirmed, *second[0].LastConfirmedAt)
+	}
 }
 
 func TestAppSweepStructural_CompiledTarget_Deleted(t *testing.T) {
@@ -125,6 +184,9 @@ func TestAppSweepStructural_CompiledTarget_Deleted(t *testing.T) {
 	}
 	if len(edges) != 1 || edges[0].InvalidAt == nil {
 		t.Errorf("expected the edge to be invalidated, got %+v", edges)
+	}
+	if edges[0].LastConfirmedAt != nil {
+		t.Errorf("expected LastConfirmedAt to stay nil on a flagged (invalidated) edge, got %v", edges[0].LastConfirmedAt)
 	}
 }
 
@@ -199,6 +261,14 @@ func TestAppSweepStructural_CompiledTarget_QueryError(t *testing.T) {
 		t.Errorf("want (1,0,1) when the compiled-table query fails, got (%d,%d,%d)", w, f, sk)
 	}
 	edgeSurvives(t, rs, "task-1")
+
+	edges, err := rs.GetBySource(context.Background(), "Task", "task-1", "depends_on")
+	if err != nil {
+		t.Fatalf("GetBySource: %v", err)
+	}
+	if len(edges) != 1 || edges[0].LastConfirmedAt != nil {
+		t.Errorf("expected LastConfirmedAt to stay nil for a skipped (could-not-check) edge, got %+v", edges)
+	}
 }
 
 // TestAppSweepStructural_UnregisteredType_NoTable_Errors is the case the
