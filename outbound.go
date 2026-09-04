@@ -109,15 +109,23 @@ const (
 	circuitOpenDuration  = 5 * time.Minute
 )
 
+// secretDecrypter decrypts a webhook endpoint's stored secret. workerPool
+// depends on this narrow interface rather than the full *WebhookStore, so
+// it is not coupled to webhook-specific storage concerns (endpoint CRUD,
+// signature verification, etc.) it never uses.
+type secretDecrypter interface {
+	decryptSecret(enc string) ([]byte, error)
+}
+
 // workerPool polls smeldr_outbound_jobs for due deliveries, signs payloads with
 // HMAC-SHA256, and POSTs them to webhook endpoints. It enforces per-endpoint
 // circuit breakers and writes delivery logs.
 type workerPool struct {
-	db           DB
-	webhookStore *WebhookStore
-	clock        Clock
-	deliver      func(context.Context, OutboundJob, []byte) error
-	workers      int
+	db      DB
+	secrets secretDecrypter
+	clock   Clock
+	deliver func(context.Context, OutboundJob, []byte) error
+	workers int
 
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -129,17 +137,17 @@ type workerPool struct {
 // newWorkerPool creates a [workerPool] wired to db and store. workers controls
 // concurrency; pass 0 to use 10. The production HTTP deliverer is used unless
 // overridden in tests via p.deliver.
-func newWorkerPool(db DB, store *WebhookStore, clock Clock, workers int) *workerPool {
+func newWorkerPool(db DB, store secretDecrypter, clock Clock, workers int) *workerPool {
 	if workers <= 0 {
 		workers = 10
 	}
 	p := &workerPool{
-		db:           db,
-		webhookStore: store,
-		clock:        clock,
-		workers:      workers,
-		stop:         make(chan struct{}),
-		circuits:     make(map[string]*circuitState),
+		db:       db,
+		secrets:  store,
+		clock:    clock,
+		workers:  workers,
+		stop:     make(chan struct{}),
+		circuits: make(map[string]*circuitState),
 	}
 	p.deliver = func(ctx context.Context, job OutboundJob, secret []byte) error {
 		return httpDeliver(ctx, job, secret)
@@ -257,7 +265,7 @@ func (p *workerPool) processJob(ctx context.Context, job OutboundJob, rng *rand.
 		return nil // circuit open — skip silently; job retains pending status
 	}
 
-	secret, err := p.webhookStore.decryptSecret(job.SecretEnc)
+	secret, err := p.secrets.decryptSecret(job.SecretEnc)
 	if err != nil {
 		// Unrecoverable — dead-letter immediately.
 		_ = p.moveToDeadLetter(ctx, job.ID)
