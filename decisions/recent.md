@@ -1479,3 +1479,58 @@ answered here — it needs an explicit answer from whichever Task wires
 this into Trace, not an assumed one.
 
 ---
+
+## A300 — BuildContextPacket anchor lookup gains the human-ID fallback Module.resolveItem already has
+
+### What shipped
+
+`BuildContextPacket`'s anchor lookup (`context_packet.go`) only ever
+queried the real `slug` column — passing a human-facing identifier (a
+Decision's own `DecisionNumber`, a Task's own `TaskID`, etc.) as the
+anchor argument failed outright whenever it didn't happen to equal the
+item's real slug, which it essentially never does (`GenerateSlug`
+produces `"decision-c29"`-shaped slugs, not `"C29"`).
+
+`Module.resolveItem` (`module.go`) already had this exact fallback on
+the write side: slug → real `Node.ID` → `humanIDColumns`-named column.
+`context_packet.go`'s own `anchorTypeEntry.relationType` already carries
+the same PascalCase type name `humanIDColumns` is keyed by — no new
+mapping needed, the two files already agreed on the key shape, they just
+never shared the fallback logic itself.
+
+Fix: after the real-slug lookup returns `ErrNotFound`, retry with
+`humanIDColumns[entry.relationType]`'s own column when one exists for
+that type (`Decision`/`Task`/`Goal`/`Amendment` — `Signal` has no entry,
+by design, since it carries no canonical identifier beyond its own
+slug). Matches `Module.resolveItem`'s own `errors.Is(err, ErrNotFound)`
+convention exactly. Only the anchor's own lookup gets the fallback — the
+packet's separate linked-item fetch (by real internal `Node.ID` from a
+relation edge) never receives a human-facing string and stays untouched.
+
+### Why this matters
+
+Found live: cloud's own multi-tenant remote read for a Trace/Pulse click
+navigates through `GET /packet/{type}/{slug}` for a remote org, and
+passes exactly the kind of human-facing ID (`AbsenceRow.SubjectID`) this
+gap rejected — a real, live click-to-Trace navigation failure for any
+subject whose ID isn't a raw slug, not a hypothetical edge case.
+
+### Tests
+
+Six new cases in `context_packet_test.go`: one "real slug miss falls
+back to the human ID" case per type with a `humanIDColumns` entry
+(`Decision`/`Task`/`Goal`/`Amendment`), one genuine "neither the slug nor
+the human ID matches anything" case still returning `ErrNotFound`
+(proves the fallback doesn't mask a real miss), and one proving `Signal`
+gets no second attempt at all (no entry in `humanIDColumns`, matching
+its own pre-existing behavior unchanged).
+
+### Consequences
+
+No new exported symbol, no signature change — purely additive,
+consumer-observable behavior (a previously-erroring call can now
+succeed). 96.3% coverage (baseline), `go test -race` clean,
+`golangci-lint` clean. PATCH bump, matching this project's own
+precedent for this shape of change (A297): v1.79.0 → **v1.79.1**.
+
+---

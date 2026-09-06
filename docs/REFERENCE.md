@@ -3074,6 +3074,13 @@ of one of the five orchestration anchor types (`goal`, `decision`,
 `BuildContextPacket`. Requires **Editor role** via bearer auth — same
 contract as `GET /_audit`/`GET /_logs`/`GET /_events/stream`.
 
+`{slug}` accepts either the item's own real slug, or — for `decision`,
+`task`, `goal`, and `amendment` — its human-facing identifier (a
+Decision's own `DecisionNumber`, a Task's own `TaskID`, etc.), the same
+fallback `Module.resolveItem` already applies on the write side (A300).
+`signal` has no such fallback: it carries no canonical identifier beyond
+its own slug.
+
 ### Setup
 
 ```go

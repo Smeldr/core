@@ -414,6 +414,113 @@ func TestBuildContextPacket_signalAnchor(t *testing.T) {
 	}
 }
 
+// — anchor lookup: human-ID fallback (01a07625) ——————————————————————————————
+//
+// BuildContextPacket's anchor lookup previously only ever tried the real
+// slug column — passing a human-facing identifier (a Decision's own
+// DecisionNumber, a Task's own TaskID, etc., exactly what cloud's remote
+// click-to-Trace navigation passes as the URL slug segment) failed outright.
+// Module.resolveItem (module.go) already has this same fallback on the
+// write side; these tests prove BuildContextPacket now matches it on read.
+
+func TestBuildContextPacket_decisionAnchor_humanIDFallback(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	ctx := context.Background()
+
+	decID := insertTestDecision(t, db, "D99")
+	slug := mustSlugForID(t, db, "smeldr_decisions", decID)
+	if slug == "D99" {
+		t.Fatalf("test setup invalid: real slug %q must differ from the human ID it's testing the fallback against", slug)
+	}
+
+	pkt, err := BuildContextPacket(ctx, db, rs, "http://localhost", "test", "decision", "D99", 1)
+	if err != nil {
+		t.Fatalf("BuildContextPacket with human ID %q: %v", "D99", err)
+	}
+	if pkt.Anchor.ID != "D99" {
+		t.Errorf("anchor ID = %q, want D99", pkt.Anchor.ID)
+	}
+	if pkt.Anchor.Slug != slug {
+		t.Errorf("anchor slug = %q, want real slug %q", pkt.Anchor.Slug, slug)
+	}
+}
+
+func TestBuildContextPacket_taskAnchor_humanIDFallback(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	ctx := context.Background()
+
+	insertTestTask(t, db, "T999")
+
+	pkt, err := BuildContextPacket(ctx, db, rs, "http://localhost", "test", "task", "T999", 1)
+	if err != nil {
+		t.Fatalf("BuildContextPacket with human ID %q: %v", "T999", err)
+	}
+	if pkt.Anchor.ID != "T999" {
+		t.Errorf("anchor ID = %q, want T999", pkt.Anchor.ID)
+	}
+}
+
+func TestBuildContextPacket_goalAnchor_humanIDFallback(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	ctx := context.Background()
+
+	insertTestGoal(t, db, "goal-fallback-test", "core", "S")
+
+	pkt, err := BuildContextPacket(ctx, db, rs, "http://localhost", "test", "goal", "goal-fallback-test", 1)
+	if err != nil {
+		t.Fatalf("BuildContextPacket with human ID: %v", err)
+	}
+	if pkt.Anchor.ID != "goal-fallback-test" {
+		t.Errorf("anchor ID = %q, want goal-fallback-test", pkt.Anchor.ID)
+	}
+}
+
+func TestBuildContextPacket_amendmentAnchor_humanIDFallback(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	ctx := context.Background()
+
+	insertTestAmendment(t, db, "A999")
+
+	pkt, err := BuildContextPacket(ctx, db, rs, "http://localhost", "test", "amendment", "A999", 1)
+	if err != nil {
+		t.Fatalf("BuildContextPacket with human ID %q: %v", "A999", err)
+	}
+	if pkt.Anchor.ID != "A999" {
+		t.Errorf("anchor ID = %q, want A999", pkt.Anchor.ID)
+	}
+}
+
+// TestBuildContextPacket_neitherSlugNorHumanIDMatches proves the fallback
+// does not mask a genuine miss: when neither the real slug nor the
+// human-ID column matches anything, BuildContextPacket still fails.
+func TestBuildContextPacket_neitherSlugNorHumanIDMatches(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	ctx := context.Background()
+
+	insertTestDecision(t, db, "D1")
+
+	_, err := BuildContextPacket(ctx, db, rs, "http://localhost", "test", "decision", "does-not-exist", 1)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("got %v, want ErrNotFound", err)
+	}
+}
+
+// TestBuildContextPacket_signalAnchor_noHumanIDFallback proves Signal —
+// which has no entry in humanIDColumns by design (its own CanonicalID
+// already is its slug) — gets no second attempt: a miss on the real slug
+// stays a miss, exactly as before this fix.
+func TestBuildContextPacket_signalAnchor_noHumanIDFallback(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	ctx := context.Background()
+
+	insertTestSignal(t, db, "plan-ready")
+
+	_, err := BuildContextPacket(ctx, db, rs, "http://localhost", "test", "signal", "not-a-real-slug", 1)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("got %v, want ErrNotFound", err)
+	}
+}
+
 // mustIDForSlug queries the node ID from a table by slug.
 func mustIDForSlug(t *testing.T, db DB, table, slug string) string {
 	t.Helper()

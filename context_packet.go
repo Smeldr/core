@@ -5,6 +5,7 @@ package smeldr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -234,6 +235,11 @@ func BuildContextPacket(
 	}
 
 	anchorCID, anchorNode, anchorFields, err := packetFetchItem(ctx, db, anchorType, entry.table, "slug", anchorSlug)
+	if errors.Is(err, ErrNotFound) {
+		if col, ok := humanIDColumns[entry.relationType]; ok {
+			anchorCID, anchorNode, anchorFields, err = packetFetchItem(ctx, db, anchorType, entry.table, col, anchorSlug)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

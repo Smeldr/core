@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.79.1] — 2026-09-06
+
+### Fixed
+- `BuildContextPacket`'s anchor lookup (used by `GET /packet/{type}/{slug}`) previously only ever queried an item's real slug column — passing a human-facing identifier instead (a Decision's own `DecisionNumber`, a Task's own `TaskID`, a Goal's own `GoalID`, an Amendment's own `AmendmentNumber`) failed outright, even though `Module.resolveItem` already supports exactly this same fallback on the write side. Now falls back to the type's own `humanIDColumns`-named column when the real slug lookup returns `ErrNotFound`, matching `Module.resolveItem`'s own behavior. `Signal` is unaffected — it has no human-facing identifier beyond its own slug, so it gets no fallback, same as before. Found live: this broke real click-to-Trace navigation in Smeldr Cloud whenever a remote multi-tenant read passed a human-facing ID instead of a raw slug. (A300)
+
+---
+
 ## [1.79.0] — 2026-09-02
 
 ### Added

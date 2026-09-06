@@ -262,6 +262,11 @@ smeldr.dev/
 │                     since A214 shipped; Editor-role auth added in the same amendment, since
 │                     removing the gate would otherwise expose orchestration data unauthenticated
 │                     on the real instance (T159, A283)
+│                     BuildContextPacket's own anchor lookup now falls back from the real slug to
+│                     humanIDColumns[entry.relationType] (orchestration.go) on ErrNotFound, mirroring
+│                     Module.resolveItem's own write-side fallback exactly — found live via cloud's
+│                     multi-tenant remote read passing a human-facing ID (DecisionNumber/TaskID/etc.)
+│                     as the URL slug segment, which previously failed outright (Amendment A300)
 ├── reachability.go   ReachabilityItem, ReachabilityRing, Reachability exported types;
 │                     MaxReachabilityDepth = 10 constant;
 │                     RelationStore.Reachability(ctx, anchorType, anchorID, kind, direction string,
