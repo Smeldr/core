@@ -2684,9 +2684,23 @@ requires the **Author** role.
 **Request:**
 
 ```
-GET /_events/stream HTTP/1.1
+GET /_events/stream?channel=<name> HTTP/1.1
 Authorization: Bearer <token>
 ```
+
+**`channel` query parameter (v1.81.0+, A302):** selects which channel this
+connection subscribes to.
+
+- `?channel=core` (or any other non-empty value) — receive only events
+  routed to that channel, plus every true broadcast (see below). Channel
+  names are free-form strings, not a fixed enum — matched verbatim.
+- `?channel=all`, or the parameter omitted/empty entirely — receive every
+  event regardless of channel (the unfiltered firehose every connection
+  received unconditionally before v1.81.0). This is the default specifically
+  so every caller that connected before channels existed keeps working
+  unmodified.
+- No new authorization is added for `?channel=all`: it is the same access
+  every Author-role token already had, not a new grant.
 
 **Response on success (200 OK):**
 
@@ -2751,8 +2765,18 @@ The JSON payload shape is identical to webhook event payloads — a
 - **At-most-once:** If a client is disconnected when an event fires, the event
   is not delivered to that client. Reconnecting starts fresh with no catch-up
   or backfill.
-- **No server-side filtering:** Every connected subscriber receives every event.
-  A listener that only cares about certain event types must filter client-side.
+- **Channel-scoped delivery (v1.81.0+, A302):** a `Task`/`Goal` transition is
+  routed by the item's own `Band`; a `Decision` transition by its own `Scope`
+  (including the literal value `"cross-cutting"`, used verbatim as a channel
+  name — not auto-broadcast); a `Signal` by its own `Receiver`. An `Amendment`
+  transition, and every generic content-module lifecycle event (a blog post's
+  own publish/update/etc.), has no such field and is always delivered as a
+  true broadcast, reaching every connected subscriber regardless of the
+  channel it requested. A subscriber connected with `?channel=all` (or no
+  parameter — see above) also receives everything, channel-routed or
+  broadcast alike. A listener that only cares about certain event *types*
+  (as opposed to channels) must still filter those client-side — channel
+  scoping and event-type filtering are different dimensions.
 - **Client buffer:** A subscriber whose local event buffer fills (32 events,
   not configurable in this version) has further events silently dropped for
   that subscriber only (logged server-side at Warn level) rather than blocking
@@ -2760,10 +2784,22 @@ The JSON payload shape is identical to webhook event payloads — a
 
 ### Example
 
-Client connecting with curl:
+Client connecting with curl, subscribed to the full, unfiltered stream:
 
 ```bash
 curl -N -H "Authorization: Bearer <token>" https://example.com/_events/stream
+```
+
+Equivalent, explicit form:
+
+```bash
+curl -N -H "Authorization: Bearer <token>" "https://example.com/_events/stream?channel=all"
+```
+
+Subscribed to one channel only:
+
+```bash
+curl -N -H "Authorization: Bearer <token>" "https://example.com/_events/stream?channel=core"
 ```
 
 Output (NDJSON):

@@ -886,7 +886,23 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 		return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
 	}
 	fireAsyncTriggers(ctx, db, typeName, currentStatus, toState, id)
-	dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster,
+
+	// Event-stream channel (A302): the type's own band/receiver-shaped
+	// column, when it has one (channelColumns has no entry for Amendment —
+	// its events are always a true broadcast, by design). A lookup failure
+	// degrades to broadcast rather than failing the transition itself —
+	// channel routing is best-effort.
+	channel := ""
+	if col, ok := channelColumns[typeName]; ok {
+		if err := db.QueryRowContext(ctx,
+			"SELECT "+quoteIdent(col)+" FROM "+quoteIdent(table)+" WHERE id = $1", id,
+		).Scan(&channel); err != nil {
+			slog.WarnContext(ctx, "smeldr: TransitionItem: channel column lookup failed, broadcasting instead",
+				"type_name", typeName, "column", col, "error", err)
+			channel = ""
+		}
+	}
+	dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, channel,
 		strings.ToLower(typeName)+".transitioned",
 		transitionWebhookData{
 			Type:      strings.ToLower(typeName),
@@ -1053,7 +1069,10 @@ func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *Webhoo
 	if err != nil {
 		return fmt.Errorf("smeldr: recordAuthorizationRequiredSignal: %w", err)
 	}
-	dispatchTransitionWebhook(ctx, store, pool, broadcaster, "signal.created", transitionWebhookData{
+	// Event-stream channel (A302): this Signal's own receiver column is set
+	// to requiredRole two statements above (the INSERT's $5 placeholder) —
+	// reusing the parameter directly needs no extra query.
+	dispatchTransitionWebhook(ctx, store, pool, broadcaster, requiredRole, "signal.created", transitionWebhookData{
 		Type: "signal", ID: id, Slug: id, ToState: "pending",
 	})
 	return nil

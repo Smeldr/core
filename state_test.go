@@ -4106,11 +4106,19 @@ func TestRecordAuthorizationRequiredSignal_Success(t *testing.T) {
 	}
 	ctx := context.Background()
 	b := newEventBroadcaster()
-	streamCh, subErr := b.subscribe("u1")
+	// A302: this Signal's own receiver column is set to requiredRole
+	// ("reviewer"), so delivery is routed there — a subscriber on an
+	// unrelated channel must not receive it.
+	streamCh, subErr := b.subscribe("u1", "reviewer")
 	if subErr != nil {
 		t.Fatalf("subscribe: %v", subErr)
 	}
 	defer b.unsubscribe(streamCh)
+	otherCh, subErr := b.subscribe("u2", "core")
+	if subErr != nil {
+		t.Fatalf("subscribe core: %v", subErr)
+	}
+	defer b.unsubscribe(otherCh)
 	if err := recordAuthorizationRequiredSignal(ctx, db, nil, nil, b, "GateItem", "item-8", "reviewing", "approved", "reviewer"); err != nil {
 		t.Fatalf("recordAuthorizationRequiredSignal: %v", err)
 	}
@@ -4124,7 +4132,12 @@ func TestRecordAuthorizationRequiredSignal_Success(t *testing.T) {
 			t.Errorf("Event = %q, want %q", got.Event, "signal.created")
 		}
 	default:
-		t.Fatal("expected signal.created broadcast, got none")
+		t.Fatal("expected signal.created delivered on the \"reviewer\" channel, got none")
+	}
+	select {
+	case got := <-otherCh:
+		t.Fatalf("core subscriber: expected no delivery, got %q", got)
+	default:
 	}
 	var sender, receiver, signalType, status string
 	if err := db.QueryRowContext(ctx,

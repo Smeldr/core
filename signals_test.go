@@ -287,7 +287,7 @@ func TestDispatchBus_BroadcastsToEventStreamOnAfterCreate(t *testing.T) {
 	app.EventStream()
 	app.wireSignalBus()
 
-	ch, err := app.eventBroadcaster.subscribe("u1")
+	ch, err := app.eventBroadcaster.subscribe("u1", eventStreamChannelAll)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestDispatchBus_SkipsBroadcastForUnmappedSignal(t *testing.T) {
 	}))
 	app.EventStream()
 
-	ch, err := app.eventBroadcaster.subscribe("u1")
+	ch, err := app.eventBroadcaster.subscribe("u1", eventStreamChannelAll)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}

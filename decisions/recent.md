@@ -1590,3 +1590,143 @@ previously assertable), so this is a MINOR bump rather than PATCH:
 v1.79.1 → **v1.80.0**.
 
 ---
+
+## A302 — GET /_events/stream gains channel-based subscription
+
+### What shipped
+
+`GET /_events/stream` previously broadcast every event to every connected
+subscriber unconditionally — no way to listen for only the events one role
+actually cares about. Now a subscriber picks a channel via a new
+`?channel=<name>` query parameter, and publishers route to one channel or
+broadcast to every channel:
+
+1. **Subscribe to one channel** — `?channel=core` (any non-empty string,
+   matched verbatim; no fixed enum).
+2. **Subscribe to everything** — `?channel=all`, or the parameter
+   absent/empty. This is the default, specifically so every pre-A302
+   caller — every role's own existing `watch-events.sh`, which connects
+   with no channel parameter at all — keeps working unmodified. Rejecting
+   a missing parameter, or defaulting it to some single arbitrary channel,
+   would both have silently broken every unmodified listener on deploy.
+3. **Publish to one channel** — `eventBroadcaster.publish(channel, payload)`
+   (new), delivers to a subscriber iff its own channel matches, or the
+   subscriber requested `eventStreamChannelAll`.
+4. **Publish as a broadcast reaching every channel** —
+   `eventBroadcaster.broadcast` (existing, unchanged signature/behaviour),
+   delivers to every subscriber regardless of its requested channel.
+
+### What determines an event's channel
+
+The originating Task's own description claimed "Decision/Goal/Amendment
+transitions have no natural band or receiver at all" — checked directly
+against `orchestration.go` before writing the plan, and this was stale:
+`Task.Band`, `Goal.Band`, and `Decision.Scope` all already exist. Only
+`Amendment` genuinely has no such field. Corrected table, keyed the same
+way `humanIDColumns` already is (PascalCase compiled-type name):
+
+| typeName | Channel source |
+|---|---|
+| `Task` | `Task.Band` |
+| `Goal` | `Goal.Band` |
+| `Decision` | `Decision.Scope` (including the literal `"cross-cutting"` value — used verbatim as an ordinary channel name, **not** auto-promoted to a broadcast; the escape hatch for a subscriber who needs cross-cutting visibility is `channel=all`, which already exists structurally) |
+| `Signal` | `Signal.Receiver` (or a required-role string for a D42 authorization-required Signal — `recordAuthorizationRequiredSignal` reuses its own `receiver` column value directly, a legitimate distinct channel) |
+| `Amendment` | *(none)* — always a true broadcast; a shipped version bump is inherently cross-cutting, not owned by one band |
+| generic content `Module[T]` (e.g. a blog post) | *(none, out of scope)* — no band/receiver concept exists for arbitrary content types; this call site (`App.dispatchBus`, `smeldr.go`) was untouched, confirmed via direct grep, and stays a true broadcast exactly as before A302 |
+
+A Signal with an empty `Receiver` resolves to the same empty-string
+sentinel used for "true broadcast" — treated as intentional: nobody was
+named, so the safest behaviour is to surface it broadly rather than
+silently file it into a channel nobody is watching.
+
+### The "everything" mode: no new role gate
+
+Considered gating `?channel=all` to `Admin` (the Task's own text raised
+this explicitly — "should any token be able to firehose, or only certain
+roles"). Rejected: today, with zero filtering, **every** existing
+Author-role-or-above token already receives literally everything — that
+is the unconditional status quo. Restricting `all` would be a *new*
+access-control boundary invented for this task, not a preservation of an
+existing one. "architect" is an operational identity (a token/`User.ID`),
+not a member of the `Guest`/`Author`/`Editor`/`Admin` role vocabulary this
+package actually has, so there is no clean way to gate "only the
+architect" without inventing role machinery this task was never asked to
+build. The endpoint's existing single gate (`user.HasRole(Author)`) is
+unchanged and sufficient — channel-scoping is purely additive filtering,
+not a new permission boundary.
+
+### Implementation
+
+`eventBroadcaster.subs` changes from `map[chan []byte]string` (token ID)
+to `map[chan []byte]eventStreamSub{tokenID, channel}`. `subscribe` gains a
+`channel` parameter. `broadcast` is unchanged. New `publish(channel,
+payload)`. `newEventStreamHandler` reads `r.URL.Query().Get("channel")`,
+normalizing empty to `eventStreamChannelAll` before calling `subscribe`.
+
+`dispatchTransitionWebhook` (unexported — no cross-repo or API-stability
+consequence) gains a `channel string` parameter: empty routes through
+`broadcast`, non-empty through `publish`. `TransitionItem` (`state.go`)
+looks up `channelColumns[typeName]` and, when present, runs one inline
+`SELECT <col> FROM <table> WHERE id = $1` (same idiom already used at
+`state.go`'s own schedule-eval lookup, not a new shared helper — this
+codebase's established convention for a single dynamically-named column
+fetch). A lookup failure degrades to `channel = ""` (broadcast) via
+`slog.WarnContext`, never blocking the transition itself.
+`recordAuthorizationRequiredSignal` needs no extra query — its own
+`receiver` column is already set to its `requiredRole` parameter, passed
+straight through. `App.NotifySignalCreated`'s **exported signature is
+unchanged** (id, slug — the v1 API-stability promise forbids adding a
+parameter); it looks up the Signal's own `receiver` by id internally
+instead, with the same broadcast-on-failure fallback.
+
+New `channelColumns` map in `orchestration.go`, placed beside
+`humanIDColumns`, same explicit non-reflection-derived shape, same reason:
+`{"Task": "band", "Goal": "band", "Decision": "scope", "Signal": "receiver"}`
+— no `Amendment` entry, deliberately.
+
+### Error-path table
+
+No new HTTP-level error response is introduced — a deliberate outcome of
+two design choices, not an oversight: channel names are free-form strings
+(no enum to validate against, matching `Band`/`Scope`/`Receiver` already
+being unrestricted columns elsewhere), and a missing/empty `?channel=` is
+the documented default, not a rejection. The 401/403/429/500 paths are
+all pre-existing and unchanged. The one new *internal* fallback (a
+channel-column DB lookup failing) is logged and degrades to broadcast,
+never surfaced as an HTTP error and never allowed to block the underlying
+transition or notification.
+
+### Tests
+
+15 new tests: `eventstream_test.go` (`publish` matching/wildcard/full-
+buffer-drop behaviour, `broadcast` still reaching every channel, three
+HTTP-handler-level tests for the query parameter — explicit channel,
+missing defaults to all, explicit `all`); `webhook_test.go`
+(`dispatchTransitionWebhook` channel routing, `NotifySignalCreated` using
+the Signal's own receiver, and its broadcast fallback on a lookup miss);
+`state_transition_item_test.go` (Task routes via Band, Decision routes via
+Scope including the literal `"cross-cutting"` value, Amendment always
+broadcasts); `recordAuthorizationRequiredSignal`'s existing test extended
+to assert channel routing rather than just "some" delivery. 23 pre-existing
+`subscribe(...)` call sites across four test files updated mechanically for
+the new signature — no existing assertion changed.
+
+### Consequences
+
+No existing exported Go symbol's signature changed. `GET /_events/stream`
+gains a new, optional, backward-compatible query parameter — MINOR bump:
+v1.80.0 → **v1.81.0**. 96.3% coverage (baseline maintained — `publish`
+and `dispatchTransitionWebhook`'s new branch both fully exercised;
+`dispatchTransitionWebhook`'s remaining gaps are pre-existing
+`json.Marshal`-failure paths, unrelated to this change), `go test -race`
+clean, `golangci-lint` clean. `docs/REFERENCE.md`/`docs/ARCHITECTURE.md`
+updated. Devlog drafted — a new consumer-facing query parameter on a
+documented public endpoint, with a non-obvious "four real modes" design
+worth explaining.
+
+**Explicitly out of scope, per the Task's own text**: updating the other
+five roles' own `watch-events.sh` copies — a separate follow-up wave, not
+assumed automatic. The devops redeploy for process.smeldr.dev is filed as
+its own Task once this ships, not bundled here.
+
+---

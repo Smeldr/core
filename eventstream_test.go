@@ -18,7 +18,7 @@ import (
 
 func TestEventBroadcaster_SubscribeReceivesBroadcast(t *testing.T) {
 	b := newEventBroadcaster()
-	ch, err := b.subscribe("u1")
+	ch, err := b.subscribe("u1", eventStreamChannelAll)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestEventBroadcaster_MultipleSubscribersAllReceive(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		// distinct token per subscriber — this test exercises fan-out
 		// across subscribers, not the per-token cap.
-		ch, err := b.subscribe(fmt.Sprintf("u%d", i))
+		ch, err := b.subscribe(fmt.Sprintf("u%d", i), eventStreamChannelAll)
 		if err != nil {
 			t.Fatalf("subscribe: %v", err)
 		}
@@ -63,7 +63,7 @@ func TestEventBroadcaster_MultipleSubscribersAllReceive(t *testing.T) {
 
 func TestEventBroadcaster_UnsubscribeStopsDelivery(t *testing.T) {
 	b := newEventBroadcaster()
-	ch, err := b.subscribe("u1")
+	ch, err := b.subscribe("u1", eventStreamChannelAll)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -91,6 +91,82 @@ func TestEventBroadcaster_BroadcastNoSubscribers(t *testing.T) {
 	b.broadcast([]byte("x")) // no-op, must not panic
 }
 
+// — eventBroadcaster.publish (A302) — ————————————————————————————————————
+
+func TestEventBroadcaster_PublishReachesMatchingChannelOnly(t *testing.T) {
+	b := newEventBroadcaster()
+	coreCh, err := b.subscribe("u1", "core")
+	if err != nil {
+		t.Fatalf("subscribe core: %v", err)
+	}
+	defer b.unsubscribe(coreCh)
+	cloudCh, err := b.subscribe("u2", "cloud")
+	if err != nil {
+		t.Fatalf("subscribe cloud: %v", err)
+	}
+	defer b.unsubscribe(cloudCh)
+
+	b.publish("core", []byte("x"))
+
+	select {
+	case <-coreCh:
+	case <-time.After(time.Second):
+		t.Fatal("core subscriber: timed out waiting for matching publish")
+	}
+	select {
+	case got := <-cloudCh:
+		t.Fatalf("cloud subscriber: expected no delivery, got %q", got)
+	default:
+	}
+}
+
+func TestEventBroadcaster_PublishReachesAllSubscriber(t *testing.T) {
+	b := newEventBroadcaster()
+	ch, err := b.subscribe("u1", eventStreamChannelAll)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer b.unsubscribe(ch)
+
+	b.publish("core", []byte("x"))
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("eventStreamChannelAll subscriber: timed out waiting for delivery of a channel-scoped publish")
+	}
+}
+
+func TestEventBroadcaster_BroadcastReachesEveryChannel(t *testing.T) {
+	// Mode 4 ("broadcast reaches every channel", A302): a true broadcast
+	// must reach a subscriber on ANY specific channel, not just an
+	// eventStreamChannelAll subscriber.
+	b := newEventBroadcaster()
+	coreCh, err := b.subscribe("u1", "core")
+	if err != nil {
+		t.Fatalf("subscribe core: %v", err)
+	}
+	defer b.unsubscribe(coreCh)
+	cloudCh, err := b.subscribe("u2", "cloud")
+	if err != nil {
+		t.Fatalf("subscribe cloud: %v", err)
+	}
+	defer b.unsubscribe(cloudCh)
+
+	b.broadcast([]byte("x"))
+
+	select {
+	case <-coreCh:
+	case <-time.After(time.Second):
+		t.Fatal("core subscriber: timed out waiting for broadcast")
+	}
+	select {
+	case <-cloudCh:
+	case <-time.After(time.Second):
+		t.Fatal("cloud subscriber: timed out waiting for broadcast")
+	}
+}
+
 func TestEventBroadcaster_FullBufferDropsWithoutBlocking(t *testing.T) {
 	// Deliberately single-goroutine and lockstep, not a background drainer
 	// racing the broadcast loop: an earlier version drained `fast` from a
@@ -104,13 +180,13 @@ func TestEventBroadcaster_FullBufferDropsWithoutBlocking(t *testing.T) {
 	// healthy sibling — is unaffected by it.
 	b := newEventBroadcaster()
 
-	slow, err := b.subscribe("u-slow") // deliberately never drained
+	slow, err := b.subscribe("u-slow", eventStreamChannelAll) // deliberately never drained
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
 	defer b.unsubscribe(slow)
 
-	fast, err := b.subscribe("u-fast")
+	fast, err := b.subscribe("u-fast", eventStreamChannelAll)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -129,6 +205,44 @@ func TestEventBroadcaster_FullBufferDropsWithoutBlocking(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("broadcast took %v for %d calls despite a full subscriber buffer — looks blocked", elapsed, n)
+	}
+
+	if got := len(slow); got != eventStreamSubscriberBuffer {
+		t.Errorf("slow subscriber buffer len = %d, want %d (full, overflow dropped)", got, eventStreamSubscriberBuffer)
+	}
+}
+
+// TestEventBroadcaster_PublishFullBufferDropsWithoutBlocking mirrors
+// TestEventBroadcaster_FullBufferDropsWithoutBlocking for publish's own
+// drop-without-blocking branch (same non-blocking select as broadcast, A302).
+func TestEventBroadcaster_PublishFullBufferDropsWithoutBlocking(t *testing.T) {
+	b := newEventBroadcaster()
+
+	slow, err := b.subscribe("u-slow", "core") // deliberately never drained
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer b.unsubscribe(slow)
+
+	fast, err := b.subscribe("u-fast", "core")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer b.unsubscribe(fast)
+
+	const n = eventStreamSubscriberBuffer + 5 // deliberately overflows slow's buffer
+
+	start := time.Now()
+	for i := 0; i < n; i++ {
+		b.publish("core", []byte("x"))
+		select {
+		case <-fast:
+		case <-time.After(time.Second):
+			t.Fatalf("fast subscriber did not receive publish %d/%d — a wedged sibling must not affect it", i+1, n)
+		}
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("publish took %v for %d calls despite a full subscriber buffer — looks blocked", elapsed, n)
 	}
 
 	if got := len(slow); got != eventStreamSubscriberBuffer {
@@ -171,7 +285,7 @@ func TestEventBroadcaster_ConcurrentSubscribeBroadcastUnsubscribe(t *testing.T) 
 				case <-stop:
 					return
 				default:
-					ch, err := b.subscribe(tokenID)
+					ch, err := b.subscribe(tokenID, eventStreamChannelAll)
 					if err != nil {
 						continue
 					}
@@ -203,7 +317,7 @@ func TestEventBroadcaster_SubscribePerTokenCapRejectsPastLimit(t *testing.T) {
 	b := newEventBroadcaster()
 	var chans []chan []byte
 	for i := 0; i < eventStreamMaxSubscribersPerToken; i++ {
-		ch, err := b.subscribe("u1")
+		ch, err := b.subscribe("u1", eventStreamChannelAll)
 		if err != nil {
 			t.Fatalf("subscribe %d/%d: %v", i+1, eventStreamMaxSubscribersPerToken, err)
 		}
@@ -215,7 +329,7 @@ func TestEventBroadcaster_SubscribePerTokenCapRejectsPastLimit(t *testing.T) {
 		}
 	}()
 
-	if _, err := b.subscribe("u1"); !errors.Is(err, ErrTooManyRequests) {
+	if _, err := b.subscribe("u1", eventStreamChannelAll); !errors.Is(err, ErrTooManyRequests) {
 		t.Fatalf("subscribe past cap: err = %v, want ErrTooManyRequests", err)
 	}
 	if got := b.tokenCount("u1"); got != eventStreamMaxSubscribersPerToken {
@@ -228,7 +342,7 @@ func TestEventBroadcaster_SubscribeDifferentTokensIndependentCaps(t *testing.T) 
 	// u1 fills its own cap entirely.
 	var u1chans []chan []byte
 	for i := 0; i < eventStreamMaxSubscribersPerToken; i++ {
-		ch, err := b.subscribe("u1")
+		ch, err := b.subscribe("u1", eventStreamChannelAll)
 		if err != nil {
 			t.Fatalf("subscribe u1 %d/%d: %v", i+1, eventStreamMaxSubscribersPerToken, err)
 		}
@@ -241,7 +355,7 @@ func TestEventBroadcaster_SubscribeDifferentTokensIndependentCaps(t *testing.T) 
 	}()
 
 	// u2 is unaffected by u1 being at its own cap.
-	u2ch, err := b.subscribe("u2")
+	u2ch, err := b.subscribe("u2", eventStreamChannelAll)
 	if err != nil {
 		t.Fatalf("subscribe u2: %v — a different token must not be affected by u1's own cap", err)
 	}
@@ -252,20 +366,20 @@ func TestEventBroadcaster_UnsubscribeFreesTokenSlot(t *testing.T) {
 	b := newEventBroadcaster()
 	var chans []chan []byte
 	for i := 0; i < eventStreamMaxSubscribersPerToken; i++ {
-		ch, err := b.subscribe("u1")
+		ch, err := b.subscribe("u1", eventStreamChannelAll)
 		if err != nil {
 			t.Fatalf("subscribe %d/%d: %v", i+1, eventStreamMaxSubscribersPerToken, err)
 		}
 		chans = append(chans, ch)
 	}
-	if _, err := b.subscribe("u1"); !errors.Is(err, ErrTooManyRequests) {
+	if _, err := b.subscribe("u1", eventStreamChannelAll); !errors.Is(err, ErrTooManyRequests) {
 		t.Fatalf("subscribe at cap: err = %v, want ErrTooManyRequests", err)
 	}
 
 	b.unsubscribe(chans[0])
 	chans = chans[1:]
 
-	freed, err := b.subscribe("u1")
+	freed, err := b.subscribe("u1", eventStreamChannelAll)
 	if err != nil {
 		t.Fatalf("subscribe after freeing a slot: %v", err)
 	}
@@ -278,7 +392,7 @@ func TestEventBroadcaster_UnsubscribeFreesTokenSlot(t *testing.T) {
 
 func TestEventBroadcaster_UnsubscribeCleansByTokenEntry(t *testing.T) {
 	b := newEventBroadcaster()
-	ch, err := b.subscribe("u1")
+	ch, err := b.subscribe("u1", eventStreamChannelAll)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -510,6 +624,166 @@ func TestEventStreamHandler_StreamsBroadcastEvent(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for the streamed event")
+	}
+}
+
+// — GET /_events/stream ?channel= (A302) — ——————————————————————————————
+
+func TestEventStreamHandler_ChannelQueryParamScopesSubscription(t *testing.T) {
+	b := newEventBroadcaster()
+	auth := BearerHMAC(eventStreamTestSecret)
+	srv := httptest.NewServer(newEventStreamHandler(auth, b))
+	defer srv.Close()
+
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Author}}, eventStreamTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"?channel=cloud", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for b.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if b.count() == 0 {
+		t.Fatal("handler never subscribed to the broadcaster")
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	lineCh := make(chan string, 1)
+	go func() {
+		if scanner.Scan() {
+			lineCh <- scanner.Text()
+		}
+	}()
+
+	// A publish to a different channel must not reach this subscriber.
+	b.publish("core", []byte(`{"event":"should-not-arrive"}`))
+	select {
+	case line := <-lineCh:
+		t.Fatalf("expected no delivery for a non-matching channel, got %q", line)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// A publish to the subscribed channel must reach it.
+	b.publish("cloud", []byte(`{"event":"task.transitioned"}`))
+	select {
+	case line := <-lineCh:
+		if line != `{"event":"task.transitioned"}` {
+			t.Errorf("streamed line = %q", line)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the matching-channel publish")
+	}
+}
+
+func TestEventStreamHandler_MissingChannelDefaultsToAll(t *testing.T) {
+	b := newEventBroadcaster()
+	auth := BearerHMAC(eventStreamTestSecret)
+	srv := httptest.NewServer(newEventStreamHandler(auth, b))
+	defer srv.Close()
+
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Author}}, eventStreamTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+	// No ?channel= query param at all — must default to eventStreamChannelAll
+	// for backward compatibility with every pre-A302 caller.
+	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for b.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if b.count() == 0 {
+		t.Fatal("handler never subscribed to the broadcaster")
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	lineCh := make(chan string, 1)
+	go func() {
+		if scanner.Scan() {
+			lineCh <- scanner.Text()
+		}
+	}()
+
+	b.publish("some-arbitrary-channel", []byte(`{"event":"task.transitioned"}`))
+	select {
+	case line := <-lineCh:
+		if line != `{"event":"task.transitioned"}` {
+			t.Errorf("streamed line = %q", line)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for delivery — missing ?channel= should default to eventStreamChannelAll")
+	}
+}
+
+func TestEventStreamHandler_ExplicitChannelAll(t *testing.T) {
+	b := newEventBroadcaster()
+	auth := BearerHMAC(eventStreamTestSecret)
+	srv := httptest.NewServer(newEventStreamHandler(auth, b))
+	defer srv.Close()
+
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Author}}, eventStreamTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"?channel=all", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for b.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if b.count() == 0 {
+		t.Fatal("handler never subscribed to the broadcaster")
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	lineCh := make(chan string, 1)
+	go func() {
+		if scanner.Scan() {
+			lineCh <- scanner.Text()
+		}
+	}()
+
+	b.publish("some-arbitrary-channel", []byte(`{"event":"task.transitioned"}`))
+	select {
+	case line := <-lineCh:
+		if line != `{"event":"task.transitioned"}` {
+			t.Errorf("streamed line = %q", line)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for delivery — explicit ?channel=all should behave exactly like the default")
 	}
 }
 

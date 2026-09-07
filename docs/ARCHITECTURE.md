@@ -1391,21 +1391,43 @@ Two broadcast call sites, both nil-safe on a.eventBroadcaster:
       → broadcasts buildWebhookPayload(ev.Type, ev.raw, sig) BEFORE the
         existing OnSignal-handler dispatch, unconditionally — independent
         of whether any OnSignal handler (including App.Webhooks) is wired
+      → generic content types have no band/receiver-shaped field, so this
+        call site always uses eventBroadcaster.broadcast (true broadcast,
+        every channel) — untouched by A302, unchanged from v1.73.0
 
   dispatchTransitionWebhook (state-flow transitions, "signal.created")
       → same payload build already used for webhook delivery; enqueues to
-        the webhook pool when App.Webhooks() is configured AND broadcasts
+        the webhook pool when App.Webhooks() is configured AND delivers
         to the stream when App.EventStream() is configured — independent
         sinks, either may be absent
+      → delivery is channel-routed (v1.81.0+, A302): the caller passes a
+        channel string — empty means eventBroadcaster.broadcast (true
+        broadcast), non-empty means eventBroadcaster.publish(channel, …)
+        (that channel, plus any "all" subscriber). TransitionItem resolves
+        the channel via channelColumns[typeName] (orchestration.go —
+        Task.Band, Goal.Band, Decision.Scope, Signal.Receiver; no entry for
+        Amendment, so its transitions are always a true broadcast).
+        recordAuthorizationRequiredSignal passes its own requiredRole
+        parameter directly (that IS the Signal's own receiver column, no
+        extra query). App.NotifySignalCreated looks up the Signal's own
+        receiver by id (one extra indexed query — its exported signature
+        cannot grow a parameter within the v1 stability promise). A
+        channel-lookup failure anywhere degrades to a true broadcast
+        (logged at Warn) rather than failing the transition/notification.
 
-Route: GET /_events/stream
+Route: GET /_events/stream?channel=<name>
     → Author role, bearer auth (same AuthFunc as every other admin route)
     → one NDJSON line per event, "\n"-terminated, flushed immediately
     → {"type":"ping"} heartbeat every 25s (keeps idle-timing reverse
       proxies from closing the connection)
     → at-most-once delivery — no replay/backfill; a dropped connection
       misses whatever fired in the gap
-    → every subscriber receives every event; filtering is client-side only
+    → channel-scoped delivery (v1.81.0+, A302): a subscriber receives only
+      events published to its requested channel, plus every true broadcast
+      — "?channel=all", or the parameter absent/empty, subscribes to
+      everything (the pre-A302 default, kept as the default for zero-
+      breakage backward compatibility). No new role gate on "all" — same
+      access every Author-role token already had.
     → absent (404) unless App.EventStream() was called
     → max 4 concurrent connections per token (v1.73.1+, T271); a 5th
       attempt returns 429 (ErrTooManyRequests) before any header is
@@ -1427,6 +1449,19 @@ persisted; a process restart drops every connection (clients are expected
 to reconnect) and a broadcast to zero subscribers is a no-op. A
 subscriber whose buffer fills (32 events, non-configurable) is dropped
 non-blocking rather than stalling the broadcaster or its siblings.
+
+**Channel subscription (v1.81.0+, A302)** — `eventBroadcaster.subs` is keyed
+by the subscriber's Go channel and stores `eventStreamSub{tokenID, channel}`
+(previously just the owning token ID). `eventStreamChannelAll` ("all") is
+the reserved wildcard channel value, not a real channel name — a subscriber
+on it matches every `publish` call regardless of the target channel, in
+addition to every `broadcast`. `?channel=` absent or empty on the HTTP route
+normalizes to `eventStreamChannelAll` before `subscribe` is called, so no
+pre-A302 caller's behavior changes unless it opts in. No new role gate:
+`?channel=all` grants nothing beyond what every Author-role token already
+had unconditionally before this feature existed. Channel names are
+free-form strings (no fixed enum), matching `Band`/`Scope`/`Receiver`
+already being unrestricted string columns elsewhere in the schema.
 
 **Per-token connection cap (T271)** — `eventBroadcaster` tracks concurrent
 subscriber count keyed by `User.ID` (the same identity `ActorID`/provenance

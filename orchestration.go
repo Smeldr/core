@@ -677,6 +677,23 @@ var humanIDColumns = map[string]string{
 	"Amendment": "amendment_number",
 }
 
+// channelColumns maps a compiled type name to the column that determines an
+// event-stream channel (A302) for its transitions — Task.Band, Goal.Band,
+// Decision.Scope, Signal.Receiver. No entry for Amendment: it carries no
+// band/receiver-shaped field, so its events are always dispatched as a true
+// broadcast (reaching every channel) rather than routed to one — deliberate,
+// not an oversight (a shipped version bump is inherently cross-cutting, not
+// owned by one band). Same explicit, non-reflection-derived shape as
+// [humanIDColumns], for the same reason: a future field merely shaped like a
+// band/receiver column should never silently become a routing key nobody
+// intended.
+var channelColumns = map[string]string{
+	"Task":     "band",
+	"Goal":     "band",
+	"Decision": "scope",
+	"Signal":   "receiver",
+}
+
 // orchSignalFlow returns the state flow for [Signal] records.
 // A signal starts as pending, is acknowledged or expires from any non-terminal state.
 func orchSignalFlow() StateFlow {

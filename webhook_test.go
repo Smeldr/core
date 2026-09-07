@@ -565,13 +565,13 @@ func TestEnqueueWebhookEvent_enqueueError(t *testing.T) {
 
 func TestDispatchTransitionWebhook_nilStore(t *testing.T) {
 	// nil store and nil broadcaster — no-op, no panic.
-	dispatchTransitionWebhook(context.Background(), nil, nil, nil, "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
+	dispatchTransitionWebhook(context.Background(), nil, nil, nil, "", "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
 }
 
 func TestDispatchTransitionWebhook_nilPool(t *testing.T) {
 	store := NewWebhookStore(nil, []byte("k"))
 	// nil pool and nil broadcaster — no-op, no panic.
-	dispatchTransitionWebhook(context.Background(), store, nil, nil, "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
+	dispatchTransitionWebhook(context.Background(), store, nil, nil, "", "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
 }
 
 func TestDispatchTransitionWebhook_nilStoreNilPoolBroadcasterSet(t *testing.T) {
@@ -579,12 +579,12 @@ func TestDispatchTransitionWebhook_nilStoreNilPoolBroadcasterSet(t *testing.T) {
 	// no App.Webhooks()) — the broadcast sink must still fire independently
 	// of the webhook sink (T269 decoupling decision).
 	b := newEventBroadcaster()
-	ch, err := b.subscribe("u1")
+	ch, err := b.subscribe("u1", eventStreamChannelAll)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
 	defer b.unsubscribe(ch)
-	dispatchTransitionWebhook(context.Background(), nil, nil, b, "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
+	dispatchTransitionWebhook(context.Background(), nil, nil, b, "", "task.transitioned", transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
 	select {
 	case payload := <-ch:
 		var got WebhookEventPayload
@@ -608,12 +608,12 @@ func TestDispatchTransitionWebhook_success(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	b := newEventBroadcaster()
-	streamCh, subErr := b.subscribe("u1")
+	streamCh, subErr := b.subscribe("u1", eventStreamChannelAll)
 	if subErr != nil {
 		t.Fatalf("subscribe: %v", subErr)
 	}
 	defer b.unsubscribe(streamCh)
-	dispatchTransitionWebhook(ctx, store, pool, b, "task.transitioned", transitionWebhookData{
+	dispatchTransitionWebhook(ctx, store, pool, b, "", "task.transitioned", transitionWebhookData{
 		Type: "task", ID: "task-1", Slug: "t231", FromState: "active", ToState: "waiting-plan", Reason: "",
 	})
 	select {
@@ -652,6 +652,36 @@ func TestDispatchTransitionWebhook_success(t *testing.T) {
 	}
 }
 
+// — dispatchTransitionWebhook channel routing (A302) — —————————————————————
+
+func TestDispatchTransitionWebhook_ChannelRoutesToMatchingSubscriberOnly(t *testing.T) {
+	b := newEventBroadcaster()
+	coreCh, err := b.subscribe("u1", "core")
+	if err != nil {
+		t.Fatalf("subscribe core: %v", err)
+	}
+	defer b.unsubscribe(coreCh)
+	cloudCh, err := b.subscribe("u2", "cloud")
+	if err != nil {
+		t.Fatalf("subscribe cloud: %v", err)
+	}
+	defer b.unsubscribe(cloudCh)
+
+	dispatchTransitionWebhook(context.Background(), nil, nil, b, "core", "task.transitioned",
+		transitionWebhookData{Type: "task", ID: "1", ToState: "active"})
+
+	select {
+	case <-coreCh:
+	case <-time.After(time.Second):
+		t.Fatal("core subscriber: timed out waiting for matching-channel dispatch")
+	}
+	select {
+	case got := <-cloudCh:
+		t.Fatalf("cloud subscriber: expected no delivery, got %q", got)
+	default:
+	}
+}
+
 // — App.NotifySignalCreated — ———————————————————————————————————————————
 //
 // For a raw-SQL Signal insert made outside core entirely (mcp's own
@@ -665,7 +695,12 @@ func TestApp_NotifySignalCreated_BroadcastsToEventStream(t *testing.T) {
 	}))
 	app.EventStream()
 
-	ch, err := app.eventBroadcaster.subscribe("u1")
+	// No Config.DB is set, so NotifySignalCreated's receiver lookup (A302)
+	// cannot run — it must degrade to a true broadcast rather than dropping
+	// the event. Subscribing on an unrelated, specific channel (not
+	// eventStreamChannelAll) proves that: delivery here can only be
+	// explained by a real broadcast, not by wildcard matching.
+	ch, err := app.eventBroadcaster.subscribe("u1", "unrelated-channel")
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -733,4 +768,81 @@ func TestApp_NotifySignalCreated_NilSafeWhenNeitherConfigured(t *testing.T) {
 	}))
 	// Neither App.Webhooks() nor App.EventStream() called — must not panic.
 	app.NotifySignalCreated(context.Background(), "sig-3", "sig-3-slug")
+}
+
+func TestApp_NotifySignalCreated_UsesSignalReceiverAsChannel(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_signals (id, slug, created_at, updated_at, receiver)
+		 VALUES ('sig-4', 'sig-4-slug', $1, $1, 'cloud')`, now,
+	); err != nil {
+		t.Fatalf("insert signal: %v", err)
+	}
+
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte("test-secret-notify-signal-channel"),
+		DB:      db,
+	}))
+	app.EventStream()
+
+	cloudCh, err := app.eventBroadcaster.subscribe("u1", "cloud")
+	if err != nil {
+		t.Fatalf("subscribe cloud: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(cloudCh)
+	coreCh, err := app.eventBroadcaster.subscribe("u2", "core")
+	if err != nil {
+		t.Fatalf("subscribe core: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(coreCh)
+
+	app.NotifySignalCreated(ctx, "sig-4", "sig-4-slug")
+
+	select {
+	case <-cloudCh:
+	case <-time.After(time.Second):
+		t.Fatal("cloud subscriber: expected delivery routed via the signal's own receiver column")
+	}
+	select {
+	case got := <-coreCh:
+		t.Fatalf("core subscriber: expected no delivery, got %q", got)
+	default:
+	}
+}
+
+func TestApp_NotifySignalCreated_ReceiverLookupFailure_FallsBackToBroadcast(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte("test-secret-notify-signal-lookup-fail"),
+		DB:      db,
+	}))
+	app.EventStream()
+
+	// A subscriber on an unrelated, specific channel — not
+	// eventStreamChannelAll — so delivery can only be explained by a real
+	// broadcast fallback, not wildcard matching.
+	ch, err := app.eventBroadcaster.subscribe("u1", "unrelated-channel")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(ch)
+
+	// "sig-does-not-exist" was never inserted — the receiver lookup misses.
+	app.NotifySignalCreated(context.Background(), "sig-does-not-exist", "sig-does-not-exist-slug")
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("expected broadcast fallback when the receiver lookup finds no row")
+	}
 }

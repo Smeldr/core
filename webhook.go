@@ -384,17 +384,22 @@ type transitionWebhookData struct {
 // dispatchTransitionWebhook builds the payload for a state-flow transition
 // or D42-class Signal-emission event (T231) and fans it out to whichever
 // sinks are configured: enqueues a webhook delivery when a [WebhookStore]/
-// worker pool are wired, and/or broadcasts to the event-stream broadcaster
+// worker pool are wired, and/or delivers to the event-stream broadcaster
 // when one is wired (T269) — the two sinks are independent, so a caller with
-// only one configured still gets that one. Nil-safe no-op when neither sink
-// is configured (matches [App.Webhooks]/[App.EventStream] both being
-// opt-in). A dedicated path beside [fireAsyncTriggers] rather than the
-// [App.OnSignal] bus (T231): the bus's [LifecycleEvent] vocabulary is fixed
-// to content-module Draft/Published/Archived semantics and
+// only one configured still gets that one. channel selects how the
+// broadcaster delivers it (A302): empty means a true broadcast reaching
+// every channel ([eventBroadcaster.broadcast]), a non-empty value routes to
+// that channel plus any [eventStreamChannelAll] subscriber
+// ([eventBroadcaster.publish]) — the webhook-store sink has no channel
+// concept and is unaffected either way. Nil-safe no-op when neither sink is
+// configured (matches [App.Webhooks]/[App.EventStream] both being opt-in).
+// A dedicated path beside [fireAsyncTriggers] rather than the [App.OnSignal]
+// bus (T231): the bus's [LifecycleEvent] vocabulary is fixed to
+// content-module Draft/Published/Archived semantics and
 // [buildWebhookPayload] requires a typed Go item — neither fits a
 // [StateFlow]-driven transition on an arbitrary named state, or a Signal
 // inserted by raw SQL with no corresponding Go value in hand.
-func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, eventName string, data transitionWebhookData) {
+func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, channel, eventName string, data transitionWebhookData) {
 	webhooksConfigured := store != nil && pool != nil
 	if !webhooksConfigured && broadcaster == nil {
 		return
@@ -418,7 +423,11 @@ func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *w
 		enqueueWebhookEvent(ctx, store, pool, eventName, payload)
 	}
 	if broadcaster != nil {
-		broadcaster.broadcast(payload)
+		if channel == "" {
+			broadcaster.broadcast(payload)
+		} else {
+			broadcaster.publish(channel, payload)
+		}
 	}
 }
 
@@ -432,8 +441,26 @@ func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *w
 // hook fires for it otherwise. id and slug identify the newly created
 // Signal. Nil-safe — a no-op unless [App.Webhooks] and/or [App.EventStream]
 // has been configured, same contract as [dispatchTransitionWebhook] itself.
+//
+// The event-stream channel (A302) is the Signal's own receiver column,
+// looked up by id — a small extra query (matching the existing single-
+// column-by-id idiom already used elsewhere in this package, e.g.
+// state.go's schedule-eval lookup), not a new parameter: id/slug is this
+// method's exported signature and the API-stability promise means that
+// cannot grow a new parameter within v1. On any lookup failure (including
+// a.cfg.DB being nil), degrades to a true broadcast rather than failing the
+// call — channel routing is best-effort, never a reason to drop the event.
 func (a *App) NotifySignalCreated(ctx context.Context, id, slug string) {
-	dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, "signal.created", transitionWebhookData{
+	channel := ""
+	if a.cfg.DB != nil {
+		if err := a.cfg.DB.QueryRowContext(ctx,
+			"SELECT receiver FROM smeldr_signals WHERE id = $1", id,
+		).Scan(&channel); err != nil {
+			slog.WarnContext(ctx, "smeldr: NotifySignalCreated: receiver lookup failed, broadcasting instead", "id", id, "error", err)
+			channel = ""
+		}
+	}
+	dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, channel, "signal.created", transitionWebhookData{
 		Type: "signal", ID: id, Slug: slug, ToState: "pending",
 	})
 }

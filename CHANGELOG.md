@@ -23,6 +23,11 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.81.0] — 2026-09-07
+
+### Added
+- `GET /_events/stream` gains channel-based subscription. A new optional `?channel=<name>` query parameter filters events to a specific channel (in addition to true broadcasts); `?channel=all` or omitted receives everything — the default, for zero-breakage backward compatibility. Channels are determined by item type: `Task` and `Goal` transitions route by `Band`, `Decision` transitions by `Scope` (including the literal `"cross-cutting"`), `Signal` by `Receiver`; `Amendment` transitions always broadcast to every channel. New internal machinery: `eventBroadcaster.publish(channel, payload)` for channel-scoped delivery alongside existing `broadcast`, a reserved `?channel=all` wildcard, and a `channelColumns` map in `orchestration.go`. `dispatchTransitionWebhook` gained a channel parameter; `App.NotifySignalCreated` signature is unchanged. (A302)
+
 ## [1.80.0] — 2026-09-07
 
 ### Added

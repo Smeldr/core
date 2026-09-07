@@ -558,6 +558,126 @@ func TestApp_TransitionItemWithReason_NoWebhookStore(t *testing.T) {
 	}
 }
 
+// — event-stream channel routing (A302) — ————————————————————————————————
+
+// TestApp_TransitionItem_TaskChannelRoutesViaBand confirms a Task
+// transition's event-stream delivery is routed by the Task's own Band
+// column, not broadcast to every subscriber.
+func TestApp_TransitionItem_TaskChannelRoutesViaBand(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	app.EventStream()
+	repo := NewSQLRepo[*Task](db, Table("smeldr_tasks"))
+	if err := repo.Save(context.Background(), &Task{
+		Node: Node{ID: "task-band-1", Slug: "task-band-1-slug", Status: "backlog"},
+		Band: "core",
+	}); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	coreCh, err := app.eventBroadcaster.subscribe("u1", "core")
+	if err != nil {
+		t.Fatalf("subscribe core: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(coreCh)
+	cloudCh, err := app.eventBroadcaster.subscribe("u2", "cloud")
+	if err != nil {
+		t.Fatalf("subscribe cloud: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(cloudCh)
+
+	if _, err := app.TransitionItem(context.Background(), "Task", "task-band-1-slug", "active"); err != nil {
+		t.Fatalf("TransitionItem: %v", err)
+	}
+
+	select {
+	case <-coreCh:
+	case <-time.After(time.Second):
+		t.Fatal("core subscriber: expected delivery routed via the Task's own Band")
+	}
+	select {
+	case got := <-cloudCh:
+		t.Fatalf("cloud subscriber: expected no delivery, got %q", got)
+	default:
+	}
+}
+
+// TestApp_TransitionItem_DecisionChannelRoutesViaScope confirms a Decision
+// transition routes by its own Scope column — including the literal
+// "cross-cutting" value, which A302 deliberately treats as an ordinary
+// channel name, not an auto-broadcast special case.
+func TestApp_TransitionItem_DecisionChannelRoutesViaScope(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	app.EventStream()
+	repo := NewSQLRepo[*Decision](db, Table("smeldr_decisions"))
+	if err := repo.Save(context.Background(), &Decision{
+		Node:  Node{ID: "dec-scope-1", Slug: "dec-scope-1-slug", Status: "proposed"},
+		Scope: "cross-cutting",
+	}); err != nil {
+		t.Fatalf("insert decision: %v", err)
+	}
+
+	scopeCh, err := app.eventBroadcaster.subscribe("u1", "cross-cutting")
+	if err != nil {
+		t.Fatalf("subscribe cross-cutting: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(scopeCh)
+	otherCh, err := app.eventBroadcaster.subscribe("u2", "core")
+	if err != nil {
+		t.Fatalf("subscribe core: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(otherCh)
+
+	// proposed -> archived carries no RequiredRole (orchDecisionFlow), so
+	// this exercises channel routing without also needing a governance
+	// grant set up.
+	if _, err := app.TransitionItem(context.Background(), "Decision", "dec-scope-1-slug", "archived"); err != nil {
+		t.Fatalf("TransitionItem: %v", err)
+	}
+
+	select {
+	case <-scopeCh:
+	case <-time.After(time.Second):
+		t.Fatal("cross-cutting subscriber: expected delivery — \"cross-cutting\" is a literal channel name, not an auto-broadcast")
+	}
+	select {
+	case got := <-otherCh:
+		t.Fatalf("core subscriber: expected no delivery, got %q", got)
+	default:
+	}
+}
+
+// TestApp_TransitionItem_AmendmentAlwaysBroadcasts confirms an Amendment
+// transition — the one compiled type with no band/receiver-shaped field —
+// is always delivered as a true broadcast (A302), reaching a subscriber on
+// an unrelated channel rather than being silently dropped or requiring
+// eventStreamChannelAll.
+func TestApp_TransitionItem_AmendmentAlwaysBroadcasts(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	app.EventStream()
+	repo := NewSQLRepo[*Amendment](db, Table("smeldr_amendments"))
+	if err := repo.Save(context.Background(), &Amendment{
+		Node: Node{ID: "amend-1", Slug: "amend-1-slug", Status: "scoped"},
+	}); err != nil {
+		t.Fatalf("insert amendment: %v", err)
+	}
+
+	ch, err := app.eventBroadcaster.subscribe("u1", "unrelated-channel")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(ch)
+
+	if _, err := app.TransitionItem(context.Background(), "Amendment", "amend-1-slug", "in-progress"); err != nil {
+		t.Fatalf("TransitionItem: %v", err)
+	}
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("expected a true broadcast — Amendment has no channelColumns entry")
+	}
+}
+
 // TestDrainEvalQueue_AuthorizationRequiredSignal_FiresWebhook confirms the
 // D42-class Signal recorded by recordAuthorizationRequiredSignal (via
 // DrainEvalQueue's role-gated branch) fires the same "signal.created" event
