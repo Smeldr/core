@@ -10,22 +10,20 @@ covers what is specific to core-implementer, `smeldr/core`, and its standalone m
 
 ## New chat session — start here
 
-Every new chat has no memory of previous sessions. Follow these steps
-at the start of every new chat, before doing anything else.
+Every new chat has no memory of previous sessions. There is no session-context
+handoff file (retired by D66, 2026-09-07) — state comes directly from the repo
+(`git status`, `git log`, `go.mod` versions) and the live instance
+(`process.smeldr.dev`), never from a diary file written by a prior session.
+Follow these steps at the start of every new chat, before doing anything else.
 
-**Step 1 — Read session context:**
-Read `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md` (local file).
-This is your state from the previous session: current versions, latest
-amendment, active milestone and step, anything deferred.
-
-**Step 2 — Read the developer skill:**
+**Step 1 — Read the developer skill:**
 Read `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md`
 (local file). This gives you the current versions for all modules, the full
 list of MCP tools and CLI commands, and any known gotchas. Load it before
 querying the live instance for a pending Task — not only at the doc-freshness
 checkpoint.
 
-**Step 3 — Check the live instance for a pending Task:**
+**Step 2 — Check the live instance for a pending Task:**
 Core no longer uses `NEXT.md` or `SIGNAL_CORE.md` — both retired 2026-08-15
 (migrated to the D50 protocol 2026-08-11). Dispatch is a `Task` on
 `process.smeldr.dev`: query for `backlog` Tasks with `band=core`, plus any
@@ -51,42 +49,38 @@ instance" section for the full state table). If one exists:
    Task's plan is still open in the same shared file, extract it to its own
    task-scoped file first; never leave a still-open Task's content to die
    with the shared file.
-6. After the commit: write `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md`
-   locally with the amendment number, then commit and push from that repo
-   (see "After every commit" for the exact command sequence).
 
-**Step 4 — After closing a Task, and if nothing is waiting:**
+**Step 3 — After closing a Task, and if nothing is waiting:**
 A session is not scoped to one Task. Once a Task reaches `done`, query the
 instance again for the next matching `backlog` Task before ending your
 turn — the same query as session start, not just at the very beginning.
 Only stop and report to the user once nothing matching `band=core` remains.
 
 **Why this matters:**
-An implementer that starts a new chat without reading context will use
-wrong versions, repeat completed work, or miss deferred items. The context
-file is the bridge between sessions. Always read it first.
+An implementer that starts a new chat without checking the live instance will
+repeat completed work or miss a waiting Task. The Task's own state and the
+repo's own git history are the bridge between sessions — always check both
+before doing anything else.
 
 ---
 
 ## Before writing any code
 
 1. If you have a claimed Task with no approved plan yet, you're already following
-   "New chat session — start here" Step 3 above — stop here and do not proceed with
+   "New chat session — start here" Step 2 above — stop here and do not proceed with
    steps 2–7 until the architect transitions `plan-reviewing → implementing`.
-2. Read session context from `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md`
-   (local file). This is your state from the previous session.
-3. Read `DECISIONS.md` — index table only. Body text lives in `decisions/core.md`
+2. Read `DECISIONS.md` — index table only. Body text lives in `decisions/core.md`
    (D1–D22, A19–A65, A88–A95), `decisions/recent.md` (current rolling window),
    and topic archive files (auth.md, content-api.md, docs.md, media.md, nav.md,
    storage.md). Read the relevant body file when a specific decision is needed.
    Do not work around locked decisions. If a decision seems wrong, raise it explicitly.
-4. Read `docs/ARCHITECTURE.md` — package structure, request lifecycle, stable interfaces.
-5. Read the milestone backlog file for the **current milestone only**
+3. Read `docs/ARCHITECTURE.md` — package structure, request lifecycle, stable interfaces.
+4. Read the milestone backlog file for the **current milestone only**
    (e.g. `Milestone11_BACKLOG.md`). This is the authoritative task list.
    Do not read completed milestone backlogs — they are historical record only.
    Do not implement anything not listed in the current backlog.
    Do not skip steps — the order is load-bearing (dependency layers).
-6. Apply document economy: completed items are removed from lists, not checked
+5. Apply document economy: completed items are removed from lists, not checked
    off. Resolved known issues are deleted. A document that does not influence
    a decision must be reduced or removed.
 
@@ -94,18 +88,12 @@ file is the bridge between sessions. Always read it first.
 
 - Transition the Task `commit-reviewing → done` with `Reason: plan file deleted`
   once the architect's written approval appears in the plan file (see "New chat
-  session — start here" Step 3.5).
+  session — start here" Step 2.5).
 - Delete `plans/core-next-plan.md` (or the task-scoped plan file) whole, in the same
   commit as the implementation: `Remove-Item "C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md"`.
   If another Task's plan is still open in the same shared file, extract it to its
   own task-scoped file first — never delete a still-open Task's content along with
   the shared file.
-- Update session context: write `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md`
-  locally. Record: current versions, latest amendment shipped,
-  current milestone and step, what was deferred or blocked.
-  Then commit and push from the smeldr/architect repo:
-  `cd C:\Users\peter\Documents\Code\Smeldr\architect ; git add context/core-implementer.md ; git commit -m "chore(context): update core-implementer after [sprint name]" ; git push`
-  Do NOT use GitHub MCP to update this file.
 
 ## DECISIONS.md file structure (CRITICAL)
 
@@ -218,7 +206,7 @@ signal vocabulary no longer applies. Do not recreate it or write to it.
 
 Dispatch, plan approval, and commit approval all run through the Task's own
 state transitions on `process.smeldr.dev` instead — see "New chat session —
-start here" Step 3 above for the flow, and `AGENT_PROTOCOL.md`'s "The live
+start here" Step 2 above for the flow, and `AGENT_PROTOCOL.md`'s "The live
 instance" section for the full state table and the reasoning behind it (D50).
 
 ## Before planning or writing anything
@@ -330,7 +318,6 @@ protocol violation.
 - Plan writing
 - Feature code (any .go file)
 - Architecture decisions
-- Context file updates
 - Review of Haiku output
 - Anything requiring codebase reading or judgment
 
@@ -463,10 +450,8 @@ that both exist, then stage.
   planned files that are now implemented. Update it before proposing the commit.
 - The step is not complete until the review checkbox is ticked.
 
-### 5. Update the backlog and session context
+### 5. Update the backlog
 - Mark the step `✅ Done` in the `Milestone{N}_BACKLOG.md` Progress table with the completion date.
-- Write `C:\Users\peter\Documents\Code\Smeldr\architect\context\core-implementer.md` locally,
-  then commit and push from that repo (see "After every commit" for the command sequence).
 - Never batch updates — update immediately after the step is verified.
 
 ### 6. Pre-commit documentation gate — then propose commit message
@@ -528,7 +513,7 @@ After the gate is clear, write the commit message in the plan file and transitio
 the Task `implementing → commit-reviewing`.
 
 - Commits require the architect's written approval in the plan file (see "New chat
-  session — start here" Step 3) — never committed on `commit-reviewing` alone, and
+  session — start here" Step 2) — never committed on `commit-reviewing` alone, and
   never on a chat answer to an unrelated technical question. Build, vet, format, and
   test commands are executed autonomously.
 - **A "yes" answer to a review question is not commit approval.** The confirmation of a technical fact and the approval of a commit are two distinct acts — approval is specifically the architect's written response in the plan file. Never collapse them into one.
@@ -655,13 +640,12 @@ Propose a conventional commit message covering all repo doc changes (steps 2–3
 Wait for explicit approval before committing.
 
 **10. After commit**
-Update `smeldr/architect/plans/core-next-plan.md` if a plan file was created.
-Update `smeldr/architect/context/core-implementer.md` and push from that repo.
+Delete `smeldr/architect/plans/core-next-plan.md` if a plan file was created.
 
 ### Push follows commit approval
 
 Commit approval is the architect's written response in the plan file (see "New chat
-session — start here" Step 3) — not a chat "yes", and not implied by answering an
+session — start here" Step 2) — not a chat "yes", and not implied by answering an
 unrelated technical question.
 
 Push is not a separate gate: for feature-branch work, the architect's approval in
@@ -851,14 +835,14 @@ Smeldr uses one tier of planning documentation per active milestone:
 - Updated after every step: tick all checkboxes, mark step ✅ in Progress table
 
 Delivery history lives in `CHANGELOG.md`. Current state and active sprint are
-tracked in `context/core-implementer.md` and `plans/core-next-plan.md` in smeldr/architect
-(written locally — never committed to this repo mid-sprint).
+tracked by the live Task on `process.smeldr.dev` and `plans/core-next-plan.md`
+in smeldr/architect (the plan file is written locally — never committed to
+this repo mid-sprint, deleted whole at commit time).
 
 ### After completing a step
 
 1. Tick all sub-task checkboxes in `Milestone{N}_BACKLOG.md`
 2. Mark step ✅ Done in the `Milestone{N}_BACKLOG.md` Progress table
-3. Write `context/core-implementer.md` and push from smeldr/architect
 
 ### Structure of a milestone backlog file
 
