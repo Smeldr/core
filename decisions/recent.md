@@ -1730,3 +1730,97 @@ assumed automatic. The devops redeploy for process.smeldr.dev is filed as
 its own Task once this ships, not bundled here.
 
 ---
+
+## D66 — Architect context files retired; standing operational discipline moves to CLAUDE.md/AGENT_PROTOCOL.md, reference facts to a slim per-repo reference file, skill-worthy procedures flagged per role
+
+### Scope
+
+Raised from a direct question about reducing token usage, same session
+`HANDOVER.md` was retired in. `smeldr/architect/context/*.md` (one file
+per Task-dispatched role — core-implementer.md ~4451 lines/338KB,
+cloud-implementer.md ~3740 lines, devops-implementer.md ~1079 lines,
+site-implementer.md ~419 lines) is read in full at every session start
+for that role and grows append-only, diary-style, with no pruning
+discipline — a real, recurring token cost.
+
+### Decision
+
+Each context file's content splits into four kinds, only one of which
+lacks another home today:
+
+1. **State** (branch, module versions, a pending plan file) — already
+   derivable from the repo itself (`git status`, `go.mod`) or the live
+   instance (`process.smeldr.dev`'s own Task state). Dropped, not
+   migrated.
+2. **History/narrative** (what shipped, how a bug was found, what was
+   live-verified) — already covered by `DECISIONS.md`/`AMENDMENTS.md`
+   for anything that ships, and by a Task's own `note_ref` for anything
+   narrower. Dropped, not migrated.
+3. **Standing operational discipline** ("never do X without Y, because Z
+   happened") — the one kind with no other home today. Moves to the
+   role's own `CLAUDE.md`/`copilot-instructions.md` when specific to
+   that role's own repo/workflow, or to `AGENT_PROTOCOL.md` when it
+   applies across roles — matching the precedent already set once,
+   informally, when devops's T260 incident ("never build from a repo an
+   implementer session currently holds") was promoted into
+   `AGENT_PROTOCOL.md` rather than left in a context-file diary entry.
+4. **Reference facts** (production token tables, deploy-pipeline steps,
+   framework API quirks/limitations) — moves to a slim, non-diary
+   reference file in the role's own repo, not `smeldr/architect`.
+
+Each role also identifies any repeatable multi-step procedure in its own
+file (a deploy sequence, a build-from-worktree recipe, an
+amendment-recording sequence) that is a genuine skill candidate for its
+own Claude Code session — flagged to the architect, not built
+unilaterally.
+
+Each context file is deleted once its own migration is verified
+complete — not trimmed, not kept as a smaller stub. A trimmed diary
+still re-grows without bound; a typed home per content kind is what
+actually prevents recurrence.
+
+### Why
+
+The four content kinds have structurally different lifespans and
+different real homes already established elsewhere in this project's
+own process — conflating them into one undifferentiated, ever-growing
+file is what produced the token cost, not the file's raw size alone.
+`AGENT_PROTOCOL.md`'s own T260 precedent already proves the "promote a
+real lesson out of a diary entry into a rules file" move works; this
+Decision makes it the default rather than the exception.
+
+**Rejected**: keeping a size-pruned version of the diary format itself —
+the problem is the untyped format re-growing without bound, not length
+alone.
+
+### Consequences
+
+Migration is dispatched as a Task per Task-dispatched role (core, site,
+cloud, devops — band matches), each role reading and classifying its own
+file once rather than architect re-reading roughly 9,600 combined lines
+centrally. Core goes first as the pilot
+(`core-context-file-migration-d66`), sequentially, to confirm the
+pattern holds before site/cloud/devops follow. Cross-role discipline
+items any role flags land in `AGENT_PROTOCOL.md`, written by architect.
+Architect drops the four `context/*.md` lines from `CLAUDE.md`'s own
+session-start list once all four migrations are verified done.
+`brand-expert`'s own context file (NEXT.md-dispatched, not part of D50)
+is explicitly out of scope for this wave — Peter's own instruction, held
+for a separate, later pass.
+
+**A related, separate governance gap found live while registering this
+Decision**: `update_decision` accepted content edits to this very item
+after its own `Status` had already moved to `ratified`, with no role or
+state gate blocking either write — contradicting this file's own
+documented "immutable once locked" model. Filed as its own Task,
+`decision-content-mutable-after-ratification` (band=core, priority 1,
+deliberately not dispatched yet), not folded into this Decision's own
+scope.
+
+Ratified by Peter directly on `process.smeldr.dev`, 2026-09-07. Full
+text: this entry (registered live first this time — `decisions/recent.md`
+was written second, after ratification, closing the gap this session
+found between D65 existing live but never reaching this file's own
+index).
+
+---
