@@ -264,6 +264,12 @@ evaluate its impact on:
 Document this analysis in the Amendment before it is agreed upon.
 If an amendment breaks a README example, fix the README in the same step.
 
+## Known gotchas
+
+Durable tooling/framework quirks live in `docs/OPERATIONAL_NOTES.md`, not
+here — check it before debugging a CI or formatting surprise that feels
+like it shouldn't be happening.
+
 ## Code style
 
 - Single package: `smeldr` — no sub-packages

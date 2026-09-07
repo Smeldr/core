@@ -15,25 +15,34 @@
 # in .claude.json (forward-slash form — confirmed against the actual
 # config, not assumed from the backslash form the OS itself reports).
 
-set -euo pipefail
+set -uo pipefail
 
 CONFIG_FILE="C:\\Users\\peter\\.claude.json"
 PROJECT_KEY='C:/Users/peter/Documents/Code/Smeldr/core'
 
-TOKEN=$(powershell.exe -NoProfile -Command "
-  \$ErrorActionPreference = 'Stop'
-  \$cfg = Get-Content -Raw '$CONFIG_FILE' | ConvertFrom-Json
-  \$node = \$cfg.projects.'$PROJECT_KEY'
-  if (-not \$node) { \$node = \$cfg.'$PROJECT_KEY' }
-  \$auth = \$node.mcpServers.process.headers.Authorization
-  if (-not \$auth) { exit 1 }
-  \$auth -replace '^Bearer ', ''
-" 2>/dev/null | tr -d '\r\n')
+# A long-held streamed connection drops periodically (curl exit 56,
+# CURLE_RECV_ERROR, roughly every 10-20 minutes in real use) — this is
+# normal for this kind of connection, not a server problem. Loop and
+# reconnect instead of letting one drop silently end the Monitor.
+while true; do
+  TOKEN=$(powershell.exe -NoProfile -Command "
+    \$ErrorActionPreference = 'Stop'
+    \$cfg = Get-Content -Raw '$CONFIG_FILE' | ConvertFrom-Json
+    \$node = \$cfg.projects.'$PROJECT_KEY'
+    if (-not \$node) { \$node = \$cfg.'$PROJECT_KEY' }
+    \$auth = \$node.mcpServers.process.headers.Authorization
+    if (-not \$auth) { exit 1 }
+    \$auth -replace '^Bearer ', ''
+  " 2>/dev/null | tr -d '\r\n')
 
-if [ -z "${TOKEN:-}" ]; then
-  echo "ERROR: could not extract process.smeldr.dev token for $PROJECT_KEY from $CONFIG_FILE" >&2
-  exit 1
-fi
+  if [ -z "${TOKEN:-}" ]; then
+    echo "ERROR: could not extract process.smeldr.dev token for $PROJECT_KEY from $CONFIG_FILE" >&2
+    sleep 5
+    continue
+  fi
 
-curl -sN -H "Authorization: Bearer $TOKEN" "https://process.smeldr.dev/_events/stream?channel=core" \
-  | grep --line-buffered -v '"type":"ping"'
+  curl -sN -H "Authorization: Bearer $TOKEN" "https://process.smeldr.dev/_events/stream?channel=core" \
+    | grep --line-buffered -v '"type":"ping"'
+
+  sleep 2
+done
