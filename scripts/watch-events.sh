@@ -35,5 +35,5 @@ if [ -z "${TOKEN:-}" ]; then
   exit 1
 fi
 
-curl -sN -H "Authorization: Bearer $TOKEN" https://process.smeldr.dev/_events/stream \
+curl -sN -H "Authorization: Bearer $TOKEN" "https://process.smeldr.dev/_events/stream?channel=core" \
   | grep --line-buffered -v '"type":"ping"'
