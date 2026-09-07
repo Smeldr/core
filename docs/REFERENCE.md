@@ -4100,12 +4100,16 @@ safe to call on every boot; `UpsertKind` updates in place if a kind is already r
 | `contains` | directional | Goal→{Goal,Task,Decision,Amendment,Signal} | asserted |
 | `contradicts` | symmetric (`Directional: false`) | Decision↔Decision | asserted |
 | `investigates` | directional | Task→Decision | asserted |
+| `addresses` | directional | Decision→Decision | asserted |
 
 `contradicts` is the vehicle for a Decision-to-Decision Asserted-provenance condition — it
 has no `ReverseLabel`, since "contradicts" reads the same statement from either endpoint,
 unlike `contains`/"Part Of". `investigates` models a Task delegated to look into a Decision.
-Who asserts either edge, and when, is left to the same `assert_relation` convention already
-used for every other kind here — no new core machinery.
+`addresses` (A301) models one Decision responding to another — e.g. a decline-Decision
+asserting back to the original it declines; `TypePairs` is scoped to Decision→Decision only
+for this one real need, not left open for a hypothetical non-Decision use case. Who asserts
+either edge, and when, is left to the same `assert_relation` convention already used for
+every other kind here — no new core machinery.
 
 ### `Signal` structured fields (A296)
 

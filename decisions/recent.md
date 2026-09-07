@@ -1534,3 +1534,59 @@ succeed). 96.3% coverage (baseline), `go test -race` clean,
 precedent for this shape of change (A297): v1.79.0 → **v1.79.1**.
 
 ---
+
+## A301 — register `addresses` relation kind (Decision → Decision)
+
+### What shipped
+
+`RegisterOrchestrationRelationKinds` (`orchestration.go`) registers one
+new relation kind, `addresses` (Decision→Decision, `Directional: true`,
+`ReverseLabel: "Addressed By"`, `Mode: "asserted"`), directly after the
+existing `investigates` entry — same idempotent `UpsertKind` pattern the
+other seven kinds already use (`derives_from`, `depends_on`, `ships_as`,
+`supersedes`, `contains`, `contradicts`, `investigates`).
+
+`TypePairs` is scoped to `[{"source_type":"Decision","target_type":"Decision"}]`
+only, per the originating Task's own explicit instruction — not left
+open for a hypothetical non-Decision use case. Extend later only if a
+real second use case names one.
+
+`ReverseLabel: "Addressed By"` follows the `supersedes`/`investigates`
+precedent: an asymmetric relation where the reverse direction ("what
+addresses this Decision?") is a real, useful question to ask from the
+original Decision's own side — e.g. surfacing a decline in its own
+context packet. `derives_from`/`depends_on`/`ships_as`/`contradicts`
+don't get one because their reverse direction isn't a naturally-asked
+question in the UI/API today.
+
+### Why this matters
+
+Unblocks cloud Task `01a076e7-3` (Decision Governance §8 decline flow):
+a new decline-Decision needs to `assert_relation` back to the original
+Decision it declines. `RelationStore.Assert` requires the kind
+pre-registered (`GetKind` lookup fails otherwise, confirmed directly by
+cloud-implementer), and registering a relation kind is Admin-gated — so
+it belongs in core's own bootstrap path, not something cloud calls ad
+hoc using an org's shared token as a side effect of one member's click.
+
+### Tests
+
+`TestRegisterOrchestrationRelationKinds_RoundTrip` — already a single
+table-driven test covering every registered kind via `store.ListKinds()`
+plus one idempotency call — gains one new entry in its existing `want`
+map. No new test function needed; the test's own `len(kinds) != len(want)`
+assertion catches a missing or duplicate registration automatically.
+`TestRegisterOrchestrationRelationKinds_UpsertError` (injected-failure
+path) needed no change — it doesn't enumerate kinds by name.
+
+### Consequences
+
+No new exported Go symbol, no signature change — purely additive
+registry data, consumed via the existing `assert_relation`/
+`propose_relation` MCP tools. 96.3% coverage (unchanged from baseline —
+no new branch introduced), `go test -race` clean, `golangci-lint`
+clean. New consumer-observable capability (a relation kind that wasn't
+previously assertable), so this is a MINOR bump rather than PATCH:
+v1.79.1 → **v1.80.0**.
+
+---

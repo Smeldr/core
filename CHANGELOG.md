@@ -23,6 +23,11 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.80.0] — 2026-09-07
+
+### Added
+- `RegisterOrchestrationRelationKinds` registers a new relation kind, `addresses` (Decision→Decision, directional, `ReverseLabel: "Addressed By"`, `Mode: "asserted"`). It models one Decision responding to another — specifically, it unblocks Smeldr Cloud's Decision Governance decline flow, where a new decline-Decision needs to assert a relation back to the original Decision it declines. `TypePairs` is deliberately scoped to Decision→Decision only for this one real, named use case — not left open for a hypothetical non-Decision use case; it can be extended later if a real second use case names one. Uses the same idempotent `UpsertKind` pattern as the seven existing kinds (`derives_from`, `depends_on`, `ships_as`, `supersedes`, `contains`, `contradicts`, `investigates`). (A301)
+
 ## [1.79.1] — 2026-09-06
 
 ### Fixed

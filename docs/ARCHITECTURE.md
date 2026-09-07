@@ -220,7 +220,9 @@ smeldr.dev/
 │                     Weighted=false, per D36; idempotent via UpsertKind (Amendment A236, M0 step 2;
 │                     contains added by A292); contradicts (Decision↔Decision, Directional=false,
 │                     symmetric, the vehicle for Workspace's own Asserted provenance) and
-│                     investigates (Task→Decision, delegation) added by A296
+│                     investigates (Task→Decision, delegation) added by A296; addresses
+│                     (Decision→Decision, a decline-Decision asserting back to the original
+│                     it declines) added by A301
 │                     Signal gains SubjectType/SubjectID/FromState/ToState/RequiredRole (db-tagged,
 │                     mirroring ProvenanceRecord's own vocabulary for the same four shared concepts,
 │                     not a parallel name) — lets a Scheduled-provenance reader build a real row from
@@ -464,15 +466,16 @@ smeldr.dev/
 │                     means no reverse phrasing established yet, not an error. CreateRelationTables
 │                     declares the column directly plus a paired EnsureColumn call (pre-existing
 │                     installs), same declare-and-migrate-together shape as A221/A264. Seeded only
-│                     for "supersedes" → "Superseded By", "contains" → "Part Of", and
-│                     "investigates" → "Investigated By" in RegisterOrchestrationRelationKinds
-│                     (orchestration.go) — other registered kinds' correct reverse phrasing isn't
-│                     established anywhere, left at the zero-value rather than guessed (Amendment
-│                     A271, T160); RegisterOrchestrationRelationKinds also registers "contradicts"
-│                     (Decision↔Decision, Directional: false, symmetric — no ReverseLabel, since
-│                     "contradicts" reads the same from either endpoint) and "investigates"
-│                     (Task→Decision, delegation) — Amendment A296, per D59's own kind-registration
-│                     pattern;
+│                     for "supersedes" → "Superseded By", "contains" → "Part Of",
+│                     "investigates" → "Investigated By", and "addresses" → "Addressed By" in
+│                     RegisterOrchestrationRelationKinds (orchestration.go) — other registered
+│                     kinds' correct reverse phrasing isn't established anywhere, left at the
+│                     zero-value rather than guessed (Amendment A271, T160); RegisterOrchestrationRelationKinds
+│                     also registers "contradicts" (Decision↔Decision, Directional: false, symmetric
+│                     — no ReverseLabel, since "contradicts" reads the same from either endpoint) and
+│                     "investigates" (Task→Decision, delegation) — Amendment A296, per D59's own
+│                     kind-registration pattern; "addresses" (Decision→Decision, Directional: true,
+│                     TypePairs scoped to Decision→Decision only) — Amendment A301;
 │                     GetBySource, GetByTarget, Delete; App.Relations/RelationStore (Amendment A159, T06);
 │                     RelationStore.provenanceStore field + setProvenanceStore (unexported), wired at
 │                     App.Handler() time when both App.Relations and App.Provenance are configured;

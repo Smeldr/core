@@ -638,6 +638,18 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			Directional:  true,
 			TypePairs:    json.RawMessage(`[{"source_type":"Task","target_type":"Decision"}]`),
 		},
+		{
+			// Scoped to Decision->Decision only, for the one real need that
+			// named it (A301): a decline-Decision asserting back to the
+			// original Decision it declines. Extend TypePairs later only if
+			// a real second use case names one.
+			TypeName:     "addresses",
+			Label:        "Addresses",
+			ReverseLabel: "Addressed By",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"}]`),
+		},
 	}
 	for _, k := range kinds {
 		if err := store.UpsertKind(ctx, k); err != nil {
