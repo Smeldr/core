@@ -240,6 +240,16 @@ smeldr.dev/
 │                     it has an outbound edge to "open") IsTerminal flag, and "resolved" is
 │                     reachable from open/in-progress/parked, all RequiredReason=true
 │                     (Amendment A261, T255)
+│                     Decision gains RuleType/Reversibility (decision-governance-model §3): RuleType
+│                     names an organization-defined authority-rank position (see RuleTypeRank,
+│                     authority.go); Reversibility holds a declared Reversibility value (authority.go).
+│                     Scope is UNCHANGED and is NOT a new field — it already fills §3's own "affected
+│                     surface" classification property (decisionScopeRoles/D34, channelColumns/A302
+│                     both already key off it); no separate Surface field was added. Neither new field
+│                     is read, ranked, or enforced anywhere yet — pure data model, Check's own wiring
+│                     at the ratification moment is a future task. EnsureDecisionClassificationColumns
+│                     (ctx, DB) error migrates a pre-A304 database via EnsureColumn, mirroring
+│                     EnsureOrchestrationSignalColumns's own A296 pattern exactly (Amendment A304)
 ├── authority.go      Rule, AuthorityStub content types embedding Node — the Authority mechanism
 │                     (decision-governance-model design doc §4): Rule is the first subtype of the
 │                     conceptual Authority supertype (Decision/Rule/Principle/Standard/Precedent);
@@ -267,6 +277,30 @@ smeldr.dev/
 │                     itself (an operational follow-up, not a Go code change); Check/Route/Propagate
 │                     query logic against these types (a sibling task's own scope, blocked on this
 │                     one landing first)
+│                     RuleType rank mechanism (decision-governance §3): CreateRuleTypeRankTable(DB)
+│                     error creates smeldr_rule_type_ranks (name TEXT PRIMARY KEY, rank INTEGER);
+│                     SetRuleTypeOrder(ctx, DB, []string) error declares the complete current
+│                     authority-rank ordering (rank = index, 0 = weakest) — a full replace, not a
+│                     merge, organization-configurable (NOT a hardcoded switch like smeldr/cloud's
+│                     own closed instanceRoleRank); RuleTypeRank(ctx, DB, name) (rank int, ok bool,
+│                     err error) — ok=false for an unregistered name, never a silent 0.
+│                     Reversibility (decision-governance §3/§7): Reversibility string-enum type
+│                     (Reversible/ConditionallyReversible/Irreversible/ReversibilityDisputed);
+│                     DestructiveOperationClass string-enum + a small, closed, hardcoded allowlist
+│                     (ClassDelete/ClassExternalCommunication/ClassFundsTransfer, all map to
+│                     Irreversible) — organization-CANNOT configure this one, unlike RuleType, per
+│                     §7's own fixed-vocabulary framing; InferReversibility(class)
+│                     (Reversibility, bool) — ok=false for any unlisted class, caller must fall back
+│                     to an explicit declaration, never assumes Reversible; ResolveReversibility
+│                     (inferred Reversibility, inferredOK bool, declared Reversibility) Reversibility
+│                     — pure function, inferred/declared disagreement → ReversibilityDisputed, never
+│                     silently overridden by either side. A 4th allowlist class from §7
+│                     ("a transition explicitly flagged irreversible in its own flow definition") is
+│                     deliberately NOT built — needs a new Transition field (state.go) + a
+│                     smeldr_transitions migration, out of this task's own file boundary. Neither
+│                     mechanism is wired into any transition/gate yet — both are pure, callable
+│                     functions; Check's own enforcement wiring is a future task's scope
+│                     (Amendment A304, decision-governance-model §3, Task 01a076e7-6)
 ├── context_packet.go ContextPacket, PacketSource, PacketAnchor, PacketBoundary, PacketOmission,
 │                     PacketItem, PacketRelation exported types; PacketAnchor/PacketItem carry
 │                     CreatedAt/UpdatedAt, read through from the underlying content's own

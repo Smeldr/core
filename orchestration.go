@@ -198,6 +198,10 @@ type Decision struct {
 	// DecisionNumber is the canonical identifier (e.g. "D22" or "A183").
 	DecisionNumber string `json:"decision_number" db:"decision_number"`
 	// Scope categorises the decision (e.g. "core", "agent", "cross-cutting").
+	// This IS decision-governance-model design §3's own "affected surface"
+	// classification property — no separate Surface field exists; Scope
+	// already fills that role (decisionScopeRoles/D34, channelColumns/A302
+	// both key off it).
 	Scope string `json:"scope"`
 	// Body is the full decision text in Markdown, including rationale.
 	Body string `json:"body" smeldr_format:"markdown"`
@@ -205,6 +209,20 @@ type Decision struct {
 	NextEvalAt time.Time `json:"next_eval_at" db:"next_eval_at"`
 	// EvalNote records the outcome of the most recent evaluation pass.
 	EvalNote string `json:"eval_note" db:"eval_note"`
+	// RuleType names this Decision's own place in the organization-defined
+	// authority-rank ordering (e.g. "design-system") — decision-governance
+	// §3. Stored as a name, never a raw integer; see [RuleTypeRank]
+	// (authority.go) for the comparison mechanism. Empty means
+	// unclassified. Not yet read, ranked, or enforced anywhere (A304) —
+	// Check's own wiring at the ratification moment is a future task.
+	RuleType string `json:"rule_type" db:"rule_type"`
+	// Reversibility is this Decision's own declared reversibility
+	// (Reversible/ConditionallyReversible/Irreversible/
+	// ReversibilityDisputed — see [Reversibility], authority.go) —
+	// decision-governance §3/§7. Empty means not yet declared and not
+	// inferable — §7's own explicit fail-closed posture: never silently
+	// assumed Reversible. Not yet enforced anywhere (A304).
+	Reversibility string `json:"reversibility"`
 }
 
 // decisionScopeRoles maps a Decision's Scope field to the role name required
@@ -431,7 +449,9 @@ func CreateOrchestrationTables(db DB) error {
 			scope           TEXT NOT NULL DEFAULT '',
 			body            TEXT NOT NULL DEFAULT '',
 			next_eval_at    TIMESTAMPTZ,
-			eval_note       TEXT NOT NULL DEFAULT ''
+			eval_note       TEXT NOT NULL DEFAULT '',
+			rule_type       TEXT NOT NULL DEFAULT '',
+			reversibility   TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_amendments (
 			id               TEXT PRIMARY KEY,
@@ -512,6 +532,26 @@ func EnsureOrchestrationSignalColumns(ctx context.Context, db DB) error {
 	for _, c := range cols {
 		if err := EnsureColumn(ctx, db, "smeldr_signals", c[0], c[1]); err != nil {
 			return fmt.Errorf("smeldr: EnsureOrchestrationSignalColumns: %w", err)
+		}
+	}
+	return nil
+}
+
+// EnsureDecisionClassificationColumns adds [Decision]'s rule_type/
+// reversibility columns to smeldr_decisions on pre-existing SQLite
+// databases that predate this Amendment (A304). Fresh installs already
+// have these columns via [CreateOrchestrationTables]'s own CREATE TABLE
+// statement; this only upgrades a database created before A304. Idempotent
+// — safe to call on every boot. Mirrors
+// [EnsureOrchestrationSignalColumns]'s exact A296 pattern.
+func EnsureDecisionClassificationColumns(ctx context.Context, db DB) error {
+	cols := [][2]string{
+		{"rule_type", "TEXT NOT NULL DEFAULT ''"},
+		{"reversibility", "TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, c := range cols {
+		if err := EnsureColumn(ctx, db, "smeldr_decisions", c[0], c[1]); err != nil {
+			return fmt.Errorf("smeldr: EnsureDecisionClassificationColumns: %w", err)
 		}
 	}
 	return nil

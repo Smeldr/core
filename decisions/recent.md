@@ -1900,3 +1900,102 @@ confirming both out-of-scope calls above and the `draft→active→retired`
 flow shape against §4's own text before implementation started.
 
 ---
+
+## A304 — Decision classification fields: RuleType, Reversibility
+
+Builds `decision-governance-model` §3's two genuinely new classification
+properties on `Decision`. **A real finding made before writing any code,
+not a guess:** §3 asks for three properties — affected surface, rule
+type, reversibility — but `Decision` already has a `Scope` field
+(`orchestration.go`: *"Scope categorises the decision (e.g. \"core\",
+\"agent\", \"cross-cutting\")"*), already load-bearing (`decisionScopeRoles`/
+D34 keys role requirements off it, `channelColumns`/A302 routes `GET
+/_events/stream` off it). That IS §3's "affected surface" property under a
+different name. No separate `Surface` field is added — adding one would
+have duplicated an axis that already exists, exactly the "collapsing
+[properties] into one flat list has already produced real confusion once"
+failure §3 itself names. `Scope` stays unrenamed (a rename is a breaking
+change to an exported field touching two other subsystems, out of this
+task's own scope). Independently verified by the architect before
+approving the plan: grepped `orchestration.go`/`module.go`/`module_test.go`
+directly rather than trusting the claim.
+
+`Decision` gains `RuleType string` and `Reversibility string` (both plain,
+untyped-at-the-struct-level fields — the actual `Reversibility` type and
+its constants live in `authority.go`, kept as a string on `Decision`
+itself the same way every other orchestration type's classification field
+is a plain string). `smeldr_decisions` CREATE TABLE gains both columns;
+new `EnsureDecisionClassificationColumns(ctx, DB) error` migrates a
+pre-A304 database, mirroring `EnsureOrchestrationSignalColumns`'s own A296
+pattern exactly.
+
+**RuleType rank mechanism** (`authority.go`) — organization-configurable,
+deliberately NOT a hardcoded switch like `smeldr/cloud`'s own closed
+`instanceRoleRank` (§3 explicitly requires the opposite for RuleType:
+vocabulary and depth are organization-defined, not fixed by the
+framework). New table `smeldr_rule_type_ranks` (`name TEXT PRIMARY KEY,
+rank INTEGER NOT NULL`). `CreateRuleTypeRankTable(DB) error`.
+`SetRuleTypeOrder(ctx, DB, names []string) error` declares the complete
+current ordering (rank = index, 0 = weakest) — a full replace: a name
+absent from a later call loses its rank entirely, not accumulated,
+matching §3's own framing of "the" current ordering rather than a growing
+set. `RuleTypeRank(ctx, DB, name string) (rank int, ok bool, err error)` —
+`ok=false` for an unregistered name, never a silent `0`, which would
+wrongly rank an unclassified name as the weakest registered one instead of
+"unknown."
+
+**Reversibility** (`authority.go`) — `type Reversibility string` with four
+constants: `Reversible`, `ConditionallyReversible`, `Irreversible`,
+`ReversibilityDisputed`. `type DestructiveOperationClass string` plus a
+small, closed, hardcoded allowlist (§7 — NOT organization-configurable,
+unlike RuleType: §7 names a fixed, universal set of destructive act
+shapes): `ClassDelete`, `ClassExternalCommunication`, `ClassFundsTransfer`,
+all mapping to `Irreversible`. `InferReversibility(class)
+(Reversibility, bool)` — `ok=false` for any class not on the allowlist,
+caller must fall back to requiring an explicit declaration, never assumes
+`Reversible` (§7's own fail-closed-on-the-unknown posture).
+`ResolveReversibility(inferred Reversibility, inferredOK bool, declared
+Reversibility) Reversibility` — a pure function: inferred and declared
+disagree → `ReversibilityDisputed`, never silently overridden by either
+side; declared alone → declared; inferred alone → inferred; neither →
+`""` (never a default toward `Reversible`).
+
+**§7 names a fourth allowlist class, deliberately NOT built here:** "a
+transition explicitly flagged irreversible in its own flow definition."
+This needs a new field on the core `Transition` struct (`state.go`) plus a
+matching `smeldr_transitions` migration — a materially different kind of
+change (a cross-cutting schema change affecting every existing `StateFlow`)
+from adding two fields to `Decision`, correctly its own future follow-up
+per the architect's own plan review.
+
+**Neither mechanism is wired into any transition or gate.**
+`RuleTypeRank`/`InferReversibility`/`ResolveReversibility` are pure,
+callable functions — nothing today ranks a real `Decision.RuleType`
+against another, and nothing blocks a transition on a missing
+`Reversibility` declaration. §4's own Check mechanism (wired at the
+ratification moment) is Task `01a076e6`'s scope, not this one's. A
+developer setting these two fields today via the existing generic
+`update_decision` MCP tool sees no different behavior from setting any
+other unused string field — the architect's own reasoning for deferring
+this Amendment's devlog to bundle with `01a076e6`, once Check enforcement
+makes the mechanism actually observable.
+
+15 new tests (`orchestration_test.go`: classification-field embedding,
+the `EnsureDecisionClassificationColumns` A296-pattern triad, one
+`CreateOrchestrationTables` extension; `authority_test.go`: RuleType rank
+round-trip/replace-drops-stale/unregistered/DB-error-paths, Reversibility
+allowlist/unknown-class/dispute-resolution table-driven tests). Every new
+function 100% covered; package-wide 96.3%. `go test -race ./...` clean;
+`golangci-lint run ./...` clean.
+
+No exported symbols removed or changed elsewhere. MINOR bump (new
+exported fields/types/functions, fully additive): v1.82.0 → v1.83.0.
+Level 2 amendment.
+
+Task: `01a076e7-6` (band=core, part of Goal `decision-governance-model`).
+Plan reviewed and approved directly by the architect in the plan file,
+who independently verified the `Scope`-is-Surface finding against source
+before approving, and confirmed both scope-narrowing decisions (no
+`Transition.Irreversible` bundled, devlog deferred to `01a076e6`).
+
+---

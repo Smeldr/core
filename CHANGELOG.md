@@ -23,6 +23,11 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.83.0] — 2026-09-08
+
+### Added
+- `Decision` gains `RuleType` and `Reversibility` fields (decision-governance-model §3). `Scope` is unchanged and is NOT replaced by a new `Surface` field — `Scope` already fills that classification role (used by `decisionScopeRoles`/D34 and `channelColumns`/A302). New in `authority.go`: a RuleType rank mechanism (`CreateRuleTypeRankTable`, `SetRuleTypeOrder`, `RuleTypeRank`) — an organization-configurable ordered list, not a hardcoded switch — and `Reversibility` (a string-enum type plus a small, closed, hardcoded allowlist of destructive operation classes, `InferReversibility`, and `ResolveReversibility` for reconciling an inferred value against a declared one, fail-closed on disagreement). Both mechanisms are pure/data-only — nothing reads, ranks, or enforces either field yet; Check's own enforcement wiring at the ratification moment is a future task. (A304)
+
 ## [1.82.0] — 2026-09-08
 
 ### Added

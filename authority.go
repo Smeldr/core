@@ -4,7 +4,9 @@ package smeldr
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 )
@@ -202,5 +204,141 @@ func authorityStubFlow() StateFlow {
 			{From: "stub", To: "converted"},
 			{From: "stub", To: "retired"},
 		},
+	}
+}
+
+// — RuleType rank mechanism (decision-governance design §3) ————————————————
+
+// CreateRuleTypeRankTable creates smeldr_rule_type_ranks if it does not
+// already exist. Call once at application startup, alongside
+// [CreateAuthorityTables].
+func CreateRuleTypeRankTable(db DB) error {
+	_, err := db.ExecContext(context.Background(), `
+		CREATE TABLE IF NOT EXISTS smeldr_rule_type_ranks (
+			name TEXT PRIMARY KEY,
+			rank INTEGER NOT NULL
+		)`)
+	return err
+}
+
+// SetRuleTypeOrder declares the complete, current authority-rank ordering
+// for RuleType values (decision-governance §3), from weakest to strongest
+// authority — rank equals index in names (0 = weakest). Vocabulary and
+// depth are organization-defined, not hardcoded by this function, unlike
+// e.g. smeldr/cloud's own closed instanceRoleRank switch.
+//
+// This is a full replace, not a merge: a name registered by a previous
+// call that is absent from names loses its registered rank entirely
+// ([RuleTypeRank] then returns ok=false for it) — matching §3's own
+// framing that the organization declares "the" current ordering, not an
+// accumulating set. Not wrapped in a transaction (same accepted risk
+// profile as [RegisterOrchestrationRelationKinds]'s own per-item loop) —
+// a failure partway through leaves a partial ordering, surfaced as an
+// error to the caller, never silently.
+func SetRuleTypeOrder(ctx context.Context, db DB, names []string) error {
+	if _, err := db.ExecContext(ctx, `DELETE FROM smeldr_rule_type_ranks`); err != nil {
+		return fmt.Errorf("smeldr: SetRuleTypeOrder: clear existing order: %w", err)
+	}
+	for rank, name := range names {
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO smeldr_rule_type_ranks (name, rank) VALUES ($1, $2)`,
+			name, rank,
+		); err != nil {
+			return fmt.Errorf("smeldr: SetRuleTypeOrder: insert %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// RuleTypeRank looks up name's current authority rank. ok is false when
+// name is not currently registered — never a silent 0, which would
+// wrongly rank an unclassified name as the single weakest registered one
+// instead of "unknown."
+func RuleTypeRank(ctx context.Context, db DB, name string) (rank int, ok bool, err error) {
+	row := db.QueryRowContext(ctx,
+		`SELECT rank FROM smeldr_rule_type_ranks WHERE name = $1`, name)
+	if err := row.Scan(&rank); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("smeldr: RuleTypeRank: %w", err)
+	}
+	return rank, true, nil
+}
+
+// — Reversibility (decision-governance design §3/§7) ————————————————————————
+
+// Reversibility is a [Decision]'s own declared or inferred reversibility —
+// not binary. The zero value "" means neither declared nor inferable,
+// never treated as [Reversible] by default (§7's own explicit
+// fail-closed-on-the-unknown posture).
+type Reversibility string
+
+const (
+	// Reversible means the actual world can be fully restored.
+	Reversible Reversibility = "reversible"
+	// ConditionallyReversible means restoration is technically possible
+	// but carries a real cost or loss.
+	ConditionallyReversible Reversibility = "conditionally-reversible"
+	// Irreversible means the actual world cannot be restored.
+	Irreversible Reversibility = "irreversible"
+	// ReversibilityDisputed marks a declared value that disagrees with an
+	// inferred one — never silently overridden by either side (§7). See
+	// [ResolveReversibility].
+	ReversibilityDisputed Reversibility = "reversibility-disputed"
+)
+
+// DestructiveOperationClass is one entry in reversibility's own small,
+// closed, hardcoded allowlist (§7) — audited by editing this list
+// directly, not organization-configurable like RuleType: §7 names a
+// fixed, universal set of destructive act shapes, not an org-specific
+// vocabulary.
+type DestructiveOperationClass string
+
+const (
+	ClassDelete                DestructiveOperationClass = "delete"
+	ClassExternalCommunication DestructiveOperationClass = "external-communication"
+	ClassFundsTransfer         DestructiveOperationClass = "funds-transfer"
+)
+
+// destructiveOperationReversibility is the allowlist itself — each listed
+// class is inferred with no friction (§7); anything not present here has
+// no default and must fall back to an explicit declaration.
+var destructiveOperationReversibility = map[DestructiveOperationClass]Reversibility{
+	ClassDelete:                Irreversible,
+	ClassExternalCommunication: Irreversible,
+	ClassFundsTransfer:         Irreversible,
+}
+
+// InferReversibility looks up class's own allowlisted reversibility. ok is
+// false for any class not on the allowlist — the caller must fall back to
+// requiring an explicit declaration (§7), never assume [Reversible].
+//
+// §7 names a fourth class, "a transition explicitly flagged irreversible
+// in its own flow definition" — deliberately not built here: it requires
+// a new field on the core [Transition] struct plus a matching
+// smeldr_transitions migration, a cross-file schema change beyond this
+// allowlist's own scope, named as its own future follow-up.
+func InferReversibility(class DestructiveOperationClass) (value Reversibility, ok bool) {
+	value, ok = destructiveOperationReversibility[class]
+	return value, ok
+}
+
+// ResolveReversibility reconciles an inferred value (from
+// [InferReversibility]) against a declared one (e.g. [Decision].
+// Reversibility as written by whoever authored it). Pure function — not
+// wired into any transition or gate; enforcement (blocking a transition
+// on a missing declaration) is decision-governance §4's own Check
+// mechanism, a future task's scope, not this function's.
+func ResolveReversibility(inferred Reversibility, inferredOK bool, declared Reversibility) Reversibility {
+	switch {
+	case inferredOK && declared != "" && declared != inferred:
+		return ReversibilityDisputed
+	case declared != "":
+		return declared
+	case inferredOK:
+		return inferred
+	default:
+		return ""
 	}
 }

@@ -45,6 +45,27 @@ func TestOrchestrationTypes_embedNode(t *testing.T) {
 	})
 }
 
+// TestDecisionType_classificationFields verifies Decision carries the
+// decision-governance-model §3 classification fields — RuleType and
+// Reversibility are genuinely new; Scope is unchanged and already fills
+// §3's own "affected surface" role (A304 — no separate Surface field).
+func TestDecisionType_classificationFields(t *testing.T) {
+	d := Decision{
+		Scope:         "core",
+		RuleType:      "design-system",
+		Reversibility: string(Irreversible),
+	}
+	if d.Scope != "core" {
+		t.Errorf("Scope = %q, want %q", d.Scope, "core")
+	}
+	if d.RuleType != "design-system" {
+		t.Errorf("RuleType = %q, want %q", d.RuleType, "design-system")
+	}
+	if d.Reversibility != string(Irreversible) {
+		t.Errorf("Reversibility = %q, want %q", d.Reversibility, Irreversible)
+	}
+}
+
 // TestSignalFlow_definition verifies the signal-protocol flow has the expected
 // states and transitions without requiring a database.
 func TestSignalFlow_definition(t *testing.T) {
@@ -1053,6 +1074,82 @@ func TestEnsureOrchestrationSignalColumns_AlterFails(t *testing.T) {
 	// smeldr_signals table deliberately not created.
 	if err := EnsureOrchestrationSignalColumns(context.Background(), db); err == nil {
 		t.Error("expected error when smeldr_signals does not exist, got nil")
+	}
+}
+
+// — EnsureDecisionClassificationColumns (A304) ————————————————————————————————
+
+func TestEnsureDecisionClassificationColumns_AddsColumns(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	// Old schema, pre-A304: smeldr_decisions without rule_type/reversibility.
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_decisions (
+			id              TEXT PRIMARY KEY,
+			slug            TEXT NOT NULL UNIQUE,
+			status          TEXT NOT NULL DEFAULT 'draft',
+			created_at      TIMESTAMPTZ NOT NULL,
+			updated_at      TIMESTAMPTZ NOT NULL,
+			decision_number TEXT NOT NULL DEFAULT '',
+			scope           TEXT NOT NULL DEFAULT '',
+			body            TEXT NOT NULL DEFAULT '',
+			eval_note       TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		t.Fatalf("create old-schema table: %v", err)
+	}
+
+	if err := EnsureDecisionClassificationColumns(ctx, db); err != nil {
+		t.Fatalf("EnsureDecisionClassificationColumns: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_decisions
+			(id, slug, created_at, updated_at, rule_type, reversibility)
+		VALUES ('1', 'test', '2025-01-01', '2025-01-01', 'design-system', 'irreversible')`,
+	); err != nil {
+		t.Errorf("structured columns should exist after migration, got: %v", err)
+	}
+}
+
+func TestEnsureDecisionClassificationColumns_Idempotent(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	// Fresh install already has the columns via CREATE TABLE — a second
+	// migration call over an already-current schema must still succeed.
+	if err := EnsureDecisionClassificationColumns(ctx, db); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := EnsureDecisionClassificationColumns(ctx, db); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+}
+
+func TestEnsureDecisionClassificationColumns_AlterFails(t *testing.T) {
+	db := newSQLiteDB(t)
+	// smeldr_decisions table deliberately not created.
+	if err := EnsureDecisionClassificationColumns(context.Background(), db); err == nil {
+		t.Error("expected error when smeldr_decisions does not exist, got nil")
+	}
+}
+
+// TestCreateOrchestrationTables_DecisionClassificationColumns verifies
+// smeldr_decisions accepts rule_type/reversibility inserts on a fresh
+// install (A304).
+func TestCreateOrchestrationTables_DecisionClassificationColumns(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_decisions
+			(id, slug, created_at, updated_at, rule_type, reversibility)
+		VALUES ('1', 'test', '2025-01-01', '2025-01-01', 'design-system', 'irreversible')`,
+	); err != nil {
+		t.Errorf("rule_type/reversibility columns should exist on fresh install, got: %v", err)
 	}
 }
 

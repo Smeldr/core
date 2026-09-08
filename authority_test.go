@@ -4,6 +4,7 @@ package smeldr
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 )
@@ -218,5 +219,188 @@ func TestRegisterAuthorityRelationKinds_UpsertError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `"materializes"`) {
 		t.Errorf("error = %q, want it to name the failing kind %q", err.Error(), "materializes")
+	}
+}
+
+// — RuleType rank mechanism (decision-governance §3, A304) ————————————————————
+
+func TestCreateRuleTypeRankTable(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateRuleTypeRankTable(db); err != nil {
+		t.Fatalf("CreateRuleTypeRankTable: %v", err)
+	}
+	row := db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM smeldr_rule_type_ranks")
+	var n int
+	if err := row.Scan(&n); err != nil {
+		t.Errorf("table not queryable: %v", err)
+	}
+}
+
+func TestCreateRuleTypeRankTable_DBError(t *testing.T) {
+	db := newSQLiteDB(t)
+	failing := &execFailDB{DB: db, failOn: "smeldr_rule_type_ranks"}
+	if err := CreateRuleTypeRankTable(failing); err == nil {
+		t.Error("expected error from failing DB, got nil")
+	}
+}
+
+func TestSetRuleTypeOrder_RoundTrip(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateRuleTypeRankTable(db); err != nil {
+		t.Fatalf("CreateRuleTypeRankTable: %v", err)
+	}
+	ctx := context.Background()
+	names := []string{"precedent", "design-system", "architecture", "constitution"}
+	if err := SetRuleTypeOrder(ctx, db, names); err != nil {
+		t.Fatalf("SetRuleTypeOrder: %v", err)
+	}
+	for wantRank, name := range names {
+		rank, ok, err := RuleTypeRank(ctx, db, name)
+		if err != nil {
+			t.Fatalf("RuleTypeRank(%q): %v", name, err)
+		}
+		if !ok {
+			t.Fatalf("RuleTypeRank(%q): ok = false, want true", name)
+		}
+		if rank != wantRank {
+			t.Errorf("RuleTypeRank(%q) = %d, want %d", name, rank, wantRank)
+		}
+	}
+}
+
+func TestSetRuleTypeOrder_ReplaceDropsStale(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateRuleTypeRankTable(db); err != nil {
+		t.Fatalf("CreateRuleTypeRankTable: %v", err)
+	}
+	ctx := context.Background()
+	if err := SetRuleTypeOrder(ctx, db, []string{"precedent", "design-system"}); err != nil {
+		t.Fatalf("first SetRuleTypeOrder: %v", err)
+	}
+	if err := SetRuleTypeOrder(ctx, db, []string{"architecture", "constitution"}); err != nil {
+		t.Fatalf("second SetRuleTypeOrder: %v", err)
+	}
+	if _, ok, err := RuleTypeRank(ctx, db, "precedent"); err != nil || ok {
+		t.Errorf(`RuleTypeRank("precedent") after replace: ok=%v, err=%v, want ok=false`, ok, err)
+	}
+	rank, ok, err := RuleTypeRank(ctx, db, "architecture")
+	if err != nil || !ok || rank != 0 {
+		t.Errorf(`RuleTypeRank("architecture") after replace = (%d, %v, %v), want (0, true, nil)`, rank, ok, err)
+	}
+}
+
+func TestSetRuleTypeOrder_DBError(t *testing.T) {
+	t.Run("delete fails", func(t *testing.T) {
+		db := newSQLiteDB(t)
+		if err := CreateRuleTypeRankTable(db); err != nil {
+			t.Fatalf("CreateRuleTypeRankTable: %v", err)
+		}
+		failing := &execFailDB{DB: db, failOn: "DELETE FROM smeldr_rule_type_ranks"}
+		if err := SetRuleTypeOrder(context.Background(), failing, []string{"a"}); err == nil {
+			t.Error("expected error when DELETE fails, got nil")
+		}
+	})
+	t.Run("insert fails", func(t *testing.T) {
+		db := newSQLiteDB(t)
+		if err := CreateRuleTypeRankTable(db); err != nil {
+			t.Fatalf("CreateRuleTypeRankTable: %v", err)
+		}
+		failing := &execFailDB{DB: db, failOn: "INSERT INTO smeldr_rule_type_ranks"}
+		if err := SetRuleTypeOrder(context.Background(), failing, []string{"a"}); err == nil {
+			t.Error("expected error when INSERT fails, got nil")
+		}
+	})
+}
+
+func TestRuleTypeRank_Unregistered(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateRuleTypeRankTable(db); err != nil {
+		t.Fatalf("CreateRuleTypeRankTable: %v", err)
+	}
+	rank, ok, err := RuleTypeRank(context.Background(), db, "never-set")
+	if err != nil {
+		t.Fatalf("RuleTypeRank: %v", err)
+	}
+	if ok {
+		t.Error("ok = true, want false for an unregistered name")
+	}
+	if rank != 0 {
+		t.Errorf("rank = %d, want 0 (zero value) alongside ok=false", rank)
+	}
+}
+
+// rankQueryErrDB makes QueryRowContext.Scan fail with a non-ErrNoRows error.
+type rankQueryErrDB struct{}
+
+func (r *rankQueryErrDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, nil
+}
+func (r *rankQueryErrDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, nil
+}
+func (r *rankQueryErrDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
+	conn := &errRowConn{}
+	return sql.OpenDB(conn).QueryRowContext(ctx, "SELECT v")
+}
+
+func TestRuleTypeRank_DBError(t *testing.T) {
+	_, ok, err := RuleTypeRank(context.Background(), &rankQueryErrDB{}, "anything")
+	if err == nil {
+		t.Fatal("want error from a scan failure, got nil")
+	}
+	if ok {
+		t.Error("ok = true, want false alongside an error")
+	}
+}
+
+// — Reversibility (decision-governance §3/§7, A304) ————————————————————————————
+
+func TestInferReversibility_AllowlistedClasses(t *testing.T) {
+	cases := []DestructiveOperationClass{ClassDelete, ClassExternalCommunication, ClassFundsTransfer}
+	for _, class := range cases {
+		t.Run(string(class), func(t *testing.T) {
+			value, ok := InferReversibility(class)
+			if !ok {
+				t.Fatalf("InferReversibility(%q): ok = false, want true", class)
+			}
+			if value != Irreversible {
+				t.Errorf("InferReversibility(%q) = %q, want %q", class, value, Irreversible)
+			}
+		})
+	}
+}
+
+func TestInferReversibility_UnknownClass(t *testing.T) {
+	value, ok := InferReversibility(DestructiveOperationClass("some-unlisted-class"))
+	if ok {
+		t.Error("ok = true, want false for an unlisted class")
+	}
+	if value != "" {
+		t.Errorf("value = %q, want empty alongside ok=false", value)
+	}
+}
+
+func TestResolveReversibility(t *testing.T) {
+	tests := []struct {
+		name       string
+		inferred   Reversibility
+		inferredOK bool
+		declared   Reversibility
+		want       Reversibility
+	}{
+		{"agree", Irreversible, true, Irreversible, Irreversible},
+		{"disagree", Irreversible, true, Reversible, ReversibilityDisputed},
+		{"declared only", "", false, ConditionallyReversible, ConditionallyReversible},
+		{"inferred only", Irreversible, true, "", Irreversible},
+		{"neither", "", false, "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveReversibility(tt.inferred, tt.inferredOK, tt.declared)
+			if got != tt.want {
+				t.Errorf("ResolveReversibility(%q, %v, %q) = %q, want %q",
+					tt.inferred, tt.inferredOK, tt.declared, got, tt.want)
+			}
+		})
 	}
 }
