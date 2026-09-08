@@ -1757,6 +1757,59 @@ func TestRegisterFlow_persistsLockedColumn(t *testing.T) {
 	}
 }
 
+// — EnsureStateLockedColumn (core-orchestration-column-migrations-not-wired) ——————
+// Mirrors TestEnsureAmendmentBodyColumn_*'s exact three-case shape (orchestration_test.go).
+
+func TestEnsureStateLockedColumn_AddsColumn(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	// Old schema, pre-A306: smeldr_states without locked.
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_states (
+			id                 TEXT NOT NULL PRIMARY KEY,
+			flow_id            TEXT NOT NULL,
+			name               TEXT NOT NULL,
+			is_initial         BOOLEAN NOT NULL DEFAULT FALSE,
+			is_terminal        BOOLEAN NOT NULL DEFAULT FALSE,
+			suppresses_signals BOOLEAN NOT NULL DEFAULT FALSE,
+			UNIQUE(flow_id, name)
+		)`); err != nil {
+		t.Fatalf("create old-schema table: %v", err)
+	}
+
+	if err := EnsureStateLockedColumn(ctx, db); err != nil {
+		t.Fatalf("EnsureStateLockedColumn: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_states (id, flow_id, name, locked) VALUES ('1', 'f1', 'ratified', TRUE)`,
+	); err != nil {
+		t.Errorf("locked column should exist after migration, got: %v", err)
+	}
+}
+
+func TestEnsureStateLockedColumn_Idempotent(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	if err := EnsureStateLockedColumn(ctx, db); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := EnsureStateLockedColumn(ctx, db); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+}
+
+func TestEnsureStateLockedColumn_AlterFails(t *testing.T) {
+	db := newSQLiteDB(t)
+	// smeldr_states table deliberately not created.
+	if err := EnsureStateLockedColumn(context.Background(), db); err == nil {
+		t.Error("expected error when smeldr_states does not exist, got nil")
+	}
+}
+
 // — notifyAfter suppression integration tests ——————————————————————————————————
 
 // suppressedFlow registers a flow for "testPost" where "published" has

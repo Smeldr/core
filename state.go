@@ -288,6 +288,18 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	return validateFlowItems(ctx, db, flow)
 }
 
+// EnsureStateLockedColumn adds State.Locked's locked column to smeldr_states on
+// pre-existing SQLite databases that predate this column (A306). Fresh installs
+// already have the column via CreateStateFlowTables's own CREATE TABLE statement;
+// this only upgrades a database created before A306. Idempotent — safe to call on
+// every boot. Same one-column EnsureColumn pattern as EnsureAmendmentBodyColumn (A305).
+func EnsureStateLockedColumn(ctx context.Context, db DB) error {
+	if err := EnsureColumn(ctx, db, "smeldr_states", "locked", "BOOLEAN NOT NULL DEFAULT FALSE"); err != nil {
+		return fmt.Errorf("smeldr: EnsureStateLockedColumn: %w", err)
+	}
+	return nil
+}
+
 // validateFlowItems checks that all existing items of flow.TypeName are in a
 // state defined by flow.States. Returns an error listing unknown states if any
 // are found.

@@ -227,6 +227,18 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.EnsureOrchestrationSignalColumns(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure orchestration signal columns: %w", err)
 		}
+		// A304/A305/A306: additive migrations for pre-existing databases, same shape as
+		// EnsureOrchestrationSignalColumns above — never wired into boot until now (found
+		// live 2026-09-08, core-orchestration-column-migrations-not-wired).
+		if err := smeldr.EnsureDecisionClassificationColumns(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure decision classification columns: %w", err)
+		}
+		if err := smeldr.EnsureAmendmentBodyColumn(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure amendment body column: %w", err)
+		}
+		if err := smeldr.EnsureStateLockedColumn(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure state locked column: %w", err)
+		}
 		smeldr.RegisterOrchestrationTypes(app, db)
 	}
 

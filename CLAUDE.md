@@ -554,6 +554,16 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       `smeldr.Config` fields, or `smeldr_format`/`smeldr_description` tag values: verify all
       code examples in `AGENTS.md` are still accurate before committing.
 - [ ] If this commit implements an Amendment: the live record exists (`create_amendment`) with `body` fully populated, the number was checked against both the frozen `DECISIONS.md` index and `list_amendments`, and it is transitioned through to `merged`. Verify with `get_amendment`.
+- [ ] **If this commit adds a column to an existing table via an `Ensure*Column`-style
+      migration:** the new `Ensure*` function's call site is also added to
+      `example/server/main.go`'s boot path in the *same* commit — not left for later. A
+      passing test against a freshly-created SQLite test database proves nothing about a
+      pre-existing database that predates the column: `CREATE TABLE IF NOT EXISTS` is a
+      no-op there, and only the boot-path `Ensure*` call actually upgrades it. (Incident,
+      2026-09-08: `EnsureDecisionClassificationColumns` (A304) and
+      `EnsureAmendmentBodyColumn` (A305) both shipped with passing tests and zero
+      non-test call sites for two full Amendments before `EnsureStateLockedColumn` (A306)
+      made the gap visible on `process.smeldr.dev`'s actual boot log.)
 - [ ] **Stability map**: if a shipped feature moves an area between tiers (e.g. SQLRepo graduates from Dogfooding to Stable, or a new module enters as Experimental), update the stability map in `README.md` in the same commit.
 - [ ] **Devlog draft** — write a draft to
       `C:\Users\peter\Documents\Code\Smeldr\common\content\drafts\devlog\`
