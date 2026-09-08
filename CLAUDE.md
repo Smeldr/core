@@ -728,6 +728,17 @@ the plan file means squash to main and push immediately, in the same step as the
 `commit-reviewing → done` transition (see "Branching and commit timestamps"). For
 direct-commit work with no feature branch, push follows the commit in the same step.
 
+**Tag/release is a separate, later act — never bundled into this step.** "Commit
+approval" and "push follows the commit" above cover exactly one thing: getting the
+code change itself onto `main` on GitHub. It does **not** authorize tagging or
+releasing, even when the commit changes `README.md`'s version line. Tag/release
+requires its own separate step, gated on its own explicit `release-approved` signal
+(sent by the architect, never inferred from `commit-approved`) — which itself only
+fires after Peter's own direct words in chat approve *that specific version* (see
+"Release tagging" below), never inferred from the commit-approval that just landed,
+and never satisfied by an earlier version's approval. If in doubt, stop after the
+push and ask.
+
 Write the plan for any docs task to:
 `C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md`
 
@@ -744,9 +755,15 @@ smeldr.dev/cli commands ship in the same release — not as a follow-up.
 ---
 
 ## Branching and commit timestamps
-All milestone work happens on a local feature branch. Commits on the branch are
-free checkpoints — their timestamps do not matter and the branch is never pushed
-to GitHub unless explicitly requested.
+All milestone work — and, per Level 2 classification (see "Change classification"
+above), all Amendment-scoped work, not only a classic `Milestone{N}_BACKLOG.md` step —
+happens on a local feature branch. A direct commit to `main` with no feature branch is
+reserved for Level 0/1 work only (cosmetic changes, micro-amendments with no
+cross-file consequences). If a change touches an exported symbol, an interface, or a
+function signature, affects route/middleware behaviour, or has consequences in more
+than one file, it gets a feature branch — full stop, not a judgment call made per
+instance. Commits on the branch are free checkpoints — their timestamps do not matter
+and the branch is never pushed to GitHub unless explicitly requested.
 Branch naming: feature/m{N}-{slug} — e.g. feature/m11-webhooks.
 When the architect's written approval appears in the plan file and you transition
 `commit-reviewing → done`, squash the branch to main.
@@ -758,7 +775,10 @@ When the architect's written approval appears in the plan file and you transitio
     git branch -d feature/m{N}-{slug}
 The squash commit timestamp = push timestamp. This is the only commit that
 appears on GitHub. "Commit approved" means: squash to main now. Push follows
-immediately after — do not wait for a separate push instruction.
+immediately after — do not wait for a separate push instruction. The squash-and-push
+above still does not authorize tag/release — that remains the separate step, gated on
+its own `release-approved` signal, described in "Push follows commit approval" and
+"Release tagging."
 This applies to all three repos (smeldr/core, smeldr.dev/mcp, smeldr.dev/cli) when a
 milestone touches multiple repos. Each repo gets its own squash commit.
 
@@ -787,6 +807,19 @@ and v1.60.1 shipped on `main` untagged for a full day before this rule
 existed in writing — `TraceLineage` and `RegisterOrchestrationRelationKinds`
 were unreachable to every consumer of the module in that window.
 Backfilled and closed 2026-08-08; this rule exists so it does not recur.)
+
+**This rule governs *whether* a version-line-changing commit eventually gets tagged
+(always, no exceptions) — it does not by itself authorize *when*.** The *when* is
+always the separate step in "Push follows commit approval" above: an explicit
+`release-approved` signal, sent by the architect only after Peter's own direct words
+in chat approve that specific version. A commit landing on `main` with a changed
+version line is a trigger to *ask*, not a trigger to tag. (Incident, 2026-09-08: all
+four Amendments recorded in one session (A303-A306, v1.82.0-v1.85.0) were tagged and
+released immediately after each commit-approval without this carve-out written down
+anywhere in `CLAUDE.md` itself — ad-hoc "wait for approval" language in that
+session's own plan-file responses is not a substitute for the document saying so.
+Peter's own decision: accept the four already-published releases as done, fix the
+document going forward.)
 - Standalone-module tagging follows its own rule below — unaffected by
   this section, since standalone modules have their own `CHANGELOG.md`
   and no `README.md` version line of core's own to key off.
