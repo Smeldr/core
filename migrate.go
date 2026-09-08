@@ -38,6 +38,7 @@ func CreateStateFlowTables(db DB) error {
 			is_initial         BOOLEAN NOT NULL DEFAULT FALSE,
 			is_terminal        BOOLEAN NOT NULL DEFAULT FALSE,
 			suppresses_signals BOOLEAN NOT NULL DEFAULT FALSE,
+			locked             BOOLEAN NOT NULL DEFAULT FALSE,
 			UNIQUE(flow_id, name)
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_transitions (
@@ -227,7 +228,7 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 	}
 	for _, s := range states {
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_states(id, flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES ($1, $2, $3, $4, $5, FALSE) ON CONFLICT (flow_id, name) DO NOTHING`,
+			`INSERT INTO smeldr_states(id, flow_id, name, is_initial, is_terminal, suppresses_signals, locked) VALUES ($1, $2, $3, $4, $5, FALSE, FALSE) ON CONFLICT (flow_id, name) DO NOTHING`,
 			NewID(), flowID, s.name, s.initial, s.terminal,
 		); err != nil {
 			return fmt.Errorf("smeldr: migrateStateFlows: seed state %s: %w", s.name, err)

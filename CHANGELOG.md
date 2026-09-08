@@ -23,6 +23,17 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.85.0] — 2026-09-08
+
+### Added
+- `State.Locked` field (alongside `IsInitial`/`IsTerminal`/`SuppressesSignals`): marks a state content-immutable. An item currently in a locked state rejects any field-content edit — `MCPUpdate`, the PATCH route, the PUT full-replace route (when status is unchanged), and `DynamicTypeRepo.UpdateFields` — with an error wrapping `ErrConflict`, regardless of role (a state gate, no override). Transitions are unaffected: `TransitionItem`/`MCPTransition` continue to move a locked item between states exactly as declared in the flow, still governed only by the edge's own `RequiredRole`/`Strict`/`RequiredReason`. Independent of `IsTerminal` — a state can be locked while still having legal outbound transitions (`Decision`'s `ratified`, which moves on to `pending-re-evaluation`/`superseded` but never again accepts a content edit). New `smeldr_states.locked` column, persisted by `RegisterFlow`.
+- `Decision` states `ratified`, `pending-re-evaluation`, `superseded`, `archived` are now `Locked` (only `proposed` stays mutable); `Amendment` states `merged`/`rejected` are now `Locked` (`committed` stays mutable through to `merged`, matching D67's create-then-drive-through-in-one-action pattern). Closes a real governance gap: no content-gating existed anywhere in the write path for any type before this release — only transition-gating. Directly closes the incident that surfaced it: two content edits reached a ratified Decision's `Body` on 2026-09-07 with nothing blocking either write. (Amendment decision-content-mutable-after-ratification)
+
+### Changed
+- `update_decision`/`update_amendment` (and the generic `update_<type>` MCP tools) now reject a content edit once the item is in a locked state — see above. This is a consumer-visible behaviour change: retrying the same edit will never succeed; the correct action is to create a new item that supersedes the locked one, matching `DECISIONS.md`'s own documented immutability model.
+
+---
+
 ## [1.84.0] — 2026-09-08
 
 ### Added

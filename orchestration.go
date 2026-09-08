@@ -829,10 +829,15 @@ func orchDecisionFlow() StateFlow {
 		TypeName: "Decision",
 		States: []State{
 			{Name: "proposed", IsInitial: true},
-			{Name: "ratified"},
-			{Name: "pending-re-evaluation"},
-			{Name: "superseded", IsTerminal: true},
-			{Name: "archived", IsTerminal: true},
+			// Locked from "ratified" onward (Amendment
+			// decision-content-mutable-after-ratification): once a Decision is
+			// ratified, DECISIONS.md's own documented model requires a new
+			// entry that supersedes it, never an in-place content edit — only
+			// "proposed" (pre-ratification draft) stays mutable.
+			{Name: "ratified", Locked: true},
+			{Name: "pending-re-evaluation", Locked: true},
+			{Name: "superseded", IsTerminal: true, Locked: true},
+			{Name: "archived", IsTerminal: true, Locked: true},
 		},
 		Transitions: []Transition{
 			// D34/D40: ratify and supersede require the "admin" role,
@@ -882,8 +887,14 @@ func orchAmendmentFlow() StateFlow {
 			{Name: "in-progress"},
 			{Name: "commit-ready"},
 			{Name: "committed"},
-			{Name: "merged", IsTerminal: true},
-			{Name: "rejected", IsTerminal: true},
+			// Locked at both terminal states only (Amendment
+			// decision-content-mutable-after-ratification): "committed"
+			// stays mutable through to "merged" to match D67's own
+			// create-then-drive-through-in-one-action pattern for Amendment
+			// records — locking it would risk blocking the same action that
+			// authors the record.
+			{Name: "merged", IsTerminal: true, Locked: true},
+			{Name: "rejected", IsTerminal: true, Locked: true},
 		},
 		Transitions: []Transition{
 			{From: "scoped", To: "in-progress"},

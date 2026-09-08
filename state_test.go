@@ -1603,6 +1603,160 @@ func (d *suppressBothFlowsFailDB) QueryRowContext(ctx context.Context, query str
 	return sql.OpenDB(&guardRowConn{noRow: true}).QueryRowContext(ctx, "SELECT v")
 }
 
+// — isStateLocked ————————————————————————————————————————————————————————————
+// Mirrors the TestSuppressesSignals_* set above field-for-field: isStateLocked
+// is a straight copy of suppressesSignals' own fail-open shape, one column
+// swapped.
+
+func TestIsStateLocked_nilDB(t *testing.T) {
+	ctx := context.Background()
+	if isStateLocked(ctx, nil, "Decision", "ratified") {
+		t.Error("nil db: want false, got true")
+	}
+}
+
+func TestIsStateLocked_nonSQLite(t *testing.T) {
+	ctx := context.Background()
+	db := &failOnNthExecDB{failAt: 999}
+	if isStateLocked(ctx, db, "Decision", "ratified") {
+		t.Error("non-SQLite: want false, got true")
+	}
+}
+
+func TestIsStateLocked_noFlow(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	if isStateLocked(ctx, db, "UnknownType", "ratified") {
+		t.Error("no flow: want false, got true")
+	}
+}
+
+func TestIsStateLocked_falseWhenNotSet(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:        "no-lock",
+		TypeName:    "testPost",
+		States:      []State{{Name: "draft", IsInitial: true}, {Name: "published"}},
+		Transitions: []Transition{{From: "draft", To: "published"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	if isStateLocked(ctx, db, "testPost", "published") {
+		t.Error("locked=false: want false, got true")
+	}
+}
+
+func TestIsStateLocked_trueWhenSet(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "lock-test",
+		TypeName: "testPost",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published", Locked: true},
+		},
+		Transitions: []Transition{{From: "draft", To: "published"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	if !isStateLocked(ctx, db, "testPost", "published") {
+		t.Error("locked=true: want true, got false")
+	}
+	// draft was never marked Locked — must stay false.
+	if isStateLocked(ctx, db, "testPost", "draft") {
+		t.Error("draft locked=false: want false, got true")
+	}
+}
+
+func TestIsStateLocked_defaultFlowFallback(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	var flowID string
+	if err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_state_flows WHERE name = 'default' AND type_name IS NULL`).Scan(&flowID); err != nil {
+		t.Fatalf("get default flow id: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_states (id, flow_id, name, is_initial, is_terminal, suppresses_signals, locked) VALUES (?, ?, 'quarantined', FALSE, FALSE, FALSE, TRUE)`,
+		NewID(), flowID,
+	); err != nil {
+		t.Fatalf("insert state: %v", err)
+	}
+	if !isStateLocked(ctx, db, "UnknownType", "quarantined") {
+		t.Error("default flow fallback: want true for quarantined with locked=1, got false")
+	}
+}
+
+func TestIsStateLocked_scanError(t *testing.T) {
+	ctx := context.Background()
+	db := &suppressFailDB{}
+	if isStateLocked(ctx, db, "Post", "published") {
+		t.Error("states scan error: want false (fail open), got true")
+	}
+}
+
+func TestIsStateLocked_bothFlowsFail(t *testing.T) {
+	ctx := context.Background()
+	db := &suppressBothFlowsFailDB{}
+	if isStateLocked(ctx, db, "Post", "published") {
+		t.Error("both flows fail: want false (fail open), got true")
+	}
+}
+
+func TestRegisterFlow_persistsLockedColumn(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(StateFlow{
+		Name:     "locked-persist-test",
+		TypeName: "testLockedPost",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "ratified", Locked: true},
+		},
+		Transitions: []Transition{{From: "draft", To: "ratified"}},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	var lockedDraft, lockedRatified bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT s.locked FROM smeldr_states s JOIN smeldr_state_flows f ON s.flow_id = f.id WHERE f.type_name = ? AND s.name = 'draft'`,
+		"testLockedPost",
+	).Scan(&lockedDraft); err != nil {
+		t.Fatalf("query draft locked: %v", err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT s.locked FROM smeldr_states s JOIN smeldr_state_flows f ON s.flow_id = f.id WHERE f.type_name = ? AND s.name = 'ratified'`,
+		"testLockedPost",
+	).Scan(&lockedRatified); err != nil {
+		t.Fatalf("query ratified locked: %v", err)
+	}
+	if lockedDraft {
+		t.Error("draft: want locked=false, got true")
+	}
+	if !lockedRatified {
+		t.Error("ratified: want locked=true, got false")
+	}
+}
+
 // — notifyAfter suppression integration tests ——————————————————————————————————
 
 // suppressedFlow registers a flow for "testPost" where "published" has

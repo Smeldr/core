@@ -942,6 +942,66 @@ func TestDynamicTypeRepo_ScheduleContent_TransitionBlocked(t *testing.T) {
 	}
 }
 
+// — UpdateFields content-lock (decision-content-mutable-after-ratification) ———
+
+// TestDynamicTypeRepo_UpdateFields_LockedStateBlocked registers a custom flow
+// for "recipe" with a Locked "published" state and verifies UpdateFields
+// rejects a content edit once the node is in that state — the dynamic-content
+// counterpart to Module[T].updateFields' own lock check, same mechanism.
+func TestDynamicTypeRepo_UpdateFields_LockedStateBlocked(t *testing.T) {
+	db := openDynDB(t)
+	app := smeldr.New(smeldr.Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte("test-secret-minimum16bytes"),
+		DB:      db,
+	})
+	if err := app.RegisterFlow(smeldr.StateFlow{
+		Name:     "recipe-locked",
+		TypeName: "recipe",
+		States: []smeldr.State{
+			{Name: "draft", IsInitial: true},
+			{Name: "published", Locked: true},
+		},
+		Transitions: []smeldr.Transition{
+			{From: "draft", To: "published"},
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Pasta", "Body": "old body"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+
+	// draft is not locked — content edit must still work.
+	if err := repo.UpdateFields(context.Background(), node.ID, map[string]any{"Body": "draft edit"}); err != nil {
+		t.Fatalf("UpdateFields on draft: %v", err)
+	}
+
+	if err := repo.SetStatus(context.Background(), node.ID, smeldr.Published); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+
+	err = repo.UpdateFields(context.Background(), node.ID, map[string]any{"Body": "tampered content"})
+	if !errors.Is(err, smeldr.ErrConflict) {
+		t.Fatalf("UpdateFields on locked published node: err = %v, want ErrConflict", err)
+	}
+
+	// Confirm the content was NOT changed.
+	got, err := repo.GetByID(context.Background(), node.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	var fields map[string]any
+	json.Unmarshal(got.Fields, &fields) //nolint:errcheck
+	if fields["Body"] != "draft edit" {
+		t.Errorf("Body = %q, want unchanged %q (the pre-lock draft edit)", fields["Body"], "draft edit")
+	}
+}
+
 // — SetStatusWithReason (T149) ————————————————————————————————————————————
 
 func setupRecipeReasonFlow(t *testing.T) (*sql.DB, *smeldr.DynamicTypeRepo) {

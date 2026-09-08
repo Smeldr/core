@@ -246,6 +246,30 @@ func TestDecisionFlow_definition(t *testing.T) {
 	}
 }
 
+// TestDecisionFlow_lockedStates verifies the Locked wiring from Amendment
+// decision-content-mutable-after-ratification: only "proposed" (the
+// pre-ratification draft state) stays content-mutable; every state reachable
+// after ratification is locked.
+func TestDecisionFlow_lockedStates(t *testing.T) {
+	f := orchDecisionFlow()
+	want := map[string]bool{
+		"proposed":              false,
+		"ratified":              true,
+		"pending-re-evaluation": true,
+		"superseded":            true,
+		"archived":              true,
+	}
+	got := map[string]bool{}
+	for _, s := range f.States {
+		got[s.Name] = s.Locked
+	}
+	for name, wantLocked := range want {
+		if got[name] != wantLocked {
+			t.Errorf("state %q Locked = %v, want %v", name, got[name], wantLocked)
+		}
+	}
+}
+
 // TestAmendmentFlow_definition verifies the amendment-lifecycle flow definition.
 func TestAmendmentFlow_definition(t *testing.T) {
 	f := orchAmendmentFlow()
@@ -263,6 +287,31 @@ func TestAmendmentFlow_definition(t *testing.T) {
 	}
 	if got := initialState(f); got != "scoped" {
 		t.Errorf("initial = %q, want %q", got, "scoped")
+	}
+}
+
+// TestAmendmentFlow_lockedStates verifies the Locked wiring from Amendment
+// decision-content-mutable-after-ratification: only the two terminal states
+// are locked — "committed" stays mutable through to "merged" to match D67's
+// create-then-drive-through-in-one-action pattern.
+func TestAmendmentFlow_lockedStates(t *testing.T) {
+	f := orchAmendmentFlow()
+	want := map[string]bool{
+		"scoped":       false,
+		"in-progress":  false,
+		"commit-ready": false,
+		"committed":    false,
+		"merged":       true,
+		"rejected":     true,
+	}
+	got := map[string]bool{}
+	for _, s := range f.States {
+		got[s.Name] = s.Locked
+	}
+	for name, wantLocked := range want {
+		if got[name] != wantLocked {
+			t.Errorf("state %q Locked = %v, want %v", name, got[name], wantLocked)
+		}
 	}
 }
 

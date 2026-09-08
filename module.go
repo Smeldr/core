@@ -1943,6 +1943,15 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, r, err)
 			return
 		}
+	} else if isStateLocked(ctx, m.db, m.contentTypeName, string(prevStatus)) {
+		// Status is unchanged (a content-only PUT) and the current state is
+		// locked — the same gate updateFields applies, extended to the PUT
+		// full-replace route (a genuine transition, prevStatus != newStatus
+		// above, is validated separately by validateTransition and is not
+		// blocked by Locked).
+		WriteError(w, r, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
+			ErrConflict, m.contentTypeName, nodeIDOf(existing), prevStatus))
+		return
 	}
 
 	if err := dispatchBefore(ctx, m.signals[BeforeUpdate], item); err != nil {
@@ -2445,6 +2454,10 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 	existing, err := m.resolveItem(ctx, slug)
 	if err != nil {
 		return nil, err
+	}
+	if isStateLocked(ctx, m.db, m.contentTypeName, string(nodeStatusOf(existing))) {
+		return nil, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
+			ErrConflict, m.contentTypeName, nodeIDOf(existing), nodeStatusOf(existing))
 	}
 
 	pv, elemType := m.newItemPtr()

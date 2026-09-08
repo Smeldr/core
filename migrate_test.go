@@ -158,6 +158,21 @@ func TestMigrateStateFlows(t *testing.T) {
 	checkState("published", false, false)
 	checkState("archived", false, true)
 
+	// locked column: seeded default flow has no locked states — all four
+	// default to FALSE.
+	for _, name := range []string{"draft", "scheduled", "published", "archived"} {
+		var locked bool
+		if err := db.QueryRowContext(ctx,
+			`SELECT locked FROM smeldr_states WHERE flow_id = ? AND name = ?`, flowID, name,
+		).Scan(&locked); err != nil {
+			t.Errorf("state %q locked column: %v", name, err)
+			continue
+		}
+		if locked {
+			t.Errorf("state %q locked: want false (default flow has no locked states), got true", name)
+		}
+	}
+
 	// Exactly 5 transitions.
 	var txCount int
 	if err := db.QueryRowContext(ctx,

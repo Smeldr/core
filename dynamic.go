@@ -180,6 +180,10 @@ func (r *DynamicTypeRepo) UpdateFields(ctx context.Context, id string, patch map
 	if err != nil {
 		return err
 	}
+	if isStateLocked(ctx, r.db, r.typeName, string(node.Status)) {
+		return fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
+			ErrConflict, r.typeName, id, node.Status)
+	}
 	existing := make(map[string]any)
 	if len(node.Fields) > 0 {
 		if err := json.Unmarshal(node.Fields, &existing); err != nil {

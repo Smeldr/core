@@ -108,6 +108,22 @@ type State struct {
 	// SuppressesSignals prevents After* event hooks from firing for items
 	// that are in this state.
 	SuppressesSignals bool
+
+	// Locked marks this state as content-immutable: an item currently in this
+	// state may not have its own fields modified via MCPUpdate, the PATCH
+	// route, the PUT full-replace route, or DynamicTypeRepo.UpdateFields —
+	// regardless of role or governance wiring (no override; this is a state
+	// gate, not an authorization gate, matching DECISIONS.md's documented
+	// model: "revisions to an existing [item] require a new entry that
+	// supersedes the original," never an in-place edit). A locked item's
+	// *transitions* are unaffected — TransitionItem / MCPTransition continue
+	// to move it between states exactly as declared in the flow, governed by
+	// the normal RequiredRole/Strict/RequiredReason gates on the edge, not by
+	// Locked. Independent of IsTerminal: a state can be locked and still have
+	// legal outbound transitions (e.g. Decision's "ratified", which moves on
+	// to "pending-re-evaluation" or "superseded" while never again accepting
+	// a content edit).
+	Locked bool
 }
 
 // Transition is a directed edge in a [StateFlow].
@@ -216,8 +232,8 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	// Upsert states.
 	for _, s := range flow.States {
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_states(id, flow_id, name, is_initial, is_terminal, suppresses_signals) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (flow_id, name) DO NOTHING`,
-			NewID(), flowID, s.Name, s.IsInitial, s.IsTerminal, s.SuppressesSignals,
+			`INSERT INTO smeldr_states(id, flow_id, name, is_initial, is_terminal, suppresses_signals, locked) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (flow_id, name) DO NOTHING`,
+			NewID(), flowID, s.Name, s.IsInitial, s.IsTerminal, s.SuppressesSignals, s.Locked,
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: upsert state %q: %w", flow.Name, s.Name, err)
 		}
@@ -623,6 +639,48 @@ func suppressesSignals(ctx context.Context, db DB, typeName, statusName string) 
 		return false // state not found or query failed — fail open
 	}
 	return suppresses
+}
+
+// isStateLocked reports whether the given state in typeName's registered flow
+// has locked=true — an item currently in a locked state may not have its own
+// fields modified (State.Locked's own doc comment covers the exact call
+// sites this gates). Returns false on any error (fail-open) — mirrors
+// suppressesSignals exactly, field for field:
+//
+// Fail-open cases (returns false):
+//   - db is nil (no DB configured)
+//   - the database is not SQLite (sqlite_master probe fails)
+//   - no flow is registered for typeName and no default flow exists
+//   - the state is not found in the flow or any query fails
+func isStateLocked(ctx context.Context, db DB, typeName, statusName string) bool {
+	if db == nil {
+		return false
+	}
+	var dummy int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
+		return false
+	}
+	var flowID string
+	err := db.QueryRowContext(ctx,
+		`SELECT id FROM smeldr_state_flows WHERE type_name = $1`, typeName,
+	).Scan(&flowID)
+	if err != nil {
+		// Fall back to the default flow (type_name IS NULL, name = 'default').
+		err = db.QueryRowContext(ctx,
+			`SELECT id FROM smeldr_state_flows WHERE type_name IS NULL AND name = 'default'`,
+		).Scan(&flowID)
+		if err != nil {
+			return false // no flow registered — nothing locked
+		}
+	}
+	var locked bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT locked FROM smeldr_states WHERE flow_id = $1 AND name = $2`,
+		flowID, statusName,
+	).Scan(&locked); err != nil {
+		return false // state not found or query failed — fail open
+	}
+	return locked
 }
 
 // applyConflictPolicy enforces the uniqueness invariant declared by

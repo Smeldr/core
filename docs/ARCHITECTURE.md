@@ -490,7 +490,39 @@ smeldr.dev/
 │                     store/pool params and fires "signal.created" — the same event name a
 │                     human-created Signal already produces — so a D42-triggered Signal is
 │                     indistinguishable from a human-created one to a webhook subscriber
-│                     (Amendment A263, T231)
+│                     (Amendment A263, T231);
+│                     State.Locked bool (new field, alongside IsInitial/IsTerminal/
+│                     SuppressesSignals) — marks a state content-immutable: an item currently in
+│                     a locked state may not have its own fields modified via MCPUpdate, the
+│                     PATCH route, the PUT full-replace route, or DynamicTypeRepo.UpdateFields,
+│                     regardless of role (a state gate, not an authorization gate — no override).
+│                     Independent of IsTerminal: a locked state can still have legal outbound
+│                     transitions (Decision's "ratified" moves on to "pending-re-evaluation" or
+│                     "superseded" while never again accepting a content edit) — TransitionItem/
+│                     MCPTransition are unaffected by Locked, governed only by the edge's own
+│                     RequiredRole/Strict/RequiredReason as before. New isStateLocked(ctx, db,
+│                     typeName, statusName) bool (unexported) — a straight copy of
+│                     suppressesSignals' own fail-open shape, new locked column read instead of
+│                     suppresses_signals. New smeldr_states.locked BOOLEAN NOT NULL DEFAULT FALSE
+│                     column (migrate.go), persisted by RegisterFlow's state-upsert INSERT
+│                     alongside is_initial/is_terminal/suppresses_signals. Enforced at three call
+│                     sites: Module[T].updateFields (module.go, shared by MCPUpdate and the PATCH
+│                     route) rejects before merging when the existing item's current status is
+│                     locked; Module[T].updateHandler (module.go, PUT) adds the same check in its
+│                     prevStatus==newStatus branch (a genuine transition, prevStatus!=newStatus,
+│                     is unaffected — validateTransition already gates that case); Dynamic
+│                     TypeRepo.UpdateFields (dynamic.go) adds the same check before merging the
+│                     patch. All three return ErrConflict (the package's existing "this state
+│                     doesn't permit that operation" error, not ErrForbidden — there is no role
+│                     that unlocks it). Wired for Decision (ratified, pending-re-evaluation,
+│                     superseded, archived — only "proposed" stays mutable) and Amendment (merged,
+│                     rejected — "committed" stays mutable through to "merged" to match D67's own
+│                     create-then-drive-through-in-one-action pattern); no other flow gets Locked
+│                     yet — the mechanism is generic and available to any StateFlow without
+│                     further schema change (Amendment decision-content-mutable-after-
+│                     ratification — closes the real gap D66's own two post-ratification body
+│                     edits exposed: no content-gating existed anywhere in the write path, only
+│                     transition-gating)
 ├── audit.go          AuditRecord, AuditFilter, AuditStore interface, NewAuditStore(DB), CreateAuditTable(DB),
 │                     newAuditHandler (unexported); GET /_audit mounted by App.Handler() (Amendment A97)
 ├── provenance.go     ProvenanceRecord, ProvenanceFilter, ProvenanceStore interface, NewProvenanceStore(DB),

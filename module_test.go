@@ -3111,6 +3111,99 @@ func TestModule_updateHandler_decisionReEvalSupersede_authorized(t *testing.T) {
 	}
 }
 
+// — decision-content-mutable-after-ratification: content-lock regression ——————
+// Direct reproduction of D66's own incident: two content-only edits to a
+// ratified Decision's body, neither blocked by any existing gate (no role
+// check, no state check). All three write surfaces are exercised, admin role
+// held throughout — Locked is a state gate with no override, so even an
+// admin actor must be rejected.
+
+func TestModule_MCPUpdate_decisionRatified_locked(t *testing.T) {
+	m, store, d := decisionModuleAtStatus(t, "ratified")
+	const uid = "tok-admin"
+	govGrant(t, store, uid, "admin")
+
+	_, err := m.MCPUpdate(NewTestContext(User{ID: uid, Name: "Admin", Roles: []Role{Admin}}), d.Slug, map[string]any{"Body": "tampered content"})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("MCPUpdate on ratified Decision: err = %v, want ErrConflict", err)
+	}
+}
+
+func TestModule_patchHandler_decisionRatified_locked(t *testing.T) {
+	m, store, d := decisionModuleAtStatus(t, "ratified")
+	const uid = "tok-admin"
+	govGrant(t, store, uid, "admin")
+
+	body, _ := json.Marshal(map[string]any{"Body": "tampered content"})
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPatch, "/decisions/"+d.Slug, bytes.NewReader(body)),
+		User{ID: uid, Name: "Admin", Roles: []Role{Admin}})
+	r.SetPathValue("slug", d.Slug)
+	m.patchHandler(w, r)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("PATCH on ratified Decision: status = %d, want 409\nbody: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestModule_updateHandler_decisionRatified_contentOnly_locked(t *testing.T) {
+	m, store, d := decisionModuleAtStatus(t, "ratified")
+	const uid = "tok-admin"
+	govGrant(t, store, uid, "admin")
+
+	// Status unchanged ("ratified" → "ratified"), only Body differs — exactly
+	// D66's own incident shape, now reachable over PUT too.
+	body, _ := json.Marshal(map[string]any{"Status": "ratified", "Body": "tampered content"})
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/decisions/"+d.Slug, bytes.NewReader(body)),
+		User{ID: uid, Name: "Admin", Roles: []Role{Admin}})
+	r.SetPathValue("slug", d.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("PUT content-only edit on ratified Decision: status = %d, want 409\nbody: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestModule_updateHandler_decisionRatified_transitionOnly_stillAllowed(t *testing.T) {
+	// A genuine transition out of a locked state (ratified→superseded) must
+	// remain unaffected by Locked — only content-only edits are blocked.
+	m, store, d := decisionModuleAtStatus(t, "ratified")
+	const uid = "tok-admin"
+	govGrant(t, store, uid, "admin")
+
+	body, _ := json.Marshal(map[string]any{"Status": "superseded"})
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/decisions/"+d.Slug, bytes.NewReader(body)),
+		User{ID: uid, Name: "Admin", Roles: []Role{Admin}})
+	r.SetPathValue("slug", d.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ratified→superseded transition: status = %d, want 200\nbody: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestModule_MCPUpdate_decisionProposed_stillMutable(t *testing.T) {
+	// "proposed" is not locked — content edits before ratification must keep
+	// working exactly as before.
+	m, store, d := decisionModuleAtStatus(t, "proposed")
+	const uid = "tok-admin"
+	govGrant(t, store, uid, "admin")
+
+	updated, err := m.MCPUpdate(NewTestContext(User{ID: uid, Name: "Admin", Roles: []Role{Admin}}), d.Slug, map[string]any{"Body": "draft edit"})
+	if err != nil {
+		t.Fatalf("MCPUpdate on proposed Decision: %v", err)
+	}
+	dec, ok := updated.(*Decision)
+	if !ok {
+		t.Fatalf("MCPUpdate result type = %T, want *Decision", updated)
+	}
+	if dec.Body != "draft edit" {
+		t.Errorf("Body = %q, want %q", dec.Body, "draft edit")
+	}
+}
+
 // isVisible — Published items are always visible regardless of governance.
 func TestModule_isVisible_Published_AlwaysVisible(t *testing.T) {
 	m, _ := govModule(t)
