@@ -240,6 +240,33 @@ smeldr.dev/
 │                     it has an outbound edge to "open") IsTerminal flag, and "resolved" is
 │                     reachable from open/in-progress/parked, all RequiredReason=true
 │                     (Amendment A261, T255)
+├── authority.go      Rule, AuthorityStub content types embedding Node — the Authority mechanism
+│                     (decision-governance-model design doc §4): Rule is the first subtype of the
+│                     conceptual Authority supertype (Decision/Rule/Principle/Standard/Precedent);
+│                     AuthorityStub is a cheap pointer (SourceRef/RuleType/Surface/SourceHash) into
+│                     a source document, converted to a fully modeled Rule opportunistically rather
+│                     than restructuring documents up front;
+│                     CreateAuthorityTables(DB) error — creates smeldr_rules/smeldr_authority_stubs;
+│                     RegisterAuthorityTypes(*App, DB) — fail-open, registers both types + both
+│                     flows, MCP(MCPRead, MCPWrite), same treatment as every orchestration type;
+│                     ruleFlow, authorityStubFlow (unexported) — Rule deliberately does NOT reuse
+│                     Decision's proposed/ratified ceremony (draft→active→retired instead): decided
+│                     against the concrete first real Rule this mechanism needs to represent (Turn
+│                     67 §4's already-in-force "no seen/acknowledged" design law, the rule violated
+│                     in the incident this whole governance model is built from) — an already-
+│                     governing convention being registered, not a fresh proposal seeking approval;
+│                     AuthorityStub: stub→converted / stub→retired;
+│                     RegisterAuthorityRelationKinds(ctx, *RelationStore) error — registers
+│                     materializes (AuthorityStub→Rule, ReverseLabel "Materialized From"), asserted
+│                     when a stub is converted to a fully modeled Rule; separate function from
+│                     RegisterOrchestrationRelationKinds — new type family, not an extension
+│                     (Amendment A303, decision-governance-model §4, Task 01a076e7-5). Deliberately
+│                     NOT built here: an automated stub→Rule conversion function (conversion is
+│                     manual — create_rule + assert_relation — until a real second/third conversion
+│                     names a shape worth automating); a live database row for the Turn 67 §4 rule
+│                     itself (an operational follow-up, not a Go code change); Check/Route/Propagate
+│                     query logic against these types (a sibling task's own scope, blocked on this
+│                     one landing first)
 ├── context_packet.go ContextPacket, PacketSource, PacketAnchor, PacketBoundary, PacketOmission,
 │                     PacketItem, PacketRelation exported types; PacketAnchor/PacketItem carry
 │                     CreatedAt/UpdatedAt, read through from the underlying content's own

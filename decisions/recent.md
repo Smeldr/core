@@ -1824,3 +1824,79 @@ found between D65 existing live but never reaching this file's own
 index).
 
 ---
+
+## A303 — Authority mechanism: Rule content type + AuthorityStub
+
+New file `authority.go` builds the minimal Authority mechanism proposed by
+`decision-governance-model` §4 (`smeldr/architect/design/decision-governance.md`):
+`Rule`, the first subtype of the conceptual Authority supertype
+(Decision/Rule/Principle/Standard/Precedent), and `AuthorityStub`, a cheap
+pointer node (SourceRef/RuleType/Surface/SourceHash) into a source
+document that can be converted to a fully modeled Rule opportunistically
+rather than restructuring an entire document body up front. Not new
+architecture: the underlying mechanism (heterogeneous compiled types, each
+with its own registered `StateFlow`, sharing one relation-graph substrate)
+already serves Goal/Task/Decision/Amendment/Signal/Run (`orchestration.go`)
+— this applies that same pattern to a new type family, in its own file
+since Authority is a distinct conceptual family from the existing
+protocol/governance one.
+
+`CreateAuthorityTables(db DB) error` creates `smeldr_rules` and
+`smeldr_authority_stubs`. `RegisterAuthorityTypes(app *App, db DB)`
+registers both types' flows (fail-open, logged on error, matching
+`RegisterOrchestrationTypes`'s own precedent) and both modules, each with
+`MCP(MCPRead, MCPWrite)` — identical tool-surface treatment to every
+existing orchestration type. `RegisterAuthorityRelationKinds(ctx,
+*RelationStore) error` registers one new kind, `materializes`
+(AuthorityStub→Rule, `ReverseLabel: "Materialized From"`), asserted when a
+stub is converted — a separate function from
+`RegisterOrchestrationRelationKinds`, since this is a new type family, not
+an extension of the existing one.
+
+`Rule`'s own state flow (`ruleFlow`, unexported) is `draft`→`active`→
+`retired`, deliberately not Decision's proposed/ratified/superseded
+ceremony — decided directly against the concrete first real Rule this
+mechanism needs to represent (Turn 67 §4's own already-in-force "no
+seen/acknowledged" design law, the rule violated in the incident this
+whole governance model is built from), per §4's own explicit text that "a
+Rule is not necessarily proposed/ratified the same way an operational
+Decision is." Most real Rules migrate an already-governing convention into
+the graph, not a fresh proposal seeking approval. `RequiredRole`/
+`RequiredOperation` gating on `active`/`retired` is deliberately deferred:
+D63/D64's own role-gating redesign is proposed but not yet ratified, and
+adding a new gate ahead of that ratification would need its own later
+Amendment regardless. `AuthorityStub`'s own flow (`authorityStubFlow`) is
+`stub`→`converted` / `stub`→`retired`.
+
+**Deliberately not built here** (architect-confirmed during plan review,
+matching §4's own explicit anti-big-bang instruction): no automated
+stub→Rule conversion function — for now an agent/architect creates the
+Rule via `create_rule` and asserts `materializes` via `assert_relation` by
+hand, then transitions the stub to `converted`; automating that sequence
+is only worth building once a real second/third conversion exists to
+derive its shape from. No live database row for the Turn 67 §4 rule itself
+— that is an operational action against the deployed instance, not a Go
+code change, left as a follow-up. No wiring into `example/server` — same
+precedent as `RegisterOrchestrationTypes` itself, exported for a caller to
+wire in, not force-enabled. No Check/Route/Propagate query logic against
+these types — Task `01a076e6`'s own scope, explicitly blocked on this task
+landing first.
+
+9 new tests in `authority_test.go`, mirroring `orchestration_test.go`'s
+existing coverage shape exactly (type embedding, both flow definitions,
+table creation happy/error paths, flow/module registration including a
+nil-DB fail-open case, relation-kind round-trip + idempotency, and the
+`UpsertKind` failure path). `authority.go` itself: 100% coverage.
+Package-wide: 96.3%. `go test -race ./...` clean; `golangci-lint run
+./...` clean.
+
+No exported symbols removed or changed elsewhere. MINOR bump (new
+exported types and functions, fully additive): v1.81.0 → v1.82.0.
+Level 2 amendment.
+
+Task: `01a076e7-5` (band=core, part of Goal `decision-governance-model`).
+Plan reviewed and approved directly by the architect in the plan file,
+confirming both out-of-scope calls above and the `draft→active→retired`
+flow shape against §4's own text before implementation started.
+
+---

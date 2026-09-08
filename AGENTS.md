@@ -680,6 +680,27 @@ gates on `Run.status` — read `lease_holder`/`outcome` instead.
 **`LifecycleEvent` (renamed from `Signal` in A183)**
 
 The Go type `smeldr.Signal` was renamed to `smeldr.LifecycleEvent` to free the `Signal` name for the orchestration content type above. All constant names are unchanged (`AfterCreate`, `AfterPublish`, etc.). If you have code that references `smeldr.Signal` as a type (not a constant), update it to `smeldr.LifecycleEvent`.
+
+### Authority mechanism (A303)
+
+Two built-in types for the decision-governance-model's Authority
+mechanism — the first subtype of the conceptual Authority supertype
+(Decision/Rule/Principle/Standard/Precedent) plus a cheap pointer type for
+un-modeled source material. Call `RegisterAuthorityTypes(app, db)` at
+startup — after `CreateAuthorityTables(db)` — to activate them. Both types
+are registered with `MCP(MCPRead, MCPWrite)`, so MCP tools are generated
+automatically, same as every orchestration type above.
+
+| Type | Table | Initial state | Purpose |
+|------|-------|---------------|---------|
+| `Rule` | `smeldr_rules` | `draft` | A fully modeled, governing rule |
+| `AuthorityStub` | `smeldr_authority_stubs` | `stub` | A cheap pointer into a source document, not yet fully modeled |
+
+Each type embeds `Node` and receives the standard auto-generated MCP tools (`create_rule`, `get_rule`, `list_rules`, `update_rule`, `publish_rule`, `archive_rule`, `delete_rule`, and the equivalent for `authority_stub`).
+
+**`Rule` does not use `publish_rule`/`archive_rule` to reach its real states.** `Rule`'s own flow is `draft` → `active` → `retired` — none of those are the built-in `Published`/`Archived` states, so use `transition_item` (type `Rule`) to move a Rule through its real lifecycle, the same pattern `Decision` already requires for `ratified`/`superseded`.
+
+**Converting a stub to a Rule is a manual, two-step act, not a tool.** Create the full `Rule` via `create_rule`, then `assert_relation` a `materializes` edge from the `AuthorityStub` to the new `Rule`, then `transition_item` the stub to `converted`. No MCP tool automates this sequence yet — deliberately, per the design's own anti-big-bang instruction (automate only once a real second/third conversion shows what's actually repeated).
 ## Connection setup
 
 See the smeldr.dev/mcp README for Claude Desktop, Cursor, and SSE configuration.

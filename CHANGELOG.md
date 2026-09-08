@@ -23,6 +23,11 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.82.0] — 2026-09-08
+
+### Added
+- New `authority.go`: the minimal Authority mechanism proposed by the decision-governance-model design (§4) — `Rule`, the first subtype of the conceptual Authority supertype (Decision/Rule/Principle/Standard/Precedent), and `AuthorityStub`, a cheap pointer node (`SourceRef`/`RuleType`/`Surface`/`SourceHash`) into a source document that can be converted to a fully modeled Rule opportunistically rather than restructuring documents up front. `CreateAuthorityTables`, `RegisterAuthorityTypes`, and `RegisterAuthorityRelationKinds` (a new `materializes` relation kind, AuthorityStub→Rule) mirror the existing six-type orchestration pattern in `orchestration.go`. `Rule`'s own state flow is deliberately `draft`→`active`→`retired`, not Decision's proposed/ratified ceremony — a Rule migrates an already-governing convention into the graph, not a fresh proposal seeking approval. (A303)
+
 ## [1.81.0] — 2026-09-07
 
 ### Added
