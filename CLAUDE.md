@@ -16,6 +16,17 @@ handoff file (retired by D66, 2026-09-07) — state comes directly from the repo
 (`process.smeldr.dev`), never from a diary file written by a prior session.
 Follow these steps at the start of every new chat, before doing anything else.
 
+**Step 0, before reading anything below:** arm `scripts/watch-events.sh` as a
+persistent Monitor against `process.smeldr.dev/_events/stream?channel=core`.
+Full mechanism: `AGENT_PROTOCOL.md`, "The live event stream — mandatory
+session-start step". Without this, this session only sees Task/Signal state
+changes when the user asks for a manual check, not live. If the Monitor tool
+itself is blocked (e.g. by the auto-mode classifier), fall back to running
+the script via `Bash` with `run_in_background: true` — the connection stays
+open, but only exit (not per-line) produces a notification, so check the
+output file directly before any transition that depends on the architect
+having seen a prior state change.
+
 **Step 1 — Read the developer skill:**
 Read `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md`
 (local file). This gives you the current versions for all modules, the full
@@ -36,19 +47,23 @@ instance" section for the full state table). If one exists:
    Task's plan is already open in the shared file (see AGENT_PROTOCOL.md's
    plan-file-deletion rule).
 3. Transition `active → waiting-plan`, then `waiting-plan → plan-reviewing`
-   once the plan is written. Notify the user in chat that the plan is ready
-   for review. Do not write any code yet.
+   once the plan is written, **sending a `Signal` (`receiver: "architect"`,
+   `signal_type: "plan-ready"`, `task_ref`: this Task's slug) in the same
+   action as the transition** — band-routed `task.transitioned` events are
+   invisible to the architect for a non-`architect`-band Task. Notify the
+   user in chat that the plan is ready for review. Do not write any code yet.
 4. Wait for the architect to transition `plan-reviewing → implementing`
    (their answers land directly in the plan file). A chat "yes" to an
    unrelated question is never approval.
-5. At commit time: transition `implementing → commit-reviewing`; once the
+5. At commit time: transition `implementing → commit-reviewing`, **sending
+   a `Signal` (`signal_type: "commit-ready"`) in the same action**; once the
    architect's written approval appears in the plan file, transition
-   `commit-reviewing → done` with `Reason: plan file deleted` (there is no
-   `committed` signal under D50 — the transition's own Reason is the only
-   record). Delete the plan file whole in the same commit — if another
-   Task's plan is still open in the same shared file, extract it to its own
-   task-scoped file first; never leave a still-open Task's content to die
-   with the shared file.
+   `commit-reviewing → done` with `Reason: plan file deleted`, **sending a
+   `Signal` (`signal_type: "task-closed"`) in the same action**. Delete the
+   plan file whole in the same commit — if another Task's plan is still
+   open in the same shared file, extract it to its own task-scoped file
+   first; never leave a still-open Task's content to die with the shared
+   file.
 
 **Step 3 — After closing a Task, and if nothing is waiting:**
 A session is not scoped to one Task. Once a Task reaches `done`, query the
