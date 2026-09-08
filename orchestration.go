@@ -280,6 +280,11 @@ type Amendment struct {
 	Pilot string `json:"pilot"`
 	// Summary is a one-line description of what the amendment changes.
 	Summary string `json:"summary"`
+	// Body is the full amendment text in Markdown, including rationale —
+	// mirrors Decision.Body exactly. Added for D67 (live recording becomes
+	// primary for new work): Summary alone cannot carry what
+	// decisions/recent.md's own Amendment bodies held before the freeze.
+	Body string `json:"body" smeldr_format:"markdown"`
 }
 
 // RunOutcome is the terminal state of a completed or abandoned [Run] (D38
@@ -467,7 +472,8 @@ func CreateOrchestrationTables(db DB) error {
 			version          TEXT NOT NULL DEFAULT '',
 			commit_hash      TEXT NOT NULL DEFAULT '',
 			pilot            TEXT NOT NULL DEFAULT '',
-			summary          TEXT NOT NULL DEFAULT ''
+			summary          TEXT NOT NULL DEFAULT '',
+			body             TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_goals (
 			id           TEXT PRIMARY KEY,
@@ -553,6 +559,20 @@ func EnsureDecisionClassificationColumns(ctx context.Context, db DB) error {
 		if err := EnsureColumn(ctx, db, "smeldr_decisions", c[0], c[1]); err != nil {
 			return fmt.Errorf("smeldr: EnsureDecisionClassificationColumns: %w", err)
 		}
+	}
+	return nil
+}
+
+// EnsureAmendmentBodyColumn adds [Amendment]'s body column to
+// smeldr_amendments on pre-existing SQLite databases that predate this
+// Amendment (A305). Fresh installs already have the column via
+// [CreateOrchestrationTables]'s own CREATE TABLE statement; this only
+// upgrades a database created before A305. Idempotent — safe to call on
+// every boot. Same one-column [EnsureColumn] pattern as
+// [EnsureDecisionClassificationColumns] (A304).
+func EnsureAmendmentBodyColumn(ctx context.Context, db DB) error {
+	if err := EnsureColumn(ctx, db, "smeldr_amendments", "body", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("smeldr: EnsureAmendmentBodyColumn: %w", err)
 	}
 	return nil
 }

@@ -1999,3 +1999,111 @@ before approving, and confirmed both scope-narrowing decisions (no
 `Transition.Irreversible` bundled, devlog deferred to `01a076e6`).
 
 ---
+
+## A305 — Amendment.Body field; D67 core-pilot migration (final hand-written entry)
+
+**This is, deliberately, the last hand-written Amendment entry in this
+file for `smeldr/core`.** D67 (ratified 2026-09-08,
+`d67-decisions-amendments-live-graph-primary-forward`) makes recording new
+Decisions and Amendments live on `process.smeldr.dev`
+(`create_decision`/`create_amendment`) the primary, authoritative act
+going forward. `DECISIONS.md` and this file freeze at their current
+content as of this entry (through A305) — no backfill of D1–D67/A1–A305
+and earlier, no new hand-written entries after this. `smeldr/core` is
+D67's own pilot repo; `smeldr/cloud` follows once this closes and is
+verified.
+
+**Investigation finding, before writing any code (per the Task's own
+explicit instruction to investigate rather than assume):** `Amendment` had
+no `Body` field — `create_amendment`'s live schema carried only
+`amendment_number`/`amendment_type`/`version`/`commit_hash`/`pilot`/
+`summary`, and `Summary` is documented as "a one-line description," the
+only free-text field on the type. The six Amendment records that already
+existed live (A253, A254, S197, OPS-2026-08-11, A255, A256 — all created
+2026-08-11/13, nothing since) each wrote a variant of *"Full record:
+smeldr/core decisions/recent.md AXXX"* into `summary` — the live record
+had never actually stood alone; it always pointed back at this file for
+the real content. This file's own Amendment bodies are frequently
+substantial (several hundred words of real design reasoning, corrections,
+rejected alternatives — A303/A304, immediately above, are typical
+examples, not outliers). Freezing this file while genuinely switching to
+live recording, without fixing this, would have silently dropped the
+majority of what an Amendment record currently preserves.
+
+**Fix:** `Amendment` gains `Body string smeldr_format:"markdown"`,
+mirroring `Decision.Body` exactly. `smeldr_amendments` CREATE TABLE gains
+a `body` column; new `EnsureAmendmentBodyColumn(ctx, DB) error` migrates a
+pre-A305 database, the same one-column `EnsureColumn` pattern as
+`EnsureDecisionClassificationColumns` (A304) / `EnsureOrchestrationSignalColumns`
+(A296). Architect independently verified both load-bearing claims before
+approving the plan: `Amendment`'s struct fields directly
+(`orchestration.go`), and `orchAmendmentFlow`'s own transition graph.
+
+**Second finding: why all six live Amendment records sit at `scoped`.**
+`orchAmendmentFlow`: `scoped → in-progress → commit-ready → committed →
+merged` (`IsTerminal` only on `merged`/`rejected`). Not a bug — nobody had
+ever instructed a session to advance a newly created Amendment record,
+because `smeldr/core`'s own `CLAUDE.md` never told any session to create
+one at all (D67's own root cause, the same shape as this session's own
+earlier Monitor-arming and Signal-sending findings — a real, working
+mechanism with no standing instruction to use it). By the time an
+Amendment is recorded, the work it represents is already fully shipped —
+so the new `CLAUDE.md` instruction has a session create the record *and*
+drive it through all four transitions to `merged` in the same action,
+never leaving it at the initial `scoped` state the way every prior live
+record was left.
+
+`Decision` is the opposite case, kept asymmetric on purpose: a real
+Decision is genuinely proposed before Peter ratifies it (this session did
+so literally, twice — D66, D67 itself). A new live `create_decision` call
+creates at `Decision`'s own natural initial state, `proposed`, and stops
+there — `proposed → ratified` stays Peter's own act, unchanged, still
+gated `RequiredRole: "admin", Strict: true` (D34/D40) regardless of what
+any instruction says.
+
+**Third finding: number assignment after the freeze.** `list_amendments`
+returned only the six pre-2026-08-13 records above — none of A257 through
+A304 (dozens of real, shipped Amendments) were ever recorded live. So
+after this Task, "the next free number" is not simply `list_amendments`'s
+own live max (a stale A256 at investigation time) — it is
+`max(the now-frozen DECISIONS.md index's own max, list_amendments`/
+`list_decisions`'s own live max) + 1`. `smeldr/core/CLAUDE.md`'s new
+"Recording a new Decision or Amendment (live, D67)" section states this
+explicitly, rather than leaving a future session to rediscover why
+grepping `DECISIONS.md` alone silently under-counts once enough time has
+passed for the two sources to diverge further.
+
+**`smeldr/core/CLAUDE.md` rewritten** — the entire Decision/Amendment
+git-file-writing instruction set replaced: the "DECISIONS.md file
+structure" section (frozen banner, table row), the former "When adding a
+new Decision or Amendment" 4-step git process (replaced by the new
+"Recording a new Decision or Amendment (live, D67)" section covering
+number assignment and the Decision/Amendment asymmetry above), the three
+Change Classification levels' own wording, the Haiku-delegation eligible
+list, the "Amendment DECISIONS.md completeness rule" (renamed "Amendment
+live-record completeness rule"), and the pre-commit checklist item.
+`decisions/nondecisions.md`'s own process is explicitly left untouched —
+D67 does not name it, and no live Non-Decision content type exists today;
+architect is carrying this forward as its own standing item, not folded
+into this Task.
+
+7 new tests (`orchestration_test.go`): `Amendment.Body` field embedding,
+the `EnsureAmendmentBodyColumn` three-part triad (add/idempotent/alter-
+fails, matching A296/A304's own established pattern), and a
+`CreateOrchestrationTables` extension confirming `smeldr_amendments`
+accepts a `body` insert on a fresh install. `EnsureAmendmentBodyColumn`
+100% covered; package-wide 96.3%. `go test -race ./...` clean;
+`golangci-lint run ./...` clean.
+
+No exported symbols removed or changed elsewhere. MINOR bump (new
+exported field, fully additive): v1.83.0 → v1.84.0. Level 2 amendment.
+
+Task: `core-d67-live-decisions-amendments-migration` (band=core, priority
+0). Plan reviewed and approved directly by the architect in the plan
+file, who independently verified both load-bearing findings against
+source, confirmed the `Body` fix as squarely in this Task's own scope
+(not a separate follow-up), confirmed the Decision/Amendment asymmetry,
+confirmed `nondecisions.md` correctly out of scope, and confirmed A305 —
+`max(304, 256) + 1 = 305` — independently.
+
+---

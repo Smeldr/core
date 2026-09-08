@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.84.0] — 2026-09-08
+
+### Added
+- `Amendment` gains a `Body` field (markdown), mirroring `Decision.Body`. D67 makes `create_decision`/`create_amendment` the primary, authoritative way to record new Decisions and Amendments going forward — `DECISIONS.md`/`decisions/recent.md` are frozen at this release and accept no new hand-written entries. `Summary` alone (a one-line field) could not carry what a `decisions/recent.md` Amendment entry used to hold, which this field closes before the freeze takes effect. `EnsureAmendmentBodyColumn` migrates a pre-existing database. (A305)
+
+### Changed
+- `smeldr/core/CLAUDE.md`'s entire Decision/Amendment-recording instruction set rewritten to use the live mechanism (`create_decision`/`create_amendment`) instead of hand-editing `DECISIONS.md`/`decisions/recent.md`, including number-assignment guidance (checked against both the frozen git index and the live list) and the differing create-then-transition procedures for Decision (stops at `proposed`) versus Amendment (driven to `merged`).
+
 ## [1.83.0] — 2026-09-08
 
 ### Added

@@ -66,6 +66,19 @@ func TestDecisionType_classificationFields(t *testing.T) {
 	}
 }
 
+// TestAmendmentType_bodyField verifies Amendment carries a Body field
+// (A305, D67) — Summary alone cannot hold what decisions/recent.md's own
+// Amendment bodies held before the git-file freeze.
+func TestAmendmentType_bodyField(t *testing.T) {
+	a := Amendment{Summary: "one-liner", Body: "full markdown rationale"}
+	if a.Summary != "one-liner" {
+		t.Errorf("Summary = %q, want %q", a.Summary, "one-liner")
+	}
+	if a.Body != "full markdown rationale" {
+		t.Errorf("Body = %q, want %q", a.Body, "full markdown rationale")
+	}
+}
+
 // TestSignalFlow_definition verifies the signal-protocol flow has the expected
 // states and transitions without requiring a database.
 func TestSignalFlow_definition(t *testing.T) {
@@ -1150,6 +1163,77 @@ func TestCreateOrchestrationTables_DecisionClassificationColumns(t *testing.T) {
 		VALUES ('1', 'test', '2025-01-01', '2025-01-01', 'design-system', 'irreversible')`,
 	); err != nil {
 		t.Errorf("rule_type/reversibility columns should exist on fresh install, got: %v", err)
+	}
+}
+
+// — EnsureAmendmentBodyColumn (A305, D67) ——————————————————————————————————
+
+func TestEnsureAmendmentBodyColumn_AddsColumns(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	// Old schema, pre-A305: smeldr_amendments without body.
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_amendments (
+			id               TEXT PRIMARY KEY,
+			slug             TEXT NOT NULL UNIQUE,
+			status           TEXT NOT NULL DEFAULT 'draft',
+			created_at       TIMESTAMPTZ NOT NULL,
+			updated_at       TIMESTAMPTZ NOT NULL,
+			amendment_number TEXT NOT NULL DEFAULT '',
+			summary          TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		t.Fatalf("create old-schema table: %v", err)
+	}
+
+	if err := EnsureAmendmentBodyColumn(ctx, db); err != nil {
+		t.Fatalf("EnsureAmendmentBodyColumn: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_amendments
+			(id, slug, created_at, updated_at, body)
+		VALUES ('1', 'test', '2025-01-01', '2025-01-01', 'full rationale')`,
+	); err != nil {
+		t.Errorf("body column should exist after migration, got: %v", err)
+	}
+}
+
+func TestEnsureAmendmentBodyColumn_Idempotent(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	if err := EnsureAmendmentBodyColumn(ctx, db); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := EnsureAmendmentBodyColumn(ctx, db); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+}
+
+func TestEnsureAmendmentBodyColumn_AlterFails(t *testing.T) {
+	db := newSQLiteDB(t)
+	// smeldr_amendments table deliberately not created.
+	if err := EnsureAmendmentBodyColumn(context.Background(), db); err == nil {
+		t.Error("expected error when smeldr_amendments does not exist, got nil")
+	}
+}
+
+// TestCreateOrchestrationTables_AmendmentBodyColumn verifies
+// smeldr_amendments accepts a body insert on a fresh install (A305).
+func TestCreateOrchestrationTables_AmendmentBodyColumn(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_amendments
+			(id, slug, created_at, updated_at, body)
+		VALUES ('1', 'test', '2025-01-01', '2025-01-01', 'full rationale')`,
+	); err != nil {
+		t.Errorf("body column should exist on fresh install, got: %v", err)
 	}
 }
 

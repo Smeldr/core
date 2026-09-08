@@ -250,6 +250,16 @@ smeldr.dev/
 │                     at the ratification moment is a future task. EnsureDecisionClassificationColumns
 │                     (ctx, DB) error migrates a pre-A304 database via EnsureColumn, mirroring
 │                     EnsureOrchestrationSignalColumns's own A296 pattern exactly (Amendment A304)
+│                     Amendment gains Body (markdown), mirroring Decision.Body — D67 makes
+│                     create_decision/create_amendment the primary recording mechanism going
+│                     forward (DECISIONS.md/decisions/recent.md frozen at A304); Summary alone
+│                     (a one-line field) could not carry what a decisions/recent.md Amendment
+│                     entry used to hold. EnsureAmendmentBodyColumn(ctx, DB) error migrates a
+│                     pre-A305 database, same one-column EnsureColumn pattern as
+│                     EnsureDecisionClassificationColumns (Amendment A305, D67 core pilot).
+│                     THIS IS THE LAST HAND-WRITTEN AMENDMENT ENTRY in decisions/recent.md for
+│                     smeldr/core — every Amendment after A305 is recorded live via
+│                     create_amendment per CLAUDE.md's own rewritten instructions
 ├── authority.go      Rule, AuthorityStub content types embedding Node — the Authority mechanism
 │                     (decision-governance-model design doc §4): Rule is the first subtype of the
 │                     conceptual Authority supertype (Decision/Rule/Principle/Standard/Precedent);

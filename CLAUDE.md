@@ -85,8 +85,10 @@ before doing anything else.
    "New chat session — start here" Step 2 above — stop here and do not proceed with
    steps 2–7 until the architect transitions `plan-reviewing → implementing`.
 2. Read `DECISIONS.md` — index table only. Body text lives in `decisions/core.md`
-   (D1–D22, A19–A65, A88–A95), `decisions/recent.md` (current rolling window),
-   and topic archive files (auth.md, content-api.md, docs.md, media.md, nav.md,
+   (D1–D22, A19–A65, A88–A95), `decisions/recent.md` (frozen at D67/A304 —
+   no Decision/Amendment content after that point; anything newer is live
+   only, see "Recording a new Decision or Amendment" below), and topic
+   archive files (auth.md, content-api.md, docs.md, media.md, nav.md,
    storage.md). Read the relevant body file when a specific decision is needed.
    Do not work around locked decisions. If a decision seems wrong, raise it explicitly.
 3. Read `docs/ARCHITECTURE.md` — package structure, request lifecycle, stable interfaces.
@@ -112,12 +114,22 @@ before doing anything else.
 
 ## DECISIONS.md file structure (CRITICAL)
 
+**FROZEN as of D67/A304 (2026-09-08) for Decisions and Amendments — see
+"Recording a new Decision or Amendment (live, D67)" below.** DECISIONS.md
+and `decisions/recent.md` stop accepting new Decision/Amendment entries at
+this point; the content already there (through D67/A304) stays exactly as
+is, permanently, for historical reading. No backfill, no new hand-written
+entries for either type from here forward. `decisions/nondecisions.md` is
+NOT covered by this freeze — D67 does not name it, and no live Non-Decision
+content type exists yet, so Non-Decisions keep using the process below
+unchanged until a future decision addresses that gap.
+
 DECISIONS.md is the index. Body text lives in separate files by topic:
 
 | File | Contents | Add new entries? |
 |------|----------|-----------------|
-| `decisions/recent.md` | Rolling working file (~20KB limit) | **Yes — new decisions go here** |
-| `decisions/nondecisions.md` | Non-Decisions only | **Yes — Non-Decisions go here directly** |
+| `decisions/recent.md` | Rolling working file (~20KB limit) | **No — frozen at D67/A304. Decisions/Amendments are recorded live now, see below** |
+| `decisions/nondecisions.md` | Non-Decisions only | **Yes — Non-Decisions go here directly (unaffected by the D67 freeze)** |
 | `decisions/core.md` | Archive: D1–D22, A19–A65, A88–A95 | No — archive only |
 | `decisions/phase2-archive.md` | Superseded archive (was phase2.md; content now in topic files) | No — archive only |
 | `decisions/auth.md` | Archive: D25, A66, D26, A83 | No — archive only |
@@ -139,34 +151,72 @@ toward the rolling window.
 **core-implementer owns all writes to `decisions/` and `DECISIONS.md`.**
 These files must be edited locally via git — never via GitHub MCP API calls.
 The files are too large for `create_or_update_file` and `push_files` silently
-truncates them.
+truncates them. (This still applies to `decisions/nondecisions.md`, which the
+D67 freeze does not cover.)
 
-**When adding a new Decision or Amendment:**
-1. Edit `decisions/recent.md` locally (append to end)
-2. Add the index row to `DECISIONS.md`
-3. Commit both in the same commit
-4. Never use GitHub MCP `create_or_update_file` or `push_files` for these files
+## Recording a new Decision or Amendment (live, D67)
+
+**Never edit `decisions/recent.md` or add a `DECISIONS.md` index row for a
+new Decision or Amendment — that mechanism is frozen (see above).** Use the
+live `process.smeldr.dev` MCP tools instead: `create_decision` /
+`create_amendment`. Both content types are queryable the same way any other
+live item is (`get_decision`, `list_decisions`, `get_amendment`,
+`list_amendments`).
+
+**Number assignment — dual-source, not `grep` alone.** The frozen
+`DECISIONS.md` index's own highest number is a permanent floor (currently
+A304) — it will never grow again, but `list_amendments`/`list_decisions`
+alone will silently under-count immediately after the freeze, since most
+Amendments shipped between 2026-08-13 and the freeze were never recorded
+live (only six pre-freeze live records exist at all: A253–A256, S197,
+OPS-2026-08-11). The next number is
+`max(DECISIONS.md's own frozen index max, list_amendments/list_decisions'
+own live max) + 1`. Check both, every time — the live list alone is not
+sufficient until enough time has passed that its own max exceeds the
+frozen floor.
+
+**Decision — create at `proposed`, stop there.** A real Decision is
+proposed by whoever is recording it and ratified separately by Peter
+(`proposed → ratified`, `RequiredRole: "admin", Strict: true` — D34/D40).
+Call `create_decision` with `decision_number`, `scope`, `body` (the full
+markdown rationale — this is now the *only* place the rationale lives, so
+write the same depth of detail `decisions/recent.md` used to hold, not a
+shorter version). Leave it at its natural initial state, `proposed`. Never
+call `transition_item` to `ratified` yourself — that is Peter's own act,
+unchanged from before D67.
+
+**Amendment — create, then drive straight through to `merged`.** Unlike a
+Decision, an Amendment records work that is already fully shipped by the
+time it's recorded (the commit is already pushed). Call `create_amendment`
+with `amendment_number`, `amendment_type`, `version`, `commit_hash`,
+`pilot`, `summary` (a genuine one-line summary now — the detail goes in
+`body`), and `body` (the full markdown rationale, same depth as a
+`decisions/recent.md` Amendment entry used to carry — do not leave this
+thinner than the git-file convention it replaces). Then call
+`transition_item` (type `Amendment`) through the full chain in the same
+action — `scoped → in-progress → commit-ready → committed → merged` — since
+the represented work is already done. Do not leave a newly created
+Amendment sitting at `scoped`: every one of the six pre-D67 live records
+was left there by mistake (nobody had ever been instructed to advance
+them), and it means the record looks like in-flight work that never
+finished, which is misleading for something that already shipped.
 
 **When adding a Non-Decision:**
 1. Edit `decisions/nondecisions.md` locally (append to end)
 2. Add the index row to `DECISIONS.md`
 3. Commit both in the same commit
 
-**When appending to `decisions/recent.md`:** Append to the end of the file.
-Closing lines (e.g. `---`) repeat throughout the file — if editing mid-file,
-use enough surrounding context to uniquely identify the insertion point.
-Re-read the tail of the file and use a longer unique anchor on match failure.
-
 ## Change classification
 
 Before starting any work, identify the level:
 
 **Level 0 — cosmetic** (CSS spacing, comment typos, whitespace)
-Solo commit by the user. No DECISIONS.md entry. No architect involvement.
+Solo commit by the user. No live Amendment record. No architect involvement.
 Criteria: no functional change, no exported symbol touched, no behaviour changed.
 
 **Level 1 — micro-amendment** (isolated change, no cross-file consequences)
-One A-entry in DECISIONS.md. No full milestone step required.
+One live Amendment record (`create_amendment`, driven to `merged` — see
+"Recording a new Decision or Amendment" above). No full milestone step required.
 Examples: dependency version bumps, single-file config, docs-only changes.
 For standalone modules (mcp, cli, media, etc.): a fix that changes consumer-observable
 behaviour (tool order, API response shape, route output) requires a patch version bump and
@@ -174,7 +224,8 @@ tag even if no exported Go symbol changed. "No version bump" means "no consumer-
 behaviour changed" — not "no exported symbol changed."
 
 **Level 2 — standard amendment or milestone step** (full cycle)
-Requires architect involvement, DECISIONS.md entry with both index row and body,
+Requires architect involvement, a live Decision or Amendment record with
+`body` fully populated (see "Recording a new Decision or Amendment" above),
 docs/ARCHITECTURE.md check, and explicit user approval before commit.
 Criteria: touches an exported Go symbol, interface, or function signature;
 affects a route or middleware behaviour; has consequences in more than one file.
@@ -325,7 +376,7 @@ protocol violation.
 - FEATURELIST.md rows (template row from feature data already in the plan)
 - REFERENCE.md entries (template entry from API data already read)
 - Skill file version line updates (one known value)
-- DECISIONS.md entries (fixed format, known decision text)
+- Live `create_decision`/`create_amendment` calls (fixed format, known decision text — D67 changed the mechanism, not the delegation judgment)
 - README badge or section additions with exact content specified
 
 ### Not eligible (remains Sonnet)
@@ -440,18 +491,27 @@ An Amendment may make README syntax more elegant — if it does, update
 
 An Amendment must never leave `example_test.go` in a failing state.
 
-**Amendment DECISIONS.md completeness rule:**
-Every commit that implements an Amendment must contain **both** of the following
-edits — neither is optional:
+**Amendment live-record completeness rule (D67):**
+Every commit that implements an Amendment must, in the same action, produce
+one complete live Amendment record — no step below is optional:
 
-1. **Index table row** — a new row added to the Amendment index table in
-   `DECISIONS.md` (columns: ID, description, status, date).
-2. **Body section** — the full Amendment text appended to `decisions/recent.md`.
+1. **`create_amendment`** with `amendment_number`, `amendment_type`,
+   `version`, `commit_hash`, `pilot`, `summary` (a genuine one-liner), and
+   `body` (the full markdown rationale — this is now the only place it
+   lives; write the same depth `decisions/recent.md` used to hold).
+2. **Number checked against both sources** — `DECISIONS.md`'s own frozen
+   index max (a permanent floor, currently A304) and
+   `list_amendments`'s own live max — see "Recording a new Decision or
+   Amendment" above.
+3. **Driven through to `merged`** — `transition_item` (type `Amendment`)
+   `scoped → in-progress → commit-ready → committed → merged`, since the
+   work this record represents is already shipped by the time it's
+   created. Do not leave it at `scoped`.
 
-Both edits must be made locally via git — never via GitHub MCP.
-A commit that adds a body without an index row (or vice versa) is incomplete.
-Treat these as a single atomic unit: write both, verify with `Select-String`
-that both exist, then stage.
+A commit that creates the record but leaves `body` empty, or leaves the
+record at `scoped`, is incomplete. Verify with `get_amendment` that
+`body` is populated and `status` is `merged` before considering the step
+done.
 
 ### 4. Architecture and decision review
 - After verification passes, review `docs/ARCHITECTURE.md` and `DECISIONS.md`.
@@ -493,7 +553,7 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       `forgemedia.NewLocalMediaStore`), token API (`smeldr.NewTokenStore`, `smeldr.SignToken`),
       `smeldr.Config` fields, or `smeldr_format`/`smeldr_description` tag values: verify all
       code examples in `AGENTS.md` are still accurate before committing.
-- [ ] If this commit implements an Amendment: both the DECISIONS.md index row and the body section in `decisions/recent.md` are present. Verify with `Select-String`.
+- [ ] If this commit implements an Amendment: the live record exists (`create_amendment`) with `body` fully populated, the number was checked against both the frozen `DECISIONS.md` index and `list_amendments`, and it is transitioned through to `merged`. Verify with `get_amendment`.
 - [ ] **Stability map**: if a shipped feature moves an area between tiers (e.g. SQLRepo graduates from Dogfooding to Stable, or a new module enters as Experimental), update the stability map in `README.md` in the same commit.
 - [ ] **Devlog draft** — write a draft to
       `C:\Users\peter\Documents\Code\Smeldr\common\content\drafts\devlog\`
