@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.86.0] — 2026-09-13
+
+### Added
+- New `grounded_in` relation kind (Decision→Decision, `RegisterOrchestrationRelationKinds`, `orchestration.go`): models a Decision's own evidentiary basis for the Re-ground intention ("the Decision is still right, but its basis needs fixing") — the Decision stays `ratified`, only the graph showing what grounds it changes. Deliberately a new kind rather than widening `derives_from`'s `TypePairs`: `derives_from` is load-bearing for Task→Goal dispatch semantics and is walked by `TraceLineage` keyed on kind name alone, not type pair, so sharing the name would make a Decision's grounding edge "lineage" by the same mechanism as a Task's dispatch edge. `TypePairs` scoped to Decision→Decision only, same narrow-by-default precedent as `addresses` (A301). (A308)
+
+---
+
 ## [1.85.0] — 2026-09-08
 
 ### Added

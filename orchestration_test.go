@@ -1038,6 +1038,7 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 		"contradicts":  {"Contradicts", "", `[{"source_type":"Decision","target_type":"Decision"}]`, false},
 		"investigates": {"Investigates", "Investigated By", `[{"source_type":"Task","target_type":"Decision"}]`, true},
 		"addresses":    {"Addresses", "Addressed By", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
+		"grounded_in":  {"Grounded In", "Grounds", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
 	}
 
 	kinds := store.ListKinds()

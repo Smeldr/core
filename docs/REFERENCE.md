@@ -4137,15 +4137,20 @@ safe to call on every boot; `UpsertKind` updates in place if a kind is already r
 | `contradicts` | symmetric (`Directional: false`) | Decision↔Decision | asserted |
 | `investigates` | directional | Task→Decision | asserted |
 | `addresses` | directional | Decision→Decision | asserted |
+| `grounded_in` | directional | Decision→Decision | asserted |
 
 `contradicts` is the vehicle for a Decision-to-Decision Asserted-provenance condition — it
 has no `ReverseLabel`, since "contradicts" reads the same statement from either endpoint,
 unlike `contains`/"Part Of". `investigates` models a Task delegated to look into a Decision.
 `addresses` (A301) models one Decision responding to another — e.g. a decline-Decision
 asserting back to the original it declines; `TypePairs` is scoped to Decision→Decision only
-for this one real need, not left open for a hypothetical non-Decision use case. Who asserts
-either edge, and when, is left to the same `assert_relation` convention already used for
-every other kind here — no new core machinery.
+for this one real need, not left open for a hypothetical non-Decision use case. `grounded_in`
+(A308) models a Decision's own evidentiary basis — the Re-ground intention
+(`decision-supersession-model.md` §2 item 4): the Decision stays `ratified`, only the graph
+showing what grounds it changes. `TypePairs` is scoped to Decision→Decision only, same
+narrow-by-default precedent as `addresses`. Who asserts either edge, and when, is left to
+the same `assert_relation` convention already used for every other kind here — no new core
+machinery.
 
 ### `Signal` structured fields (A296)
 

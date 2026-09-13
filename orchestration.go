@@ -630,7 +630,10 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 // Signal): derives_from (Task→Goal), depends_on (Task→Task), ships_as
 // (Task→Amendment), supersedes (Decision→Decision), contains
 // (Goal→{Goal,Task,Decision,Amendment,Signal}), contradicts
-// (Decision↔Decision, symmetric), and investigates (Task→Decision).
+// (Decision↔Decision, symmetric), investigates (Task→Decision), addresses
+// (Decision→Decision, a decline-Decision asserting back to the original it
+// declines), and grounded_in (Decision→Decision, a Decision's own
+// evidentiary basis — the Re-ground intention).
 // Idempotent — safe to call on every boot; UpsertKind updates in place if a
 // kind with the same type_name is already registered.
 func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStore) error {
@@ -706,6 +709,27 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			TypeName:     "addresses",
 			Label:        "Addresses",
 			ReverseLabel: "Addressed By",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"}]`),
+		},
+		{
+			// Re-ground intention (decision-supersession-model.md §2 item 4):
+			// "the Decision is still right, but its basis needs fixing" — a
+			// new grounding edge is asserted, the invalidated one stays as
+			// historical record, the Decision itself stays ratified (no
+			// state-flow transition). Deliberately its own kind rather than
+			// widening derives_from's TypePairs: derives_from is load-bearing
+			// for Task→Goal dispatch semantics (D36) and is walked by
+			// TraceLineage keyed on kind name alone (lineage.go), not on
+			// type pair — sharing the name would make a Decision's grounding
+			// edge "lineage" by the same mechanism as a Task's dispatch edge.
+			// Scoped to Decision→Decision only, same narrow-by-default
+			// precedent as addresses above — extend TypePairs later only if
+			// a real second use case names one.
+			TypeName:     "grounded_in",
+			Label:        "Grounded In",
+			ReverseLabel: "Grounds",
 			Mode:         "asserted",
 			Directional:  true,
 			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"}]`),

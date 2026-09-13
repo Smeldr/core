@@ -222,7 +222,8 @@ smeldr.dev/
 │                     symmetric, the vehicle for Workspace's own Asserted provenance) and
 │                     investigates (Task→Decision, delegation) added by A296; addresses
 │                     (Decision→Decision, a decline-Decision asserting back to the original
-│                     it declines) added by A301
+│                     it declines) added by A301; grounded_in (Decision→Decision, a
+│                     Decision's own grounding basis, Re-ground) added by A308
 │                     Signal gains SubjectType/SubjectID/FromState/ToState/RequiredRole (db-tagged,
 │                     mirroring ProvenanceRecord's own vocabulary for the same four shared concepts,
 │                     not a parallel name) — lets a Scheduled-provenance reader build a real row from
