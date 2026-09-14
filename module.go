@@ -526,6 +526,7 @@ type Module[T any] struct {
 	secret            []byte                                            // set by App.Content via setSecret; used for preview token validation
 	db                DB                                                // set by App.Content via setDB; used for transition validation
 	roleStore         *RoleStore                                        // nil unless App.Governance is wired; set by App.Handler via setRoleStore
+	relationStore     *RelationStore                                    // nil unless App.Relations() is wired; set by App.Handler via setRelationStore
 	cacheInvalidators []func()                                          // extra invalidation callbacks wired by App.Route for aggregate routes
 	slugCheckers      []func(ctx context.Context, slug string) error    // collision checkers wired by App.Route for aggregate routes
 
@@ -779,6 +780,14 @@ func (m *Module[T]) setDB(db DB) {
 // checks. Called by [App.Handler] when [App.Governance] has been wired.
 func (m *Module[T]) setRoleStore(store *RoleStore) {
 	m.roleStore = store
+}
+
+// setRelationStore injects the application [RelationStore] into the module,
+// threaded into [validateTransition]'s rels parameter — reserved for D62's
+// future RequiredRelation existence-check (D64 item 2), not yet consulted.
+// Called by [App.Handler] when [App.Relations] has been wired.
+func (m *Module[T]) setRelationStore(store *RelationStore) {
+	m.relationStore = store
 }
 
 // collectStats implements [statsCollector]. It returns item counts per status
@@ -1928,11 +1937,11 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 		// reserved body key would be a live collision (serveblocks.go's own
 		// buildData/Status precedent), not merely a theoretical one.
 		reason := r.Header.Get("Smeldr-Reason")
-		if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(newStatus), reason); err != nil {
+		if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(existing), m.contentTypeName, string(prevStatus), string(newStatus), reason); err != nil {
 			WriteError(w, r, err)
 			return
 		}
-		// D34: layered scope-aware check on top of the generic RequiredRole
+		// D34: layered scope-aware check on top of the generic RequiredOperation
 		// gate above — a no-op for every type except *Decision, and a no-op
 		// for *Decision too until decisionScopeRoles is populated. Checked
 		// against existing, not item: updateHandler decodes a full-replace
@@ -2546,7 +2555,7 @@ func (m *Module[T]) MCPPublish(ctx Context, slug, reason string) error {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
-	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Published), reason); err != nil {
+	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Published), reason); err != nil {
 		return err
 	}
 	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Published), nodeIDOf(item)); err != nil {
@@ -2576,7 +2585,7 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time, reason s
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
-	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Scheduled), reason); err != nil {
+	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Scheduled), reason); err != nil {
 		return err
 	}
 	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Scheduled), nodeIDOf(item)); err != nil {
@@ -2604,7 +2613,7 @@ func (m *Module[T]) MCPArchive(ctx Context, slug, reason string) error {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
-	if err := validateTransition(ctx, m.db, m.roleStore, ctx.User().ID, m.contentTypeName, string(prevStatus), string(Archived), reason); err != nil {
+	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Archived), reason); err != nil {
 		return err
 	}
 	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Archived), nodeIDOf(item)); err != nil {

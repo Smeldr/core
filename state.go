@@ -134,13 +134,20 @@ type Transition struct {
 	// To is the target state name.
 	To string
 
-	// RequiredRole is the minimum role that may perform this transition.
-	// An empty string means any authenticated role may perform it.
-	RequiredRole string
+	// RequiredOperation is the operation (e.g. "approve", "manage") the actor
+	// must be [RoleStore.Authorized] for on this item to perform this
+	// transition. An empty string means any authenticated role may perform
+	// it. Renamed from RequiredRole (D63/D64, Amendment A309): matching moved
+	// from RoleStore.RoleGranted's exact-role-name match to
+	// RoleStore.Authorized's operation match — the same model every MCP tool
+	// already uses — so a transition gate composes with the rest of the
+	// operation-based role system instead of being a second, independent
+	// mechanism.
+	RequiredOperation string
 
 	// RequiredReason, when true, requires the caller to supply a non-empty
 	// reason for this specific transition (T149) — enforced at the same layer
-	// and in the same fail-closed manner as RequiredRole. False (the zero
+	// and in the same fail-closed manner as RequiredOperation. False (the zero
 	// value) means no reason is required, matching every existing flow's
 	// behaviour unchanged. Per-Transition, not global: a Decision→superseded
 	// transition might require one; a Task todo→doing transition typically
@@ -152,9 +159,10 @@ type Transition struct {
 	// not wired) and an empty actorID (no authenticated caller) are rejected
 	// with ErrForbidden instead of silently allowed through. False (the zero
 	// value, matching every existing flow's behaviour unchanged) keeps
-	// today's lenient posture — RequiredRole is checked only when a RoleStore
-	// and actor are actually present. Only meaningful alongside a non-empty
-	// RequiredRole: Strict has no effect on a transition with no role gate.
+	// today's lenient posture — RequiredOperation is checked only when a
+	// RoleStore and actor are actually present. Only meaningful alongside a
+	// non-empty RequiredOperation: Strict has no effect on a transition with
+	// no operation gate.
 	Strict bool
 }
 
@@ -242,8 +250,8 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	// Upsert transitions.
 	for _, t := range flow.Transitions {
 		var roleArg any
-		if t.RequiredRole != "" {
-			roleArg = t.RequiredRole
+		if t.RequiredOperation != "" {
+			roleArg = t.RequiredOperation
 		}
 		if _, err := db.ExecContext(ctx,
 			`INSERT INTO smeldr_transitions(id, flow_id, from_state, to_state, required_role, required_reason, strict) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`,
@@ -366,7 +374,8 @@ func validateFlowItems(ctx context.Context, db DB, flow StateFlow) error {
 //
 // validateTransition checks that the transition fromStatus→toStatus is permitted
 // for typeName by the registered state flow. When governance is wired and the
-// transition row carries a required_role, the actor must hold a grant to that role.
+// transition row carries a required_operation, the actor must be
+// [RoleStore.Authorized] for that operation on the item (itemID, typeName).
 //
 // Two distinct failure zones:
 //
@@ -375,20 +384,27 @@ func validateFlowItems(ctx context.Context, db DB, flow StateFlow) error {
 //     compatibility for deployments without a registered flow.
 //
 //   - FAIL-CLOSED (authorization): the transition exists and carries a
-//     required_role, governance is wired, and the actor's grants are evaluated.
-//     Any DB error during the grant check returns [ErrForbidden] (deny).
+//     required_operation, governance is wired, and the actor's grants are
+//     evaluated. Any DB error during the grant check returns [ErrForbidden] (deny).
 //
 // The actorID parameter carries the token ID of the actor initiating the transition.
-// When actorID is empty the required_role check is skipped — this applies to any
-// caller that does not carry a user in context: system-initiated paths (e.g. batch
-// migrations, test code with plain context.Context, or background jobs that do not
-// pass a smeldr.Context). Only callers that explicitly provide an actorID are
-// subject to governance enforcement.
+// When actorID is empty the required_operation check is skipped — this applies to
+// any caller that does not carry a user in context: system-initiated paths (e.g.
+// batch migrations, test code with plain context.Context, or background jobs that
+// do not pass a smeldr.Context). Only callers that explicitly provide an actorID
+// are subject to governance enforcement.
+//
+// itemID identifies the item being transitioned, carried into
+// [RoleStore.Authorized]'s AuthTarget so a scoped grant (static or dynamic) can
+// match against it — previously always a zero AuthTarget{} (D63 §1). rels is
+// accepted but not yet consulted: reserved for D62's future RequiredRelation
+// existence-check, not yet implemented. Threading it through here avoids a
+// second breaking signature change to this function when that ships (D64 item 2).
 //
 // The reason parameter carries the caller-supplied rationale for this transition,
 // if any (T149). When the transition row carries required_reason=true and reason
 // is empty, the transition is rejected with [ErrBadRequest] — this check is
-// fail-closed and unconditional, unlike required_role's checks (it does not
+// fail-closed and unconditional, unlike required_operation's checks (it does not
 // depend on governance being wired or an actorID being present, since supplying
 // a reason is a caller-side fact, not an identity check).
 //
@@ -397,7 +413,7 @@ func validateFlowItems(ctx context.Context, db DB, flow StateFlow) error {
 //   - the database is not SQLite (non-SQLite databases skip flow validation)
 //   - fromStatus == toStatus (identity transition — always allowed for idempotency)
 //   - no flow is registered for typeName and no default flow exists
-func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, typeName, fromStatus, toStatus, reason string) error {
+func validateTransition(ctx context.Context, db DB, rs *RoleStore, rels *RelationStore, actorID, itemID, typeName, fromStatus, toStatus, reason string) error {
 	if db == nil {
 		return nil
 	}
@@ -432,7 +448,7 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 	}
 
 	// ── FAIL-OPEN structural boundary ────────────────────────────────────────
-	requiredRole, requiredReason, strict, edgeFound, gateErr := lookupTransitionGate(ctx, db, flowID, fromStatus, toStatus)
+	requiredOperation, requiredReason, strict, edgeFound, gateErr := lookupTransitionGate(ctx, db, flowID, fromStatus, toStatus)
 	if !edgeFound && gateErr == nil {
 		return fmt.Errorf("%w: transition %s→%s is not permitted for type %q", ErrConflict, fromStatus, toStatus, typeName)
 	}
@@ -453,35 +469,35 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, actorID, type
 	}
 
 	// ── FAIL-CLOSED authorization boundary ───────────────────────────────────
-	if requiredRole == "" {
-		return nil // no role gate on this transition
+	if requiredOperation == "" {
+		return nil // no operation gate on this transition
 	}
 	if rs == nil {
 		if strict {
-			return fmt.Errorf("%w: transition %s→%s requires role %q but governance is not wired",
-				ErrForbidden, fromStatus, toStatus, requiredRole)
+			return fmt.Errorf("%w: transition %s→%s requires operation %q but governance is not wired",
+				ErrForbidden, fromStatus, toStatus, requiredOperation)
 		}
-		return nil // governance not wired — skip required_role check (non-strict, unchanged)
+		return nil // governance not wired — skip required_operation check (non-strict, unchanged)
 	}
 	if actorID == "" {
 		// Any caller without an actor in context (system paths, plain
 		// context.Context, background jobs) is treated as pre-authorized —
 		// unless this transition is strict (D34), in which case an absent
-		// actor cannot satisfy a role gate and is rejected instead.
+		// actor cannot satisfy an operation gate and is rejected instead.
 		if strict {
-			return fmt.Errorf("%w: transition %s→%s requires role %q but no actor is present",
-				ErrForbidden, fromStatus, toStatus, requiredRole)
+			return fmt.Errorf("%w: transition %s→%s requires operation %q but no actor is present",
+				ErrForbidden, fromStatus, toStatus, requiredOperation)
 		}
 		return nil
 	}
-	ok, err := rs.RoleGranted(ctx, actorID, requiredRole, AuthTarget{})
+	ok, err := rs.Authorized(ctx, actorID, requiredOperation, AuthTarget{TypeName: typeName, ID: itemID})
 	if err != nil {
-		return fmt.Errorf("%w: transition %s→%s requires role %q: %s",
-			ErrForbidden, fromStatus, toStatus, requiredRole, err)
+		return fmt.Errorf("%w: transition %s→%s requires operation %q: %s",
+			ErrForbidden, fromStatus, toStatus, requiredOperation, err)
 	}
 	if !ok {
-		return fmt.Errorf("%w: transition %s→%s requires role %q",
-			ErrForbidden, fromStatus, toStatus, requiredRole)
+		return fmt.Errorf("%w: transition %s→%s requires operation %q",
+			ErrForbidden, fromStatus, toStatus, requiredOperation)
 	}
 	return nil
 }
@@ -521,19 +537,19 @@ func resolveFlowID(ctx context.Context, db DB, typeName string) (flowID string, 
 // must stay visible rather than collapsed into one "not found" case.
 // Extracted from validateTransition (T243) — same query, same two outcomes,
 // now shared rather than duplicated for the provenance gating check.
-func lookupTransitionGate(ctx context.Context, db DB, flowID, fromState, toState string) (requiredRole string, requiredReason, strict, found bool, err error) {
-	var nullRole sql.NullString
+func lookupTransitionGate(ctx context.Context, db DB, flowID, fromState, toState string) (requiredOperation string, requiredReason, strict, found bool, err error) {
+	var nullOperation sql.NullString
 	e := db.QueryRowContext(ctx,
 		`SELECT required_role, required_reason, strict FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = $3`,
 		flowID, fromState, toState,
-	).Scan(&nullRole, &requiredReason, &strict)
+	).Scan(&nullOperation, &requiredReason, &strict)
 	if errors.Is(e, sql.ErrNoRows) {
 		return "", false, false, false, nil
 	}
 	if e != nil {
 		return "", false, false, false, e
 	}
-	return nullRole.String, requiredReason, strict, true, nil
+	return nullOperation.String, requiredReason, strict, true, nil
 }
 
 // validateInitialState checks whether statusName is a known state in the
@@ -941,7 +957,7 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 	if sc, ok := ctx.(smeldrCtxAccessor); ok {
 		actorID = sc.User().ID
 	}
-	if err := validateTransition(ctx, db, a.governance, actorID, typeName, currentStatus, toState, reason); err != nil {
+	if err := validateTransition(ctx, db, a.governance, a.relationStore, actorID, id, typeName, currentStatus, toState, reason); err != nil {
 		return nil, err
 	}
 	if err := applyConflictPolicy(ctx, db, nil, typeName, toState, id); err != nil {
@@ -991,13 +1007,13 @@ func isNoSuchTable(err error) bool {
 }
 
 // drainAuthorizationGate reports whether typeName's fromState→toState
-// transition requires a role — automation may never cross such a boundary
-// itself (D42, [DrainEvalQueue]'s authority half of T211).
-// requiredRole is empty when the transition is not gated; a non-empty
-// value is the exact role name the flow declares, independent of whether
+// transition requires an operation — automation may never cross such a
+// boundary itself (D42, [DrainEvalQueue]'s authority half of T211).
+// requiredOperation is empty when the transition is not gated; a non-empty
+// value is the exact operation the flow declares, independent of whether
 // that transition is [Transition.Strict] and independent of whether
-// governance is wired on this instance — declaring a RequiredRole is the
-// operator's stated intent about that transition, and the absence of a
+// governance is wired on this instance — declaring a RequiredOperation is
+// the operator's stated intent about that transition, and the absence of a
 // wired [RoleStore] does not withdraw it for an unattended caller.
 //
 // Returns the item's current status as fromState (needed by the caller
@@ -1006,7 +1022,7 @@ func isNoSuchTable(err error) bool {
 // "gated" verdict — the caller falls back to its own existing skip+log
 // behaviour for a plain failure rather than misreporting it as an
 // authorization block.
-func drainAuthorizationGate(ctx context.Context, db DB, table, typeName, itemID, toState string) (fromState, requiredRole string, err error) {
+func drainAuthorizationGate(ctx context.Context, db DB, table, typeName, itemID, toState string) (fromState, requiredOperation string, err error) {
 	if err := db.QueryRowContext(ctx,
 		"SELECT status FROM "+quoteIdent(table)+" WHERE id = $1", itemID,
 	).Scan(&fromState); err != nil {
@@ -1029,36 +1045,38 @@ func drainAuthorizationGate(ctx context.Context, db DB, table, typeName, itemID,
 		}
 	}
 
-	var role sql.NullString
+	var operation sql.NullString
 	rowErr := db.QueryRowContext(ctx,
 		`SELECT required_role FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2 AND to_state = $3`,
 		flowID, fromState, toState,
-	).Scan(&role)
+	).Scan(&operation)
 	if errors.Is(rowErr, sql.ErrNoRows) {
 		return fromState, "", nil // transition not declared — nothing to gate
 	}
 	if rowErr != nil {
 		return "", "", fmt.Errorf("smeldr: drainAuthorizationGate: read transition: %w", rowErr)
 	}
-	if !role.Valid {
+	if !operation.Valid {
 		return fromState, "", nil
 	}
-	return fromState, role.String, nil
+	return fromState, operation.String, nil
 }
 
 // TransitionOption describes one legal transition out of a given state in a
-// registered [StateFlow], including the role (if any) required to perform it.
+// registered [StateFlow], including the operation (if any) required to
+// perform it.
 type TransitionOption struct {
-	ToState        string
-	RequiredRole   string // "" if the transition has no role gate
-	RequiredReason bool
-	Strict         bool
+	ToState           string
+	RequiredOperation string // "" if the transition has no operation gate
+	RequiredReason    bool
+	Strict            bool
 }
 
 // ValidTransitions returns every legal transition out of fromState for
 // typeName's registered flow (or the default flow, if typeName has none),
-// including each transition's RequiredRole — the piece [drainAuthorizationGate]
-// already reads internally but no exported API surfaced until now (A296).
+// including each transition's RequiredOperation — the piece
+// [drainAuthorizationGate] already reads internally but no exported API
+// surfaced until now (A296).
 // A caller like Workspace's own filter chain ("does this transition require
 // a role") can use this for any item in any state, not only the
 // auto-generated authorization-required Signal case drainAuthorizationGate
@@ -1094,11 +1112,11 @@ func (a *App) ValidTransitions(ctx context.Context, typeName, fromState string) 
 	var options []TransitionOption
 	for rows.Next() {
 		var opt TransitionOption
-		var role sql.NullString
-		if err := rows.Scan(&opt.ToState, &role, &opt.RequiredReason, &opt.Strict); err != nil {
+		var operation sql.NullString
+		if err := rows.Scan(&opt.ToState, &operation, &opt.RequiredReason, &opt.Strict); err != nil {
 			return nil, fmt.Errorf("smeldr: ValidTransitions: scan: %w", err)
 		}
-		opt.RequiredRole = role.String
+		opt.RequiredOperation = operation.String
 		options = append(options, opt)
 	}
 	if err := rows.Err(); err != nil {
@@ -1109,11 +1127,17 @@ func (a *App) ValidTransitions(ctx context.Context, typeName, fromState string) 
 
 // recordAuthorizationRequiredSignal inserts a Signal recording that
 // typeName/itemID's fromState→toState transition requires a human holding
-// requiredRole — the loud-failure half of T211's authority answer
+// requiredOperation — the loud-failure half of T211's authority answer
 // ([drainAuthorizationGate]). A Signal is a persisted, queryable row
-// (unlike a log line), addressed to the exact role the flow declares —
-// never a hardcoded role, since RequiredRole is free-form and a Signal
-// naming the wrong authority would be a false statement about who may act.
+// (unlike a log line), addressed by the exact operation the flow declares —
+// never a hardcoded value, since RequiredOperation is free-form and a Signal
+// naming the wrong requirement would be a false statement about what may act.
+//
+// The Signal's own receiver column is set to requiredOperation (an operation
+// word, e.g. "approve", not a role name — Amendment A309/D64) — nothing in
+// core resolves receiver against RoleStore, so this is a free-form label, not
+// a routing lookup; a consumer that previously expected a role name here
+// should be told this value's shape changed alongside the D64 migration.
 //
 // store/pool deliver a "signal.created" webhook event for this Signal (T231);
 // broadcaster additionally streams it (T269) — the same event name a
@@ -1123,10 +1147,10 @@ func (a *App) ValidTransitions(ctx context.Context, typeName, fromState string) 
 // correct behaviour: a Signal is a Signal. [dispatchTransitionWebhook] is
 // nil-safe, so a caller with webhooks/streaming unwired passes nil for
 // whichever it lacks.
-func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, typeName, itemID, fromState, toState, requiredRole string) error {
+func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, typeName, itemID, fromState, toState, requiredOperation string) error {
 	id := NewID()
 	now := time.Now().UTC()
-	message := fmt.Sprintf("%s %s: %s→%s requires role %q", typeName, itemID, fromState, toState, requiredRole)
+	message := fmt.Sprintf("%s %s: %s→%s requires operation %q", typeName, itemID, fromState, toState, requiredOperation)
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO smeldr_signals
 			(id, slug, status, created_at, updated_at, sender, receiver, signal_type, message, task_ref, sequence,
@@ -1134,15 +1158,15 @@ func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *Webhoo
 		VALUES
 			($1, $2, 'pending', $3, $4, 'system', $5, 'authorization-required', $6, '', 0,
 			 $7, $8, $9, $10, $5)`,
-		id, id, now, now, requiredRole, message, typeName, itemID, fromState, toState,
+		id, id, now, now, requiredOperation, message, typeName, itemID, fromState, toState,
 	)
 	if err != nil {
 		return fmt.Errorf("smeldr: recordAuthorizationRequiredSignal: %w", err)
 	}
 	// Event-stream channel (A302): this Signal's own receiver column is set
-	// to requiredRole two statements above (the INSERT's $5 placeholder) —
-	// reusing the parameter directly needs no extra query.
-	dispatchTransitionWebhook(ctx, store, pool, broadcaster, requiredRole, "signal.created", transitionWebhookData{
+	// to requiredOperation two statements above (the INSERT's $5 placeholder)
+	// — reusing the parameter directly needs no extra query.
+	dispatchTransitionWebhook(ctx, store, pool, broadcaster, requiredOperation, "signal.created", transitionWebhookData{
 		Type: "signal", ID: id, Slug: id, ToState: "pending",
 	})
 	return nil
@@ -1151,7 +1175,7 @@ func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *Webhoo
 // DrainEvalQueue transitions items whose scheduled evaluation time has arrived.
 // It selects all rows from smeldr_eval_queue WHERE eval_at <= now, then for
 // each row checks whether the item's current status→to_state transition is
-// role-gated ([drainAuthorizationGate]): if not, applies a direct status
+// operation-gated ([drainAuthorizationGate]): if not, applies a direct status
 // UPDATE; if it is, automation does not cross the boundary itself — a
 // [recordAuthorizationRequiredSignal] Signal is recorded instead. Either way
 // the queue row is deleted regardless of outcome (failed or blocked
@@ -1160,9 +1184,9 @@ func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *Webhoo
 //
 // Returns walked (total eligible rows read from smeldr_eval_queue, T223 — the
 // count that makes triggered/skipped meaningful on a clean run), the number
-// of items transitioned (triggered), and items skipped due to errors or a
-// role gate. Returns (0, 0, 0, nil) when Config.DB is nil or the table does
-// not yet exist (fail-open).
+// of items transitioned (triggered), and items skipped due to errors or an
+// operation gate. Returns (0, 0, 0, nil) when Config.DB is nil or the table
+// does not yet exist (fail-open).
 func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped int, err error) {
 	db := a.cfg.DB
 	if db == nil {
@@ -1208,7 +1232,7 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 	for _, r := range pending {
 		table := resolveItemTable(ctx, db, r.typeName)
 
-		fromState, requiredRole, gateErr := drainAuthorizationGate(ctx, db, table, r.typeName, r.itemID, r.toState)
+		fromState, requiredOperation, gateErr := drainAuthorizationGate(ctx, db, table, r.typeName, r.itemID, r.toState)
 		switch {
 		case gateErr != nil:
 			// A plain failure, not an authorization verdict — falls back
@@ -1218,13 +1242,13 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 			slog.WarnContext(ctx, "smeldr: DrainEvalQueue: authorization gate check failed",
 				"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "error", gateErr)
 			skipped++
-		case requiredRole != "":
-			// Automation may never cross a role-gated boundary itself —
+		case requiredOperation != "":
+			// Automation may never cross an operation-gated boundary itself —
 			// the authority half of T211. Emit the loud-failure Signal
 			// instead of applying the transition.
-			if sigErr := recordAuthorizationRequiredSignal(ctx, db, a.webhookStore, a.webhookPool, a.eventBroadcaster, r.typeName, r.itemID, fromState, r.toState, requiredRole); sigErr != nil {
+			if sigErr := recordAuthorizationRequiredSignal(ctx, db, a.webhookStore, a.webhookPool, a.eventBroadcaster, r.typeName, r.itemID, fromState, r.toState, requiredOperation); sigErr != nil {
 				slog.WarnContext(ctx, "smeldr: DrainEvalQueue: authorization-required signal failed",
-					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "required_role", requiredRole, "error", sigErr)
+					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "required_operation", requiredOperation, "error", sigErr)
 			}
 			skipped++
 		default:

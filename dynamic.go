@@ -22,6 +22,7 @@ type DynamicTypeRepo struct {
 	typeName string
 	schema   *ContentTypeSchema // used for title-Role slug generation; may be nil
 	rs       *RoleStore         // nil unless WithGovernance was called
+	relStore *RelationStore     // nil unless WithRelations was called
 }
 
 // NewDynamicTypeRepo returns a DynamicTypeRepo bound to the given type name.
@@ -30,16 +31,29 @@ func NewDynamicTypeRepo(db DB, typeName string, schema *ContentTypeSchema) *Dyna
 	return &DynamicTypeRepo{db: db, typeName: typeName, schema: schema}
 }
 
-// WithGovernance returns a shallow copy of r configured to enforce required_role
-// checks on [DynamicTypeRepo.SetStatus]. Pass nil to obtain a copy without
-// governance enforcement (identical to the default state).
+// WithGovernance returns a shallow copy of r configured to enforce
+// required_operation checks on [DynamicTypeRepo.SetStatus]. Pass nil to
+// obtain a copy without governance enforcement (identical to the default
+// state).
 //
 // When the caller does not provide a smeldr.Context (e.g. system-initiated code
-// using a plain context.Context), the actorID is empty and the required_role
-// check is skipped, matching the behaviour of any other non-authenticated caller.
+// using a plain context.Context), the actorID is empty and the
+// required_operation check is skipped, matching the behaviour of any other
+// non-authenticated caller.
 func (r *DynamicTypeRepo) WithGovernance(rs *RoleStore) *DynamicTypeRepo {
 	cp := *r
 	cp.rs = rs
+	return &cp
+}
+
+// WithRelations returns a shallow copy of r configured with store, threaded
+// into [validateTransition]'s rels parameter on [DynamicTypeRepo.SetStatus]/
+// [DynamicTypeRepo.ScheduleContent] — reserved for D62's future
+// RequiredRelation existence-check (D64 item 2), not yet consulted. Pass nil
+// to obtain a copy with no relation store (identical to the default state).
+func (r *DynamicTypeRepo) WithRelations(store *RelationStore) *DynamicTypeRepo {
+	cp := *r
+	cp.relStore = store
 	return &cp
 }
 
@@ -207,10 +221,11 @@ func (r *DynamicTypeRepo) UpdateFields(ctx context.Context, id string, patch map
 // Published and PublishedAt is zero, it is set to the current UTC time.
 // The transition is validated against the registered flow before the update is applied.
 //
-// When [WithGovernance] has been called and the transition carries a required_role,
-// the actor's token ID is extracted from ctx if it implements the smeldr.Context
-// interface. Callers that pass a plain context.Context (system-initiated paths)
-// get an empty actorID, which skips the required_role check.
+// When [WithGovernance] has been called and the transition carries a
+// required_operation, the actor's token ID is extracted from ctx if it
+// implements the smeldr.Context interface. Callers that pass a plain
+// context.Context (system-initiated paths) get an empty actorID, which skips
+// the required_operation check.
 //
 // SetStatus supplies no reason — use [DynamicTypeRepo.SetStatusWithReason] for
 // transitions on a flow where [Transition.RequiredReason] is set (T149); those
@@ -235,7 +250,7 @@ func (r *DynamicTypeRepo) setStatus(ctx context.Context, id string, status Statu
 		return err
 	}
 	// Extract actor ID if ctx carries a smeldr.Context (MCP request path).
-	// Plain context.Context (system-initiated paths) → actorID "" → skip required_role.
+	// Plain context.Context (system-initiated paths) → actorID "" → skip required_operation.
 	type smeldrCtxAccessor interface {
 		User() User
 	}
@@ -243,7 +258,7 @@ func (r *DynamicTypeRepo) setStatus(ctx context.Context, id string, status Statu
 	if sc, ok := ctx.(smeldrCtxAccessor); ok {
 		actorID = sc.User().ID
 	}
-	if err := validateTransition(ctx, r.db, r.rs, actorID, r.typeName, string(node.Status), string(status), reason); err != nil {
+	if err := validateTransition(ctx, r.db, r.rs, r.relStore, actorID, id, r.typeName, string(node.Status), string(status), reason); err != nil {
 		return err
 	}
 	if err := applyConflictPolicy(ctx, r.db, nil, r.typeName, string(status), id); err != nil {
@@ -279,7 +294,7 @@ func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, schedu
 	if sc, ok := ctx.(smeldrCtxAccessor); ok {
 		actorID = sc.User().ID
 	}
-	if err := validateTransition(ctx, r.db, r.rs, actorID, r.typeName, string(node.Status), string(Scheduled), ""); err != nil {
+	if err := validateTransition(ctx, r.db, r.rs, r.relStore, actorID, id, r.typeName, string(node.Status), string(Scheduled), ""); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -431,6 +446,9 @@ func (a *App) DynamicContentRepo(typeName string) (*DynamicTypeRepo, error) {
 	repo := NewDynamicTypeRepo(a.cfg.DB, typeName, desc.Schema)
 	if a.governance != nil {
 		repo = repo.WithGovernance(a.governance)
+	}
+	if a.relationStore != nil {
+		repo = repo.WithRelations(a.relationStore)
 	}
 	return repo, nil
 }

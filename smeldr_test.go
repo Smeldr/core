@@ -663,6 +663,52 @@ func TestApp_Handler_navModeCode(t *testing.T) {
 }
 
 // ——————————————————————————————————————————————————————————————
+// Handler — App.Relations wiring + setRelationStore (D64/A309)
+// ——————————————————————————————————————————————————————————————
+
+// TestApp_Handler_relationStoreWiring verifies that Handler() wires the
+// App's own RelationStore into every registered module implementing
+// setRelationStore, mirroring the existing governanceModules/setRoleStore
+// wiring exactly (smeldr.go's relationStoreModules loop).
+func TestApp_Handler_relationStoreWiring(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := NewModule((*testPost)(nil), Repo(repo))
+
+	db := newSQLiteDB(t)
+	if err := CreateRelationTables(db); err != nil {
+		t.Fatalf("CreateRelationTables: %v", err)
+	}
+	store, err := NewRelationStore(db)
+	if err != nil {
+		t.Fatalf("NewRelationStore: %v", err)
+	}
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16"), DB: db})
+	app.Relations(store)
+	app.Content(m) // adds m to relationStoreModules
+
+	_ = app.Handler()
+	if m.relationStore != store {
+		t.Error("module relationStore should be set to the App's own RelationStore via setRelationStore after Handler()")
+	}
+}
+
+// TestApp_Handler_relationStoreWiring_NoRelations verifies that a module's
+// relationStore stays nil when App.Relations was never called — no wiring
+// loop runs, matching the governance equivalent's own nil-guard.
+func TestApp_Handler_relationStoreWiring_NoRelations(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	m := NewModule((*testPost)(nil), Repo(repo))
+
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	app.Content(m)
+
+	_ = app.Handler()
+	if m.relationStore != nil {
+		t.Error("module relationStore should stay nil when App.Relations was never called")
+	}
+}
+
+// ——————————————————————————————————————————————————————————————
 // Handler — OGDefaults root-relative image URL resolution
 // ——————————————————————————————————————————————————————————————
 

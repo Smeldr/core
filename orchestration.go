@@ -167,10 +167,18 @@ type Signal struct {
 	// FromState/ToState.
 	FromState string `json:"from_state" db:"from_state"`
 	ToState   string `json:"to_state" db:"to_state"`
-	// RequiredRole names the role that would have been required to
-	// perform the blocked transition. Empty when this Signal does not
-	// concern a blocked transition.
-	RequiredRole string `json:"required_role" db:"required_role"`
+	// RequiredOperation names the operation that would have been required
+	// to perform the blocked transition (D63/D64, Amendment A309 — an
+	// operation word, e.g. "approve", not a role name; renamed from
+	// RequiredRole). Empty when this Signal does not concern a blocked
+	// transition. JSON key and DB column deliberately kept as
+	// "required_role" — unlike the Go field, both are consumer-facing
+	// wire contracts (smeldr.dev/mcp's create_signal/get_signal/
+	// list_signals tools, and the live process.smeldr.dev orchestration
+	// instance's own callers) that this Amendment does not rename, to
+	// avoid a second, live-system-breaking change beyond what D64 itself
+	// scoped.
+	RequiredOperation string `json:"required_role" db:"required_role"`
 }
 
 // Task is an orchestration content type representing a work item moving
@@ -230,16 +238,19 @@ type Decision struct {
 // (ratified→superseded) — per D34. Deliberately starts empty: no
 // scope-to-role policy has been decided yet. An unmapped Scope value is not
 // an error — it simply means authorizeDecisionScope has nothing additional
-// to check for that item, and the generic RequiredRole gate already set on
-// orchDecisionFlow's transitions is what enforces authority today.
+// to check for that item, and the generic RequiredOperation gate already set
+// on orchDecisionFlow's transitions is what enforces authority today.
+// Unaffected by D63/D64's RequiredRole→RequiredOperation migration: this
+// mechanism calls RoleStore.RoleGranted directly, independent of
+// validateTransition and its own operation-based check.
 var decisionScopeRoles = map[string]string{}
 
 // authorizeDecisionScope checks whether actorID holds the role D34 maps from
 // item's Scope field, via scopeRoles. It is layered alongside — not instead
-// of — validateTransition's generic RequiredRole gate: RequiredRole is fixed
-// per (from, to) transition row and shared by every Decision regardless of
-// its own Scope, while Scope is a per-instance field a shared row can't
-// express.
+// of — validateTransition's generic RequiredOperation gate: RequiredOperation
+// is fixed per (from, to) transition row and shared by every Decision
+// regardless of its own Scope, while Scope is a per-instance field a shared
+// row can't express.
 //
 // Returns nil (no additional check) when item is not *Decision, rs is nil,
 // actorID is empty, or item's Scope has no entry in scopeRoles — the same
@@ -864,21 +875,25 @@ func orchDecisionFlow() StateFlow {
 			{Name: "archived", IsTerminal: true, Locked: true},
 		},
 		Transitions: []Transition{
-			// D34/D40: ratify and supersede require the "admin" role,
-			// fail-closed (Strict) so a nil RoleStore or missing actor
-			// rejects rather than silently allows — the highest of the
-			// three built-in seeded roles, requiring no new provisioning
-			// to start enforcing. D40 extends the same gate to the
-			// re-evaluation door into the same two states: ratifying or
-			// superseding is an authority-bearing act regardless of which
+			// D34/D40/D63/D64: ratify and supersede require the "approve"
+			// operation, fail-closed (Strict) so a nil RoleStore or missing
+			// actor rejects rather than silently allows — held by the
+			// built-in "admin" role's seeded Operations list, requiring no
+			// new provisioning to start enforcing. D40 extends the same gate
+			// to the re-evaluation door into the same two states: ratifying
+			// or superseding is an authority-bearing act regardless of which
 			// state it is entered from, and having been re-evaluated first
 			// does not supply the authority the direct path requires.
-			{From: "proposed", To: "ratified", RequiredRole: "admin", Strict: true},
+			// Migrated from RequiredRole: "admin" (exact-role-name match via
+			// RoleGranted) to RequiredOperation: "approve" (operation match
+			// via Authorized) by D63/D64, Amendment A309 — see
+			// validateTransition's own godoc for the mechanism change.
+			{From: "proposed", To: "ratified", RequiredOperation: "approve", Strict: true},
 			{From: "proposed", To: "archived"},
 			{From: "ratified", To: "pending-re-evaluation"},
-			{From: "pending-re-evaluation", To: "ratified", RequiredRole: "admin", Strict: true},
-			{From: "pending-re-evaluation", To: "superseded", RequiredRole: "admin", Strict: true},
-			{From: "ratified", To: "superseded", RequiredRole: "admin", Strict: true},
+			{From: "pending-re-evaluation", To: "ratified", RequiredOperation: "approve", Strict: true},
+			{From: "pending-re-evaluation", To: "superseded", RequiredOperation: "approve", Strict: true},
+			{From: "ratified", To: "superseded", RequiredOperation: "approve", Strict: true},
 			{From: "superseded", To: "archived"},
 		},
 		Triggers: []TransitionTrigger{

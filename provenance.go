@@ -270,7 +270,7 @@ func (a *App) Provenance(store ProvenanceStore) *App {
 // ProvenanceEntry is one item-history event with the gating decision of
 // provenance-visibility-brief.md §4.3 already applied: actor identity
 // (ActorKind, ActorID, Surface, Reason) is populated only when Gated — the
-// transition that produced this record required RequiredRole with Strict
+// transition that produced this record required RequiredOperation with Strict
 // enforcement. An ungated entry carries only the non-identifying facts
 // (Verb, FromState, ToState, Timestamp), matching the brief's own framing:
 // "an act that did not [require authority] gets a word and a date, with
@@ -288,7 +288,7 @@ type ProvenanceEntry struct {
 }
 
 // transitionIsGated reports whether typeName's fromState→toState transition
-// required RequiredRole with Strict enforcement — the exact predicate
+// required RequiredOperation with Strict enforcement — the exact predicate
 // [validateTransition] itself evaluates (D34/D40), reused via
 // [resolveFlowID]/[lookupTransitionGate] rather than reimplemented, per
 // provenance-visibility-brief.md §4.3 ("the tier is whether the act had to

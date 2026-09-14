@@ -694,7 +694,7 @@ func TestDrainEvalQueue_AuthorizationRequiredSignal_FiresWebhook(t *testing.T) {
 		TypeName: "GateItem",
 		States:   []State{{Name: "reviewing", IsInitial: true}, {Name: "approved"}},
 		Transitions: []Transition{
-			{From: "reviewing", To: "approved", RequiredRole: "reviewer"},
+			{From: "reviewing", To: "approved", RequiredOperation: "reviewer"},
 		},
 	}); err != nil {
 		t.Fatalf("RegisterFlow: %v", err)

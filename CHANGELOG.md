@@ -23,6 +23,22 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.87.0] — 2026-09-14
+
+### Changed
+
+- **BREAKING:** `Transition.RequiredRole` renamed to `Transition.RequiredOperation`; authorization model shifts from role-name matching (`RoleStore.RoleGranted`) to operation matching (`RoleStore.Authorized`), aligning with MCP tools' model. Callers must update both field name and value: replace role names (e.g., `"admin"`) with operation words (e.g., `"approve"`, `"manage"`) from role `Operations` lists.
+- `validateTransition` (unexported) gains `itemID string` and `rels *RelationStore` parameters; `itemID` constructs real `AuthTarget{TypeName, ID}` for checks (previously zero-valued), `rels` reserved for future `RequiredRelation` validation without another breaking change.
+- `Module[T].relationStore` field and `DynamicTypeRepo.WithRelations(*RelationStore) *DynamicTypeRepo` method added, mirroring `WithGovernance`; both auto-wired by `App.Handler()` and `App.DynamicContentRepo` when `App.Relations()` called.
+- Four built-in `Decision` state-flow gates (`proposed→ratified`, `pending-re-evaluation→ratified`, `pending-re-evaluation→superseded`, `ratified→superseded`) migrate from `RequiredRole: "admin"` to `RequiredOperation: "approve"`; seeded `admin` role retains `"approve"` in operations, preserving access for existing admin tokens.
+- `TransitionOption.RequiredRole` (from `App.ValidTransitions`) renamed to `RequiredOperation`.
+- `Signal.RequiredRole` struct field renamed to `Signal.RequiredOperation`; JSON key and database column deliberately keep `required_role` as live wire contract with smeldr.dev/mcp tools and process.smeldr.dev. Auto-generated Signal `receiver` field now holds operation words (e.g., `"approve"`) instead of role names for `pending-re-evaluation` gates.
+- No database schema or column changes; all renamed fields already decoupled Go names from SQL columns.
+
+MINOR version bump with breaking change inside v1 per D53 — no external importers of smeldr.dev/core existed at release time (verified against Go module proxy). (D63/D64, A309)
+
+---
+
 ## [1.86.0] — 2026-09-13
 
 ### Added

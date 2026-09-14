@@ -202,8 +202,8 @@ func TestDecisionFlow_definition(t *testing.T) {
 		t.Errorf("initial = %q, want %q", got, "proposed")
 	}
 
-	// D34/D40: ratify and supersede require the "admin" role, fail-closed
-	// — both from "proposed"/"ratified" directly (D34) and from
+	// D34/D40/D63/D64: ratify and supersede require the "approve" operation,
+	// fail-closed — both from "proposed"/"ratified" directly (D34) and from
 	// "pending-re-evaluation" (D40): re-evaluation is the same
 	// authority-bearing act through a different door.
 	var ratify, supersede, reEvalRatify, reEvalSupersede *Transition
@@ -223,26 +223,26 @@ func TestDecisionFlow_definition(t *testing.T) {
 	if ratify == nil {
 		t.Fatal("proposed→ratified transition not found")
 	}
-	if ratify.RequiredRole != "admin" || !ratify.Strict {
-		t.Errorf("proposed→ratified: RequiredRole=%q Strict=%v, want %q true", ratify.RequiredRole, ratify.Strict, "admin")
+	if ratify.RequiredOperation != "approve" || !ratify.Strict {
+		t.Errorf("proposed→ratified: RequiredOperation=%q Strict=%v, want %q true", ratify.RequiredOperation, ratify.Strict, "approve")
 	}
 	if supersede == nil {
 		t.Fatal("ratified→superseded transition not found")
 	}
-	if supersede.RequiredRole != "admin" || !supersede.Strict {
-		t.Errorf("ratified→superseded: RequiredRole=%q Strict=%v, want %q true", supersede.RequiredRole, supersede.Strict, "admin")
+	if supersede.RequiredOperation != "approve" || !supersede.Strict {
+		t.Errorf("ratified→superseded: RequiredOperation=%q Strict=%v, want %q true", supersede.RequiredOperation, supersede.Strict, "approve")
 	}
 	if reEvalRatify == nil {
 		t.Fatal("pending-re-evaluation→ratified transition not found")
 	}
-	if reEvalRatify.RequiredRole != "admin" || !reEvalRatify.Strict {
-		t.Errorf("pending-re-evaluation→ratified: RequiredRole=%q Strict=%v, want %q true", reEvalRatify.RequiredRole, reEvalRatify.Strict, "admin")
+	if reEvalRatify.RequiredOperation != "approve" || !reEvalRatify.Strict {
+		t.Errorf("pending-re-evaluation→ratified: RequiredOperation=%q Strict=%v, want %q true", reEvalRatify.RequiredOperation, reEvalRatify.Strict, "approve")
 	}
 	if reEvalSupersede == nil {
 		t.Fatal("pending-re-evaluation→superseded transition not found")
 	}
-	if reEvalSupersede.RequiredRole != "admin" || !reEvalSupersede.Strict {
-		t.Errorf("pending-re-evaluation→superseded: RequiredRole=%q Strict=%v, want %q true", reEvalSupersede.RequiredRole, reEvalSupersede.Strict, "admin")
+	if reEvalSupersede.RequiredOperation != "approve" || !reEvalSupersede.Strict {
+		t.Errorf("pending-re-evaluation→superseded: RequiredOperation=%q Strict=%v, want %q true", reEvalSupersede.RequiredOperation, reEvalSupersede.Strict, "approve")
 	}
 }
 
