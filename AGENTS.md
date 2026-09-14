@@ -559,6 +559,14 @@ governance is wired.
 - Every grant and revoke is recorded in an audit trail automatically —
   there is no way to opt out (D44).
 
+**Rule-type stewardship** — granting standing authority over a rule-type
+domain (e.g. "who owns `design-system`") uses these same tools with no new
+mechanism: `grant_role` with `scope_static: ["RuleType:<name>"]` on a role
+holding the `"steward"` operation. `RoleStore.StewardedRuleTypes`/
+`StewardshipInbox` (Go API, no MCP tool yet) answer "what does this token
+steward" and "what currently touches authority I steward" — see
+[docs/REFERENCE.md](docs/REFERENCE.md#rule-type-stewardship-d63d64-decision-governance-modelmd-5).
+
 ### Webhook management tools (Admin role required)
 
 These tools are available when the site has `App.Webhooks(store)` configured:

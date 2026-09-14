@@ -515,6 +515,65 @@ active admin token. Create a replacement first.
 `create_token` returns the plaintext token once. Copy it immediately —
 it cannot be retrieved again. See [AGENTS.md](AGENTS.md) for full details.
 
+### Rule-type stewardship (D63/D64, decision-governance-model.md §5)
+
+Authority stewardship — "who owns a rule-type domain" (e.g. `design-system`,
+`security`) — is modeled as a real, scoped role grant, not a dedicated table.
+Requires no new mechanism: `RoleGrant.ScopeStatic` already accepts any
+`"type:id"` pattern with no validation that `type` names a real registered
+content type, so a synthetic `"RuleType:<name>"` pattern grants standing
+authority over that domain using the same `define_role`/`grant_role` tools
+every other scoped grant uses.
+
+```go
+// Define a domain-specific steward role and grant it — no core code beyond
+// the existing governance mechanism.
+app.RoleStore().DefineRole(ctx, smeldr.RoleDefinition{
+    Name: "design-system-steward", Operations: []string{"steward"}, ScopeMode: smeldr.ScopeStatic,
+})
+app.RoleStore().Grant(ctx, smeldr.RoleGrant{
+    TokenID: tokenID, RoleName: "design-system-steward",
+    ScopeStatic: []string{"RuleType:design-system"},
+})
+```
+
+Two read functions on `RoleStore` answer the pull-discoverability half of §5
+("anyone holding a stewardship role can query what currently touches
+authority they steward"):
+
+```go
+func (s *RoleStore) StewardedRuleTypes(ctx context.Context, tokenID string) ([]string, error)
+func (s *RoleStore) StewardshipInbox(ctx context.Context, tokenID string) (*StewardshipInbox, error)
+
+type StewardshipInbox struct {
+    RuleTypes []string
+    Decisions []Decision
+    Rules     []Rule
+    Stubs     []AuthorityStub
+}
+```
+
+`StewardedRuleTypes` returns the RuleType domains `tokenID` holds standing
+authority over — every `"RuleType:<name>"` static-scope pattern on a grant
+whose role holds the `"steward"` operation. `StewardshipInbox` calls it, then
+returns every `Decision`/`Rule`/`AuthorityStub` whose own `RuleType` field
+matches one of those domains — scoped to these three types (every
+RuleType-bearing type that exists today); extend the type when a future type
+gains its own `RuleType` field. Both return an empty (non-nil) result, not an
+error, when the token holds no stewardship grants.
+
+Classification — "which domain a given new item falls under" — needs no new
+mechanism either: `Decision.RuleType`/`Rule.RuleType`/`AuthorityStub.RuleType`
+(A303/A304) are ordinary, ungated string fields, settable by any Author+ role
+via the existing `update_decision`/`update_rule`/`update_authority_stub` MCP
+tools, matching §5's own framing ("frequent, low-stakes... an agent may
+propose and apply this by default").
+
+**Not built here** (§5's own text names both as separate, later work): push
+notification to a steward when a new item lands in their domain, and an MCP
+tool exposing `StewardshipInbox` directly (this is core-side only; the tool
+itself is a `smeldr.dev/mcp` follow-up).
+
 ---
 
 ## SEO & structured data

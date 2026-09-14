@@ -1173,6 +1173,142 @@ func (s *RoleStore) RoleGranted(ctx context.Context, tokenID, roleName string, t
 	return false, nil
 }
 
+// — Rule-type stewardship (decision-governance-model.md §5) ————————————————
+
+// stewardRuleTypePrefix is the synthetic AuthTarget.TypeName used to model a
+// rule-type domain as a static-scope grant — "RuleType:<name>" in a role's
+// own ScopeStatic list. Not a real registered content type; Authorized's own
+// ScopeStatic matching never validates TypeName against the type registry
+// (confirmed by reading its implementation), so this needs no core schema
+// change — stewardship is granted today via the existing define_role/
+// grant_role MCP tools with no code in this file.
+const stewardRuleTypePrefix = "RuleType:"
+
+// stewardOperation is the operation word a role must hold for one of its
+// static-scope "RuleType:<name>" patterns to count as stewardship, not an
+// unrelated static grant that happens to share the prefix by coincidence.
+const stewardOperation = "steward"
+
+// StewardedRuleTypes returns the RuleType values tokenID holds standing
+// authority over (§5's "rule type → standing authority" lookup) — every
+// "RuleType:<name>" static-scope pattern on a grant whose role holds the
+// "steward" operation. Modeled as a real role grant (D43), not a dedicated
+// table: stewardship over a rule-type domain is a static-scope grant like
+// any other.
+//
+// Returns an empty (non-nil) slice, not an error, when tokenID holds no
+// stewardship grants — the same "nothing to report" convention every other
+// query-shaped function in this package uses.
+func (s *RoleStore) StewardedRuleTypes(ctx context.Context, tokenID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT g.scope_static, r.operations, r.scope_mode
+		   FROM smeldr_role_grants g
+		   JOIN smeldr_roles r ON r.id = g.role_id
+		  WHERE g.token_id = $1`, tokenID)
+	if err != nil {
+		return nil, fmt.Errorf("smeldr: StewardedRuleTypes: query grants: %w", err)
+	}
+	defer rows.Close()
+
+	ruleTypes := make([]string, 0)
+	for rows.Next() {
+		var staticJSON, opsJSON, scopeMode string
+		if err := rows.Scan(&staticJSON, &opsJSON, &scopeMode); err != nil {
+			return nil, fmt.Errorf("smeldr: StewardedRuleTypes: scan: %w", err)
+		}
+		if scopeMode != string(ScopeStatic) {
+			continue
+		}
+		var ops []string
+		if err := json.Unmarshal([]byte(opsJSON), &ops); err != nil || !slices.Contains(ops, stewardOperation) {
+			continue // malformed or not a steward role — skip
+		}
+		var patterns []string
+		if err := json.Unmarshal([]byte(staticJSON), &patterns); err != nil {
+			continue // malformed static list — skip
+		}
+		for _, p := range patterns {
+			if name, ok := strings.CutPrefix(p, stewardRuleTypePrefix); ok && name != "" {
+				ruleTypes = append(ruleTypes, name)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("smeldr: StewardedRuleTypes: rows: %w", err)
+	}
+	return ruleTypes, nil
+}
+
+// StewardshipInbox is the pull half of §5's discoverability model: "anyone
+// holding a stewardship role can query what currently touches authority
+// they steward." Grouped by the RuleType-bearing types that exist today
+// (A303/A304) — an explicit list, not reflection-derived, matching
+// humanIDColumns's own established convention (orchestration.go); extend
+// this struct and [RoleStore.StewardshipInbox] when a future type gains its
+// own RuleType field.
+type StewardshipInbox struct {
+	RuleTypes []string
+	Decisions []Decision
+	Rules     []Rule
+	Stubs     []AuthorityStub
+}
+
+// StewardshipInbox returns every item across Decision/Rule/AuthorityStub
+// whose own RuleType matches one of tokenID's stewarded domains
+// ([RoleStore.StewardedRuleTypes]). Push notification is a deliberately
+// separate, later enhancement (§5's own text) — this is the pull mechanism
+// only.
+//
+// Returns a zero-value *StewardshipInbox (RuleTypes empty, every slice
+// empty-but-non-nil), not an error, when tokenID holds no stewardship
+// grants — nothing to report is not a failure.
+func (s *RoleStore) StewardshipInbox(ctx context.Context, tokenID string) (*StewardshipInbox, error) {
+	ruleTypes, err := s.StewardedRuleTypes(ctx, tokenID)
+	if err != nil {
+		return nil, fmt.Errorf("smeldr: StewardshipInbox: %w", err)
+	}
+	inbox := &StewardshipInbox{
+		RuleTypes: ruleTypes,
+		Decisions: make([]Decision, 0),
+		Rules:     make([]Rule, 0),
+		Stubs:     make([]AuthorityStub, 0),
+	}
+	if len(ruleTypes) == 0 {
+		return inbox, nil
+	}
+
+	placeholders := make([]string, len(ruleTypes))
+	args := make([]any, len(ruleTypes))
+	for i, rt := range ruleTypes {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = rt
+	}
+	inClause := strings.Join(placeholders, ", ")
+
+	decisions, err := Query[Decision](ctx, s.db,
+		"SELECT * FROM smeldr_decisions WHERE rule_type IN ("+inClause+")", args...)
+	if err != nil {
+		return nil, fmt.Errorf("smeldr: StewardshipInbox: query decisions: %w", err)
+	}
+	inbox.Decisions = decisions
+
+	rules, err := Query[Rule](ctx, s.db,
+		"SELECT * FROM smeldr_rules WHERE rule_type IN ("+inClause+")", args...)
+	if err != nil {
+		return nil, fmt.Errorf("smeldr: StewardshipInbox: query rules: %w", err)
+	}
+	inbox.Rules = rules
+
+	stubs, err := Query[AuthorityStub](ctx, s.db,
+		"SELECT * FROM smeldr_authority_stubs WHERE rule_type IN ("+inClause+")", args...)
+	if err != nil {
+		return nil, fmt.Errorf("smeldr: StewardshipInbox: query authority stubs: %w", err)
+	}
+	inbox.Stubs = stubs
+
+	return inbox, nil
+}
+
 // relationExists checks whether an active, asserted one-hop relation exists
 // between itemID and anchorID via the given relation kind and direction.
 //

@@ -2706,3 +2706,319 @@ func TestRoleGranted_StaticScope_MalformedJSON(t *testing.T) {
 		t.Error("expected false: malformed scope_static skipped")
 	}
 }
+
+// --- StewardedRuleTypes / StewardshipInbox tests (decision-governance-model.md §5) ---
+
+// defineStewardRole defines a static-scope role holding the "steward"
+// operation and grants it to a fresh token, scoped to "RuleType:<name>" for
+// each of ruleTypes. Returns the token ID.
+func defineStewardRole(t *testing.T, ctx context.Context, store *RoleStore, roleName string, ruleTypes ...string) string {
+	t.Helper()
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: roleName, Operations: []string{"steward"}, ScopeMode: ScopeStatic,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	patterns := make([]string, len(ruleTypes))
+	for i, rt := range ruleTypes {
+		patterns[i] = "RuleType:" + rt
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: roleName, ScopeStatic: patterns,
+	}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	return tokenID
+}
+
+func TestStewardedRuleTypes_Empty(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	got, err := store.StewardedRuleTypes(ctx, NewID())
+	if err != nil {
+		t.Fatalf("StewardedRuleTypes: %v", err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Errorf("no grants: want empty non-nil slice, got %#v", got)
+	}
+}
+
+func TestStewardedRuleTypes_SingleGrant(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	tokenID := defineStewardRole(t, ctx, store, "design-system-steward", "design-system")
+
+	got, err := store.StewardedRuleTypes(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("StewardedRuleTypes: %v", err)
+	}
+	if len(got) != 1 || got[0] != "design-system" {
+		t.Errorf("got %#v, want [\"design-system\"]", got)
+	}
+}
+
+func TestStewardedRuleTypes_MultipleGrants(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "multi-steward", Operations: []string{"steward"}, ScopeMode: ScopeStatic,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "multi-steward",
+		ScopeStatic: []string{"RuleType:design-system", "RuleType:security"},
+	}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	got, err := store.StewardedRuleTypes(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("StewardedRuleTypes: %v", err)
+	}
+	want := map[string]bool{"design-system": true, "security": true}
+	if len(got) != 2 || !want[got[0]] || !want[got[1]] {
+		t.Errorf("got %#v, want both design-system and security", got)
+	}
+}
+
+func TestStewardedRuleTypes_WrongOperation_Excluded(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	// Static-scope role with a RuleType: pattern, but no "steward" operation.
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "not-a-steward", Operations: []string{"read"}, ScopeMode: ScopeStatic,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "not-a-steward",
+		ScopeStatic: []string{"RuleType:design-system"},
+	}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	got, err := store.StewardedRuleTypes(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("StewardedRuleTypes: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("role without \"steward\" operation: want empty, got %#v", got)
+	}
+}
+
+func TestStewardedRuleTypes_NonStaticScope_Excluded(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	// Global-scope role holding "steward" — not a per-domain grant, excluded.
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "global-steward", Operations: []string{"steward"}, ScopeMode: ScopeGlobal,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "global-steward"}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	got, err := store.StewardedRuleTypes(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("StewardedRuleTypes: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("global-scope steward role: want empty (no domain named), got %#v", got)
+	}
+}
+
+func TestStewardedRuleTypes_NonRuleTypePrefix_Excluded(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	// A steward-operation role whose static pattern targets a real content
+	// type, not the synthetic RuleType prefix.
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "decision-scoped-steward", Operations: []string{"steward"}, ScopeMode: ScopeStatic,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "decision-scoped-steward",
+		ScopeStatic: []string{"Decision:*"},
+	}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	got, err := store.StewardedRuleTypes(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("StewardedRuleTypes: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("non-RuleType static pattern: want empty, got %#v", got)
+	}
+}
+
+func TestStewardedRuleTypes_MalformedJSON_Skipped(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	tokenID := defineStewardRole(t, ctx, store, "corrupt-steward", "design-system")
+	if _, err := db.ExecContext(ctx,
+		`UPDATE smeldr_role_grants SET scope_static = 'NOT JSON' WHERE token_id = ?`, tokenID,
+	); err != nil {
+		t.Fatalf("corrupt scope_static: %v", err)
+	}
+
+	got, err := store.StewardedRuleTypes(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("StewardedRuleTypes with malformed JSON: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("malformed scope_static: want skipped (empty), got %#v", got)
+	}
+}
+
+func TestStewardedRuleTypes_QueryError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	wrapped := &govQueryFailDB{DB: db, failOn: "FROM smeldr_role_grants g"}
+	store := NewRoleStore(wrapped)
+	ctx := context.Background()
+
+	_, err := store.StewardedRuleTypes(ctx, "tok")
+	if err == nil {
+		t.Error("expected error on grants query failure")
+	}
+}
+
+// setupStewardshipInboxDB creates a governance DB plus the orchestration and
+// authority tables StewardshipInbox queries.
+func setupStewardshipInboxDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db := setupGovernanceDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	if err := CreateAuthorityTables(db); err != nil {
+		t.Fatalf("CreateAuthorityTables: %v", err)
+	}
+	return db
+}
+
+func TestStewardshipInbox_Empty(t *testing.T) {
+	db := setupStewardshipInboxDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	inbox, err := store.StewardshipInbox(ctx, NewID())
+	if err != nil {
+		t.Fatalf("StewardshipInbox: %v", err)
+	}
+	if len(inbox.RuleTypes) != 0 || len(inbox.Decisions) != 0 || len(inbox.Rules) != 0 || len(inbox.Stubs) != 0 {
+		t.Errorf("no stewardship grants: want an all-empty inbox, got %#v", inbox)
+	}
+}
+
+func TestStewardshipInbox_MatchesAcrossTypes(t *testing.T) {
+	db := setupStewardshipInboxDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := NewSQLRepo[*Decision](db, Table("smeldr_decisions")).Save(ctx, &Decision{
+		Node: Node{ID: NewID(), Slug: "d-inbox"}, DecisionNumber: "D900", Scope: "core", RuleType: "design-system",
+	}); err != nil {
+		t.Fatalf("seed Decision: %v", err)
+	}
+	if err := NewSQLRepo[*Rule](db, Table("smeldr_rules")).Save(ctx, &Rule{
+		Node: Node{ID: NewID(), Slug: "r-inbox"}, Surface: "core", RuleType: "design-system",
+	}); err != nil {
+		t.Fatalf("seed Rule: %v", err)
+	}
+	if err := NewSQLRepo[*AuthorityStub](db, Table("smeldr_authority_stubs")).Save(ctx, &AuthorityStub{
+		Node: Node{ID: NewID(), Slug: "s-inbox"}, SourceRef: "docs/x.md", RuleType: "design-system",
+	}); err != nil {
+		t.Fatalf("seed AuthorityStub: %v", err)
+	}
+
+	tokenID := defineStewardRole(t, ctx, store, "cross-type-steward", "design-system")
+
+	inbox, err := store.StewardshipInbox(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("StewardshipInbox: %v", err)
+	}
+	if len(inbox.Decisions) != 1 || inbox.Decisions[0].Slug != "d-inbox" {
+		t.Errorf("Decisions = %#v, want one matching d-inbox", inbox.Decisions)
+	}
+	if len(inbox.Rules) != 1 || inbox.Rules[0].Slug != "r-inbox" {
+		t.Errorf("Rules = %#v, want one matching r-inbox", inbox.Rules)
+	}
+	if len(inbox.Stubs) != 1 || inbox.Stubs[0].Slug != "s-inbox" {
+		t.Errorf("Stubs = %#v, want one matching s-inbox", inbox.Stubs)
+	}
+}
+
+func TestStewardshipInbox_NoMatchingItems(t *testing.T) {
+	db := setupStewardshipInboxDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := NewSQLRepo[*Decision](db, Table("smeldr_decisions")).Save(ctx, &Decision{
+		Node: Node{ID: NewID(), Slug: "d-other"}, DecisionNumber: "D901", Scope: "core", RuleType: "unrelated-domain",
+	}); err != nil {
+		t.Fatalf("seed Decision: %v", err)
+	}
+
+	tokenID := defineStewardRole(t, ctx, store, "empty-inbox-steward", "design-system")
+
+	inbox, err := store.StewardshipInbox(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("StewardshipInbox: %v", err)
+	}
+	if len(inbox.RuleTypes) != 1 {
+		t.Fatalf("RuleTypes = %#v, want one stewarded domain", inbox.RuleTypes)
+	}
+	if len(inbox.Decisions) != 0 {
+		t.Errorf("Decisions = %#v, want empty (no item in the stewarded domain)", inbox.Decisions)
+	}
+}
+
+func TestStewardshipInbox_StewardedRuleTypesError(t *testing.T) {
+	db := setupStewardshipInboxDB(t)
+	wrapped := &govQueryFailDB{DB: db, failOn: "FROM smeldr_role_grants g"}
+	store := NewRoleStore(wrapped)
+	ctx := context.Background()
+
+	_, err := store.StewardshipInbox(ctx, "tok")
+	if err == nil {
+		t.Error("expected error when the underlying StewardedRuleTypes query fails")
+	}
+}
+
+func TestStewardshipInbox_DecisionQueryError(t *testing.T) {
+	db := setupStewardshipInboxDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	tokenID := defineStewardRole(t, ctx, store, "failing-inbox-steward", "design-system")
+
+	wrapped := &govQueryFailDB{DB: db, failOn: "FROM smeldr_decisions"}
+	failingStore := NewRoleStore(wrapped)
+
+	_, err := failingStore.StewardshipInbox(ctx, tokenID)
+	if err == nil {
+		t.Error("expected error when the Decisions query fails (fail-closed, not a silently incomplete inbox)")
+	}
+}

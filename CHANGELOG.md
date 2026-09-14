@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.88.0] — 2026-09-14
+
+### Added
+- `RoleStore.StewardedRuleTypes(ctx, tokenID string) ([]string, error)`: queries the stewardship model to return all RuleType domain values (e.g., "design-system", "security") that a token holds standing authority over. Implemented as a static-scope grant with synthetic `"RuleType:<name>"` entries in `ScopeStatic` and role operation word `"steward"`, reusing existing grant-matching logic with zero schema changes — classified and matched identically to real content-type grants via the already-shipped `define_role` and `grant_role` MCP tools.
+- `RoleStore.StewardshipInbox(ctx, tokenID string) (*StewardshipInbox, error)` and the `StewardshipInbox` struct (`RuleTypes []string`, `Decisions []Decision`, `Rules []Rule`, `Stubs []AuthorityStub`): the discoverability half of the rule-type stewardship model — returns every `Decision`, `Rule`, and `AuthorityStub` in the system whose `RuleType` field matches one of the calling token's stewarded domains. Uses the generic `Query[T]` helper to scan all three content types in a single operation; returns an empty (non-nil) result when the token holds no stewardship grants.
+- Straightforward classification of content into rule-type domains: `Decision.RuleType`, `Rule.RuleType`, and `AuthorityStub.RuleType` are ordinary fields any Author-role token already sets via the existing `update_decision`, `update_rule`, and `update_authority_stub` MCP tools; no new mechanism required.
+- Deferred to a follow-up: push notification when a new item enters a steward's domain (future enhancement), and MCP server tooling to expose `StewardshipInbox` directly (smeldr.dev/mcp follow-up, not in this release).
+
+This is a MINOR version bump: v1.87.0 → v1.88.0, purely additive with no changes to existing exported symbols. (D63/D64, A310)
+
+---
+
 ## [1.87.0] — 2026-09-14
 
 ### Changed
