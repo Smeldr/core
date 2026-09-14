@@ -280,6 +280,11 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// get_stewardship_inbox reads RoleStore.StewardshipInbox directly, no
 		// MCPModule backs it (A310/decision-governance-model.md §5).
 		{"get_stewardship_inbox", "read"},
+		// Check status tool (Author+, smeldr.dev/mcp v1.36.0+). Same
+		// "not module-generated" reason as the four rows above —
+		// get_check_status reads CheckStore.Last directly, no MCPModule
+		// backs it (A312/decision-governance-model.md §4).
+		{"get_check_status", "read"},
 	}
 
 	for _, p := range policies {

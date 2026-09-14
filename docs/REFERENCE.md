@@ -640,6 +640,13 @@ done (`updateHandler` only) and A307 later confirmed as its own gap. Both
 sites are fail-open: a `CheckStore` outage is logged at `Warn` and never
 surfaces to the caller or blocks the transition.
 
+A recorded Check result is readable via `smeldr.dev/mcp`'s `get_check_status`
+tool (Author role, `subject_type`/`subject_id` params) — see that module's
+own docs; this tool requires a `smeldr_tool_policies` seed row
+(`{"get_check_status", "read"}`, added alongside `get_stewardship_inbox`'s
+own row) or every governance-enabled caller is silently forbidden, the same
+gap A298/A311 already closed for `get_sweep_run`/`get_stewardship_inbox`.
+
 ---
 
 ## SEO & structured data

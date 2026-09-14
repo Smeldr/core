@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.89.1] — 2026-09-14
+
+### Fixed
+
+`seedToolPolicies` (in `governance.go`) now includes an explicit policy row `{"get_check_status", "read"}` for the framework tool `get_check_status`. Like `get_goal_context`, `list_type_tools`, `get_sweep_run`, and `get_stewardship_inbox` before it, this tool has no backing `MCPModule`, so it cannot use the MCP-side verb-derived policy fallback; without an explicit seeded row, callers on governance-enabled instances are silently denied access regardless of role. Found while planning the companion `get_check_status` MCP tool for `smeldr.dev/mcp` (which exposes `CheckStore.Last`, added in v1.89.0/A312), and caught for real by `smeldr.dev/mcp`'s own `TestAuthoriseTool_PolicyCoverage_Enumerated` when that tool's test suite ran against this tag before the row existed. `docs/REFERENCE.md`'s Authority Check section and `AGENTS.md`'s tool table both updated now that the tool's policy is in place.
+
+---
+
 ## [1.89.0] — 2026-09-14
 
 ### Added
