@@ -298,11 +298,15 @@ type App struct {
 
 	provenanceStore ProvenanceStore // non-nil when App.Provenance() was called
 
+	checkStore CheckStore // non-nil when App.Check() was called
+
 	governance        *RoleStore                              // non-nil when App.Governance() was called
 	governanceModules []interface{ setRoleStore(*RoleStore) } // modules that receive the RoleStore at Handler() time
 	governanceAudit   GovernanceAuditStore                    // set alongside governance — D44: audit is not optional
 
 	relationStoreModules []interface{ setRelationStore(*RelationStore) } // modules that receive the RelationStore at Handler() time (D64/A309)
+
+	checkStoreModules []interface{ setCheckStore(CheckStore) } // modules that receive the CheckStore at Handler() time (decision-governance-model.md §4)
 
 	logRing        *logRing // non-nil when App.CaptureLogs() was called; backs GET /_logs
 	logsHandlerReg bool     // true once GET /_logs is registered
@@ -612,6 +616,9 @@ func (a *App) Content(v any, opts ...Option) {
 		}
 		if rls, ok := r.(interface{ setRelationStore(*RelationStore) }); ok {
 			a.relationStoreModules = append(a.relationStoreModules, rls)
+		}
+		if cs, ok := r.(interface{ setCheckStore(CheckStore) }); ok {
+			a.checkStoreModules = append(a.checkStoreModules, cs)
 		}
 		if hk, ok := r.(interface {
 			setAfterHook(func(Context, LifecycleEvent, afterHookMeta, any))
@@ -1506,6 +1513,11 @@ func (a *App) Handler() http.Handler {
 	if a.relationStore != nil {
 		for _, m := range a.relationStoreModules {
 			m.setRelationStore(a.relationStore)
+		}
+	}
+	if a.checkStore != nil {
+		for _, m := range a.checkStoreModules {
+			m.setCheckStore(a.checkStore)
 		}
 	}
 	// A34: trigger a one-shot startup rebuild of all derived content (sitemap,

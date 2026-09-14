@@ -23,6 +23,24 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.89.0] — 2026-09-14
+
+### Added
+
+- `CheckRecord` struct (`ID, SubjectType, SubjectID, RuleType string; RanAt time.Time; Found bool; MatchType, MatchID, MatchName, Sentence string`): captures the result of an authority check, recording whether a conflict was found, which Rule or AuthorityStub matched (if any), and a human-readable sentence explaining the finding. All records are persisted, enabling audit trail and re-inspection of decision context at ratification time. `CheckStore` interface provides the persistence contract with methods `Append(ctx, r CheckRecord) error`, `Last(ctx, subjectType, subjectID string) (CheckRecord, bool, error)`, and `List(ctx, subjectType, subjectID string, limit int) ([]CheckRecord, error)`. `NewCheckStore(db smeldr.DB) CheckStore` creates the SQL-backed implementation. `CreateCheckTable(db smeldr.DB) error` ensures the `smeldr_check_records` schema exists at boot time.
+
+- `App.Check(store CheckStore) *App`: chainable configuration method that arms the Check precondition mechanism. Passing `nil` (the default) disables the feature — no behaviour change for existing apps that never call it.
+
+- `RunAuthorityCheck(ctx, db, store, subjectType, subjectID, ruleType string) (*CheckRecord, error)`: the full check operation — queries all active Rules and unconverted AuthorityStubs matching the supplied `ruleType`, selects the most-recently-published match if candidates exist, composes a sentence ("this touches %q, an existing %s rule" or "no conflicting authority found"), and persists the record via the store. Fail-open by design: query failures return no finding; persist failures still return the computed record alongside the error.
+
+- Check is wired as an enforced *precondition* on a Decision's `proposed → ratified` transition — advisory and recording only, never blocking ratification even when a conflict is found. Integrated into both transition paths: the HTTP `PUT` handler (`Module.updateHandler`) and the programmatic path (`App.TransitionItem` / `App.TransitionItemWithReason`), avoiding a single-path gap like the `authorizeDecisionScope` incident (A307). `example/server/main.go` gained two new boot-time flags: `ENABLE_AUTHORITY` (now wires the previously-unwired Authority mechanism — `CreateAuthorityTables`, `RegisterAuthorityTypes`, and `RegisterAuthorityRelationKinds` had zero non-test call sites prior to this release) and `ENABLE_CHECK` (wires Check itself; requires both `ENABLE_AUTHORITY` and `ENABLE_ORCHESTRATION`).
+
+- All Check functions in `check.go` carry 100% test coverage; package-wide coverage 96.3-96.4%. `go test -race ./...` passes clean. `golangci-lint` reports zero findings. `docs/REFERENCE.md` gained a new "Authority Check" section, and `AGENTS.md` gained a new "Check mechanism" section.
+
+This is a MINOR version bump: v1.88.1 → v1.89.0, purely additive with no changes to existing exported symbols. (decision-governance-model.md §4, A312)
+
+---
+
 ## [1.88.1] — 2026-09-14
 
 ### Fixed

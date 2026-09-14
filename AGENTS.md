@@ -716,6 +716,19 @@ Each type embeds `Node` and receives the standard auto-generated MCP tools (`cre
 **`Rule` does not use `publish_rule`/`archive_rule` to reach its real states.** `Rule`'s own flow is `draft` → `active` → `retired` — none of those are the built-in `Published`/`Archived` states, so use `transition_item` (type `Rule`) to move a Rule through its real lifecycle, the same pattern `Decision` already requires for `ratified`/`superseded`.
 
 **Converting a stub to a Rule is a manual, two-step act, not a tool.** Create the full `Rule` via `create_rule`, then `assert_relation` a `materializes` edge from the `AuthorityStub` to the new `Rule`, then `transition_item` the stub to `converted`. No MCP tool automates this sequence yet — deliberately, per the design's own anti-big-bang instruction (automate only once a real second/third conversion shows what's actually repeated).
+
+### Check mechanism (A312, decision-governance-model.md §4)
+
+Check is an enforced *precondition* on a `Decision`'s `proposed → ratified`
+transition — advisory and recording, not a gate: it never blocks
+ratification, even when it finds an existing Rule or AuthorityStub sharing
+the Decision's `RuleType`. Enable it once, on the server: `app.Check(smeldr.NewCheckStore(db))` (after `CreateCheckTable(db)`, alongside
+`CreateAuthorityTables(db)`). No MCP tool exposes Check directly — it runs
+automatically, transparent to every caller, on both the HTTP `PUT` and
+`transition_item` paths that can move a `Decision` to `ratified`. See
+[REFERENCE.md](docs/REFERENCE.md)'s "Authority Check" section for the full
+`CheckRecord`/`CheckStore` API.
+
 ## Connection setup
 
 See the smeldr.dev/mcp README for Claude Desktop, Cursor, and SSE configuration.

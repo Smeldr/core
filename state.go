@@ -972,6 +972,14 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 		return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
 	}
 	fireAsyncTriggers(ctx, db, typeName, currentStatus, toState, id)
+	// decision-governance-model.md §4: Check is an enforced precondition on
+	// Decision's proposed→ratified transition — a no-op for every other type
+	// or transition, fail-open (see App.Check's own godoc). This is the
+	// TransitionItem/transition_item-tool path; updateHandler (module.go)
+	// wires the same precondition for the HTTP PUT path via
+	// runDecisionAuthorityCheck — deliberately both, not repeating the gap
+	// D34's own authorizeDecisionScope left (wired into updateHandler only).
+	runDecisionAuthorityCheckByID(ctx, db, a.checkStore, typeName, id, currentStatus, toState)
 
 	// Event-stream channel (A302): the type's own band/receiver-shaped
 	// column, when it has one (channelColumns has no entry for Amendment —

@@ -527,6 +527,7 @@ type Module[T any] struct {
 	db                DB                                                // set by App.Content via setDB; used for transition validation
 	roleStore         *RoleStore                                        // nil unless App.Governance is wired; set by App.Handler via setRoleStore
 	relationStore     *RelationStore                                    // nil unless App.Relations() is wired; set by App.Handler via setRelationStore
+	checkStore        CheckStore                                        // nil unless App.Check() is wired; set by App.Handler via setCheckStore
 	cacheInvalidators []func()                                          // extra invalidation callbacks wired by App.Route for aggregate routes
 	slugCheckers      []func(ctx context.Context, slug string) error    // collision checkers wired by App.Route for aggregate routes
 
@@ -788,6 +789,14 @@ func (m *Module[T]) setRoleStore(store *RoleStore) {
 // Called by [App.Handler] when [App.Relations] has been wired.
 func (m *Module[T]) setRelationStore(store *RelationStore) {
 	m.relationStore = store
+}
+
+// setCheckStore injects the application [CheckStore] into the module, used
+// by updateHandler's own runDecisionAuthorityCheck wiring (decision-
+// governance-model.md §4). Called by [App.Handler] when [App.Check] has
+// been wired.
+func (m *Module[T]) setCheckStore(store CheckStore) {
+	m.checkStore = store
 }
 
 // collectStats implements [statsCollector]. It returns item counts per status
@@ -1952,6 +1961,14 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, r, err)
 			return
 		}
+		// decision-governance-model.md §4: Check is an enforced precondition
+		// on Decision's proposed→ratified transition — a no-op for every
+		// other type or transition, and fail-open (advisory/recording, not
+		// an authorization gate; see App.Check's own godoc). Checked against
+		// existing for the same reason authorizeDecisionScope is above: a
+		// full-replace PUT body must not steer which RuleType this runs
+		// against.
+		runDecisionAuthorityCheck(ctx, m.db, m.checkStore, any(existing), string(prevStatus), string(newStatus))
 	} else if isStateLocked(ctx, m.db, m.contentTypeName, string(prevStatus)) {
 		// Status is unchanged (a content-only PUT) and the current state is
 		// locked — the same gate updateFields applies, extended to the PUT

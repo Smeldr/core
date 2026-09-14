@@ -24,6 +24,12 @@
 //	ENABLE_DYNAMIC_CONTENT wire the runtime content type system and schema store
 //	ENABLE_BLOCKS         wire the block/composition system MCP tools
 //	ENABLE_ORCHESTRATION  wire orchestration types (Signal, Task, Decision, Amendment, Goal)
+//	ENABLE_AUTHORITY      wire the Authority mechanism (Rule, AuthorityStub — decision-
+//	                      governance-model.md §4). Independent of ENABLE_ORCHESTRATION.
+//	ENABLE_CHECK          wire the Check precondition on Decision ratification
+//	                      (App.Check; decision-governance-model.md §4). Requires
+//	                      ENABLE_AUTHORITY and ENABLE_ORCHESTRATION (Check targets
+//	                      Decision specifically and queries the Authority graph).
 //	INSTANCE_NAME         source name embedded in Context Packet responses (default: smeldr-dogfood)
 //	ENABLE_REDIRECTS      wire database-backed redirect management
 //	ENABLE_PAGE_META      wire per-path SEO override store
@@ -82,6 +88,8 @@ type ServerConfig struct {
 	EnableDynamicContent    bool
 	EnableBlocks            bool
 	EnableOrchestration     bool
+	EnableAuthority         bool
+	EnableCheck             bool
 	EnableRedirects         bool
 	EnablePageMeta          bool
 	EnableMedia             bool
@@ -128,6 +136,8 @@ func parseConfig() ServerConfig {
 		EnableDynamicContent:    os.Getenv("ENABLE_DYNAMIC_CONTENT") != "",
 		EnableBlocks:            os.Getenv("ENABLE_BLOCKS") != "",
 		EnableOrchestration:     os.Getenv("ENABLE_ORCHESTRATION") != "",
+		EnableAuthority:         os.Getenv("ENABLE_AUTHORITY") != "",
+		EnableCheck:             os.Getenv("ENABLE_CHECK") != "",
 		EnableRedirects:         os.Getenv("ENABLE_REDIRECTS") != "",
 		EnablePageMeta:          os.Getenv("ENABLE_PAGE_META") != "",
 		EnableMedia:             os.Getenv("ENABLE_MEDIA") != "",
@@ -242,12 +252,39 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		smeldr.RegisterOrchestrationTypes(app, db)
 	}
 
+	if cfg.EnableAuthority {
+		// Never wired into this boot path until now (found live 2026-09-14,
+		// planning 01a076e6/authority-check-precondition) — smeldr_rules/
+		// smeldr_authority_stubs did not exist on any real deployment since
+		// A303 shipped, the same fault class as A307's own boot-wiring gap.
+		if err := smeldr.CreateAuthorityTables(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create authority tables: %w", err)
+		}
+		smeldr.RegisterAuthorityTypes(app, db)
+	}
+
+	if cfg.EnableCheck {
+		if !cfg.EnableAuthority || !cfg.EnableOrchestration {
+			return ServerResult{}, fmt.Errorf("ENABLE_CHECK requires ENABLE_AUTHORITY and ENABLE_ORCHESTRATION")
+		}
+		if err := smeldr.CreateCheckTable(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create check table: %w", err)
+		}
+		app.Check(smeldr.NewCheckStore(db))
+	}
+
 	if cfg.EnableRelations && cfg.EnableOrchestration {
 		if err := smeldr.RegisterOrchestrationRelationKinds(context.Background(), rs); err != nil {
 			return ServerResult{}, fmt.Errorf("register orchestration relation kinds: %w", err)
 		}
 		if cfg.EnableContextPacket {
 			app.ContextPacketHandler(rs, cfg.InstanceName)
+		}
+	}
+
+	if cfg.EnableRelations && cfg.EnableAuthority {
+		if err := smeldr.RegisterAuthorityRelationKinds(context.Background(), rs); err != nil {
+			return ServerResult{}, fmt.Errorf("register authority relation kinds: %w", err)
 		}
 	}
 

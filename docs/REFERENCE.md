@@ -579,6 +579,67 @@ added alongside `get_goal_context`/`get_sweep_run`'s own rows) or every
 governance-enabled caller is silently forbidden, the same gap A298 already
 closed once for `get_sweep_run`.
 
+### Authority Check (decision-governance-model.md §4)
+
+Check is an enforced *precondition* on a Decision's `proposed → ratified`
+transition: before ratification is allowed to proceed, Smeldr looks for an
+existing Rule or AuthorityStub sharing the Decision's own `RuleType`, and
+records what it found. Check is advisory and recording, not a gate — it
+never blocks ratification, even when it finds a conflict; a separate,
+not-yet-built "declared tension" mechanism is what will make "ratified
+anyway" itself a recorded act.
+
+Enable it once, on `App`:
+
+```go
+app.Check(smeldr.NewCheckStore(db))
+```
+
+`nil` (the default) leaves Check disabled — no behaviour change for an
+app that never calls `App.Check`.
+
+```go
+type CheckRecord struct {
+    ID, SubjectType, SubjectID, RuleType string
+    RanAt                                time.Time
+    Found                                bool
+    MatchType, MatchID, MatchName        string
+    Sentence                             string
+}
+
+type CheckStore interface {
+    Append(ctx context.Context, r CheckRecord) error
+    Last(ctx context.Context, subjectType, subjectID string) (CheckRecord, bool, error)
+    List(ctx context.Context, subjectType, subjectID string, limit int) ([]CheckRecord, error)
+}
+
+func NewCheckStore(db smeldr.DB) CheckStore
+func CreateCheckTable(db smeldr.DB) error
+```
+
+`CreateCheckTable` creates the `smeldr_check_records` table (call it from
+your boot path alongside your other `Create*Table` calls — see
+`example/server/main.go`'s `ENABLE_CHECK` block). `Last` returns
+`found = false, err = nil` when no record exists yet for a subject — not an
+error.
+
+Candidate selection, when both a Rule and an AuthorityStub (or several of
+either) share the RuleType: the most-recently-published one wins
+(`PublishedAt`), the same "most recent" convention `SweepRunStore.Last`
+already uses. The recorded sentence names existence, not rank —
+`"this touches %q, an existing %s rule"` when found, `"no conflicting
+authority found"` otherwise — since a same-RuleType match shares the
+matched item's own authority rank; claiming one "outranks" the other is a
+separate, larger cross-rule-type question, not built here.
+
+Check runs on both paths a Decision can be ratified from: the HTTP
+`PUT` path (`Module.updateHandler`) and `App.TransitionItem`/
+`TransitionItemWithReason` — deliberately wired into both, the same
+"cover every mutation path" lesson D34's `authorizeDecisionScope` left half
+done (`updateHandler` only) and A307 later confirmed as its own gap. Both
+sites are fail-open: a `CheckStore` outage is logged at `Warn` and never
+surfaces to the caller or blocks the transition.
+
 ---
 
 ## SEO & structured data
