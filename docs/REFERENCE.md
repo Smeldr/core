@@ -569,10 +569,15 @@ via the existing `update_decision`/`update_rule`/`update_authority_stub` MCP
 tools, matching §5's own framing ("frequent, low-stakes... an agent may
 propose and apply this by default").
 
-**Not built here** (§5's own text names both as separate, later work): push
-notification to a steward when a new item lands in their domain, and an MCP
-tool exposing `StewardshipInbox` directly (this is core-side only; the tool
-itself is a `smeldr.dev/mcp` follow-up).
+**Not built here**: push notification to a steward when a new item lands in
+their domain — §5's own text names this as separate, later work.
+`StewardshipInbox` is exposed as an MCP tool, `get_stewardship_inbox`
+(Author role, no params — always the caller's own token), by
+`smeldr.dev/mcp` — see that module's own docs; this tool requires a
+`smeldr_tool_policies` seed row (`{"get_stewardship_inbox", "read"}`,
+added alongside `get_goal_context`/`get_sweep_run`'s own rows) or every
+governance-enabled caller is silently forbidden, the same gap A298 already
+closed once for `get_sweep_run`.
 
 ---
 

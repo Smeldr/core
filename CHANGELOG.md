@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.88.1] — 2026-09-14
+
+### Fixed
+
+`seedToolPolicies` (in `governance.go`) now includes an explicit policy row `{"get_stewardship_inbox", "read"}` for the framework tool `get_stewardship_inbox`. Like `get_goal_context`, `list_type_tools`, and `get_sweep_run`, this tool has no backing `MCPModule`, so it cannot use the MCP-side verb-derived policy fallback; without an explicit seeded row, callers on governance-enabled instances are silently denied access regardless of role. The gap was identified proactively while planning the new `get_stewardship_inbox` MCP tool for `smeldr.dev/mcp` (which exposes `RoleStore.StewardedRuleTypes` and `StewardshipInbox` added in v1.88.0), rather than discovered live post-deployment as happened with `get_sweep_run`. Extends `TestRoleStore_ToolPolicy_OrchestrationDiscoveryTools` to verify the new row; updates `docs/REFERENCE.md` stewardship section and `AGENTS.md` MCP tool table now that the tool's policy is in place (A311).
+
+---
+
 ## [1.88.0] — 2026-09-14
 
 ### Added

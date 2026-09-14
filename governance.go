@@ -275,6 +275,11 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// as the two rows above — get_sweep_run reads SweepRunStore directly,
 		// no MCPModule backs it.
 		{"get_sweep_run", "read"},
+		// Stewardship inbox tool (Author+, smeldr.dev/mcp v1.35.0+). Same
+		// "not module-generated" reason as the three rows above —
+		// get_stewardship_inbox reads RoleStore.StewardshipInbox directly, no
+		// MCPModule backs it (A310/decision-governance-model.md §5).
+		{"get_stewardship_inbox", "read"},
 	}
 
 	for _, p := range policies {
