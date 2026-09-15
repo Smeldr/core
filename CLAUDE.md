@@ -16,16 +16,24 @@ handoff file (retired by D66, 2026-09-07) — state comes directly from the repo
 (`process.smeldr.dev`), never from a diary file written by a prior session.
 Follow these steps at the start of every new chat, before doing anything else.
 
-**Step 0, before reading anything below:** arm `scripts/watch-events.sh` as a
-persistent Monitor against `process.smeldr.dev/_events/stream?channel=core`.
-Full mechanism: `AGENT_PROTOCOL.md`, "The live event stream — mandatory
-session-start step". Without this, this session only sees Task/Signal state
-changes when the user asks for a manual check, not live. If the Monitor tool
-itself is blocked (e.g. by the auto-mode classifier), fall back to running
-the script via `Bash` with `run_in_background: true` — the connection stays
-open, but only exit (not per-line) produces a notification, so check the
-output file directly before any transition that depends on the architect
-having seen a prior state change.
+**Step 0, before reading anything below:** arm `scripts/watch-events.ps1` as a
+persistent Monitor (`powershell.exe -NoProfile -File scripts/watch-events.ps1`)
+against `process.smeldr.dev/_events/stream?channel=core`. Full mechanism:
+`AGENT_PROTOCOL.md`, "The live event stream — mandatory session-start step".
+Without this, this session only sees Task/Signal state changes when the user
+asks for a manual check, not live. `watch-events.ps1` is a single native
+PowerShell process (token fetch, HTTP streaming, reconnect, backoff, and
+jitter all inside one process via `System.Net.Http.HttpClient`) — unlike the
+retired `watch-events.sh` (bash wrapping curl.exe as a separate child), there
+is nothing left to orphan when the Monitor is stopped (01a0a652, incident
+2026-09-15: 42 orphaned bash.exe/curl.exe processes survived `TaskStop` and
+caused a `too_many_requests` incident). `watch-events.sh` is kept in the repo
+as reference/fallback only — not the recommended command. If the Monitor tool
+itself is blocked (e.g. by the auto-mode classifier), fall back to running the
+script via `Bash` with `run_in_background: true` — the connection stays open,
+but only exit (not per-line) produces a notification, so check the output
+file directly before any transition that depends on the architect having seen
+a prior state change.
 
 **Step 1 — Read the developer skill:**
 Read `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md`
