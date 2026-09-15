@@ -1496,12 +1496,22 @@ that cannot receive an inbound webhook.
 Two broadcast call sites, both nil-safe on a.eventBroadcaster:
 
   App.dispatchBus (content lifecycle — AfterCreate…AfterSchedule)
-      → broadcasts buildWebhookPayload(ev.Type, ev.raw, sig) BEFORE the
+      → delivers buildWebhookPayload(ev.Type, ev.raw, sig) BEFORE the
         existing OnSignal-handler dispatch, unconditionally — independent
         of whether any OnSignal handler (including App.Webhooks) is wired
-      → generic content types have no band/receiver-shaped field, so this
-        call site always uses eventBroadcaster.broadcast (true broadcast,
-        every channel) — untouched by A302, unchanged from v1.73.0
+      → delivery is channel-routed for the four channelColumns-covered
+        compiled types (01a0a683, closing a gap A302 left open: A302 only
+        channel-scoped dispatchTransitionWebhook below, not this call site
+        — confirmed live, a channel=architect subscriber was receiving
+        task.created/task.updated for other bands' Tasks). channelValueFromItem
+        (orchestration.go) reads the value directly off the in-memory item
+        dispatchBus already holds (Task.Band, Goal.Band, Decision.Scope,
+        Signal.Receiver — no DB query, unlike TransitionItem's own lookup)
+        and routes to eventBroadcaster.publish(channel, …) when non-empty.
+      → every other type — generic dynamic content, and Amendment (no
+        channelColumns entry, by design) — has no band/receiver-shaped
+        field, so this call site falls through to eventBroadcaster.broadcast
+        (true broadcast, every channel), same as before 01a0a683
 
   dispatchTransitionWebhook (state-flow transitions, "signal.created")
       → same payload build already used for webhook delivery; enqueues to

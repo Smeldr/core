@@ -1336,3 +1336,68 @@ func TestRun_SaveRevConflict(t *testing.T) {
 		t.Errorf("stale save: got %v, want ErrRevConflict", err)
 	}
 }
+
+// — channelValueFromItem (01a0a683) — ———————————————————————————————————————
+
+// TestChannelValueFromItem_KnownTypes verifies each channelColumns-covered
+// type returns its own band/scope/receiver field value.
+func TestChannelValueFromItem_KnownTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		typeName string
+		item     any
+		want     string
+	}{
+		{"Task", "Task", &Task{Band: "core"}, "core"},
+		{"Goal", "Goal", &Goal{Band: "cloud"}, "cloud"},
+		{"Decision", "Decision", &Decision{Scope: "cross-cutting"}, "cross-cutting"},
+		{"Signal", "Signal", &Signal{Receiver: "architect"}, "architect"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := channelValueFromItem(tc.typeName, tc.item); got != tc.want {
+				t.Errorf("channelValueFromItem(%q, ...) = %q, want %q", tc.typeName, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestChannelValueFromItem_UnmappedTypeBroadcasts verifies a typeName absent
+// from channelColumns (e.g. Amendment, or an unrelated dynamic content type)
+// returns "" — a true broadcast, matching [App.TransitionItem]'s own
+// no-entry handling for the same set of types.
+func TestChannelValueFromItem_UnmappedTypeBroadcasts(t *testing.T) {
+	if got := channelValueFromItem("Amendment", &Amendment{}); got != "" {
+		t.Errorf("channelValueFromItem(%q, ...) = %q, want \"\" (true broadcast)", "Amendment", got)
+	}
+	if got := channelValueFromItem("Post", &struct{}{}); got != "" {
+		t.Errorf("channelValueFromItem(%q, ...) = %q, want \"\" (true broadcast)", "Post", got)
+	}
+}
+
+// TestChannelValueFromItem_TypeMismatchFailsOpen verifies a typeName that IS
+// in channelColumns but whose item argument's concrete type does not match
+// (e.g. a stale or mismatched caller) degrades to "" rather than panicking —
+// the same fail-open posture TransitionItem's own DB-lookup-failure path
+// takes (state.go:994-996).
+func TestChannelValueFromItem_TypeMismatchFailsOpen(t *testing.T) {
+	mismatches := []struct {
+		typeName string
+		item     any
+	}{
+		{"Task", &Goal{Band: "core"}},
+		{"Goal", &Task{Band: "core"}},
+		{"Decision", &Signal{Receiver: "architect"}},
+		{"Signal", &Decision{Scope: "core"}},
+	}
+	for _, tc := range mismatches {
+		t.Run(tc.typeName, func(t *testing.T) {
+			if got := channelValueFromItem(tc.typeName, tc.item); got != "" {
+				t.Errorf("channelValueFromItem(%q, mismatched type) = %q, want \"\"", tc.typeName, got)
+			}
+		})
+	}
+	if got := channelValueFromItem("Task", nil); got != "" {
+		t.Errorf("channelValueFromItem(%q, nil) = %q, want \"\"", "Task", got)
+	}
+}

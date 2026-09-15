@@ -789,6 +789,50 @@ var channelColumns = map[string]string{
 	"Signal":   "receiver",
 }
 
+// channelValueFromItem returns the band/scope/receiver-shaped channel
+// value for a compiled orchestration type's own in-memory Go value — the
+// [App.dispatchBus] path's counterpart to [channelColumns]' DB-column
+// lookup used by [App.TransitionItem] (A302). dispatchBus already holds
+// the concrete just-created/updated item, so this reads the value
+// directly off the struct rather than issuing an extra query. Returns ""
+// (true broadcast) for any typeName not in channelColumns' domain, or
+// when item's concrete type doesn't match what channelColumns expects for
+// typeName — fail-open, matching TransitionItem's own degrade-to-
+// broadcast-on-lookup-failure posture. Deliberately a type switch, not a
+// reflection-based field lookup keyed off channelColumns' own string:
+// that string names a DB column ("band"), not a Go field name ("Band") —
+// they coincide today only incidentally, and a generic FieldByName lookup
+// would break silently, with no compiler signal, if that ever diverged.
+func channelValueFromItem(typeName string, item any) string {
+	if _, ok := channelColumns[typeName]; !ok {
+		return ""
+	}
+	switch v := item.(type) {
+	case *Task:
+		if typeName != "Task" {
+			return ""
+		}
+		return v.Band
+	case *Goal:
+		if typeName != "Goal" {
+			return ""
+		}
+		return v.Band
+	case *Decision:
+		if typeName != "Decision" {
+			return ""
+		}
+		return v.Scope
+	case *Signal:
+		if typeName != "Signal" {
+			return ""
+		}
+		return v.Receiver
+	default:
+		return ""
+	}
+}
+
 // orchSignalFlow returns the state flow for [Signal] records.
 // A signal starts as pending, is acknowledged or expires from any non-terminal state.
 func orchSignalFlow() StateFlow {

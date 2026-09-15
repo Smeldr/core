@@ -1150,13 +1150,19 @@ func (a *App) OnSignal(sig LifecycleEvent, h func(context.Context, SignalEvent) 
 }
 
 // dispatchBus dispatches ev to all handlers registered for sig via [App.OnSignal],
-// and, when [App.EventStream] has been called, broadcasts the same payload
-// [webhookDispatch] would build to the event-stream broadcaster — deliberately
-// unconditional on whether any [App.OnSignal] handler exists for sig, so the
-// stream works independently of whether [App.Webhooks] was also configured
-// (T269). A sig with no webhook-event mapping ([buildWebhookPayload] erroring)
-// is silently skipped, matching [webhookDispatch]'s own handling of the same
-// case via [buildEventName]'s ok check.
+// and, when [App.EventStream] has been called, delivers the same payload
+// [webhookDispatch] would build to the event-stream broadcaster — this
+// delivery is deliberately unconditional on whether any [App.OnSignal]
+// handler exists for sig, so the stream works independently of whether
+// [App.Webhooks] was also configured (T269). Channel routing (A302) is
+// not unconditional, though: [channelValueFromItem] narrows delivery to a
+// single channel for the compiled orchestration types it covers (Task/
+// Goal/Decision/Signal), the same scoping [App.TransitionItem] already
+// applies to `*.transitioned` events — everything else (dynamic content
+// modules, Amendment) still gets a true broadcast. A sig with no
+// webhook-event mapping ([buildWebhookPayload] erroring) is silently
+// skipped, matching [webhookDispatch]'s own handling of the same case via
+// [buildEventName]'s ok check.
 //
 // Called from the wireSignalBus closure inside the afterHook goroutine.
 // Each handler runs with a fresh context derived from context.WithoutCancel(ctx)
@@ -1165,7 +1171,11 @@ func (a *App) OnSignal(sig LifecycleEvent, h func(context.Context, SignalEvent) 
 func (a *App) dispatchBus(ctx context.Context, ev SignalEvent, sig LifecycleEvent) {
 	if a.eventBroadcaster != nil {
 		if payload, err := buildWebhookPayload(ev.Type, ev.raw, sig); err == nil {
-			a.eventBroadcaster.broadcast(payload)
+			if channel := channelValueFromItem(ev.Type, ev.raw); channel != "" {
+				a.eventBroadcaster.publish(channel, payload)
+			} else {
+				a.eventBroadcaster.broadcast(payload)
+			}
 		}
 	}
 	a.busMu.RLock()

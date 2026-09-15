@@ -310,17 +310,21 @@ covering the same event names (`"{type}.created"` … `"{type}.transitioned"`,
 `"signal.created"`). A `{"type":"ping"}` line arrives every 25s while idle.
 At-most-once delivery — no replay on reconnect.
 
-**Channel subscription (v1.81.0+, A302):** `?channel=<name>` subscribes to
-one channel only — a `Task`/`Goal`'s own `Band`, a `Decision`'s own `Scope`,
-or a `Signal`'s own `Receiver`, matched verbatim (free-form string, not a
-fixed enum). `?channel=all`, or the parameter omitted entirely, subscribes
-to everything — the default, so a listener written before this feature
-existed keeps working unmodified. An `Amendment` transition, and every
-generic content-module lifecycle event, has no such field and is always
-delivered to every subscriber regardless of its requested channel. No new
-role is required for `?channel=all` — same access an Author-role token
-already had. Event-*type* filtering (as opposed to channel) is still
-client-side only. Route is absent (404) unless `EventStream` was called.
+**Channel subscription (v1.81.0+, A302; extended v1.89.2+, 01a0a683):**
+`?channel=<name>` subscribes to one channel only — a `Task`/`Goal`'s own
+`Band`, a `Decision`'s own `Scope`, or a `Signal`'s own `Receiver`, matched
+verbatim (free-form string, not a fixed enum). `?channel=all`, or the
+parameter omitted entirely, subscribes to everything — the default, so a
+listener written before this feature existed keeps working unmodified.
+Channel routing applies to every event those four types produce — both
+`*.transitioned` (A302) and `*.created`/`*.updated` (01a0a683, which closed
+a gap where the latter had been an unconditional broadcast to every
+subscriber regardless of channel). An `Amendment` event, and every generic
+content-module lifecycle event, has no such field and is always delivered
+to every subscriber regardless of its requested channel. No new role is
+required for `?channel=all` — same access an Author-role token already
+had. Event-*type* filtering (as opposed to channel) is still client-side
+only. Route is absent (404) unless `EventStream` was called.
 There is no MCP tool for this by design, same reasoning as `/_logs` — the
 whole point is working when an agent has only this one HTTP connection to
 rely on. Each token may hold at most 4 concurrent connections — a 5th

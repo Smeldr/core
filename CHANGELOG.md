@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.89.2] — 2026-09-15
+
+### Fixed
+
+`App.dispatchBus` (in `smeldr.go`) was broadcasting all content-lifecycle events (`AfterCreate`, `AfterUpdate`, etc.) unconditionally to every channel subscriber, even for the four compiled orchestration types that support event-stream channel scoping: `Task`, `Goal`, `Decision`, and `Signal` (added by A302 in v1.81.0). Channel scoping only applied to `*.transitioned` events and `signal.created` (handled separately), not to the `dispatchBus` broadcast path — subscribers on `?channel=architect` would receive `task.created`/`task.updated` events for Tasks from unrelated bands. Found live 2026-09-15.
+
+Fixed by adding an unexported `channelValueFromItem(typeName string, item any) string` function in `orchestration.go`, which reads the channel value directly from the in-memory struct (`Task.Band`, `Goal.Band`, `Decision.Scope`, `Signal.Receiver` — no extra database query). `dispatchBus` now routes through `eventBroadcaster.publish(channel, ...)` when a channel value exists, falling back to `eventBroadcaster.broadcast(...)` for all other types: generic dynamic content types and `Amendment` (which deliberately has no channel scoping, as its events are cross-cutting). `docs/ARCHITECTURE.md`, `docs/REFERENCE.md`, and `AGENTS.md` updated to reflect that channel scoping now covers the full event vocabulary for these four types, not just transitions. (A315)
+
+---
+
 ## [1.89.1] — 2026-09-14
 
 ### Fixed

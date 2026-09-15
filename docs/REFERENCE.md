@@ -2897,18 +2897,23 @@ The JSON payload shape is identical to webhook event payloads — a
 - **At-most-once:** If a client is disconnected when an event fires, the event
   is not delivered to that client. Reconnecting starts fresh with no catch-up
   or backfill.
-- **Channel-scoped delivery (v1.81.0+, A302):** a `Task`/`Goal` transition is
-  routed by the item's own `Band`; a `Decision` transition by its own `Scope`
-  (including the literal value `"cross-cutting"`, used verbatim as a channel
-  name — not auto-broadcast); a `Signal` by its own `Receiver`. An `Amendment`
-  transition, and every generic content-module lifecycle event (a blog post's
-  own publish/update/etc.), has no such field and is always delivered as a
-  true broadcast, reaching every connected subscriber regardless of the
-  channel it requested. A subscriber connected with `?channel=all` (or no
-  parameter — see above) also receives everything, channel-routed or
-  broadcast alike. A listener that only cares about certain event *types*
-  (as opposed to channels) must still filter those client-side — channel
-  scoping and event-type filtering are different dimensions.
+- **Channel-scoped delivery (v1.81.0+, A302; extended v1.89.2+, 01a0a683):**
+  a `Task`/`Goal` event is routed by the item's own `Band`; a `Decision`
+  event by its own `Scope` (including the literal value `"cross-cutting"`,
+  used verbatim as a channel name — not auto-broadcast); a `Signal` by its
+  own `Receiver`. This applies to every event those four types produce —
+  both `"{type}.transitioned"` (A302) and `"{type}.created"`/
+  `"{type}.updated"`/etc. (01a0a683 — before this, those events reached
+  every subscriber regardless of channel, an unclosed gap in A302's own
+  scoping). An `Amendment` event, and every generic content-module
+  lifecycle event (a blog post's own publish/update/etc.), has no such
+  field and is always delivered as a true broadcast, reaching every
+  connected subscriber regardless of the channel it requested. A subscriber
+  connected with `?channel=all` (or no parameter — see above) also receives
+  everything, channel-routed or broadcast alike. A listener that only cares
+  about certain event *types* (as opposed to channels) must still filter
+  those client-side — channel scoping and event-type filtering are
+  different dimensions.
 - **Client buffer:** A subscriber whose local event buffer fills (32 events,
   not configurable in this version) has further events silently dropped for
   that subscriber only (logged server-side at Warn level) rather than blocking

@@ -518,3 +518,113 @@ func TestSignalBus_ActorRolesSurviveDispatch(t *testing.T) {
 		t.Fatal("handler not called")
 	}
 }
+
+// — dispatchBus channel routing (01a0a683) — —————————————————————————————————
+//
+// TransitionItem's *.transitioned events were already channel-scoped by
+// A302; dispatchBus's *.created/*.updated events were not, defeating A302's
+// noise/token-cost reduction for that half of the event vocabulary
+// (confirmed live 2026-09-15: a channel=architect subscriber received
+// task.created for band=site/band=devops Tasks). These tests exercise
+// dispatchBus directly with a hand-built SignalEvent carrying a real
+// concrete item in its unexported raw field — the same direct-call pattern
+// TestDispatchBus_SkipsBroadcastForUnmappedSignal already uses above —
+// rather than driving a full MCPCreate/RegisterOrchestrationTypes setup,
+// since channelValueFromItem only ever looks at ev.Type and ev.raw.
+
+// TestDispatchBus_TaskChannelRoutesViaBand confirms a Task's AfterCreate
+// event reaches only a subscriber on the Task's own Band channel.
+func TestDispatchBus_TaskChannelRoutesViaBand(t *testing.T) {
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte("test-secret-dispatchbus-task-channel"),
+	}))
+	app.EventStream()
+
+	coreCh, err := app.eventBroadcaster.subscribe("u1", "core")
+	if err != nil {
+		t.Fatalf("subscribe core: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(coreCh)
+	cloudCh, err := app.eventBroadcaster.subscribe("u2", "cloud")
+	if err != nil {
+		t.Fatalf("subscribe cloud: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(cloudCh)
+
+	app.dispatchBus(context.Background(), SignalEvent{Type: "Task", raw: &Task{Band: "core"}}, AfterCreate)
+
+	select {
+	case <-coreCh:
+	case <-time.After(time.Second):
+		t.Fatal("core subscriber: expected delivery routed via the Task's own Band")
+	}
+	select {
+	case got := <-cloudCh:
+		t.Fatalf("cloud subscriber: expected no delivery, got %q", got)
+	default:
+	}
+}
+
+// TestDispatchBus_DecisionChannelRoutesViaScope confirms a Decision's
+// AfterUpdate event reaches only a subscriber on the Decision's own Scope
+// channel — same "cross-cutting" literal-channel-name case A302's
+// TransitionItem tests cover.
+func TestDispatchBus_DecisionChannelRoutesViaScope(t *testing.T) {
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte("test-secret-dispatchbus-decision-channel"),
+	}))
+	app.EventStream()
+
+	scopeCh, err := app.eventBroadcaster.subscribe("u1", "cross-cutting")
+	if err != nil {
+		t.Fatalf("subscribe cross-cutting: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(scopeCh)
+	otherCh, err := app.eventBroadcaster.subscribe("u2", "core")
+	if err != nil {
+		t.Fatalf("subscribe core: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(otherCh)
+
+	app.dispatchBus(context.Background(), SignalEvent{Type: "Decision", raw: &Decision{Scope: "cross-cutting"}}, AfterUpdate)
+
+	select {
+	case <-scopeCh:
+	case <-time.After(time.Second):
+		t.Fatal("cross-cutting subscriber: expected delivery — \"cross-cutting\" is a literal channel name, not an auto-broadcast")
+	}
+	select {
+	case got := <-otherCh:
+		t.Fatalf("core subscriber: expected no delivery, got %q", got)
+	default:
+	}
+}
+
+// TestDispatchBus_AmendmentAlwaysBroadcasts confirms an Amendment's
+// AfterCreate event — the one compiled orchestration type with no
+// band/scope/receiver-shaped field — still reaches a subscriber on an
+// unrelated channel, matching TransitionItem's own Amendment behaviour
+// (A302) and the plan's explicit sign-off that this stays a true broadcast.
+func TestDispatchBus_AmendmentAlwaysBroadcasts(t *testing.T) {
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte("test-secret-dispatchbus-amendment-channel"),
+	}))
+	app.EventStream()
+
+	ch, err := app.eventBroadcaster.subscribe("u1", "unrelated-channel")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(ch)
+
+	app.dispatchBus(context.Background(), SignalEvent{Type: "Amendment", raw: &Amendment{}}, AfterCreate)
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("expected a true broadcast — Amendment has no channelColumns entry")
+	}
+}
