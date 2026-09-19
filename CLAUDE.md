@@ -598,6 +598,14 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       line corrected, no new capability described), a patch bump with no
       behaviour change, an internal refactor.
 
+**After tagging any module** (core, mcp, media, social, agent, oauth):
+- [ ] **`example/server/go.mod`** — bump that module's own pin
+      (`go get <module>@<tag> && go mod tidy`) in the same session,
+      before ending the release round. This is the ninth recurrence of
+      this exact staleness (T258/T266/T268/mcp-pin-1330/and others) — a
+      standing checklist step closes it structurally rather than relying
+      on catching it by inspection each time.
+
 **M-number milestone commits — additionally mandatory:**
 - [ ] Module `README.md` updated to reflect shipped behaviour.
 - [ ] `docs/REFERENCE.md` updated (new commands, tools, config keys, changed signatures).
