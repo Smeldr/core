@@ -22,8 +22,8 @@ CREATE TABLE IF NOT EXISTS smeldr_routes (
     redirect_to  TEXT,
     status_code  INTEGER,
     is_prefix    INTEGER NOT NULL DEFAULT 0,
-    created_at   DATETIME NOT NULL,
-    updated_at   DATETIME NOT NULL
+    created_at   TIMESTAMPTZ NOT NULL,
+    updated_at   TIMESTAMPTZ NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_routes_path ON smeldr_routes (path_pattern)`)
 	return err

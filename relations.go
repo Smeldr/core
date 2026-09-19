@@ -125,8 +125,8 @@ CREATE TABLE IF NOT EXISTS smeldr_relation_kinds (
     weighted       INTEGER NOT NULL DEFAULT 0,
     type_pairs     TEXT NOT NULL DEFAULT '[]',
     attributes     TEXT NOT NULL DEFAULT '{}',
-    created_at     DATETIME NOT NULL,
-    updated_at     DATETIME NOT NULL
+    created_at     TIMESTAMPTZ NOT NULL,
+    updated_at     TIMESTAMPTZ NOT NULL
 )`); err != nil {
 		return err
 	}
@@ -144,17 +144,17 @@ CREATE TABLE IF NOT EXISTS smeldr_relations (
     relation_kind   TEXT NOT NULL,
     edge_class      TEXT NOT NULL,
     confidence      REAL,
-    valid_at        DATETIME,
-    invalid_at      DATETIME,
+    valid_at        TIMESTAMPTZ,
+    invalid_at      TIMESTAMPTZ,
     created_by_job  TEXT,
     attributes      TEXT NOT NULL DEFAULT '{}',
-    created_at      DATETIME NOT NULL,
-    updated_at      DATETIME NOT NULL,
-    last_confirmed_at DATETIME
+    created_at      TIMESTAMPTZ NOT NULL,
+    updated_at      TIMESTAMPTZ NOT NULL,
+    last_confirmed_at TIMESTAMPTZ
 )`); err != nil {
 		return err
 	}
-	if err := EnsureColumn(ctx, db, "smeldr_relations", "last_confirmed_at", "DATETIME"); err != nil {
+	if err := EnsureColumn(ctx, db, "smeldr_relations", "last_confirmed_at", "TIMESTAMPTZ"); err != nil {
 		return err
 	}
 
@@ -693,7 +693,7 @@ func scanRelationKind(rows *sql.Rows) (RelationKindDef, error) {
 		&d.ID, &d.TypeName, &d.Label, &d.ReverseLabel, &d.Mode,
 		&directional, &weighted,
 		&typePairs, &attributes,
-		&d.CreatedAt, &d.UpdatedAt,
+		scanDest(&d.CreatedAt), scanDest(&d.UpdatedAt),
 	)
 	if err != nil {
 		return RelationKindDef{}, err
@@ -708,18 +708,17 @@ func scanRelationKind(rows *sql.Rows) (RelationKindDef, error) {
 func scanEdge(rows *sql.Rows) (RelationEdge, error) {
 	var e RelationEdge
 	var confidence sql.NullFloat64
-	var validAt, invalidAt, lastConfirmedAt sql.NullTime
 	var createdByJob sql.NullString
 	var attributes string
 	err := rows.Scan(
 		&e.ID, &e.SourceType, &e.SourceID,
 		&e.TargetType, &e.TargetID,
 		&e.RelationKind, &e.EdgeClass,
-		&confidence, &validAt, &invalidAt,
+		&confidence, nullTimeScanner{dst: &e.ValidAt}, nullTimeScanner{dst: &e.InvalidAt},
 		&createdByJob,
 		&attributes,
-		&e.CreatedAt, &e.UpdatedAt,
-		&lastConfirmedAt,
+		scanDest(&e.CreatedAt), scanDest(&e.UpdatedAt),
+		nullTimeScanner{dst: &e.LastConfirmedAt},
 	)
 	if err != nil {
 		return RelationEdge{}, err
@@ -727,17 +726,8 @@ func scanEdge(rows *sql.Rows) (RelationEdge, error) {
 	if confidence.Valid {
 		e.Confidence = &confidence.Float64
 	}
-	if validAt.Valid {
-		e.ValidAt = &validAt.Time
-	}
-	if invalidAt.Valid {
-		e.InvalidAt = &invalidAt.Time
-	}
 	if createdByJob.Valid {
 		e.CreatedByJob = &createdByJob.String
-	}
-	if lastConfirmedAt.Valid {
-		e.LastConfirmedAt = &lastConfirmedAt.Time
 	}
 	e.Attributes = json.RawMessage(attributes)
 	return e, nil

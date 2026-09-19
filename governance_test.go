@@ -585,12 +585,12 @@ func setupRelationsTable(t *testing.T, db *sql.DB) {
 			relation_kind TEXT NOT NULL,
 			edge_class    TEXT NOT NULL DEFAULT '',
 			confidence    REAL,
-			valid_at      DATETIME,
-			invalid_at    DATETIME,
+			valid_at      TIMESTAMPTZ,
+			invalid_at    TIMESTAMPTZ,
 			created_by_job TEXT,
 			attributes    TEXT NOT NULL DEFAULT '{}',
-			created_at    DATETIME NOT NULL,
-			updated_at    DATETIME NOT NULL
+			created_at    TIMESTAMPTZ NOT NULL,
+			updated_at    TIMESTAMPTZ NOT NULL
 		)`,
 	); err != nil {
 		t.Fatalf("setup smeldr_relations: %v", err)

@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.90.1] — 2026-09-19
+
+### Fixed
+
+`DATETIME` is not a valid Postgres column type — `blocks.go` (`smeldr_dynamic_content`), `relations.go` (`smeldr_relation_kinds`/`smeldr_relations`), `routes.go` (`smeldr_routes`), `schemas.go` (`smeldr_content_type_schemas`), and `site_config.go` (`smeldr_site_configs`) all declared it, so `CREATE TABLE` would fail on a fresh Postgres install for all five tables (T117, distinct from T210's separate orchestration-tables fix). Changed to `TIMESTAMPTZ`, matching the convention already established by A91/A195 and every orchestration/webhook/audit/provenance/sweep_run/check/finding table since — SQLite accepts either as a type-affinity keyword with identical NUMERIC-affinity behaviour, so this is a same-behaviour rename on SQLite and a real portability fix for Postgres.
+
+Not a mechanical rename: `modernc.org/sqlite`'s driver auto-converts `DATE`/`DATETIME`/`TIMESTAMP` columns to `time.Time` on Scan, but not `TIMESTAMPTZ` (A222's own documented incident). `relations.go`'s `scanRelationKind` and `scanEdge` scanned `CreatedAt`/`UpdatedAt` via raw `*time.Time` and `ValidAt`/`InvalidAt`/`LastConfirmedAt` via local `sql.NullTime` vars, bypassing `storage.go`'s `scanDest`/`nullTimeScanner` helpers entirely — renaming the DDL alone would have reproduced A222's exact failure (`list_relation_kinds`/`get_relations`/`RelationStore.SweepStructural` breaking or silently zeroing every timestamp). Both functions now scan through `scanDest`/`nullTimeScanner`, the same helpers the generic `Query[T]`/`SQLRepo[T]` path has used since A200/T210; `blocks.go`/`schemas.go`/`routes.go`/`site_config.go` already went through that generic path, so they needed no Go-code change beyond the DDL rename. Matching test fixtures that duplicated these tables' DDL (`governance_test.go`'s `setupRelationsTable`, `dynamic_app_test.go` and `schemas_test.go`'s `smeldr_content_type_schemas` fixtures) updated in lockstep — left on `DATETIME`, they would have masked the exact regression this fix prevents, A222's own documented failure mode. Two new regression tests (`TestAssert_GetBySource_TimeFields_RoundTrip`, `TestUpsertKind_TimeFields_RoundTrip`) prove the round trip against the real `TIMESTAMPTZ`-declared tables rather than assuming it — no existing test asserted these time fields' actual values before.
+
+No exported symbol changed. Coverage: 96.3%.
+
+---
+
 ## [1.90.0] — 2026-09-19
 
 ### Added

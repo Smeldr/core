@@ -3,6 +3,7 @@ package smeldr
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func setupRelationStore(t *testing.T) *RelationStore {
@@ -200,6 +201,96 @@ func TestAssert_GetBySource(t *testing.T) {
 	}
 	if edges[0].TargetID != "p2" {
 		t.Errorf("TargetID = %q, want p2", edges[0].TargetID)
+	}
+}
+
+// TestAssert_GetBySource_TimeFields_RoundTrip pins T117: smeldr_relations'
+// time columns are declared TIMESTAMPTZ, which modernc.org/sqlite's driver
+// does not auto-convert to time.Time on Scan (unlike DATETIME) — scanEdge
+// must go through scanDest/nullTimeScanner explicitly, not raw *time.Time/
+// sql.NullTime args (A222's own documented failure mode). Proves the round
+// trip rather than assuming it: a non-zero CreatedAt/UpdatedAt and a
+// non-nil ValidAt/InvalidAt that survive a real Assert→GetBySource round
+// trip against the actual production table would silently break (scan
+// error, or a zero-valued/nil result the caller can't distinguish from
+// "never set") if this regressed.
+func TestAssert_GetBySource_TimeFields_RoundTrip(t *testing.T) {
+	store := setupRelationStore(t)
+	ctx := context.Background()
+
+	if err := store.UpsertKind(ctx, RelationKindDef{
+		TypeName: "related_to", Mode: "asserted",
+	}); err != nil {
+		t.Fatalf("UpsertKind: %v", err)
+	}
+
+	validAt := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	invalidAt := time.Date(2027, 1, 1, 12, 0, 0, 0, time.UTC)
+	edge := RelationEdge{
+		ID:           "edge-time-1",
+		SourceType:   "post",
+		SourceID:     "p1",
+		TargetType:   "post",
+		TargetID:     "p2",
+		RelationKind: "related_to",
+		EdgeClass:    "asserted",
+		ValidAt:      &validAt,
+		InvalidAt:    &invalidAt,
+	}
+	if err := store.Assert(ctx, edge); err != nil {
+		t.Fatalf("Assert: %v", err)
+	}
+
+	edges, err := store.GetBySource(ctx, "post", "p1", "related_to")
+	if err != nil {
+		t.Fatalf("GetBySource: %v", err)
+	}
+	if len(edges) != 1 {
+		t.Fatalf("GetBySource: got %d edges, want 1", len(edges))
+	}
+	got := edges[0]
+
+	if got.CreatedAt.IsZero() {
+		t.Error("CreatedAt: zero value, want a real timestamp")
+	}
+	if got.UpdatedAt.IsZero() {
+		t.Error("UpdatedAt: zero value, want a real timestamp")
+	}
+	if got.ValidAt == nil || !got.ValidAt.Equal(validAt) {
+		t.Errorf("ValidAt = %v, want %v", got.ValidAt, validAt)
+	}
+	if got.InvalidAt == nil || !got.InvalidAt.Equal(invalidAt) {
+		t.Errorf("InvalidAt = %v, want %v", got.InvalidAt, invalidAt)
+	}
+	if got.LastConfirmedAt != nil {
+		t.Errorf("LastConfirmedAt = %v, want nil (never confirmed by a sweep)", got.LastConfirmedAt)
+	}
+}
+
+// TestUpsertKind_TimeFields_RoundTrip pins T117: smeldr_relation_kinds'
+// time columns are TIMESTAMPTZ, requiring scanRelationKind to scan through
+// scanDest rather than raw *time.Time args — see
+// TestAssert_GetBySource_TimeFields_RoundTrip's own doc comment for the
+// full A222 hazard this guards against.
+func TestUpsertKind_TimeFields_RoundTrip(t *testing.T) {
+	store := setupRelationStore(t)
+	ctx := context.Background()
+
+	if err := store.UpsertKind(ctx, RelationKindDef{
+		TypeName: "time_fields_test", Mode: "asserted",
+	}); err != nil {
+		t.Fatalf("UpsertKind: %v", err)
+	}
+
+	got, ok := store.GetKind("time_fields_test")
+	if !ok {
+		t.Fatal("GetKind: not found after upsert")
+	}
+	if got.CreatedAt.IsZero() {
+		t.Error("CreatedAt: zero value, want a real timestamp")
+	}
+	if got.UpdatedAt.IsZero() {
+		t.Error("UpdatedAt: zero value, want a real timestamp")
 	}
 }
 

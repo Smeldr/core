@@ -79,10 +79,10 @@ CREATE TABLE IF NOT EXISTS smeldr_dynamic_content (
 	type_name    TEXT NOT NULL,
 	status       TEXT NOT NULL DEFAULT 'draft',
 	fields       TEXT NOT NULL DEFAULT '{}',
-	created_at   DATETIME NOT NULL,
-	updated_at   DATETIME NOT NULL,
-	scheduled_at DATETIME,
-	published_at DATETIME,
+	created_at   TIMESTAMPTZ NOT NULL,
+	updated_at   TIMESTAMPTZ NOT NULL,
+	scheduled_at TIMESTAMPTZ,
+	published_at TIMESTAMPTZ,
 	rev          INTEGER NOT NULL DEFAULT 0
 )`); err != nil {
 		return err

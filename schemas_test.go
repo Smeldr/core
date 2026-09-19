@@ -143,8 +143,8 @@ func TestMigrateURLPrefixColumn_AddsColumn(t *testing.T) {
 		label     TEXT NOT NULL DEFAULT '',
 		kind      TEXT NOT NULL DEFAULT '',
 		fields    TEXT NOT NULL DEFAULT '[]',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMPTZ NOT NULL,
+		updated_at TIMESTAMPTZ NOT NULL
 	)`)
 	if err != nil {
 		t.Fatalf("create old table: %v", err)

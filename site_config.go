@@ -56,10 +56,10 @@ CREATE TABLE IF NOT EXISTS smeldr_site_configs (
 	id               TEXT NOT NULL PRIMARY KEY,
 	slug             TEXT NOT NULL DEFAULT 'site-config',
 	status           TEXT NOT NULL DEFAULT 'draft',
-	created_at       DATETIME NOT NULL,
-	updated_at       DATETIME NOT NULL,
-	published_at     DATETIME,
-	scheduled_at     DATETIME,
+	created_at       TIMESTAMPTZ NOT NULL,
+	updated_at       TIMESTAMPTZ NOT NULL,
+	published_at     TIMESTAMPTZ,
+	scheduled_at     TIMESTAMPTZ,
 	rev              INTEGER NOT NULL DEFAULT 0,
 	site_name        TEXT NOT NULL DEFAULT '',
 	title_separator  TEXT NOT NULL DEFAULT '',
@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS smeldr_site_configs (
 )`); err != nil {
 		return err
 	}
-	if err := EnsureColumn(ctx, db, "smeldr_site_configs", "scheduled_at", "DATETIME"); err != nil {
+	if err := EnsureColumn(ctx, db, "smeldr_site_configs", "scheduled_at", "TIMESTAMPTZ"); err != nil {
 		return err
 	}
 	return EnsureColumn(ctx, db, "smeldr_site_configs", "rev", "INTEGER NOT NULL DEFAULT 0")

@@ -152,8 +152,8 @@ CREATE TABLE IF NOT EXISTS smeldr_content_type_schemas (
 	kind       TEXT NOT NULL DEFAULT 'block',
 	url_prefix TEXT NOT NULL DEFAULT '',
 	fields     TEXT NOT NULL DEFAULT '[]',
-	created_at DATETIME NOT NULL,
-	updated_at DATETIME NOT NULL
+	created_at TIMESTAMPTZ NOT NULL,
+	updated_at TIMESTAMPTZ NOT NULL
 )`)
 	return err
 }
