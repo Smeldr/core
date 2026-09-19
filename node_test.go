@@ -1,8 +1,10 @@
 package smeldr
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestNewID verifies UUID v7 format: 36 chars, correct hyphen positions,
@@ -412,6 +414,46 @@ func TestValidation_minMaxInt_valid(t *testing.T) {
 	v := &minMaxIntStruct{Node: Node{ID: "1", Slug: "s", Status: Published}, Count: 10, Score: 5, Rank: 10}
 	if err := RunValidation(v); err != nil {
 		t.Errorf("unexpected validation error: %v", err)
+	}
+}
+
+// TestNode_ScheduledAt_RoundTripsThroughSQLRepo is a regression guard for a
+// latent bug flagged during T210 (see A288): a *time.Time struct field's own
+// address is **time.Time, which scanDest's nullTimeScanner (storage.go) now
+// handles — verified here directly rather than left as an unverified comment
+// claim (the claim previously lived on Run.AcknowledgedAt's own doc comment).
+func TestNode_ScheduledAt_RoundTripsThroughSQLRepo(t *testing.T) {
+	db := newSQLiteDB(t)
+	if _, err := db.ExecContext(context.Background(), `
+		CREATE TABLE test_posts (
+			id           TEXT NOT NULL PRIMARY KEY,
+			slug         TEXT NOT NULL DEFAULT '',
+			status       TEXT NOT NULL DEFAULT 'draft',
+			created_at   DATETIME NOT NULL DEFAULT '',
+			updated_at   DATETIME NOT NULL DEFAULT '',
+			scheduled_at DATETIME,
+			published_at DATETIME,
+			title        TEXT NOT NULL DEFAULT '',
+			body         TEXT NOT NULL DEFAULT '',
+			rev          INTEGER NOT NULL DEFAULT 0
+		)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	repo := NewSQLRepo[*testPost](db)
+	want := time.Now().UTC().Truncate(time.Second)
+	p := &testPost{Node: Node{ID: NewID(), Slug: "sched-probe", Status: Scheduled, ScheduledAt: &want}, Title: "x"}
+	if err := repo.Save(context.Background(), p); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := repo.FindByID(context.Background(), p.ID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got.ScheduledAt == nil {
+		t.Fatal("ScheduledAt round-tripped as nil")
+	}
+	if !got.ScheduledAt.Equal(want) {
+		t.Errorf("ScheduledAt = %v, want %v", got.ScheduledAt, want)
 	}
 }
 

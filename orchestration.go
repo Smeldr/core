@@ -419,26 +419,9 @@ type Run struct {
 	// Cleanup tracks this Run's worktree/branch cleanup progress.
 	Cleanup RunCleanupState `json:"cleanup"`
 	// AcknowledgedAt gates deletion of a preserved stuck/failed/orphaned
-	// Run's worktree (D38 §7). The zero value means not yet acknowledged —
-	// matching [Decision].NextEvalAt's own established nullable-timestamp
-	// convention, not a *time.Time: the generic SQLRepo scan path
-	// (scanDest, storage.go) only special-cases a scan destination whose
-	// address is naturally *time.Time — which is what taking the address
-	// of a plain time.Time field gives you. A *time.Time field's own
-	// address is **time.Time, unhandled by that special case, and falls
-	// through to database/sql's generic pointer-to-pointer path, which
-	// cannot parse SQLite's string-formatted timestamps into the inner
-	// *time.Time it allocates. Verified directly, not assumed: reproduced
-	// this exact failure empirically against a real SQLRepo before
-	// choosing this field's type. [Node].ScheduledAt is *time.Time and
-	// is NOT a working counterexample — every existing test that round-
-	// trips a non-nil ScheduledAt uses NewMemoryRepo, never NewSQLRepo;
-	// a nil ScheduledAt round-trips fine (database/sql's nil-source case
-	// needs no string parsing), but a non-nil one hits this exact failure
-	// against a real SQLite-backed repo. This looks like a real,
-	// previously-untested latent bug in Node.ScheduledAt, flagged to the
-	// architect as its own follow-up — not fixed here, out of this
-	// task's scope.
+	// Run's worktree (D38 §7). Zero means not yet acknowledged — the same
+	// zero-means-unset convention [Decision].NextEvalAt uses for a nullable
+	// timestamp on a non-pointer field.
 	AcknowledgedAt time.Time `json:"acknowledged_at" db:"acknowledged_at"`
 }
 
