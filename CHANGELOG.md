@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.91.1] — 2026-09-19
+
+### Added
+
+`App.DrainEvalQueue` now records a `Finding` (`Detector: "eval-queue"`, `Provenance: "scheduled"`) for each re-evaluation condition it successfully transitions — D51 names `scheduled` as a valid Finding provenance alongside `detected`/`asserted`, but the original Finding build (A322) scoped itself to the `structural` detector's own `onStale` callback only, leaving `DrainEvalQueue` unwired.
+
+A direct call inside `DrainEvalQueue`'s own body, not a new callback parameter: unlike `RelationStore.SweepStructural` (which needs `App.SweepStructural`'s own `onStale` closure to inject `FindingStore.Record`, since `RelationStore` itself has no `findingStore` field), `DrainEvalQueue` is already an `App` method with direct access to `a.findingStore`, the same place `a.provenanceStore` is already read a few lines above. Same fail-open posture as the existing provenance-recording block — a `Record` failure never blocks the queue-row deletion (A241's own "not re-queued" rule, unweakened).
+
+3 new tests. No exported symbol changed. Coverage: 96.2%.
+
+Decisions: A326
+
+---
+
 ## [1.91.0] — 2026-09-19
 
 ### Added

@@ -1313,6 +1313,24 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 						Surface:     "trigger",
 					})
 				}
+				// D51: the "scheduled" Finding provenance — a re-evaluation
+				// condition newly arrived at, distinct from provenance
+				// above (an audit trail entry) and from SweepStructural's
+				// own "detected" Finding (A322). Same fail-open posture:
+				// a Record failure never blocks the queue-row deletion
+				// below (A241's own "not re-queued" rule, unweakened).
+				if a.findingStore != nil {
+					if err := a.findingStore.Record(ctx, Finding{
+						Detector:    "eval-queue",
+						SubjectType: r.typeName,
+						SubjectID:   r.itemID,
+						Provenance:  "scheduled",
+						Message:     fmt.Sprintf("scheduled re-evaluation transitioned to %q", r.toState),
+					}); err != nil {
+						slog.WarnContext(ctx, "smeldr: DrainEvalQueue: Finding record failed",
+							"type_name", r.typeName, "item_id", r.itemID, "error", err)
+					}
+				}
 				triggered++
 			}
 		}

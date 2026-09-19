@@ -580,9 +580,10 @@ smeldr.dev/
 │                     App.Findings(store) wires the store; App.SweepStructural's own onStale
 │                     callback (relations.go) records a Finding (Provenance: "detected") for
 │                     each newly-flagged stale RelationEdge when a store is configured — no
-│                     store means no behaviour change. Only the structural detector is wired;
-│                     DrainEvalQueue's scheduled provenance has no equivalent callback yet, a
-│                     separate follow-up. Read surface: smeldr.dev/mcp's list_findings tool
+│                     store means no behaviour change. App.DrainEvalQueue (state.go) records a
+│                     Finding (Detector: "eval-queue", Provenance: "scheduled") for each
+│                     re-evaluation condition it transitions, same fail-open posture (A326).
+│                     Read surface: smeldr.dev/mcp's list_findings tool
 ├── tension.go          DefaultTensionThreshold (var, default 3); recordDeclaredTension,
 │                     runDeclaredTensionAggregation/-ByID — decision-governance §6's Propagate:
 │                     counts ratified Decisions sharing a TensionRuleID, records a Finding

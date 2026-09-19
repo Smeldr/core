@@ -3905,6 +3905,145 @@ func TestDrainEvalQueue_ProvenanceWriteFails_QueueRowStillDeleted(t *testing.T) 
 	}
 }
 
+// TestDrainEvalQueue_RecordsFinding_OnSuccessfulTransition pins D51's
+// "scheduled" Finding provenance for DrainEvalQueue, mirroring
+// TestDrainEvalQueue_RecordsProvenance_OnSuccessfulTransition's own shape.
+func TestDrainEvalQueue_RecordsFinding_OnSuccessfulTransition(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if err := CreateFindingTable(db); err != nil {
+		t.Fatalf("CreateFindingTable: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE eval_items (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create eval_items: %v", err)
+	}
+	itemID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO eval_items (id, status) VALUES (?, 'ratified')`, itemID,
+	); err != nil {
+		t.Fatalf("insert item: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'EvalItem', ?, 'pending-re-evaluation', datetime('now', '-1 second'))`,
+		NewID(), itemID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	store := NewFindingStore(db)
+	app := &App{cfg: Config{DB: db}}
+	app.Findings(store)
+
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 1 || skipped != 0 {
+		t.Fatalf("expected (1,0), got (%d,%d)", triggered, skipped)
+	}
+
+	findings, err := store.List(ctx, "eval-queue")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(findings))
+	}
+	f := findings[0]
+	if f.SubjectType != "EvalItem" || f.SubjectID != itemID {
+		t.Errorf("subject: got %s/%s, want EvalItem/%s", f.SubjectType, f.SubjectID, itemID)
+	}
+	if f.Provenance != "scheduled" {
+		t.Errorf("Provenance: got %q, want %q", f.Provenance, "scheduled")
+	}
+}
+
+// TestDrainEvalQueue_NoFindingStore_NoOp confirms the fail-open contract:
+// findingStore never wired — no panic, behaviour identical to before this
+// bridge.
+func TestDrainEvalQueue_NoFindingStore_NoOp(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE eval_items (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create eval_items: %v", err)
+	}
+	itemID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO eval_items (id, status) VALUES (?, 'ratified')`, itemID,
+	); err != nil {
+		t.Fatalf("insert item: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'EvalItem', ?, 'pending-re-evaluation', datetime('now', '-1 second'))`,
+		NewID(), itemID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	app := &App{cfg: Config{DB: db}} // findingStore never set
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 1 || skipped != 0 {
+		t.Errorf("expected (1,0), got (%d,%d)", triggered, skipped)
+	}
+}
+
+// TestDrainEvalQueue_FindingRecordFails_QueueRowStillDeleted pins that a
+// failing Finding write does not weaken the existing not-re-queued rule,
+// mirroring TestDrainEvalQueue_ProvenanceWriteFails_QueueRowStillDeleted.
+func TestDrainEvalQueue_FindingRecordFails_QueueRowStillDeleted(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	if err := CreateFindingTable(db); err != nil {
+		t.Fatalf("CreateFindingTable: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE eval_items (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("create eval_items: %v", err)
+	}
+	itemID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO eval_items (id, status) VALUES (?, 'ratified')`, itemID,
+	); err != nil {
+		t.Fatalf("insert item: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'EvalItem', ?, 'pending-re-evaluation', datetime('now', '-1 second'))`,
+		NewID(), itemID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	app := &App{cfg: Config{DB: db}}
+	app.Findings(NewFindingStore(db))
+	// Drop smeldr_findings after wiring — Record's own INSERT now fails.
+	if _, err := db.ExecContext(ctx, `DROP TABLE smeldr_findings`); err != nil {
+		t.Fatalf("drop smeldr_findings: %v", err)
+	}
+
+	_, triggered, skipped, err := app.DrainEvalQueue(ctx)
+	if err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	}
+	if triggered != 1 || skipped != 0 {
+		t.Errorf("finding write failure must not affect triggered/skipped: got (%d,%d), want (1,0)", triggered, skipped)
+	}
+	var qCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_eval_queue`).Scan(&qCount); err != nil {
+		t.Fatalf("SELECT queue: %v", err)
+	}
+	if qCount != 0 {
+		t.Errorf("queue row must still be deleted on finding write failure, count=%d", qCount)
+	}
+}
+
 func TestDrainEvalQueue_notDueYet(t *testing.T) {
 	db := newMigratedDB(t)
 	ctx := context.Background()
