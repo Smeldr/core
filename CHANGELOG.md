@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.89.3] — 2026-09-19
+
+### Changed
+
+`doc.go` — the file pkg.go.dev renders as a Go module's own description, not `README.md` — described only the base content-lifecycle framework (Node/Module/Repository/Auth/Signals), nothing about the orchestration/governance/ledger capabilities (Decision, Task, Goal, Signal, Amendment, Run, StateFlow, RelationStore, Authority, Check, SweepRunStore, LineageTrace, RoleStore/GovernanceAuditStore, WebhookStore, DynamicTypeRepo) shipped and led with in the project's own positioning since D59/D61-D64/A292-A315. Added a new "Orchestration and governance" section naming every exported symbol, verified directly against source before writing. Docs-only — no exported Go symbol added/removed/changed, no behaviour change. (A316)
+
+---
+
 ## [1.89.2] — 2026-09-15
 
 ### Fixed
