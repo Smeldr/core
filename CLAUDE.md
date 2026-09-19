@@ -561,6 +561,17 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       `forgemedia.NewLocalMediaStore`), token API (`smeldr.NewTokenStore`, `smeldr.SignToken`),
       `smeldr.Config` fields, or `smeldr_format`/`smeldr_description` tag values: verify all
       code examples in `AGENTS.md` are still accurate before committing.
+- [ ] **`doc.go`** — if this commit adds, removes, or materially reshapes an
+      exported capability (in `smeldr/core` or any of the six standalone
+      modules — mcp/media/social/oauth/agent/cli — whichever this commit
+      touches), update that module's own `doc.go` in the same commit. Same
+      discipline as the `README.md`/`AGENTS.md` items above: `doc.go` is a
+      separate, deliberately-authored file with its own audience
+      (pkg.go.dev, `go doc`, editor hover-docs) and drifts silently because
+      nothing else in this checklist touches it. See `AGENT_PROTOCOL.md`'s
+      own standing rule (added 2026-09-19) for the full reasoning; this
+      entry is what makes that rule enforced at commit time, not only read
+      at session start.
 - [ ] If this commit implements an Amendment: the live record exists (`create_amendment`) with `body` fully populated, the number was checked against both the frozen `DECISIONS.md` index and `list_amendments`, and it is transitioned through to `merged`. Verify with `get_amendment`.
 - [ ] **If this commit adds a column to an existing table via an `Ensure*Column`-style
       migration:** the new `Ensure*` function's call site is also added to
