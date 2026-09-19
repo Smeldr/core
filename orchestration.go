@@ -239,6 +239,18 @@ type Decision struct {
 	// inferable — §7's own explicit fail-closed posture: never silently
 	// assumed Reversible. Not yet enforced anywhere (A304).
 	Reversibility string `json:"reversibility"`
+	// TensionRuleID is the [Rule] this Decision declares tension
+	// against, when it knowingly goes against an existing rule —
+	// decision-governance §6. Empty means no tension declared. No FK
+	// (Rule is an optional table, matching A195's own Postgres-portability
+	// precedent of dropping FKs to optional tables).
+	TensionRuleID string `json:"tension_rule_id" db:"tension_rule_id"`
+	// TensionReason is the required reason accompanying a declared
+	// TensionRuleID — §6's own "declare-don't-infer" treatment, the same
+	// shape Reversibility already uses. Not code-enforced as required
+	// when TensionRuleID is set (a future Check-precondition task, §4) —
+	// this field only records the declaration.
+	TensionReason string `json:"tension_reason" db:"tension_reason" smeldr_format:"markdown"`
 }
 
 // decisionScopeRoles maps a Decision's Scope field to the role name required
@@ -483,7 +495,9 @@ func CreateOrchestrationTables(db DB) error {
 			next_eval_at    TIMESTAMPTZ,
 			eval_note       TEXT NOT NULL DEFAULT '',
 			rule_type       TEXT NOT NULL DEFAULT '',
-			reversibility   TEXT NOT NULL DEFAULT ''
+			reversibility   TEXT NOT NULL DEFAULT '',
+			tension_rule_id TEXT NOT NULL DEFAULT '',
+			tension_reason  TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_amendments (
 			id               TEXT PRIMARY KEY,
@@ -585,6 +599,26 @@ func EnsureDecisionClassificationColumns(ctx context.Context, db DB) error {
 	for _, c := range cols {
 		if err := EnsureColumn(ctx, db, "smeldr_decisions", c[0], c[1]); err != nil {
 			return fmt.Errorf("smeldr: EnsureDecisionClassificationColumns: %w", err)
+		}
+	}
+	return nil
+}
+
+// EnsureDecisionTensionColumns adds [Decision]'s tension_rule_id/
+// tension_reason columns to smeldr_decisions on pre-existing SQLite
+// databases that predate this Amendment (decision-governance §6). Fresh
+// installs already have these columns via [CreateOrchestrationTables]'s
+// own CREATE TABLE statement; this only upgrades a database created
+// before this Amendment. Idempotent — safe to call on every boot. Mirrors
+// [EnsureDecisionClassificationColumns]'s exact A304 pattern.
+func EnsureDecisionTensionColumns(ctx context.Context, db DB) error {
+	cols := [][2]string{
+		{"tension_rule_id", "TEXT NOT NULL DEFAULT ''"},
+		{"tension_reason", "TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, c := range cols {
+		if err := EnsureColumn(ctx, db, "smeldr_decisions", c[0], c[1]); err != nil {
+			return fmt.Errorf("smeldr: EnsureDecisionTensionColumns: %w", err)
 		}
 	}
 	return nil

@@ -128,6 +128,9 @@
 //     never by a human-driven flow.
 //   - Lineage ([LineageTrace], [LineageNode]) — traversal of the relation
 //     graph for provenance and impact queries.
+//   - Severity ([Severity], [SeverityOf]) — a small ordinal blast-radius
+//     score for an anchor item, the higher of its real relation-graph
+//     fan-out and its own rule-type authority rank used as a floor.
 //   - Governance roles and audit ([RoleStore], [RoleDefinition], [RoleGrant],
 //     [GovernanceAuditStore], [GovernanceAuditRecord], [StewardshipInbox]) —
 //     role grants and an audit trail over governance actions, created with

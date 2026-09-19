@@ -991,6 +991,11 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 	// authorizeDecisionScopeByID above, pre-UPDATE — this call stays
 	// post-UPDATE since Check is advisory/recording, never blocking).
 	runDecisionAuthorityCheckByID(ctx, db, a.checkStore, typeName, id, currentStatus, toState)
+	// decision-governance-model.md §6: declared-tension aggregation is the
+	// same advisory, fail-open, post-UPDATE treatment as Check just above
+	// — deliberately both wired here (TransitionItem) and in
+	// updateHandler (module.go), matching Check's own dual-wiring.
+	runDeclaredTensionAggregationByID(ctx, db, a.findingStore, typeName, id, currentStatus, toState)
 
 	// Event-stream channel (A302): the type's own band/receiver-shaped
 	// column, when it has one (channelColumns has no entry for Amendment —

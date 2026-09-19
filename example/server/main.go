@@ -243,6 +243,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.EnsureDecisionClassificationColumns(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure decision classification columns: %w", err)
 		}
+		if err := smeldr.EnsureDecisionTensionColumns(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure decision tension columns: %w", err)
+		}
 		if err := smeldr.EnsureAmendmentBodyColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure amendment body column: %w", err)
 		}

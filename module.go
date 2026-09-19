@@ -528,6 +528,7 @@ type Module[T any] struct {
 	roleStore         *RoleStore                                        // nil unless App.Governance is wired; set by App.Handler via setRoleStore
 	relationStore     *RelationStore                                    // nil unless App.Relations() is wired; set by App.Handler via setRelationStore
 	checkStore        CheckStore                                        // nil unless App.Check() is wired; set by App.Handler via setCheckStore
+	findingStore      FindingStore                                      // nil unless App.Findings() is wired; set by App.Handler via setFindingStore
 	cacheInvalidators []func()                                          // extra invalidation callbacks wired by App.Route for aggregate routes
 	slugCheckers      []func(ctx context.Context, slug string) error    // collision checkers wired by App.Route for aggregate routes
 
@@ -797,6 +798,14 @@ func (m *Module[T]) setRelationStore(store *RelationStore) {
 // been wired.
 func (m *Module[T]) setCheckStore(store CheckStore) {
 	m.checkStore = store
+}
+
+// setFindingStore injects the application [FindingStore] into the module,
+// used by updateHandler's own runDeclaredTensionAggregation wiring
+// (decision-governance-model.md §6). Called by [App.Handler] when
+// [App.Findings] has been wired.
+func (m *Module[T]) setFindingStore(store FindingStore) {
+	m.findingStore = store
 }
 
 // collectStats implements [statsCollector]. It returns item counts per status
@@ -1969,6 +1978,11 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 		// full-replace PUT body must not steer which RuleType this runs
 		// against.
 		runDecisionAuthorityCheck(ctx, m.db, m.checkStore, any(existing), string(prevStatus), string(newStatus))
+		// decision-governance-model.md §6: same advisory, fail-open
+		// treatment as Check just above — deliberately both wired here
+		// and in TransitionItem (state.go), matching Check's own
+		// dual-wiring reasoning immediately above.
+		runDeclaredTensionAggregation(ctx, m.db, m.findingStore, any(existing), string(prevStatus), string(newStatus))
 	} else if isStateLocked(ctx, m.db, m.contentTypeName, string(prevStatus)) {
 		// Status is unchanged (a content-only PUT) and the current state is
 		// locked — the same gate updateFields applies, extended to the PUT

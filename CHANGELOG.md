@@ -23,6 +23,26 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.91.0] — 2026-09-19
+
+### Added
+
+Decision governance §6, Propagate: declared-tension aggregation and rule-type-weighted severity (`decision-governance-model.md`).
+
+`Decision` gains `TensionRuleID`/`TensionReason` — the `Rule` a Decision declares tension against, and the required reason, empty meaning undeclared (same convention as `RuleType`/`Reversibility`, A304). `EnsureDecisionTensionColumns` migrates a pre-existing database, wired into `example/server/main.go`'s boot path in this same commit.
+
+New `tension.go`: `DefaultTensionThreshold` (package `var`, default 3) and `recordDeclaredTension` — reuses `FindingStore.Record` directly (D51), the design doc's own "not new machinery" framing taken literally: counts ratified Decisions sharing a `TensionRuleID`, records a `Finding{Detector:"declared-tension", SubjectType:"Rule", Provenance:"asserted"}` at or past the threshold. Wired into both `Module.updateHandler` and `App.TransitionItem` (mirroring A312's own Check dual-wiring). `App`/`Module[T]` gain `findingStoreModules`/`setFindingStore` plumbing, the same shape `checkStoreModules` already established.
+
+New `severity.go`: `Severity` (small closed ordinal — `SeverityLow`/`Medium`/`High`/`Critical`) and `SeverityOf` — the higher of `Reachability`'s own real graph fan-out and a `RuleType`'s own rank position (relative to the full registered ordering), the rank acting only as a floor, never a substitute for fan-out.
+
+Two genuinely open design questions (threshold configurability; severity scale shape) were raised to the architect before implementation rather than decided unilaterally.
+
+No MCP tool in this release's own scope. No exported symbol removed. Coverage: 96.2%.
+
+Decisions: A325
+
+---
+
 ## [1.90.2] — 2026-09-19
 
 ### Fixed
