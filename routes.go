@@ -41,7 +41,7 @@ func MigrateRedirectsToRoutes(db DB) error {
 	rows, err := db.QueryContext(ctx,
 		"SELECT name FROM sqlite_master WHERE type='table' AND name='smeldr_redirects'")
 	if err != nil {
-		return fmt.Errorf("smeldr: migrate redirects: check table: %w", err)
+		return nil // not SQLite (or a genuine query failure) — nothing to migrate
 	}
 	exists := rows.Next()
 	rows.Close()
@@ -63,9 +63,10 @@ func MigrateRedirectsToRoutes(db DB) error {
 	now := time.Now().UTC()
 	for _, r := range srcRows {
 		_, err := db.ExecContext(ctx,
-			"INSERT OR IGNORE INTO smeldr_routes "+
+			"INSERT INTO smeldr_routes "+
 				"(id, path_pattern, route_type, redirect_to, status_code, is_prefix, created_at, updated_at) "+
-				"VALUES ($1, $2, 'redirect', $3, $4, $5, $6, $7)",
+				"VALUES ($1, $2, 'redirect', $3, $4, $5, $6, $7) "+
+				"ON CONFLICT (path_pattern) DO NOTHING",
 			NewID(), r.From, r.To, r.Code, r.IsPrefix, now, now,
 		)
 		if err != nil {

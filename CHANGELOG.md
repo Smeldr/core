@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.90.2] — 2026-09-19
+
+### Fixed
+
+`MigrateRedirectsToRoutes` (`routes.go`) hard-failed on any non-SQLite database — its `smeldr_redirects` exists-check queried `sqlite_master` directly and wrapped every query error, including "this isn't SQLite," into a returned error. `App.Redirects`'s own doc comment shows the standard caller pattern (`if err != nil { log.Fatal(err) }`), so any application calling `App.Redirects` against Postgres crashed at boot (T116, distinct from T117's separate DDL-type fix). Fixed by treating a query error as fail-open (return `nil`, nothing to migrate), the same idiom `migrateLegacyTableNames` already established for the identical `sqlite_master`-probe problem. `migrateStateFlowConflictColumns` was also named in scope but checked and confirmed already correct — it only calls `EnsureColumn`, which already fails open on non-SQLite.
+
+A second bug in the same function, found while grounding, not previously reported: `INSERT OR IGNORE` (SQLite-only syntax) would have been the next Postgres failure for any install with genuine legacy `smeldr_redirects` data, once the exists-check stopped hiding it. Fixed to `INSERT ... ON CONFLICT (path_pattern) DO NOTHING`, matching the portable UPSERT syntax `relations.go`'s `insertEdge` already uses.
+
+New regression test `TestMigrateRedirectsToRoutes_NonSQLite`, using the existing `queryFailDB` test double (same precedent as `TestEnsureColumn_NonSQLite`), proves the fail-open path rather than assuming it.
+
+No exported symbols changed. Coverage: 96.3%.
+
+---
+
 ## [1.90.1] — 2026-09-19
 
 ### Fixed
