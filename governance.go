@@ -285,6 +285,13 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// get_check_status reads CheckStore.Last directly, no MCPModule
 		// backs it (A312/decision-governance-model.md §4).
 		{"get_check_status", "read"},
+		// Findings list tool (Author+, D51). Same "not module-generated"
+		// reason as the five rows above — list_findings reads
+		// FindingStore.List directly, no MCPModule backs it, and
+		// deriveToolPolicy's own list-op branch requires
+		// moduleForAdminList("findings") to succeed, which it never will
+		// for a type with no create_*/update_* tools by design.
+		{"list_findings", "read"},
 	}
 
 	for _, p := range policies {

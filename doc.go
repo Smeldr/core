@@ -122,6 +122,10 @@
 //     enforcement against a subject, run with [RunAuthorityCheck].
 //   - Structural sweeps ([SweepRunStore], [SweepRunRecord]) — recorded runs
 //     of a structural-deviation detector, created with [NewSweepRunStore].
+//   - Findings ([Finding], [FindingStore]) — thin, detector-owned records of
+//     a structural or governance condition, created with [NewFindingStore]
+//     and wired into a sweep via [App.Findings]; written only by detectors,
+//     never by a human-driven flow.
 //   - Lineage ([LineageTrace], [LineageNode]) — traversal of the relation
 //     graph for provenance and impact queries.
 //   - Governance roles and audit ([RoleStore], [RoleDefinition], [RoleGrant],

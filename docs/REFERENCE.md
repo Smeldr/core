@@ -3247,6 +3247,52 @@ type SweepRunStore interface {
 
 ---
 
+## Findings (D51)
+
+`Finding` is a thin, detector-owned record of a structural or governance
+condition — a different granularity from `SweepRunStore` (one row per
+sweep *run*, with aggregate counts): `Finding` is one row per individual
+*detected issue*, deduplicated across repeated sweeps.
+
+```go
+smeldr.CreateFindingTable(db) // once at startup
+
+app := smeldr.New(smeldr.MustConfig(cfg))
+app.Findings(smeldr.NewFindingStore(db))
+// App.SweepStructural now records a Finding for each newly-flagged
+// stale relation edge, in addition to its existing AfterRelationCascade
+// signal. No FindingStore configured means no behaviour change.
+
+findings, err := app.FindingStore().List(ctx, "structural") // detector filter; "" lists all
+```
+
+**No `create_*`/`update_*` MCP tools and no human-driven state flow, by
+design (D51/D46)** — a write surface would invite exactly the
+`acknowledged`/`dismissed`/`accepted-as-is` human-resolution claims D46
+forbids. A finding resolves when its own detector stops firing for the
+same subject, not by human action — the same "authoritative state lives
+outside `Node.Status`" shape `Run` (D38) already established. The only
+read surface is `smeldr.dev/mcp`'s `list_findings` tool (Author role).
+
+Identity is `(Detector, SubjectType, SubjectID)` — `Record` upserts:
+a repeat finding for the same subject updates `LastSeenAt`/`Message`
+only; a new subject inserts with `FirstSeenAt == LastSeenAt`.
+
+Currently wired for the `structural` detector only (`RelationStore.
+SweepStructural`'s own `onStale` callback, `Provenance: "detected"`).
+`DrainEvalQueue`'s own scheduled-provenance condition is not yet
+wired — it has no equivalent "newly flagged" callback to extend, a
+separate follow-up.
+
+```go
+type FindingStore interface {
+    Record(ctx context.Context, f Finding) error
+    List(ctx context.Context, detector string) ([]Finding, error)
+}
+```
+
+---
+
 ## Context packets
 
 `App.ContextPacketHandler(rs *RelationStore, sourceName string)` mounts

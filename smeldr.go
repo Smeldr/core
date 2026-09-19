@@ -300,6 +300,8 @@ type App struct {
 
 	checkStore CheckStore // non-nil when App.Check() was called
 
+	findingStore FindingStore // non-nil when App.Findings() was called
+
 	governance        *RoleStore                              // non-nil when App.Governance() was called
 	governanceModules []interface{ setRoleStore(*RoleStore) } // modules that receive the RoleStore at Handler() time
 	governanceAudit   GovernanceAuditStore                    // set alongside governance — D44: audit is not optional
@@ -1045,6 +1047,18 @@ func (a *App) SweepStructural(ctx context.Context) (walked, flagged, skipped int
 			Type:   e.SourceType,
 			NodeID: e.SourceID,
 		})
+		if a.findingStore != nil {
+			if err := a.findingStore.Record(ctx, Finding{
+				Detector:    "structural",
+				SubjectType: "RelationEdge",
+				SubjectID:   e.ID,
+				Provenance:  "detected",
+				Message:     "relation target no longer alive",
+			}); err != nil {
+				slog.WarnContext(ctx, "smeldr: SweepStructural: Finding record failed",
+					"edge_id", e.ID, "error", err)
+			}
+		}
 	}
 	return rs.SweepStructural(ctx, check, onStale)
 }

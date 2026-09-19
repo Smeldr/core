@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.90.0] — 2026-09-19
+
+### Added
+
+`Finding` and `FindingStore` (`finding.go`) — a thin, detector-owned record of a structural or governance condition (D51): `Detector`, `SubjectType`, `SubjectID`, `Provenance`, `Message`, `FirstSeenAt`, `LastSeenAt`. `NewFindingStore(db)`, `CreateFindingTable(db)`. `Record` upserts, deduplicated on `(Detector, SubjectType, SubjectID)` — a repeat finding for the same subject updates `LastSeenAt`/`Message` only. No `create_*`/`update_*` MCP tools and no human-driven state flow, by design (D51/D46) — a write surface would invite exactly the `acknowledged`/`dismissed`/`accepted-as-is` human-resolution claims D46 forbids; a finding resolves when its own detector stops firing for the same subject. `App.Findings(store)` wires a `FindingStore`; `App.SweepStructural`'s own `onStale` callback now records a `Finding` (`Provenance: "detected"`) for each newly-flagged stale `RelationEdge` when a store is configured — no store configured means no behaviour change from before this release. Only the `structural` detector is wired; `DrainEvalQueue`'s own scheduled-provenance condition has no equivalent callback yet, a separate follow-up. Read surface: `smeldr.dev/mcp`'s `list_findings` tool (Author role).
+
+Decisions: D51
+
+---
+
 ## [1.89.3] — 2026-09-19
 
 ### Changed

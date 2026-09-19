@@ -561,6 +561,21 @@ smeldr.dev/
 │                     there would force a smeldr.dev/core import into the dependency-free MIT base
 │                     smeldr.dev/agent package) — record runs by wrapping the detector function at the call site
 │                     instead, per SweepRunStore's own doc comment (Amendment A279, T223)
+├── finding.go          Finding (Detector, SubjectType, SubjectID, Provenance, Message,
+│                     FirstSeenAt, LastSeenAt), FindingStore interface, NewFindingStore(DB),
+│                     CreateFindingTable(DB); Record (upsert-dedup on Detector+SubjectType+
+│                     SubjectID)/List — a thin, detector-owned record of a structural or
+│                     governance condition (D51), a different granularity from SweepRunStore
+│                     (one row per sweep run vs. one row per detected issue). No create_*/
+│                     update_* MCP tools and no human-driven state flow, by design — D51/D46:
+│                     a write surface would invite the acknowledged/dismissed resolution
+│                     claims D46 forbids; resolution happens when the detector stops firing.
+│                     App.Findings(store) wires the store; App.SweepStructural's own onStale
+│                     callback (relations.go) records a Finding (Provenance: "detected") for
+│                     each newly-flagged stale RelationEdge when a store is configured — no
+│                     store means no behaviour change. Only the structural detector is wired;
+│                     DrainEvalQueue's scheduled provenance has no equivalent callback yet, a
+│                     separate follow-up. Read surface: smeldr.dev/mcp's list_findings tool
 ├── blocks.go          DynamicNode (embeds Node; TypeName, Fields json.RawMessage) + Head(),
 │                     NewDynamicContentRepo(db) *SQLRepo[*DynamicNode] (binds smeldr_dynamic_content),
 │                     CreateBlockTables(db) — grouped idempotent creator: smeldr_dynamic_content +
