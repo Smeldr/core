@@ -243,3 +243,47 @@ No exported Go symbols added, removed, or renamed.
 No build, vet, or test changes required.
 
 ---
+
+## Non-Decision — Smeldr does not model people (T241)
+
+**Date:** 2026-08-14
+**Status:** Declined — token names only, no person modeling
+**Level:** 1 (docs-only — no code change)
+
+### What was considered
+
+Whether Smeldr should model people as a first-class concept — user
+accounts, person records, identity beyond a bearer token's own `Name`
+field.
+
+### Decision
+
+Smeldr will not model people. Tokens carry a `Name` field (a free-text
+label, e.g. "ci-deploy" or "alice-laptop") with no person/identity
+semantics attached — no user accounts, no PII fields, no person records
+anywhere in core.
+
+### Rationale
+
+Peter settled this by declining the problem rather than solving it,
+2026-08-14. A token's `Name` can happen to look like a person's name
+(nothing stops an operator naming a token "Alice"), but the field itself
+carries no identity guarantee, no uniqueness constraint tied to a real
+person, and no PII handling obligation — it is exactly as meaningful as
+any other free-text label. Modeling real people (accounts, profiles,
+identity verification) is a different, much larger problem Smeldr
+explicitly does not take on.
+
+### Developer pattern
+
+Use `Token.Name` as a human-readable label only — never treat it as, or
+validate it against, a real person's identity. Do not build features that
+assume `Token.Name` uniquely or reliably identifies a person (audit
+trails, actor attribution, etc. reference the token, not a person).
+
+### Consequences
+
+No exported Go symbols added, removed, or renamed. No build, vet, or test
+changes required.
+
+---
