@@ -96,4 +96,41 @@
 //
 // Available signal constants: [AfterCreate], [AfterUpdate], [AfterPublish],
 // [AfterUnpublish], [AfterSchedule], [AfterArchive], [AfterDelete].
+//
+// # Orchestration and governance
+//
+// Beyond the base content-lifecycle framework above, Smeldr ships a set of
+// compiled types and stores for running a project's own governance ledger —
+// decisions, tasks, goals, relations between them, and enforcement around all
+// of it:
+//
+//   - Orchestration types ([Decision], [Task], [Goal], [Signal], [Amendment],
+//     [Run]) — a project's own ledger of decisions, work items, goals, and
+//     inter-agent signals. Register with [RegisterOrchestrationTypes]; create
+//     the backing tables with [CreateOrchestrationTables].
+//   - Custom state flows ([StateFlow], [State], [Transition],
+//     [TransitionTrigger]) — a data-driven state machine registered per
+//     content type via [App.RegisterFlow], for lifecycles beyond the built-in
+//     Draft → Published → Archived progression.
+//   - Relation graph ([RelationStore], [RelationEdge], [RelationKindDef]) —
+//     typed, directional edges between items (asserted, inferred, or
+//     observed). Create a store with [NewRelationStore].
+//   - Authority and rules ([Rule], [AuthorityStub]) — role/rank-scoped
+//     authorization scaffolding, ordered with [SetRuleTypeOrder] and queried
+//     with [RuleTypeRank].
+//   - Checks ([CheckStore], [CheckRecord]) — recorded precondition
+//     enforcement against a subject, run with [RunAuthorityCheck].
+//   - Structural sweeps ([SweepRunStore], [SweepRunRecord]) — recorded runs
+//     of a structural-deviation detector, created with [NewSweepRunStore].
+//   - Lineage ([LineageTrace], [LineageNode]) — traversal of the relation
+//     graph for provenance and impact queries.
+//   - Governance roles and audit ([RoleStore], [RoleDefinition], [RoleGrant],
+//     [GovernanceAuditStore], [GovernanceAuditRecord], [StewardshipInbox]) —
+//     role grants and an audit trail over governance actions, created with
+//     [NewRoleStore] and [NewGovernanceAuditStore].
+//   - Webhooks ([WebhookStore], [WebhookEndpoint], [WebhookEventPayload]) —
+//     outbound delivery on lifecycle events, created with [NewWebhookStore].
+//   - Dynamic content types ([DynamicTypeRepo]) — a schema-driven repository
+//     for content types registered at runtime (e.g. via MCP) rather than
+//     compiled in, created with [NewDynamicTypeRepo].
 package smeldr
