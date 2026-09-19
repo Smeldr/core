@@ -1010,6 +1010,97 @@ func TestAuthorizeDecisionScope_GrantCheckError(t *testing.T) {
 	}
 }
 
+// — authorizeDecisionScopeByID (01a09ffc, TransitionItem's own wiring) ———————
+
+func TestAuthorizeDecisionScopeByID_NotDecision(t *testing.T) {
+	db := setupGovernanceDB(t)
+	rs := NewRoleStore(db)
+	err := authorizeDecisionScopeByID(context.Background(), db, rs, "tok", "Task", "any-id", map[string]string{"core": "core-ratifier"})
+	if err != nil {
+		t.Errorf("non-Decision typeName: want nil, got %v", err)
+	}
+}
+
+func TestAuthorizeDecisionScopeByID_LookupFailsOpen(t *testing.T) {
+	// No smeldr_decisions row for this id — Scan returns sql.ErrNoRows,
+	// exercising the same fail-open branch a real connectivity error would.
+	db := setupGovernanceDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	rs := NewRoleStore(db)
+	err := authorizeDecisionScopeByID(context.Background(), db, rs, "tok", "Decision", "does-not-exist", map[string]string{"core": "core-ratifier"})
+	if err != nil {
+		t.Errorf("lookup failure: want nil (fail-open), got %v", err)
+	}
+}
+
+func TestAuthorizeDecisionScopeByID_GrantedRole(t *testing.T) {
+	db := setupGovernanceDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	rs := NewRoleStore(db)
+	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"approve"}}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	const uid = "tok-byid-granted"
+	if _, err := rs.Grant(context.Background(), RoleGrant{TokenID: uid, RoleName: "core-ratifier"}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	d := &Decision{Node: Node{ID: NewID(), Slug: GenerateSlug("d-byid-granted")}, Scope: "core"}
+	if err := NewSQLRepo[*Decision](db, Table("smeldr_decisions")).Save(context.Background(), d); err != nil {
+		t.Fatalf("save Decision: %v", err)
+	}
+	err := authorizeDecisionScopeByID(context.Background(), db, rs, uid, "Decision", d.ID, map[string]string{"core": "core-ratifier"})
+	if err != nil {
+		t.Errorf("granted role: want nil, got %v", err)
+	}
+}
+
+func TestAuthorizeDecisionScopeByID_NotGranted(t *testing.T) {
+	db := setupGovernanceDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	rs := NewRoleStore(db)
+	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"approve"}}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	d := &Decision{Node: Node{ID: NewID(), Slug: GenerateSlug("d-byid-ungranted")}, Scope: "core"}
+	if err := NewSQLRepo[*Decision](db, Table("smeldr_decisions")).Save(context.Background(), d); err != nil {
+		t.Fatalf("save Decision: %v", err)
+	}
+	err := authorizeDecisionScopeByID(context.Background(), db, rs, "tok-no-grant", "Decision", d.ID, map[string]string{"core": "core-ratifier"})
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("ungranted role: want ErrForbidden (still fails closed once Scope resolves), got %v", err)
+	}
+}
+
+// TestTransitionItem_authorizeDecisionScope_wired is the integration proof
+// that the call site in TransitionItemWithReason is actually reached, not
+// just the helper in isolation — same reasoning as the MCPCreate/priority
+// integration test (01a07631).
+func TestTransitionItem_authorizeDecisionScope_wired(t *testing.T) {
+	app, db, rs := setupTransitionItemApp(t)
+	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"approve"}}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	d := &Decision{Node: Node{ID: NewID(), Slug: GenerateSlug("d-transitionitem-wired"), Status: "proposed"}, Scope: "core"}
+	if err := NewSQLRepo[*Decision](db, Table("smeldr_decisions")).Save(context.Background(), d); err != nil {
+		t.Fatalf("save Decision: %v", err)
+	}
+
+	decisionScopeRoles["core"] = "core-ratifier"
+	t.Cleanup(func() { delete(decisionScopeRoles, "core") })
+
+	ctx := NewTestContext(User{ID: "tok-no-grant"})
+	_, err := app.TransitionItemWithReason(ctx, "Decision", d.Slug, "ratified", "")
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("TransitionItemWithReason with unmapped role: want ErrForbidden, got %v", err)
+	}
+}
+
 // — RegisterOrchestrationRelationKinds ———————————————————————————————————————
 
 func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {

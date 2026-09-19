@@ -960,6 +960,15 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 	if err := validateTransition(ctx, db, a.governance, a.relationStore, actorID, id, typeName, currentStatus, toState, reason); err != nil {
 		return nil, err
 	}
+	// D34: layered scope-aware check on top of the generic RequiredOperation
+	// gate above — a no-op for every type except "Decision", and a no-op
+	// for Decision too until decisionScopeRoles is populated. Mirrors
+	// updateHandler's own authorizeDecisionScope call (module.go) — this is
+	// the transition_item MCP tool's own path, previously missing this
+	// check entirely (core-authorize-decision-scope-transition-item-gap).
+	if err := authorizeDecisionScopeByID(ctx, db, a.governance, actorID, typeName, id, decisionScopeRoles); err != nil {
+		return nil, err
+	}
 	if err := applyConflictPolicy(ctx, db, nil, typeName, toState, id); err != nil {
 		return nil, err
 	}
@@ -977,8 +986,10 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 	// or transition, fail-open (see App.Check's own godoc). This is the
 	// TransitionItem/transition_item-tool path; updateHandler (module.go)
 	// wires the same precondition for the HTTP PUT path via
-	// runDecisionAuthorityCheck — deliberately both, not repeating the gap
-	// D34's own authorizeDecisionScope left (wired into updateHandler only).
+	// runDecisionAuthorityCheck — deliberately both. D34's own
+	// authorizeDecisionScope is now wired into both paths too (see
+	// authorizeDecisionScopeByID above, pre-UPDATE — this call stays
+	// post-UPDATE since Check is advisory/recording, never blocking).
 	runDecisionAuthorityCheckByID(ctx, db, a.checkStore, typeName, id, currentStatus, toState)
 
 	// Event-stream channel (A302): the type's own band/receiver-shaped

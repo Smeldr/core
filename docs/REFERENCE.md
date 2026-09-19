@@ -640,6 +640,15 @@ done (`updateHandler` only) and A307 later confirmed as its own gap. Both
 sites are fail-open: a `CheckStore` outage is logged at `Warn` and never
 surfaces to the caller or blocks the transition.
 
+`authorizeDecisionScope` itself is now wired into both paths too (closed
+by `authorizeDecisionScopeByID`, a `TransitionItem`-specific variant that
+fetches `Scope` by id since `TransitionItem` has no typed `*Decision`
+struct in hand) — unlike Check, this is a blocking authorization gate, so
+its `TransitionItem` call runs before the row's `UPDATE`, not after.
+Only the `Scope` *lookup* is fail-open (a read error skips the check,
+logged at `Warn`); once `Scope` resolves, an ungranted role still fails
+closed exactly as `updateHandler`'s own call does.
+
 A recorded Check result is readable via `smeldr.dev/mcp`'s `get_check_status`
 tool (Author role, `subject_type`/`subject_id` params) — see that module's
 own docs; this tool requires a `smeldr_tool_policies` seed row

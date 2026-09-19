@@ -283,6 +283,31 @@ func authorizeDecisionScope(ctx context.Context, rs *RoleStore, actorID string, 
 	return nil
 }
 
+// authorizeDecisionScopeByID is [App.TransitionItem]'s own wiring of
+// authorizeDecisionScope: a no-op unless typeName is "Decision". Unlike
+// authorizeDecisionScope, TransitionItem never decodes a full Decision
+// struct (it operates generically across compiled types via raw SQL), so
+// Scope is fetched directly by id. A lookup failure fails open (logs and
+// skips the check) — the same posture runDecisionAuthorityCheckByID uses
+// for the sibling Check precondition wired into this same path
+// (check.go), and the only real risk today is zero either way:
+// decisionScopeRoles ships empty by design (D34), so this whole layer is
+// a no-op until Peter populates it.
+func authorizeDecisionScopeByID(ctx context.Context, db DB, rs *RoleStore, actorID, typeName, itemID string, scopeRoles map[string]string) error {
+	if typeName != "Decision" {
+		return nil
+	}
+	var scope string
+	if err := db.QueryRowContext(ctx,
+		`SELECT scope FROM smeldr_decisions WHERE id = $1`, itemID,
+	).Scan(&scope); err != nil {
+		slog.WarnContext(ctx, "smeldr: authorizeDecisionScopeByID: read scope failed",
+			"subject_id", itemID, "error", err)
+		return nil
+	}
+	return authorizeDecisionScope(ctx, rs, actorID, &Decision{Scope: scope}, scopeRoles)
+}
+
 // Amendment is an orchestration content type representing a committed
 // changeset that links a Task to its implementation in code.
 type Amendment struct {
