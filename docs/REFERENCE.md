@@ -4190,6 +4190,12 @@ via HTTP) are sorted by `Priority` ascending by default (lower number is higher 
 `Decision`, `Amendment`, `Run` have no `Priority` field and keep the repository's own natural
 order, unchanged.
 
+`create_task`/`create_goal` (MCP only — not the HTTP `POST` create route) default an
+omitted `priority` field to `5`, never `0` — `0` is reserved for a deliberate escalation
+(`Priority=0` on a `Task` is the only value that authorizes an implementer to start work
+without asking, per `AGENT_PROTOCOL.md`'s own gate rule). Explicitly passing `priority: 0`
+is still honoured as a real escalation.
+
 ### `DefaultListOrder` (A267, T262)
 
 ```go

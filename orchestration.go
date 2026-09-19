@@ -18,6 +18,10 @@ type Goal struct {
 	// GoalID is the canonical identifier (e.g. "T114").
 	GoalID string `json:"goal_id" db:"goal_id"`
 	// Priority is the scheduling priority. Lower values are higher priority.
+	// A create call that omits this field entirely gets defaultPriority (5),
+	// not 0 — 0 is reserved for a deliberate escalation (see
+	// applyDefaultPriority in module.go). Explicitly setting priority: 0 is
+	// still honoured as-is.
 	Priority int `json:"priority"`
 	// Band groups goals by work band (e.g. "P0", "P1", "P2", "P3").
 	Band string `json:"band"`
@@ -188,6 +192,10 @@ type Task struct {
 	// TaskID is the canonical task identifier (e.g. "T23").
 	TaskID string `json:"task_id" db:"task_id"`
 	// Priority is the scheduling priority. Lower values are higher priority.
+	// A create call that omits this field entirely gets defaultPriority (5),
+	// not 0 — 0 is reserved for a deliberate escalation (see
+	// applyDefaultPriority in module.go). Explicitly setting priority: 0 is
+	// still honoured as-is.
 	Priority int `json:"priority"`
 	// Band groups tasks into work bands (e.g. "M", "T", "R").
 	Band string `json:"band"`

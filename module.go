@@ -2401,6 +2401,38 @@ func applyDefaultStatus(ctx context.Context, db DB, typeName string, pv reflect.
 	pv.Elem().FieldByIndex(f.status).Set(reflect.ValueOf(status))
 }
 
+// defaultPriority is the priority a Task or Goal receives when its
+// creator omits the priority field entirely. Priority=0 has a specific,
+// load-bearing meaning for Task — the only value that authorizes an
+// implementer to start work without asking (AGENT_PROTOCOL.md's own
+// priority=0 gate rule) — and Goal shares the same field for the same
+// reason. Defaulting an omission to the highest-urgency value inverts
+// the safety property: escalation must be a deliberate, active choice,
+// never a byproduct of leaving a field blank. An explicit priority: 0 in
+// the create call is still honoured — only a fully omitted field gets
+// this default.
+const defaultPriority = 5
+
+// applyDefaultPriority sets pv's Priority field to defaultPriority when
+// typeName is Task or Goal and fields (the pre-unmarshal map passed to
+// MCPCreate) has no "priority" key. Checking fields, not the struct's
+// own post-unmarshal value, is required here — unlike applyDefaultStatus's
+// string check, Priority is an int, so an explicit priority: 0 and an
+// omitted priority are indistinguishable once JSON-unmarshaled.
+func applyDefaultPriority(typeName string, fields map[string]any, pv reflect.Value) {
+	if typeName != "Task" && typeName != "Goal" {
+		return
+	}
+	if _, ok := fields["priority"]; ok {
+		return
+	}
+	f := pv.Elem().FieldByName("Priority")
+	if !f.IsValid() || !f.CanSet() {
+		return
+	}
+	f.SetInt(defaultPriority)
+}
+
 // stampPublishedAt sets PublishedAt to now when item's status is Published and
 // PublishedAt has not already been set — covers the case where an item is created
 // (or resolves, via a custom flow's own IsInitial state) directly as Published.
@@ -2438,6 +2470,7 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 		pv.Elem().FieldByIndex(f.slug).SetString(slug)
 	}
 	applyDefaultStatus(ctx, m.db, m.contentTypeName, pv, f)
+	applyDefaultPriority(m.contentTypeName, fields, pv)
 
 	item := ptrToT[T](pv, m.proto)
 	stampPublishedAt(item)

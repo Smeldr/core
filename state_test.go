@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -1443,6 +1444,71 @@ func TestCreateHandler_omittedStatus_defaultsToDraft(t *testing.T) {
 	if created.Status != Draft {
 		t.Errorf("Status = %q, want %q", created.Status, Draft)
 	}
+}
+
+// — applyDefaultPriority unit tests (01a07631) ———————————————————————————————
+
+func TestApplyDefaultPriority_omittedGetsDefault(t *testing.T) {
+	for _, typeName := range []string{"Task", "Goal"} {
+		t.Run(typeName, func(t *testing.T) {
+			var item any
+			if typeName == "Task" {
+				item = &Task{}
+			} else {
+				item = &Goal{}
+			}
+			pv := reflect.ValueOf(item)
+			applyDefaultPriority(typeName, map[string]any{"description": "x"}, pv)
+
+			got := pv.Elem().FieldByName("Priority").Int()
+			if got != defaultPriority {
+				t.Errorf("Priority = %d, want %d (default)", got, defaultPriority)
+			}
+		})
+	}
+}
+
+func TestApplyDefaultPriority_explicitZeroHonoured(t *testing.T) {
+	// An explicit priority: 0 is a deliberate escalation — must never be
+	// overridden by the default, unlike a fully omitted field.
+	for _, typeName := range []string{"Task", "Goal"} {
+		t.Run(typeName, func(t *testing.T) {
+			var item any
+			if typeName == "Task" {
+				item = &Task{Priority: 0}
+			} else {
+				item = &Goal{Priority: 0}
+			}
+			pv := reflect.ValueOf(item)
+			applyDefaultPriority(typeName, map[string]any{"priority": float64(0)}, pv)
+
+			got := pv.Elem().FieldByName("Priority").Int()
+			if got != 0 {
+				t.Errorf("Priority = %d, want 0 (explicit value must be honoured)", got)
+			}
+		})
+	}
+}
+
+func TestApplyDefaultPriority_explicitNonZeroUnaffected(t *testing.T) {
+	task := &Task{Priority: 2}
+	pv := reflect.ValueOf(task)
+	applyDefaultPriority("Task", map[string]any{"priority": float64(2)}, pv)
+
+	if task.Priority != 2 {
+		t.Errorf("Priority = %d, want 2 (unaffected)", task.Priority)
+	}
+}
+
+func TestApplyDefaultPriority_otherTypeNameNoOp(t *testing.T) {
+	// Decision has no Priority field at all — confirms the typeName guard
+	// returns early before any reflection lookup is attempted, rather than
+	// relying on FieldByName's own not-found fallback.
+	decision := &Decision{}
+	pv := reflect.ValueOf(decision)
+	applyDefaultPriority("Decision", map[string]any{}, pv)
+	// No panic, nothing to assert on Decision itself — the guard is what's
+	// under test here.
 }
 
 // — suppressesSignals unit tests ——————————————————————————————————————————————

@@ -2004,6 +2004,44 @@ func newTaskModule(repo Repository[*Task], opts ...Option) *Module[*Task] {
 	return NewModule((*Task)(nil), append([]Option{Repo(repo)}, opts...)...)
 }
 
+// — applyDefaultPriority via MCPCreate (01a07631) ————————————————————————————
+
+// TestMCPCreate_omittedPriority_defaultsTo5 proves applyDefaultPriority's
+// call site in MCPCreate is actually wired, not just the helper in
+// isolation (state_test.go's own unit tests cover the helper directly).
+func TestMCPCreate_omittedPriority_defaultsTo5(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	m := newTaskModule(mem)
+
+	created, err := m.MCPCreate(NewTestContext(editorUser()), map[string]any{
+		"description": "no priority given",
+	})
+	if err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+	if got := created.(*Task).Priority; got != defaultPriority {
+		t.Errorf("Priority = %d, want %d (default)", got, defaultPriority)
+	}
+}
+
+// TestMCPCreate_explicitZeroPriority_honoured is the regression guard for
+// the escalation path — priority: 0 must reach the saved item unchanged.
+func TestMCPCreate_explicitZeroPriority_honoured(t *testing.T) {
+	mem := NewMemoryRepo[*Task]()
+	m := newTaskModule(mem)
+
+	created, err := m.MCPCreate(NewTestContext(editorUser()), map[string]any{
+		"description": "explicit urgent",
+		"priority":    0,
+	})
+	if err != nil {
+		t.Fatalf("MCPCreate: %v", err)
+	}
+	if got := created.(*Task).Priority; got != 0 {
+		t.Errorf("Priority = %d, want 0 (explicit escalation honoured)", got)
+	}
+}
+
 // — DefaultListOrder (T262) ——————————————————————————————————————————————
 
 func seedTaskWithPriority(t *testing.T, repo Repository[*Task], slug string, priority int) {
