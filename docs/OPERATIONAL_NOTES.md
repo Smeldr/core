@@ -26,3 +26,18 @@ file.
 `//` comment into one curly closing-quote character (U+201D). Grep for
 `//.*''` before running `gofmt -w` on a file with hand-written comments
 using that pattern.
+
+Windows PowerShell 5.1's `-Encoding utf8` writes **UTF-8 with a BOM**, not
+plain UTF-8 (`utf8NoBOM` is a separate encoding name, only available in
+PowerShell 7+). `Set-Content`/`Add-Content`/`Out-File -Encoding utf8` on a
+`.go` file therefore prepends `EF BB BF` before the package declaration.
+`gofmt` treats the BOM as real content and flags the file as dirty — this
+reproduces even against the actual git-stored blob (unlike the CRLF
+false-positive above), so it fails CI, not just the local check.
+Confirmed root cause of a real CI break (2026-09-19, `smeldr.dev/oauth`
+commit e07be4f): a `Bash`-tool call wrapping a PowerShell one-liner with
+`Set-Content -Encoding utf8` partially executed before a quoting error,
+leaving the BOM behind. Avoid `Set-Content`/`Out-File -Encoding utf8` on
+`.go` files entirely — use the `Edit`/`Write` tools instead, or if a raw
+PowerShell rewrite is unavoidable, use `[System.IO.File]::WriteAllText`
+with an explicit `New-Object System.Text.UTF8Encoding($false)`.
