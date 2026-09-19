@@ -8,7 +8,7 @@ require (
 	smeldr.dev/core v1.91.1
 	smeldr.dev/mcp v1.36.4
 	smeldr.dev/media v1.6.3
-	smeldr.dev/oauth v0.4.2
+	smeldr.dev/oauth v0.4.3
 	smeldr.dev/social v0.10.5
 )
 
