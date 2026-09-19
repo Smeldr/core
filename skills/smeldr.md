@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.74.0 · smeldr.dev/mcp v1.31.1 · smeldr.dev/oauth v0.4.0 · smeldr.dev/media v1.6.0 · smeldr.dev/cli v0.15.2 · smeldr.dev/social v0.10.1 · smeldr.dev/agent v0.9.0 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.89.3 · smeldr.dev/mcp v1.36.1 · smeldr.dev/oauth v0.4.1 · smeldr.dev/media v1.6.2 · smeldr.dev/cli v0.17.1 · smeldr.dev/social v0.10.3 · smeldr.dev/agent v0.9.1 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -430,6 +430,7 @@ Tools are named from the type in lower_snake_case.
 | `list_signals` | Author | List signals by receiver+state (default "pending"). Fail-open on missing table. Gate: `App.Config().DB != nil`. |
 | `get_goal_context` | Author | Retrieve a goal and all linked items (Decisions, Tasks, Goals) via the relation graph. Args: `goal_id` (required, e.g. `"T114"`). Returns `{goal, linked_decisions, linked_tasks, linked_goals}`. -32001 on not found. Gate: `App.Config().DB != nil`. smeldr.dev/mcp v1.27.0. |
 | `list_type_tools` | Author | Discovery meta-tool. Takes `type_name` (snake_case, e.g. `"essay"`) and returns all MCP tool names registered for that compiled content type. Use when you find one verb for a type and need to enumerate its siblings. Always present in tools/list. smeldr.dev/mcp v1.29.0. |
+| `get_sweep_run` | Author | Reads the most recent structural sweep run recorded for a detector, via `smeldr.SweepRunStore.Last`. Args: `detector` (required, e.g. `"structural"`). Returns `{detector, wired: false}` when no run has been recorded, or `{detector, wired: true, ran_at, walked, flagged}` when one exists. Gate: `App.Config().DB != nil`. smeldr.dev/mcp v1.33.0, requires smeldr.dev/core v1.78.2+. |
 
 Block system (T32, enabled with `mcp.WithBlocks()`; blocks addressed by ID, not slug):
 
@@ -618,6 +619,11 @@ smeldr-cli audit list
 smeldr-cli audit list --type Post
 smeldr-cli audit list --from 2026-01-01T00:00:00Z --to 2026-12-31T23:59:59Z
 smeldr-cli audit list --actor <actor-id>
+
+# Transition (role required by the target StateFlow's own gate, smeldr-cli v0.16.0+)
+# — dynamic content (snake_case type_name) or a compiled type (e.g. Decision, Task, Signal)
+smeldr-cli transition Decision <slug> --to ratified          # e.g. Decision ratification
+smeldr-cli transition <type_name> <slug> --to <state> --reason "<text>"  # when the gate requires a reason
 
 # Block system (T32, smeldr-cli v0.10.0+) — Fields keys are case-sensitive PascalCase
 smeldr-cli block node create --type hero --field Headline="Welcome"   # Author
