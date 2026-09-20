@@ -213,6 +213,14 @@ type Decision struct {
 	Node
 	// DecisionNumber is the canonical identifier (e.g. "D22" or "A183").
 	DecisionNumber string `json:"decision_number" db:"decision_number"`
+	// Title is a short, human-readable display title, independent of
+	// Body's own Markdown content — added because scraping Body's first
+	// heading for a title (Cloud's prior approach) produced
+	// duplicate/unhelpful titles when two Decisions opened with the same
+	// generic heading (e.g. two Decisions both starting "## Context").
+	// Empty is valid on old rows until migrated; never auto-derived from
+	// Body by core itself.
+	Title string `json:"title" db:"title"`
 	// Scope categorises the decision (e.g. "core", "agent", "cross-cutting").
 	// This IS decision-governance-model design §3's own "affected surface"
 	// classification property — no separate Surface field exists; Scope
@@ -490,6 +498,7 @@ func CreateOrchestrationTables(db DB) error {
 			updated_at      TIMESTAMPTZ NOT NULL,
 			rev             INTEGER NOT NULL DEFAULT 0,
 			decision_number TEXT NOT NULL DEFAULT '',
+			title           TEXT NOT NULL DEFAULT '',
 			scope           TEXT NOT NULL DEFAULT '',
 			body            TEXT NOT NULL DEFAULT '',
 			next_eval_at    TIMESTAMPTZ,
@@ -620,6 +629,20 @@ func EnsureDecisionTensionColumns(ctx context.Context, db DB) error {
 		if err := EnsureColumn(ctx, db, "smeldr_decisions", c[0], c[1]); err != nil {
 			return fmt.Errorf("smeldr: EnsureDecisionTensionColumns: %w", err)
 		}
+	}
+	return nil
+}
+
+// EnsureDecisionTitleColumn adds [Decision]'s title column to
+// smeldr_decisions on pre-existing SQLite databases that predate this
+// Amendment. Fresh installs already have the column via
+// [CreateOrchestrationTables]'s own CREATE TABLE statement; this only
+// upgrades a database created before this Amendment. Idempotent — safe to
+// call on every boot. Same one-column [EnsureColumn] pattern as
+// [EnsureAmendmentBodyColumn].
+func EnsureDecisionTitleColumn(ctx context.Context, db DB) error {
+	if err := EnsureColumn(ctx, db, "smeldr_decisions", "title", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("smeldr: EnsureDecisionTitleColumn: %w", err)
 	}
 	return nil
 }

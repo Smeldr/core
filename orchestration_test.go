@@ -1381,6 +1381,77 @@ func TestCreateOrchestrationTables_AmendmentBodyColumn(t *testing.T) {
 	}
 }
 
+func TestEnsureDecisionTitleColumn_AddsColumns(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	// Old schema, pre-decision-title-field: smeldr_decisions without title.
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_decisions (
+			id              TEXT PRIMARY KEY,
+			slug            TEXT NOT NULL UNIQUE,
+			status          TEXT NOT NULL DEFAULT 'draft',
+			created_at      TIMESTAMPTZ NOT NULL,
+			updated_at      TIMESTAMPTZ NOT NULL,
+			decision_number TEXT NOT NULL DEFAULT '',
+			scope           TEXT NOT NULL DEFAULT '',
+			body            TEXT NOT NULL DEFAULT '',
+			eval_note       TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		t.Fatalf("create old-schema table: %v", err)
+	}
+
+	if err := EnsureDecisionTitleColumn(ctx, db); err != nil {
+		t.Fatalf("EnsureDecisionTitleColumn: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_decisions
+			(id, slug, created_at, updated_at, title)
+		VALUES ('1', 'test', '2025-01-01', '2025-01-01', 'A Real Title')`,
+	); err != nil {
+		t.Errorf("title column should exist after migration, got: %v", err)
+	}
+}
+
+func TestEnsureDecisionTitleColumn_Idempotent(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	if err := EnsureDecisionTitleColumn(ctx, db); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := EnsureDecisionTitleColumn(ctx, db); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+}
+
+func TestEnsureDecisionTitleColumn_AlterFails(t *testing.T) {
+	db := newSQLiteDB(t)
+	// smeldr_decisions table deliberately not created.
+	if err := EnsureDecisionTitleColumn(context.Background(), db); err == nil {
+		t.Error("expected error when smeldr_decisions does not exist, got nil")
+	}
+}
+
+// TestCreateOrchestrationTables_DecisionTitleColumn verifies
+// smeldr_decisions accepts a title insert on a fresh install.
+func TestCreateOrchestrationTables_DecisionTitleColumn(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_decisions
+			(id, slug, created_at, updated_at, title)
+		VALUES ('1', 'test', '2025-01-01', '2025-01-01', 'A Real Title')`,
+	); err != nil {
+		t.Errorf("title column should exist on fresh install, got: %v", err)
+	}
+}
+
 func TestRegisterOrchestrationRelationKinds_UpsertError(t *testing.T) {
 	store := mockRelationStore(&errExecDB{})
 	err := RegisterOrchestrationRelationKinds(context.Background(), store)

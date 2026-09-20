@@ -4224,7 +4224,7 @@ smeldr.RegisterOrchestrationTypes(app, db)
 |------|-------|------------|------------|
 | `Signal` | `smeldr_signals` | signal-protocol (4 states) | sender, receiver, signal_type, message, task_ref, sequence, subject_type, subject_id, from_state, to_state, required_role |
 | `Task` | `smeldr_tasks` | agent-task (9 states) | task_id, priority, band, size, description, note_ref |
-| `Decision` | `smeldr_decisions` | governance-decision (5 states) | decision_number, scope, body, next_eval_at, eval_note |
+| `Decision` | `smeldr_decisions` | governance-decision (5 states) | decision_number, title, scope, body, next_eval_at, eval_note |
 | `Amendment` | `smeldr_amendments` | amendment-lifecycle (6 states) | amendment_number, amendment_type, version, commit_hash, pilot, summary |
 | `Goal` | `smeldr_goals` | goal-lifecycle (4 states) | goal_id, priority, band, size, description |
 

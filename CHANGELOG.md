@@ -23,6 +23,22 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.93.0] — 2026-09-20
+
+### Added
+
+`Decision` gains a `Title` field (`json:"title" db:"title"`) — a short, human-readable display title independent of `Body`'s own Markdown content. Cloud's Workspace UI previously derived a displayed title by scraping `Body`'s first Markdown heading, which produced duplicate/unhelpful titles when two Decisions opened with the same generic heading (e.g. two Decisions both starting `## Context`). `Title` is never auto-derived from `Body` by core itself — empty is valid on old rows until migrated.
+
+`EnsureDecisionTitleColumn` upgrades a pre-existing `smeldr_decisions` table on boot (same one-column `EnsureColumn` pattern as `EnsureAmendmentBodyColumn`); fresh installs get the column directly via `CreateOrchestrationTables`'s own `CREATE TABLE`. Wired into `example/server/main.go`'s boot path in this same commit.
+
+Live-data titling of `process.smeldr.dev`'s own Decisions is a separate live-instance action (no repo diff), not part of this Amendment. Cloud's own Navigator/Workspace/Pulse read-model wiring to use `Title` is a separate, later Task in `smeldr/cloud`.
+
+4 new regression tests (`TestEnsureDecisionTitleColumn_{AddsColumns,Idempotent,AlterFails}`, `TestCreateOrchestrationTables_DecisionTitleColumn`), mirroring `EnsureAmendmentBodyColumn`'s own test shape. No exported symbol removed. Coverage: 96.2%.
+
+Decisions: (Amendment recorded live per D67 — see live record for the number)
+
+---
+
 ## [1.92.0] — 2026-09-20
 
 ### Added
