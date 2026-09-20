@@ -182,11 +182,14 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		TokenStore: tokenStore,
 	})
 
+	var roleStore *smeldr.RoleStore
+
 	if cfg.EnableGovernance {
 		store := smeldr.NewRoleStore(db)
 		if err := app.Governance(store); err != nil {
 			return ServerResult{}, fmt.Errorf("governance: %w", err)
 		}
+		roleStore = store
 	}
 
 	var rs *smeldr.RelationStore
@@ -285,6 +288,12 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 		if cfg.EnableContextPacket {
 			app.ContextPacketHandler(rs, cfg.InstanceName)
+		}
+	}
+
+	if cfg.EnableRelations && cfg.EnableOrchestration && cfg.EnableGovernance {
+		if err := smeldr.RegisterDecisionDomainAdminRole(context.Background(), roleStore); err != nil {
+			return ServerResult{}, fmt.Errorf("register decision-domain-admin role: %w", err)
 		}
 	}
 

@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.94.0] — 2026-09-20
+
+### Added
+
+`RegisterDecisionDomainAdminRole` defines (or updates) the `decision-domain-admin` governance role: `Operations: ["approve"]`, `ScopeMode: ScopeDynamic`, `ScopeRelationKind: "belongs_to_domain"`, `ScopeDirection: "incoming"`. A grant of this role anchored on a specific Domain item's own ID authorizes ratify/supersede only on Decisions carrying a `belongs_to_domain` edge to that Domain — real per-Domain delegation (D68), reusing `RoleStore.Authorized`'s existing `ScopeDynamic` resolution. No new authorization code was needed; this is a role definition only. Wired into `example/server/main.go`'s boot path when `ENABLE_GOVERNANCE`, `ENABLE_RELATIONS`, and `ENABLE_ORCHESTRATION` are all set.
+
+`decisionScopeRoles` (`orchestration.go`, empty since D34) is deliberately left unpopulated — `decide-decision-scope-role-policy` considered populating it (a role name per `Scope` string value) and chose this mechanism instead, reusing D71/D72's `belongs_to_domain` edges rather than inventing a second, weaker policy layer. The map's own doc comment now records the reasoning.
+
+2 new regression tests (`TestRegisterDecisionDomainAdminRole_{RoundTrip,Idempotent}`). No exported symbol removed. Coverage: 96.2%.
+
+Decisions: (Amendment recorded live per D67 — see live record for the number)
+
+---
+
 ## [1.93.0] — 2026-09-20
 
 ### Added

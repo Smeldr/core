@@ -263,15 +263,48 @@ type Decision struct {
 
 // decisionScopeRoles maps a Decision's Scope field to the role name required
 // to transition it — ratify (proposed→ratified) or supersede
-// (ratified→superseded) — per D34. Deliberately starts empty: no
-// scope-to-role policy has been decided yet. An unmapped Scope value is not
-// an error — it simply means authorizeDecisionScope has nothing additional
-// to check for that item, and the generic RequiredOperation gate already set
-// on orchDecisionFlow's transitions is what enforces authority today.
+// (ratified→superseded) — per D34. Deliberately starts empty and stays empty:
+// decide-decision-scope-role-policy (2026-09-20) considered populating this
+// map (Path A, one role name per Scope string value) and rejected it in
+// favor of Path B — [RegisterDecisionDomainAdminRole]'s real, per-Domain
+// delegation via the belongs_to_domain relation kind (D71/D72) and
+// RoleStore.Authorized's existing ScopeDynamic mechanism, matching D68's own
+// policy ("authority is granted per scope... via delegation") without a
+// role-per-Scope-value naming burden. An unmapped Scope value is not an
+// error — it simply means authorizeDecisionScope has nothing additional to
+// check for that item, and the generic RequiredOperation gate already set on
+// orchDecisionFlow's transitions (now backed by RegisterDecisionDomainAdminRole
+// grants, alongside ScopeGlobal admin) is what enforces authority today.
 // Unaffected by D63/D64's RequiredRole→RequiredOperation migration: this
 // mechanism calls RoleStore.RoleGranted directly, independent of
 // validateTransition and its own operation-based check.
 var decisionScopeRoles = map[string]string{}
+
+// RegisterDecisionDomainAdminRole defines (or updates) the
+// "decision-domain-admin" role: Operations: ["approve"], scoped dynamically
+// via the belongs_to_domain relation kind (D71/D72,
+// [RegisterOrchestrationRelationKinds]) with ScopeDirection "incoming" — a
+// grant of this role, anchored on a specific Domain item's own ID, matches
+// exactly the Decisions carrying a belongs_to_domain edge to that Domain
+// (relationExists' own "incoming" semantic: itemID has a relation pointing
+// TO anchorID, which is precisely a Decision→domain edge). This gives real,
+// per-Domain delegation — D68's own policy ("a holder of authority over
+// scope X may grant authority over X to another actor") — reusing
+// RoleStore.Authorized's already-tested ScopeDynamic resolution; no new
+// authorization code was needed, only this role definition
+// (decide-decision-scope-role-policy, Path B, chosen over populating
+// [decisionScopeRoles]). Idempotent — safe to call on every boot;
+// RoleStore.DefineRole updates the role in place if one with this name is
+// already registered.
+func RegisterDecisionDomainAdminRole(ctx context.Context, rs *RoleStore) error {
+	return rs.DefineRole(ctx, RoleDefinition{
+		Name:              "decision-domain-admin",
+		Operations:        []string{"approve"},
+		ScopeMode:         ScopeDynamic,
+		ScopeRelationKind: "belongs_to_domain",
+		ScopeDirection:    "incoming",
+	})
+}
 
 // authorizeDecisionScope checks whether actorID holds the role D34 maps from
 // item's Scope field, via scopeRoles. It is layered alongside — not instead

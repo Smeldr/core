@@ -571,6 +571,15 @@ holding the `"steward"` operation. `RoleStore.StewardedRuleTypes`/
 steward" and "what currently touches authority I steward" — see
 [docs/REFERENCE.md](docs/REFERENCE.md#rule-type-stewardship-d63d64-decision-governance-modelmd-5).
 
+**Per-Domain Decision authority** — granting one person ratify/supersede
+authority over Decisions in a specific Domain (D71/D72's Domain/Area model)
+also uses these same tools with no new mechanism: `grant_role` with
+`role: "decision-domain-admin"` (auto-defined when `ENABLE_GOVERNANCE`,
+`ENABLE_RELATIONS`, and `ENABLE_ORCHESTRATION` are all set) and
+`scope_anchor_id` set to the target Domain item's own ID — real delegation,
+narrower than the flat `admin` role, matching D68's own policy. See
+[docs/REFERENCE.md](docs/REFERENCE.md#decision-domain-authority-d68d71d72-decide-decision-scope-role-policy).
+
 ### Webhook management tools (Admin role required)
 
 These tools are available when the site has `App.Webhooks(store)` configured:

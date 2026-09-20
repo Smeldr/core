@@ -276,6 +276,25 @@ smeldr.dev/
 │                     THIS IS THE LAST HAND-WRITTEN AMENDMENT ENTRY in decisions/recent.md for
 │                     smeldr/core — every Amendment after A305 is recorded live via
 │                     create_amendment per CLAUDE.md's own rewritten instructions
+│                     Decision gains Title (json/db "title") — a short, human-readable display
+│                     title independent of Body's own Markdown content, replacing Cloud's prior
+│                     approach of scraping Body's first Markdown heading (fragile: two live
+│                     Decisions both opened with the identical "## Scope" heading).
+│                     EnsureDecisionTitleColumn(ctx, DB) error mirrors EnsureAmendmentBodyColumn's
+│                     own one-column EnsureColumn pattern exactly (Amendment A339,
+│                     decision-title-field)
+│                     RegisterDecisionDomainAdminRole(ctx, *RoleStore) error — defines the
+│                     "decision-domain-admin" role (Operations: ["approve"], ScopeMode:
+│                     ScopeDynamic, ScopeRelationKind: "belongs_to_domain", ScopeDirection:
+│                     "incoming"): a grant anchored on a specific Domain item's own ID authorizes
+│                     ratify/supersede only for Decisions carrying a belongs_to_domain edge to
+│                     that Domain — real per-Domain delegation (D68), reusing
+│                     RoleStore.Authorized's existing ScopeDynamic resolution, no new
+│                     authorization code. Chosen over populating decisionScopeRoles (Path B,
+│                     decide-decision-scope-role-policy) — that map's own doc comment now
+│                     explains why it stays empty. decisionScopeRoles/authorizeDecisionScope
+│                     themselves are unchanged code, left in place as a no-op layered check
+│                     (Amendment pending, decide-decision-scope-role-policy)
 ├── authority.go      Rule, AuthorityStub content types embedding Node — the Authority mechanism
 │                     (decision-governance-model design doc §4): Rule is the first subtype of the
 │                     conceptual Authority supertype (Decision/Rule/Principle/Standard/Precedent);

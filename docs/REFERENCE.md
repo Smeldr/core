@@ -579,6 +579,42 @@ added alongside `get_goal_context`/`get_sweep_run`'s own rows) or every
 governance-enabled caller is silently forbidden, the same gap A298 already
 closed once for `get_sweep_run`.
 
+### Decision-Domain authority (D68/D71/D72, decide-decision-scope-role-policy)
+
+Per-Domain ratify/supersede authority is modeled as a `ScopeDynamic` role grant
+anchored on a Domain item, not a role per Scope string value.
+`RegisterDecisionDomainAdminRole` (called automatically when
+`ENABLE_GOVERNANCE`, `ENABLE_RELATIONS`, and `ENABLE_ORCHESTRATION` are all
+set) defines a single `"decision-domain-admin"` role
+(`Operations: ["approve"]`, `ScopeMode: ScopeDynamic`,
+`ScopeRelationKind: "belongs_to_domain"`, `ScopeDirection: "incoming"`) —
+reusing `RoleStore.Authorized`'s existing dynamic-scope resolution against the
+`belongs_to_domain` edges asserted between a `Decision` and its Domain item, no
+new authorization code needed:
+
+```go
+// Grant one person authority over Decisions in the "core" Domain — anchor is
+// that Domain item's own ID, not a role name per Scope value.
+app.RoleStore().Grant(ctx, smeldr.RoleGrant{
+    TokenID: tokenID, RoleName: "decision-domain-admin",
+    ScopeAnchorID: coreDomainItemID,
+})
+```
+
+A grant like this authorizes `proposed→ratified`/`pending-re-evaluation→ratified`/
+`pending-re-evaluation→superseded`/`ratified→superseded` (the four `approve`-gated
+transitions on `orchDecisionFlow`, D63/D64) only for Decisions carrying a
+`belongs_to_domain` edge to `coreDomainItemID` — real per-Domain delegation, not
+a flat admin tier. A `ScopeGlobal` grant of the built-in `admin` role (which
+already holds `approve`) still authorizes every Decision regardless of Domain,
+matching D72's own "Root admin has authority everywhere" semantic. A Decision
+with no `belongs_to_domain` edge at all (D72's Root case) can only be acted on
+by a `ScopeGlobal`-holding role — there is no dynamic anchor for it to match.
+
+`decisionScopeRoles` (`orchestration.go`, a flat `Scope`-string→role-name map)
+is deliberately left unpopulated — this mechanism was chosen over it during
+policy review; see the map's own doc comment for the full reasoning.
+
 ### Authority Check (decision-governance-model.md §4)
 
 Check is an enforced *precondition* on a Decision's `proposed → ratified`

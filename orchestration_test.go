@@ -1452,6 +1452,59 @@ func TestCreateOrchestrationTables_DecisionTitleColumn(t *testing.T) {
 	}
 }
 
+func TestRegisterDecisionDomainAdminRole_RoundTrip(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := RegisterDecisionDomainAdminRole(ctx, store); err != nil {
+		t.Fatalf("RegisterDecisionDomainAdminRole: %v", err)
+	}
+
+	var ops, scopeMode, relKind, relDir string
+	if err := db.QueryRowContext(ctx,
+		`SELECT operations, scope_mode, scope_relation_kind, scope_direction
+			FROM smeldr_roles WHERE name = 'decision-domain-admin'`,
+	).Scan(&ops, &scopeMode, &relKind, &relDir); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if ops != `["approve"]` {
+		t.Errorf("operations: got %q, want %q", ops, `["approve"]`)
+	}
+	if scopeMode != "dynamic" {
+		t.Errorf("scope_mode: got %q, want %q", scopeMode, "dynamic")
+	}
+	if relKind != "belongs_to_domain" {
+		t.Errorf("scope_relation_kind: got %q, want %q", relKind, "belongs_to_domain")
+	}
+	if relDir != "incoming" {
+		t.Errorf("scope_direction: got %q, want %q", relDir, "incoming")
+	}
+}
+
+func TestRegisterDecisionDomainAdminRole_Idempotent(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := RegisterDecisionDomainAdminRole(ctx, store); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := RegisterDecisionDomainAdminRole(ctx, store); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_roles WHERE name = 'decision-domain-admin'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count: got %d, want 1 (no duplicate on re-register)", count)
+	}
+}
+
 func TestRegisterOrchestrationRelationKinds_UpsertError(t *testing.T) {
 	store := mockRelationStore(&errExecDB{})
 	err := RegisterOrchestrationRelationKinds(context.Background(), store)
