@@ -795,6 +795,38 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			Directional:  true,
 			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"}]`),
 		},
+		{
+			// D72's authority-hierarchy model (domain-area-root-implementation.md
+			// §1): Domain and Area are per-instance dynamic content types, not
+			// compiled into core, so the target type name is the lowercase
+			// dynamic-type convention (dynamic_test.go's own "recipe"/"tag"/"post")
+			// rather than the PascalCase compiled-type convention every other kind
+			// in this function uses for its source side.
+			TypeName:     "belongs_to_domain",
+			Label:        "Belongs To Domain",
+			ReverseLabel: "Domain Of",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"domain"}]`),
+		},
+		{
+			TypeName:     "belongs_to_area",
+			Label:        "Belongs To Area",
+			ReverseLabel: "Area Of",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"area"}]`),
+		},
+		{
+			// D71's Set: no TypePairs, deliberately open — every other kind in
+			// this function restricts TypePairs because its endpoints are known
+			// compiled/dynamic types; Set's whole point is that its members span
+			// types core cannot enumerate ahead of time.
+			TypeName:    "in_set",
+			Label:       "In Set",
+			Mode:        "asserted",
+			Directional: true,
+		},
 	}
 	for _, k := range kinds {
 		if err := store.UpsertKind(ctx, k); err != nil {

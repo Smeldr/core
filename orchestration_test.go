@@ -1126,10 +1126,13 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 			`{"source_type":"Goal","target_type":"Decision"},` +
 			`{"source_type":"Goal","target_type":"Amendment"},` +
 			`{"source_type":"Goal","target_type":"Signal"}]`, true},
-		"contradicts":  {"Contradicts", "", `[{"source_type":"Decision","target_type":"Decision"}]`, false},
-		"investigates": {"Investigates", "Investigated By", `[{"source_type":"Task","target_type":"Decision"}]`, true},
-		"addresses":    {"Addresses", "Addressed By", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
-		"grounded_in":  {"Grounded In", "Grounds", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
+		"contradicts":       {"Contradicts", "", `[{"source_type":"Decision","target_type":"Decision"}]`, false},
+		"investigates":      {"Investigates", "Investigated By", `[{"source_type":"Task","target_type":"Decision"}]`, true},
+		"addresses":         {"Addresses", "Addressed By", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
+		"grounded_in":       {"Grounded In", "Grounds", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
+		"belongs_to_domain": {"Belongs To Domain", "Domain Of", `[{"source_type":"Decision","target_type":"domain"}]`, true},
+		"belongs_to_area":   {"Belongs To Area", "Area Of", `[{"source_type":"Decision","target_type":"area"}]`, true},
+		"in_set":            {"In Set", "", `[]`, true},
 	}
 
 	kinds := store.ListKinds()

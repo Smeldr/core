@@ -23,6 +23,24 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.92.0] — 2026-09-20
+
+### Added
+
+`RegisterOrchestrationRelationKinds` gains three new relation kinds, implementing the core-side half of D71 (Set) and D72 (Domain/Area/Root authority hierarchy): `belongs_to_domain` and `belongs_to_area` (both `Decision→{domain,area}`, directional, asserted) and `in_set` (directional, asserted, deliberately no `TypePairs` — Set's membership spans types core cannot enumerate ahead of time).
+
+Domain and Area are per-instance dynamic content types, not compiled into `smeldr/core` — D72's own migration text names the values a given instance uses (e.g. `core`/`cloud`/`brand`/...) as that instance's own vocabulary, the same way `Task.Band` values are never core's to hardcode. `belongs_to_domain`/`belongs_to_area`'s target type names (`domain`/`area`) are lowercase, matching the established dynamic-content-type casing convention, unlike every other kind's PascalCase compiled-type targets.
+
+No new validation added for "at most one Domain per Decision": `RelationKindDef` has no cardinality field anywhere in this system, and this migration's own single-`Scope`-value-per-Decision construction is single-valued without needing one — a future write path that could create a second edge is that write path's own concern, not a new core mechanism built ahead of need.
+
+Domain/Area content-type creation and the Decision migration itself are a separate, later task (`core-domain-area-content-and-migration`) — they require live tooling against `process.smeldr.dev`'s own dynamic-content subsystem, outside what a `smeldr/core` release can ship.
+
+1 new regression coverage (extends `TestRegisterOrchestrationRelationKinds_RoundTrip`). No exported symbol removed. Coverage: 96.2%.
+
+Decisions: A338
+
+---
+
 ## [1.91.2] — 2026-09-20
 
 ### Fixed

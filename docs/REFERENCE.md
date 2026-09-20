@@ -4336,6 +4336,9 @@ safe to call on every boot; `UpsertKind` updates in place if a kind is already r
 | `investigates` | directional | Task→Decision | asserted |
 | `addresses` | directional | Decision→Decision | asserted |
 | `grounded_in` | directional | Decision→Decision | asserted |
+| `belongs_to_domain` | directional | Decision→domain | asserted |
+| `belongs_to_area` | directional | Decision→area | asserted |
+| `in_set` | directional | (open — no `TypePairs`) | asserted |
 
 `contradicts` is the vehicle for a Decision-to-Decision Asserted-provenance condition — it
 has no `ReverseLabel`, since "contradicts" reads the same statement from either endpoint,
@@ -4349,6 +4352,14 @@ showing what grounds it changes. `TypePairs` is scoped to Decision→Decision on
 narrow-by-default precedent as `addresses`. Who asserts either edge, and when, is left to
 the same `assert_relation` convention already used for every other kind here — no new core
 machinery.
+
+`belongs_to_domain`/`belongs_to_area` (A338, D71/D72) connect a Decision to its Domain/Area —
+per-instance dynamic content types, not compiled into core, hence the lowercase target type
+name (`domain`/`area`) unlike every other kind above's PascalCase compiled-type targets. No
+Domain/Area content types ship with core itself; an instance defines them via
+`define_content_type` and asserts these edges against its own items. `in_set` (D71) is
+deliberately unrestricted — Set's whole point is membership spanning types core cannot
+enumerate ahead of time, so it carries no `TypePairs` at all, unlike every other kind here.
 
 ### `Signal` structured fields (A296)
 
