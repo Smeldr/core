@@ -23,6 +23,22 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.91.2] — 2026-09-20
+
+### Fixed
+
+`App.RegisterFlow`'s per-transition upsert used `ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`, so a transition's `RequiredRole`/`RequiredOperation`/`RequiredReason`/`Strict` was silently frozen at whatever it was on first insert — a re-registration with a changed value never took effect. Live incident: A309 (v1.87.0) changed `orchDecisionFlow()`'s four Decision governance gates from `RequiredRole: "admin"` to `RequiredOperation: "approve"`, but every pre-existing database kept the stale `"admin"` value, silently forbidding every actor — including real admins — from ratifying or superseding a Decision for six days.
+
+Fix: the transition upsert now matches the flow-level upsert's own established shape (`ON CONFLICT ... DO UPDATE SET required_role = EXCLUDED.required_role, required_reason = EXCLUDED.required_reason, strict = EXCLUDED.strict`) — applied globally, not scoped to the five compiled orchestration flows, matching `RegisterFlow`'s own already-documented "idempotent, safe to re-run" contract. No backfill needed: `RegisterOrchestrationTypes` already re-registers all five flows on every boot, so a normal redeploy self-heals.
+
+This was a known, previously-flagged limitation (`docs/ARCHITECTURE.md`'s A234 entry, 2026-08-07) that had not yet been actioned.
+
+1 new regression test. No exported symbol changed. Coverage: 96.2%.
+
+Decisions: A337
+
+---
+
 ## [1.91.1] — 2026-09-19
 
 ### Added

@@ -254,7 +254,7 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 			roleArg = t.RequiredOperation
 		}
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_transitions(id, flow_id, from_state, to_state, required_role, required_reason, strict) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (flow_id, from_state, to_state) DO NOTHING`,
+			`INSERT INTO smeldr_transitions(id, flow_id, from_state, to_state, required_role, required_reason, strict) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (flow_id, from_state, to_state) DO UPDATE SET required_role = EXCLUDED.required_role, required_reason = EXCLUDED.required_reason, strict = EXCLUDED.strict`,
 			NewID(), flowID, t.From, t.To, roleArg, t.RequiredReason, t.Strict,
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: upsert transition %s→%s: %w", flow.Name, t.From, t.To, err)

@@ -223,6 +223,87 @@ func TestRegisterFlow_rename_updatesInPlace(t *testing.T) {
 	}
 }
 
+// TestRegisterFlow_transitionRoleUpdatedInPlace is the direct regression pin
+// for the A309 incident: a transition's RequiredRole/RequiredReason/Strict
+// must be updated in place on re-registration, not frozen at the first
+// INSERT. Before this fix, this exact shape — RegisterFlow called twice for
+// the same flow/transition with a changed RequiredOperation — is precisely
+// what silently broke Decision ratification live for six days: the stored
+// required_role stayed "admin" after orchDecisionFlow() switched to
+// RequiredOperation "approve", because ON CONFLICT DO NOTHING discarded the
+// new value on every subsequent boot.
+func TestRegisterFlow_transitionRoleUpdatedInPlace(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+
+	original := StateFlow{
+		Name:     "role-update-flow",
+		TypeName: "RoleUpdateTestType",
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "done", IsTerminal: true},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "done", RequiredOperation: "admin"},
+		},
+	}
+	if err := app.RegisterFlow(original); err != nil {
+		t.Fatalf("RegisterFlow (original): %v", err)
+	}
+
+	updated := StateFlow{
+		Name:     "role-update-flow",
+		TypeName: "RoleUpdateTestType", // same type — the re-registration shape
+		States: []State{
+			{Name: "draft", IsInitial: true},
+			{Name: "done", IsTerminal: true},
+		},
+		Transitions: []Transition{
+			{From: "draft", To: "done", RequiredOperation: "approve", RequiredReason: true, Strict: true},
+		},
+	}
+	if err := app.RegisterFlow(updated); err != nil {
+		t.Fatalf("RegisterFlow (updated): %v", err)
+	}
+
+	flowID, found, err := resolveFlowID(ctx, db, "RoleUpdateTestType")
+	if err != nil || !found {
+		t.Fatalf("resolveFlowID: found=%v err=%v", found, err)
+	}
+
+	var transCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_transitions WHERE flow_id = $1`, flowID,
+	).Scan(&transCount); err != nil {
+		t.Fatalf("count transitions: %v", err)
+	}
+	if transCount != 1 {
+		t.Fatalf("transition count after re-registration = %d, want 1 (no duplicate row)", transCount)
+	}
+
+	var role *string
+	var requiredReason, strict bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT required_role, required_reason, strict FROM smeldr_transitions WHERE flow_id = $1 AND from_state = 'draft' AND to_state = 'done'`,
+		flowID,
+	).Scan(&role, &requiredReason, &strict); err != nil {
+		t.Fatalf("select transition: %v", err)
+	}
+	if role == nil || *role != "approve" {
+		t.Errorf("required_role after re-registration = %v, want %q (must update in place, not stay frozen at first INSERT)", role, "approve")
+	}
+	if !requiredReason {
+		t.Errorf("required_reason after re-registration = %v, want true", requiredReason)
+	}
+	if !strict {
+		t.Errorf("strict after re-registration = %v, want true", strict)
+	}
+}
+
 func TestRegisterFlow_unknownStateError(t *testing.T) {
 	db := newSQLiteDB(t)
 	ctx := context.Background()

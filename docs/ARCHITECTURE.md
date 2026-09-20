@@ -440,7 +440,13 @@ smeldr.dev/
 │                     resolveFlowID's own unordered query sometimes picked over the correct
 │                     one). description now also updates on re-registration (previously
 │                     frozen after first insert) — a deliberate, flagged behavioural
-│                     upgrade, not incidental. New migrateDuplicateStateFlowRows
+│                     upgrade, not incidental. The per-transition upsert (ON CONFLICT
+│                     (flow_id, from_state, to_state)) now also DO UPDATEs
+│                     required_role/required_reason/strict on re-registration, matching
+│                     the flow-level upsert above — previously DO NOTHING, which silently
+│                     froze a transition's role/reason/strict gate at whatever it was on
+│                     first insert (A234's own named limitation; fixed as the A309 incident
+│                     follow-up). New migrateDuplicateStateFlowRows
 │                     (unexported, migrate.go), called from migrateStateFlows before the
 │                     new unique index is created — self-heals any pre-existing duplicate
 │                     type_name row (this or any other affected install) by keeping the
