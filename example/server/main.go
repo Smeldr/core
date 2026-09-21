@@ -45,6 +45,10 @@
 //	                      ENABLE_RELATIONS; App.SweepStructural on a cron schedule,
 //	                      recorded via SweepRunStore)
 //	STRUCTURAL_SWEEP_SCHEDULE  5-field cron expression for the sweep (default: "0 * * * *", hourly)
+//	ENABLE_EVAL_QUEUE_DRAIN  wire a scheduled smeldr_eval_queue drain (requires
+//	                      ENABLE_ORCHESTRATION; App.DrainEvalQueue on a cron
+//	                      schedule, recorded via SweepRunStore, T211/A258)
+//	EVAL_QUEUE_DRAIN_SCHEDULE  5-field cron expression for the drain (default: "*/5 * * * *")
 //	ENABLE_CONTEXT_PACKET wire GET /packet/{type}/{slug} (Editor role required; requires
 //	                      ENABLE_RELATIONS and ENABLE_ORCHESTRATION, T159)
 //	ENABLE_REACHABILITY   wire GET /reachability/{type}/{id} (Author role required; requires
@@ -102,6 +106,8 @@ type ServerConfig struct {
 	EnableEventStream       bool
 	EnableStructuralSweep   bool
 	StructuralSweepSchedule string
+	EnableEvalQueueDrain    bool
+	EvalQueueDrainSchedule  string
 	EnableContextPacket     bool
 	EnableReachability      bool
 	EnableProvenance        bool
@@ -150,6 +156,8 @@ func parseConfig() ServerConfig {
 		EnableEventStream:       os.Getenv("ENABLE_EVENT_STREAM") != "",
 		EnableStructuralSweep:   os.Getenv("ENABLE_STRUCTURAL_SWEEP") != "",
 		StructuralSweepSchedule: envOr("STRUCTURAL_SWEEP_SCHEDULE", "0 * * * *"),
+		EnableEvalQueueDrain:    os.Getenv("ENABLE_EVAL_QUEUE_DRAIN") != "",
+		EvalQueueDrainSchedule:  envOr("EVAL_QUEUE_DRAIN_SCHEDULE", "*/5 * * * *"),
 		EnableContextPacket:     os.Getenv("ENABLE_CONTEXT_PACKET") != "",
 		EnableReachability:      os.Getenv("ENABLE_REACHABILITY") != "",
 		EnableProvenance:        os.Getenv("ENABLE_PROVENANCE") != "",
@@ -404,6 +412,51 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 		sweep.Start()
 		stopFuncs = append(stopFuncs, sweep.Stop)
+	}
+
+	if cfg.EnableEvalQueueDrain {
+		if !cfg.EnableOrchestration {
+			return ServerResult{}, fmt.Errorf("ENABLE_EVAL_QUEUE_DRAIN requires ENABLE_ORCHESTRATION")
+		}
+		runStore := smeldr.NewSweepRunStore(db)
+		if err := smeldr.CreateSweepRunTable(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create sweep run table: %w", err)
+		}
+		schedule := cfg.EvalQueueDrainSchedule
+		if schedule == "" {
+			schedule = "*/5 * * * *"
+		}
+		// Wrapping closure records each run via SweepRunStore, same pattern as
+		// SweepStructural's own sweepFn above — agent.NewEvalQueueScheduler has
+		// no hook for this, so agent.NewSweepScheduler is called directly
+		// instead (agent.NewEvalQueueScheduler stays unused here; it exists in
+		// smeldr.dev/agent for a caller with no run-recording need).
+		drainFn := func(ctx context.Context) (int, int, int, error) {
+			walked, triggered, skipped, drainErr := app.DrainEvalQueue(ctx)
+			errStr := ""
+			if drainErr != nil {
+				errStr = drainErr.Error()
+			}
+			_ = runStore.Append(ctx, smeldr.SweepRunRecord{
+				ID:        smeldr.NewID(),
+				Detector:  "eval-queue",
+				RanAt:     time.Now().UTC(),
+				Interval:  schedule,
+				Walked:    walked,
+				Flagged:   triggered,
+				Skipped:   skipped,
+				Err:       errStr,
+				ActorKind: "job",
+				ActorID:   "drain-eval-queue",
+			})
+			return walked, triggered, skipped, drainErr
+		}
+		drain, err := agent.NewSweepScheduler(schedule, "UTC", drainFn)
+		if err != nil {
+			return ServerResult{}, fmt.Errorf("eval queue drain scheduler: %w", err)
+		}
+		drain.Start()
+		stopFuncs = append(stopFuncs, drain.Stop)
 	}
 
 	// ENABLE_AGENTS must register before mcp.New so AgentJob appears in MCP tools.

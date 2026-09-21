@@ -600,4 +600,53 @@ func TestServerToggles(t *testing.T) {
 			rows.Close()
 		}
 	})
+
+	t.Run("off/noEvalQueueDrain", func(t *testing.T) {
+		cfg := baseConfig()
+		// EnableEvalQueueDrain deliberately left false.
+		ts := buildTestServer(t, cfg)
+
+		var name string
+		err := ts.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='smeldr_sweep_runs'`).Scan(&name)
+		if err != sql.ErrNoRows {
+			t.Errorf("smeldr_sweep_runs table exists (err=%v), want no such table when ENABLE_EVAL_QUEUE_DRAIN=false", err)
+		}
+	})
+
+	t.Run("on/evalQueueDrainRequiresOrchestration", func(t *testing.T) {
+		// Config validation must fail loudly, not silently no-op.
+		cfg := baseConfig()
+		cfg.EnableEvalQueueDrain = true
+		cfg.EnableOrchestration = false
+
+		db, err := sql.Open("sqlite", ":memory:")
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		defer db.Close()
+		db.SetMaxOpenConns(1)
+
+		_, err = buildApp(cfg, db)
+		if err == nil {
+			t.Fatal("buildApp: want error when ENABLE_EVAL_QUEUE_DRAIN=true without ENABLE_ORCHESTRATION")
+		}
+	})
+
+	t.Run("on/evalQueueDrain", func(t *testing.T) {
+		cfg := baseConfig()
+		cfg.EnableOrchestration = true
+		cfg.EnableEvalQueueDrain = true
+		ts := buildTestServer(t, cfg)
+
+		var name string
+		if err := ts.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='smeldr_sweep_runs'`).Scan(&name); err != nil {
+			t.Errorf("smeldr_sweep_runs table: %v, want it created when ENABLE_EVAL_QUEUE_DRAIN=true", err)
+		}
+		rows, err := ts.db.Query(`SELECT actor_kind, actor_id FROM smeldr_sweep_runs LIMIT 0`)
+		if err != nil {
+			t.Errorf("smeldr_sweep_runs table: actor_kind/actor_id columns missing: %v", err)
+		} else {
+			rows.Close()
+		}
+	})
 }
