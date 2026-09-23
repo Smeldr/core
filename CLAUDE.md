@@ -961,7 +961,7 @@ internal planning history. `Milestone_BACKLOG_TEMPLATE.md` is never removed.
 
 # Smeldr Agent Protocol
 
-<!-- common-template-version: 2026-09-23f -->
+<!-- common-template-version: 2026-09-23g -->
 <!-- source: smeldr/architect/AGENT_PROTOCOL.md (canonical) -->
 
 **This file is the canonical source D77 calls `Template-Smeldr-Common-Agent.md`.** Not
@@ -1040,9 +1040,8 @@ Every role's own `CLAUDE.md` owns its full session-start reading order — which
 in what sequence, is a per-role concern, not something this shared document dictates.
 The one constant across every role: **arm your event-stream `Monitor` (see "The live
 event stream" below) before querying or reading anything else**, then check what's
-actually waiting for you — `backlog` Tasks at `priority=0` in your own band (migrated
-roles, see "The live instance" below) or `NEXT.md` plus any pending `Signal` (brand-
-expert, the one role still on file-based dispatch).
+actually waiting for you — `backlog` Tasks at `priority=0` in your own band (see "The
+live instance" below) plus any pending `Signal`.
 
 **Context files.** Only brand-expert has one (`smeldr/brand/context/brand-expert.md`).
 The other four roles' own context files were retired under D66 (2026-09-07/2026-09-15) —
@@ -1059,11 +1058,13 @@ if it is not in your task's scope.
 ## The live instance — the D50 Task protocol
 
 `process.smeldr.dev` runs Smeldr and holds this project's own `Decision`, `Task`, `Goal`
-and `Signal` records. All five roles now coordinate through it rather than a per-repo
-`NEXT.md`/signal-file pair. **Exception: brand-expert's Task-based dispatch never
-migrated** — brand's work doesn't fit the Task shape (no backlog, no priority). Only
-brand's discussion-layer notifications moved to the live `Signal` type; `NEXT.md` in
-`smeldr/brand` stays brand's real dispatch channel.
+and `Signal` records. All six roles now coordinate through it rather than a per-repo
+`NEXT.md`/signal-file pair — brand-expert was the last to migrate (2026-09-23,
+`smeldr/brand@9d9365f`), `NEXT.md` in `smeldr/brand` is deleted. Brand-expert's own
+lightweight content-approval cycle (see "Every task that ships code or a durable
+artifact follows this sequence" below) is unaffected by this — that exception was
+always about the review cycle for ordinary content work, never about how dispatch
+itself arrives.
 
 **Operating rules, migrated roles:**
 
@@ -1304,16 +1305,6 @@ it is in the record. A conclusion becomes real the way it always has —
 
 ---
 
-## Why NEXT.md and the plan file are separate (brand-expert)
-
-`NEXT.md` is the task **payload** — written once by architect, unchanged on disk for the
-task's lifetime, deleted by brand-expert at commit time. The plan file is the **evolving
-discussion** — plan, open questions, architect's answers, also deleted at commit time.
-Checking whether `NEXT.md` exists is itself the "a task has arrived" signal, at zero
-coordination cost — no separate signal needed for that.
-
----
-
 ## Plan → approval → implementation → commit
 
 Every task that ships code or a durable artifact follows this sequence.
@@ -1361,16 +1352,15 @@ This is a signal-driven (or Task-state-driven) protocol, not a chat-approval pro
 
 ## Signal protocol (brand-expert, discussion mode only)
 
-The four ship-code roles (core, site, cloud, devops) use Task-state transitions
-exclusively — no signal files, no `Signal` records for dispatch. Brand-expert is
-different: `NEXT.md` in `smeldr/brand` is still the real dispatch channel (brand's work
-doesn't fit the Task shape — no backlog, no priority), but the discussion-mode
-conversation layer runs on the real `Signal` content type (`create_signal`/
-`list_signals`/`transition_item`, state flow `pending → read → acknowledged/expired`),
-not a flat file. `signal_type` values: `turn-posted`, `synthesis-proposed`,
-`synthesis-agreed`, `session-closing`. `sender`/`receiver`: `architect`/`brand`.
-Discussion content itself lives in `smeldr/common/reviews/<slug>/discussion.md`
-(append-only) — the `Signal` is only the doorbell.
+All six roles use Task-state transitions for ordinary dispatch — no signal files, no
+`Signal` records needed for that. Brand-expert additionally runs a discussion-mode
+layer on top, for design-review conversations specifically (not dispatch): the real
+`Signal` content type (`create_signal`/`list_signals`/`transition_item`, state flow
+`pending → read → acknowledged/expired`), not a flat file. `signal_type` values:
+`turn-posted`, `synthesis-proposed`, `synthesis-agreed`, `session-closing`.
+`sender`/`receiver`: `architect`/`brand`. Discussion content itself lives in
+`smeldr/common/reviews/<slug>/discussion.md` (append-only) — the `Signal` is only the
+doorbell.
 
 Arm `GET /_events/stream` the same way every other role does (see above), filtered
 client-side for `signal.created` events where `receiver` is `brand`.
