@@ -270,8 +270,8 @@ func (r *DynamicTypeRepo) setStatus(ctx context.Context, id string, status Statu
 		publishedAt = now
 	}
 	_, err = r.db.ExecContext(ctx,
-		"UPDATE smeldr_dynamic_content SET status = $1, published_at = $2, updated_at = $3 WHERE id = $4 AND type_name = $5",
-		string(status), publishedAt, now, id, r.typeName)
+		"UPDATE smeldr_dynamic_content SET status = $1, published_at = $2, updated_at = $3, last_actor = $4 WHERE id = $5 AND type_name = $6",
+		string(status), publishedAt, now, actorID, id, r.typeName)
 	if err != nil {
 		return err
 	}
@@ -299,8 +299,8 @@ func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, schedu
 	}
 	now := time.Now().UTC()
 	_, err = r.db.ExecContext(ctx,
-		"UPDATE smeldr_dynamic_content SET status = $1, scheduled_at = $2, updated_at = $3 WHERE id = $4 AND type_name = $5",
-		string(Scheduled), scheduledAt, now, id, r.typeName)
+		"UPDATE smeldr_dynamic_content SET status = $1, scheduled_at = $2, updated_at = $3, last_actor = $4 WHERE id = $5 AND type_name = $6",
+		string(Scheduled), scheduledAt, now, actorID, id, r.typeName)
 	if err != nil {
 		return err
 	}

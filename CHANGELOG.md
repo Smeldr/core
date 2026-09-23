@@ -23,6 +23,22 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.95.0] — 2026-09-23
+
+### Added
+
+`LastActor string` (D78) added to `Signal`, `Task`, `Decision`, `Amendment`, `Goal`, `Run` (`orchestration.go`) and to `DynamicNode` (`blocks.go`) — persists the actor ID `App.TransitionItemWithReason` and `DynamicTypeRepo.setStatus`/`ScheduleContent` already extract from the caller's context for the authorization check, previously discarded before the UPDATE. Backed by a new `last_actor` column on the six orchestration tables and `smeldr_dynamic_content`; `EnsureLastActorColumns(ctx, DB) error` migrates a pre-existing database, wired into `example/server/main.go`'s boot path in this same commit.
+
+`TransitionItemWithReason`'s own UPDATE — generic across any compiled type's table — fails open to the original two-column form when the target table lacks `last_actor` (a third-party module table this framework does not control), rather than erroring. `DrainEvalQueue`'s automated transitions record `last_actor="drain-eval-queue"`, reusing the identity its own `recordProvenance` call already uses for this mechanism.
+
+Exposed via `get_task`/`list_tasks`/`get_decision`/etc. and `get_content`/`list_content` automatically — `Module[T].MCPGet`/`MCPList` return the fetched struct directly, no `smeldr/mcp` change needed.
+
+12 new tests. No exported symbol removed. Coverage: 96.2%.
+
+Decisions: D78 (implements), Amendment A347
+
+---
+
 ## [1.94.0] — 2026-09-20
 
 ### Added

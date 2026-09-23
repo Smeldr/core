@@ -974,11 +974,26 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 	}
 
 	now := time.Now().UTC()
+	// D78: persist the actor alongside status/updated_at. table is resolved
+	// generically above and may be a third-party module's own table that
+	// predates the last_actor column (Finding 4, plan 01a0ce3a) — attempt
+	// the three-column form first and fail open to the original two-column
+	// UPDATE when the column doesn't exist, rather than special-casing by
+	// type. Tables this framework owns (the six orchestration tables,
+	// smeldr_dynamic_content) always have the column from this commit on.
 	if _, err := db.ExecContext(ctx,
-		"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
-		toState, now, id,
+		"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2, last_actor = $3 WHERE id = $4",
+		toState, now, actorID, id,
 	); err != nil {
-		return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
+		if !isNoSuchColumn(err, "last_actor") {
+			return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
+		}
+		if _, err := db.ExecContext(ctx,
+			"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
+			toState, now, id,
+		); err != nil {
+			return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
+		}
 	}
 	fireAsyncTriggers(ctx, db, typeName, currentStatus, toState, id)
 	// decision-governance-model.md §4: Check is an enforced precondition on
@@ -1022,12 +1037,22 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 			ToState:   toState,
 			Reason:    reason,
 		})
-	return map[string]any{"id": id, "slug": realSlug, "status": toState}, nil
+	return map[string]any{"id": id, "slug": realSlug, "status": toState, "last_actor": actorID}, nil
 }
 
 // isNoSuchTable reports whether err is a SQLite "no such table" error.
 func isNoSuchTable(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "no such table")
+}
+
+// isNoSuchColumn reports whether err is a SQLite "no such column: <column>"
+// error for the given column — used by [App.TransitionItemWithReason]'s own
+// last_actor write (D78) to fail open on a compiled type's table that
+// predates the column (a third-party module table this framework does not
+// control), the same graceful-degradation shape [isNoSuchTable] already
+// provides for a missing table.
+func isNoSuchColumn(err error, column string) bool {
+	return err != nil && strings.Contains(err.Error(), "no such column: "+column)
 }
 
 // drainAuthorizationGate reports whether typeName's fromState→toState
@@ -1276,10 +1301,21 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 			}
 			skipped++
 		default:
+			// D78: same identity DrainEvalQueue already records for this
+			// exact transition in its own recordProvenance call below
+			// ("drain-eval-queue") — one name for "the periodic sweep did
+			// this," not a second one. Fails open to the two-column form on
+			// a table that predates last_actor, same as TransitionItemWithReason.
 			_, updateErr := db.ExecContext(ctx,
-				"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
-				r.toState, now, r.itemID,
+				"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2, last_actor = $3 WHERE id = $4",
+				r.toState, now, "drain-eval-queue", r.itemID,
 			)
+			if isNoSuchColumn(updateErr, "last_actor") {
+				_, updateErr = db.ExecContext(ctx,
+					"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
+					r.toState, now, r.itemID,
+				)
+			}
 			if updateErr != nil {
 				slog.WarnContext(ctx, "smeldr: DrainEvalQueue: UPDATE failed",
 					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "error", updateErr)

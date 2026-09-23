@@ -736,6 +736,31 @@ func TestDynamicTypeRepo_ScheduleContent_WithSmeldrContext(t *testing.T) {
 	}
 }
 
+// TestDynamicTypeRepo_ScheduleContent_PersistsLastActor proves ScheduleContent
+// persists the actorID it already extracts for the authorization check (D78,
+// plan 01a0ce3a) — the same actorID TestDynamicTypeRepo_ScheduleContent_
+// WithSmeldrContext exercises above, now also verified in the stored row.
+func TestDynamicTypeRepo_ScheduleContent_PersistsLastActor(t *testing.T) {
+	db := openDynDB(t)
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Sourdough"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	ctx := smeldr.NewTestContext(smeldr.User{ID: "editor-3", Roles: []smeldr.Role{smeldr.Editor}})
+	if err := repo.ScheduleContent(ctx, node.ID, time.Now().UTC().Add(48*time.Hour)); err != nil {
+		t.Fatalf("ScheduleContent with TestContext: %v", err)
+	}
+	updated, err := repo.GetByID(context.Background(), node.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updated.LastActor != "editor-3" {
+		t.Errorf("LastActor = %q, want \"editor-3\"", updated.LastActor)
+	}
+}
+
 // TestDynamicTypeRepo_SetStatus_WithSmeldrContext covers the actorID branch
 // inside SetStatus when ctx implements smeldr.Context.
 func TestDynamicTypeRepo_SetStatus_WithSmeldrContext(t *testing.T) {
@@ -756,6 +781,55 @@ func TestDynamicTypeRepo_SetStatus_WithSmeldrContext(t *testing.T) {
 	}
 	if updated.Status != smeldr.Published {
 		t.Errorf("status = %q, want published", updated.Status)
+	}
+}
+
+// TestDynamicTypeRepo_SetStatus_PersistsLastActor proves setStatus persists
+// the actorID it already extracts for the authorization check (D78, plan
+// 01a0ce3a) — the same actorID TestDynamicTypeRepo_SetStatus_WithSmeldrContext
+// exercises above, now also verified in the stored row.
+func TestDynamicTypeRepo_SetStatus_PersistsLastActor(t *testing.T) {
+	db := openDynDB(t)
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Baguette"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	ctx := smeldr.NewTestContext(smeldr.User{ID: "editor-4", Roles: []smeldr.Role{smeldr.Editor}})
+	if err := repo.SetStatus(ctx, node.ID, smeldr.Published); err != nil {
+		t.Fatalf("SetStatus with TestContext: %v", err)
+	}
+	updated, err := repo.GetByID(context.Background(), node.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updated.LastActor != "editor-4" {
+		t.Errorf("LastActor = %q, want \"editor-4\"", updated.LastActor)
+	}
+}
+
+// TestDynamicTypeRepo_SetStatus_LastActorEmptyForPlainContext proves a plain
+// context.Context (no smeldr.Context) persists last_actor="" rather than
+// erroring — Q4 of plan 01a0ce3a, mirrored from TransitionItemWithReason's
+// own equivalent test.
+func TestDynamicTypeRepo_SetStatus_LastActorEmptyForPlainContext(t *testing.T) {
+	db := openDynDB(t)
+	schema := recipeSchema()
+	repo := smeldr.NewDynamicTypeRepo(db, schema.TypeName, schema)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Rye"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	if err := repo.SetStatus(context.Background(), node.ID, smeldr.Published); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+	updated, err := repo.GetByID(context.Background(), node.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updated.LastActor != "" {
+		t.Errorf("LastActor = %q, want empty", updated.LastActor)
 	}
 }
 

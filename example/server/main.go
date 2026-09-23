@@ -269,6 +269,16 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		smeldr.RegisterOrchestrationTypes(app, db)
 	}
 
+	// D78: additive migration for last_actor across whichever of the seven
+	// tables this deployment's own config actually created above (the six
+	// orchestration tables and/or smeldr_dynamic_content) — called
+	// unconditionally since EnsureLastActorColumns itself skips a table
+	// this deployment didn't enable, rather than requiring this call site
+	// to know which cfg flags were set.
+	if err := smeldr.EnsureLastActorColumns(context.Background(), db); err != nil {
+		return ServerResult{}, fmt.Errorf("ensure last actor columns: %w", err)
+	}
+
 	if cfg.EnableAuthority {
 		// Never wired into this boot path until now (found live 2026-09-14,
 		// planning 01a076e6/authority-check-precondition) — smeldr_rules/

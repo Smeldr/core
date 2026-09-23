@@ -1381,6 +1381,89 @@ func TestCreateOrchestrationTables_AmendmentBodyColumn(t *testing.T) {
 	}
 }
 
+// — EnsureLastActorColumns (D78) ————————————————————————————————————————————
+
+func TestEnsureLastActorColumns_AddsColumns(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	// Old schema, pre-D78: smeldr_tasks without last_actor. Only one
+	// orchestration table is created here deliberately — proves the loop
+	// covers each table present, not just the first.
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_tasks (
+			id          TEXT PRIMARY KEY,
+			slug        TEXT NOT NULL UNIQUE,
+			status      TEXT NOT NULL DEFAULT 'draft',
+			created_at  TIMESTAMPTZ NOT NULL,
+			updated_at  TIMESTAMPTZ NOT NULL,
+			task_id     TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		t.Fatalf("create old-schema table: %v", err)
+	}
+
+	if err := EnsureLastActorColumns(ctx, db); err != nil {
+		t.Fatalf("EnsureLastActorColumns: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_tasks
+			(id, slug, created_at, updated_at, last_actor)
+		VALUES ('1', 'test', '2025-01-01', '2025-01-01', 'tok_abc')`,
+	); err != nil {
+		t.Errorf("last_actor column should exist after migration, got: %v", err)
+	}
+}
+
+func TestEnsureLastActorColumns_Idempotent(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	if err := CreateBlockTables(db); err != nil {
+		t.Fatalf("CreateBlockTables: %v", err)
+	}
+	if err := EnsureLastActorColumns(ctx, db); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := EnsureLastActorColumns(ctx, db); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+}
+
+// TestEnsureLastActorColumns_SkipsMissingTable proves the migration does not
+// error when a given deployment's own config never created one of the seven
+// tables (e.g. EnableOrchestration but not EnableBlocks) — deliberately
+// different from EnsureAmendmentBodyColumn/EnsureStateLockedColumn's own
+// "AlterFails" case: those each target one table their own boot path
+// unconditionally creates first, so a missing table is a real error there.
+// EnsureLastActorColumns spans seven independently-flagged tables, so a
+// missing one is an expected, non-error case (see its own doc comment).
+func TestEnsureLastActorColumns_SkipsMissingTable(t *testing.T) {
+	db := newSQLiteDB(t)
+	// No tables created at all.
+	if err := EnsureLastActorColumns(context.Background(), db); err != nil {
+		t.Errorf("expected nil when no target table exists, got: %v", err)
+	}
+}
+
+// TestCreateOrchestrationTables_LastActorColumn verifies all six
+// orchestration tables accept a last_actor insert on a fresh install (D78).
+func TestCreateOrchestrationTables_LastActorColumn(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_tasks
+			(id, slug, created_at, updated_at, last_actor)
+		VALUES ('1', 'test', '2025-01-01', '2025-01-01', 'tok_abc')`,
+	); err != nil {
+		t.Errorf("last_actor column should exist on fresh install, got: %v", err)
+	}
+}
+
 func TestEnsureDecisionTitleColumn_AddsColumns(t *testing.T) {
 	db := newSQLiteDB(t)
 	ctx := context.Background()

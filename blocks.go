@@ -32,6 +32,12 @@ type DynamicNode struct {
 	// Fields holds the type-specific data as raw JSON. Its shape is governed
 	// by the block type's schema, not by this struct.
 	Fields json.RawMessage `db:"fields" json:"fields"`
+
+	// LastActor is the actor ID of whoever performed this item's most
+	// recent state transition (D78). Empty when no caller identity was
+	// available (a system-initiated transition) or the item has never
+	// been transitioned since this column was added.
+	LastActor string `db:"last_actor" json:"last_actor,omitempty"`
 }
 
 // Head implements [Content] for the future MCP and admin surface. DynamicNode
@@ -83,7 +89,8 @@ CREATE TABLE IF NOT EXISTS smeldr_dynamic_content (
 	updated_at   TIMESTAMPTZ NOT NULL,
 	scheduled_at TIMESTAMPTZ,
 	published_at TIMESTAMPTZ,
-	rev          INTEGER NOT NULL DEFAULT 0
+	rev          INTEGER NOT NULL DEFAULT 0,
+	last_actor   TEXT NOT NULL DEFAULT ''
 )`); err != nil {
 		return err
 	}

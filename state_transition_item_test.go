@@ -747,3 +747,90 @@ func TestDrainEvalQueue_AuthorizationRequiredSignal_FiresWebhook(t *testing.T) {
 		t.Errorf("Event = %q, want %q", jobs[0].Event, "signal.created")
 	}
 }
+
+// — last_actor (D78) ————————————————————————————————————————————————————————
+
+// TestApp_TransitionItemWithReason_PersistsLastActor proves the actorID
+// TransitionItemWithReason already extracts for the authorization check
+// (state.go:955-959) is now also persisted, not discarded — the core gap
+// 01a0ce3a exists to close.
+func TestApp_TransitionItemWithReason_PersistsLastActor(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	insertSignal(t, db, "sig-la-1", "sig-la-1-slug", "pending")
+
+	ctx := NewTestContext(User{ID: "tok-core-2"})
+	result, err := app.TransitionItemWithReason(ctx, "Signal", "sig-la-1-slug", "read", "")
+	if err != nil {
+		t.Fatalf("TransitionItemWithReason: %v", err)
+	}
+	if result["last_actor"] != "tok-core-2" {
+		t.Errorf("result last_actor = %v, want \"tok-core-2\"", result["last_actor"])
+	}
+
+	var lastActor string
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT last_actor FROM smeldr_signals WHERE id = ?", "sig-la-1",
+	).Scan(&lastActor); err != nil {
+		t.Fatalf("verify last_actor: %v", err)
+	}
+	if lastActor != "tok-core-2" {
+		t.Errorf("stored last_actor = %q, want %q", lastActor, "tok-core-2")
+	}
+}
+
+// TestApp_TransitionItemWithReason_LastActorEmptyForSystemCaller proves a
+// plain context.Context (no smeldr.Context, e.g. a background job or test
+// code) persists last_actor="" rather than erroring — Q4 of plan 01a0ce3a:
+// an absent actor is a fact to record, not a rejection reason.
+func TestApp_TransitionItemWithReason_LastActorEmptyForSystemCaller(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	insertSignal(t, db, "sig-la-2", "sig-la-2-slug", "pending")
+
+	result, err := app.TransitionItemWithReason(context.Background(), "Signal", "sig-la-2-slug", "read", "")
+	if err != nil {
+		t.Fatalf("TransitionItemWithReason: %v", err)
+	}
+	if result["last_actor"] != "" {
+		t.Errorf("result last_actor = %v, want \"\"", result["last_actor"])
+	}
+
+	var lastActor string
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT last_actor FROM smeldr_signals WHERE id = ?", "sig-la-2",
+	).Scan(&lastActor); err != nil {
+		t.Fatalf("verify last_actor: %v", err)
+	}
+	if lastActor != "" {
+		t.Errorf("stored last_actor = %q, want empty", lastActor)
+	}
+}
+
+// TestApp_TransitionItem_FailsOpenWhenLastActorColumnMissing proves Finding 4
+// of plan 01a0ce3a: a compiled type's table that predates the last_actor
+// column (reason_gated_types, registered fresh by registerReasonGatedFlow
+// with no last_actor column at all — standing in for a third-party module
+// table this framework doesn't control) still transitions successfully,
+// with the two-column UPDATE fallback silently taking over.
+func TestApp_TransitionItem_FailsOpenWhenLastActorColumnMissing(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	registerReasonGatedFlow(t, app, db)
+
+	ctx := NewTestContext(User{ID: "tok-core-3"})
+	result, err := app.TransitionItemWithReason(ctx, "ReasonGatedType", "rg-1-slug", "published", "because the plan says so")
+	if err != nil {
+		t.Fatalf("TransitionItemWithReason: %v", err)
+	}
+	if result["status"] != "published" {
+		t.Errorf("result status = %v, want \"published\"", result["status"])
+	}
+
+	var status string
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT status FROM reason_gated_types WHERE id = ?", "rg-1",
+	).Scan(&status); err != nil {
+		t.Fatalf("verify status: %v", err)
+	}
+	if status != "published" {
+		t.Errorf("stored status = %q, want %q", status, "published")
+	}
+}

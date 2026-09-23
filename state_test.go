@@ -3838,6 +3838,53 @@ func TestDrainEvalQueue_happy(t *testing.T) {
 	}
 }
 
+// TestDrainEvalQueue_SetsLastActorToDrainEvalQueue proves an automated
+// transition (no caller identity exists in this loop) records last_actor
+// as the literal "drain-eval-queue" (Q3, plan 01a0ce3a) — reusing the same
+// identity this function already writes into its own recordProvenance call
+// for this exact transition, rather than inventing a second name for the
+// same mechanism.
+func TestDrainEvalQueue_SetsLastActorToDrainEvalQueue(t *testing.T) {
+	db := newMigratedDB(t)
+	ctx := context.Background()
+	// Unlike TestDrainEvalQueue_happy's ad-hoc eval_items table, this one
+	// includes last_actor so the primary UPDATE persists it directly,
+	// rather than exercising the isNoSuchColumn fallback.
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE eval_items (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_actor TEXT NOT NULL DEFAULT '')`,
+	); err != nil {
+		t.Fatalf("create eval_items: %v", err)
+	}
+	itemID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO eval_items (id, status) VALUES (?, 'ratified')`, itemID,
+	); err != nil {
+		t.Fatalf("insert item: %v", err)
+	}
+	qID := NewID()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at) VALUES (?, 'EvalItem', ?, 'pending-re-evaluation', datetime('now', '-1 second'))`,
+		qID, itemID,
+	); err != nil {
+		t.Fatalf("insert queue: %v", err)
+	}
+
+	app := &App{cfg: Config{DB: db}}
+	if _, triggered, _, err := app.DrainEvalQueue(ctx); err != nil {
+		t.Fatalf("DrainEvalQueue: %v", err)
+	} else if triggered != 1 {
+		t.Fatalf("expected 1 triggered, got %d", triggered)
+	}
+
+	var lastActor string
+	if err := db.QueryRowContext(ctx, `SELECT last_actor FROM eval_items WHERE id = ?`, itemID).Scan(&lastActor); err != nil {
+		t.Fatalf("SELECT last_actor: %v", err)
+	}
+	if lastActor != "drain-eval-queue" {
+		t.Errorf("last_actor = %q, want \"drain-eval-queue\"", lastActor)
+	}
+}
+
 // failingProvenanceStore.Append always fails — used to prove
 // recordProvenance's fail-open discipline reaches DrainEvalQueue too
 // (T211): the queue row is still deleted, triggered still increments.
@@ -4279,8 +4326,13 @@ func (d *evalQueueScanFailDB) QueryContext(ctx context.Context, q string, args .
 func gatedItemFixture(t *testing.T, db *sql.DB, table, itemID, status string) {
 	t.Helper()
 	ctx := context.Background()
+	// last_actor included (D78) so the fail-open UPDATE in DrainEvalQueue's
+	// default branch succeeds on its first attempt here, same as any real
+	// orchestration table — tests that count exact ExecContext calls
+	// (TestDrainEvalQueue_DeleteFails) depend on this being a single call,
+	// not the isNoSuchColumn fallback's two.
 	if _, err := db.ExecContext(ctx,
-		`CREATE TABLE IF NOT EXISTS `+table+` (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+		`CREATE TABLE IF NOT EXISTS `+table+` (id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_actor TEXT NOT NULL DEFAULT '')`,
 	); err != nil {
 		t.Fatalf("create %s: %v", table, err)
 	}

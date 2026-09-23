@@ -29,6 +29,11 @@ type Goal struct {
 	Size string `json:"size"`
 	// Description is the full goal specification in Markdown.
 	Description string `json:"description" smeldr_format:"markdown"`
+	// LastActor is the actor ID of whoever performed this item's most
+	// recent state transition (D78). Empty when no caller identity was
+	// available (a system-initiated transition) or the item has never
+	// been transitioned since this column was added.
+	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
 // GoalContext is the assembled context for a single [Goal] — the goal itself
@@ -183,6 +188,11 @@ type Signal struct {
 	// avoid a second, live-system-breaking change beyond what D64 itself
 	// scoped.
 	RequiredOperation string `json:"required_role" db:"required_role"`
+	// LastActor is the actor ID of whoever performed this item's most
+	// recent state transition (D78). Empty when no caller identity was
+	// available (a system-initiated transition) or the item has never
+	// been transitioned since this column was added.
+	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
 // Task is an orchestration content type representing a work item moving
@@ -205,6 +215,12 @@ type Task struct {
 	Description string `json:"description" smeldr_format:"markdown"`
 	// NoteRef is an optional cross-reference to a design note or decision.
 	NoteRef string `json:"note_ref" db:"note_ref"`
+	// LastActor is the actor ID of whoever performed this item's most
+	// recent state transition (D78) — e.g. which scaled core instance
+	// (core, core-2, core-3) actually claimed this Task. Empty when no
+	// caller identity was available (a system-initiated transition) or
+	// the item has never been transitioned since this column was added.
+	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
 // Decision is an orchestration content type representing a ratified
@@ -259,6 +275,11 @@ type Decision struct {
 	// when TensionRuleID is set (a future Check-precondition task, §4) —
 	// this field only records the declaration.
 	TensionReason string `json:"tension_reason" db:"tension_reason" smeldr_format:"markdown"`
+	// LastActor is the actor ID of whoever performed this item's most
+	// recent state transition (D78). Empty when no caller identity was
+	// available (a system-initiated transition) or the item has never
+	// been transitioned since this column was added.
+	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
 // decisionScopeRoles maps a Decision's Scope field to the role name required
@@ -382,6 +403,11 @@ type Amendment struct {
 	// primary for new work): Summary alone cannot carry what
 	// decisions/recent.md's own Amendment bodies held before the freeze.
 	Body string `json:"body" smeldr_format:"markdown"`
+	// LastActor is the actor ID of whoever performed this item's most
+	// recent state transition (D78). Empty when no caller identity was
+	// available (a system-initiated transition) or the item has never
+	// been transitioned since this column was added.
+	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
 // RunOutcome is the terminal state of a completed or abandoned [Run] (D38
@@ -476,6 +502,12 @@ type Run struct {
 	// zero-means-unset convention [Decision].NextEvalAt uses for a nullable
 	// timestamp on a non-pointer field.
 	AcknowledgedAt time.Time `json:"acknowledged_at" db:"acknowledged_at"`
+	// LastActor is the actor ID of whoever performed this item's most
+	// recent state transition (D78). Run registers no StateFlow (see this
+	// type's own doc comment), so this is set only if a future caller
+	// ever routes a Run through TransitionItem/TransitionItemWithReason
+	// rather than its own lease-based lifecycle. Empty otherwise.
+	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
 // CreateOrchestrationTables creates the six orchestration content tables
@@ -503,7 +535,8 @@ func CreateOrchestrationTables(db DB) error {
 			subject_id    TEXT NOT NULL DEFAULT '',
 			from_state    TEXT NOT NULL DEFAULT '',
 			to_state      TEXT NOT NULL DEFAULT '',
-			required_role TEXT NOT NULL DEFAULT ''
+			required_role TEXT NOT NULL DEFAULT '',
+			last_actor    TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_tasks (
 			id          TEXT PRIMARY KEY,
@@ -519,7 +552,8 @@ func CreateOrchestrationTables(db DB) error {
 			band        TEXT NOT NULL DEFAULT '',
 			size        TEXT NOT NULL DEFAULT '',
 			description TEXT NOT NULL DEFAULT '',
-			note_ref    TEXT NOT NULL DEFAULT ''
+			note_ref    TEXT NOT NULL DEFAULT '',
+			last_actor  TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_decisions (
 			id              TEXT PRIMARY KEY,
@@ -539,7 +573,8 @@ func CreateOrchestrationTables(db DB) error {
 			rule_type       TEXT NOT NULL DEFAULT '',
 			reversibility   TEXT NOT NULL DEFAULT '',
 			tension_rule_id TEXT NOT NULL DEFAULT '',
-			tension_reason  TEXT NOT NULL DEFAULT ''
+			tension_reason  TEXT NOT NULL DEFAULT '',
+			last_actor      TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_amendments (
 			id               TEXT PRIMARY KEY,
@@ -556,7 +591,8 @@ func CreateOrchestrationTables(db DB) error {
 			commit_hash      TEXT NOT NULL DEFAULT '',
 			pilot            TEXT NOT NULL DEFAULT '',
 			summary          TEXT NOT NULL DEFAULT '',
-			body             TEXT NOT NULL DEFAULT ''
+			body             TEXT NOT NULL DEFAULT '',
+			last_actor       TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_goals (
 			id           TEXT PRIMARY KEY,
@@ -571,7 +607,8 @@ func CreateOrchestrationTables(db DB) error {
 			priority     INTEGER NOT NULL DEFAULT 0,
 			band         TEXT NOT NULL DEFAULT '',
 			size         TEXT NOT NULL DEFAULT '',
-			description  TEXT NOT NULL DEFAULT ''
+			description  TEXT NOT NULL DEFAULT '',
+			last_actor   TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_runs (
 			id              TEXT PRIMARY KEY,
@@ -591,7 +628,8 @@ func CreateOrchestrationTables(db DB) error {
 			lease_holder    TEXT NOT NULL DEFAULT '',
 			outcome         TEXT NOT NULL DEFAULT '',
 			cleanup         TEXT NOT NULL DEFAULT '',
-			acknowledged_at TIMESTAMPTZ
+			acknowledged_at TIMESTAMPTZ,
+			last_actor      TEXT NOT NULL DEFAULT ''
 		)`,
 	}
 	for _, stmt := range stmts {
@@ -690,6 +728,46 @@ func EnsureDecisionTitleColumn(ctx context.Context, db DB) error {
 func EnsureAmendmentBodyColumn(ctx context.Context, db DB) error {
 	if err := EnsureColumn(ctx, db, "smeldr_amendments", "body", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("smeldr: EnsureAmendmentBodyColumn: %w", err)
+	}
+	return nil
+}
+
+// EnsureLastActorColumns adds the last_actor column (D78) to the six
+// orchestration tables (smeldr_signals, smeldr_tasks, smeldr_decisions,
+// smeldr_amendments, smeldr_goals, smeldr_runs) and to smeldr_dynamic_content
+// on pre-existing SQLite databases that predate this column. Fresh installs
+// already have the column via [CreateOrchestrationTables]/[CreateBlockTables]'s
+// own CREATE TABLE statements; this only upgrades a database created before
+// this Amendment. Idempotent — safe to call on every boot, unconditionally:
+// unlike every other Ensure* function in this file, the seven tables it
+// covers are each gated by their own independent feature flag
+// (EnableOrchestration, EnableBlocks/EnableDynamicContent) at the caller's
+// own boot path, so a table this function targets may legitimately not
+// exist yet on a given deployment — each is skipped (not an error) rather
+// than requiring the caller to know which tables its own config enabled.
+// One column across seven tables, unlike [EnsureOrchestrationSignalColumns]'s
+// several columns on one table — same [EnsureColumn] primitive, looped the
+// other way, with an added existence probe [EnsureColumn] itself doesn't need
+// (every other caller of it targets a table its own boot path just created).
+func EnsureLastActorColumns(ctx context.Context, db DB) error {
+	tables := []string{
+		"smeldr_signals", "smeldr_tasks", "smeldr_decisions",
+		"smeldr_amendments", "smeldr_goals", "smeldr_runs",
+		"smeldr_dynamic_content",
+	}
+	for _, table := range tables {
+		var exists int
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$1`, table,
+		).Scan(&exists); err != nil {
+			return nil // non-SQLite — assume schema is current, matches EnsureColumn's own fail-open
+		}
+		if exists == 0 {
+			continue // table not created by this deployment's own config — nothing to migrate
+		}
+		if err := EnsureColumn(ctx, db, table, "last_actor", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("smeldr: EnsureLastActorColumns: %w", err)
+		}
 	}
 	return nil
 }

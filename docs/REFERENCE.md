@@ -3695,8 +3695,9 @@ are addressed by ID — `Slug` may be empty.
 ```go
 type DynamicNode struct {
     smeldr.Node
-    TypeName string          `db:"type_name" json:"type_name"`
-    Fields   json.RawMessage `db:"fields"     json:"fields"`
+    TypeName  string          `db:"type_name" json:"type_name"`
+    Fields    json.RawMessage `db:"fields"     json:"fields"`
+    LastActor string          `db:"last_actor" json:"last_actor,omitempty"`
 }
 
 repo := smeldr.NewDynamicContentRepo(db) // *SQLRepo[*DynamicNode]
@@ -3711,6 +3712,10 @@ repo.Save(ctx, node)
 `NewDynamicContentRepo(db)` returns a `SQLRepo` bound to `smeldr_dynamic_content`
 (the table name cannot be derived from the type), with the full
 `FindByID` / `FindBySlug` / `FindAll` / `Save` / `Delete` / `Seq` surface.
+
+`LastActor` (D78, Amendment A347) is the actor ID of whoever performed this
+item's most recent state transition — set by `SetStatus`/`SetStatusWithReason`/
+`ScheduleContent`, empty when no caller identity was available.
 
 `Save` writes the post-save `Rev`, `UpdatedAt`, and `CreatedAt` back onto `node`
 itself once the write succeeds (v1.64.1+) — no re-read needed to see the current
@@ -4129,6 +4134,16 @@ optional `reason` argument.
 ```go
 result, err := app.TransitionItemWithReason(ctx, "Decision", "some-decision-slug", "superseded", "no longer accurate")
 ```
+
+**`last_actor` (D78, Amendment A347):** the returned map's `"last_actor"` key
+echoes the caller's own actor ID (empty for a caller with no `smeldr.Context`
+identity). The same value is persisted onto the transitioned row's own
+`last_actor` column, exposed automatically via `get_task`/`list_tasks`/
+`get_decision`/etc. — on the six orchestration types (`Signal`/`Task`/
+`Decision`/`Amendment`/`Goal`/`Run`) and `DynamicNode`. A compiled type's own
+table that predates this column (any table outside these seven — a
+third-party module) keeps working unchanged: the write fails open to the
+original two-column UPDATE rather than erroring.
 
 ### `ConflictPolicy` (A186)
 
