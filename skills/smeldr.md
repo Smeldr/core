@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.89.3 · smeldr.dev/mcp v1.36.1 · smeldr.dev/oauth v0.4.1 · smeldr.dev/media v1.6.2 · smeldr.dev/cli v0.17.1 · smeldr.dev/social v0.10.3 · smeldr.dev/agent v0.9.1 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.89.3 · smeldr.dev/mcp v1.39.0 · smeldr.dev/oauth v0.4.1 · smeldr.dev/media v1.6.2 · smeldr.dev/cli v0.17.1 · smeldr.dev/social v0.10.3 · smeldr.dev/agent v0.9.1 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -426,8 +426,9 @@ Tools are named from the type in lower_snake_case.
 | `transition_item` | Editor | Move a dynamic content item to a new state; validates against registered flow (ErrConflict → -32001). Optional `reason` param (v1.31.0+) — required if the target transition has `RequiredReason` set, else returns -32602. Gate: `App.Config().DB != nil`. |
 | `get_valid_transitions` | Author | List legal target states for the item's current state; falls back to default flow. Gate: `App.Config().DB != nil`. |
 | `list_items_by_state` | Author | List items of a dynamic content type in a given state. Gate: `App.Config().DB != nil`. |
-| `create_signal` | Author | Insert a signal into smeldr_signals with status=pending. Args: `sender`, `receiver`, `signal_type` (required); `task_ref`, `message`, `sequence` (optional). Requires `CreateOrchestrationTables`. Gate: `App.Config().DB != nil`. |
-| `list_signals` | Author | List signals by receiver+state (default "pending"). Fail-open on missing table. Gate: `App.Config().DB != nil`. |
+| `create_signal` | Author | Insert a signal into smeldr_signals with status=pending. Args: `sender`, `signal_type` (required); `receiver` (optional — omit or leave empty for a broadcast to every subscriber), `task_ref`, `message`, `sequence` (optional). Requires `CreateOrchestrationTables`. Gate: `App.Config().DB != nil`. smeldr.dev/mcp v1.38.0. |
+| `list_signals` | Author | List signals filtered by `receiver`/`sender` (at least one required) and `state` (default "pending"). `limit` returns the most recent N (`created_at` descending); omitted or explicit 0 defaults to 50, capped at 500 (01a0d76a/v1.39.0 — previously omitted meant unbounded, oldest-first, a real disclosed behaviour change). Fail-open on missing table. Gate: `App.Config().DB != nil`. smeldr.dev/mcp v1.39.0. |
+| `list_tasks` / `list_amendments` / `list_decisions` / `list_goals` / `list_runs` | Editor/Admin | Generic admin-list family (`mcpAdminReadToolDefs`) for the six orchestration types. `status` filters by lifecycle status. `limit`/`offset` (01a0d76a/v1.39.0) page the result — omitted or explicit 0 defaults to 50, capped at 500; previously unbounded (confirmed live: `list_tasks` returned 338 items, ~710KB). Response gains `"total"` (the real unfiltered count) alongside `"items"`. |
 | `get_goal_context` | Author | Retrieve a goal and all linked items (Decisions, Tasks, Goals) via the relation graph. Args: `goal_id` (required, e.g. `"T114"`). Returns `{goal, linked_decisions, linked_tasks, linked_goals}`. -32001 on not found. Gate: `App.Config().DB != nil`. smeldr.dev/mcp v1.27.0. |
 | `list_type_tools` | Author | Discovery meta-tool. Takes `type_name` (snake_case, e.g. `"essay"`) and returns all MCP tool names registered for that compiled content type. Use when you find one verb for a type and need to enumerate its siblings. Always present in tools/list. smeldr.dev/mcp v1.29.0. |
 | `get_sweep_run` | Author | Reads the most recent structural sweep run recorded for a detector, via `smeldr.SweepRunStore.Last`. Args: `detector` (required, e.g. `"structural"`). Returns `{detector, wired: false}` when no run has been recorded, or `{detector, wired: true, ran_at, walked, flagged}` when one exists. Gate: `App.Config().DB != nil`. smeldr.dev/mcp v1.33.0, requires smeldr.dev/core v1.78.2+. |
