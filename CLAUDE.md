@@ -961,7 +961,7 @@ internal planning history. `Milestone_BACKLOG_TEMPLATE.md` is never removed.
 
 # Smeldr Agent Protocol
 
-<!-- common-template-version: 2026-09-23g -->
+<!-- common-template-version: 2026-09-25d -->
 <!-- source: smeldr/architect/AGENT_PROTOCOL.md (canonical) -->
 
 **This file is the canonical source D77 calls `Template-Smeldr-Common-Agent.md`.** Not
@@ -1019,16 +1019,22 @@ retired, superseded 2026-09-21).
 
 ## Local repo paths
 
+**`$SMELDR_ROOT`** is the parent directory holding every sibling Smeldr repo — resolve it
+per environment, never hardcode it. Locally (PowerShell) it is `$env:SMELDR_ROOT`,
+defaulting to `C:\Users\peter\Documents\Code\Smeldr` when unset. In a Claude Code cloud
+session it is `$SMELDR_ROOT` (bash), set by the cloud environment's own setup script —
+see `design/cloud-session-setup-v1.md`.
+
 ```
-smeldr/architect:  C:\Users\peter\Documents\Code\Smeldr\architect   (read context/plans/signals here)
-smeldr/core:       C:\Users\peter\Documents\Code\Smeldr\core
-smeldr/site-dev:   C:\Users\peter\Documents\Code\Smeldr\site-dev
-smeldr/brand:      C:\Users\peter\Documents\Code\Smeldr\brand
-smeldr/cloud:      C:\Users\peter\Documents\Code\Smeldr\cloud       (private)
-smeldr/mail:       C:\Users\peter\Documents\Code\Smeldr\mail        (private)
-smeldr/ops:        C:\Users\peter\Documents\Code\Smeldr\ops         (private)
-smeldr/cloud-ops:  C:\Users\peter\Documents\Code\Smeldr\cloud-ops   (private)
-smeldr/common:     C:\Users\peter\Documents\Code\Smeldr\common      (shared drafts, skill file)
+smeldr/architect:  $SMELDR_ROOT\architect   (read context/plans/signals here)
+smeldr/core:       $SMELDR_ROOT\core
+smeldr/site-dev:   $SMELDR_ROOT\site-dev
+smeldr/brand:      $SMELDR_ROOT\brand
+smeldr/cloud:      $SMELDR_ROOT\cloud       (private)
+smeldr/mail:       $SMELDR_ROOT\mail        (private)
+smeldr/ops:        $SMELDR_ROOT\ops         (private)
+smeldr/cloud-ops:  $SMELDR_ROOT\cloud-ops   (private)
+smeldr/common:     $SMELDR_ROOT\common      (shared drafts, skill file)
 smeldr/cli, mcp, media, oauth, agent, social: standalone repos, own go.mod, not subdirs of core
 ```
 
@@ -1085,43 +1091,47 @@ itself arrives.
    | (creation, `backlog`) | architect | the dispatch — the description is the task |
    | `backlog → active` | implementer | claimed |
    | `active → waiting-plan` | implementer | planning |
-   | `waiting-plan → plan-reviewing` | implementer | plan is ready in `plans/` |
-   | `plan-reviewing → implementing` | architect | plan approved (answers in the plan file) |
+   | `waiting-plan → plan-reviewing` | implementer | `task_plan` record is `submitted` |
+   | `plan-reviewing → implementing` | architect | plan approved (answers in the `task_plan` record's `body`) |
    | `implementing → commit-reviewing` | implementer | commit ready on the branch |
-   | `commit-reviewing → done` | implementer, after architect's written approval in the plan file | merged, pushed, closed out |
+   | `commit-reviewing → done` | implementer, after architect's written approval in the `task_plan` record | merged, pushed, closed out |
 
    Iteration happens **inside** a phase (plan-feedback and commit-feedback rounds in the
-   plan file, Task stays in its reviewing state), not by moving backward.
-   `blocked`/`deferred` exist for real stops. **Claim (`backlog → active`) before doing
-   any plan-grounding work** — reading the Task's own description and `NoteRef` to decide
-   whether to claim it is fine before claiming; reading source code, tracing
-   implementations, or anything else that is actually plan-building happens after.
-3. **The plan file is the durable record; a `Signal` is only the fast-path wake-up, never
-   the only path to the answer.** Several transitions produce no event on the live
-   stream at all — a plan-file edit with no `transition_item` call, and (independent of
-   that) `task.transitioned` itself is band-routed, so the direction an implementer
-   reads (`plan-reviewing → implementing`) reaches them but the direction architect
-   needs to read (`waiting-plan → plan-reviewing`, `implementing → commit-reviewing`,
-   `commit-reviewing → done`) does not reach architect. Fix, both directions:
-   - **Architect**, writing plan/commit feedback into the plan file without an
+   `task_plan` record's `body`, Task stays in its reviewing state), not by moving
+   backward. `blocked`/`deferred` exist for real stops. **Claim (`backlog → active`)
+   before doing any plan-grounding work** — reading the Task's own description and
+   `NoteRef` to decide whether to claim it is fine before claiming; reading source code,
+   tracing implementations, or anything else that is actually plan-building happens after.
+3. **The `task_plan` record is the durable record; a `Signal` is only the fast-path
+   wake-up, never the only path to the answer (D81, 2026-09-25 — same discipline as the
+   old file mechanism, only the storage moved).** A plain `update_content` edit to a
+   `task_plan`'s `body` fires no `transition_item`-driven event by itself, and
+   (independent of that) `task.transitioned` itself is band-routed, so the direction an
+   implementer reads (`plan-reviewing → implementing`) reaches them but the direction
+   architect needs to read (`waiting-plan → plan-reviewing`, `implementing →
+   commit-reviewing`, `commit-reviewing → done`) does not reach architect. Fix, both
+   directions:
+   - **Architect**, editing a `task_plan`'s `body` with plan/commit feedback without an
      accompanying `transition_item` call, sends a `Signal` in the same action:
      `plan-feedback` (stays `plan-reviewing`), `commit-approved` (stays
      `commit-reviewing`), or `commit-feedback` (stays `commit-reviewing`).
-   - **Implementer**, correcting a plan file in response to feedback without a
+   - **Implementer**, correcting a `task_plan`'s `body` in response to feedback without a
      `transition_item` call, sends `plan-resubmitted` (`receiver: "architect"`) in the
      same action; and sends a `Signal` (`receiver: "architect"`, reusing `plan-ready`/
      `commit-ready`/`task-closed` as `signal_type`) at every transition architect has no
      other way to see: `waiting-plan → plan-reviewing`, `implementing →
      commit-reviewing`, `commit-reviewing → done`.
    - **Regardless of whether a `Signal` arrives**: at session start or resume, for any
-     Task you hold in `plan-reviewing` or `commit-reviewing`, re-read the plan file's
-     current tail unconditionally — do not treat "I'm nominally waiting on the other
-     side" as a reason to skip the check. Secondary check: `list_signals` for your own
-     band's `pending` entries.
-   - (Full incident history behind this rule: `<details>` below.)
-4. **Approvals live in the plan file** (architect answers there, always) — a
-   transition's `Reason` cites the approval, it never *is* the authority. Peter's own
-   yeses (releases, deploys, ratifications) stay in chat, as ever.
+     Task you hold in `plan-reviewing` or `commit-reviewing`, re-read the linked
+     `task_plan` record's current `body` unconditionally (`get_content(type_name:
+     "task_plan", slug: <the record's slug>)`) — do not treat "I'm nominally waiting on
+     the other side" as a reason to skip the check. Secondary check: `list_signals` for
+     your own band's `pending` entries.
+   - (Full incident history behind this rule, from the old file-based mechanism: `<details>`
+     below — the same discipline, D81 changed only where the content lives.)
+4. **Approvals live in the `task_plan` record's `body`** (architect answers there,
+   always) — a transition's `Reason` cites the approval, it never *is* the authority.
+   Peter's own yeses (releases, deploys, ratifications) stay in chat, as ever.
 5. Before proceeding past `active`, verify the Task's `depends_on` edges point at `done`
    tasks. If one does not, stop and say so — never guess.
 6. **Relations are part of the record**: architect asserts `derives_from` (Task → Goal)
@@ -1136,8 +1146,14 @@ commit-reviewed change to a repo. Everything else — a design discussion, a
 decision-in-progress, an investigation, anything that concludes without that cycle — is a
 `Goal` (`open → in-progress → done`/`parked`, no plan-review, no commit-review).
 
-**Plans stay files.** A plan is written to `smeldr/architect/plans/` and reviewed there.
-That is not a temporary arrangement.
+**Plans are a live content type, not files (D81, 2026-09-25).** A plan is a `task_plan`
+record on `process.smeldr.dev` — fields `task_ref`, `band`, `body`, `revision`; flow
+`draft → submitted → changes_requested → submitted → approved`/`abandoned`, gated on the
+`manage` operation throughout. Not a file in `smeldr/architect/plans/` — that mechanism
+only ever worked because every role's session ran on Peter's own machine, all sharing one
+disk, and was unreachable from a cloud session (found live during architect's first cloud
+pilot, the incident D81 records). See "Plan → approval → implementation → commit" below
+for the actual sequence.
 
 **Delivery is pull plus doorbell, for now.** A session never sees the instance on its
 own: you find work at session start, and a stalled hand-off is nudged with a `Signal`
@@ -1152,7 +1168,7 @@ architect-sends and implementer-sends), and in at least one case the ping's own 
 never reached the receiving agent even though it rendered in Peter's own UI. Retested and
 reconfirmed 2026-08-15 in the reverse direction (devops → architect), same hang. **No
 role sends a desktop ping to any other role, in either direction, full stop** — report
-status in the plan file, Task state, or a `Signal` instead, every time.
+status in the `task_plan` record, Task state, or a `Signal` instead, every time.
 
 **Rule 1 (`priority=0` as a closed gate) was corrected three times before it was stated
 correctly.** First version (2026-08-18) said "keep going" means the `priority=0` batch,
@@ -1197,23 +1213,69 @@ one line per real event (`task.created`, `task.transitioned`, `signal.created`),
 zero-third-party-dependency principle — see `design/self-hosting-the-architect-process.md`
 §7).
 
-**Arm it once per session, not per wait**, as a persistent `Monitor` running
-`scripts/watch-events.ps1` — this project always runs on Windows, so `.ps1` is the
-primary and only form each role should reach for; `scripts/watch-events.sh` still exists
-in the repo but is retired to reference/fallback only. First time only: copy the template
-from `smeldr/architect/scripts/watch-events.ps1`, point `PROJECT_KEY` at your own
-project's absolute path (forward-slash form), sanity-check with an unfiltered copy, then
-commit the real one. Every session after that: just start it and leave it running.
+**Arm it once per session, not per wait**, using the harness's own dedicated `Monitor`
+tool (one push notification per output line) — not a plain backgrounded shell command via
+Bash/PowerShell `run_in_background`, which only notifies once, at completion, not per
+line, and is the wrong mechanism here even though it also "runs something in the
+background." Found live 2026-09-25: this line's own backticks around `Monitor` read as
+emphasis, not as a pointer to a specific named tool distinct from any generic background
+process — at least two sessions independently defaulted to `run_in_background` and only
+switched after noticing they weren't getting live per-event notifications. Run it against
+`scripts/watch-events.ps1` — a local session on Peter's own machine always runs on
+Windows, so `.ps1` is the primary and only form a local session should reach for;
+`scripts/watch-events.sh` still exists in the repo but is retired to reference/fallback
+only. First time only: copy the template from `smeldr/architect/scripts/watch-events.ps1`,
+point `PROJECT_KEY` at your own project's absolute path (forward-slash form), sanity-check
+with an unfiltered copy, then commit the real one. Every session after that: just start it
+and leave it running.
+
+**Cloud sessions — use `scripts/watch-events-cloud.sh`, added 2026-09-25 (`2026-09-25b`)
+during architect's own first live cloud pilot, not `watch-events.ps1`/`.sh`.** Neither
+local script ports: `.ps1` needs `powershell.exe`, unavailable on the cloud environment's
+Linux VM; `watch-events.sh` *looks* portable (it is bash) but its own `fetch_token()`
+shells out to `powershell.exe` and hardcodes a Windows path (`C:\Users\peter\.claude.json`)
+to read the bearer token — neither exists in a cloud session either. `watch-events-cloud.sh`
+takes a different approach and reads no token at all: a cloud environment's own "API
+credentials" mechanism already injects the `Authorization` header for outbound requests to
+a matching domain at the network layer. **Confirmed live 2026-09-25** (architect's first
+real cloud session): a bare `curl` against the stream URL, no token supplied anywhere,
+returned `200 OK`/`application/x-ndjson` — the injection covers plain Bash-tool `curl`
+traffic, not just MCP/WebFetch, at least in this environment.
+
+**Still verify in every *new* cloud environment before arming as a persistent Monitor** —
+environment/credential config can differ per environment, so a pass in one doesn't
+guarantee another. Run the short manual check `watch-events-cloud.sh`'s own header comment
+documents (`curl -sN --max-time 10` against the stream URL, confirm real NDJSON
+events/heartbeats, not a 401 or error body — a streamed 401 can still look like "it
+connected" if you only check curl's exit code). If it authenticates, arm it as the Monitor
+exactly like a local session arms `watch-events.ps1`. **If it 401s, do not fall back to
+polling as a silent default — Peter has explicitly ruled that out.** Stop and escalate:
+report the failure and wait for a real fix (that environment's own credential setup) rather
+than degrading the session's own coordination model on your own judgment.
+
+**Known, unsolved limitation, not to be treated as fixed by this script:** a cloud
+container can be reclaimed after inactivity independent of whether a Monitor is sitting on
+a held-open connection waiting for an event — this is the interaction-model mismatch
+`design/cloud-session-setup-v1.md` §4 already names and does not resolve. No script can fix
+this; it is a real difference between a cloud session's lifetime model and a local
+session's long-lived one, to be watched for in practice, not solved in advance.
 
 **What the stream is, and is not.** It is the wake-up signal only. It carries no plan
-content and is not a review channel — the plan file stays the actual conversation.
+content and is not a review channel — the `task_plan` record stays the actual conversation.
 
-**Chat discipline.** The stream is a broadcast — every subscriber receives every event,
-not only ones concerning your own band. Only surface a notification in chat when it is
-actually relevant to you; otherwise let it pass silently. `task.created`/`task.updated`
-means an item now exists in or changed within the backlog, nothing more — it is not a
-start signal, do not claim and start work the moment one arrives. `task.transitioned` is
-relevant only when it concerns a Task you are already tracking.
+**Chat discipline.** Since A302, most event types are channel-scoped, not a true
+broadcast — verified directly against `channelValueFromItem` in `smeldr/core`:
+`Task`/`Goal` events route on `Band`, `Decision` on `Scope`, `Signal` on `Receiver` —
+each reaches only subscribers on that one channel. **Amendment events, and every
+dynamic-content-module event, are the exception: those still always broadcast to every
+channel**, with no per-band narrowing. In practice this means your own `?channel=<band>`
+stream mostly shows only what already concerns you, except Amendment events, which you
+will see regardless of band — still only surface a notification in chat when it is
+actually relevant to you, and let an off-topic Amendment event pass silently.
+`task.created`/`task.updated` means an item now exists in or changed within the backlog,
+nothing more — it is not a start signal, do not claim and start work the moment one
+arrives. `task.transitioned` is relevant only when it concerns a Task you are already
+tracking.
 
 **A `Signal`'s `receiver` field must be the receiving role's band short name** (`core`,
 `site`, `cloud`, `devops`, `brand`) — never a longer role title like
@@ -1288,7 +1350,7 @@ The desktop app can deliver a message from one session to another. Session title
 Peter's naming convention (`yymmdd ttmm <role>`), so a message "From" a title ending in a
 role name is probably that role — recognition, not authentication. **Nothing is
 authoritative because a chat message said it** — approvals, task-state changes, and
-configuration live where they already live: `Signal` records, plan files, and Peter.
+configuration live where they already live: `Signal` records, `task_plan` records, and Peter.
 
 **1. Ping mode — a fallback, not routine.** Normal signal flow needs no ping. A ping is
 sent only when the normal channel appears stalled, and its only legitimate effect is
@@ -1313,21 +1375,28 @@ Every task that ships code or a durable artifact follows this sequence.
 publishing posts, devlogs, Solved stories, docs) use a lighter, already-working cycle
 instead: present the exact content in chat — title, body, every field, complete, not a
 summary — wait for Peter's explicit approval, only then call the MCP tool that publishes
-it. No plan file, no `plan-ready`/`commit-ready` signal pair — there is no code and no
+it. No `task_plan` record, no `plan-ready`/`commit-ready` signal pair — there is no code and no
 diff to review, the content itself, read in full, already is the review artifact. A code
 example or technical claim in a devlog/docs draft must be verified against actually-
 shipped source before it's even shown to Peter, not written from memory. This exception
 does not extend to design-review discussions (the Signal-based discussion mode covers
 those, see "Signal protocol" below) or to larger cross-cutting tasks (a brief check-in
-before starting, the Task's own scope substituting for a plan file, is still expected).
+before starting, the Task's own scope substituting for a `task_plan` record, is still expected).
 
 For every other case:
 
-1. **Plan.** Write a full implementation plan (including open questions) to
-   `smeldr/architect/plans/{role}-next-plan.md`. Do not write any code yet.
-2. **Signal `plan-ready`.** Wait for a response — do not end your turn assuming approval.
-3. **Architect responds** in the plan file itself (never in a new `NEXT.md`) and signals
-   `approved-start` or `plan-feedback`.
+1. **Plan.** `create_content(type_name="task_plan", fields={task_ref, band, body,
+   revision: 1})` — the full implementation plan, including open questions, goes in
+   `body` (free-form markdown, same shape as the old file). Do not write any code yet.
+   Leave the record in `draft` while composing; edit freely via `update_content` before
+   submitting.
+2. **`transition_item` the `task_plan` to `submitted`, then signal `plan-ready`** (name
+   the `task_plan`'s `task_ref`/slug in the notes). Wait for a response — do not end your
+   turn assuming approval.
+3. **Architect responds by editing the same `task_plan` record's `body`** via
+   `update_content` (never in a new `NEXT.md`, never a separate record) and either
+   `transition_item`s it to `changes_requested` plus signals `plan-feedback`, or
+   `transition_item`s it to `approved` plus signals `approved-start`.
 4. **Implement**, following your own repo's domain rules. Read-only commands (build, vet,
    test, format, git status/diff/log) run autonomously. Signal `implementing` if
    long-running, `implementation-question` if blocked.
@@ -1337,14 +1406,9 @@ For every other case:
    signals `commit-approved` or `commit-feedback`.
 7. **On `commit-approved`: commit and push immediately.** A feature branch means squash
    to main and push in the same step, unless your own `CLAUDE.md` states otherwise.
-8. **Close out:** delete the plan file, update your context file, commit and push it, and
-   state the deletion explicitly in your close-out — as the `Reason` on your
-   `commit-reviewing → done` transition. It is gitignored, so a missed deletion shows up
-   in neither `git status` nor a diff — stating it explicitly is what makes forgetting
-   visible, since nothing else will. **The plan file is deleted whole, every commit —
-   never partially.** If another Task's plan is still open in the same shared file,
-   extract that Task's plan into its own task-scoped file first
-   (`plans/{role}-{task-slug}-next-plan.md`), before deleting.
+8. **Close out:** no plan-file deletion step — the `task_plan` record stays in `approved`
+   as the historical record, same as every other orchestration type never gets hard-
+   deleted. Ordinary Task close-out (`commit-reviewing → done`) is the whole of this step.
 
 This is a signal-driven (or Task-state-driven) protocol, not a chat-approval protocol.
 
@@ -1383,14 +1447,21 @@ already shipped on architect's own approval.
 Two sessions of the same role can run concurrently in separate git worktrees when the
 architect has explicitly split a task this way.
 
-**Task-scoped signal and plan files**, named for the task, not the role:
-`SIGNAL_CORE_M1.md` / `plans/core-m1-next-plan.md`, etc. The shared defaults stay free
-for whichever session needs them next — check they're actually idle before reusing.
-**Whenever a plan or signal file is task-scoped, name the exact path in a real `Signal`
-to architect in the same round as writing it** — a task-scoped file's path can't be
-guessed the way the shared default can. The plan file is deleted by its own implementer
-at commit time as usual; the task-scoped *signal* file is deleted by the architect once
-the task closes (it's a shared channel neither party's own commit touches).
+**Plans no longer need task-scoping (D81, 2026-09-25).** Each `task_plan` record carries
+its own `task_ref`, so two concurrent same-role sessions each get their own record
+naturally — there is no shared file path to collide on anymore. Query
+`list_items_by_state(type_name: "task_plan", state: ...)` filtered to your own `task_ref`
+if you need to find yours again.
+
+**Task-scoped signal files**, named for the task, not the role: `SIGNAL_CORE_M1.md`, etc.
+The shared defaults stay free for whichever session needs them next — check they're
+actually idle before reusing. **Whenever a signal file is task-scoped, name the exact
+path in a real `Signal` to architect in the same round as writing it** — a task-scoped
+file's path can't be guessed the way the shared default can. The task-scoped signal file
+is deleted by the architect once the task closes (it's a shared channel neither party's
+own commit touches). Note: this predates the D50 migration and may itself be stale for
+the four migrated roles, which no longer use signal files at all — not verified as part
+of D81, flagged here for a separate check.
 
 **The real collision surface is the shared meta-files every task touches by convention**
 (`README.md`, `CHANGELOG.md`, `DECISIONS.md`, `decisions/recent.md`, the session-context
@@ -1491,7 +1562,7 @@ per D66 — recurring mistakes checked against this document and confirmed genui
 elsewhere, not duplicates.
 
 - **Never self-transition `plan-reviewing → implementing` by inferring approval from the
-  content of architect's own plan-file feedback.** Wait for architect's own explicit
+  content of architect's own `task_plan` feedback.** Wait for architect's own explicit
   `transition_item` call, even when the feedback reads like approval.
 - **No size-based exception to plan-before-implement.** Never self-transition straight
   from claiming to implementing because a Task "looks fully pre-scoped." Urgency-sounding
@@ -1569,7 +1640,9 @@ actively swept as dead by `SweepStructural`'s own liveness check.
 
 You may always write to your own repo and your own context file. Beyond that:
 
-- **`smeldr/architect`**: your own plan file and context file only.
+- **`smeldr/architect`**: your own context file only (brand-expert — the other five roles
+  have none, D66). Plans are no longer files here at all (D81) — write your `task_plan`
+  record on `process.smeldr.dev` instead.
 - **Every other agent's repo**: read-only, except a `NEXT.md` an architect was explicitly
   told to write there (architect-only; implementers do not write `NEXT.md` for each other).
 - **`smeldr/common/content/drafts/`**: write to the subfolder your role owns (see your own
