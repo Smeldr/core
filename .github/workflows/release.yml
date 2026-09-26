@@ -30,15 +30,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          for i in $(seq 1 10); do
+          for i in $(seq 1 20); do
             if gh release view ${{ github.ref_name }} --json tagName >/dev/null 2>&1; then
-              echo "Release ${{ github.ref_name }} found."
+              echo "Release ${{ github.ref_name }} found on attempt $i/20."
               exit 0
             fi
-            echo "Release ${{ github.ref_name }} not found yet (attempt $i/10), retrying in 5s..."
+            echo "Release ${{ github.ref_name }} not found yet (attempt $i/20), retrying in 5s..."
             sleep 5
           done
-          echo "::error::Release ${{ github.ref_name }} did not appear within ~50s of the tag push."
+          echo "::error::Release ${{ github.ref_name }} did not appear within ~100s of the tag push."
           exit 1
 
       - name: Attach binary to the release

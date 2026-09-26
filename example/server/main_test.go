@@ -401,7 +401,9 @@ func TestServerToggles(t *testing.T) {
 		cfg := baseConfig()
 		cfg.EnableRedirects = true
 		ts := buildTestServer(t, cfg)
-		token := createToken(t, ts, "author", "author")
+		// create_redirect requires Editor (01a0ca79: tools/list is now filtered
+		// by the caller's own role) - an Author token would no longer see it.
+		token := createToken(t, ts, "editor", "editor")
 		// Redirect management is MCP-only; confirm create_redirect is in tools/list.
 		tools := toolsList(t, ts.URL, token)
 		if !slices.Contains(tools, "create_redirect") {
@@ -413,11 +415,34 @@ func TestServerToggles(t *testing.T) {
 		cfg := baseConfig()
 		cfg.EnablePageMeta = true
 		ts := buildTestServer(t, cfg)
-		token := createToken(t, ts, "author", "author")
+		// set_page_meta requires Admin (01a0ca79: tools/list is now filtered by
+		// the caller's own role) - an Author token would no longer see it.
+		token := createToken(t, ts, "admin", "admin")
 		// Page meta management is MCP-only; confirm set_page_meta is in tools/list.
 		tools := toolsList(t, ts.URL, token)
 		if !slices.Contains(tools, "set_page_meta") {
 			t.Error("set_page_meta missing from tools/list when ENABLE_PAGE_META=true")
+		}
+	})
+
+	t.Run("on/schemaTools", func(t *testing.T) {
+		cfg := baseConfig()
+		cfg.EnableSchemaTools = true
+		ts := buildTestServer(t, cfg)
+		token := createToken(t, ts, "author", "author")
+		tools := toolsList(t, ts.URL, token)
+		for _, want := range []string{"get_content_type_schema", "list_content_type_schemas"} {
+			if !slices.Contains(tools, want) {
+				t.Errorf("%s missing from tools/list when ENABLE_SCHEMA_TOOLS=true", want)
+			}
+		}
+		// Schema discovery alone must not pull in the block-system tool surface
+		// (01a0dc6a's own Task, core-schema-store-not-wired-on-process) -
+		// EnableSchemaTools is deliberately narrower than EnableBlocks.
+		for _, notWant := range []string{"create_node", "update_node", "add_section"} {
+			if slices.Contains(tools, notWant) {
+				t.Errorf("%s unexpectedly present in tools/list with ENABLE_SCHEMA_TOOLS=true (no ENABLE_BLOCKS)", notWant)
+			}
 		}
 	})
 

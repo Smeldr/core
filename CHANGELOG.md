@@ -23,6 +23,21 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.95.1] — 2026-09-26
+
+### Fixed
+
+`Task`'s own state flow (`orchTaskFlow`, `orchestration.go`) had no legal exit from
+`backlog` except to `active` — a Task that turned out unnecessary or needed postponing
+before anyone claimed it had no legitimate terminal state to land in. Added
+`{From: "backlog", To: "deferred"}` and `{From: "backlog", To: "resolved",
+RequiredReason: true}`, mirroring the existing transitions from `active`. Purely
+additive — no existing transition removed or changed — but a real, disclosed
+consumer-visible behaviour change: `transition_item`/`get_valid_transitions` now report
+two transitions they didn't before.
+
+---
+
 ## [1.95.0] — 2026-09-23
 
 ### Added

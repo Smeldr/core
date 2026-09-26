@@ -4,6 +4,14 @@ Durable tooling and framework gotchas — reference facts, not a diary. See
 `CLAUDE.md` for standing process rules; this file is only for things that
 are true about the tools regardless of what task is in flight.
 
+## Standalone-module integration testing before a core push
+
+For a standalone module (mcp, cli, oauth, media, social, agent) that depends on an
+in-flight `smeldr/core` change: set up a local `go.work` pointing at the live feature
+branch and test against it (e.g. `example/server` locally) before squashing, pushing, or
+tagging the module — not after. `go.work` is gitignored, never committed, in every repo
+it's used.
+
 ## CI
 
 `gh run watch --exit-status` returning exit 0 does **not** mean the

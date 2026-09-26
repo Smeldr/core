@@ -96,6 +96,7 @@ type ServerConfig struct {
 	EnableCheck             bool
 	EnableRedirects         bool
 	EnablePageMeta          bool
+	EnableSchemaTools       bool
 	EnableMedia             bool
 	MediaBackend            string
 	EnableSocial            bool
@@ -146,6 +147,7 @@ func parseConfig() ServerConfig {
 		EnableCheck:             os.Getenv("ENABLE_CHECK") != "",
 		EnableRedirects:         os.Getenv("ENABLE_REDIRECTS") != "",
 		EnablePageMeta:          os.Getenv("ENABLE_PAGE_META") != "",
+		EnableSchemaTools:       os.Getenv("ENABLE_SCHEMA_TOOLS") != "",
 		EnableMedia:             os.Getenv("ENABLE_MEDIA") != "",
 		MediaBackend:            envOr("MEDIA_STORE_BACKEND", "local"),
 		EnableSocial:            os.Getenv("ENABLE_SOCIAL") != "",
@@ -236,6 +238,18 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		// ServeDynamicContent also calls CreateBlockTables; this is idempotent.
 		if err := smeldr.CreateBlockTables(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create block tables: %w", err)
+		}
+	}
+
+	// The schema table backs get_content_type_schema/list_content_type_schemas
+	// (mcp.WithSchemaTools, or as a side effect of mcp.WithBlocks below) — needed
+	// by either flag, created once regardless of which one is set. Found live
+	// 2026-09-26: this table was never created at all on this boot path, so
+	// schema discovery would have failed with "no such table" even under the
+	// pre-existing EnableBlocks-only route.
+	if cfg.EnableSchemaTools || cfg.EnableBlocks {
+		if err := smeldr.CreateSchemaTable(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create schema table: %w", err)
 		}
 	}
 
@@ -505,6 +519,13 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 	if cfg.EnableBlocks {
 		mcpOptions = append(mcpOptions, mcp.WithBlocks())
+	} else if cfg.EnableSchemaTools {
+		// WithBlocks already wires the same schema store as one of its own
+		// effects — only reach for the narrower option when blocks aren't
+		// already on, so schema discovery works without also exposing the
+		// full block/node/composition tool surface (01a0dc6a's own Task,
+		// core-schema-store-not-wired-on-process).
+		mcpOptions = append(mcpOptions, mcp.WithSchemaTools(db))
 	}
 	if cfg.EnablePageMeta {
 		mcpOptions = append(mcpOptions, mcp.WithPageMeta(db))

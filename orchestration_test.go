@@ -118,26 +118,29 @@ func TestTaskFlow_definition(t *testing.T) {
 	if len(f.States) != 10 {
 		t.Errorf("state count = %d, want 10", len(f.States))
 	}
-	if len(f.Transitions) != 12 {
-		t.Errorf("transition count = %d, want 12", len(f.Transitions))
+	if len(f.Transitions) != 14 {
+		t.Errorf("transition count = %d, want 14", len(f.Transitions))
 	}
 	if got := initialState(f); got != "backlog" {
 		t.Errorf("initial = %q, want %q", got, "backlog")
 	}
 }
 
-// TestTaskFlow_ResolvedReachableFromThreeStates pins exactly which states may
-// close a Task as "resolved" (D58): active, waiting-plan, plan-reviewing —
-// every state that precedes a real build starting — and confirms
-// implementing/commit-reviewing/blocked deliberately cannot.
-func TestTaskFlow_ResolvedReachableFromThreeStates(t *testing.T) {
+// TestTaskFlow_ResolvedReachableFromFourStates pins exactly which states may
+// close a Task as "resolved" (D58): backlog, active, waiting-plan,
+// plan-reviewing — every state that precedes a real build starting — and
+// confirms implementing/commit-reviewing/blocked deliberately cannot.
+// "backlog" joined this set via 01a0dc73 (2026-09-26): a Task can turn out
+// unnecessary before anyone ever claims it, not only after.
+func TestTaskFlow_ResolvedReachableFromFourStates(t *testing.T) {
 	f := orchTaskFlow()
 	want := map[string]bool{
+		"backlog":        true,
 		"active":         true,
 		"waiting-plan":   true,
 		"plan-reviewing": true,
 	}
-	notWant := []string{"implementing", "commit-reviewing", "blocked", "backlog", "done", "deferred"}
+	notWant := []string{"implementing", "commit-reviewing", "blocked", "done", "deferred"}
 
 	got := map[string]bool{}
 	for _, tr := range f.Transitions {
@@ -156,6 +159,33 @@ func TestTaskFlow_ResolvedReachableFromThreeStates(t *testing.T) {
 	for _, from := range notWant {
 		if got[from] {
 			t.Errorf("unexpected transition %s→resolved", from)
+		}
+	}
+}
+
+// TestTaskFlow_DeferredReachableFromActiveAndBacklog pins exactly which
+// states may close a Task as "deferred": active (the original path) and
+// backlog (01a0dc73, 2026-09-26 — a Task can need postponing before anyone
+// ever claims it, not only after).
+func TestTaskFlow_DeferredReachableFromActiveAndBacklog(t *testing.T) {
+	f := orchTaskFlow()
+	want := map[string]bool{"active": true, "backlog": true}
+	notWant := []string{"waiting-plan", "plan-reviewing", "implementing", "commit-reviewing", "blocked", "done", "resolved"}
+
+	got := map[string]bool{}
+	for _, tr := range f.Transitions {
+		if tr.To == "deferred" {
+			got[tr.From] = true
+		}
+	}
+	for from := range want {
+		if !got[from] {
+			t.Errorf("missing transition %s→deferred", from)
+		}
+	}
+	for _, from := range notWant {
+		if got[from] {
+			t.Errorf("unexpected transition %s→deferred", from)
 		}
 	}
 }

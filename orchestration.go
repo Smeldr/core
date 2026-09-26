@@ -1077,12 +1077,21 @@ func orchSignalFlow() StateFlow {
 // underlying need was met, but not by this Task's own tracked work (e.g. a
 // plan whose own investigation concludes "already done elsewhere, nothing to
 // build" — T238). Reachable from every state that precedes a real build
-// actually starting ("active", "waiting-plan", "plan-reviewing") — not only
-// the state where this was first found, since the same discovery can surface
-// at any of the three. Not reachable from "implementing"/"commit-reviewing"
-// (once a build is in flight, "nothing to build" no longer applies) or
-// "blocked" (a stall, not a conclusion). RequiredReason: true — a transition
-// into "resolved" with no explanation is the same problem one level down.
+// actually starting ("backlog", "active", "waiting-plan", "plan-reviewing")
+// — not only the state where this was first found, since the same
+// discovery can surface at any of the four. Not reachable from
+// "implementing"/"commit-reviewing" (once a build is in flight, "nothing to
+// build" no longer applies) or "blocked" (a stall, not a conclusion).
+// RequiredReason: true — a transition into "resolved" with no explanation
+// is the same problem one level down.
+//
+// "backlog" also reaches "deferred" directly, mirroring "active" →
+// "deferred" — a Task can turn out unnecessary, or need postponing, before
+// anyone ever claims it (01a0dc73; found live 2026-09-26 trying to retire a
+// superseded Task, 01a0d827-3, that nobody had picked up yet — the only
+// workaround available at the time was leaving it in "backlog" with
+// priority dropped and a manual "SUPERSEDED" notice prepended to its own
+// description, not a real close).
 func orchTaskFlow() StateFlow {
 	return StateFlow{
 		Name:     "agent-task",
@@ -1109,9 +1118,11 @@ func orchTaskFlow() StateFlow {
 			{From: "active", To: "blocked"},
 			{From: "blocked", To: "active"},
 			{From: "active", To: "deferred"},
+			{From: "backlog", To: "deferred"},
 			{From: "active", To: "resolved", RequiredReason: true},
 			{From: "waiting-plan", To: "resolved", RequiredReason: true},
 			{From: "plan-reviewing", To: "resolved", RequiredReason: true},
+			{From: "backlog", To: "resolved", RequiredReason: true},
 		},
 	}
 }

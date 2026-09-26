@@ -489,9 +489,18 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       discipline as the `README.md`/`AGENTS.md` items above: `doc.go` is a
       separate, deliberately-authored file with its own audience
       (pkg.go.dev, `go doc`, editor hover-docs) and drifts silently because
-      nothing else in this checklist touches it. See the embedded protocol's
-      own standing rule for the full reasoning; this entry is what makes
-      that rule enforced at commit time, not only read at session start.
+      nothing else in this checklist touches it. Found 2026-09-19: Peter
+      noticed pkg.go.dev's own description of `smeldr/core` was badly stale,
+      traced it to `doc.go` (the package-level godoc comment, not
+      `README.md`) being the file pkg.go.dev renders — and `smeldr/core`'s
+      own `doc.go` described only the base content-lifecycle framework,
+      nothing about the orchestration/governance/ledger capabilities the
+      project's own positioning has shipped and led with since. Checked
+      directly: `mcp`, `cli`, `media`, `social`, `agent`, `oauth` had no
+      `doc.go` at all at the time — worse than stale, never written, so
+      pkg.go.dev had nothing authored to show for any of them. Create one if
+      none exists; this checklist entry is what makes that discipline
+      enforced at commit time, not only read at session start.
 - [ ] If this commit implements an Amendment: the live record exists (`create_amendment`) with `body` fully populated, the number was checked against both the frozen `DECISIONS.md` index and `list_amendments`, and it is transitioned through to `merged`. Verify with `get_amendment`.
 - [ ] **If this commit adds a column to an existing table via an `Ensure*Column`-style
       migration:** the new `Ensure*` function's call site is also added to
