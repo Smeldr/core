@@ -3,7 +3,9 @@ package smeldr
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -152,7 +154,7 @@ func TestMigrateGovernance_DefaultRolesSeed(t *testing.T) {
 	}{
 		{"author", `["create","read","update","publish","archive"]`},
 		{"editor", `["create","read","update","publish","archive","delete","manage"]`},
-		{"admin", `["create","read","update","publish","archive","delete","manage","administer","review","approve","define-type","define-flow","define-relation-kind"]`},
+		{"admin", `["create","read","update","publish","archive","delete","manage","administer","define-type","define-flow","define-relation-kind"]`},
 	}
 	for _, c := range cases {
 		var ops string
@@ -165,6 +167,133 @@ func TestMigrateGovernance_DefaultRolesSeed(t *testing.T) {
 		if ops != c.wantOps {
 			t.Errorf("role %q operations: want %q, got %q", c.name, c.wantOps, ops)
 		}
+	}
+}
+
+// — migrateAdminRoleRemovesReviewApprove (01a0e3f9-2) ————————————————————————
+
+func TestMigrateAdminRoleRemovesReviewApprove_RemovesFromExistingRow(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	// Simulate a pre-fix install: admin's row still carries review/approve,
+	// plus a custom operation an operator may have added, to prove filtering
+	// removes only the two target words and preserves everything else.
+	dirty := `["create","read","update","publish","archive","delete","manage","administer","review","approve","define-type","define-flow","define-relation-kind","custom-op"]`
+	if _, err := db.ExecContext(ctx, `UPDATE smeldr_roles SET operations = $1 WHERE name = 'admin'`, dirty); err != nil {
+		t.Fatalf("seed dirty admin row: %v", err)
+	}
+
+	if err := migrateAdminRoleRemovesReviewApprove(ctx, db); err != nil {
+		t.Fatalf("migrateAdminRoleRemovesReviewApprove: %v", err)
+	}
+
+	var opsJSON string
+	if err := db.QueryRowContext(ctx, `SELECT operations FROM smeldr_roles WHERE name = 'admin'`).Scan(&opsJSON); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	var ops []string
+	if err := json.Unmarshal([]byte(opsJSON), &ops); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, want := range []string{"review", "approve"} {
+		if slices.Contains(ops, want) {
+			t.Errorf("operations = %v, want %q removed", ops, want)
+		}
+	}
+	if !slices.Contains(ops, "custom-op") {
+		t.Errorf("operations = %v, want %q preserved", ops, "custom-op")
+	}
+	if !slices.Contains(ops, "administer") {
+		t.Errorf("operations = %v, want %q preserved", ops, "administer")
+	}
+}
+
+func TestMigrateAdminRoleRemovesReviewApprove_Idempotent(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	dirty := `["create","review","approve"]`
+	if _, err := db.ExecContext(ctx, `UPDATE smeldr_roles SET operations = $1 WHERE name = 'admin'`, dirty); err != nil {
+		t.Fatalf("seed dirty admin row: %v", err)
+	}
+
+	if err := migrateAdminRoleRemovesReviewApprove(ctx, db); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := migrateAdminRoleRemovesReviewApprove(ctx, db); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	var opsJSON string
+	if err := db.QueryRowContext(ctx, `SELECT operations FROM smeldr_roles WHERE name = 'admin'`).Scan(&opsJSON); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if opsJSON != `["create"]` {
+		t.Errorf("operations = %q, want %q", opsJSON, `["create"]`)
+	}
+}
+
+func TestMigrateAdminRoleRemovesReviewApprove_AlreadyClean_NoOp(t *testing.T) {
+	db := setupGovernanceDB(t) // seedDefaultRoles already seeds admin clean
+	ctx := context.Background()
+	var before string
+	if err := db.QueryRowContext(ctx, `SELECT updated_at FROM smeldr_roles WHERE name = 'admin'`).Scan(&before); err != nil {
+		t.Fatalf("query before: %v", err)
+	}
+
+	if err := migrateAdminRoleRemovesReviewApprove(ctx, db); err != nil {
+		t.Fatalf("migrateAdminRoleRemovesReviewApprove: %v", err)
+	}
+
+	var after string
+	if err := db.QueryRowContext(ctx, `SELECT updated_at FROM smeldr_roles WHERE name = 'admin'`).Scan(&after); err != nil {
+		t.Fatalf("query after: %v", err)
+	}
+	if before != after {
+		t.Errorf("updated_at changed (%q -> %q), want no write on an already-clean row", before, after)
+	}
+}
+
+func TestMigrateAdminRoleRemovesReviewApprove_NoAdminRow_NoOp(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `DELETE FROM smeldr_roles WHERE name = 'admin'`); err != nil {
+		t.Fatalf("delete admin row: %v", err)
+	}
+
+	if err := migrateAdminRoleRemovesReviewApprove(ctx, db); err != nil {
+		t.Errorf("migrateAdminRoleRemovesReviewApprove with no admin row: %v", err)
+	}
+}
+
+func TestMigrateAdminRoleRemovesReviewApprove_UnmarshalError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `UPDATE smeldr_roles SET operations = 'not-json' WHERE name = 'admin'`); err != nil {
+		t.Fatalf("seed malformed row: %v", err)
+	}
+
+	if err := migrateAdminRoleRemovesReviewApprove(ctx, db); err == nil {
+		t.Fatal("expected error for malformed operations JSON, got nil")
+	}
+}
+
+func TestMigrateAdminRoleRemovesReviewApprove_QueryError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	wrapped := &govQueryRowFailDB{DB: db, failOn: "SELECT operations FROM smeldr_roles"}
+	if err := migrateAdminRoleRemovesReviewApprove(context.Background(), wrapped); err == nil {
+		t.Fatal("expected error when the SELECT fails, got nil")
+	}
+}
+
+func TestMigrateAdminRoleRemovesReviewApprove_ExecError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `UPDATE smeldr_roles SET operations = '["review"]' WHERE name = 'admin'`); err != nil {
+		t.Fatalf("seed dirty admin row: %v", err)
+	}
+	wrapped := &execFailDB{DB: db, failOn: "UPDATE smeldr_roles"}
+	if err := migrateAdminRoleRemovesReviewApprove(ctx, wrapped); err == nil {
+		t.Fatal("expected error when the UPDATE fails, got nil")
 	}
 }
 

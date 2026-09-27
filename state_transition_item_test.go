@@ -192,6 +192,12 @@ func TestApp_TransitionItem_Compiled_RoleGated_Granted(t *testing.T) {
 	app, db, rs := setupTransitionItemApp(t)
 	insertDecision(t, db, "dec-2", "dec-2-slug", "proposed")
 	tokenID := setupTokenWithRole(t, db, rs, "admin")
+	if err := RegisterDecisionStewardRole(context.Background(), rs); err != nil {
+		t.Fatalf("RegisterDecisionStewardRole: %v", err)
+	}
+	if _, err := rs.Grant(context.Background(), RoleGrant{TokenID: tokenID, RoleName: "decision-steward"}); err != nil {
+		t.Fatalf("Grant decision-steward: %v", err)
+	}
 
 	result, err := app.TransitionItem(NewTestContext(User{ID: tokenID}), "Decision", "dec-2-slug", "ratified")
 	if err != nil {

@@ -82,6 +82,9 @@ func migrateGovernance(ctx context.Context, db DB) error {
 	if err := seedDefaultRoles(ctx, db); err != nil {
 		return err
 	}
+	if err := migrateAdminRoleRemovesReviewApprove(ctx, db); err != nil {
+		return err
+	}
 	if err := seedToolPolicies(ctx, db); err != nil {
 		return err
 	}
@@ -112,7 +115,7 @@ func seedDefaultRoles(ctx context.Context, db DB) error {
 		},
 		{
 			"admin",
-			`["create","read","update","publish","archive","delete","manage","administer","review","approve","define-type","define-flow","define-relation-kind"]`,
+			`["create","read","update","publish","archive","delete","manage","administer","define-type","define-flow","define-relation-kind"]`,
 		},
 	}
 	for _, r := range roles {
@@ -125,6 +128,57 @@ func seedDefaultRoles(ctx context.Context, db DB) error {
 		); err != nil {
 			return fmt.Errorf("smeldr: seedDefaultRoles: %s: %w", r.name, err)
 		}
+	}
+	return nil
+}
+
+// migrateAdminRoleRemovesReviewApprove removes "review" and "approve" from an
+// already-seeded admin role's Operations (design/grants-and-delegate-v1.md
+// §2 step 3, 01a0e3f9-2). seedDefaultRoles' own literal fix only takes effect
+// on a fresh install — its ON CONFLICT (name) DO NOTHING means an
+// already-migrated install's admin row never self-corrects. Parses the
+// current operations JSON and filters out the two words rather than a
+// literal string-match UPDATE, so any other operation an install may have
+// accumulated on its admin row survives untouched. Idempotent: a no-op once
+// admin's Operations no longer contains either word, and a no-op (not an
+// error) when no admin row exists yet — seedDefaultRoles, called just
+// before this, will seed it correctly in that case.
+func migrateAdminRoleRemovesReviewApprove(ctx context.Context, db DB) error {
+	var opsJSON string
+	err := db.QueryRowContext(ctx,
+		`SELECT operations FROM smeldr_roles WHERE name = 'admin'`,
+	).Scan(&opsJSON)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("smeldr: migrateAdminRoleRemovesReviewApprove: %w", err)
+	}
+
+	var ops []string
+	if err := json.Unmarshal([]byte(opsJSON), &ops); err != nil {
+		return fmt.Errorf("smeldr: migrateAdminRoleRemovesReviewApprove: unmarshal operations: %w", err)
+	}
+
+	filtered := make([]string, 0, len(ops))
+	changed := false
+	for _, op := range ops {
+		if op == "review" || op == "approve" {
+			changed = true
+			continue
+		}
+		filtered = append(filtered, op)
+	}
+	if !changed {
+		return nil
+	}
+
+	newOpsJSON, _ := json.Marshal(filtered) // []string marshal never fails
+	if _, err := db.ExecContext(ctx,
+		`UPDATE smeldr_roles SET operations = $1, updated_at = $2 WHERE name = 'admin'`,
+		string(newOpsJSON), time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		return fmt.Errorf("smeldr: migrateAdminRoleRemovesReviewApprove: %w", err)
 	}
 	return nil
 }

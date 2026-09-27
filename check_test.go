@@ -646,6 +646,12 @@ func TestApp_Check_WiresIntoTransitionItem(t *testing.T) {
 	}
 	insertDecision(t, db, "dec-check-1", "dec-check-1-slug", "proposed")
 	tokenID := setupTokenWithRole(t, db, rs, "admin")
+	if err := RegisterDecisionStewardRole(context.Background(), rs); err != nil {
+		t.Fatalf("RegisterDecisionStewardRole: %v", err)
+	}
+	if _, err := rs.Grant(context.Background(), RoleGrant{TokenID: tokenID, RoleName: "decision-steward"}); err != nil {
+		t.Fatalf("Grant decision-steward: %v", err)
+	}
 
 	if _, err := app.TransitionItem(NewTestContext(User{ID: tokenID}), "Decision", "dec-check-1-slug", "ratified"); err != nil {
 		t.Fatalf("TransitionItem: %v", err)

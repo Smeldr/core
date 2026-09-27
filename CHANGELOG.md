@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.98.0] — 2026-09-27
+
+### Fixed
+
+The `admin` role was previously seeded with `Operations` including `"review"` and `"approve"`, in direct contradiction of the project's governance design (design/governance-model.md §4), which reserves those operation words exclusively for the Plan governance loop and the new `decision-steward` role. This allowed any `admin`-holding token to ratify or approve a Decision despite the `RequiredOperation:"approve"` gate on Decision transitions working correctly - the gate checked for the operation, but the seed data handed it to every admin token unconditionally. The fix has two parts. First, `seedDefaultRoles` no longer includes `"review"` or `"approve"` in the `admin` role's operations literal, ensuring fresh installations seed with the correct, restricted set. Second, a new unexported function `migrateAdminRoleRemovesReviewApprove` is automatically called from `migrateGovernance` on every boot, reading the existing `admin` role's `operations` JSON column, filtering out `"review"` and `"approve"` if present, and writing back only if a change is needed (idempotent - a no-op on an already-clean row, and a no-op with no error if the `admin` row does not exist, preserving any other operations an operator may have manually added). This self-corrects already-deployed instances without requiring manual SQL intervention. Consequence: any token that relied on `admin` alone to ratify or review Decisions now requires an explicit `decision-steward` role grant (defined and pre-granted in the prior release, v1.96.0 as Amendment A358) to retain that authority - a disclosed behavior change for that narrow case, not a silent fix. Six existing tests updated to grant `decision-steward` alongside `admin` where asserting admin-only governance authority, one new test added proving admin alone can no longer transition a Decision from `proposed` to `ratified`, and seven new tests for `migrateAdminRoleRemovesReviewApprove` itself covering removal while preserving other operations, idempotency, and error paths achieve full coverage on the new logic. This is a MINOR version bump (v1.97.0 to v1.98.0): no new exported Go symbol was added, but it is a genuine, disclosed, narrowing consumer-visible behavior change that self-hosters should be aware of before upgrading, matching the project's precedent of using MINOR for a disclosed behavior change of this weight.
+
+---
+
 ## [1.97.0] — 2026-09-27
 
 ### Added

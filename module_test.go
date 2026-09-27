@@ -2915,6 +2915,19 @@ func govGrant(t *testing.T, store *RoleStore, tokenID, roleName string) {
 	}
 }
 
+// govGrantDecisionSteward defines (if not already defined) and grants the
+// "decision-steward" role to tokenID — the review/approve authority admin's
+// own Operations no longer bundles (01a0e3f9-2). Tests that need a token
+// able to ratify/review a Decision call this alongside govGrant(..., "admin")
+// for any other operation the test also exercises.
+func govGrantDecisionSteward(t *testing.T, store *RoleStore, tokenID string) {
+	t.Helper()
+	if err := RegisterDecisionStewardRole(context.Background(), store); err != nil {
+		t.Fatalf("RegisterDecisionStewardRole: %v", err)
+	}
+	govGrant(t, store, tokenID, "decision-steward")
+}
+
 // canReadDrafts — Branch 1: no RoleStore → legacy HasRole(Author) check.
 func TestModule_canReadDrafts_NoStore_AuthorAllowed(t *testing.T) {
 	m := newTestModule(NewMemoryRepo[*testPost]())
@@ -3089,6 +3102,7 @@ func TestModule_updateHandler_decisionRatify_authorized(t *testing.T) {
 	m, store, d := decisionModuleAtStatus(t, "proposed")
 	const uid = "tok-admin"
 	govGrant(t, store, uid, "admin")
+	govGrantDecisionSteward(t, store, uid)
 
 	body, _ := json.Marshal(map[string]any{"Status": "ratified"})
 	w := httptest.NewRecorder()
@@ -3106,6 +3120,28 @@ func TestModule_updateHandler_decisionRatify_authorized(t *testing.T) {
 	}
 	if updated.Status != "ratified" {
 		t.Errorf("Status = %q, want %q", updated.Status, "ratified")
+	}
+}
+
+// TestModule_updateHandler_decisionRatify_adminAloneForbidden pins this
+// Task's own actual fix (01a0e3f9-2): admin no longer bundles "approve", so
+// a token holding admin alone — no decision-steward grant — can no longer
+// ratify a Decision. Distinct from _scopeForbidden below, which is about
+// decisionScopeRoles, not the underlying RequiredOperation gate itself.
+func TestModule_updateHandler_decisionRatify_adminAloneForbidden(t *testing.T) {
+	m, store, d := decisionModuleAtStatus(t, "proposed")
+	const uid = "tok-admin-only"
+	govGrant(t, store, uid, "admin")
+
+	body, _ := json.Marshal(map[string]any{"Status": "ratified"})
+	w := httptest.NewRecorder()
+	r := withUser(httptest.NewRequest(http.MethodPut, "/decisions/"+d.Slug, bytes.NewReader(body)),
+		User{ID: uid, Name: "Admin", Roles: []Role{Admin}})
+	r.SetPathValue("slug", d.Slug)
+	m.updateHandler(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("ratify with admin alone (no decision-steward): status = %d, want 403\nbody: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -3161,6 +3197,7 @@ func TestModule_updateHandler_decisionReEvalRatify_authorized(t *testing.T) {
 	m, store, d := decisionModuleAtStatus(t, "pending-re-evaluation")
 	const uid = "tok-admin"
 	govGrant(t, store, uid, "admin")
+	govGrantDecisionSteward(t, store, uid)
 
 	body, _ := json.Marshal(map[string]any{"Status": "ratified"})
 	w := httptest.NewRecorder()
@@ -3202,6 +3239,7 @@ func TestModule_updateHandler_decisionReEvalSupersede_authorized(t *testing.T) {
 	m, store, d := decisionModuleAtStatus(t, "pending-re-evaluation")
 	const uid = "tok-admin"
 	govGrant(t, store, uid, "admin")
+	govGrantDecisionSteward(t, store, uid)
 
 	body, _ := json.Marshal(map[string]any{"Status": "superseded"})
 	w := httptest.NewRecorder()
@@ -3282,6 +3320,7 @@ func TestModule_updateHandler_decisionRatified_transitionOnly_stillAllowed(t *te
 	m, store, d := decisionModuleAtStatus(t, "ratified")
 	const uid = "tok-admin"
 	govGrant(t, store, uid, "admin")
+	govGrantDecisionSteward(t, store, uid)
 
 	body, _ := json.Marshal(map[string]any{"Status": "superseded"})
 	w := httptest.NewRecorder()

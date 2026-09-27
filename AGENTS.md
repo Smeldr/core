@@ -584,12 +584,11 @@ narrower than the flat `admin` role, matching D68's own policy. See
 `role: "decision-steward"` (auto-defined when `ENABLE_GOVERNANCE` is set:
 `Operations: ["review", "approve"]`, `ScopeMode: global`, `TrustLevel: 0`)
 grants review/ratify authority over every Decision on the instance, not
-scoped to one Domain. This role exists so `admin`'s own `Operations` bundle
-can drop the two Plan-governance verbs (`review`/`approve` are reserved for
-the Plan governance loop, not a generic admin-tier grant, per
-`design/governance-model.md` §4) without silently breaking whoever
-currently ratifies Decisions on the strength of holding `admin` alone — they
-hold `decision-steward` instead, via an explicit grant.
+scoped to one Domain. `admin`'s own `Operations` bundle no longer carries
+`review`/`approve` (they are reserved for the Plan governance loop, not a
+generic admin-tier grant, per `design/governance-model.md` §4, as of
+01a0e3f9-2) — an `admin`-holding token that also needs to ratify/review
+Decisions must hold `decision-steward` via an explicit grant.
 See [docs/REFERENCE.md](docs/REFERENCE.md#decision-steward-role-grants-and-delegate-v1).
 
 ### Webhook management tools (Admin role required)

@@ -630,12 +630,13 @@ app.RoleStore().Grant(ctx, smeldr.RoleGrant{
 })
 ```
 
-This role exists so `admin`'s own `Operations` bundle can drop `review`/
-`approve` (reserved for the Plan governance loop, not a generic admin-tier
-grant, per `design/governance-model.md` §4) without breaking whoever
-currently ratifies Decisions on the strength of holding `admin` alone —
-they hold `decision-steward` instead, via an explicit grant. Defining the
-role does not itself grant it to anyone.
+This role exists so `admin`'s own `Operations` bundle no longer needs to
+carry `review`/`approve` (reserved for the Plan governance loop, not a
+generic admin-tier grant, per `design/governance-model.md` §4). As of
+`seedDefaultRoles` (01a0e3f9-2), a fresh install's `admin` role no longer
+includes either word — an `admin`-holding token that also needs to
+ratify/review Decisions must hold `decision-steward` via an explicit grant.
+Defining the role does not itself grant it to anyone.
 
 ### Authority Check (decision-governance-model.md §4)
 
