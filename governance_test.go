@@ -3151,3 +3151,280 @@ func TestStewardshipInbox_DecisionQueryError(t *testing.T) {
 		t.Error("expected error when the Decisions query fails (fail-closed, not a silently incomplete inbox)")
 	}
 }
+
+// — ExpiresAt on RoleGrant (design/grants-and-delegate-v1.md §3.1/3.2, 01a0e3f9-3) —
+
+func TestEnsureRoleGrantExpiresAtColumn_AddsColumn(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	// Simulate a pre-existing install: create the table without expires_at,
+	// mirroring the shape smeldr_role_grants had before this column existed.
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE smeldr_role_grants (
+    id              TEXT NOT NULL PRIMARY KEY,
+    token_id        TEXT NOT NULL,
+    role_id         TEXT NOT NULL,
+    scope_static    TEXT NOT NULL DEFAULT '[]',
+    scope_anchor_id TEXT,
+    created_at      TIMESTAMP NOT NULL
+)`); err != nil {
+		t.Fatalf("create pre-existing table: %v", err)
+	}
+
+	if err := EnsureRoleGrantExpiresAtColumn(ctx, db); err != nil {
+		t.Fatalf("EnsureRoleGrantExpiresAtColumn: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_role_grants (id, token_id, role_id, expires_at, created_at)
+			VALUES ('g1', 't1', 'r1', '2026-01-01T00:00:00Z', '2026-01-01')`,
+	); err != nil {
+		t.Errorf("expires_at column should exist after migration, got: %v", err)
+	}
+}
+
+func TestEnsureRoleGrantExpiresAtColumn_Idempotent(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateGovernance(ctx, db); err != nil {
+		t.Fatalf("migrateGovernance: %v", err)
+	}
+	if err := EnsureRoleGrantExpiresAtColumn(ctx, db); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := EnsureRoleGrantExpiresAtColumn(ctx, db); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+}
+
+func TestEnsureRoleGrantExpiresAtColumn_AlterFails(t *testing.T) {
+	db := newSQLiteDB(t)
+	// smeldr_role_grants table deliberately not created.
+	if err := EnsureRoleGrantExpiresAtColumn(context.Background(), db); err == nil {
+		t.Error("expected error when smeldr_role_grants does not exist, got nil")
+	}
+}
+
+func TestGrant_ExpiresAtNilByDefault(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	tokenID := NewID()
+
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "author"}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	grants, err := store.ListGrants(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	if len(grants) != 1 {
+		t.Fatalf("want 1 grant, got %d", len(grants))
+	}
+	if grants[0].ExpiresAt != nil {
+		t.Errorf("ExpiresAt: want nil (standing grant), got %v", grants[0].ExpiresAt)
+	}
+}
+
+func TestGrant_SetsExpiresAt(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	tokenID := NewID()
+	expiry := time.Now().UTC().Add(14 * 24 * time.Hour).Truncate(time.Second)
+
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "author", ExpiresAt: &expiry}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	grants, err := store.ListGrants(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	if len(grants) != 1 {
+		t.Fatalf("want 1 grant, got %d", len(grants))
+	}
+	if grants[0].ExpiresAt == nil {
+		t.Fatal("ExpiresAt: want non-nil, got nil")
+	}
+	if !grants[0].ExpiresAt.Equal(expiry) {
+		t.Errorf("ExpiresAt: want %v, got %v", expiry, *grants[0].ExpiresAt)
+	}
+}
+
+func TestGrant_ExpiresAt_RecordedInAudit(t *testing.T) {
+	db, store, auditStore := setupGovernanceAuditDB(t)
+	actor := "tok-actor"
+	audited := store.WithAudit(actor, auditStore)
+	ctx := context.Background()
+	tokenID := NewID()
+	expiry := time.Now().UTC().Add(14 * 24 * time.Hour).Truncate(time.Second)
+
+	if _, err := audited.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "author", ExpiresAt: &expiry}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	var after string
+	if err := db.QueryRowContext(ctx,
+		`SELECT after_json FROM smeldr_governance_audit LIMIT 1`,
+	).Scan(&after); err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	if !strings.Contains(after, expiry.Format(time.RFC3339)) {
+		t.Errorf("after_json missing expires_at %q, got %q", expiry.Format(time.RFC3339), after)
+	}
+}
+
+func TestListGrants_DoesNotFilterExpired(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	tokenID := NewID()
+	past := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Second)
+
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "author", ExpiresAt: &past}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	grants, err := store.ListGrants(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	// list_grants is the audit surface — an expired grant stays visible so a
+	// viewer can see what was delegated and when it expired.
+	if len(grants) != 1 {
+		t.Fatalf("want 1 grant (expired grant still listed), got %d", len(grants))
+	}
+	if grants[0].ExpiresAt == nil || !grants[0].ExpiresAt.Equal(past) {
+		t.Errorf("ExpiresAt: want %v, got %v", past, grants[0].ExpiresAt)
+	}
+}
+
+func TestAuthorized_ExpiredGrantDenied(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	tokenID := NewID()
+	past := time.Now().UTC().Add(-24 * time.Hour)
+
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "editor", ExpiresAt: &past}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	ok, err := store.Authorized(ctx, tokenID, "delete", AuthTarget{})
+	if err != nil {
+		t.Fatalf("Authorized: %v", err)
+	}
+	if ok {
+		t.Error("expected false: grant expired 24h ago, must be absent from the check")
+	}
+}
+
+func TestAuthorized_NonExpiredGrantAllowed(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	tokenID := NewID()
+	future := time.Now().UTC().Add(24 * time.Hour)
+
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "editor", ExpiresAt: &future}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	ok, err := store.Authorized(ctx, tokenID, "delete", AuthTarget{})
+	if err != nil {
+		t.Fatalf("Authorized: %v", err)
+	}
+	if !ok {
+		t.Error("expected true: grant expires 24h from now, still active")
+	}
+}
+
+func TestAuthorized_NilExpiresAtStandingGrantAllowed(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	tokenID := setupTokenWithRole(t, db, store, "editor")
+	ok, err := store.Authorized(context.Background(), tokenID, "delete", AuthTarget{})
+	if err != nil {
+		t.Fatalf("Authorized: %v", err)
+	}
+	if !ok {
+		t.Error("expected true: nil ExpiresAt is a standing grant, unaffected by the expiry filter")
+	}
+}
+
+func TestRoleGranted_ExpiredGrantDenied(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	tokenID := NewID()
+	past := time.Now().UTC().Add(-24 * time.Hour)
+
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "editor", ExpiresAt: &past}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	ok, err := store.RoleGranted(ctx, tokenID, "editor", AuthTarget{})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if ok {
+		t.Error("expected false: grant expired 24h ago, must be absent from the check")
+	}
+}
+
+func TestRoleGranted_NonExpiredGrantAllowed(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	tokenID := NewID()
+	future := time.Now().UTC().Add(24 * time.Hour)
+
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "editor", ExpiresAt: &future}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	ok, err := store.RoleGranted(ctx, tokenID, "editor", AuthTarget{})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if !ok {
+		t.Error("expected true: grant expires 24h from now, still active")
+	}
+}
+
+func TestRoleGranted_NilExpiresAtStandingGrantAllowed(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	tokenID := setupTokenWithRole(t, db, store, "editor")
+	ok, err := store.RoleGranted(context.Background(), tokenID, "editor", AuthTarget{})
+	if err != nil {
+		t.Fatalf("RoleGranted: %v", err)
+	}
+	if !ok {
+		t.Error("expected true: nil ExpiresAt is a standing grant, unaffected by the expiry filter")
+	}
+}
+
+func TestStewardedRuleTypes_ExpiredGrantExcluded(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "expired-steward", Operations: []string{"steward"}, ScopeMode: ScopeStatic,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	past := time.Now().UTC().Add(-24 * time.Hour)
+	if _, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "expired-steward",
+		ScopeStatic: []string{"RuleType:design-system"}, ExpiresAt: &past,
+	}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	got, err := store.StewardedRuleTypes(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("StewardedRuleTypes: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected no stewarded rule types from an expired grant, got %#v", got)
+	}
+}

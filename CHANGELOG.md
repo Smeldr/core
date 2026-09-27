@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.99.0] — 2026-09-27
+
+### Added
+
+Role grants can now have an optional expiration timestamp via the new `RoleGrant.ExpiresAt` field (`*time.Time`), which remains nil for standing grants and specifies when a grant stops matching authorization checks. The storage layer adds a new nullable `expires_at` TIMESTAMPTZ column to `smeldr_role_grants` (present in fresh installations via DDL, added to pre-existing installs via the new exported function `EnsureRoleGrantExpiresAtColumn`, automatically called from `migrateGovernance` on boot). `RoleStore.Grant` now accepts and persists `ExpiresAt` in a single call; if `WithAudit` is configured, the audit trail includes `expires_at` in `after_json`. `RoleStore.ListGrants` returns each grant's `ExpiresAt` and deliberately does not filter expired ones - `list_grants` surfaces explainability, so expired grants remain visible in audit history. All authorization checks (`RoleStore.Authorized`, `RoleStore.RoleGranted`, `RoleStore.StewardedRuleTypes`, and `StewardshipInbox`, which calls `StewardedRuleTypes`) add `AND (expires_at IS NULL OR expires_at > $now)` predicates to their `smeldr_role_grants` queries, excluding expired grants from matching entirely - an expired grant is "absent, not present-but-inert." No background sweep job was added; expiration is evaluated at read time, consistent with how `smeldr_relations`' `invalid_at` column already works. This release provides only the storage and enforcement primitive; a higher-level `delegate_item` mechanism with a delegator-caps-delegate authority check and default/max expiry enforcement is separate, later work. 14 new tests cover column migration, idempotency and its error path, grant creation with and without `ExpiresAt`, audit recording, list behavior with an expired grant still visible, and authorization filtering across all four affected read paths; full test suite passes with `-race` at 96.1% coverage. This is a MINOR version bump (v1.98.0 to v1.99.0): new exported field and function, fully additive, no existing behaviour changed for callers that never set `ExpiresAt`.
+
+---
+
 ## [1.98.0] — 2026-09-27
 
 ### Fixed

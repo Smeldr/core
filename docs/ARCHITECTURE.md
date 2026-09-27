@@ -813,7 +813,25 @@ smeldr.dev/
 │                     same pattern as RelationStore's own setProvenanceStore; Grant/Revoke each record
 │                     a ProvenanceRecord (SubjectType "RoleGrant", Verb "assert"/"invalidate") after
 │                     their existing GovernanceAuditStore write succeeds — additive, GovernanceAuditStore
-│                     remains the authoritative full-diff record, D44's boundary unchanged (T203, A281)
+│                     remains the authoritative full-diff record, D44's boundary unchanged (T203, A281);
+│                     RoleGrant.ExpiresAt *time.Time — nil is a standing grant (unchanged behavior for
+│                     every existing caller); non-nil is a time-boxed grant, same "absent, not
+│                     present-but-inert" shape as RelationEdge.InvalidAt. smeldr_role_grants gains an
+│                     expires_at TIMESTAMPTZ column; EnsureRoleGrantExpiresAtColumn(ctx, db) error
+│                     upgrades a pre-existing install (same one-column EnsureColumn pattern as
+│                     EnsureRelationCreatedByColumn), called from inside migrateGovernance itself — no
+│                     separate example/server boot-path line needed. Grant/ListGrants plumb it through
+│                     unchanged otherwise; ListGrants deliberately does not filter by expiry (it is the
+│                     "explainable authority" audit surface — an expired delegation should stay visible,
+│                     not vanish). Authorized, RoleGranted, and StewardedRuleTypes each add
+│                     "AND (expires_at IS NULL OR expires_at > $now)" to their smeldr_role_grants query —
+│                     an expired grant is excluded from every authorization-check read path, including
+│                     StewardedRuleTypes (and so StewardshipInbox, which calls it), not just the two
+│                     functions design/grants-and-delegate-v1.md §3.2 names literally. Fail-closed
+│                     unchanged: a DB error still returns (false, err) before this predicate is ever
+│                     evaluated. No sweep/cleanup job — an expired grant simply stops matching at read
+│                     time, same reasoning invalid_at-filtered relations never needed one either.
+│                     (design/grants-and-delegate-v1.md §3.1/3.2, 01a0e3f9-3)
 ├── auth.go           AuthFunc interface, BearerHMAC, CookieSession, BasicAuth, AnyAuth, SignToken,
 │                     VerifyBearerToken(r, secret, store *TokenStore);
 │                     TokenRecord, TokenStore, NewTokenStore (Amendment A66);

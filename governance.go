@@ -60,6 +60,7 @@ func migrateGovernance(ctx context.Context, db DB) error {
 			role_id         TEXT NOT NULL REFERENCES smeldr_roles(id),
 			scope_static    TEXT NOT NULL DEFAULT '[]',
 			scope_anchor_id TEXT,
+			expires_at      TIMESTAMPTZ,
 			created_at      TIMESTAMP NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_role_grants_token
@@ -78,6 +79,9 @@ func migrateGovernance(ctx context.Context, db DB) error {
 			return fmt.Errorf("smeldr: migrateGovernance: %w", err)
 		}
 	}
+	if err := EnsureRoleGrantExpiresAtColumn(ctx, db); err != nil {
+		return err
+	}
 
 	if err := seedDefaultRoles(ctx, db); err != nil {
 		return err
@@ -93,6 +97,20 @@ func migrateGovernance(ctx context.Context, db DB) error {
 	// deployment (apps that never call WithTokenStore). Log and continue.
 	if _, err := pruneInertTokenGrants(ctx, db); err != nil {
 		slog.Warn("smeldr: migrateGovernance: inert grant pruning skipped", "err", err)
+	}
+	return nil
+}
+
+// EnsureRoleGrantExpiresAtColumn adds [RoleGrant]'s expires_at column to a
+// pre-existing smeldr_role_grants table (design/grants-and-delegate-v1.md
+// §3.1, 01a0e3f9-3). A fresh install gets the column directly via
+// [migrateGovernance]'s own CREATE TABLE; this upgrades an install that
+// migrated before this column existed. Idempotent — safe to call on every
+// boot. Same one-column [EnsureColumn] pattern as
+// [EnsureRelationCreatedByColumn]/[EnsureDecisionTitleColumn].
+func EnsureRoleGrantExpiresAtColumn(ctx context.Context, db DB) error {
+	if err := EnsureColumn(ctx, db, "smeldr_role_grants", "expires_at", "TIMESTAMPTZ"); err != nil {
+		return fmt.Errorf("smeldr: EnsureRoleGrantExpiresAtColumn: %w", err)
 	}
 	return nil
 }
@@ -456,6 +474,15 @@ type RoleGrant struct {
 	// ScopeAnchorID is the anchor item's ID for dynamic scope.
 	// Only used when the role's ScopeMode is [ScopeDynamic].
 	ScopeAnchorID string
+	// ExpiresAt is when this grant stops matching in [RoleStore.Authorized],
+	// [RoleStore.RoleGranted], and [RoleStore.StewardedRuleTypes] — nil means a
+	// standing grant with no expiry (unchanged behavior for every caller that
+	// never sets it). Same shape as [RelationEdge.InvalidAt]: an expired grant
+	// is absent from an authorization check, not present-but-inert, and needs
+	// no separate revocation or cleanup step. [RoleStore.ListGrants] returns an
+	// expired grant's ExpiresAt unfiltered — it is the audit surface, not an
+	// authorization check.
+	ExpiresAt *time.Time
 	// CreatedAt is the RFC3339 creation timestamp. Populated by ListGrants.
 	CreatedAt string
 }
@@ -797,14 +824,14 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 	}
 
 	if _, err := exec.ExecContext(ctx,
-		`INSERT INTO smeldr_role_grants (id, token_id, role_id, scope_static, scope_anchor_id, created_at)
-			SELECT $1, $2, $3, $4, $5, $6
+		`INSERT INTO smeldr_role_grants (id, token_id, role_id, scope_static, scope_anchor_id, expires_at, created_at)
+			SELECT $1, $2, $3, $4, $5, $6, $7
 			WHERE NOT EXISTS (
 				SELECT 1 FROM smeldr_role_grants
-				WHERE token_id = $7 AND role_id = $8
-				  AND scope_anchor_id IS NOT DISTINCT FROM $9
+				WHERE token_id = $8 AND role_id = $9
+				  AND scope_anchor_id IS NOT DISTINCT FROM $10
 			)`,
-		newID, grant.TokenID, roleID, string(staticJSON), anchorID, now,
+		newID, grant.TokenID, roleID, string(staticJSON), anchorID, grant.ExpiresAt, now,
 		grant.TokenID, roleID, anchorID,
 	); err != nil {
 		return "", fmt.Errorf("smeldr: Grant: insert: %w", err)
@@ -832,12 +859,17 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 		if anchorID != nil {
 			anchorVal = *anchorID
 		}
+		var expiresVal any
+		if grant.ExpiresAt != nil {
+			expiresVal = grant.ExpiresAt.UTC().Format(time.RFC3339)
+		}
 		afterJSON, _ := json.Marshal(map[string]any{
 			"id":              grantID,
 			"token_id":        grant.TokenID,
 			"role_id":         roleID,
 			"scope_static":    json.RawMessage([]byte(string(staticJSON))),
 			"scope_anchor_id": anchorVal,
+			"expires_at":      expiresVal,
 		})
 		rec := GovernanceAuditRecord{
 			ID:           NewID(),
@@ -988,7 +1020,10 @@ func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
 
 // ListGrants returns the grants bound to the given token. If tokenID is empty,
 // all grants in the store are returned. Each [RoleGrant] in the result has its
-// ID, TokenID, RoleName, ScopeStatic, ScopeAnchorID, and CreatedAt populated.
+// ID, TokenID, RoleName, ScopeStatic, ScopeAnchorID, ExpiresAt, and CreatedAt
+// populated. Unlike [RoleStore.Authorized]/[RoleStore.RoleGranted], an expired
+// grant (ExpiresAt in the past) is still returned — this is the audit surface
+// ("what did I delegate, to whom, until when"), not an authorization check.
 func (s *RoleStore) ListGrants(ctx context.Context, tokenID string) ([]RoleGrant, error) {
 	var (
 		rows *sql.Rows
@@ -996,13 +1031,13 @@ func (s *RoleStore) ListGrants(ctx context.Context, tokenID string) ([]RoleGrant
 	)
 	if tokenID != "" {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT g.id, r.name, g.token_id, g.scope_static, g.scope_anchor_id, g.created_at
+			`SELECT g.id, r.name, g.token_id, g.scope_static, g.scope_anchor_id, g.expires_at, g.created_at
 				FROM smeldr_role_grants g
 				JOIN smeldr_roles r ON r.id = g.role_id
 				WHERE g.token_id = $1`, tokenID)
 	} else {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT g.id, r.name, g.token_id, g.scope_static, g.scope_anchor_id, g.created_at
+			`SELECT g.id, r.name, g.token_id, g.scope_static, g.scope_anchor_id, g.expires_at, g.created_at
 				FROM smeldr_role_grants g
 				JOIN smeldr_roles r ON r.id = g.role_id`)
 	}
@@ -1016,7 +1051,8 @@ func (s *RoleStore) ListGrants(ctx context.Context, tokenID string) ([]RoleGrant
 		var g RoleGrant
 		var staticJSON string
 		var anchorID sql.NullString
-		if err := rows.Scan(&g.ID, &g.RoleName, &g.TokenID, &staticJSON, &anchorID, &g.CreatedAt); err != nil {
+		if err := rows.Scan(&g.ID, &g.RoleName, &g.TokenID, &staticJSON, &anchorID,
+			nullTimeScanner{dst: &g.ExpiresAt}, &g.CreatedAt); err != nil {
 			return nil, fmt.Errorf("smeldr: ListGrants: scan: %w", err)
 		}
 		if err := json.Unmarshal([]byte(staticJSON), &g.ScopeStatic); err != nil {
@@ -1057,6 +1093,9 @@ type authorizedGrant struct {
 // For operations with no specific target (e.g. "administer"), pass a zero
 // AuthTarget — only global-scope grants can authorize those.
 //
+// A grant whose ExpiresAt has passed is excluded from the query entirely — it
+// is absent, not present-but-inert (design/grants-and-delegate-v1.md §3.2).
+//
 // A transient dynamic-scope query error does not abort the check: remaining
 // grants continue to be evaluated, and the error is surfaced only if no other
 // grant authorizes the request.
@@ -1066,7 +1105,8 @@ func (s *RoleStore) Authorized(ctx context.Context, tokenID, op string, target A
 		        r.scope_mode, r.scope_relation_kind, r.scope_direction
 		   FROM smeldr_role_grants g
 		   JOIN smeldr_roles r ON r.id = g.role_id
-		  WHERE g.token_id = $1`, tokenID)
+		  WHERE g.token_id = $1 AND (g.expires_at IS NULL OR g.expires_at > $2)`,
+		tokenID, time.Now().UTC())
 	if err != nil {
 		return false, fmt.Errorf("smeldr: Authorized: query grants: %w", err)
 	}
@@ -1169,6 +1209,10 @@ type roleNameGrant struct {
 // [AuthTarget] for operations with no specific target (e.g. transition gates
 // that are global in scope; item-level scope is deferred).
 //
+// A grant whose ExpiresAt has passed is excluded from the query entirely —
+// same "absent, not present-but-inert" contract as [RoleStore.Authorized]
+// (design/grants-and-delegate-v1.md §3.2).
+//
 // Returns (false, nil) when the token holds no matching grant.
 // Returns (false, err) on any DB error — fail-closed per §5.5.
 func (s *RoleStore) RoleGranted(ctx context.Context, tokenID, roleName string, target AuthTarget) (bool, error) {
@@ -1176,7 +1220,8 @@ func (s *RoleStore) RoleGranted(ctx context.Context, tokenID, roleName string, t
 		`SELECT g.scope_static, g.scope_anchor_id, r.scope_mode, r.scope_relation_kind, r.scope_direction
 		   FROM smeldr_role_grants g
 		   JOIN smeldr_roles r ON r.id = g.role_id
-		  WHERE g.token_id = $1 AND r.name = $2`, tokenID, roleName)
+		  WHERE g.token_id = $1 AND r.name = $2 AND (g.expires_at IS NULL OR g.expires_at > $3)`,
+		tokenID, roleName, time.Now().UTC())
 	if err != nil {
 		return false, fmt.Errorf("smeldr: RoleGranted: query grants: %w", err)
 	}
@@ -1270,12 +1315,19 @@ const stewardOperation = "steward"
 // Returns an empty (non-nil) slice, not an error, when tokenID holds no
 // stewardship grants — the same "nothing to report" convention every other
 // query-shaped function in this package uses.
+//
+// An expired grant (ExpiresAt in the past) contributes no RuleType — same
+// "absent, not present-but-inert" contract as [RoleStore.Authorized]/
+// [RoleStore.RoleGranted] (design/grants-and-delegate-v1.md §3.2). Without
+// this, an expired steward grant would keep conferring real stewardship-inbox
+// access forever through this one read path.
 func (s *RoleStore) StewardedRuleTypes(ctx context.Context, tokenID string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT g.scope_static, r.operations, r.scope_mode
 		   FROM smeldr_role_grants g
 		   JOIN smeldr_roles r ON r.id = g.role_id
-		  WHERE g.token_id = $1`, tokenID)
+		  WHERE g.token_id = $1 AND (g.expires_at IS NULL OR g.expires_at > $2)`,
+		tokenID, time.Now().UTC())
 	if err != nil {
 		return nil, fmt.Errorf("smeldr: StewardedRuleTypes: query grants: %w", err)
 	}

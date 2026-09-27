@@ -638,6 +638,42 @@ includes either word — an `admin`-holding token that also needs to
 ratify/review Decisions must hold `decision-steward` via an explicit grant.
 Defining the role does not itself grant it to anyone.
 
+### Time-boxed grants (`ExpiresAt`, grants-and-delegate-v1 §3.1/3.2)
+
+`RoleGrant.ExpiresAt *time.Time` makes a grant time-boxed instead of standing.
+`nil` (the default, unchanged for every existing caller) is a standing grant
+with no expiry. A non-nil value is when the grant stops matching — same
+"absent, not present-but-inert" shape `RelationEdge.InvalidAt` already uses
+for relations:
+
+```go
+expiry := time.Now().Add(14 * 24 * time.Hour) // 14-day time-boxed grant
+app.RoleStore().Grant(ctx, smeldr.RoleGrant{
+    TokenID: tokenID, RoleName: "decision-steward", ExpiresAt: &expiry,
+})
+```
+
+Enforcement is automatic and requires no separate check: `RoleStore.Authorized`,
+`RoleStore.RoleGranted`, and `RoleStore.StewardedRuleTypes` (and so
+`StewardshipInbox`, which calls it) each exclude an expired grant from their
+underlying query — an expired grant simply stops authorizing anything, with
+no revocation call needed. Fail-closed is unchanged: a DB error still denies
+before the expiry check is ever evaluated.
+
+`RoleStore.ListGrants` deliberately does **not** filter by expiry — it is the
+"explainable authority" audit surface (`list_grants`), so a viewer can see
+that a grant existed and when it expired, not have it silently disappear.
+
+No sweep or cleanup job exists for v1, by design — an expired row is simply
+never matched again, the same reasoning `smeldr_relations`' `invalid_at`
+column never needed one either. `RoleStore.Revoke` still works on a
+time-boxed grant exactly as on a standing one, for explicit early revocation.
+
+This is deliberately just the storage/enforcement primitive — a default
+14-day expiry, a server-enforced maximum, and the delegator-caps-delegate
+authority check belong to the higher-level Delegate mechanism
+(`delegate_item`, grants-and-delegate-v1 §3.3), a separate, later piece.
+
 ### Authority Check (decision-governance-model.md §4)
 
 Check is an enforced *precondition* on a Decision's `proposed → ratified`
