@@ -4167,6 +4167,15 @@ table that predates this column (any table outside these seven — a
 third-party module) keeps working unchanged: the write fails open to the
 original two-column UPDATE rather than erroring.
 
+**`last_actor` is also set on create, not only on transition (01a0e3bc-8).**
+`Module[T].MCPCreate` stamps `last_actor` from the caller's own
+`ctx.User().ID` for any type with a settable `LastActor` field — covers the
+same six orchestration types (create tools: `create_task`, `create_decision`,
+etc.). Before this, a never-transitioned item (every fresh `proposed`
+Decision, for example) had no `last_actor` at all — no proposer/asserter
+recorded. Always overwrites whatever the create payload itself may have set
+for `last_actor`; actor identity is never client-suppliable.
+
 ### `ConflictPolicy` (A186)
 
 ```go

@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.97.0] — 2026-09-27
+
+### Added
+
+All six orchestration create tools (`create_task`, `create_decision`, `create_amendment`, `create_goal`, `create_run`, `create_signal`) now record the authenticated caller's identity in the new `last_actor` field immediately upon creation, rather than only after the item's first state transition. The underlying change is in `Module[T].MCPCreate`, which stamps `LastActor` via a new unexported helper `stampLastActorOnCreate` before returning. Previously, a freshly created item that had never transitioned (for example, every Decision still sitting at its initial `proposed` state) would carry an empty `last_actor` field with no record of who proposed it. The identity is derived from the calling `smeldr.Context`'s authenticated user ID and always overwrites any value the client request body may have supplied, ensuring actor identity is never trusted from external input. A related change adds a new exported field `CreatedBy` to `RelationEdge` (db column `created_by`), an exported counterpart to the existing `CreatedByJob` field, populated automatically whenever a relation edge is written via `assert_relation`, `propose_relation`, or `observe_relation` (all three tools call the same internal write path through `insertEdge`, so all three now record the caller's identity at write time). Both `LastActor` and `CreatedBy` remain nil or empty when the calling context carries no authenticated user ID. A new exported migration function, `EnsureRelationCreatedByColumn(ctx context.Context, db DB) error`, adds the column to pre-existing tables and is called automatically on boot from `CreateRelationTables`, requiring no separate wiring. This is a MINOR version bump (v1.96.0 to v1.97.0): two new exported symbols (`RelationEdge.CreatedBy`, `EnsureRelationCreatedByColumn`), fully additive and backward-compatible, and genuine new consumer-visible behavior on nine existing tools (the six create tools plus three relation-write tools).
+
+---
+
 ## [1.96.0] — 2026-09-27
 
 ### Added

@@ -2447,6 +2447,31 @@ func applyDefaultPriority(typeName string, fields map[string]any, pv reflect.Val
 	f.SetInt(defaultPriority)
 }
 
+// stampLastActorOnCreate sets item's LastActor field (D78) to the calling
+// user's ID on create, for any content type that has one — not gated by
+// type name (unlike [applyDefaultPriority]'s Task/Goal-only check), since a
+// settable LastActor field is itself the signal that a type opted in, the
+// same role Priority's own field-presence check already plays there. Leaves
+// the field untouched when ctx carries no user ID (a system-initiated
+// create) — same "empty means no caller identity was available" convention
+// [DynamicTypeRepo.SetStatus] and [App.TransitionItemWithReason] already use
+// for the same field on the transition path.
+//
+// Always overwrites whatever the unmarshaled request body may have set —
+// unlike Priority, actor identity must never be client-suppliable; it comes
+// from ctx's own authenticated user, never from the create payload.
+func stampLastActorOnCreate(ctx Context, pv reflect.Value) {
+	userID := ctx.User().ID
+	if userID == "" {
+		return
+	}
+	f := pv.Elem().FieldByName("LastActor")
+	if !f.IsValid() || !f.CanSet() || f.Kind() != reflect.String {
+		return
+	}
+	f.SetString(userID)
+}
+
 // stampPublishedAt sets PublishedAt to now when item's status is Published and
 // PublishedAt has not already been set — covers the case where an item is created
 // (or resolves, via a custom flow's own IsInitial state) directly as Published.
@@ -2485,6 +2510,7 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	}
 	applyDefaultStatus(ctx, m.db, m.contentTypeName, pv, f)
 	applyDefaultPriority(m.contentTypeName, fields, pv)
+	stampLastActorOnCreate(ctx, pv)
 
 	item := ptrToT[T](pv, m.proto)
 	stampPublishedAt(item)

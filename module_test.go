@@ -849,6 +849,79 @@ type testSlicePost struct {
 
 func (p *testSlicePost) Head() Head { return Head{Title: p.Title} }
 
+// — 01a0e3bc-8 LastActor-on-create ——————————————————————————————————————————
+
+// testActorPost is a content type with a LastActor field, mirroring the six
+// orchestration types' own shape, for testing [stampLastActorOnCreate]
+// without the six real types' own DB/table setup.
+type testActorPost struct {
+	Node
+	Title     string `smeldr:"required"`
+	LastActor string `json:"last_actor,omitempty"`
+}
+
+func (p *testActorPost) Head() Head { return Head{Title: p.Title} }
+
+// TestMCPCreate_PersistsLastActor proves MCPCreate stamps LastActor from
+// ctx.User().ID for a type that has the field, matching the existing
+// transition-path convention (dynamic.go/state.go) for the create path too.
+func TestMCPCreate_PersistsLastActor(t *testing.T) {
+	m := NewModule((*testActorPost)(nil), Repo(NewMemoryRepo[*testActorPost]()))
+	ctx := NewTestContext(User{ID: "editor-7"})
+	item, err := m.MCPCreate(ctx, map[string]any{"title": "Hello"})
+	if err != nil {
+		t.Fatalf("MCPCreate returned error: %v", err)
+	}
+	p, ok := item.(*testActorPost)
+	if !ok {
+		t.Fatalf("unexpected type %T", item)
+	}
+	if p.LastActor != "editor-7" {
+		t.Errorf("LastActor = %q, want %q", p.LastActor, "editor-7")
+	}
+}
+
+// TestMCPCreate_LastActorEmptyForNoUserID proves MCPCreate leaves LastActor
+// untouched when ctx carries no user ID — same "empty means no caller
+// identity was available" convention the transition path already uses.
+func TestMCPCreate_LastActorEmptyForNoUserID(t *testing.T) {
+	m := NewModule((*testActorPost)(nil), Repo(NewMemoryRepo[*testActorPost]()))
+	ctx := NewTestContext(User{})
+	item, err := m.MCPCreate(ctx, map[string]any{"title": "Hello"})
+	if err != nil {
+		t.Fatalf("MCPCreate returned error: %v", err)
+	}
+	p, ok := item.(*testActorPost)
+	if !ok {
+		t.Fatalf("unexpected type %T", item)
+	}
+	if p.LastActor != "" {
+		t.Errorf("LastActor = %q, want empty", p.LastActor)
+	}
+}
+
+// TestMCPCreate_LastActorOverwritesClientSuppliedValue proves a caller
+// cannot spoof LastActor via the create payload — it always comes from
+// ctx's own authenticated user, never the request body.
+func TestMCPCreate_LastActorOverwritesClientSuppliedValue(t *testing.T) {
+	m := NewModule((*testActorPost)(nil), Repo(NewMemoryRepo[*testActorPost]()))
+	ctx := NewTestContext(User{ID: "real-actor"})
+	item, err := m.MCPCreate(ctx, map[string]any{
+		"title":      "Hello",
+		"last_actor": "spoofed-actor",
+	})
+	if err != nil {
+		t.Fatalf("MCPCreate returned error: %v", err)
+	}
+	p, ok := item.(*testActorPost)
+	if !ok {
+		t.Fatalf("unexpected type %T", item)
+	}
+	if p.LastActor != "real-actor" {
+		t.Errorf("LastActor = %q, want %q (ctx's own actor, not the client-supplied value)", p.LastActor, "real-actor")
+	}
+}
+
 // TestMCPSchema_arrayField verifies that []string struct fields are typed as
 // "array" in MCPSchema output (Amendment A52-1).
 func TestMCPSchema_arrayField(t *testing.T) {

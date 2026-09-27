@@ -47,20 +47,34 @@ type RelationKindDef struct {
 // RelationEdge is a single typed adjacency between two content items.
 // It does not embed Node — relations are graph edges, not content items.
 type RelationEdge struct {
-	ID           string          `db:"id"`
-	SourceType   string          `db:"source_type"`
-	SourceID     string          `db:"source_id"`
-	TargetType   string          `db:"target_type"`
-	TargetID     string          `db:"target_id"`
-	RelationKind string          `db:"relation_kind"`
-	EdgeClass    string          `db:"edge_class"` // "asserted" | "inferred"
-	Confidence   *float64        `db:"confidence"`
-	ValidAt      *time.Time      `db:"valid_at"`
-	InvalidAt    *time.Time      `db:"invalid_at"`
-	CreatedByJob *string         `db:"created_by_job"`
-	Attributes   json.RawMessage `db:"attributes"`
-	CreatedAt    time.Time       `db:"created_at"`
-	UpdatedAt    time.Time       `db:"updated_at"`
+	ID           string     `db:"id"`
+	SourceType   string     `db:"source_type"`
+	SourceID     string     `db:"source_id"`
+	TargetType   string     `db:"target_type"`
+	TargetID     string     `db:"target_id"`
+	RelationKind string     `db:"relation_kind"`
+	EdgeClass    string     `db:"edge_class"` // "asserted" | "inferred"
+	Confidence   *float64   `db:"confidence"`
+	ValidAt      *time.Time `db:"valid_at"`
+	InvalidAt    *time.Time `db:"invalid_at"`
+	CreatedByJob *string    `db:"created_by_job"`
+
+	// CreatedBy is the actor ID of whoever most recently asserted, proposed,
+	// or observed this edge via [RelationStore.MCPAssertRelation],
+	// [RelationStore.MCPProposeRelation], or [RelationStore.MCPObserveRelation]
+	// (01a0e3bc-8) — the human/agent counterpart to CreatedByJob's own
+	// system/job attribution. Nil when no caller identity was available (a
+	// system-initiated call using a plain context.Context) or the edge
+	// predates this column. Overwritten on every re-assert of the same
+	// (source, target, relation_kind, edge_class) tuple, same as
+	// CreatedByJob's own existing conflict behavior on this table — the most
+	// recent asserter is who a credential surface should point at, not
+	// necessarily whoever asserted it first.
+	CreatedBy *string `db:"created_by"`
+
+	Attributes json.RawMessage `db:"attributes"`
+	CreatedAt  time.Time       `db:"created_at"`
+	UpdatedAt  time.Time       `db:"updated_at"`
 
 	// LastConfirmedAt is the most recent time [RelationStore.SweepStructural]
 	// walked this edge and found both its source and target alive. It is nil
@@ -119,14 +133,14 @@ func (s *RelationStore) setSignalDeps(store *WebhookStore, pool *workerPool, bro
 
 // Column order constants — scan order must match SELECT order exactly.
 const relationKindColumns = `id, type_name, label, reverse_label, mode, directional, weighted, type_pairs, attributes, created_at, updated_at`
-const relationColumns = `id, source_type, source_id, target_type, target_id, relation_kind, edge_class, confidence, valid_at, invalid_at, created_by_job, attributes, created_at, updated_at, last_confirmed_at`
+const relationColumns = `id, source_type, source_id, target_type, target_id, relation_kind, edge_class, confidence, valid_at, invalid_at, created_by_job, created_by, attributes, created_at, updated_at, last_confirmed_at`
 
 // relationInsertColumns excludes last_confirmed_at — it is only ever set by
 // [RelationStore.SweepStructural]'s own confirm-write, never on insert or
 // re-assert (an INSERT ... ON CONFLICT re-assert also leaves an existing
 // row's last_confirmed_at untouched, since it is absent from both the
 // column list and the ON CONFLICT SET clause below).
-const relationInsertColumns = `id, source_type, source_id, target_type, target_id, relation_kind, edge_class, confidence, valid_at, invalid_at, created_by_job, attributes, created_at, updated_at`
+const relationInsertColumns = `id, source_type, source_id, target_type, target_id, relation_kind, edge_class, confidence, valid_at, invalid_at, created_by_job, created_by, attributes, created_at, updated_at`
 
 // CreateRelationTables creates the smeldr_relation_kinds and smeldr_relations tables and
 // their indexes if they do not already exist. Idempotent — safe to call on every boot.
@@ -166,6 +180,7 @@ CREATE TABLE IF NOT EXISTS smeldr_relations (
     valid_at        TIMESTAMPTZ,
     invalid_at      TIMESTAMPTZ,
     created_by_job  TEXT,
+    created_by      TEXT,
     attributes      TEXT NOT NULL DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL,
     updated_at      TIMESTAMPTZ NOT NULL,
@@ -174,6 +189,9 @@ CREATE TABLE IF NOT EXISTS smeldr_relations (
 		return err
 	}
 	if err := EnsureColumn(ctx, db, "smeldr_relations", "last_confirmed_at", "TIMESTAMPTZ"); err != nil {
+		return err
+	}
+	if err := EnsureRelationCreatedByColumn(ctx, db); err != nil {
 		return err
 	}
 
@@ -196,6 +214,20 @@ CREATE INDEX IF NOT EXISTS idx_relations_governance_temporal
 		return err
 	}
 
+	return nil
+}
+
+// EnsureRelationCreatedByColumn adds smeldr_relations' created_by column
+// (01a0e3bc-8) on pre-existing SQLite databases that predate it. Fresh
+// installs already have the column via [CreateRelationTables]'s own CREATE
+// TABLE statement (which calls this too, so it is idempotent either way);
+// this only upgrades a database created before this column existed. Same
+// one-column [EnsureColumn] pattern as [EnsureDecisionTitleColumn]/
+// [EnsureAmendmentBodyColumn].
+func EnsureRelationCreatedByColumn(ctx context.Context, db DB) error {
+	if err := EnsureColumn(ctx, db, "smeldr_relations", "created_by", "TEXT"); err != nil {
+		return fmt.Errorf("smeldr: EnsureRelationCreatedByColumn: %w", err)
+	}
 	return nil
 }
 
@@ -404,6 +436,20 @@ func canonicalizeNonDirectional(kind RelationKindDef, edge RelationEdge) Relatio
 func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (RelationEdge, error) {
 	now := time.Now().UTC()
 
+	// 01a0e3bc-8: record the human/agent caller, same smeldrCtxAccessor
+	// type-assertion dynamic.go/state.go already use for this exact
+	// situation — ctx is a plain context.Context here, but every real
+	// MCP-tool call site passes a smeldr.Context through unchanged.
+	// System-initiated calls (a plain context.Context) leave CreatedBy nil.
+	type smeldrCtxAccessor interface {
+		User() User
+	}
+	if sc, ok := ctx.(smeldrCtxAccessor); ok {
+		if actorID := sc.User().ID; actorID != "" {
+			edge.CreatedBy = &actorID
+		}
+	}
+
 	if kind, ok := s.GetKind(edge.RelationKind); ok {
 		if err := validateTypePairs(kind, edge); err != nil {
 			return RelationEdge{}, err
@@ -448,7 +494,7 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO smeldr_relations (`+relationInsertColumns+`)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 ON CONFLICT (id) DO UPDATE SET
     source_type    = EXCLUDED.source_type,
     source_id      = EXCLUDED.source_id,
@@ -460,13 +506,14 @@ ON CONFLICT (id) DO UPDATE SET
     valid_at       = EXCLUDED.valid_at,
     invalid_at     = EXCLUDED.invalid_at,
     created_by_job = EXCLUDED.created_by_job,
+    created_by     = EXCLUDED.created_by,
     attributes     = EXCLUDED.attributes,
     updated_at     = EXCLUDED.updated_at`,
 		edge.ID, edge.SourceType, edge.SourceID,
 		edge.TargetType, edge.TargetID,
 		edge.RelationKind, edge.EdgeClass,
 		edge.Confidence, edge.ValidAt, edge.InvalidAt,
-		edge.CreatedByJob, string(edge.Attributes),
+		edge.CreatedByJob, edge.CreatedBy, string(edge.Attributes),
 		edge.CreatedAt, edge.UpdatedAt,
 	)
 	if err != nil {
@@ -781,6 +828,7 @@ func scanEdge(rows *sql.Rows) (RelationEdge, error) {
 	var e RelationEdge
 	var confidence sql.NullFloat64
 	var createdByJob sql.NullString
+	var createdBy sql.NullString
 	var attributes string
 	err := rows.Scan(
 		&e.ID, &e.SourceType, &e.SourceID,
@@ -788,6 +836,7 @@ func scanEdge(rows *sql.Rows) (RelationEdge, error) {
 		&e.RelationKind, &e.EdgeClass,
 		&confidence, nullTimeScanner{dst: &e.ValidAt}, nullTimeScanner{dst: &e.InvalidAt},
 		&createdByJob,
+		&createdBy,
 		&attributes,
 		scanDest(&e.CreatedAt), scanDest(&e.UpdatedAt),
 		nullTimeScanner{dst: &e.LastConfirmedAt},
@@ -800,6 +849,9 @@ func scanEdge(rows *sql.Rows) (RelationEdge, error) {
 	}
 	if createdByJob.Valid {
 		e.CreatedByJob = &createdByJob.String
+	}
+	if createdBy.Valid {
+		e.CreatedBy = &createdBy.String
 	}
 	e.Attributes = json.RawMessage(attributes)
 	return e, nil
@@ -1126,12 +1178,12 @@ func (s *RelationStore) applyRelationDiff(ctx context.Context, db edgeExecer, to
 			e.Attributes = json.RawMessage("{}")
 		}
 		_, err := exec.ExecContext(ctx,
-			"INSERT INTO smeldr_relations ("+relationInsertColumns+") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+			"INSERT INTO smeldr_relations ("+relationInsertColumns+") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
 			e.ID, e.SourceType, e.SourceID,
 			e.TargetType, e.TargetID,
 			e.RelationKind, e.EdgeClass,
 			e.Confidence, e.ValidAt, e.InvalidAt,
-			e.CreatedByJob, string(e.Attributes),
+			e.CreatedByJob, e.CreatedBy, string(e.Attributes),
 			e.CreatedAt, e.UpdatedAt,
 		)
 		if err != nil {
