@@ -334,6 +334,28 @@ func RegisterDecisionDomainAdminRole(ctx context.Context, rs *RoleStore) error {
 	})
 }
 
+// RegisterDecisionStewardRole defines (or updates) the "decision-steward"
+// role: Operations: ["review", "approve"], ScopeMode: global, TrustLevel: 0
+// (design/grants-and-delegate-v1.md §2). A plain, instance-wide governance
+// role, distinct from [RegisterDecisionDomainAdminRole]'s per-Domain dynamic
+// scope: a holder can review/approve any Decision, not just ones under a
+// specific Domain edge. Exists so admin's own Operations bundle can drop
+// "review"/"approve" (governance-model.md §4's own rule: those two verbs are
+// reserved for the Plan governance loop, not a generic admin-tier grant)
+// without breaking whoever currently ratifies Decisions on the strength of
+// holding admin alone — they hold this role instead, via an explicit
+// grant_role call. Defining the role is idempotent and does not itself
+// grant it to anyone; RoleStore.DefineRole updates the role in place if one
+// with this name is already registered.
+func RegisterDecisionStewardRole(ctx context.Context, rs *RoleStore) error {
+	return rs.DefineRole(ctx, RoleDefinition{
+		Name:       "decision-steward",
+		Operations: []string{"review", "approve"},
+		ScopeMode:  ScopeGlobal,
+		TrustLevel: 0,
+	})
+}
+
 // authorizeDecisionScope checks whether actorID holds the role D34 maps from
 // item's Scope field, via scopeRoles. It is layered alongside — not instead
 // of — validateTransition's generic RequiredOperation gate: RequiredOperation

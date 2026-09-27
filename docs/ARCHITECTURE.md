@@ -302,6 +302,11 @@ smeldr.dev/
 │                     explains why it stays empty. decisionScopeRoles/authorizeDecisionScope
 │                     themselves are unchanged code, left in place as a no-op layered check
 │                     (Amendment pending, decide-decision-scope-role-policy)
+│                     RegisterDecisionStewardRole(ctx, *RoleStore) error — defines the
+│                     "decision-steward" role (Operations: ["review", "approve"],
+│                     ScopeMode: global, TrustLevel: 0): instance-wide Decision review/ratify
+│                     authority, granted explicitly via grant_role rather than bundled into
+│                     admin's own Operations (design/grants-and-delegate-v1.md §2, 01a0e3f9)
 ├── authority.go      Rule, AuthorityStub content types embedding Node — the Authority mechanism
 │                     (decision-governance-model design doc §4): Rule is the first subtype of the
 │                     conceptual Authority supertype (Decision/Rule/Principle/Standard/Precedent);

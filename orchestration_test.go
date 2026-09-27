@@ -1618,6 +1618,57 @@ func TestRegisterDecisionDomainAdminRole_Idempotent(t *testing.T) {
 	}
 }
 
+func TestRegisterDecisionStewardRole_RoundTrip(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := RegisterDecisionStewardRole(ctx, store); err != nil {
+		t.Fatalf("RegisterDecisionStewardRole: %v", err)
+	}
+
+	var ops, scopeMode string
+	var trustLevel int
+	if err := db.QueryRowContext(ctx,
+		`SELECT operations, scope_mode, trust_level
+			FROM smeldr_roles WHERE name = 'decision-steward'`,
+	).Scan(&ops, &scopeMode, &trustLevel); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !strings.Contains(ops, "review") || !strings.Contains(ops, "approve") {
+		t.Errorf("operations: got %q, want to contain both review and approve", ops)
+	}
+	if scopeMode != string(ScopeGlobal) {
+		t.Errorf("scope_mode: got %q, want %q", scopeMode, ScopeGlobal)
+	}
+	if trustLevel != 0 {
+		t.Errorf("trust_level: got %d, want 0", trustLevel)
+	}
+}
+
+func TestRegisterDecisionStewardRole_Idempotent(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := RegisterDecisionStewardRole(ctx, store); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := RegisterDecisionStewardRole(ctx, store); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_roles WHERE name = 'decision-steward'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count: got %d, want 1 (no duplicate on re-register)", count)
+	}
+}
+
 func TestRegisterOrchestrationRelationKinds_UpsertError(t *testing.T) {
 	store := mockRelationStore(&errExecDB{})
 	err := RegisterOrchestrationRelationKinds(context.Background(), store)

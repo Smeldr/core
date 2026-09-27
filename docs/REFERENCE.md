@@ -615,6 +615,28 @@ by a `ScopeGlobal`-holding role — there is no dynamic anchor for it to match.
 is deliberately left unpopulated — this mechanism was chosen over it during
 policy review; see the map's own doc comment for the full reasoning.
 
+### Decision-steward role (grants-and-delegate-v1)
+
+`RegisterDecisionStewardRole` (called automatically when `ENABLE_GOVERNANCE`
+is set) defines a single `"decision-steward"` role
+(`Operations: ["review", "approve"]`, `ScopeMode: global`, `TrustLevel: 0`) —
+a plain, instance-wide grant, unlike `decision-domain-admin`'s per-Domain
+dynamic scope above. A holder can review/ratify any Decision on the
+instance:
+
+```go
+app.RoleStore().Grant(ctx, smeldr.RoleGrant{
+    TokenID: tokenID, RoleName: "decision-steward",
+})
+```
+
+This role exists so `admin`'s own `Operations` bundle can drop `review`/
+`approve` (reserved for the Plan governance loop, not a generic admin-tier
+grant, per `design/governance-model.md` §4) without breaking whoever
+currently ratifies Decisions on the strength of holding `admin` alone —
+they hold `decision-steward` instead, via an explicit grant. Defining the
+role does not itself grant it to anyone.
+
 ### Authority Check (decision-governance-model.md §4)
 
 Check is an enforced *precondition* on a Decision's `proposed → ratified`

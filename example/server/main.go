@@ -329,6 +329,12 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 	}
 
+	if cfg.EnableGovernance {
+		if err := smeldr.RegisterDecisionStewardRole(context.Background(), roleStore); err != nil {
+			return ServerResult{}, fmt.Errorf("register decision-steward role: %w", err)
+		}
+	}
+
 	if cfg.EnableRelations && cfg.EnableAuthority {
 		if err := smeldr.RegisterAuthorityRelationKinds(context.Background(), rs); err != nil {
 			return ServerResult{}, fmt.Errorf("register authority relation kinds: %w", err)
