@@ -1454,6 +1454,13 @@ func (a *App) Handler() http.Handler {
 	if a.provenanceStore != nil && a.relationStore != nil {
 		a.relationStore.setProvenanceStore(a.provenanceStore)
 	}
+	if a.relationStore != nil {
+		// Unconditional, unlike the provenanceStore wiring above: all three
+		// deps are individually nil-safe (dispatchTransitionWebhook's own
+		// contract) — emitConflictDetectedSignal (relations.go, 01a0dd64-2)
+		// simply skips whichever notification channel isn't wired.
+		a.relationStore.setSignalDeps(a.webhookStore, a.webhookPool, a.eventBroadcaster)
+	}
 	if a.provenanceStore != nil && a.governance != nil {
 		a.governance.setProvenanceStore(a.provenanceStore)
 	}

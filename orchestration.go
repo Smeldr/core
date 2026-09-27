@@ -301,6 +301,13 @@ type Decision struct {
 // validateTransition and its own operation-based check.
 var decisionScopeRoles = map[string]string{}
 
+// decisionRatifyOperation is the operation orchDecisionFlow's own
+// proposed→ratified transition requires (RequiredOperation, D63/D64). Shared
+// with [emitConflictDetectedSignal] (relations.go) so a conflict-detected
+// Signal's own receiver names the same operation the actual ratification
+// gate checks, without duplicating the literal string in two files (01a0dd64-2).
+const decisionRatifyOperation = "approve"
+
 // RegisterDecisionDomainAdminRole defines (or updates) the
 // "decision-domain-admin" role: Operations: ["approve"], scoped dynamically
 // via the belongs_to_domain relation kind (D71/D72,
@@ -1159,12 +1166,12 @@ func orchDecisionFlow() StateFlow {
 			// RoleGranted) to RequiredOperation: "approve" (operation match
 			// via Authorized) by D63/D64, Amendment A309 — see
 			// validateTransition's own godoc for the mechanism change.
-			{From: "proposed", To: "ratified", RequiredOperation: "approve", Strict: true},
+			{From: "proposed", To: "ratified", RequiredOperation: decisionRatifyOperation, Strict: true},
 			{From: "proposed", To: "archived"},
 			{From: "ratified", To: "pending-re-evaluation"},
-			{From: "pending-re-evaluation", To: "ratified", RequiredOperation: "approve", Strict: true},
-			{From: "pending-re-evaluation", To: "superseded", RequiredOperation: "approve", Strict: true},
-			{From: "ratified", To: "superseded", RequiredOperation: "approve", Strict: true},
+			{From: "pending-re-evaluation", To: "ratified", RequiredOperation: decisionRatifyOperation, Strict: true},
+			{From: "pending-re-evaluation", To: "superseded", RequiredOperation: decisionRatifyOperation, Strict: true},
+			{From: "ratified", To: "superseded", RequiredOperation: decisionRatifyOperation, Strict: true},
 			{From: "superseded", To: "archived"},
 		},
 		Triggers: []TransitionTrigger{

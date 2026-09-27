@@ -90,12 +90,31 @@ type RelationStore struct {
 	// order (T149). Nil is a normal, fully-supported state: relation assertion
 	// works identically either way, simply without a provenance record.
 	provenanceStore ProvenanceStore
+
+	// webhookStore, webhookPool, and eventBroadcaster back
+	// emitConflictDetectedSignal's own dispatchTransitionWebhook call
+	// (01a0dd64-2) — injected at App.Handler() time, mirroring
+	// provenanceStore's own wiring. All three are individually nil-safe
+	// (dispatchTransitionWebhook's own contract), unlike provenanceStore,
+	// so setSignalDeps is wired unconditionally rather than gated.
+	webhookStore     *WebhookStore
+	webhookPool      *workerPool
+	eventBroadcaster *eventBroadcaster
 }
 
 // setProvenanceStore wires store for provenance recording on future edge
 // assertions. Unexported — called from App.Handler(), not part of the public API.
 func (s *RelationStore) setProvenanceStore(store ProvenanceStore) {
 	s.provenanceStore = store
+}
+
+// setSignalDeps wires the dependencies emitConflictDetectedSignal needs to
+// dispatch a webhook/event-stream notification for each Signal it writes.
+// Unexported — called from App.Handler(), not part of the public API.
+func (s *RelationStore) setSignalDeps(store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster) {
+	s.webhookStore = store
+	s.webhookPool = pool
+	s.eventBroadcaster = broadcaster
 }
 
 // Column order constants — scan order must match SELECT order exactly.
@@ -455,7 +474,60 @@ ON CONFLICT (id) DO UPDATE SET
 	}
 
 	s.recordAssertProvenance(ctx, edge)
+	if edge.RelationKind == "contradicts" {
+		s.emitConflictDetectedSignal(ctx, edge)
+	}
 	return edge, nil
+}
+
+// emitConflictDetectedSignal fires D85's conflict-detected structural Signal
+// whenever a contradicts edge is written — via MCPAssertRelation,
+// MCPProposeRelation, or MCPObserveRelation, all of which funnel through
+// insertEdge above; a system-witnessed contradiction is just as real as a
+// human- or agent-asserted one, so all three edge classes fire this,
+// deliberately not narrowed to asserted/inferred alone (01a0dd64-2,
+// architect-approved).
+//
+// Two rows are written, one per side (D86 point 3: two ordinary
+// single-receiver rows rather than a second subject-column pair), each
+// naming the *other* Decision as subject_id — the item this Signal's own
+// receiver did not just author the contradiction on. receiver is
+// decisionRatifyOperation for both rows: contradicts is always Decision↔
+// Decision (enforced by its own TypePairs), so both sides need the same
+// ratification authority. This is a known, deliberately deferred
+// simplification — it broadcasts to every holder of that operation
+// globally, not narrowed to either Decision's own Domain, since no
+// per-Domain Signal channel convention exists yet (signal-patterns-v1.md
+// §5 names this as its own future design pass, not this Task's scope).
+//
+// Best-effort and fail-open on the dispatch half only, matching
+// recordAuthorizationRequiredSignal's own contract: a DB error here is
+// logged, never returned, since a failed structural-Signal emission must
+// never fail the relation assertion itself.
+func (s *RelationStore) emitConflictDetectedSignal(ctx context.Context, edge RelationEdge) {
+	pairs := [2]struct{ subjectID string }{{edge.TargetID}, {edge.SourceID}}
+	for _, pair := range pairs {
+		id := NewID()
+		now := time.Now().UTC()
+		message := fmt.Sprintf("Decision %s contradicts Decision %s", edge.SourceID, edge.TargetID)
+		_, err := s.db.ExecContext(ctx,
+			`INSERT INTO smeldr_signals
+				(id, slug, status, created_at, updated_at, sender, receiver, signal_type, message, task_ref, sequence,
+				 subject_type, subject_id)
+			VALUES
+				($1, $2, 'pending', $3, $4, 'system', $5, 'conflict-detected', $6, '', 0,
+				 'Decision', $7)`,
+			id, id, now, now, decisionRatifyOperation, message, pair.subjectID,
+		)
+		if err != nil {
+			slog.WarnContext(ctx, "smeldr: emitConflictDetectedSignal: insert failed",
+				"edge_id", edge.ID, "subject_id", pair.subjectID, "error", err)
+			continue
+		}
+		dispatchTransitionWebhook(ctx, s.webhookStore, s.webhookPool, s.eventBroadcaster, decisionRatifyOperation, "signal.created", transitionWebhookData{
+			Type: "signal", ID: id, Slug: id, ToState: "pending",
+		})
+	}
 }
 
 // recordAssertProvenance records a ProvenanceRecord for a successfully asserted

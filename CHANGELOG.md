@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.96.0] — 2026-09-27
+
+### Added
+
+A new structural Signal, `conflict-detected`, now fires automatically whenever a `contradicts` relation edge is written between two Decisions — via `assert_relation`, `propose_relation`, or `observe_relation` (all three funnel through the same internal write path, so all three trigger it). Two Signal rows are written, one per side of the contradiction, each naming the *other* Decision as its own `subject_id` — so each affected Decision's own steward sees a link to the specific Decision it conflicts with, not just a generic notice. Both rows are addressed to `receiver: "approve"` (the same operation that already gates a Decision's own `proposed→ratified` transition), a deliberate v1 simplification: this broadcasts to everyone holding that operation globally rather than narrowing to the specific Domain each Decision belongs to — a known, explicitly deferred limitation, not yet built. No exported Go symbol was added (the new `RelationStore` fields and functions are unexported); this is a MINOR bump because it is a genuine new consumer-visible behavior — existing callers of `assert_relation`/`propose_relation`/`observe_relation` now see new Signals appear automatically where they didn't before, even though nothing about their own call shape changed.
+
+---
+
 ## [1.95.1] — 2026-09-26
 
 ### Fixed
