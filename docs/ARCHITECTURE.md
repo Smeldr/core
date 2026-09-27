@@ -831,7 +831,19 @@ smeldr.dev/
 │                     unchanged: a DB error still returns (false, err) before this predicate is ever
 │                     evaluated. No sweep/cleanup job — an expired grant simply stops matching at read
 │                     time, same reasoning invalid_at-filtered relations never needed one either.
-│                     (design/grants-and-delegate-v1.md §3.1/3.2, 01a0e3f9-3)
+│                     (design/grants-and-delegate-v1.md §3.1/3.2, 01a0e3f9-3);
+│                     RoleStore.GetRole(ctx, name) (RoleDefinition, error) — read-only counterpart
+│                     to DefineRole, added so a caller (smeldr.dev/mcp's delegate_item tool) can
+│                     check a delegator against every operation a role actually holds before
+│                     granting it, not just a single caller-supplied word (the naive single-
+│                     operation check is a real privilege-escalation path: operation="read",
+│                     role="admin" would pass it while handing out full admin). Wraps ErrNotFound
+│                     on a missing role, same convention Grant's own role lookup uses. New
+│                     seedToolPolicies row: {"delegate_item", "read"} — deliberately coarse floor
+│                     gate only, same "not module-generated" shape as get_stewardship_inbox/
+│                     get_sweep_run; the real per-item, per-operation check happens inside the
+│                     mcp-side handler via Authorized, looped over GetRole's own Operations, not
+│                     at this tool-dispatch layer. (design/grants-and-delegate-v1.md §3.3, 01a0e3f9-4)
 ├── auth.go           AuthFunc interface, BearerHMAC, CookieSession, BasicAuth, AnyAuth, SignToken,
 │                     VerifyBearerToken(r, secret, store *TokenStore);
 │                     TokenRecord, TokenStore, NewTokenStore (Amendment A66);

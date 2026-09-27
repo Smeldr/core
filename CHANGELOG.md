@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.100.0] — 2026-09-27
+
+### Added
+
+New exported function `RoleStore.GetRole(ctx context.Context, name string) (RoleDefinition, error)` provides read-only access to a role's full definition, supporting the higher-level `delegate_item` mechanism (which ships in smeldr.dev/mcp as a separate release). The function returns the named role's complete specification: Operations list, ScopeMode, ScopeRelationKind, ScopeDirection, TrustLevel, and AllowSelfApproval, matching the internal convention that `DefineRole` already uses; when no role with that name exists, it returns an error wrapping the existing `ErrNotFound` sentinel. This function closes a real privilege-escalation vulnerability discovered during design review: the initial `delegate_item` design checked only a single caller-supplied operation word against the delegator's authority before granting an entire role to the delegate, but roles bundle multiple operations (e.g. both "review" and "approve"), so checking only one arbitrary operation would have allowed a delegator holding a weak operation like "read" to grant a delegate a role containing much stronger operations they don't actually hold. With `GetRole`, callers can now loop `RoleStore.Authorized` over every operation in the named role's Operations list and deny the entire delegation if the delegator doesn't hold every operation for the target. This correctly enforces "a grant's authority must never exceed what the grantor actually holds" for the complete role being handed out. Additionally, a new `smeldr_tool_policies` seed row `{"delegate_item", "read"}` was added to `seedToolPolicies`, providing the coarse tool-dispatch-level authorization floor for the `delegate_item` MCP tool; the actual per-item per-operation authorization is delegated to `GetRole` + `Authorized` inside that tool's handler in smeldr.dev/mcp. Four new tests cover `GetRole` success, `NotFound` return, query errors, and unmarshal errors; the existing `TestMigrateGovernance_ToolPoliciesSeed` table-driven test gained a new case for the `delegate_item` policy row. Full test suite passes with `-race` at 96.2% coverage. This is a MINOR version bump (v1.99.0 to v1.100.0): one new exported function, fully additive, no existing behavior changed for any existing caller.
+
+---
+
 ## [1.99.0] — 2026-09-27
 
 ### Added

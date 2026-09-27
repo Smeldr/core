@@ -364,6 +364,15 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// moduleForAdminList("findings") to succeed, which it never will
 		// for a type with no create_*/update_* tools by design.
 		{"list_findings", "read"},
+		// Delegate tool (Author+, smeldr.dev/mcp, grants-and-delegate-v1
+		// §3.3, 01a0e3f9-4). Same "not module-generated" reason as the six
+		// rows above — delegate_item reads/writes RoleStore directly, no
+		// MCPModule backs it. Deliberately coarse: this is only the floor
+		// gate (Author+ can attempt the call at all) — the real per-item,
+		// per-operation check is Authorized(), inside the handler, against
+		// the actual target and every operation the named role holds, not
+		// this tool-dispatch-level policy.
+		{"delegate_item", "read"},
 	}
 
 	for _, p := range policies {
@@ -763,6 +772,45 @@ func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
 		}
 	}
 	return nil
+}
+
+// GetRole returns the role definition named name — the read-only counterpart
+// to [RoleStore.DefineRole], added for a caller that must inspect a role's own
+// Operations before granting it (design/grants-and-delegate-v1.md §3.3,
+// 01a0e3f9-4: a delegator must be checked against every operation the role
+// being delegated actually holds, not just a caller-supplied word, or the
+// check can be trivially bypassed by naming an operation the delegator holds
+// alongside a role that holds much more).
+//
+// Returns an error wrapping [ErrNotFound] when no role with that name exists.
+func (s *RoleStore) GetRole(ctx context.Context, name string) (RoleDefinition, error) {
+	var (
+		def          RoleDefinition
+		opsJSON      string
+		scopeMode    string
+		relKind      sql.NullString
+		relDir       sql.NullString
+		selfApproval int
+	)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT name, operations, scope_mode, scope_relation_kind, scope_direction,
+		        trust_level, allow_self_approval
+		   FROM smeldr_roles WHERE name = $1`, name,
+	).Scan(&def.Name, &opsJSON, &scopeMode, &relKind, &relDir, &def.TrustLevel, &selfApproval)
+	if err == sql.ErrNoRows {
+		return RoleDefinition{}, fmt.Errorf("smeldr: GetRole: role %q: %w", name, ErrNotFound)
+	}
+	if err != nil {
+		return RoleDefinition{}, fmt.Errorf("smeldr: GetRole: query %q: %w", name, err)
+	}
+	if err := json.Unmarshal([]byte(opsJSON), &def.Operations); err != nil {
+		return RoleDefinition{}, fmt.Errorf("smeldr: GetRole: unmarshal operations: %w", err)
+	}
+	def.ScopeMode = ScopeMode(scopeMode)
+	def.ScopeRelationKind = relKind.String
+	def.ScopeDirection = relDir.String
+	def.AllowSelfApproval = selfApproval != 0
+	return def, nil
 }
 
 // Grant binds a token to a role with concrete scope data and returns the grant ID.

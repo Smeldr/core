@@ -674,6 +674,19 @@ This is deliberately just the storage/enforcement primitive — a default
 authority check belong to the higher-level Delegate mechanism
 (`delegate_item`, grants-and-delegate-v1 §3.3), a separate, later piece.
 
+`RoleStore.GetRole(ctx, name) (RoleDefinition, error)` is the read-only
+counterpart to `DefineRole`, added for exactly this Delegate mechanism: a
+caller granting a role on someone else's behalf must check the delegator
+against *every* operation the named role actually holds, not just a single
+caller-supplied word — checking only one word is a real privilege-escalation
+path (a delegator holding nothing but `read` could otherwise name
+`operation: "read"` alongside `role: "admin"` and pass a naive check while
+handing out full admin). Returns an error wrapping `ErrNotFound` when no role
+with that name exists. `delegate_item` itself — the MCP tool that puts
+`GetRole`, the per-operation `Authorized` loop, and `Grant` together with a
+default/maximum expiry — ships in `smeldr.dev/mcp`, not here; see that
+module's own docs.
+
 ### Authority Check (decision-governance-model.md §4)
 
 Check is an enforced *precondition* on a Decision's `proposed → ratified`

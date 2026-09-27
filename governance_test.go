@@ -358,6 +358,7 @@ func TestMigrateGovernance_ToolPoliciesSeed(t *testing.T) {
 		{"grant_role", "administer"},
 		{"list_grants", "administer"},
 		{"revoke_grant", "administer"},
+		{"delegate_item", "read"},
 	}
 	for _, c := range cases {
 		var op string
@@ -793,6 +794,79 @@ func TestDefineRole_InsertError(t *testing.T) {
 	store := NewRoleStore(wrapped)
 	if err := store.DefineRole(ctx, RoleDefinition{Name: "x", Operations: []string{"read"}}); err == nil {
 		t.Fatal("expected error from failing UPSERT, got nil")
+	}
+}
+
+// --- GetRole tests (design/grants-and-delegate-v1.md §3.3, 01a0e3f9-4) ---
+
+func TestGetRole_Found(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "decision-steward", Operations: []string{"review", "approve"},
+		ScopeMode: ScopeGlobal, TrustLevel: 0,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+
+	got, err := store.GetRole(ctx, "decision-steward")
+	if err != nil {
+		t.Fatalf("GetRole: %v", err)
+	}
+	if got.Name != "decision-steward" {
+		t.Errorf("Name: got %q, want %q", got.Name, "decision-steward")
+	}
+	if len(got.Operations) != 2 || got.Operations[0] != "review" || got.Operations[1] != "approve" {
+		t.Errorf("Operations: got %#v, want [review approve]", got.Operations)
+	}
+	if got.ScopeMode != ScopeGlobal {
+		t.Errorf("ScopeMode: got %q, want %q", got.ScopeMode, ScopeGlobal)
+	}
+}
+
+func TestGetRole_NotFound(t *testing.T) {
+	store := NewRoleStore(setupGovernanceDB(t))
+	_, err := store.GetRole(context.Background(), "no-such-role")
+	if err == nil {
+		t.Fatal("expected ErrNotFound for unknown role")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound in chain, got: %v", err)
+	}
+}
+
+func TestGetRole_QueryError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	wrapped := &govQueryRowFailDB{DB: db, failOn: "FROM smeldr_roles WHERE name"}
+	store := NewRoleStore(wrapped)
+	_, err := store.GetRole(context.Background(), "admin")
+	if err == nil {
+		t.Fatal("expected error from failing query")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Error("a query failure must not be reported as ErrNotFound")
+	}
+}
+
+func TestGetRole_UnmarshalError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := store.DefineRole(ctx, RoleDefinition{Name: "corrupt-role", Operations: []string{"read"}}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`UPDATE smeldr_roles SET operations=']bad' WHERE name='corrupt-role'`,
+	); err != nil {
+		t.Fatalf("corrupt operations: %v", err)
+	}
+
+	_, err := store.GetRole(ctx, "corrupt-role")
+	if err == nil {
+		t.Fatal("expected error from corrupt operations JSON")
 	}
 }
 

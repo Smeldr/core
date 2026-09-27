@@ -591,6 +591,19 @@ generic admin-tier grant, per `design/governance-model.md` §4, as of
 Decisions must hold `decision-steward` via an explicit grant.
 See [docs/REFERENCE.md](docs/REFERENCE.md#decision-steward-role-grants-and-delegate-v1).
 
+**Delegating a role to someone else, time-boxed** — `delegate_item` (Author+
+role, `smeldr.dev/mcp`) lets any token hand off a *subset* of its own
+authority to another token, scoped to one item, for a limited time (default
+14 days, capped at 90) — unlike `grant_role`, which is Admin-only and hands
+out standing authority with no expiry. Takes `token_id` (the delegate),
+`role` (an existing role name), `operation` (the operation this delegation
+is for — must be one of `role`'s own operations), `type`+`id` (the target
+item), and an optional `expires_in_days`. Before granting, the tool checks
+that the caller (the delegator) is itself authorized for *every* operation
+`role` carries, against that same target — not just the named `operation` —
+so a token can never hand out more authority than it actually holds.
+See [docs/REFERENCE.md](docs/REFERENCE.md#time-boxed-grants-expiresat-grants-and-delegate-v1-3132).
+
 ### Webhook management tools (Admin role required)
 
 These tools are available when the site has `App.Webhooks(store)` configured:
