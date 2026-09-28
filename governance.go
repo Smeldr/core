@@ -373,6 +373,17 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// the actual target and every operation the named role holds, not
 		// this tool-dispatch-level policy.
 		{"delegate_item", "read"},
+		// Withdraw a delegation (Author+, smeldr.dev/mcp,
+		// workspace-delegate-region-v1.md §0 F3, 01a0e3f9-5). Same "not
+		// module-generated" reason as delegate_item above. Deliberately
+		// coarse: the real check — is the caller this grant's own recorded
+		// creator, and is it actually a time-boxed delegation — is inside
+		// the handler, against the actual grant.
+		{"withdraw_delegation", "read"},
+		// List every role's own definition (Author+, smeldr.dev/mcp,
+		// workspace-delegate-region-v1.md §0 F4, 01a0e3f9-5). Read-only;
+		// same "not module-generated" reason as the rows above.
+		{"list_roles", "read"},
 	}
 
 	for _, p := range policies {
@@ -494,6 +505,22 @@ type RoleGrant struct {
 	ExpiresAt *time.Time
 	// CreatedAt is the RFC3339 creation timestamp. Populated by ListGrants.
 	CreatedAt string
+	// Grantor is the token ID recorded on the earliest smeldr_governance_audit
+	// row for this grant's own creation ("action" = "grant", "target_kind" =
+	// "grant", "target_id" = this grant's own ID) — the actor who originally
+	// created it. Empty when no audit trail names one, e.g. this RoleStore was
+	// built directly on [migrateGovernance] without also wiring an audit store
+	// (only [App.Governance] pairs the two unconditionally).
+	//
+	// Populated by [RoleStore.GetGrant] (fails closed: an error there, not a
+	// silently empty Grantor, when the lookup itself fails) and, best-effort,
+	// by [RoleStore.ListGrants] (fails open: left empty rather than failing the
+	// whole call when the enrichment query can't run). Empty on input to Grant
+	// and never written by it — added for smeldr.dev/mcp's withdraw_delegation
+	// tool (design/workspace-delegate-region-v1.md §0 F3, 01a0e3f9-5), which
+	// must verify the caller is the grant's own creator before letting them
+	// revoke it.
+	Grantor string
 }
 
 // AuthTarget identifies the content item being acted on in an [RoleStore.Authorized]
@@ -814,10 +841,26 @@ func (s *RoleStore) GetRole(ctx context.Context, name string) (RoleDefinition, e
 }
 
 // Grant binds a token to a role with concrete scope data and returns the grant ID.
-// If an identical grant already exists (same token, role, and anchor) the existing
-// grant ID is returned without inserting a duplicate. The WHERE NOT EXISTS guard
-// is required because SQLite allows multiple NULL values in a UNIQUE constraint,
-// making INSERT OR IGNORE unreliable for global-scope (null anchor) grants.
+// If an identical grant already exists (same token, role, anchor, and static scope
+// list) the existing grant ID is returned without inserting a duplicate. The WHERE
+// NOT EXISTS guard is required because SQLite allows multiple NULL values in a
+// UNIQUE constraint, making INSERT OR IGNORE unreliable for global-scope (null
+// anchor) grants.
+//
+// The idempotency key includes ScopeStatic (design/workspace-delegate-region-v1.md
+// §0 F2, 01a0e3f9-5): a caller granting the same (token, role, anchor) pair with a
+// different ScopeStatic list — e.g. smeldr.dev/mcp's delegate_item tool delegating
+// the same static-scope role to the same recipient for two different items — gets
+// two separate grant rows, each scoped to its own item, rather than the second call
+// silently resolving to the first grant's row and leaving the second item
+// unauthorized. A caller whose ScopeStatic never varies (every global- or
+// dynamic-scope grant, where it is always the zero value "[]") sees no behavior
+// change: the key's new component is identical on every call, so the same grant
+// still dedupes to one row. ScopeStatic is compared as its serialized JSON text, so
+// element order matters — delegate_item always writes a single-element list, which
+// has no ordering to vary; a caller passing a multi-element list in different
+// orders across calls would not dedupe against itself, which is an acceptable
+// narrowing (not a widening) of what counts as "identical."
 //
 // Returns an error when grant.TokenID or grant.RoleName is empty, the named role
 // does not exist, or any DB operation fails.
@@ -878,26 +921,32 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 				SELECT 1 FROM smeldr_role_grants
 				WHERE token_id = $8 AND role_id = $9
 				  AND scope_anchor_id IS NOT DISTINCT FROM $10
+				  AND scope_static = $11
 			)`,
 		newID, grant.TokenID, roleID, string(staticJSON), anchorID, grant.ExpiresAt, now,
-		grant.TokenID, roleID, anchorID,
+		grant.TokenID, roleID, anchorID, string(staticJSON),
 	); err != nil {
 		return "", fmt.Errorf("smeldr: Grant: insert: %w", err)
 	}
 
-	// Re-query to find the canonical grant ID (new or pre-existing).
+	// Re-query to find the canonical grant ID (new or pre-existing). scope_static
+	// must be part of this predicate too, not only the INSERT guard above: since
+	// more than one row can now share (token_id, role_id, scope_anchor_id) —
+	// distinguished only by scope_static — a resolve query keyed on just those
+	// three would return an arbitrary matching row, not necessarily the one this
+	// call just requested.
 	var grantID string
 	if anchorID != nil {
 		if err := exec.QueryRowContext(ctx,
-			`SELECT id FROM smeldr_role_grants WHERE token_id=$1 AND role_id=$2 AND scope_anchor_id=$3`,
-			grant.TokenID, roleID, *anchorID,
+			`SELECT id FROM smeldr_role_grants WHERE token_id=$1 AND role_id=$2 AND scope_anchor_id=$3 AND scope_static=$4`,
+			grant.TokenID, roleID, *anchorID, string(staticJSON),
 		).Scan(&grantID); err != nil {
 			return "", fmt.Errorf("smeldr: Grant: resolve grant id: %w", err)
 		}
 	} else {
 		if err := exec.QueryRowContext(ctx,
-			`SELECT id FROM smeldr_role_grants WHERE token_id=$1 AND role_id=$2 AND scope_anchor_id IS NULL`,
-			grant.TokenID, roleID,
+			`SELECT id FROM smeldr_role_grants WHERE token_id=$1 AND role_id=$2 AND scope_anchor_id IS NULL AND scope_static=$3`,
+			grant.TokenID, roleID, string(staticJSON),
 		).Scan(&grantID); err != nil {
 			return "", fmt.Errorf("smeldr: Grant: resolve grant id: %w", err)
 		}
@@ -1113,6 +1162,165 @@ func (s *RoleStore) ListGrants(ctx context.Context, tokenID string) ([]RoleGrant
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("smeldr: ListGrants: rows: %w", err)
+	}
+	if len(out) > 0 {
+		ids := make([]string, len(out))
+		for i, g := range out {
+			ids[i] = g.ID
+		}
+		grantors := s.grantorsFor(ctx, ids)
+		for i := range out {
+			out[i].Grantor = grantors[out[i].ID]
+		}
+	}
+	return out, nil
+}
+
+// grantorsFor returns a map of grant ID to the ActorTokenID of the earliest
+// smeldr_governance_audit row recording that grant's own creation ("action" =
+// "grant", "target_kind" = "grant") — the actor who originally created it,
+// even when [RoleStore.Grant]'s own idempotent re-insert later recorded a
+// second row for the same grant under a different actor.
+//
+// Best-effort: any query error (most commonly, no smeldr_governance_audit
+// table at all — a bare [RoleStore] built directly on [migrateGovernance]
+// rather than through [App.Governance], which always pairs the two) returns
+// an empty map rather than an error. [RoleStore.ListGrants]'s own contract —
+// return the grants — must not fail because this enrichment could not run;
+// see [RoleGrant.Grantor]'s doc comment for the fail-open/fail-closed split
+// with [RoleStore.GetGrant].
+func (s *RoleStore) grantorsFor(ctx context.Context, grantIDs []string) map[string]string {
+	out := make(map[string]string, len(grantIDs))
+	if len(grantIDs) == 0 {
+		return out
+	}
+	placeholders := make([]string, len(grantIDs))
+	args := make([]any, len(grantIDs))
+	for i, id := range grantIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+	query := fmt.Sprintf(
+		`SELECT a.target_id, a.actor_token_id FROM smeldr_governance_audit a
+		  WHERE a.action = 'grant' AND a.target_kind = 'grant' AND a.target_id IN (%s)
+		    AND a.created_at = (
+		      SELECT MIN(a2.created_at) FROM smeldr_governance_audit a2
+		       WHERE a2.action = 'grant' AND a2.target_kind = 'grant' AND a2.target_id = a.target_id
+		    )`,
+		strings.Join(placeholders, ", "),
+	)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return out // best-effort — see doc comment
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var targetID, actor string
+		if err := rows.Scan(&targetID, &actor); err != nil {
+			return out
+		}
+		if _, exists := out[targetID]; !exists {
+			out[targetID] = actor
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return out
+	}
+	return out
+}
+
+// GetGrant returns the grant identified by grantID, including Grantor — the
+// read-only single-grant counterpart to [RoleStore.ListGrants], and
+// [RoleStore.GetRole]'s equivalent for a grant rather than a role definition.
+//
+// Unlike [RoleStore.ListGrants]'s own best-effort Grantor enrichment, this
+// method fails closed: any error resolving Grantor (including no
+// smeldr_governance_audit table at all) is a query error returned to the
+// caller, not a silently empty field. Added for smeldr.dev/mcp's
+// withdraw_delegation tool (design/workspace-delegate-region-v1.md §0 F3,
+// 01a0e3f9-5), whose whole authorization decision — may this caller revoke
+// this grant — depends on knowing who created it; a caller that cannot
+// determine that must be denied, not let through with an empty Grantor.
+//
+// Returns an error wrapping [ErrNotFound] when no grant with that ID exists.
+func (s *RoleStore) GetGrant(ctx context.Context, grantID string) (RoleGrant, error) {
+	var (
+		g          RoleGrant
+		staticJSON string
+		anchorID   sql.NullString
+		grantor    sql.NullString
+	)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT g.id, r.name, g.token_id, g.scope_static, g.scope_anchor_id, g.expires_at, g.created_at,
+		        (SELECT a.actor_token_id FROM smeldr_governance_audit a
+		          WHERE a.action = 'grant' AND a.target_kind = 'grant' AND a.target_id = g.id
+		          ORDER BY a.created_at ASC LIMIT 1)
+		   FROM smeldr_role_grants g
+		   JOIN smeldr_roles r ON r.id = g.role_id
+		  WHERE g.id = $1`, grantID,
+	).Scan(&g.ID, &g.RoleName, &g.TokenID, &staticJSON, &anchorID,
+		nullTimeScanner{dst: &g.ExpiresAt}, &g.CreatedAt, &grantor)
+	if err == sql.ErrNoRows {
+		return RoleGrant{}, fmt.Errorf("smeldr: GetGrant: grant %q: %w", grantID, ErrNotFound)
+	}
+	if err != nil {
+		return RoleGrant{}, fmt.Errorf("smeldr: GetGrant: query %q: %w", grantID, err)
+	}
+	if err := json.Unmarshal([]byte(staticJSON), &g.ScopeStatic); err != nil {
+		return RoleGrant{}, fmt.Errorf("smeldr: GetGrant: unmarshal scope_static: %w", err)
+	}
+	if anchorID.Valid {
+		g.ScopeAnchorID = anchorID.String
+	}
+	g.Grantor = grantor.String
+	return g, nil
+}
+
+// ListRoles returns every role defined on the instance, in no particular
+// order — [RoleStore.GetRole]'s bulk counterpart. Added for smeldr.dev/mcp's
+// list_roles tool (design/workspace-delegate-region-v1.md §0 F4, 01a0e3f9-5):
+// a caller (cloud, computing what a role would actually authorize before
+// granting or delegating it) needs every role's real meaning — Operations,
+// scope shape — without inventing role semantics of its own.
+//
+// Returns an empty (non-nil) slice, never an error, only when the
+// smeldr_roles table has no rows — never true for a governance-wired
+// instance, since [migrateGovernance] always seeds author/editor/admin.
+func (s *RoleStore) ListRoles(ctx context.Context) ([]RoleDefinition, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT name, operations, scope_mode, scope_relation_kind, scope_direction,
+		        trust_level, allow_self_approval
+		   FROM smeldr_roles`)
+	if err != nil {
+		return nil, fmt.Errorf("smeldr: ListRoles: query: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]RoleDefinition, 0)
+	for rows.Next() {
+		var (
+			def          RoleDefinition
+			opsJSON      string
+			scopeMode    string
+			relKind      sql.NullString
+			relDir       sql.NullString
+			selfApproval int
+		)
+		if err := rows.Scan(&def.Name, &opsJSON, &scopeMode, &relKind, &relDir,
+			&def.TrustLevel, &selfApproval); err != nil {
+			return nil, fmt.Errorf("smeldr: ListRoles: scan: %w", err)
+		}
+		if err := json.Unmarshal([]byte(opsJSON), &def.Operations); err != nil {
+			return nil, fmt.Errorf("smeldr: ListRoles: unmarshal operations: %w", err)
+		}
+		def.ScopeMode = ScopeMode(scopeMode)
+		def.ScopeRelationKind = relKind.String
+		def.ScopeDirection = relDir.String
+		def.AllowSelfApproval = selfApproval != 0
+		out = append(out, def)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("smeldr: ListRoles: rows: %w", err)
 	}
 	return out, nil
 }

@@ -687,6 +687,38 @@ with that name exists. `delegate_item` itself — the MCP tool that puts
 default/maximum expiry — ships in `smeldr.dev/mcp`, not here; see that
 module's own docs.
 
+`RegisterItemApproverRole`/`RegisterItemReviewerRole` (workspace-delegate-region-v1
+§0 P1) define two built-in `ScopeStatic`-mode roles — `item-approver`
+(`["approve"]`) and `item-reviewer` (`["review"]`) — the first roles
+`delegate_item` can actually hand out safely. `RoleStore.Authorized`/
+`RoleGranted` branch on the *role's* own `ScopeMode`, not the grant's:
+delegating a `ScopeGlobal` role like `decision-steward` "for one Decision"
+still authorizes the recipient on every Decision, because a global-scope
+role's grant never consults its own `ScopeStatic` list at all. `delegate_item`
+refuses to hand out any role whose `ScopeMode` isn't `ScopeStatic`, for
+exactly this reason.
+
+`RoleStore.Grant`'s idempotency key includes `ScopeStatic` (workspace-delegate-region-v1
+§0 F2): granting the same `(token, role, anchor)` pair with a *different*
+`ScopeStatic` list creates a separate grant row scoped to that list, rather
+than silently resolving to an earlier grant's row and leaving the new scope
+unauthorized. A repeat call with the *identical* `ScopeStatic` list still
+dedupes to one row, unchanged. Callers whose `ScopeStatic` never varies
+(every global- or dynamic-scope grant) see no behavior change.
+
+`RoleStore.GetGrant(ctx, grantID) (RoleGrant, error)` is `ListGrants`'
+single-grant, fail-closed counterpart: any lookup error (including a
+`RoleStore` with no `smeldr_governance_audit` table wired at all) is
+returned as an error, never silently absorbed. `RoleGrant.Grantor` — the
+token ID of the grant's own original creator, read from the earliest
+matching `smeldr_governance_audit` row — is populated by `GetGrant`
+(fail-closed) and, best-effort, by `ListGrants` (fail-open: left empty
+rather than failing the whole call when the enrichment can't run).
+`RoleStore.ListRoles(ctx) ([]RoleDefinition, error)` is `GetRole`'s bulk
+counterpart, returning every role's `Name`/`Operations`/scope shape. Both
+`GetGrant` and `ListRoles` back `smeldr.dev/mcp`'s `withdraw_delegation` and
+`list_roles` tools respectively — see that module's own docs.
+
 ### Authority Check (decision-governance-model.md §4)
 
 Check is an enforced *precondition* on a Decision's `proposed → ratified`

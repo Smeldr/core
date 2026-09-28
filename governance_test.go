@@ -1118,6 +1118,336 @@ func TestListGrants_RowsError(t *testing.T) {
 	}
 }
 
+// --- Grant scope_static dedup tests (design/workspace-delegate-region-v1.md §0 F2) ---
+
+func TestGrant_SameTokenRoleDifferentScopeStatic_CreatesSeparateRows(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "item-approver-test", Operations: []string{"approve"}, ScopeMode: ScopeStatic,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+
+	id1, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "item-approver-test", ScopeStatic: []string{"Decision:d1"},
+	})
+	if err != nil {
+		t.Fatalf("first Grant: %v", err)
+	}
+	id2, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "item-approver-test", ScopeStatic: []string{"Decision:d2"},
+	})
+	if err != nil {
+		t.Fatalf("second Grant: %v", err)
+	}
+	if id1 == id2 {
+		t.Fatalf("expected two distinct grant IDs for two different items, got the same: %q", id1)
+	}
+
+	grants, err := store.ListGrants(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	if len(grants) != 2 {
+		t.Fatalf("expected 2 grants, got %d: %+v", len(grants), grants)
+	}
+
+	authD1, err := store.Authorized(ctx, tokenID, "approve", AuthTarget{TypeName: "Decision", ID: "d1"})
+	if err != nil || !authD1 {
+		t.Errorf("Authorized(d1) = %v, %v, want true, nil", authD1, err)
+	}
+	authD2, err := store.Authorized(ctx, tokenID, "approve", AuthTarget{TypeName: "Decision", ID: "d2"})
+	if err != nil || !authD2 {
+		t.Errorf("Authorized(d2) = %v, %v, want true, nil", authD2, err)
+	}
+	authD3, err := store.Authorized(ctx, tokenID, "approve", AuthTarget{TypeName: "Decision", ID: "d3"})
+	if err != nil || authD3 {
+		t.Errorf("Authorized(d3) = %v, %v, want false, nil (never delegated)", authD3, err)
+	}
+}
+
+func TestGrant_SameScopeStatic_Idempotent(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "item-approver-test2", Operations: []string{"approve"}, ScopeMode: ScopeStatic,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+
+	id1, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "item-approver-test2", ScopeStatic: []string{"Decision:d1"},
+	})
+	if err != nil {
+		t.Fatalf("first Grant: %v", err)
+	}
+	id2, err := store.Grant(ctx, RoleGrant{
+		TokenID: tokenID, RoleName: "item-approver-test2", ScopeStatic: []string{"Decision:d1"},
+	})
+	if err != nil {
+		t.Fatalf("second Grant: %v", err)
+	}
+	if id1 != id2 {
+		t.Errorf("idempotent grant IDs differ: %q vs %q", id1, id2)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_role_grants WHERE token_id=?`, tokenID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 grant row, got %d", count)
+	}
+}
+
+// --- GetGrant tests ---
+
+func TestGetGrant_Found_WithGrantor(t *testing.T) {
+	_, store, auditStore := setupGovernanceAuditDB(t)
+	ctx := context.Background()
+	tokenID := NewID()
+
+	audited := store.WithAudit("grantor-token", auditStore)
+	grantID, err := audited.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	got, err := store.GetGrant(ctx, grantID)
+	if err != nil {
+		t.Fatalf("GetGrant: %v", err)
+	}
+	if got.ID != grantID {
+		t.Errorf("ID: got %q, want %q", got.ID, grantID)
+	}
+	if got.RoleName != "author" {
+		t.Errorf("RoleName: got %q, want author", got.RoleName)
+	}
+	if got.Grantor != "grantor-token" {
+		t.Errorf("Grantor: got %q, want grantor-token", got.Grantor)
+	}
+}
+
+func TestGetGrant_Found_NoAuditRow_GrantorEmpty(t *testing.T) {
+	_, store, _ := setupGovernanceAuditDB(t)
+	ctx := context.Background()
+	tokenID := NewID()
+
+	// Plain Grant, no WithAudit — the audit table exists but no row records
+	// this specific grant's creation.
+	grantID, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	got, err := store.GetGrant(ctx, grantID)
+	if err != nil {
+		t.Fatalf("GetGrant: %v", err)
+	}
+	if got.Grantor != "" {
+		t.Errorf("Grantor: got %q, want empty (no audit row for this grant)", got.Grantor)
+	}
+}
+
+func TestGetGrant_NotFound(t *testing.T) {
+	_, store, _ := setupGovernanceAuditDB(t)
+	_, err := store.GetGrant(context.Background(), "no-such-grant")
+	if err == nil {
+		t.Fatal("expected ErrNotFound for unknown grant")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound in chain, got: %v", err)
+	}
+}
+
+func TestGetGrant_QueryError(t *testing.T) {
+	db, _, _ := setupGovernanceAuditDB(t)
+	wrapped := &govQueryRowFailDB{DB: db, failOn: "FROM smeldr_role_grants g"}
+	store := NewRoleStore(wrapped)
+	_, err := store.GetGrant(context.Background(), "any-id")
+	if err == nil {
+		t.Fatal("expected error from failing query")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Error("a query failure must not be reported as ErrNotFound")
+	}
+}
+
+func TestGetGrant_UnmarshalError(t *testing.T) {
+	db, store, _ := setupGovernanceAuditDB(t)
+	ctx := context.Background()
+	tokenID := NewID()
+
+	grantID, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`UPDATE smeldr_role_grants SET scope_static='not-json' WHERE id=?`, grantID,
+	); err != nil {
+		t.Fatalf("corrupt scope_static: %v", err)
+	}
+
+	if _, err := store.GetGrant(ctx, grantID); err == nil {
+		t.Fatal("expected unmarshal error from corrupt scope_static")
+	}
+}
+
+// TestGetGrant_NoAuditTable_FailsClosed pins the fail-closed contract
+// GetGrant's own doc comment promises: unlike ListGrants's best-effort
+// Grantor enrichment, a RoleStore with no smeldr_governance_audit table at
+// all (built directly on migrateGovernance, never through App.Governance)
+// must make GetGrant fail outright, not silently succeed with an empty
+// Grantor — withdraw_delegation's whole authorization decision depends on
+// knowing who may withdraw a grant, and a caller that cannot determine that
+// must be denied.
+func TestGetGrant_NoAuditTable_FailsClosed(t *testing.T) {
+	db := setupGovernanceDB(t) // no audit table
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	tokenID := NewID()
+
+	grantID, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	if _, err := store.GetGrant(ctx, grantID); err == nil {
+		t.Fatal("expected GetGrant to fail closed when smeldr_governance_audit doesn't exist, got nil error")
+	}
+}
+
+// --- ListGrants Grantor enrichment tests ---
+
+func TestListGrants_PopulatesGrantor(t *testing.T) {
+	_, store, auditStore := setupGovernanceAuditDB(t)
+	ctx := context.Background()
+	tokenID := NewID()
+
+	audited := store.WithAudit("grantor-token", auditStore)
+	grantID, err := audited.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "author"})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	grants, err := store.ListGrants(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	if len(grants) != 1 || grants[0].ID != grantID {
+		t.Fatalf("ListGrants = %+v, want one grant %q", grants, grantID)
+	}
+	if grants[0].Grantor != "grantor-token" {
+		t.Errorf("Grantor: got %q, want grantor-token", grants[0].Grantor)
+	}
+}
+
+// TestListGrants_GrantorEmptyWhenAuditTableAbsent pins that ListGrants's own
+// long-standing contract — return the grants — is unaffected by a RoleStore
+// with no smeldr_governance_audit table (every existing ListGrants test in
+// this file builds one via setupGovernanceDB alone). Unlike GetGrant, this
+// must not error.
+func TestListGrants_GrantorEmptyWhenAuditTableAbsent(t *testing.T) {
+	db := setupGovernanceDB(t) // no audit table
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	tokenID := NewID()
+
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "author"}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	grants, err := store.ListGrants(ctx, tokenID)
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	if len(grants) != 1 {
+		t.Fatalf("expected 1 grant, got %d", len(grants))
+	}
+	if grants[0].Grantor != "" {
+		t.Errorf("Grantor: got %q, want empty (no audit table)", grants[0].Grantor)
+	}
+}
+
+// --- ListRoles tests ---
+
+func TestListRoles_Success(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: "custom-role-for-list", Operations: []string{"review"}, ScopeMode: ScopeStatic,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+
+	roles, err := store.ListRoles(ctx)
+	if err != nil {
+		t.Fatalf("ListRoles: %v", err)
+	}
+	var found bool
+	for _, r := range roles {
+		if r.Name == "custom-role-for-list" {
+			found = true
+			if len(r.Operations) != 1 || r.Operations[0] != "review" {
+				t.Errorf("Operations: got %#v, want [review]", r.Operations)
+			}
+			if r.ScopeMode != ScopeStatic {
+				t.Errorf("ScopeMode: got %q, want %q", r.ScopeMode, ScopeStatic)
+			}
+		}
+	}
+	if !found {
+		t.Error("custom-role-for-list not found in ListRoles output")
+	}
+	if len(roles) < 4 { // author, editor, admin (seeded) + the one just defined
+		t.Errorf("expected at least 4 roles, got %d", len(roles))
+	}
+}
+
+func TestListRoles_QueryError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	wrapped := &govQueryFailDB{DB: db, failOn: "FROM smeldr_roles"}
+	store := NewRoleStore(wrapped)
+	if _, err := store.ListRoles(context.Background()); err == nil {
+		t.Fatal("expected error from failing query")
+	}
+}
+
+func TestListRoles_ScanError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	wrapped := &govQueryNullRowsDB{DB: db, nullOn: "FROM smeldr_roles"}
+	store := NewRoleStore(wrapped)
+	if _, err := store.ListRoles(context.Background()); err == nil {
+		t.Fatal("expected scan error from wrong-arity NULL rows")
+	}
+}
+
+func TestListRoles_UnmarshalError(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+	if err := store.DefineRole(ctx, RoleDefinition{Name: "corrupt-role-list", Operations: []string{"read"}}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`UPDATE smeldr_roles SET operations=']bad' WHERE name='corrupt-role-list'`,
+	); err != nil {
+		t.Fatalf("corrupt operations: %v", err)
+	}
+
+	if _, err := store.ListRoles(ctx); err == nil {
+		t.Fatal("expected error from corrupt operations JSON")
+	}
+}
+
 // --- Authorized tests ---
 
 func setupTokenWithRole(t *testing.T, db *sql.DB, store *RoleStore, roleName string) string {

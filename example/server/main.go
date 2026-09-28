@@ -333,6 +333,12 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.RegisterDecisionStewardRole(context.Background(), roleStore); err != nil {
 			return ServerResult{}, fmt.Errorf("register decision-steward role: %w", err)
 		}
+		if err := smeldr.RegisterItemApproverRole(context.Background(), roleStore); err != nil {
+			return ServerResult{}, fmt.Errorf("register item-approver role: %w", err)
+		}
+		if err := smeldr.RegisterItemReviewerRole(context.Background(), roleStore); err != nil {
+			return ServerResult{}, fmt.Errorf("register item-reviewer role: %w", err)
+		}
 	}
 
 	if cfg.EnableRelations && cfg.EnableAuthority {

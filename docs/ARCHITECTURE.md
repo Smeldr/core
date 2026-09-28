@@ -844,6 +844,40 @@ smeldr.dev/
 │                     get_sweep_run; the real per-item, per-operation check happens inside the
 │                     mcp-side handler via Authorized, looped over GetRole's own Operations, not
 │                     at this tool-dispatch layer. (design/grants-and-delegate-v1.md §3.3, 01a0e3f9-4)
+│                     RegisterItemApproverRole/RegisterItemReviewerRole(ctx, *RoleStore) error —
+│                     two built-in ScopeStatic-mode roles ("item-approver": ["approve"],
+│                     "item-reviewer": ["review"]) in orchestration.go beside
+│                     RegisterDecisionStewardRole; the first roles delegate_item can hand out
+│                     safely, since Authorized/RoleGranted branch on the *role's* own ScopeMode,
+│                     not the grant's — delegating a ScopeGlobal role for one item still
+│                     authorizes the recipient everywhere. delegate_item refuses any named role
+│                     whose ScopeMode isn't ScopeStatic. Wired in example/server/main.go's
+│                     EnableGovernance block beside RegisterDecisionStewardRole;
+│                     Grant's idempotency key now includes scope_static — both the INSERT's own
+│                     WHERE NOT EXISTS guard and both resolve-grant-id queries (anchor and
+│                     null-anchor branches) — so granting the same (token, role, anchor) pair
+│                     with a different ScopeStatic list creates its own row instead of silently
+│                     resolving to an earlier grant's row and leaving the new scope
+│                     unauthorized; a repeat call with an identical ScopeStatic list still
+│                     dedupes to one row. Callers whose ScopeStatic never varies (every global-
+│                     or dynamic-scope grant) see no behavior change;
+│                     RoleGrant.Grantor string — the token ID of the grant's own original
+│                     creator, read from the earliest smeldr_governance_audit row recording
+│                     that grant's creation. RoleStore.GetGrant(ctx, grantID) (RoleGrant, error)
+│                     is ListGrants' single-grant counterpart and populates Grantor
+│                     fail-closed (any lookup error, including no smeldr_governance_audit table
+│                     at all, is returned to the caller). ListGrants populates Grantor
+│                     best-effort via the new private grantorsFor(ctx, grantIDs) — fail-open
+│                     (left empty on any query error), since many existing ListGrants callers
+│                     build a bare RoleStore via migrateGovernance alone with no audit table,
+│                     and ListGrants' own contract must not start failing for them;
+│                     RoleStore.ListRoles(ctx) ([]RoleDefinition, error) — GetRole's bulk
+│                     counterpart, every role's Name/Operations/scope shape, no WHERE clause.
+│                     GetGrant and ListRoles back smeldr.dev/mcp's withdraw_delegation and
+│                     list_roles tools respectively; new seedToolPolicies rows:
+│                     {"withdraw_delegation", "read"}, {"list_roles", "read"} — same coarse
+│                     floor-gate shape as delegate_item's own row.
+│                     (design/workspace-delegate-region-v1.md §0 P1/F2/F3/F4, 01a0e3f9-5)
 ├── auth.go           AuthFunc interface, BearerHMAC, CookieSession, BasicAuth, AnyAuth, SignToken,
 │                     VerifyBearerToken(r, secret, store *TokenStore);
 │                     TokenRecord, TokenStore, NewTokenStore (Amendment A66);

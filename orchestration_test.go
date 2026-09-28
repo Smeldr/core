@@ -1669,6 +1669,98 @@ func TestRegisterDecisionStewardRole_Idempotent(t *testing.T) {
 	}
 }
 
+func TestRegisterItemApproverRole_RoundTrip(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := RegisterItemApproverRole(ctx, store); err != nil {
+		t.Fatalf("RegisterItemApproverRole: %v", err)
+	}
+
+	var ops, scopeMode string
+	if err := db.QueryRowContext(ctx,
+		`SELECT operations, scope_mode FROM smeldr_roles WHERE name = 'item-approver'`,
+	).Scan(&ops, &scopeMode); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !strings.Contains(ops, "approve") {
+		t.Errorf("operations: got %q, want to contain approve", ops)
+	}
+	if scopeMode != string(ScopeStatic) {
+		t.Errorf("scope_mode: got %q, want %q", scopeMode, ScopeStatic)
+	}
+}
+
+func TestRegisterItemApproverRole_Idempotent(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := RegisterItemApproverRole(ctx, store); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := RegisterItemApproverRole(ctx, store); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_roles WHERE name = 'item-approver'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count: got %d, want 1 (no duplicate on re-register)", count)
+	}
+}
+
+func TestRegisterItemReviewerRole_RoundTrip(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := RegisterItemReviewerRole(ctx, store); err != nil {
+		t.Fatalf("RegisterItemReviewerRole: %v", err)
+	}
+
+	var ops, scopeMode string
+	if err := db.QueryRowContext(ctx,
+		`SELECT operations, scope_mode FROM smeldr_roles WHERE name = 'item-reviewer'`,
+	).Scan(&ops, &scopeMode); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !strings.Contains(ops, "review") {
+		t.Errorf("operations: got %q, want to contain review", ops)
+	}
+	if scopeMode != string(ScopeStatic) {
+		t.Errorf("scope_mode: got %q, want %q", scopeMode, ScopeStatic)
+	}
+}
+
+func TestRegisterItemReviewerRole_Idempotent(t *testing.T) {
+	db := setupGovernanceDB(t)
+	store := NewRoleStore(db)
+	ctx := context.Background()
+
+	if err := RegisterItemReviewerRole(ctx, store); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := RegisterItemReviewerRole(ctx, store); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_roles WHERE name = 'item-reviewer'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count: got %d, want 1 (no duplicate on re-register)", count)
+	}
+}
+
 func TestRegisterOrchestrationRelationKinds_UpsertError(t *testing.T) {
 	store := mockRelationStore(&errExecDB{})
 	err := RegisterOrchestrationRelationKinds(context.Background(), store)

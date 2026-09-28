@@ -601,7 +601,24 @@ is for — must be one of `role`'s own operations), `type`+`id` (the target
 item), and an optional `expires_in_days`. Before granting, the tool checks
 that the caller (the delegator) is itself authorized for *every* operation
 `role` carries, against that same target — not just the named `operation` —
-so a token can never hand out more authority than it actually holds.
+so a token can never hand out more authority than it actually holds. `role`
+must also be a static-scope role (e.g. the built-in `item-approver`/
+`item-reviewer`) — a global- or dynamic-scope role is refused, because its
+own grants never consult the scoped `type:id` pair `delegate_item` writes,
+so delegating one "for this item" would actually authorize the recipient
+everywhere the role reaches.
+
+`withdraw_delegation` (Author+, `smeldr.dev/mcp`) lets the member who
+created a delegation undo it before it expires — `revoke_grant` stays
+Admin-only, so this is the delegator's own equivalent. Takes `grant_id`
+(from `delegate_item`'s own response or `list_grants`); refuses a grant
+that isn't a time-boxed delegation (no `ExpiresAt`) or that this caller
+didn't create.
+
+`list_roles` (Author+, `smeldr.dev/mcp`) lists every role defined on the
+instance — name, operations, and scope shape — read-only, useful for
+checking what a role actually authorizes before granting or delegating it.
+
 See [docs/REFERENCE.md](docs/REFERENCE.md#time-boxed-grants-expiresat-grants-and-delegate-v1-3132).
 
 ### Webhook management tools (Admin role required)

@@ -356,6 +356,40 @@ func RegisterDecisionStewardRole(ctx context.Context, rs *RoleStore) error {
 	})
 }
 
+// RegisterItemApproverRole defines (or updates) the "item-approver" role:
+// Operations: ["approve"], ScopeMode: static (design/workspace-delegate-region-v1.md
+// §0 P1, 01a0e3f9-5). Unlike [RegisterDecisionStewardRole]'s global scope,
+// this role's ScopeMode is static so a grant's own ScopeStatic list — the
+// specific "type:id" pair smeldr.dev/mcp's delegate_item tool writes —
+// actually narrows what the grant authorizes. [RoleStore.Authorized] and
+// [RoleStore.RoleGranted] both branch on the *role's* own ScopeMode, not the
+// grant's: a global-scope role would make any grant of it authorize the
+// holder everywhere regardless of the grant's own ScopeStatic list, which is
+// exactly the gap delegate_item's own plan review found (delegating
+// "decision-steward" — global — for one Decision granted review+approve on
+// every Decision, not just that one). Registering a dedicated static-scope
+// role is the fix: delegate_item refuses to hand out any role whose
+// ScopeMode isn't static. Idempotent — safe to call on every boot.
+func RegisterItemApproverRole(ctx context.Context, rs *RoleStore) error {
+	return rs.DefineRole(ctx, RoleDefinition{
+		Name:       "item-approver",
+		Operations: []string{"approve"},
+		ScopeMode:  ScopeStatic,
+	})
+}
+
+// RegisterItemReviewerRole defines (or updates) the "item-reviewer" role:
+// Operations: ["review"], ScopeMode: static. See
+// [RegisterItemApproverRole]'s doc comment for why ScopeStatic matters here.
+// Idempotent — safe to call on every boot.
+func RegisterItemReviewerRole(ctx context.Context, rs *RoleStore) error {
+	return rs.DefineRole(ctx, RoleDefinition{
+		Name:       "item-reviewer",
+		Operations: []string{"review"},
+		ScopeMode:  ScopeStatic,
+	})
+}
+
 // authorizeDecisionScope checks whether actorID holds the role D34 maps from
 // item's Scope field, via scopeRoles. It is layered alongside — not instead
 // of — validateTransition's generic RequiredOperation gate: RequiredOperation
