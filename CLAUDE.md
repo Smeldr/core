@@ -970,7 +970,7 @@ internal planning history. `Milestone_BACKLOG_TEMPLATE.md` is never removed.
 
 # Smeldr Agent Protocol
 
-<!-- common-template-version: 2026-09-28b -->
+<!-- common-template-version: 2026-09-28c -->
 <!-- source: smeldr/architect/AGENT_PROTOCOL.md (canonical) -->
 
 **This file is the canonical source D77 calls `Template-Smeldr-Common-Agent.md`.** Not
@@ -1105,6 +1105,15 @@ itself arrives.
    | `implementing → commit-reviewing` | implementer | commit ready on the branch |
    | `commit-reviewing → done` | implementer, after architect's written approval in the `task_plan` record | merged, pushed, closed out |
    | `active → done` (reason required) | implementer | work that concludes without a plan/commit cycle: a review, sign-off, copy pass, investigation or design discussion (D88) |
+
+   **A no-plan Task that still ends in a commit** (a Task whose description says "no plan
+   needed", such as a mechanical protocol re-sync) keeps the commit review but skips the
+   plan. It stays `active` throughout: commit on a feature branch, send `commit-ready`
+   (`receiver: "architect"`), and wait for `commit-approved`. Only then merge, push, and
+   close `active → done` with a reason that cites the approval. Never push to main before
+   `commit-approved`, and never create a pro-forma `task_plan` just to reach
+   `commit-reviewing`. While the Task waits, its state does not show that it is under
+   review; the `commit-ready` Signal is the only marker.
 
    Iteration happens **inside** a phase (plan-feedback and commit-feedback rounds in the
    `task_plan` record's `body`, Task stays in its reviewing state), not by moving
