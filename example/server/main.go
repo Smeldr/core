@@ -198,6 +198,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 
 	var tokenStore *smeldr.TokenStore
 	if cfg.EnableTokens {
+		if err := smeldr.EnsureTokenUserIDColumn(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure smeldr_tokens.user_id: %w", err)
+		}
 		tokenStore = smeldr.NewTokenStore(db, cfg.Secret)
 	}
 
@@ -652,7 +655,8 @@ func migrateDB(db *sql.DB) error {
 			role       TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMPTZ NOT NULL,
 			expires_at TIMESTAMPTZ,
-			revoked_at TIMESTAMPTZ
+			revoked_at TIMESTAMPTZ,
+			user_id    TEXT
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_webhook_endpoints (
 			id         TEXT    PRIMARY KEY,

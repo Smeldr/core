@@ -47,6 +47,29 @@ Use absolute paths for every `[System.IO.File]` (or other raw .NET I/O)
 call in a PowerShell script that follows a `cd` — never rely on `cd`
 having taken effect for anything beyond PowerShell's own cmdlets.
 
+## SQLite missing-column error text depends on statement kind
+
+`modernc.org/sqlite` reports a missing column with **two different message
+shapes** depending on which statement referenced it — confirmed directly,
+2026-09-28 (`token-record-user-id`), by provoking all three from the same
+test: an `UPDATE ... SET <col> = ...` or a `SELECT <col> FROM ...` produces
+`no such column: <col>`, but an `INSERT INTO t (<col>) VALUES (...)`
+naming the column in its own column list produces `table t has no column
+named <col>` instead — a different sentence, not just a different table
+name substituted in.
+
+`isNoSuchColumn` (`state.go`) checks for both shapes now, but every caller
+of it before this date only ever used it against an `UPDATE` fallback
+(`App.TransitionItemWithReason`, `App.DrainEvalQueue`) — the `INSERT` shape
+was never exercised until `TokenStore.createToken`'s own fallback needed
+it, and it silently failed to match (`isNoSuchColumn` returned `false` for
+a genuine missing-column `INSERT` error) until caught by three pre-existing
+tests failing against a legacy `smeldr_tokens` fixture with no `user_id`
+column. Before writing a new `isNoSuchColumn`-based fallback for an
+`INSERT` (not `UPDATE`/`SELECT`), verify empirically which message shape
+your own statement actually produces — don't assume the existing check
+already covers it.
+
 ## gofmt / Windows
 
 Windows checkouts with `core.autocrlf` enabled can make a local

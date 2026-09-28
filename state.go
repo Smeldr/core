@@ -1045,14 +1045,30 @@ func isNoSuchTable(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "no such table")
 }
 
-// isNoSuchColumn reports whether err is a SQLite "no such column: <column>"
-// error for the given column — used by [App.TransitionItemWithReason]'s own
+// isNoSuchColumn reports whether err is a SQLite missing-column error for
+// the given column — used by [App.TransitionItemWithReason]'s own
 // last_actor write (D78) to fail open on a compiled type's table that
 // predates the column (a third-party module table this framework does not
 // control), the same graceful-degradation shape [isNoSuchTable] already
 // provides for a missing table.
+//
+// SQLite (via modernc.org/sqlite) reports a missing column with two
+// different message shapes depending on the statement kind — verified
+// directly (token-record-user-id, 2026-09-28), not assumed: an UPDATE or
+// SELECT referencing the column produces "no such column: <column>", but an
+// INSERT naming it in its own column list produces "table <table> has no
+// column named <column>" instead. Every caller of this function before
+// token-record-user-id only ever used it against an UPDATE (never an
+// INSERT), so only the first shape was ever exercised — this second branch
+// closes that gap for [TokenStore]'s own INSERT-based fallback, and for any
+// future INSERT-based caller.
 func isNoSuchColumn(err error, column string) bool {
-	return err != nil && strings.Contains(err.Error(), "no such column: "+column)
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "no such column: "+column) ||
+		strings.Contains(msg, "no column named "+column)
 }
 
 // drainAuthorizationGate reports whether typeName's fromState→toState

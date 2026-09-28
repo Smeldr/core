@@ -518,7 +518,7 @@ These tools are available when the site has `TokenStore` configured:
 | Tool | Description |
 |------|-------------|
 | `create_token` | Issues a new named token with a given role and TTL. Returns `token_id` alongside the raw token — pass it directly to `grant_role`. |
-| `list_tokens` | Lists all tokens with name, role, expiry, revoked status |
+| `list_tokens` | Lists all tokens with name, role, expiry, revoked status, and `user_id` (the JWT identity this token was minted for — `null` for a token created before this field existed) |
 | `revoke_token` | Revokes a token by ID — effective immediately |
 
 **Critical rules for token operations:**

@@ -457,15 +457,46 @@ Create the `smeldr_tokens` table once before starting:
 
 ```sql
 CREATE TABLE smeldr_tokens (
-    id         TEXT PRIMARY KEY,
+    id         TEXT PRIMARY KEY,  -- SHA-256 hex fingerprint of the raw token
     name       TEXT NOT NULL,
     role       TEXT NOT NULL,
-    token_hash TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     revoked_at TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    user_id    TEXT               -- optional; see "user_id" below
 );
 ```
+
+#### `user_id`
+
+`user_id` (optional, added v1.104.0) records the JWT's own `User.ID` minted
+for this token — the same actor identity `last_actor`, `RoleGrant.Grantor`,
+and `RelationEdge.CreatedBy` already record elsewhere, letting an actor ID
+seen in any of those be resolved back to the token's own `Name` via
+`TokenStore.NamesForUserIDs`. `user_id` is unique per token by construction
+(`createToken` mints a fresh ID for every token) — a given value never
+resolves to more than one name.
+
+`smeldr_tokens` is **not** a core-owned table — every application defines
+its own DDL (this one is a template, not enforced). An application on an
+existing deployment adds the column with `smeldr.EnsureTokenUserIDColumn`,
+called once at boot before `TokenStore.Create`/`CreateWithID` is first
+called; `TokenStore.Create`/`CreateWithID`/`List`/`NamesForUserIDs` all fall
+back to the column-less form automatically until then, so upgrading core
+alone never breaks an application that hasn't added the column yet.
+
+This fallback detects a missing table or column by matching **SQLite's own
+error text** — the same convention every other such fallback in this
+codebase uses. An application on another database engine (Postgres, MySQL)
+must run its own equivalent of `EnsureTokenUserIDColumn`'s migration before
+upgrading; the text-matching fallback does not recognize that engine's own
+error format and will not add the column for you.
+
+Every token created before this column existed keeps `user_id = NULL`
+permanently — it is never backfilled or guessed. This includes any
+already-issued long-lived token (a bootstrap admin token, an agent's own
+token minted before the upgrade): it stays absent from
+`NamesForUserIDs`'s results until it is revoked and reissued.
 
 ### Bootstrap
 
@@ -499,6 +530,11 @@ records, err := app.TokenStore().List(ctx)
 
 // Revoke by ID
 err := app.TokenStore().Revoke(ctx, id)
+
+// Resolve a batch of actor IDs (from last_actor, RoleGrant.Grantor,
+// RelationEdge.CreatedBy, ...) back to the token Name each was minted for.
+// One query for the whole batch; an ID with no match is simply absent.
+names, err := app.TokenStore().NamesForUserIDs(ctx, []string{userID1, userID2})
 ```
 
 `ErrLastAdmin` (HTTP 409) is returned if you attempt to revoke the last

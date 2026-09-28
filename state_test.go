@@ -4816,6 +4816,7 @@ func TestDrainEvalQueue_GatedTransition_SignalEmittedNotApplied(t *testing.T) {
 	if count != 1 {
 		t.Errorf("authorization-required signal count = %d, want 1", count)
 	}
+
 	var receiver string
 	if err := db.QueryRowContext(ctx, `SELECT receiver FROM smeldr_signals WHERE signal_type = 'authorization-required'`).Scan(&receiver); err != nil {
 		t.Fatalf("SELECT signal receiver: %v", err)
@@ -4831,6 +4832,67 @@ func TestDrainEvalQueue_GatedTransition_SignalEmittedNotApplied(t *testing.T) {
 	}
 	if qCount != 0 {
 		t.Errorf("queue row not deleted, count=%d", qCount)
+	}
+}
+
+// — isNoSuchColumn (token-record-user-id) ————————————————————————————————————
+
+// TestIsNoSuchColumn_MatchesBothStatementShapes provisions all three real
+// SQLite missing-column error shapes directly — an UPDATE, a SELECT, and an
+// INSERT each referencing a column that does not exist — and confirms
+// isNoSuchColumn matches all three. Found live 2026-09-28
+// (token-record-user-id): an INSERT naming the missing column in its own
+// column list produces a different error message than an UPDATE/SELECT
+// referencing it; see docs/OPERATIONAL_NOTES.md.
+func TestIsNoSuchColumn_MatchesBothStatementShapes(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `CREATE TABLE no_such_column_test (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	t.Run("UPDATE", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `UPDATE no_such_column_test SET missing = 'x' WHERE id = '1'`)
+		if err == nil {
+			t.Fatal("expected an error referencing the missing column")
+		}
+		if !isNoSuchColumn(err, "missing") {
+			t.Errorf("isNoSuchColumn did not match UPDATE's own error text: %v", err)
+		}
+	})
+
+	t.Run("SELECT", func(t *testing.T) {
+		row := db.QueryRowContext(ctx, `SELECT missing FROM no_such_column_test WHERE id = '1'`)
+		var v string
+		err := row.Scan(&v)
+		if err == nil {
+			t.Fatal("expected an error referencing the missing column")
+		}
+		if !isNoSuchColumn(err, "missing") {
+			t.Errorf("isNoSuchColumn did not match SELECT's own error text: %v", err)
+		}
+	})
+
+	t.Run("INSERT", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `INSERT INTO no_such_column_test (id, missing) VALUES ('1', 'x')`)
+		if err == nil {
+			t.Fatal("expected an error referencing the missing column")
+		}
+		if !isNoSuchColumn(err, "missing") {
+			t.Errorf("isNoSuchColumn did not match INSERT's own error text: %v", err)
+		}
+	})
+}
+
+func TestIsNoSuchColumn_nilErr(t *testing.T) {
+	if isNoSuchColumn(nil, "anything") {
+		t.Error("expected false for nil error")
+	}
+}
+
+func TestIsNoSuchColumn_unrelatedError(t *testing.T) {
+	if isNoSuchColumn(errors.New("some other failure"), "col") {
+		t.Error("expected false for an unrelated error")
 	}
 }
 

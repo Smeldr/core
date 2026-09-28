@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.104.0] — 2026-09-28
+
+### Added
+
+`TokenRecord` gains an exported field `UserID *string` that records the JWT's own `User.ID` value at mint time — the same identity tracked in `last_actor`, `RoleGrant.Grantor`, and `RelationEdge.CreatedBy` elsewhere — enabling token records to be traced to their creator. A new `EnsureTokenUserIDColumn(ctx, db)` idempotent migration helper adds the `user_id TEXT` column to existing `smeldr_tokens` tables; unlike other `Ensure*Column` functions, `smeldr_tokens` is not core-created, so applications must call this themselves at boot. Both `TokenStore.Create` and `TokenStore.List` now transparently handle the migration: they attempt the new column-inclusive SQL form first, then automatically fall back to the column-less form if the table does not have the column yet, ensuring that upgrading core alone never breaks applications that have not yet added the column. New exported method `TokenStore.NamesForUserIDs(ctx, userIDs)` is a single-query batch lookup resolving JWT `User.ID` values (e.g., from `last_actor` or `RelationEdge.CreatedBy`) back to their human-readable token `Name`; empty input returns an empty map without querying, missing tables or columns fail open to an empty map with nil error, and IDs with no matching token are simply absent from the result. A fix to the unexported `isNoSuchColumn` helper now matches both SQLite error shapes — UPDATE-form (`"no such column: X"`) and INSERT-form (`"table X has no column named Y"`) — enabling the `createToken` fallback logic. `example/server/main.go` now calls `EnsureTokenUserIDColumn` at boot when `ENABLE_TOKENS` is set. Coverage 96.1% (gate 96.0%), 20 new tests, `-race` green. MINOR version bump (v1.103.0 to v1.104.0): one new exported field, one new exported function, and one new exported method, all fully additive, no existing behaviour changed for any caller that does not use the new API.
+
+---
+
 ## [1.103.0] — 2026-09-28
 
 ### Added

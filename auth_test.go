@@ -1503,3 +1503,244 @@ func TestTokenStore_List_withRecords(t *testing.T) {
 		t.Errorf("List: unexpected names %q, %q", records[0].Name, records[1].Name)
 	}
 }
+
+// — EnsureTokenUserIDColumn ————————————————————————————————————————————————
+
+func TestEnsureTokenUserIDColumn_AddsColumn(t *testing.T) {
+	db := newTestTokensDB(t) // legacy schema, no user_id column
+	ctx := context.Background()
+
+	if err := EnsureTokenUserIDColumn(ctx, db); err != nil {
+		t.Fatalf("EnsureTokenUserIDColumn: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO smeldr_tokens (id, name, role, expires_at, created_at, user_id)
+		 VALUES ('1', 'n', 'author', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'u1')`,
+	); err != nil {
+		t.Errorf("user_id column should exist after EnsureTokenUserIDColumn, got: %v", err)
+	}
+}
+
+func TestEnsureTokenUserIDColumn_ErrorWrapped(t *testing.T) {
+	// Empty SQLite DB with no smeldr_tokens table at all: PRAGMA returns no
+	// rows (no error), column absent, then ALTER TABLE fails (no such
+	// table) — mirroring TestEnsureColumn_AlterFails, but through
+	// EnsureTokenUserIDColumn's own wrapping.
+	db := newSQLiteDB(t)
+	err := EnsureTokenUserIDColumn(context.Background(), db)
+	if err == nil {
+		t.Fatal("expected an error when smeldr_tokens does not exist")
+	}
+	if !strings.Contains(err.Error(), "EnsureTokenUserIDColumn") {
+		t.Errorf("error should be wrapped with the function's own name, got: %v", err)
+	}
+}
+
+func TestEnsureTokenUserIDColumn_Idempotent(t *testing.T) {
+	db := newTestTokensDB(t)
+	ctx := context.Background()
+
+	if err := EnsureTokenUserIDColumn(ctx, db); err != nil {
+		t.Errorf("first call: %v", err)
+	}
+	if err := EnsureTokenUserIDColumn(ctx, db); err != nil {
+		t.Errorf("second call: %v", err)
+	}
+}
+
+// newTestTokensDBWithUserID creates an in-memory SQLite DB with the
+// smeldr_tokens table including the optional user_id column — the shape an
+// application has after calling EnsureTokenUserIDColumn (or creating the
+// table with the column from the start).
+func newTestTokensDBWithUserID(t *testing.T) *sql.DB {
+	t.Helper()
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, `
+		CREATE TABLE smeldr_tokens (
+			id         TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			role       TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			revoked_at TEXT,
+			created_at TEXT NOT NULL,
+			user_id    TEXT
+		)`)
+	if err != nil {
+		t.Fatalf("create smeldr_tokens with user_id: %v", err)
+	}
+	return db
+}
+
+// — TokenRecord.UserID ———————————————————————————————————————————————————————
+
+func TestTokenStore_createToken_populatesUserID(t *testing.T) {
+	db := newTestTokensDBWithUserID(t)
+	ts := NewTokenStore(db, testSecret)
+	ctx := context.Background()
+
+	_, userID, err := ts.CreateWithID(ctx, "ci", "author", time.Hour)
+	if err != nil {
+		t.Fatalf("CreateWithID: %v", err)
+	}
+
+	records, err := ts.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	if records[0].UserID == nil {
+		t.Fatal("UserID is nil, want a populated pointer")
+	}
+	if *records[0].UserID != userID {
+		t.Errorf("UserID = %q, want %q", *records[0].UserID, userID)
+	}
+}
+
+func TestTokenStore_List_legacySchema_userIDNil(t *testing.T) {
+	db := newTestTokensDB(t) // legacy schema, no user_id column
+	ts := NewTokenStore(db, testSecret)
+	ctx := context.Background()
+
+	if _, err := ts.Create(ctx, "tok", "author", time.Hour); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	records, err := ts.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	if records[0].UserID != nil {
+		t.Errorf("UserID = %v, want nil for a token on a legacy-schema table", records[0].UserID)
+	}
+}
+
+func TestTokenStore_ensureBootstrap_registersUserID(t *testing.T) {
+	db := newTestTokensDBWithUserID(t)
+	ts := NewTokenStore(db, testSecret)
+	ctx := context.Background()
+
+	userID, created := ts.ensureBootstrap(ctx)
+	if !created {
+		t.Fatal("ensureBootstrap: expected created=true on empty table")
+	}
+	if userID == "" {
+		t.Fatal("ensureBootstrap: expected non-empty userID")
+	}
+
+	records, err := ts.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	if records[0].UserID == nil || *records[0].UserID != userID {
+		t.Errorf("bootstrap token UserID = %v, want %q", records[0].UserID, userID)
+	}
+}
+
+// — NamesForUserIDs ———————————————————————————————————————————————————————————
+
+// noQueryDB fails any QueryContext call — used to prove NamesForUserIDs never
+// queries the database for empty input.
+type noQueryDB struct{}
+
+func (noQueryDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, errors.New("noQueryDB: ExecContext not used")
+}
+func (noQueryDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, errors.New("noQueryDB: QueryContext must not be called for empty input")
+}
+func (noQueryDB) QueryRowContext(_ context.Context, _ string, _ ...any) *sql.Row {
+	return nil
+}
+
+func TestTokenStore_NamesForUserIDs_emptyInput_noQuery(t *testing.T) {
+	ts := NewTokenStore(noQueryDB{}, testSecret)
+	out, err := ts.NamesForUserIDs(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("NamesForUserIDs: %v", err)
+	}
+	if len(out) != 0 {
+		t.Errorf("out = %v, want empty map", out)
+	}
+}
+
+func TestTokenStore_NamesForUserIDs_matches(t *testing.T) {
+	db := newTestTokensDBWithUserID(t)
+	ts := NewTokenStore(db, testSecret)
+	ctx := context.Background()
+
+	_, id1, err := ts.CreateWithID(ctx, "alice-token", "author", time.Hour)
+	if err != nil {
+		t.Fatalf("CreateWithID 1: %v", err)
+	}
+	_, id2, err := ts.CreateWithID(ctx, "bob-token", "editor", time.Hour)
+	if err != nil {
+		t.Fatalf("CreateWithID 2: %v", err)
+	}
+
+	out, err := ts.NamesForUserIDs(ctx, []string{id1, id2, "no-such-id"})
+	if err != nil {
+		t.Fatalf("NamesForUserIDs: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("len(out) = %d, want 2: %v", len(out), out)
+	}
+	if out[id1] != "alice-token" {
+		t.Errorf("out[id1] = %q, want %q", out[id1], "alice-token")
+	}
+	if out[id2] != "bob-token" {
+		t.Errorf("out[id2] = %q, want %q", out[id2], "bob-token")
+	}
+	if _, ok := out["no-such-id"]; ok {
+		t.Error("unmatched ID must be absent from the map, not present with an empty value")
+	}
+}
+
+func TestTokenStore_NamesForUserIDs_missingColumn_failOpen(t *testing.T) {
+	db := newTestTokensDB(t) // legacy schema: table exists, no user_id column
+	ts := NewTokenStore(db, testSecret)
+	ctx := context.Background()
+	if _, err := ts.Create(ctx, "tok", "author", time.Hour); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	out, err := ts.NamesForUserIDs(ctx, []string{"whatever"})
+	if err != nil {
+		t.Fatalf("NamesForUserIDs: expected nil error (fail-open), got %v", err)
+	}
+	if len(out) != 0 {
+		t.Errorf("out = %v, want empty map", out)
+	}
+}
+
+func TestTokenStore_NamesForUserIDs_missingTable_failOpen(t *testing.T) {
+	db := newSQLiteDB(t) // no smeldr_tokens table at all
+	ts := NewTokenStore(db, testSecret)
+
+	out, err := ts.NamesForUserIDs(context.Background(), []string{"whatever"})
+	if err != nil {
+		t.Fatalf("NamesForUserIDs: expected nil error (fail-open), got %v", err)
+	}
+	if len(out) != 0 {
+		t.Errorf("out = %v, want empty map", out)
+	}
+}
+
+func TestTokenStore_NamesForUserIDs_queryError(t *testing.T) {
+	db := newTestTokensDBWithUserID(t)
+	db.Close() // any subsequent query fails with a generic, non-schema error
+	ts := NewTokenStore(db, testSecret)
+
+	_, err := ts.NamesForUserIDs(context.Background(), []string{"whatever"})
+	if !errors.Is(err, ErrInternal) {
+		t.Errorf("expected ErrInternal for a genuine query error, got %v", err)
+	}
+}

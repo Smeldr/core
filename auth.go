@@ -373,6 +373,17 @@ type TokenRecord struct {
 
 	// CreatedAt is the UTC time at which the token was created.
 	CreatedAt time.Time
+
+	// UserID is the JWT's own User.ID minted for this token (the same value
+	// last_actor, RoleGrant.Grantor, and RelationEdge.CreatedBy record
+	// elsewhere) — nil for a token created before this field existed, or on
+	// an application whose smeldr_tokens table predates the user_id column
+	// (see [EnsureTokenUserIDColumn]). Never backfilled or guessed: a nil
+	// value means this token's own identity cannot be recovered, not that
+	// it is empty. user_id is unique per token by construction (createToken
+	// mints a fresh [NewID] for every token), so at most one TokenRecord
+	// carries any given value.
+	UserID *string
 }
 
 // TokenStore manages named, revocable bearer tokens stored in a smeldr_tokens
@@ -388,8 +399,16 @@ type TokenRecord struct {
 //	    role       TEXT NOT NULL,
 //	    expires_at TEXT NOT NULL,     -- RFC3339 UTC
 //	    revoked_at TEXT,              -- NULL when not revoked; RFC3339 UTC when revoked
-//	    created_at TEXT NOT NULL      -- RFC3339 UTC
+//	    created_at TEXT NOT NULL,     -- RFC3339 UTC
+//	    user_id    TEXT               -- optional; see EnsureTokenUserIDColumn
 //	);
+//
+// user_id is optional on this required DDL — [TokenStore.Create]/[List] both
+// fall back to the column-less form when it's absent (checked via SQLite's
+// own "no such column" error text, like every other such fallback in this
+// codebase), so an application that hasn't added it yet keeps working
+// unmodified. Add it with [EnsureTokenUserIDColumn] to start recording
+// [TokenRecord.UserID].
 type TokenStore struct {
 	db              DB
 	secret          string
@@ -401,6 +420,30 @@ type TokenStore struct {
 // here are verifiable by [VerifyBearerToken].
 func NewTokenStore(db DB, secret string) *TokenStore {
 	return &TokenStore{db: db, secret: secret}
+}
+
+// EnsureTokenUserIDColumn adds smeldr_tokens' own user_id column on a
+// pre-existing database that predates it, so [TokenStore.Create]/
+// [TokenStore.CreateWithID] start persisting [TokenRecord.UserID] and
+// [TokenStore.List]/[TokenStore.NamesForUserIDs] start returning it.
+// Idempotent — safe to call on every application startup, mirroring every
+// other single-column Ensure*Column function in this codebase
+// (EnsureRelationCreatedByColumn, EnsureDecisionTitleColumn). Deliberately
+// nullable with no DEFAULT: an existing token's own identity cannot be
+// recovered, so its user_id stays a real SQL NULL rather than a guessed or
+// empty-string value.
+//
+// Unlike every other Ensure*Column function, smeldr_tokens is not a table
+// core itself creates (see [TokenStore]'s own doc comment) — an application
+// must call this against its own smeldr_tokens table, the same way it
+// creates that table itself. Wire it wherever the application's own
+// migration/boot path already lives, before [TokenStore.Create] is first
+// called.
+func EnsureTokenUserIDColumn(ctx context.Context, db DB) error {
+	if err := EnsureColumn(ctx, db, "smeldr_tokens", "user_id", "TEXT"); err != nil {
+		return fmt.Errorf("smeldr: EnsureTokenUserIDColumn: %w", err)
+	}
+	return nil
 }
 
 // setProvenanceStore wires store for Revoke's own ProvenanceRecord write
@@ -463,9 +506,21 @@ func (ts *TokenStore) createToken(ctx context.Context, name, role string, ttl ti
 	now := time.Now().UTC()
 	expiresAt := now.Add(ttl)
 	_, err = ts.db.ExecContext(ctx,
-		`INSERT INTO smeldr_tokens (id, name, role, expires_at, created_at) VALUES ($1, $2, $3, $4, $5)`,
-		id, name, role, expiresAt.Format(time.RFC3339), now.Format(time.RFC3339),
+		`INSERT INTO smeldr_tokens (id, name, role, expires_at, created_at, user_id) VALUES ($1, $2, $3, $4, $5, $6)`,
+		id, name, role, expiresAt.Format(time.RFC3339), now.Format(time.RFC3339), user.ID,
 	)
+	if isNoSuchColumn(err, "user_id") {
+		// This application's own smeldr_tokens table (never core-owned, see
+		// TokenStore's own doc comment) predates the user_id column — the
+		// real minted user.ID is still returned to the caller below, only
+		// its DB persistence is skipped, so every existing caller of
+		// Create/CreateWithID keeps working exactly as before this field
+		// existed.
+		_, err = ts.db.ExecContext(ctx,
+			`INSERT INTO smeldr_tokens (id, name, role, expires_at, created_at) VALUES ($1, $2, $3, $4, $5)`,
+			id, name, role, expiresAt.Format(time.RFC3339), now.Format(time.RFC3339),
+		)
+	}
 	if err != nil {
 		return "", "", ErrInternal
 	}
@@ -502,8 +557,14 @@ func (ts *TokenStore) CreateWithID(ctx context.Context, name, role string, ttl t
 // [TokenRecord.RevokedAt] to filter client-side.
 func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 	rows, err := ts.db.QueryContext(ctx,
-		`SELECT id, name, role, expires_at, revoked_at, created_at FROM smeldr_tokens ORDER BY created_at DESC`,
+		`SELECT id, name, role, expires_at, revoked_at, created_at, user_id FROM smeldr_tokens ORDER BY created_at DESC`,
 	)
+	legacySchema := isNoSuchColumn(err, "user_id")
+	if legacySchema {
+		rows, err = ts.db.QueryContext(ctx,
+			`SELECT id, name, role, expires_at, revoked_at, created_at FROM smeldr_tokens ORDER BY created_at DESC`,
+		)
+	}
 	if err != nil {
 		return nil, ErrInternal
 	}
@@ -512,8 +573,13 @@ func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 	for rows.Next() {
 		var rec TokenRecord
 		var expiresAtStr, createdAtStr string
-		var revokedAtStr *string
-		if err := rows.Scan(&rec.ID, &rec.Name, &rec.Role, &expiresAtStr, &revokedAtStr, &createdAtStr); err != nil {
+		var revokedAtStr, userID *string
+		if legacySchema {
+			err = rows.Scan(&rec.ID, &rec.Name, &rec.Role, &expiresAtStr, &revokedAtStr, &createdAtStr)
+		} else {
+			err = rows.Scan(&rec.ID, &rec.Name, &rec.Role, &expiresAtStr, &revokedAtStr, &createdAtStr, &userID)
+		}
+		if err != nil {
 			return nil, ErrInternal
 		}
 		rec.ExpiresAt, _ = time.Parse(time.RFC3339, expiresAtStr)
@@ -521,7 +587,65 @@ func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 		if revokedAtStr != nil {
 			rec.RevokedAt, _ = time.Parse(time.RFC3339, *revokedAtStr)
 		}
+		rec.UserID = userID
 		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, ErrInternal
+	}
+	return out, nil
+}
+
+// NamesForUserIDs resolves each of the given JWT User.IDs (e.g. read from
+// last_actor, RoleGrant.Grantor, or RelationEdge.CreatedBy) to the Name of
+// the token it was minted for — the narrow, read-only, batch lookup
+// Article I's own "authority is explainable" principle calls for: name the
+// credential behind an actor ID already visible elsewhere, without exposing
+// the rest of TokenRecord (Role, ExpiresAt, RevokedAt), which stays behind
+// administer via [TokenStore.List]. One query for the whole batch, not one
+// per ID — built for a caller naming every actor across many rows in a
+// single read.
+//
+// An ID with no matching token is simply absent from the returned map,
+// never a guessed or zero-value entry — this includes every token created
+// before the user_id column existed (a nil UserID never matches any input),
+// and, because user_id is unique per token by construction ([createToken]
+// mints a fresh [NewID] every call), at most one name per input ID.
+//
+// Empty input returns an empty map without querying. A missing table or
+// column also returns an empty map with a nil error (fail-open — this
+// exists so a caller that just wants names gets an empty result, not an
+// error, from an application that hasn't migrated yet). The isNoSuchColumn/
+// isNoSuchTable checks this relies on match SQLite's own error text only,
+// like every other use of them in this codebase — an application on
+// another database engine must run [EnsureTokenUserIDColumn]'s own
+// equivalent migration before upgrading, not rely on this fallback.
+func (ts *TokenStore) NamesForUserIDs(ctx context.Context, userIDs []string) (map[string]string, error) {
+	out := make(map[string]string, len(userIDs))
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(userIDs))
+	args := make([]any, len(userIDs))
+	for i, id := range userIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+	query := "SELECT user_id, name FROM smeldr_tokens WHERE user_id IN (" + strings.Join(placeholders, ", ") + ")"
+	rows, err := ts.db.QueryContext(ctx, query, args...)
+	if isNoSuchColumn(err, "user_id") || isNoSuchTable(err) {
+		return make(map[string]string), nil
+	}
+	if err != nil {
+		return nil, ErrInternal
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var userID, name string
+		if err := rows.Scan(&userID, &name); err != nil {
+			return nil, ErrInternal
+		}
+		out[userID] = name
 	}
 	if err := rows.Err(); err != nil {
 		return nil, ErrInternal
