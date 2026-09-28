@@ -970,7 +970,7 @@ internal planning history. `Milestone_BACKLOG_TEMPLATE.md` is never removed.
 
 # Smeldr Agent Protocol
 
-<!-- common-template-version: 2026-09-28a -->
+<!-- common-template-version: 2026-09-28b -->
 <!-- source: smeldr/architect/AGENT_PROTOCOL.md (canonical) -->
 
 **This file is the canonical source D77 calls `Template-Smeldr-Common-Agent.md`.** Not
@@ -1104,6 +1104,7 @@ itself arrives.
    | `plan-reviewing → implementing` | architect | plan approved (answers in the `task_plan` record's `body`) |
    | `implementing → commit-reviewing` | implementer | commit ready on the branch |
    | `commit-reviewing → done` | implementer, after architect's written approval in the `task_plan` record | merged, pushed, closed out |
+   | `active → done` (reason required) | implementer | work that concludes without a plan/commit cycle: a review, sign-off, copy pass, investigation or design discussion (D88) |
 
    Iteration happens **inside** a phase (plan-feedback and commit-feedback rounds in the
    `task_plan` record's `body`, Task stays in its reviewing state), not by moving
@@ -1150,10 +1151,16 @@ itself arrives.
    automation-stopped-at-a-gate class) — if one is addressed to your role, read it,
    acknowledge it via its own flow, act through the normal channels.
 
-**Task vs. Goal (D57).** Create a `Task` only for work that ends in a plan-reviewed,
-commit-reviewed change to a repo. Everything else — a design discussion, a
-decision-in-progress, an investigation, anything that concludes without that cycle — is a
-`Goal` (`open → in-progress → done`/`parked`, no plan-review, no commit-review).
+**Task vs. Goal (D88, supersedes D57).** A `Task` is the work item for every role and
+every kind of work. Work that ends in a repo change takes the full plan/commit path above.
+Work that concludes without that cycle (a review, sign-off, copy pass, investigation or
+design discussion) is still a `Task`: claim it, do it, and close it `active → done` with a
+reason saying what was concluded. This differs from `resolved` (D58), which means the
+need was met by work outside this Task. A `Goal` means a goal again: an outcome that
+several Tasks serve, linked with `contains`/`derives_from`. It is never dispatch, so
+session start queries Tasks, not Goals. (D57 used Goals for no-commit work only because
+`done` was reachable solely through `commit-reviewing` until core v1.105.0, A382,
+2026-09-28.)
 
 **Plans are a live content type, not files (D81, 2026-09-25).** A plan is a `task_plan`
 record on `process.smeldr.dev` — fields `task_ref`, `band`, `body`, `revision`; flow
