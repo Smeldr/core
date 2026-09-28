@@ -752,6 +752,8 @@ gates on `Run.status` — read `lease_holder`/`outcome` instead.
 
 The Go type `smeldr.Signal` was renamed to `smeldr.LifecycleEvent` to free the `Signal` name for the orchestration content type above. All constant names are unchanged (`AfterCreate`, `AfterPublish`, etc.). If you have code that references `smeldr.Signal` as a type (not a constant), update it to `smeldr.LifecycleEvent`.
 
+**`Signal`'s `expired` state is reachable by a real scheduled mechanism, not only by hand (A374).** `App.ExpireSignals` (Go API only, no MCP tool) moves `pending`/`read` Signals older than a configurable age (default 14 days) to `expired` — never deleted, Signals are Trace history. Three `signal_type` values are always excluded regardless of caller config, since they represent a standing condition that closes only by being answered: `authorization-required`, `review-requested`, `conflict-detected`. If you build your own dynamic content types that create Signals with a `signal_type` meaning "a real open condition, not yet resolved," pass it in `SignalExpiryConfig.ExcludeTypes` — it's added to, never a replacement for, the mandatory three.
+
 ### Reference types and the structural sweep (A372)
 
 A dynamic content type an application registers via `define_content_type`

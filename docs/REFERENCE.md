@@ -3311,7 +3311,7 @@ type ProvenanceStore interface {
 
 ## Scheduled sweep run records
 
-`App.SweepStructural(ctx) (walked, flagged, skipped int, err error)` and `App.DrainEvalQueue(ctx) (walked, triggered, skipped int, err error)` run detectors at scheduled intervals to maintain data consistency — structural validation, eval-queue draining, relation invalidation. Previously, a successful clean run logged one Debug line and persisted nothing, making it indistinguishable from "the sweep never ran". `SweepRunStore` records every scheduled sweep, so staleness can be derived by Go code (e.g. a future alerting task). `SweepRunStore` itself has no HTTP or MCP surface in core (A279) — `Last` and `List` are plain Go methods. `smeldr.dev/mcp` exposes a remote-callable read on top of them: the `get_sweep_run` tool (Author role) wraps `SweepRunStore.Last`, added for exactly the "public read surfaces deferred via future task if needed" case A279 anticipated.
+`App.SweepStructural(ctx) (walked, flagged, skipped int, err error)`, `App.DrainEvalQueue(ctx) (walked, triggered, skipped int, err error)`, and `App.ExpireSignals(ctx, cfg) (walked, expired, skipped int, err error)` run detectors at scheduled intervals to maintain data consistency — structural validation, eval-queue draining, relation invalidation, Signal expiry. Previously, a successful clean run logged one Debug line and persisted nothing, making it indistinguishable from "the sweep never ran". `SweepRunStore` records every scheduled sweep, so staleness can be derived by Go code (e.g. a future alerting task). `SweepRunStore` itself has no HTTP or MCP surface in core (A279) — `Last` and `List` are plain Go methods. `smeldr.dev/mcp` exposes a remote-callable read on top of them: the `get_sweep_run` tool (Author role) wraps `SweepRunStore.Last`, added for exactly the "public read surfaces deferred via future task if needed" case A279 anticipated.
 
 `SweepStructural` also stamps a **per-edge** confirmation, distinct from `SweepRunStore`'s per-run aggregate: `RelationEdge.LastConfirmedAt` (A299) is set to the sweep's own `now` for every edge whose source and target were both checked and found alive that run — nil until an edge's first successful sweep, and never touched by `Assert`/`Propose`/`Observe`. It answers "was this specific edge part of the most recent successful walk," which `SweepRunRecord.Walked`'s aggregate count cannot — the field a witness certificate needs for "confirmed by the system, on a schedule," as opposed to any deliberate `ProvenanceRecord` action. Exposed via `smeldr.dev/mcp`'s `get_relations` (`last_confirmed_at`, omitted when nil).
 
@@ -3384,6 +3384,41 @@ type SweepRunStore interface {
     List(ctx context.Context, detector string, limit int) ([]SweepRunRecord, error)
 }
 ```
+
+### Signal expiry sweep
+
+`App.ExpireSignals(ctx, cfg SignalExpiryConfig) (walked, expired, skipped int, err error)` implements the "retraction by time" state `Signal`'s own flow always defined (`pending`/`read` → `expired`) but nothing ever drove — Signals accumulated `pending`/`read` forever with no mechanism to mark an old one stale. Moves eligible rows to `expired`; never deletes one — Signals are Trace history, and orchestration records are never deleted, matching every other detector in this section.
+
+```go
+type SignalExpiryConfig struct {
+    MaxAge       time.Duration // <= 0 means DefaultSignalExpiryMaxAge (14 days)
+    ExcludeTypes []string      // merged with, never replacing, DefaultSignalExpiryExcludedTypes
+    BatchCap     int           // 0 means DefaultSignalExpiryBatchCap (200); negative means unlimited
+}
+```
+
+**Standing conditions never expire by time.** A Signal whose `signal_type` is `authorization-required`, `review-requested`, or `conflict-detected` is always excluded, regardless of `SignalExpiryConfig.ExcludeTypes` — these represent a real open condition that closes only by being answered (ratified, reviewed, the contradiction resolved), never by growing old. `DefaultSignalExpiryExcludedTypes` names all three; a caller's own `ExcludeTypes` can add more but can never remove the mandatory floor. Each expiry stamps `last_actor` as `"signal-expiry-sweep"` and fires `signal.transitioned` on the Signal's own `receiver` channel (A302), exactly as a human-driven transition would — visible in Trace the same way.
+
+**Each row's UPDATE is guarded against a concurrent answer.** `ExpireSignals` selects eligible rows, then updates each by id — a real gap in which someone could answer the Signal (`read` → `acknowledged`, terminal) before the update runs. The `UPDATE` is conditioned on `status` still matching what was selected; when it doesn't (zero rows affected), the row is left exactly as the concurrent actor left it, counted as `skipped`, and no `signal.transitioned` event fires for it — a lost race is silent, never a silently-overwritten answer.
+
+Wiring mirrors `SweepStructural`/`DrainEvalQueue` exactly:
+
+```go
+runStore := smeldr.NewSweepRunStore(db)
+smeldr.CreateSweepRunTable(db)
+
+expiryFn := func(ctx context.Context) (int, int, int, error) {
+    walked, expired, skipped, err := app.ExpireSignals(ctx, smeldr.SignalExpiryConfig{})
+    _ = runStore.Append(ctx, smeldr.SweepRunRecord{
+        ID: smeldr.NewID(), Detector: "signal-expiry", RanAt: time.Now().UTC(),
+        Walked: walked, Flagged: expired, Skipped: skipped,
+        ActorKind: "job", ActorID: "signal-expiry-sweep",
+    })
+    return walked, expired, skipped, err
+}
+```
+
+`example/server` wires this behind `ENABLE_SIGNAL_EXPIRY_SWEEP` (default schedule: daily at 03:00 UTC), `SIGNAL_EXPIRY_MAX_AGE_DAYS`, and `SIGNAL_EXPIRY_BATCH_CAP` — `ExcludeTypes` beyond the mandatory three is Go-API-only, not exposed as an env var.
 
 ---
 
