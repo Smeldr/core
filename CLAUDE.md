@@ -970,7 +970,7 @@ internal planning history. `Milestone_BACKLOG_TEMPLATE.md` is never removed.
 
 # Smeldr Agent Protocol
 
-<!-- common-template-version: 2026-09-25d -->
+<!-- common-template-version: 2026-09-28a -->
 <!-- source: smeldr/architect/AGENT_PROTOCOL.md (canonical) -->
 
 **This file is the canonical source D77 calls `Template-Smeldr-Common-Agent.md`.** Not
@@ -1010,7 +1010,7 @@ rather than silently picking one.
 
 | Role | Repo(s) | Owns |
 |------|---------|------|
-| core-implementer | `smeldr/core` (+ standalone modules mcp/cli/oauth/media/social/agent) | Framework, MCP server, CLI, standalone Go modules |
+| core-implementer | `smeldr/core` (+ standalone modules mcp/cli/oauth/media/social/agent/runner) | Framework, MCP server, CLI, standalone Go modules |
 | site-implementer | `smeldr/site-dev` | smeldr.dev, deploy, content publishing |
 | brand-expert | `smeldr/brand` | Brand, tone, messaging, content planning and drafts |
 | cloud-implementer | `smeldr/cloud`, `smeldr/mail` | Smeldr Cloud (`cloud.smeldr.io`, `demo.smeldr.io`, `smeldr.io` marketing/CMS — one owner, decided 2026-07-24). `smeldr/mail` (private) is the transactional-email module, reached via absolute paths from the same session, no separate `CLAUDE.md` |
@@ -1269,6 +1269,34 @@ a held-open connection waiting for an event — this is the interaction-model mi
 this; it is a real difference between a cloud session's lifetime model and a local
 session's long-lived one, to be watched for in practice, not solved in advance.
 
+**Orphaned `curl` child processes, found 2026-09-26/27 — a real, structural gap in this
+environment, unlike the local Windows case below (which root-caused to purely procedural:
+re-arming without `TaskStop`-ing the previous task first).** `watch-events-cloud.sh`'s
+backgrounded `curl` (spawned via `> >(filter) &` process substitution inside the script's
+own reconnect loop) has been confirmed, multiple times, to survive its own Monitor's clean
+expiry or an explicit `TaskStop` — even when arming discipline was followed correctly, no
+double-arm mistake involved. Confirmed independently in two sessions on this project:
+architect's own session found 2-3 stray `curl` processes across one session; a separate
+session (brand) accumulated 48 over several days, only surfaced when the harness itself
+flagged them as "orphaned by a previous Claude Code process exit" in its own
+background-tasks panel. Enough accumulation caused a real ~15-20 minute
+`429 Too Many Requests` storm against `process.smeldr.dev`, affecting other sessions, not
+only the one leaking. Upstream tracking: `github.com/anthropics/claude-code/issues/95242`
+(Anthropic's own harness bug, still open upstream). **This repo's own defensive fix
+shipped and was verified live 2026-09-27** (Task `01a0da18`, `scripts/watch-events-cloud.sh`
+commit `b696f7c`): a PID-file checked and killed at every script start (liveness +
+cmdline-match verified before kill, group-kill via `setsid`), so a prior invocation's
+orphan is cleaned up the *next* time the script starts even when its own `trap` never ran
+(a SIGKILL to the wrapper, which a 30-minute Monitor expiry or `TaskStop` can send, is not
+catchable by any trap). Not yet ported to the other local-session scripts
+(`watch-events.ps1`/`.sh`) — check before assuming they carry the same fix.
+
+**Standing practice for every cloud session, not just when something looks wrong:** before
+arming a fresh Monitor — at session start, or any re-arm after expiry/`TaskStop` — run
+`ps aux | grep -E 'curl|watch-events'` and kill anything not tied to a Monitor you are
+about to arm or currently track. Routine hygiene, not incident response — the
+accumulation is silent and the harness's own panel only surfaces it well after the fact.
+
 **What the stream is, and is not.** It is the wake-up signal only. It carries no plan
 content and is not a review channel — the `task_plan` record stays the actual conversation.
 
@@ -1438,9 +1466,23 @@ doorbell.
 Arm `GET /_events/stream` the same way every other role does (see above), filtered
 client-side for `signal.created` events where `receiver` is `brand`.
 
-**Every role, not just brand: mark a `Signal` as read once you've acted on it** —
-`pending → read` on seeing it, `read → acknowledged` once acted on (or `pending →
-expired` if stale on arrival). Not retroactive.
+**Every role, not just brand: close every `Signal` addressed to you, throughout the
+session, not only at session start.**
+- `pending → read` when you have seen it.
+- `read → acknowledged` once you have acted on it. A direct `pending → acknowledged` is
+  not a legal transition; go through `read`.
+- Standing-condition Signals (`authorization-required`, `review-requested`,
+  `conflict-detected`) close by being answered, never by a bare ack: answering the
+  condition is what closes them.
+- Anything left `pending`/`read` for 14 days is moved to `expired` by core's scheduled
+  Signal expiry sweep (A374, `ENABLE_SIGNAL_EXPIRY_SWEEP`), except the standing-condition
+  types above, which never expire. The sweep is a backstop for what nobody closed, not a
+  substitute for closing your own.
+
+Why: `pending` must keep meaning "waiting on you". Found 2026-09-28: architect had 609
+Signals sitting at `pending`, most of them long handled, so a real new one was
+indistinguishable from the backlog. Not retroactive for other roles' old Signals; the
+expiry sweep clears those.
 
 **Brand reviews frontend plans, parallel not blocking (2026-09-03).** Any role's plan
 that touches UI gets posted as a turn in the relevant `discussion.md` thread plus a
