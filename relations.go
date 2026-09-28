@@ -214,6 +214,20 @@ CREATE INDEX IF NOT EXISTS idx_relations_governance_temporal
 		return err
 	}
 
+	// smeldr_reference_types is a brand-new table name on every install, so a
+	// plain CREATE TABLE IF NOT EXISTS is self-healing on next boot with no
+	// separate EnsureColumn-style migration — the A307 class of gap (a new
+	// column silently missing from a pre-existing table) doesn't apply to a
+	// whole new table. See RegisterReferenceType's own doc comment for why
+	// this is a table, not a field on ContentTypeSchema.
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS smeldr_reference_types (
+    type_name  TEXT NOT NULL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL
+)`); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -361,6 +375,45 @@ ON CONFLICT (type_name) DO UPDATE SET
 	s.registry.mu.Lock()
 	s.registry.kinds[def.TypeName] = def
 	s.registry.mu.Unlock()
+	return nil
+}
+
+// RegisterReferenceType designates typeName — a runtime-defined dynamic
+// content type — as a reference type for [defaultTargetChecker]'s own
+// liveness rule (core-sweep-invalidates-domain-edges, 2026-09-28): a
+// reference type's row counts as alive whenever it exists and is not
+// archived (draft, published, and scheduled all count), the same "no
+// status is terminal except actually gone" reasoning defaultTargetChecker
+// already applies unconditionally to every compiled type — generalized
+// here to the dynamic types an application designates as reference/lookup
+// data (Domain, Area) rather than editorial content, for which "must be
+// published to count as real" remains the correct, unchanged rule.
+//
+// A table, not a field on [ContentTypeSchema]: a type can be designated a
+// reference type before, or independently of, its own schema row being
+// defined — [RegisterOrchestrationRelationKinds] designates "domain" and
+// "area" at the same point it registers D71/D72's relation kinds, not at
+// schema-definition time, and a type only ever gains schema validation
+// rules under [ENABLE_DYNAMIC_CONTENT]'s own separate mechanism regardless.
+//
+// Idempotent — safe to call on every boot, matching [UpsertKind]'s own
+// idempotency convention. Returns an error when typeName is empty or the
+// DB operation fails. Does not itself validate that typeName is a
+// registered dynamic content type — [defaultTargetChecker] checks that
+// separately and unconditionally, so a reference-type designation for a
+// type that never gets registered (or is later removed) is simply inert,
+// never consulted.
+func (s *RelationStore) RegisterReferenceType(ctx context.Context, typeName string) error {
+	if typeName == "" {
+		return fmt.Errorf("smeldr: RegisterReferenceType: typeName must not be empty")
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO smeldr_reference_types (type_name, created_at) VALUES ($1, $2)
+		 ON CONFLICT (type_name) DO NOTHING`,
+		typeName, time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		return fmt.Errorf("smeldr: RegisterReferenceType: %q: %w", typeName, err)
+	}
 	return nil
 }
 

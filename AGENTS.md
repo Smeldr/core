@@ -752,6 +752,27 @@ gates on `Run.status` — read `lease_holder`/`outcome` instead.
 
 The Go type `smeldr.Signal` was renamed to `smeldr.LifecycleEvent` to free the `Signal` name for the orchestration content type above. All constant names are unchanged (`AfterCreate`, `AfterPublish`, etc.). If you have code that references `smeldr.Signal` as a type (not a constant), update it to `smeldr.LifecycleEvent`.
 
+### Reference types and the structural sweep (A372)
+
+A dynamic content type an application registers via `define_content_type`
+can be designated a **reference type** (Go API only, no MCP tool —
+`RelationStore.RegisterReferenceType(ctx, typeName)`) when it holds
+lookup/reference data rather than editorial content — data other items
+point at rather than content with its own publication lifecycle. `domain`
+and `area` (D71/D72) are registered as reference types by core itself, at
+the same point it registers their relation kinds.
+
+This changes only how the background structural sweep (`App.SweepStructural`)
+decides whether an edge's target still counts as "alive": for an ordinary
+dynamic content type, a relation edge to a `draft` (never-published) item is
+invalidated, since unpublished editorial content isn't real yet. For a
+reference type, a `draft`/`published`/`scheduled` row all count as alive —
+only `archived` counts as gone. If you create a Domain or Area item via `create_domain`/`create_area` and
+never call `publish_domain`/`publish_area` on it, `belongs_to_domain`/
+`belongs_to_area` edges pointing at it survive the sweep; this was not true
+before A372, and a Decision's Domain-scoped governance access could silently
+disappear the first time the sweep ran against a never-published Domain.
+
 ### Authority mechanism (A303)
 
 Two built-in types for the decision-governance-model's Authority

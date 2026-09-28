@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.102.0] — 2026-09-28
+
+### Added
+
+New exported `RelationStore.RegisterReferenceType(ctx context.Context, typeName string) error` designates a runtime-defined dynamic content type as reference/lookup data for `App.SweepStructural`'s default `TargetChecker`: a registered reference type's row counts as alive whenever it exists and its `Status` is not `"archived"` (draft, published, and scheduled all count), the same "no status is terminal except actually gone" rule every compiled type already gets unconditionally — instead of the default dynamic-content rule, which requires `Status == "published"`. New table `smeldr_reference_types`, created unconditionally by `CreateRelationTables` (a brand-new table, no `EnsureColumn`-style migration needed). `RegisterOrchestrationRelationKinds` now calls `RegisterReferenceType` for `"domain"` and `"area"` (D71/D72) immediately after registering their relation kinds, closing a real bug: both types are typically created via `create_content` and never explicitly published, since they are reference data a Decision points at rather than editorial content — under the previous unconditional "published" rule, every never-published Domain or Area item's `belongs_to_domain`/`belongs_to_area` edges were silently invalidated by the very first scheduled structural sweep. `process.smeldr.dev` itself was checked directly and found unaffected before this fix shipped (every real Domain item there was already published). A reference-type designation is independent of whether the type is ever actually registered as dynamic content — the target checker still requires `targetType` to resolve as a real registered dynamic content type before consulting the reference-type table at all, so a designation for a type that is never defined (or later removed) is simply inert, confirmed by a dedicated regression test. Editorial dynamic content types (never registered as reference types) keep the unchanged "published" rule — pinned by its own regression test. 17 new tests across `relations.go`/`relations_errors_test.go`/`smeldr_target_checker_test.go`/`orchestration_test.go`'s own test files, including an end-to-end test driven through the real `RegisterOrchestrationRelationKinds` wiring and a real `App.SweepStructural` call that reproduces and proves-fixed the exact originally-reported symptom. Full test suite passes with `-race` at 96.1% coverage. This is a MINOR version bump (v1.101.0 to v1.102.0): one new exported function and one new table, fully additive, with a disclosed consumer-visible behaviour fix for any instance using `domain`/`area` content types.
+
+---
+
 ## [1.101.0] — 2026-09-28
 
 ### Added

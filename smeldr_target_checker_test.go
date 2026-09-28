@@ -343,6 +343,234 @@ func TestAppSweepStructural_UnregisteredType_NoTable_Errors(t *testing.T) {
 	edgeSurvives(t, rs, "task-1")
 }
 
+// — Reference-type tests (core-sweep-invalidates-domain-edges, 2026-09-28) —
+
+// setupDynamicTargetDB creates relation/orchestration/schema/block tables,
+// registers typeName as a real dynamic content type via
+// [RelationStore.UpsertKind]'s own "belongs_to_<typeName>" kind
+// (Decision -> typeName), creates one item of that type, and — unless
+// status is [Draft], the state [DynamicTypeRepo.CreateDraft] already
+// leaves it at — sets its status via a direct UPDATE, bypassing
+// [DynamicTypeRepo.SetStatus]'s own state-flow validation, which these
+// tests have no need to register a flow for. Returns the raw DB, a wired
+// RelationStore, an App, and the item's own ID.
+func setupDynamicTargetDB(t *testing.T, typeName string, status Status) (*sql.DB, *RelationStore, *App, string) {
+	t.Helper()
+	db := newSQLiteDB(t)
+	if err := CreateRelationTables(db); err != nil {
+		t.Fatalf("CreateRelationTables: %v", err)
+	}
+	if err := CreateOrchestrationTables(db); err != nil {
+		t.Fatalf("CreateOrchestrationTables: %v", err)
+	}
+	if err := CreateSchemaTable(db); err != nil {
+		t.Fatalf("CreateSchemaTable: %v", err)
+	}
+	if err := CreateBlockTables(db); err != nil {
+		t.Fatalf("CreateBlockTables: %v", err)
+	}
+	rs, err := NewRelationStore(db)
+	if err != nil {
+		t.Fatalf("NewRelationStore: %v", err)
+	}
+	upsertTestKind(t, rs, "belongs_to_"+typeName, "Decision", typeName)
+
+	app := &App{cfg: Config{DB: db}}
+	app.Relations(rs)
+
+	if err := NewSchemaStore(db).Save(context.Background(), &ContentTypeSchema{
+		TypeName: typeName, Kind: "content",
+	}); err != nil {
+		t.Fatalf("SchemaStore.Save: %v", err)
+	}
+	repo := &DynamicTypeRepo{db: db, typeName: typeName}
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"name": "x"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	if status != Draft {
+		if _, err := db.ExecContext(context.Background(),
+			"UPDATE smeldr_dynamic_content SET status=$1 WHERE id=$2", string(status), node.ID,
+		); err != nil {
+			t.Fatalf("set status: %v", err)
+		}
+	}
+	return db, rs, app, node.ID
+}
+
+func assertDomainEdgeSurvives(t *testing.T, rs *RelationStore, decisionID string) {
+	t.Helper()
+	edges, err := rs.GetBySource(context.Background(), "Decision", decisionID, "")
+	if err != nil {
+		t.Fatalf("GetBySource: %v", err)
+	}
+	if len(edges) != 1 || edges[0].InvalidAt != nil {
+		t.Errorf("expected the edge from Decision/%s to survive, got %+v", decisionID, edges)
+	}
+}
+
+func TestDefaultTargetChecker_ReferenceType_DraftAlive(t *testing.T) {
+	db, rs, app, itemID := setupDynamicTargetDB(t, "domain", Draft)
+	if err := rs.RegisterReferenceType(context.Background(), "domain"); err != nil {
+		t.Fatalf("RegisterReferenceType: %v", err)
+	}
+	seedDecision(t, db, "decision-1", "proposed")
+	if _, err := rs.MCPAssertRelation(context.Background(),
+		"Decision", "decision-1", "domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPAssertRelation: %v", err)
+	}
+
+	w, f, sk, err := app.SweepStructural(context.Background())
+	if err != nil {
+		t.Fatalf("SweepStructural: %v", err)
+	}
+	if w != 1 || f != 0 || sk != 0 {
+		t.Errorf("want (1,0,0) for a draft reference-type target, got (%d,%d,%d)", w, f, sk)
+	}
+	assertDomainEdgeSurvives(t, rs, "decision-1")
+}
+
+func TestDefaultTargetChecker_ReferenceType_PublishedAlive(t *testing.T) {
+	db, rs, app, itemID := setupDynamicTargetDB(t, "domain", Published)
+	if err := rs.RegisterReferenceType(context.Background(), "domain"); err != nil {
+		t.Fatalf("RegisterReferenceType: %v", err)
+	}
+	seedDecision(t, db, "decision-1", "proposed")
+	if _, err := rs.MCPAssertRelation(context.Background(),
+		"Decision", "decision-1", "domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPAssertRelation: %v", err)
+	}
+
+	w, f, sk, err := app.SweepStructural(context.Background())
+	if err != nil {
+		t.Fatalf("SweepStructural: %v", err)
+	}
+	if w != 1 || f != 0 || sk != 0 {
+		t.Errorf("want (1,0,0) for a published reference-type target, got (%d,%d,%d)", w, f, sk)
+	}
+	assertDomainEdgeSurvives(t, rs, "decision-1")
+}
+
+func TestDefaultTargetChecker_ReferenceType_ScheduledAlive(t *testing.T) {
+	db, rs, app, itemID := setupDynamicTargetDB(t, "domain", Scheduled)
+	if err := rs.RegisterReferenceType(context.Background(), "domain"); err != nil {
+		t.Fatalf("RegisterReferenceType: %v", err)
+	}
+	seedDecision(t, db, "decision-1", "proposed")
+	if _, err := rs.MCPAssertRelation(context.Background(),
+		"Decision", "decision-1", "domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPAssertRelation: %v", err)
+	}
+
+	w, f, sk, err := app.SweepStructural(context.Background())
+	if err != nil {
+		t.Fatalf("SweepStructural: %v", err)
+	}
+	if w != 1 || f != 0 || sk != 0 {
+		t.Errorf("want (1,0,0) for a scheduled reference-type target, got (%d,%d,%d)", w, f, sk)
+	}
+	assertDomainEdgeSurvives(t, rs, "decision-1")
+}
+
+func TestDefaultTargetChecker_ReferenceType_ArchivedDead(t *testing.T) {
+	db, rs, app, itemID := setupDynamicTargetDB(t, "domain", Archived)
+	if err := rs.RegisterReferenceType(context.Background(), "domain"); err != nil {
+		t.Fatalf("RegisterReferenceType: %v", err)
+	}
+	seedDecision(t, db, "decision-1", "proposed")
+	if _, err := rs.MCPAssertRelation(context.Background(),
+		"Decision", "decision-1", "domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPAssertRelation: %v", err)
+	}
+
+	w, f, sk, err := app.SweepStructural(context.Background())
+	if err != nil {
+		t.Fatalf("SweepStructural: %v", err)
+	}
+	if w != 1 || f != 1 || sk != 0 {
+		t.Errorf("want (1,1,0) for an archived reference-type target, got (%d,%d,%d)", w, f, sk)
+	}
+	edges, err := rs.GetBySource(context.Background(), "Decision", "decision-1", "")
+	if err != nil {
+		t.Fatalf("GetBySource: %v", err)
+	}
+	if len(edges) != 1 || edges[0].InvalidAt == nil {
+		t.Errorf("expected the edge to an archived reference-type target to be invalidated, got %+v", edges)
+	}
+}
+
+func TestDefaultTargetChecker_ReferenceType_RowMissing(t *testing.T) {
+	db, rs, app, _ := setupDynamicTargetDB(t, "domain", Draft)
+	if err := rs.RegisterReferenceType(context.Background(), "domain"); err != nil {
+		t.Fatalf("RegisterReferenceType: %v", err)
+	}
+	seedDecision(t, db, "decision-1", "proposed")
+	if _, err := rs.MCPAssertRelation(context.Background(),
+		"Decision", "decision-1", "domain", "never-created", "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPAssertRelation: %v", err)
+	}
+
+	w, f, sk, err := app.SweepStructural(context.Background())
+	if err != nil {
+		t.Fatalf("SweepStructural: %v", err)
+	}
+	if w != 1 || f != 1 || sk != 0 {
+		t.Errorf("want (1,1,0) for a reference-type target row that doesn't exist, got (%d,%d,%d)", w, f, sk)
+	}
+}
+
+func TestDefaultTargetChecker_ReferenceTypeQueryError(t *testing.T) {
+	db, rs, app, itemID := setupDynamicTargetDB(t, "domain", Draft)
+	if err := rs.RegisterReferenceType(context.Background(), "domain"); err != nil {
+		t.Fatalf("RegisterReferenceType: %v", err)
+	}
+	seedDecision(t, db, "decision-1", "proposed")
+	if _, err := rs.MCPAssertRelation(context.Background(),
+		"Decision", "decision-1", "domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPAssertRelation: %v", err)
+	}
+
+	app.cfg.DB = &targetCheckerQueryFailDB{DB: db, failOn: "smeldr_reference_types"}
+
+	w, f, sk, err := app.SweepStructural(context.Background())
+	if err != nil {
+		t.Fatalf("SweepStructural: %v", err)
+	}
+	if w != 1 || f != 0 || sk != 1 {
+		t.Errorf("want (1,0,1) when the reference-type registry query fails, got (%d,%d,%d)", w, f, sk)
+	}
+	assertDomainEdgeSurvives(t, rs, "decision-1")
+}
+
+// TestDefaultTargetChecker_EditorialType_DraftDead is the regression pin:
+// a dynamic content type never designated a reference type must keep
+// exactly its pre-Amendment behaviour — a draft target is still "not
+// alive."
+func TestDefaultTargetChecker_EditorialType_DraftDead(t *testing.T) {
+	db, rs, app, itemID := setupDynamicTargetDB(t, "article", Draft)
+	// Deliberately no RegisterReferenceType call — "article" is editorial.
+	seedDecision(t, db, "decision-1", "proposed")
+	if _, err := rs.MCPAssertRelation(context.Background(),
+		"Decision", "decision-1", "article", itemID, "belongs_to_article", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPAssertRelation: %v", err)
+	}
+
+	w, f, sk, err := app.SweepStructural(context.Background())
+	if err != nil {
+		t.Fatalf("SweepStructural: %v", err)
+	}
+	if w != 1 || f != 1 || sk != 0 {
+		t.Errorf("want (1,1,0) for a draft editorial-type target, got (%d,%d,%d)", w, f, sk)
+	}
+	edges, err := rs.GetBySource(context.Background(), "Decision", "decision-1", "")
+	if err != nil {
+		t.Fatalf("GetBySource: %v", err)
+	}
+	if len(edges) != 1 || edges[0].InvalidAt == nil {
+		t.Error("expected a draft editorial-type target's edge to still be invalidated (unchanged pre-Amendment behavior)")
+	}
+}
+
 // TestAppSweepStructural_SchemaRegistryTableMissing_Errors covers the
 // other way the registry lookup itself can fail: smeldr_content_type_schemas
 // doesn't exist at all, not just an absent row in it. App.Relations always

@@ -1030,6 +1030,17 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			return fmt.Errorf("register relation kind %q: %w", k.TypeName, err)
 		}
 	}
+
+	// "domain" and "area" (D71/D72) are reference/lookup data, not editorial
+	// content — see RegisterReferenceType's own doc comment for why this is
+	// a table lookup in defaultTargetChecker, not a hardcoded list there,
+	// and why it lives here rather than at schema-definition time
+	// (core-sweep-invalidates-domain-edges, 2026-09-28).
+	for _, t := range []string{"domain", "area"} {
+		if err := store.RegisterReferenceType(ctx, t); err != nil {
+			return fmt.Errorf("register reference type %q: %w", t, err)
+		}
+	}
 	return nil
 }
 

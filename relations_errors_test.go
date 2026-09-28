@@ -89,6 +89,18 @@ func TestCreateRelationTables_ExecError6(t *testing.T) {
 	}
 }
 
+// TestCreateRelationTables_ExecError7 pins the smeldr_reference_types CREATE
+// TABLE call added by core-sweep-invalidates-domain-edges (2026-09-28) —
+// the last statement in the function, so it is unambiguously the 7th
+// ExecContext call regardless of how the six calls before it are internally
+// numbered.
+func TestCreateRelationTables_ExecError7(t *testing.T) {
+	err := CreateRelationTables(&failOnNthExecDB{failAt: 7})
+	if err == nil {
+		t.Error("want error on seventh ExecContext, got nil")
+	}
+}
+
 // — NewRelationStore / loadRegistry error paths ————————————————————————————
 
 func TestNewRelationStore_LoadRegistryQueryError(t *testing.T) {

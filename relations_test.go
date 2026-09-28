@@ -29,6 +29,89 @@ func TestCreateRelationTables_Idempotent(t *testing.T) {
 	}
 }
 
+func TestCreateRelationTables_CreatesReferenceTypesTable(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateRelationTables(db); err != nil {
+		t.Fatalf("CreateRelationTables: %v", err)
+	}
+	var n int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='smeldr_reference_types'`,
+	).Scan(&n); err != nil || n == 0 {
+		t.Error("table smeldr_reference_types not found after CreateRelationTables")
+	}
+}
+
+// — RegisterReferenceType tests —————————————————————————————————————————————
+
+func TestRegisterReferenceType_EmptyTypeName(t *testing.T) {
+	store := setupRelationStore(t)
+	if err := store.RegisterReferenceType(context.Background(), ""); err == nil {
+		t.Fatal("expected error for empty typeName")
+	}
+}
+
+func TestRegisterReferenceType_Idempotent(t *testing.T) {
+	store := setupRelationStore(t)
+	ctx := context.Background()
+	if err := store.RegisterReferenceType(ctx, "domain"); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := store.RegisterReferenceType(ctx, "domain"); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	var count int
+	if err := store.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_reference_types WHERE type_name='domain'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 row, got %d", count)
+	}
+}
+
+func TestRegisterReferenceType_ExecError(t *testing.T) {
+	store := mockRelationStore(&execFailDB{DB: setupRelationStore(t).db, failOn: "INSERT INTO smeldr_reference_types"})
+	if err := store.RegisterReferenceType(context.Background(), "domain"); err == nil {
+		t.Fatal("expected error from failing INSERT")
+	}
+}
+
+// TestRegisterReferenceType_UnregisteredType_StillErrorsAsUnregistered pins
+// architect's own plan-review condition: designating a type as a reference
+// type does not itself make it a registered dynamic content type.
+// defaultTargetChecker's "registered" check runs first and unconditionally —
+// an unregistered type must still error exactly as it did before this
+// Amendment, never silently treated as alive because it happens to also be
+// in smeldr_reference_types.
+func TestRegisterReferenceType_UnregisteredType_StillErrorsAsUnregistered(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreateRelationTables(db); err != nil {
+		t.Fatalf("CreateRelationTables: %v", err)
+	}
+	if err := CreateSchemaTable(db); err != nil {
+		t.Fatalf("CreateSchemaTable: %v", err)
+	}
+	store, err := NewRelationStore(db)
+	if err != nil {
+		t.Fatalf("NewRelationStore: %v", err)
+	}
+	ctx := context.Background()
+	// Designated as a reference type, but never registered in
+	// smeldr_content_type_schemas — "ghost-domain" has no schema row at all.
+	if err := store.RegisterReferenceType(ctx, "ghost-domain"); err != nil {
+		t.Fatalf("RegisterReferenceType: %v", err)
+	}
+
+	check := defaultTargetChecker(db)
+	_, err = check(ctx, "ghost-domain", "any-id")
+	if err == nil {
+		t.Fatal("expected error for a reference-typed but unregistered dynamic content type")
+	}
+}
+
 func TestUpsertKind_RoundTrip(t *testing.T) {
 	store := setupRelationStore(t)
 	ctx := context.Background()

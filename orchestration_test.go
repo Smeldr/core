@@ -1204,6 +1204,56 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestRegisterOrchestrationRelationKinds_RegistersReferenceTypes pins
+// core-sweep-invalidates-domain-edges (2026-09-28): "domain" and "area" are
+// designated reference types at the same point core registers their own
+// relation kinds, per architect's own instruction.
+func TestRegisterOrchestrationRelationKinds_RegistersReferenceTypes(t *testing.T) {
+	store := setupRelationStore(t)
+	ctx := context.Background()
+	if err := RegisterOrchestrationRelationKinds(ctx, store); err != nil {
+		t.Fatalf("RegisterOrchestrationRelationKinds: %v", err)
+	}
+
+	for _, typeName := range []string{"domain", "area"} {
+		var count int
+		if err := store.db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM smeldr_reference_types WHERE type_name=$1`, typeName,
+		).Scan(&count); err != nil {
+			t.Fatalf("query %q: %v", typeName, err)
+		}
+		if count != 1 {
+			t.Errorf("%q: expected 1 row in smeldr_reference_types, got %d", typeName, count)
+		}
+	}
+}
+
+// TestAppSweepStructural_ReferenceTypeTarget_DraftSurvives is the
+// end-to-end regression test for the actual reported symptom, using the
+// real RegisterOrchestrationRelationKinds wiring rather than a hand-rolled
+// kind: a Domain item created but never published must not have its
+// belongs_to_domain edge invalidated by a structural sweep.
+func TestAppSweepStructural_ReferenceTypeTarget_DraftSurvives(t *testing.T) {
+	db, rs, app, itemID := setupDynamicTargetDB(t, "domain", Draft)
+	if err := RegisterOrchestrationRelationKinds(context.Background(), rs); err != nil {
+		t.Fatalf("RegisterOrchestrationRelationKinds: %v", err)
+	}
+	seedDecision(t, db, "decision-1", "proposed")
+	if _, err := rs.MCPAssertRelation(context.Background(),
+		"Decision", "decision-1", "domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPAssertRelation: %v", err)
+	}
+
+	w, f, sk, err := app.SweepStructural(context.Background())
+	if err != nil {
+		t.Fatalf("SweepStructural: %v", err)
+	}
+	if w != 1 || f != 0 || sk != 0 {
+		t.Errorf("want (1,0,0) for a never-published real Domain item, got (%d,%d,%d)", w, f, sk)
+	}
+	assertDomainEdgeSurvives(t, rs, "decision-1")
+}
+
 // — EnsureOrchestrationSignalColumns (A296) ——————————————————————————————————
 
 func TestEnsureOrchestrationSignalColumns_AddsColumns(t *testing.T) {

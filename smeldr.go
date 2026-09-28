@@ -962,7 +962,17 @@ func (a *App) RelationStore() *RelationStore {
 //
 // For a runtime-defined content type (no dedicated table,
 // resolveItemTable falls back to smeldr_dynamic_content), alive means
-// status = 'published', matching this function's original behaviour.
+// status = 'published', matching this function's original behaviour —
+// unless targetType has been designated a reference type via
+// [RelationStore.RegisterReferenceType] (Domain, Area: reference/lookup
+// data, not editorial content), in which case it gets the same "no status
+// is terminal except gone" rule as a compiled type: alive means the row
+// exists and isn't archived. Found live 2026-09-28
+// (core-sweep-invalidates-domain-edges): a Domain item created but never
+// explicitly published — nothing about a governance-scope reference target
+// implies an editorial draft-review-publish workflow — had every
+// belongs_to_domain edge pointing at it silently invalidated on the very
+// next sweep.
 //
 // resolveItemTable's own fallback is where the same hazard this function
 // exists to fix can reappear sideways: it returns smeldr_dynamic_content
@@ -1011,6 +1021,22 @@ func defaultTargetChecker(db DB) TargetChecker {
 			return false, fmt.Errorf("smeldr: defaultTargetChecker: %q: no compiled table and not a registered dynamic content type — cannot determine liveness", targetType)
 		}
 
+		// Reference types (Domain, Area — see [RelationStore.RegisterReferenceType])
+		// use the same "no status is terminal except actually gone" rule the
+		// compiled-type branch above already applies unconditionally; every
+		// other (editorial) dynamic content type keeps requiring "published".
+		// Checked only after confirming targetType is a real registered
+		// dynamic content type above — a reference-type row for a type that
+		// was never registered (or was later removed) never reaches here at
+		// all, per RegisterReferenceType's own doc comment.
+		var isReference int
+		if err := db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM smeldr_reference_types WHERE type_name=$1",
+			targetType,
+		).Scan(&isReference); err != nil {
+			return false, fmt.Errorf("smeldr: defaultTargetChecker: %q: reference-type registry could not be checked: %w", targetType, err)
+		}
+
 		rows, err := db.QueryContext(ctx,
 			"SELECT status FROM smeldr_dynamic_content WHERE id=$1", targetID)
 		if err != nil {
@@ -1023,6 +1049,9 @@ func defaultTargetChecker(db DB) TargetChecker {
 		var status string
 		if err := rows.Scan(&status); err != nil {
 			return false, err
+		}
+		if isReference > 0 {
+			return status != "archived", nil
 		}
 		return status == "published", nil
 	}

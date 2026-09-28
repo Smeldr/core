@@ -114,7 +114,13 @@
 //     Draft → Published → Archived progression.
 //   - Relation graph ([RelationStore], [RelationEdge], [RelationKindDef]) —
 //     typed, directional edges between items (asserted, inferred, or
-//     observed). Create a store with [NewRelationStore].
+//     observed). Create a store with [NewRelationStore]. Designate a dynamic
+//     content type as reference/lookup data (never edited toward a terminal
+//     "published" state, but never structurally invalid either) with
+//     [RelationStore.RegisterReferenceType] — the default structural-sweep
+//     target checker treats a registered reference type's row as alive
+//     whenever it exists and isn't archived, rather than requiring
+//     "published" the way editorial dynamic content does.
 //   - Authority and rules ([Rule], [AuthorityStub]) — role/rank-scoped
 //     authorization scaffolding, ordered with [SetRuleTypeOrder] and queried
 //     with [RuleTypeRank].

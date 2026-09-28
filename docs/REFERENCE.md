@@ -4525,6 +4525,41 @@ Domain/Area content types ship with core itself; an instance defines them via
 deliberately unrestricted — Set's whole point is membership spanning types core cannot
 enumerate ahead of time, so it carries no `TypePairs` at all, unlike every other kind here.
 
+`RegisterOrchestrationRelationKinds` also calls
+[`RelationStore.RegisterReferenceType`](#registerreferencetype) for `"domain"` and
+`"area"` — see that section for what a reference-type designation changes about how the
+structural sweep treats a Domain or Area item that has never been published.
+
+### `RegisterReferenceType`
+
+```go
+func (s *RelationStore) RegisterReferenceType(ctx context.Context, typeName string) error
+```
+
+Designates a dynamic content type as **reference/lookup data** rather than editorial
+content, for the default structural-sweep target checker's own liveness rule
+(`App.SweepStructural`'s built-in `TargetChecker`, see "Scheduled sweep run records"
+above). Idempotent — safe to call on every boot, same convention as `UpsertKind`.
+
+By default, the structural sweep treats a dynamic content type's row as alive only when
+its `Status` is `"published"` — correct for editorial content, where an unpublished
+draft is not yet real. `domain`/`area` (D71/D72) are typically created via
+`create_content` and never explicitly published, since they are reference data a
+Decision points at, not content with its own publication lifecycle — under the default
+rule, every never-published Domain or Area item's `belongs_to_domain`/`belongs_to_area`
+edges were silently invalidated by the very first structural sweep. A type registered
+here instead counts as alive whenever its row exists and its `Status` is not
+`"archived"` — draft, published, and scheduled all count, mirroring the rule every
+compiled orchestration type already gets unconditionally.
+
+A reference-type designation is independent of whether the type is actually a
+registered dynamic content type: `RegisterOrchestrationRelationKinds` designates
+`"domain"`/`"area"` at the same point it registers the D71/D72 relation kinds, not at
+the point an instance defines the type's own schema via `define_content_type` — the
+target checker still requires `targetType` to resolve as a real registered dynamic
+content type before consulting the reference-type table at all, so a designation for a
+type that is never defined (or later removed) is simply inert.
+
 ### `Signal` structured fields (A296)
 
 `Signal` (`orchestration.go`) carries five additional fields, populated when the Signal was
