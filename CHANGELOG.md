@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.104.1] — 2026-09-28
+
+### Fixed
+
+A pre-emptive governance authorization gate fix: `seedToolPolicies` in `governance.go` now seeds a policy row for the `lookup_token_names` MCP tool, mapping it to the `read` operation required by Smeldr's governance layer. When an application configures full governance with a `RoleStore`, this row ensures the tool can be authorized correctly once it ships in `smeldr.dev/mcp`; previously, tools missing a seeded policy row in this table were denied to everyone, including authorized users — a gap that had already affected `get_sweep_run` (fixed in A298) and `get_check_status` (fixed in A312). Documentation in `AGENTS.md` was restructured from a two-column token-tools table (Tool/Description) to three columns (Tool/Role/Description) to reflect that the new tool requires only Author role authorization, unlike the existing three token-management tools (`create_token`, `list_tokens`, `revoke_token`) which all require Admin. `TestMigrateGovernance_ToolPoliciesSeed` was extended with a test case asserting the new `lookup_token_names` → `read` row is correctly seeded. No exported Go symbols were added or changed; package coverage remains at 96.1%, all tests and race-detector pass green.
+
+---
+
 ## [1.104.0] — 2026-09-28
 
 ### Added

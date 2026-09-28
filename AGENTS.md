@@ -511,15 +511,19 @@ Use subscriptions to keep cached content fresh without polling.
 The `capabilities.resources.subscribe` flag in the `initialize` response
 confirms subscriptions are available on this server.
 
-### Token management tools (Admin role required)
+### Token management tools
 
-These tools are available when the site has `TokenStore` configured:
+These tools are available when the site has `TokenStore` configured. `create_token`/
+`list_tokens`/`revoke_token` require Admin role — they expose or change a token's role,
+expiry, and revoked status. `lookup_token_names` requires only Author role — it reveals
+nothing those three protect, only a name for an ID already visible elsewhere (see below).
 
-| Tool | Description |
-|------|-------------|
-| `create_token` | Issues a new named token with a given role and TTL. Returns `token_id` alongside the raw token — pass it directly to `grant_role`. |
-| `list_tokens` | Lists all tokens with name, role, expiry, revoked status, and `user_id` (the JWT identity this token was minted for — `null` for a token created before this field existed) |
-| `revoke_token` | Revokes a token by ID — effective immediately |
+| Tool | Role | Description |
+|------|------|-------------|
+| `create_token` | Admin | Issues a new named token with a given role and TTL. Returns `token_id` alongside the raw token — pass it directly to `grant_role`. |
+| `list_tokens` | Admin | Lists all tokens with name, role, expiry, revoked status, and `user_id` (the JWT identity this token was minted for — `null` for a token created before this field existed) |
+| `revoke_token` | Admin | Revokes a token by ID — effective immediately |
+| `lookup_token_names` | Author | Batch-resolves a list of `user_id` values (e.g. from `last_actor`, `RoleGrant.Grantor`, or a relation edge's `created_by`) back to each token's own `Name`. An ID with no matching token is simply absent from the result, never guessed. |
 
 **Critical rules for token operations:**
 

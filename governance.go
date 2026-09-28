@@ -384,6 +384,16 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// workspace-delegate-region-v1.md §0 F4, 01a0e3f9-5). Read-only;
 		// same "not module-generated" reason as the rows above.
 		{"list_roles", "read"},
+		// Batch-resolve JWT User.ID values to token Names (Author+,
+		// smeldr.dev/mcp, mcp-lookup-token-names, Article I
+		// explainability). Same "not module-generated" reason as the
+		// rows above -- lookup_token_names reads TokenStore.
+		// NamesForUserIDs directly, no MCPModule backs it. Deliberately
+		// coarse: reveals only a name for an ID the caller can already
+		// see elsewhere (last_actor, RoleGrant.Grantor, a relation
+		// edge's created_by), nothing list_tokens protects (role,
+		// expiry, revocation).
+		{"lookup_token_names", "read"},
 	}
 
 	for _, p := range policies {
