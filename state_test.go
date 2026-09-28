@@ -304,6 +304,73 @@ func TestRegisterFlow_transitionRoleUpdatedInPlace(t *testing.T) {
 	}
 }
 
+// TestRegisterFlow_TaskFlow_ActiveToDoneAddedOnUpgrade is the regression pin
+// for D88's own central claim: a live instance already running the
+// pre-D88 agent-task flow (14 transitions, no "active"→"done") picks up the
+// new transition automatically on its next boot's RegisterFlow call, via
+// the same transition-upsert mechanism T268/A309 already proved — no
+// Ensure*Column-style migration needed, since this adds a transition row,
+// not a column.
+func TestRegisterFlow_TaskFlow_ActiveToDoneAddedOnUpgrade(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+
+	// The pre-D88 shape: orchTaskFlow() minus the "active"->"done" transition.
+	old := StateFlow{
+		Name:     "agent-task",
+		TypeName: "Task",
+		States: []State{
+			{Name: "backlog", IsInitial: true},
+			{Name: "active"},
+			{Name: "waiting-plan"},
+			{Name: "plan-reviewing"},
+			{Name: "implementing"},
+			{Name: "commit-reviewing"},
+			{Name: "done", IsTerminal: true},
+			{Name: "blocked"},
+			{Name: "deferred", IsTerminal: true},
+			{Name: "resolved", IsTerminal: true},
+		},
+		Transitions: []Transition{
+			{From: "backlog", To: "active"},
+			{From: "active", To: "waiting-plan"},
+			{From: "waiting-plan", To: "plan-reviewing"},
+			{From: "plan-reviewing", To: "implementing"},
+			{From: "implementing", To: "commit-reviewing"},
+			{From: "commit-reviewing", To: "done"},
+			{From: "active", To: "blocked"},
+			{From: "blocked", To: "active"},
+			{From: "active", To: "deferred"},
+			{From: "backlog", To: "deferred"},
+			{From: "active", To: "resolved", RequiredReason: true},
+			{From: "waiting-plan", To: "resolved", RequiredReason: true},
+			{From: "plan-reviewing", To: "resolved", RequiredReason: true},
+			{From: "backlog", To: "resolved", RequiredReason: true},
+		},
+	}
+	if err := app.RegisterFlow(old); err != nil {
+		t.Fatalf("RegisterFlow (old, pre-D88 shape): %v", err)
+	}
+
+	// Before the upgrade: "active"->"done" is not yet a valid transition.
+	if err := validateTransition(ctx, db, nil, nil, "", "", "Task", "active", "done", "closing early"); err == nil {
+		t.Fatal(`active->done: want error before upgrade, got nil`)
+	}
+
+	// The real, current shape — simulating the live instance's next boot.
+	if err := app.RegisterFlow(orchTaskFlow()); err != nil {
+		t.Fatalf("RegisterFlow (current, with D88): %v", err)
+	}
+
+	if err := validateTransition(ctx, db, nil, nil, "", "", "Task", "active", "done", "closing early"); err != nil {
+		t.Errorf("active->done: want nil after upgrade, got %v", err)
+	}
+}
+
 func TestRegisterFlow_unknownStateError(t *testing.T) {
 	db := newSQLiteDB(t)
 	ctx := context.Background()

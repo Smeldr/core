@@ -1166,6 +1166,16 @@ func orchSignalFlow() StateFlow {
 // workaround available at the time was leaving it in "backlog" with
 // priority dropped and a manual "SUPERSEDED" notice prepended to its own
 // description, not a real close).
+//
+// "active" → "done" (D88, RequiredReason: true) is a second, shorter door
+// into the same terminal state the full "commit-reviewing" → "done" path
+// also reaches — for work that ends without a plan/commit cycle at all (a
+// review, sign-off, copy pass, investigation, or design discussion).
+// Distinct from "resolved" (D58): "resolved" means the underlying need was
+// met by work outside this Task; "active" → "done" means this Task's own
+// work is what closed it, just not through a build. Only reachable from
+// "active" — a Task must be claimed first ("backlog" → "done" stays
+// illegal, matching every other terminal-state door in this flow).
 func orchTaskFlow() StateFlow {
 	return StateFlow{
 		Name:     "agent-task",
@@ -1197,6 +1207,7 @@ func orchTaskFlow() StateFlow {
 			{From: "waiting-plan", To: "resolved", RequiredReason: true},
 			{From: "plan-reviewing", To: "resolved", RequiredReason: true},
 			{From: "backlog", To: "resolved", RequiredReason: true},
+			{From: "active", To: "done", RequiredReason: true},
 		},
 	}
 }

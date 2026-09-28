@@ -2,6 +2,7 @@ package smeldr
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -118,8 +119,8 @@ func TestTaskFlow_definition(t *testing.T) {
 	if len(f.States) != 10 {
 		t.Errorf("state count = %d, want 10", len(f.States))
 	}
-	if len(f.Transitions) != 14 {
-		t.Errorf("transition count = %d, want 14", len(f.Transitions))
+	if len(f.Transitions) != 15 {
+		t.Errorf("transition count = %d, want 15", len(f.Transitions))
 	}
 	if got := initialState(f); got != "backlog" {
 		t.Errorf("initial = %q, want %q", got, "backlog")
@@ -210,6 +211,65 @@ func TestTaskFlow_ResolvedIsTerminal(t *testing.T) {
 		if tr.From == "resolved" {
 			t.Errorf("unexpected outbound transition resolved→%s", tr.To)
 		}
+	}
+}
+
+// setupTaskFlowDB registers the real orchTaskFlow() (not a synthetic
+// stand-in) against a fresh SQLite DB, for tests that exercise
+// validateTransition end-to-end rather than just inspecting the flow struct.
+func setupTaskFlowDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+	if err := app.RegisterFlow(orchTaskFlow()); err != nil {
+		t.Fatalf("RegisterFlow: %v", err)
+	}
+	return db
+}
+
+// TestTaskFlow_ActiveToDone_WithReason_Succeeds verifies the new D88 door —
+// "active" → "done" with a reason supplied — validates cleanly.
+func TestTaskFlow_ActiveToDone_WithReason_Succeeds(t *testing.T) {
+	db := setupTaskFlowDB(t)
+	err := validateTransition(context.Background(), db, nil, nil, "", "", "Task", "active", "done", "reviewed and closed, no build needed")
+	if err != nil {
+		t.Errorf("active->done with reason: want nil, got %v", err)
+	}
+}
+
+// TestTaskFlow_ActiveToDone_NoReason_Rejected verifies the same door rejects
+// an empty reason — RequiredReason is enforced, not just declared.
+func TestTaskFlow_ActiveToDone_NoReason_Rejected(t *testing.T) {
+	db := setupTaskFlowDB(t)
+	err := validateTransition(context.Background(), db, nil, nil, "", "", "Task", "active", "done", "")
+	if !errors.Is(err, ErrBadRequest) {
+		t.Errorf("active->done with no reason: want ErrBadRequest, got %v", err)
+	}
+}
+
+// TestTaskFlow_BacklogToDone_StillRejected confirms D88 only opened "active"
+// → "done" — a Task must still be claimed first. A reason does not make an
+// otherwise-undefined transition legal.
+func TestTaskFlow_BacklogToDone_StillRejected(t *testing.T) {
+	db := setupTaskFlowDB(t)
+	err := validateTransition(context.Background(), db, nil, nil, "", "", "Task", "backlog", "done", "skipping straight through")
+	if err == nil {
+		t.Error("backlog->done: want error, got nil")
+	}
+}
+
+// TestTaskFlow_FullCommitPath_Unchanged pins that D88 is additive: the
+// original "commit-reviewing" → "done" door (no reason required) still
+// works exactly as before.
+func TestTaskFlow_FullCommitPath_Unchanged(t *testing.T) {
+	db := setupTaskFlowDB(t)
+	err := validateTransition(context.Background(), db, nil, nil, "", "", "Task", "commit-reviewing", "done", "")
+	if err != nil {
+		t.Errorf("commit-reviewing->done: want nil, got %v", err)
 	}
 }
 

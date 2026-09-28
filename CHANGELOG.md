@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.105.0] — 2026-09-28
+
+### Added
+
+`orchTaskFlow()` in `orchestration.go` gained a second transition path to the `done` terminal state: `{From: "active", To: "done", RequiredReason: true}` (D88), complementing the existing `commit-reviewing → done` path which remains completely unchanged. The new path allows a Task to transition directly from `active` to `done` when its work concludes without a plan/commit cycle — for investigation, review, sign-off, or design discussion tasks — and enforces a reason via the same `RequiredReason` gate applied to the `resolved` state (D58), but carries different semantics: where `resolved` indicates external work fulfilled the need, the new `active → done` path indicates this Task's own work closed it. The transition is only reachable from `active` (i.e., `backlog → done` remains illegal, preserving the requirement to claim before closing), and is handled by the existing `transition_item` MCP tool with `to: "done"` and a `reason` argument. Because `RegisterFlow`'s transition upsert treats a new `(flow_id, from_state, to_state)` combination as a plain insert, this transition reaches a live instance automatically on its next boot with no `Ensure*Column` migration step required. Testing: `TestRegisterFlow_TaskFlow_ActiveToDoneAddedOnUpgrade` in `state_test.go` confirms the upgrade path (old shape rejected, new shape succeeds, mirroring the pattern in T268/A309); `orchestration_test.go` gained four new functional tests (`TestTaskFlow_ActiveToDone_WithReason_Succeeds`, `TestTaskFlow_ActiveToDone_NoReason_Rejected` confirming the reason gate is enforced, `TestTaskFlow_BacklogToDone_StillRejected` confirming only the `active` door opened, and `TestTaskFlow_FullCommitPath_Unchanged` confirming the original path still works), and `TestTaskFlow_definition`'s transition-count assertion updated from 14 to 15. A pre-existing documentation drift was corrected alongside this change: `docs/REFERENCE.md`'s Task type state flow listed "9 states" (stale since D58 added the `resolved` terminal state) and is now "10 states"; `AGENTS.md` gained a new paragraph in the "Orchestration content types (A183)" section explaining the new transition's purpose and that no new MCP tool is required. Coverage remains at 96.1% (gate 96.0%), and both `go test ./...` and `go test -race ./...` pass green. MINOR version bump (v1.104.1 → v1.105.0) reflects this fully additive behavioural change; existing code not using the new transition is unaffected.
+
+---
+
 ## [1.104.1] — 2026-09-28
 
 ### Fixed
