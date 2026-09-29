@@ -101,12 +101,29 @@ Labels are reviewed at every module minor or major version bump.
 - Grant provenance — `RoleGrant.Grantor` records which token created a grant (v1.101.0)
 - `RoleStore.GetRole(ctx, name)` — read-only lookup of a role's full definition (operations, scope mode) (v1.100.0)
 - Admin's own operation set was narrowed to remove `review`/`approve` (v1.98.0, security hardening) — Admin no longer implicitly holds every operation that exists; explicit roles are required for review/approval workflows
+- The role, scope, tool-policy and audit model behind all of this is described under "Governance and delegation" below
 
 ## Governance and delegation — Experimental
 
-New surface since v1.89.3 — the underlying RoleStore/operations governance model predates
-this window and is not yet catalogued here in full; this section covers only what shipped
-in this update:
+### Baseline model — RoleStore
+
+Opt-in: an app that never calls `App.Governance(store)` sees no governance behaviour at all.
+
+- `App.Governance(store *RoleStore) error` — wires the store: creates the governance tables, seeds default roles and tool policies, migrates existing token role strings into grants, and always wires the audit trail alongside it (D44 — there is no governance-enabled instance without an audit log). `store` must share the app's own `Config.DB`. Accessors `App.RoleStore()` and `App.GovernanceAuditStore()`
+- Tables — `smeldr_roles`, `smeldr_role_grants`, `smeldr_tool_policies`, `smeldr_governance_audit`
+- `RoleDefinition` — `Name`, `Operations` (full-word operation list), `ScopeMode`, `ScopeRelationKind`, `ScopeDirection`, `TrustLevel` (0 direct, 2 plan required; 1 is rejected as not yet defined), `AllowSelfApproval` (meaningful only at trust level 2)
+- `RoleStore.DefineRole` — upsert by name; a redefinition updates operations, scope, trust level and self-approval, and keeps the row's ID
+- Seeded roles — `author` (create, read, update, publish, archive), `editor` (author plus delete, manage), `admin` (editor plus administer, define-type, define-flow, define-relation-kind; no review/approve since v1.98.0)
+- `RoleGrant` and `RoleStore.Grant`/`Revoke`/`ListGrants` — binds a token to a role with concrete scope data. `Grant` is idempotent on token, role, anchor and static scope list, so repeating it returns the existing grant ID
+- Three scope modes (`ScopeMode`) — `ScopeGlobal` (every item), `ScopeStatic` (explicit `type:id` or `type:*` patterns), `ScopeDynamic` (items one hop from an anchor item via a named relation kind and direction; only asserted, non-invalidated edges count)
+- `RoleStore.Authorized(ctx, tokenID, op, AuthTarget)` — whether the token holds any unexpired grant whose role includes the operation and whose scope covers the target. Fails closed on a query error; a transient dynamic-scope error does not abort the remaining grants and surfaces only if none authorizes. Operations with no target (e.g. `administer`) need a global grant
+- `RoleStore.RoleGranted(ctx, tokenID, roleName, target)` — the same scope logic keyed by exact role name instead of operation word, for named-role gates on custom transitions
+- `AuthTarget` — `TypeName`, `ID` (used for matching), `Slug` (display and logging only)
+- Tool policies — `smeldr_tool_policies` maps each built-in MCP tool to the operation word that gates it, seeded idempotently on every boot; `RoleStore.ToolPolicy(ctx, toolName)` is the seam smeldr.dev/mcp uses to resolve a tool's required operation before calling `Authorized`
+- Governance audit — `RoleStore.WithAudit(actorTokenID, log)` returns a store that records every `DefineRole`, `Grant` and `Revoke` as a `GovernanceAuditRecord` (actor, action, target, before and after JSON) via a `GovernanceAuditStore`; `NewGovernanceAuditStore`/`CreateGovernanceAuditTable` give the SQL-backed one. `Grant` and `Revoke` are atomic with their audit record when the audit store is the SQL one and the DB supports transactions (A233); otherwise (a non-SQL audit store, no transaction support, or `DefineRole`, which always writes its audit record outside the mutation) an audit error means the change may already have applied
+- Stewardship reads — `RoleStore.StewardedRuleTypes` and `RoleStore.StewardshipInbox` return the rule types a token stewards and the Decisions, Rules and authority stubs touching them
+
+### Delegation and stewardship additions (since v1.89.3)
 
 - Item-scoped delegation — `RoleStore.GetGrant`, `RoleStore.ListRoles` (v1.101.0); built-in
   `item-approver`/`item-reviewer` roles via `RegisterItemApproverRole`/`RegisterItemReviewerRole`
@@ -319,9 +336,10 @@ MCP resource subscriptions (Beta):
 - `Decision` content type — ratified architectural decision with re-evaluation cycle (governance-decision flow: proposed -> ratified -> ... -> superseded/archived). Gained a short display `Title` field independent of the Markdown `Body` (v1.93.0), and `TensionRuleID`/`TensionReason` fields recording declared tension against a Rule (v1.91.0)
 - `Amendment` content type — committed changeset linking a Task to its code implementation (amendment-lifecycle flow: scoped -> in-progress -> commit-ready -> committed -> merged/rejected)
 - `Goal` content type — work goal with priority, band, and size; linked to Decisions and Tasks via the relation graph (goal-lifecycle flow: open -> in-progress -> done/resolved, open <-> parked, parked -> resolved)
-- `CreateOrchestrationTables(db DB) error` — creates all five DB tables
-- `RegisterOrchestrationTypes(app *App, db DB)` — registers all five types with state flows and MCP(MCPRead, MCPWrite); fail-open on nil DB
-- All five types embed `Node` and receive full MCP tool generation (create, get, list, update, publish, archive, delete)
+- `Run` content type (D38, M3) — one mechanical episode of headless automated work, from the moment a listener claims it to the moment it merges or is abandoned. Fields: `TaskID`, `Repo`, `Machine`, `Branch`, `WorktreePath`, `BaseSHA`, `LeaseHolder`, `Outcome`, `Cleanup`, `AcknowledgedAt`, `LastActor`. Unlike the other five types it registers no state flow: its authoritative state is `LeaseHolder` plus `Outcome`, guarded by `SQLRepo.Save`'s rev-CAS, and `Node.Status` stays Draft for the whole life of the row. `RunOutcome` values `merged`, `needs-resync`, `stuck`, `failed`, `orphaned` (empty while in flight); `RunCleanupState` values `pending`/`done`. Lease expiry is computed by the caller (`UpdatedAt` plus a TTL), not stored. Every lease-touching write must echo the `Rev` it last read, or the CAS degrades to last-write-wins
+- `CreateOrchestrationTables(db DB) error` — creates all six DB tables (`smeldr_signals`, `smeldr_tasks`, `smeldr_decisions`, `smeldr_amendments`, `smeldr_goals`, `smeldr_runs`)
+- `RegisterOrchestrationTypes(app *App, db DB)` — registers all six types with MCP(MCPRead, MCPWrite); five of them (all but `Run`) also get state flows; fail-open on nil DB
+- All six types embed `Node` and receive full MCP tool generation (create, get, list, update, publish, archive, delete)
 - `QueryGoalContext(ctx, db, rs, goalID)` — assembles `GoalContext` (goal + linked Decisions, Tasks, Goals) via bidirectional relation-graph query; fail-open on nil RelationStore
 - `Severity` type + `SeverityOf(ctx, db, rs, anchorType, anchorID, ruleType, kind, direction, maxDepth)` (v1.91.0) — computes an ordinal blast-radius severity for a Rule-anchored graph walk, surfaced once a threshold is crossed
 - New relation kinds `belongs_to_domain`, `belongs_to_area` (Decision → Domain/Area), and `in_set` (v1.92.0) — model domain/area/set membership on the relation graph
