@@ -2,20 +2,20 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.89.3 + smeldr.dev/mcp v1.36.1 + smeldr.dev/cli v0.17.1 + smeldr.dev/oauth v0.4.1 + smeldr.dev/social v0.10.3 + smeldr.dev/agent v0.9.1 + smeldr.dev/media v1.6.2 + smeldr.dev/core/pgx v0.2.0.
+Last updated: v1.105.1 + smeldr.dev/mcp v1.43.1 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.89.3 | Stable |
-| `smeldr.dev/mcp` | v1.36.1 | Stable |
-| `smeldr.dev/oauth` | v0.4.1 | Beta |
+| `smeldr.dev/core` | v1.105.1 | Stable |
+| `smeldr.dev/mcp` | v1.43.1 | Stable |
+| `smeldr.dev/oauth` | v0.5.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.2.0 | Beta |
-| `smeldr.dev/media` | v1.6.2 | Beta |
-| `smeldr.dev/cli` | v0.17.1 | Beta |
-| `smeldr.dev/social` | v0.10.3 | Experimental |
-| `smeldr.dev/agent` | v0.9.1 | Experimental |
+| `smeldr.dev/media` | v1.6.3 | Beta |
+| `smeldr.dev/cli` | v0.17.2 | Beta |
+| `smeldr.dev/social` | v0.10.5 | Experimental |
+| `smeldr.dev/agent` | v0.9.2 | Experimental |
 
 **Stable** — API will not break without a deprecation notice.  
 **Beta** — Functional and tested; API may change in minor releases.  
@@ -97,6 +97,39 @@ Labels are reviewed at every module minor or major version bump.
 - Struct-tag validation — `smeldr:"required,min=3"` enforced identically for HTTP, API, and MCP calls
 - Token management — named revocable tokens with role scoping; `ensureBootstrap` auto-creates the first admin token on first start
 - ErrLastAdmin guard — cannot revoke the last admin token
+- Time-boxed grants — `RoleGrant.ExpiresAt *time.Time` (v1.99.0); an expired grant is automatically excluded from authorization checks, no manual revoke needed
+- Grant provenance — `RoleGrant.Grantor` records which token created a grant (v1.101.0)
+- `RoleStore.GetRole(ctx, name)` — read-only lookup of a role's full definition (operations, scope mode) (v1.100.0)
+- Admin's own operation set was narrowed to remove `review`/`approve` (v1.98.0, security hardening) — Admin no longer implicitly holds every operation that exists; explicit roles are required for review/approval workflows
+
+## Governance and delegation — Experimental
+
+New surface since v1.89.3 — the underlying RoleStore/operations governance model predates
+this window and is not yet catalogued here in full; this section covers only what shipped
+in this update:
+
+- Item-scoped delegation — `RoleStore.GetGrant`, `RoleStore.ListRoles` (v1.101.0); built-in
+  `item-approver`/`item-reviewer` roles via `RegisterItemApproverRole`/`RegisterItemReviewerRole`
+  (v1.101.0), scoped to a single item rather than global
+- `delegate_item` MCP tool (smeldr.dev/mcp v1.41.0) — a token delegates a role/operation
+  subset it already holds to another token, scoped to one item, expiring after 1-90 days
+  (default 14); the caller must itself hold every operation the delegated role carries, and
+  only a `ScopeStatic` role qualifies
+- `withdraw_delegation` MCP tool (v1.42.0) — the delegator revokes their own delegation
+  before it expires
+- `list_roles` MCP tool (v1.42.0) — lists every role defined on the instance: name,
+  operations, scope shape
+- Domain-scoped Decision stewardship — `RegisterDecisionDomainAdminRole`,
+  `RegisterDecisionStewardRole` (v1.94.0) define roles that hold ratify/supersede authority
+  over Decisions within one Domain, rather than instance-wide
+- `lookup_token_names` MCP tool (v1.43.0) + `TokenStore.NamesForUserIDs(ctx, userIDs)`
+  (v1.104.0) — batch-resolve actor IDs seen in `last_actor`/`RoleGrant.Grantor`/relation
+  `created_by` back to their human-readable token names
+- Actor provenance — every orchestration item (`Signal`, `Task`, `Decision`, `Amendment`,
+  `Goal`, `Run`) and `DynamicNode` gained a `LastActor` field (v1.95.0), stamped at creation
+  time too, not only on transition (v1.97.0); `RelationEdge` gained `CreatedBy` (v1.97.0)
+  and MCP responses for `get_relations`/`assert_relation`/`propose_relation`/
+  `observe_relation` now include it (smeldr.dev/mcp v1.42.1)
 
 ## Navigation — Stable
 
@@ -116,9 +149,16 @@ Per content type — automatically derived, no manual definition:
 - `list_[type]s` — Editor+
 - `get_[type]` — Editor+
 
+Cross-cutting tool behaviour (smeldr.dev/mcp v1.39.0-v1.40.0):
+
+- Pagination — `list_tasks`/`list_amendments`/`list_decisions`/`list_goals`/`list_runs`/`list_signals` take `limit`/`offset`, default 50 capped at 500 (previously unbounded); response includes `total` (the real pre-`limit` count) alongside `items`/`signals`
+- Unknown-parameter rejection — every `create_*`/`update_*` tool now returns `-32602` for a key not in its own declared schema, instead of silently succeeding with the field left empty
+- `tools/list` is filtered to the calling token's own role — a caller no longer sees a tool it could never actually call (curation only; `tools/call` enforcement is unchanged)
+- `mcp.WithSchemaTools(db)` — wires `get_content_type_schema`/`list_content_type_schemas` alone, without the rest of `WithBlocks`'s tool surface
+
 Block system tools (Experimental, T32 — enabled with `mcp.WithBlocks()`):
 
-- `create_node`, `update_node`, `get_node`, `list_nodes`, `publish_node`, `archive_node` — Author+; generic block lifecycle, addressed by ID
+- `create_node`, `update_node`, `get_node`, `list_nodes`, `publish_node`, `archive_node` — Author+; generic block lifecycle, addressed by ID. `publish_node`/`archive_node` actually run a block type's own registered state flow when one is defined via `define_state_flow` (v1.36.2 — previously silently bypassed it)
 - `add_section`, `reorder_sections`, `remove_section` — Editor+; compose page sections
 - `add_item`, `reorder_items`, `remove_item` — Editor+; compose collection items
 
@@ -268,18 +308,24 @@ MCP resource subscriptions (Beta):
 - `StateFlow.Triggers []TransitionTrigger` — async trigger handlers persisted to `smeldr_transition_triggers` by `RegisterFlow`; idempotent
 - `schedule-eval` trigger type — on transition, reads `eval_field` from item row and inserts into `smeldr_eval_queue` for later drain
 - `smeldr_eval_queue` table — queues timed state transitions; `UNIQUE(type_name, item_id, to_state)` prevents duplicate entries
-- `App.DrainEvalQueue(ctx) (triggered, skipped int, err error)` — drains due rows: UPDATE item status, DELETE queue row; fail-open on nil DB and missing table (A187)
+- `App.DrainEvalQueue(ctx) (triggered, skipped int, err error)` — drains due rows: UPDATE item status, DELETE queue row; fail-open on nil DB and missing table (A187); each triggered transition also records a `Finding` when a `FindingStore` is configured (v1.91.1)
 - `orchDecisionFlow` wired with two `schedule-eval` triggers on `proposed→ratified` and `pending-re-evaluation→ratified`
+- `App.ExpireSignals(ctx, SignalExpiryConfig)` (v1.103.0) — scheduled detector moving stale `pending`/`read` Signals to `expired` (never deleted) after `MaxAge` (default 14 days); three `signal_type` values (`authorization-required`, `review-requested`, `conflict-detected`) are always excluded, since they represent a standing condition that must be answered, not aged out; `ExcludeTypes` adds further exclusions without replacing the mandatory three
 
 ## Orchestration types — Experimental
 
-- `Signal` content type — protocol message between pilots and the architect (signal-protocol flow: pending -> read -> acknowledged/expired)
-- `Task` content type — work item in the architect/pilot state machine (agent-task flow: backlog -> active -> ... -> done/deferred)
-- `Decision` content type — ratified architectural decision with re-evaluation cycle (governance-decision flow: proposed -> ratified -> ... -> superseded/archived)
+- `Signal` content type — protocol message between pilots and the architect (signal-protocol flow: pending -> read -> acknowledged/expired). `create_signal`'s `receiver` is optional (smeldr.dev/mcp v1.38.0) — omitting it broadcasts to every subscriber; `subject_type`/`subject_id` (v1.40.1) let any Signal point at a specific item; `list_signals` gained `sender` and `limit` filters (v1.37.0), querying signals sent as well as received
+- `Task` content type — work item in the architect/pilot state machine (agent-task flow: backlog -> active -> ... -> done/deferred/resolved). `backlog` also exits directly to `deferred`/`resolved` (v1.95.1 — a Task can turn out unnecessary before anyone claims it). `active` also exits directly to `done` with a required reason (v1.105.0) — for work that concludes without a plan/commit cycle at all (a review, sign-off, investigation, or design discussion), distinct from `resolved` (the need was met by work outside this Task)
+- `Decision` content type — ratified architectural decision with re-evaluation cycle (governance-decision flow: proposed -> ratified -> ... -> superseded/archived). Gained a short display `Title` field independent of the Markdown `Body` (v1.93.0), and `TensionRuleID`/`TensionReason` fields recording declared tension against a Rule (v1.91.0)
 - `Amendment` content type — committed changeset linking a Task to its code implementation (amendment-lifecycle flow: scoped -> in-progress -> commit-ready -> committed -> merged/rejected)
 - `Goal` content type — work goal with priority, band, and size; linked to Decisions and Tasks via the relation graph (goal-lifecycle flow: open -> in-progress -> done/resolved, open <-> parked, parked -> resolved)
 - `CreateOrchestrationTables(db DB) error` — creates all five DB tables
 - `RegisterOrchestrationTypes(app *App, db DB)` — registers all five types with state flows and MCP(MCPRead, MCPWrite); fail-open on nil DB
 - All five types embed `Node` and receive full MCP tool generation (create, get, list, update, publish, archive, delete)
 - `QueryGoalContext(ctx, db, rs, goalID)` — assembles `GoalContext` (goal + linked Decisions, Tasks, Goals) via bidirectional relation-graph query; fail-open on nil RelationStore
+- `Severity` type + `SeverityOf(ctx, db, rs, anchorType, anchorID, ruleType, kind, direction, maxDepth)` (v1.91.0) — computes an ordinal blast-radius severity for a Rule-anchored graph walk, surfaced once a threshold is crossed
+- New relation kinds `belongs_to_domain`, `belongs_to_area` (Decision → Domain/Area), and `in_set` (v1.92.0) — model domain/area/set membership on the relation graph
+- `RelationStore.RegisterReferenceType(ctx, typeName)` (v1.102.0) — marks a dynamic content type as reference/lookup data, so `App.SweepStructural` treats any non-archived row (not only `published`) as a live target, since reference data (e.g. Domain, Area) is typically never explicitly published
+- Automatic `conflict-detected` Signal (v1.96.0) — fires whenever a `contradicts` relation edge is asserted/proposed/observed between two Decisions, notifying each Decision's steward
+- `Finding`/`FindingStore` (v1.90.0) — a structured, deduplicated record of a detected structural or governance condition (`NewFindingStore`, `CreateFindingTable`, `FindingStore.Record`, `App.Findings`); wired into `App.SweepStructural`'s stale-edge detection and `App.DrainEvalQueue`'s scheduled re-evaluations
 - `get_goal_context` MCP tool (smeldr.dev/mcp v1.27.0) — agent-callable query returning `{goal, linked_decisions, linked_tasks, linked_goals}` for a given GoalID
