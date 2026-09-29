@@ -2726,6 +2726,163 @@ func setupGovernanceAuditTable(t *testing.T) *sql.DB {
 	return db
 }
 
+// --- DefineRole audit-write atomicity tests ---
+//
+// DefineRole shares Grant/Revoke's transaction path (beginAuditWrite): with the
+// bundled SQL audit store on a transaction-capable DB, the role write and its
+// audit record commit or roll back together.
+
+// roleOperations returns the stored operations JSON for the role named name,
+// and whether the role exists, used to prove a rolled-back DefineRole left the
+// role table exactly as it was.
+func roleOperations(t *testing.T, db *sql.DB, name string) (string, bool) {
+	t.Helper()
+	var ops string
+	err := db.QueryRowContext(context.Background(),
+		`SELECT operations FROM smeldr_roles WHERE name = $1`, name).Scan(&ops)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false
+	}
+	if err != nil {
+		t.Fatalf("roleOperations(%q): %v", name, err)
+	}
+	return ops, true
+}
+
+func TestDefineRole_BeginTxError(t *testing.T) {
+	db := setupGovernanceAuditTable(t)
+	ctx := context.Background()
+	wrapped := &govBeginTxFailDB{DB: db}
+	store := NewRoleStore(wrapped).WithAudit("actor", NewGovernanceAuditStore(db))
+	err := store.DefineRole(ctx, RoleDefinition{Name: "reviewer", Operations: []string{"review"}})
+	if err == nil || !strings.Contains(err.Error(), "begin tx") {
+		t.Fatalf("DefineRole error = %v, want a begin tx failure", err)
+	}
+	if _, ok := roleOperations(t, db, "reviewer"); ok {
+		t.Error("role written despite begin-tx failure, want nothing written")
+	}
+}
+
+// TestDefineRole_AuditAppendFailure_RollsBackCreate: a real sqlGovernanceAuditStore
+// pointed at a DB missing the audit table fails the append with a genuine SQL
+// error, so the just-upserted new role must be rolled back, not left behind.
+func TestDefineRole_AuditAppendFailure_RollsBackCreate(t *testing.T) {
+	db := setupGovernanceDB(t) // deliberately no CreateGovernanceAuditTable
+	ctx := context.Background()
+	store := NewRoleStore(db).WithAudit("actor", NewGovernanceAuditStore(db))
+	if err := store.DefineRole(ctx, RoleDefinition{Name: "reviewer", Operations: []string{"review"}}); err == nil {
+		t.Fatal("expected error from audit append failure, got nil")
+	}
+	if _, ok := roleOperations(t, db, "reviewer"); ok {
+		t.Error("role exists after failed DefineRole, want the create rolled back")
+	}
+}
+
+// TestDefineRole_AuditAppendFailure_RollsBackUpdate: same failure against an
+// already-defined role: the update is rolled back and the old operations stay.
+func TestDefineRole_AuditAppendFailure_RollsBackUpdate(t *testing.T) {
+	db := setupGovernanceDB(t)
+	ctx := context.Background()
+	if err := NewRoleStore(db).DefineRole(ctx, RoleDefinition{Name: "reviewer", Operations: []string{"review"}}); err != nil {
+		t.Fatalf("seed DefineRole: %v", err)
+	}
+	store := NewRoleStore(db).WithAudit("actor", NewGovernanceAuditStore(db)) // no audit table
+	if err := store.DefineRole(ctx, RoleDefinition{Name: "reviewer", Operations: []string{"review", "approve"}}); err == nil {
+		t.Fatal("expected error from audit append failure, got nil")
+	}
+	ops, ok := roleOperations(t, db, "reviewer")
+	if !ok {
+		t.Fatal("role vanished after failed update")
+	}
+	if ops != `["review"]` {
+		t.Errorf("operations = %s after failed update, want the original [\"review\"]", ops)
+	}
+}
+
+// TestDefineRole_AuditTx_BeforeStateError: inside the transaction, the
+// before-state read fails (a column it selects no longer exists), so DefineRole
+// reports it and writes nothing.
+func TestDefineRole_AuditTx_BeforeStateError(t *testing.T) {
+	db := setupGovernanceAuditTable(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`ALTER TABLE smeldr_roles RENAME COLUMN allow_self_approval TO allow_self_approval_old`); err != nil {
+		t.Fatalf("rename column: %v", err)
+	}
+	store := NewRoleStore(db).WithAudit("actor", NewGovernanceAuditStore(db))
+	err := store.DefineRole(ctx, RoleDefinition{Name: "reviewer", Operations: []string{"review"}})
+	if err == nil || !strings.Contains(err.Error(), "audit before-state") {
+		t.Fatalf("DefineRole error = %v, want an audit before-state failure", err)
+	}
+}
+
+// TestDefineRole_AuditTx_UpsertError: the before-state read succeeds but the
+// upsert inside the transaction fails (a trigger aborts the insert), so nothing
+// is written and no audit record survives.
+func TestDefineRole_AuditTx_UpsertError(t *testing.T) {
+	db := setupGovernanceAuditTable(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx,
+		`CREATE TRIGGER deny_role_insert BEFORE INSERT ON smeldr_roles
+		 BEGIN SELECT RAISE(ABORT, 'simulated upsert failure'); END`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+	store := NewRoleStore(db).WithAudit("actor", NewGovernanceAuditStore(db))
+	err := store.DefineRole(ctx, RoleDefinition{Name: "reviewer", Operations: []string{"review"}})
+	if err == nil || !strings.Contains(err.Error(), "upsert") {
+		t.Fatalf("DefineRole error = %v, want an upsert failure", err)
+	}
+	if _, ok := roleOperations(t, db, "reviewer"); ok {
+		t.Error("role exists after failed upsert")
+	}
+	var audits int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_governance_audit`).Scan(&audits); err != nil {
+		t.Fatalf("count audit rows: %v", err)
+	}
+	if audits != 0 {
+		t.Errorf("audit rows = %d after failed DefineRole, want 0", audits)
+	}
+}
+
+// TestDefineRole_AtomicSuccess_CommitsRoleAndAudit: on the atomic path a
+// successful DefineRole leaves both the role and its audit record.
+func TestDefineRole_AtomicSuccess_CommitsRoleAndAudit(t *testing.T) {
+	db := setupGovernanceAuditTable(t)
+	ctx := context.Background()
+	store := NewRoleStore(db).WithAudit("actor", NewGovernanceAuditStore(db))
+	if err := store.DefineRole(ctx, RoleDefinition{Name: "reviewer", Operations: []string{"review"}}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	if _, ok := roleOperations(t, db, "reviewer"); !ok {
+		t.Error("role missing after successful DefineRole")
+	}
+	var audits int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM smeldr_governance_audit WHERE action = 'define_role'`).Scan(&audits); err != nil {
+		t.Fatalf("count audit rows: %v", err)
+	}
+	if audits != 1 {
+		t.Errorf("define_role audit rows = %d, want 1", audits)
+	}
+}
+
+// TestDefineRole_SQLAuditStoreWithoutTxDB_FallsBackSequential: the audit store
+// could join a transaction but the DB has no BeginTx, so DefineRole falls back
+// to sequential writes: a failed audit append leaves the role written, exactly
+// as before this path was made atomic.
+func TestDefineRole_SQLAuditStoreWithoutTxDB_FallsBackSequential(t *testing.T) {
+	db := setupGovernanceDB(t) // no audit table, so the append fails
+	ctx := context.Background()
+	noTx := &govQueryRowFailDB{DB: db, failOn: "never-matches-anything"} // embeds DB only: no BeginTx
+	store := NewRoleStore(noTx).WithAudit("actor", NewGovernanceAuditStore(db))
+	if err := store.DefineRole(ctx, RoleDefinition{Name: "reviewer", Operations: []string{"review"}}); err == nil {
+		t.Fatal("expected error from audit append failure, got nil")
+	}
+	if _, ok := roleOperations(t, db, "reviewer"); !ok {
+		t.Error("role missing, want it persisted on the non-transactional fallback path")
+	}
+}
+
 // --- Grant/Revoke provenance-wiring tests (T203/A281) ---
 
 func TestRoleStore_Grant_RecordsProvenance(t *testing.T) {

@@ -685,6 +685,58 @@ func appendAuditRecord(ctx context.Context, exec DB, r GovernanceAuditRecord) er
 	return nil
 }
 
+// auditWrite is the transaction plumbing shared by the [RoleStore] mutations
+// that write an audit record ([RoleStore.DefineRole], [RoleStore.Grant],
+// [RoleStore.Revoke]): one transaction covers the mutation and its audit
+// append when that is possible, and the mutation falls back to plain
+// sequential writes on the store's own DB when it is not.
+type auditWrite struct {
+	// exec is the DB every read and write of the mutation must go through.
+	exec DB
+	// appender is non-nil only when the audit append shares exec's transaction.
+	appender txGovernanceAuditAppender
+	// commit is a no-op when no transaction was started.
+	commit func() error
+	// rollback is a no-op when no transaction was started, and safe to call
+	// after commit.
+	rollback func()
+}
+
+// beginAuditWrite starts the shared transaction when the audit store can
+// participate in it (see [txGovernanceAuditAppender]) and s.db supports
+// transactions. Otherwise (no audit store, a custom non-SQL one, or a DB
+// without BeginTx) it returns an auditWrite that runs on s.db directly. A
+// BeginTx failure is returned unwrapped so each caller can prefix its own name.
+func (s *RoleStore) beginAuditWrite(ctx context.Context) (*auditWrite, error) {
+	w := &auditWrite{exec: s.db, commit: func() error { return nil }, rollback: func() {}}
+	txAppender, ok := s.auditStore.(txGovernanceAuditAppender)
+	if !ok {
+		return w, nil
+	}
+	txdb, ok := s.db.(txBeginner)
+	if !ok {
+		return w, nil
+	}
+	tx, err := txdb.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	w.exec = tx
+	w.appender = txAppender
+	w.commit = tx.Commit
+	w.rollback = func() { tx.Rollback() } //nolint:errcheck
+	return w, nil
+}
+
+// appendAudit writes rec through the shared transaction when there is one,
+// and through the audit store's own Append otherwise.
+func (s *RoleStore) appendAudit(ctx context.Context, w *auditWrite, rec GovernanceAuditRecord) error {
+	if w.appender != nil {
+		return w.appender.appendTx(ctx, w.exec, rec)
+	}
+	return s.auditStore.Append(ctx, rec)
+}
+
 // RoleStore provides role management and authorization checks backed by the
 // smeldr_roles, smeldr_role_grants, and smeldr_tool_policies tables from
 // [migrateGovernance]. Obtain one via [NewRoleStore] and wire it into the
@@ -713,14 +765,20 @@ func (s *RoleStore) setProvenanceStore(store ProvenanceStore) {
 // mutation (DefineRole, Grant, Revoke) to log, attributed to actorTokenID.
 //
 // When audit is wired, each mutation method reads the previous state, performs
-// the mutation, then calls log.Append with a [GovernanceAuditRecord]. If
-// Append returns an error, the mutation method surfaces that error — but the
-// underlying DB operations are not transactional: the mutation (INSERT, UPDATE,
-// or DELETE) may have already taken effect before Append was called. An error
-// return means "the mutation may have already taken effect; the audit record
-// failed to write — verify current state before assuming the operation was
-// rolled back." Callers can safely retry DefineRole and Grant (both are
-// idempotent) and Revoke (idempotent by nature).
+// the mutation, then appends a [GovernanceAuditRecord] to log. If the append
+// fails, the mutation method surfaces that error.
+//
+// Whether the mutation is undone in that case depends on log and the DB.
+// When log is the bundled SQL store from [NewGovernanceAuditStore] and the
+// store's DB supports transactions, the mutation, any reads it depends on, and
+// the audit append share one transaction (A233 for Grant and Revoke; DefineRole
+// joined them later), so an audit failure rolls the mutation back and the error
+// means nothing changed. Otherwise (a custom, non-SQL [GovernanceAuditStore],
+// or a DB without transaction support) the writes are sequential and the
+// mutation (INSERT, UPDATE, or DELETE) may already have taken effect before the
+// append failed: verify current state before assuming the operation was rolled
+// back. Callers can safely retry DefineRole and Grant (both are idempotent) and
+// Revoke (idempotent by nature).
 //
 // Call sites that do not use WithAudit receive a store with nil auditStore
 // and see zero behaviour change.
@@ -735,6 +793,10 @@ func (s *RoleStore) WithAudit(actorTokenID string, log GovernanceAuditStore) *Ro
 // given name already exists its mutable fields (operations, scope, trust level,
 // and self-approval flag) are updated; the row's ID and created_at remain
 // unchanged. Idempotent for concurrent calls on distinct names.
+//
+// When the store was built with [RoleStore.WithAudit] over the bundled SQL
+// audit store on a transaction-capable DB, the role write and its audit record
+// commit or roll back together; see [RoleStore.WithAudit] for the fallback.
 //
 // Returns an error when role.Name is empty or any DB statement fails.
 func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
@@ -759,6 +821,15 @@ func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// With an audit store, the before-state read, the upsert, the id resolve
+	// and the audit append share one transaction when possible, see
+	// beginAuditWrite. Without one this is a single upsert on s.db, as before.
+	w, err := s.beginAuditWrite(ctx)
+	if err != nil {
+		return fmt.Errorf("smeldr: DefineRole: begin tx: %w", err)
+	}
+	defer w.rollback()
+
 	var (
 		beforeJSON = "{}"
 		targetID   string
@@ -772,7 +843,7 @@ func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
 			existingTrust        int
 			existingSelfApproval int
 		)
-		err := s.db.QueryRowContext(ctx,
+		err := w.exec.QueryRowContext(ctx,
 			`SELECT id, name, operations, scope_mode, trust_level, allow_self_approval
 			   FROM smeldr_roles WHERE name = $1`, role.Name,
 		).Scan(&existingID, &existingName, &existingOps, &existingScope, &existingTrust, &existingSelfApproval)
@@ -792,7 +863,7 @@ func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
 		}
 	}
 
-	if _, err := s.db.ExecContext(ctx,
+	if _, err := w.exec.ExecContext(ctx,
 		`INSERT INTO smeldr_roles
 			(id, name, operations, scope_mode, scope_relation_kind, scope_direction,
 			 trust_level, allow_self_approval, created_at, updated_at)
@@ -813,7 +884,7 @@ func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
 	}
 	if s.auditStore != nil {
 		if targetID == "" {
-			if err := s.db.QueryRowContext(ctx,
+			if err := w.exec.QueryRowContext(ctx,
 				`SELECT id FROM smeldr_roles WHERE name = $1`, role.Name,
 			).Scan(&targetID); err != nil {
 				return fmt.Errorf("smeldr: DefineRole: audit resolve id: %w", err)
@@ -836,9 +907,12 @@ func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
 			After:        string(afterJSON),
 			CreatedAt:    time.Now().UTC(),
 		}
-		if err := s.auditStore.Append(ctx, rec); err != nil {
+		if err := s.appendAudit(ctx, w, rec); err != nil {
 			return fmt.Errorf("smeldr: DefineRole: audit: %w", err)
 		}
+	}
+	if err := w.commit(); err != nil {
+		return fmt.Errorf("smeldr: DefineRole: commit: %w", err)
 	}
 	return nil
 }
@@ -935,26 +1009,13 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Share one transaction across the insert, the grant-id resolve, and the
-	// audit append when possible — see txGovernanceAuditAppender. Falls back to
-	// sequential writes on s.db when the audit store can't participate (a
-	// custom, non-SQL GovernanceAuditStore) or the DB doesn't support
-	// transactions.
-	var exec DB = s.db
-	commit := func() error { return nil }
-	txAppender, atomic := s.auditStore.(txGovernanceAuditAppender)
-	if atomic {
-		if txdb, ok := s.db.(txBeginner); ok {
-			tx, err := txdb.BeginTx(ctx, nil)
-			if err != nil {
-				return "", fmt.Errorf("smeldr: Grant: begin tx: %w", err)
-			}
-			defer tx.Rollback() //nolint:errcheck
-			exec = tx
-			commit = tx.Commit
-		} else {
-			atomic = false
-		}
+	// audit append when possible, see beginAuditWrite.
+	w, err := s.beginAuditWrite(ctx)
+	if err != nil {
+		return "", fmt.Errorf("smeldr: Grant: begin tx: %w", err)
 	}
+	defer w.rollback()
+	exec := w.exec
 
 	if _, err := exec.ExecContext(ctx,
 		`INSERT INTO smeldr_role_grants (id, token_id, role_id, scope_static, scope_anchor_id, expires_at, created_at)
@@ -1020,17 +1081,11 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 			After:        string(afterJSON),
 			CreatedAt:    time.Now().UTC(),
 		}
-		var appendErr error
-		if atomic {
-			appendErr = txAppender.appendTx(ctx, exec, rec)
-		} else {
-			appendErr = s.auditStore.Append(ctx, rec)
-		}
-		if appendErr != nil {
+		if appendErr := s.appendAudit(ctx, w, rec); appendErr != nil {
 			return "", fmt.Errorf("smeldr: Grant: audit: %w", appendErr)
 		}
 	}
-	if err := commit(); err != nil {
+	if err := w.commit(); err != nil {
 		return "", fmt.Errorf("smeldr: Grant: commit: %w", err)
 	}
 	s.recordGrantProvenance(ctx, grantID, "assert")
@@ -1104,27 +1159,14 @@ func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
 		}
 	}
 	// Share one transaction across the delete and the audit append when
-	// possible — see txGovernanceAuditAppender. Falls back to sequential
-	// writes on s.db when the audit store can't participate (a custom,
-	// non-SQL GovernanceAuditStore) or the DB doesn't support transactions.
-	var exec DB = s.db
-	commit := func() error { return nil }
-	txAppender, atomic := s.auditStore.(txGovernanceAuditAppender)
-	if atomic {
-		if txdb, ok := s.db.(txBeginner); ok {
-			tx, err := txdb.BeginTx(ctx, nil)
-			if err != nil {
-				return fmt.Errorf("smeldr: Revoke: begin tx: %w", err)
-			}
-			defer tx.Rollback() //nolint:errcheck
-			exec = tx
-			commit = tx.Commit
-		} else {
-			atomic = false
-		}
+	// possible, see beginAuditWrite.
+	w, err := s.beginAuditWrite(ctx)
+	if err != nil {
+		return fmt.Errorf("smeldr: Revoke: begin tx: %w", err)
 	}
+	defer w.rollback()
 
-	if _, err := exec.ExecContext(ctx,
+	if _, err := w.exec.ExecContext(ctx,
 		`DELETE FROM smeldr_role_grants WHERE id = $1`, grantID,
 	); err != nil {
 		return fmt.Errorf("smeldr: Revoke: %w", err)
@@ -1140,17 +1182,11 @@ func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
 			After:        "{}",
 			CreatedAt:    time.Now().UTC(),
 		}
-		var appendErr error
-		if atomic {
-			appendErr = txAppender.appendTx(ctx, exec, rec)
-		} else {
-			appendErr = s.auditStore.Append(ctx, rec)
-		}
-		if appendErr != nil {
+		if appendErr := s.appendAudit(ctx, w, rec); appendErr != nil {
 			return fmt.Errorf("smeldr: Revoke: audit: %w", appendErr)
 		}
 	}
-	if err := commit(); err != nil {
+	if err := w.commit(); err != nil {
 		return fmt.Errorf("smeldr: Revoke: commit: %w", err)
 	}
 	s.recordGrantProvenance(ctx, grantID, "invalidate")

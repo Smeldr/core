@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.105.2] — 2026-09-29
+
+### Fixed
+- `RoleStore.DefineRole` had the same non-atomic audit-write gap that Amendment A233 fixed for `Grant`/`Revoke` in v1.58.5. When the audit write failed, `DefineRole` returned an error but the role definition had already been created or updated. Now, when the store was built with `RoleStore.WithAudit` over the bundled SQL audit store (`NewGovernanceAuditStore`) on a DB that supports transactions, the before-state read, the role upsert, and the audit record share one transaction, so a failed audit write rolls the role change back. With a custom non-SQL audit store, or a DB without transaction support, behaviour is unchanged (sequential writes; an audit error may leave the role change in place). A store with no audit wired is unchanged: still a single upsert with no transaction. This is a consumer-observable behaviour change for callers that use `WithAudit` with `DefineRole`. (A388)
+
+### Changed
+- The `RoleStore.WithAudit` doc comment said none of `DefineRole`, `Grant` or `Revoke` were transactional with their audit write. That had been wrong for `Grant` and `Revoke` since v1.58.5. It now states the real rule. The begin-transaction logic that `Grant` and `Revoke` each carried inline is now one shared unexported helper (`beginAuditWrite`) used by `DefineRole`, `Grant` and `Revoke`. No exported symbol, signature or table changed.
+
+---
+
 ## [1.105.1] — 2026-09-29
 
 ### Fixed

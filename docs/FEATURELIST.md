@@ -2,13 +2,13 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.105.1 + smeldr.dev/mcp v1.43.1 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
+Last updated: v1.105.2 + smeldr.dev/mcp v1.43.1 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.105.1 | Stable |
+| `smeldr.dev/core` | v1.105.2 | Stable |
 | `smeldr.dev/mcp` | v1.43.1 | Stable |
 | `smeldr.dev/oauth` | v0.5.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.2.0 | Beta |
@@ -128,7 +128,7 @@ Opt-in: an app that never calls `App.Governance(store)` sees no governance behav
 - `RoleStore.RoleGranted(ctx, tokenID, roleName, target)` — the same scope logic keyed by exact role name instead of operation word, for named-role gates on custom transitions
 - `AuthTarget` — `TypeName`, `ID` (used for matching), `Slug` (display and logging only)
 - Tool policies — `smeldr_tool_policies` maps each built-in MCP tool to the operation word that gates it, seeded idempotently on every boot; `RoleStore.ToolPolicy(ctx, toolName)` is the seam smeldr.dev/mcp uses to resolve a tool's required operation before calling `Authorized`
-- Governance audit — `RoleStore.WithAudit(actorTokenID, log)` returns a store that records every `DefineRole`, `Grant` and `Revoke` as a `GovernanceAuditRecord` (actor, action, target, before and after JSON) via a `GovernanceAuditStore`; `NewGovernanceAuditStore`/`CreateGovernanceAuditTable` give the SQL-backed one. `Grant` and `Revoke` are atomic with their audit record when the audit store is the SQL one and the DB supports transactions (A233); otherwise (a non-SQL audit store, no transaction support, or `DefineRole`, which always writes its audit record outside the mutation) an audit error means the change may already have applied
+- Governance audit: `RoleStore.WithAudit(actorTokenID, log)` returns a store that records every `DefineRole`, `Grant` and `Revoke` as a `GovernanceAuditRecord` (actor, action, target, before and after JSON) via a `GovernanceAuditStore`; `NewGovernanceAuditStore`/`CreateGovernanceAuditTable` give the SQL-backed one. `DefineRole`, `Grant` and `Revoke` are atomic with their audit record when the audit store is the SQL one and the DB supports transactions (`Grant`/`Revoke` since A233, `DefineRole` since v1.105.2); otherwise (a non-SQL audit store or no transaction support) an audit error means the change may already have applied
 - Stewardship reads — `RoleStore.StewardedRuleTypes` and `RoleStore.StewardshipInbox` return the rule types a token stewards and the Decisions, Rules and authority stubs touching them
 
 ### Delegation and stewardship additions (since v1.89.3)
