@@ -360,6 +360,8 @@ func TestMigrateGovernance_ToolPoliciesSeed(t *testing.T) {
 		{"revoke_grant", "administer"},
 		{"delegate_item", "read"},
 		{"lookup_token_names", "read"},
+		{"schedule_content", "manage"},
+		{"observe_relation", "create"},
 	}
 	for _, c := range cases {
 		var op string

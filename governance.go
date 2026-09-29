@@ -278,6 +278,16 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		{"list_content", "read"},
 		{"update_content", "manage"},     // Editor-gated operational tool
 		{"set_content_status", "manage"}, // Editor-gated operational tool
+		// schedule_content (core-tool-policy-gaps-schedule-observe-blocks,
+		// 2026-09-29): same "manage" op and Editor floor as set_content_status
+		// above — both are the two ways to move a content item's status/
+		// scheduled_at, roleFor already gates both Editor. deriveToolPolicy
+		// cannot rescue a missing row here: it parses to (op="schedule",
+		// typeSnake="content"), but "content" is never a compiled Module[T]
+		// type name — dynamic content types aren't registered in s.modules —
+		// so this tool fell closed for every caller, Admin included, whenever
+		// governance was wired, until this row existed.
+		{"schedule_content", "manage"},
 		// Schema read tools (Author+)
 		{"get_content_type_schema", "read"},
 		{"list_content_type_schemas", "read"},
@@ -330,6 +340,16 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// Relation tools
 		{"assert_relation", "create"},
 		{"propose_relation", "create"},
+		// observe_relation (core-tool-policy-gaps-schedule-observe-blocks,
+		// 2026-09-29): same Author floor and doc contract as assert_relation/
+		// propose_relation above ("a system directly witnessed" vs. "a human's
+		// direct claim"/"an agent's inference" — all three insert an edge the
+		// same way). deriveToolPolicy cannot rescue a missing row here even in
+		// principle: "observe" is not one of the verbs generated per-type
+		// tools ever carry (create/get/list/update/publish/schedule/archive/
+		// delete), so this tool fell closed for every caller, Admin included,
+		// whenever governance was wired, until this row existed.
+		{"observe_relation", "create"},
 		{"get_relations", "read"},
 		{"preview_impact", "manage"}, // Editor gate — operational read with side-effect preview
 		{"upsert_relation_kind", "define-relation-kind"},
@@ -357,12 +377,24 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// get_check_status reads CheckStore.Last directly, no MCPModule
 		// backs it (A312/decision-governance-model.md §4).
 		{"get_check_status", "read"},
-		// Findings list tool (Author+, D51). Same "not module-generated"
-		// reason as the five rows above — list_findings reads
-		// FindingStore.List directly, no MCPModule backs it, and
-		// deriveToolPolicy's own list-op branch requires
-		// moduleForAdminList("findings") to succeed, which it never will
-		// for a type with no create_*/update_* tools by design.
+		// Findings list tool (Author+, D51) — kept as pre-provisioning, not
+		// because the tool exists today. Traced 2026-09-29
+		// (core-tool-policy-gaps-schedule-observe-blocks): despite
+		// CHANGELOG.md's [1.90.0] entry, docs/ARCHITECTURE.md,
+		// docs/REFERENCE.md, and skills/smeldr.md all stating list_findings
+		// ships in smeldr.dev/mcp v1.37.0+, no such tool exists anywhere in
+		// that repo today (confirmed by grep — zero matches for
+		// list_findings/FindingStore/isFindingTool/findingToolDefs). Git
+		// history there shows why: a 2026-09-20 merge (62e2d54, "WIP:
+		// list_findings/get_check_status MCP tool... do not drop") started
+		// both; only get_check_status was ever finished and shipped (its own
+		// check_tools.go, A312) — list_findings was never completed. This row
+		// is harmless either way (nothing can call a tool name that doesn't
+		// exist) and is left in place so mcp's real implementation, whenever
+		// it ships, is covered immediately rather than repeating the
+		// get_sweep_run/get_check_status pattern a third time. The doc/
+		// implementation mismatch itself is flagged to the architect as its
+		// own follow-up, not fixed here.
 		{"list_findings", "read"},
 		// Delegate tool (Author+, smeldr.dev/mcp, grants-and-delegate-v1
 		// §3.3, 01a0e3f9-4). Same "not module-generated" reason as the six

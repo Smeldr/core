@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.105.1] — 2026-09-29
+
+### Fixed
+
+Three MCP tools became unusable whenever an application wired governance (e.g. `process.smeldr.dev`): `schedule_content`, `observe_relation`, and typed `create_{block}` tools. `smeldr.dev/mcp`'s `authoriseTool` looks up `smeldr_tool_policies` rows and falls back to `deriveToolPolicy` when missing; `schedule_content` had no row and "content" is not a compiled type name, `observe_relation` had no row and "observe" is not a known verb, and `create_{block}` tools are dynamically named so static rows cannot exist. Fix: `seedToolPolicies()` in `governance.go` seeds two rows: `schedule_content` mapped to `manage` (like `set_content_status`) and `observe_relation` mapped to `create` (like `assert_relation`/`propose_relation`), reusing existing governance vocabulary. A test wiring governance with dynamic content, relations, and blocks showed exactly 3 uncovered tools before the fix, 0 after. Also corrected a related comment error: `list_findings` policy row falsely claimed the tool shipped in v1.37.0, but no `list_findings` MCP tool has ever been implemented; the row is harmless, the comment now states the truth. The broader documentation-implementation mismatch has been flagged separately. `TestMigrateGovernance_ToolPoliciesSeed` extended to regression-pin both new rows. No exported symbols changed. All checks pass: `go build`, `go vet`, `gofmt -l`, `go test ./...`, `go test -race ./...`, and `golangci-lint run ./...`; package coverage 96.1% (gate 96.0%). PATCH version: a real, consumer-visible behaviour fix (previously unusable tools now work for their intended role), but no exported symbol changed.
+
+---
+
 ## [1.105.0] — 2026-09-28
 
 ### Added
