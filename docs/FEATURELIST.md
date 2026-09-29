@@ -27,6 +27,14 @@ consecutive minor releases with integration tests present. Beta → Stable requi
 architect approval and a major version bump for any future breaking changes.
 Labels are reviewed at every module minor or major version bump.
 
+"API" for these criteria means the whole public contract, not only the exported Go
+symbols compared tag to tag: it also covers the documented behavioural and wire
+contracts (MCP tool names, parameters and response shapes; CLI commands, flags and
+environment variables; HTTP parameters; database schema). A change to any of these
+counts as an API change for graduation.
+
+Last full label review: 2026-09-29, no label changes.
+
 ---
 
 ## Routes and feeds — Stable
