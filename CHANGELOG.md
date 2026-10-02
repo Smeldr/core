@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.106.0] — 2026-10-02
+
+### Changed
+- `signal.transitioned` is no longer published to the live event stream (`GET /_events/stream`). Previously, every Signal transition from `transition_item`, `App.TransitionItemWithReason`, and the `ExpireSignals` sweep was sent to the stream on the Signal's `Receiver` channel. Since only the receiver moves its own Signal (pending, read, acknowledged), the event could only echo back to the originating session for no benefit. `signal.created` and other event types (`task.*`, `goal.*`, `decision.*`, `amendment.*`) continue streaming. Outbound webhooks are unchanged: subscribed endpoints still receive `signal.transitioned`. (A389)
+- Consumers subscribing to the event stream for `signal.transitioned` must use webhook delivery instead. The Signal's stored state and transitions remain unchanged.
+- `App.TransitionItemWithReason` no longer runs a `SELECT receiver` query for Signal transitions, since that lookup only determined the stream channel. This eliminates one query per Signal transition.
+- D97's deprecation window (add, never break, three months) does not apply to this removal. The project owner requested it directly, and no consuming code was found: no other Smeldr repository references it, and the live instance has no registered webhook endpoints. A generic Discord relay rendering every `*.transitioned` event will stop showing Signal transition lines. This is a stated exception, not a precedent.
+- Internally, `dispatchTransitionWebhook` skips stream delivery through the `eventStreamSuppressed` predicate. No exported symbol, signature, or table changed.
+
+### Fixed
+- Comments in `signal_expiry.go` described a `signal.transitioned` stream event that no longer fires; they now describe the webhook.
+
+---
+
 ## [1.105.2] — 2026-09-29
 
 ### Fixed

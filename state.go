@@ -1016,9 +1016,12 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 	// column, when it has one (channelColumns has no entry for Amendment —
 	// its events are always a true broadcast, by design). A lookup failure
 	// degrades to broadcast rather than failing the transition itself —
-	// channel routing is best-effort.
+	// channel routing is best-effort. Skipped when the event is not published
+	// to the stream at all (a Signal transition, see eventStreamSuppressed):
+	// the lookup's only purpose is picking a stream channel.
+	eventName := strings.ToLower(typeName) + ".transitioned"
 	channel := ""
-	if col, ok := channelColumns[typeName]; ok {
+	if col, ok := channelColumns[typeName]; ok && !eventStreamSuppressed(eventName) {
 		if err := db.QueryRowContext(ctx,
 			"SELECT "+quoteIdent(col)+" FROM "+quoteIdent(table)+" WHERE id = $1", id,
 		).Scan(&channel); err != nil {
@@ -1028,7 +1031,7 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 		}
 	}
 	dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, channel,
-		strings.ToLower(typeName)+".transitioned",
+		eventName,
 		transitionWebhookData{
 			Type:      strings.ToLower(typeName),
 			ID:        id,

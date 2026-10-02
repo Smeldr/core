@@ -2950,6 +2950,13 @@ from the `App.OnSignal` bus above — the bus's `LifecycleEvent` vocabulary
 so subscribe to `"{type}.transitioned"` specifically, not the created/
 updated/… events, to observe orchestration state changes.
 
+One exception applies to the live event stream (`/_events/stream`, below):
+`signal.transitioned` is delivered to subscribed webhook endpoints but is
+**not** published to the stream (v1.106.0). A Signal routes on its `Receiver`
+and only the receiver moves it, so on the stream the event could only echo
+back to the session that caused it. `signal.created`, and every other type's
+`*.transitioned` event, are streamed as before.
+
 A `Signal` created by `DrainEvalQueue` when an automated transition hits a
 role-gated boundary (D42) fires the same `"signal.created"` event a
 human-created Signal already produces via the normal create path — a
@@ -3071,7 +3078,9 @@ to a webhook event name is delivered to the stream:
   → `"{type}.created"`, `"{type}.updated"`, `"{type}.published"`,
   `"{type}.unpublished"`, `"{type}.archived"`, `"{type}.deleted"`,
   `"{type}.scheduled"`
-- State transitions: `"{type}.transitioned"` (item moves between states)
+- State transitions: `"{type}.transitioned"` (item moves between states); the
+  one exception is `signal.transitioned`, which is webhook-only and never
+  published to the stream (v1.106.0)
 - Signals: `"signal.created"` (new explicit signal)
 
 The JSON payload shape is identical to webhook event payloads — a
@@ -3087,7 +3096,8 @@ The JSON payload shape is identical to webhook event payloads — a
   event by its own `Scope` (including the literal value `"cross-cutting"`,
   used verbatim as a channel name — not auto-broadcast); a `Signal` by its
   own `Receiver`. This applies to every event those four types produce —
-  both `"{type}.transitioned"` (A302) and `"{type}.created"`/
+  both `"{type}.transitioned"` (A302; except `signal.transitioned`, which is
+  not streamed at all as of v1.106.0) and `"{type}.created"`/
   `"{type}.updated"`/etc. (01a0a683 — before this, those events reached
   every subscriber regardless of channel, an unclosed gap in A302's own
   scoping). An `Amendment` event, and every generic content-module

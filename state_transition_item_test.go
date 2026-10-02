@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -604,6 +605,115 @@ func TestApp_TransitionItem_TaskChannelRoutesViaBand(t *testing.T) {
 	case got := <-cloudCh:
 		t.Fatalf("cloud subscriber: expected no delivery, got %q", got)
 	default:
+	}
+}
+
+// TestApp_TransitionItem_Signal_NotStreamed confirms a Signal transition
+// succeeds and persists, and publishes nothing to the event stream: not to the
+// receiver's own channel and not to an all-channel subscriber. Only the
+// receiver ever moves a Signal, so the event could only echo back to its actor.
+func TestApp_TransitionItem_Signal_NotStreamed(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	app.EventStream()
+	repo := NewSQLRepo[*Signal](db, Table("smeldr_signals"))
+	if err := repo.Save(context.Background(), &Signal{
+		Node:     Node{ID: "sig-ns-1", Slug: "sig-ns-1-slug", Status: "pending"},
+		Receiver: "core",
+	}); err != nil {
+		t.Fatalf("insert signal: %v", err)
+	}
+	coreCh, err := app.eventBroadcaster.subscribe("u1", "core")
+	if err != nil {
+		t.Fatalf("subscribe core: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(coreCh)
+	allCh, err := app.eventBroadcaster.subscribe("u2", eventStreamChannelAll)
+	if err != nil {
+		t.Fatalf("subscribe all: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(allCh)
+
+	result, err := app.TransitionItem(context.Background(), "Signal", "sig-ns-1-slug", "read")
+	if err != nil {
+		t.Fatalf("TransitionItem: %v", err)
+	}
+	if result["status"] != "read" {
+		t.Fatalf("result status = %v, want \"read\"", result["status"])
+	}
+	var status string
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT status FROM smeldr_signals WHERE id = 'sig-ns-1'`).Scan(&status); err != nil || status != "read" {
+		t.Errorf("stored status = %q (err %v), want \"read\"", status, err)
+	}
+	for name, ch := range map[string]chan []byte{"core": coreCh, "all": allCh} {
+		select {
+		case got := <-ch:
+			t.Errorf("%s subscriber: expected no delivery for a Signal transition, got %q", name, got)
+		default:
+		}
+	}
+}
+
+// queryRowCountDB wraps a DB and counts QueryRowContext calls whose SQL
+// contains match. It embeds DB only, so it hides BeginTx; fine for
+// TransitionItem, which does not need a transaction on this path.
+type queryRowCountDB struct {
+	DB
+	match string
+	n     int
+}
+
+func (d *queryRowCountDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	if strings.Contains(q, d.match) {
+		d.n++
+	}
+	return d.DB.QueryRowContext(ctx, q, args...)
+}
+
+// TestApp_TransitionItem_ChannelLookup proves the stream-channel lookup is
+// skipped exactly when the event is not streamed. A failing lookup would only
+// log and fall back to broadcast, so success alone proves nothing: count the
+// queries. A Signal transition must issue none; a Task transition still issues
+// its one band lookup.
+func TestApp_TransitionItem_ChannelLookup(t *testing.T) {
+	cases := []struct {
+		name     string
+		typeName string
+		slug     string
+		match    string
+		to       string
+		seed     func(t *testing.T, db *sql.DB)
+		want     int
+	}{
+		{
+			name: "signal skips lookup", typeName: "Signal", slug: "sig-cl-slug", match: `SELECT "receiver"`, to: "read", want: 0,
+			seed: func(t *testing.T, db *sql.DB) { insertSignal(t, db, "sig-cl", "sig-cl-slug", "pending") },
+		},
+		{
+			name: "task still looks up band", typeName: "Task", slug: "task-cl-slug", match: `SELECT "band"`, to: "active", want: 1,
+			seed: func(t *testing.T, db *sql.DB) {
+				repo := NewSQLRepo[*Task](db, Table("smeldr_tasks"))
+				if err := repo.Save(context.Background(), &Task{
+					Node: Node{ID: "task-cl", Slug: "task-cl-slug", Status: "backlog"}, Band: "core",
+				}); err != nil {
+					t.Fatalf("insert task: %v", err)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app, db, _ := setupTransitionItemApp(t)
+			tc.seed(t, db)
+			counter := &queryRowCountDB{DB: db, match: tc.match}
+			app.cfg.DB = counter
+			if _, err := app.TransitionItem(context.Background(), tc.typeName, tc.slug, tc.to); err != nil {
+				t.Fatalf("TransitionItem: %v", err)
+			}
+			if counter.n != tc.want {
+				t.Errorf("channel lookup queries (%s) = %d, want %d", tc.match, counter.n, tc.want)
+			}
+		})
 	}
 }
 

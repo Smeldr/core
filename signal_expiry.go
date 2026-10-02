@@ -12,12 +12,14 @@ import (
 const DefaultSignalExpiryMaxAge = 14 * 24 * time.Hour
 
 // DefaultSignalExpiryBatchCap caps how many Signals [App.ExpireSignals]
-// expires in a single call by default. One signal.transitioned event fires
-// per expired Signal (A302, same mechanism [App.TransitionItemWithReason]
+// expires in a single call by default. One signal.transitioned webhook
+// fires per expired Signal (same mechanism [App.TransitionItemWithReason]
 // uses); an unbounded first run against an established instance's full
-// backlog could flood event-stream subscribers — found live: architect had
-// 609 stale pending Signals as of 2026-09-28, manually marked read pending
-// this mechanism's existence.
+// backlog could flood webhook endpoints, and originally event-stream
+// subscribers too (the stream no longer carries this event, see
+// [eventStreamSuppressed]); found live: architect had 609 stale pending
+// Signals as of 2026-09-28, manually marked read pending this mechanism's
+// existence.
 const DefaultSignalExpiryBatchCap = 200
 
 // DefaultSignalExpiryExcludedTypes are signal_type values that represent a
@@ -72,10 +74,10 @@ type SignalExpiryConfig struct {
 // deleted.
 //
 // Each expiry is an ordinary transition: last_actor is stamped
-// "signal-expiry-sweep", and a signal.transitioned event fires on the
-// Signal's own receiver channel (A302), exactly as a human-driven
-// transition would — the same [dispatchTransitionWebhook] mechanism
-// [App.TransitionItemWithReason] itself uses. ExpireSignals does not call
+// "signal-expiry-sweep", and a signal.transitioned webhook fires, exactly
+// as a human-driven transition would, the same [dispatchTransitionWebhook]
+// mechanism [App.TransitionItemWithReason] itself uses. Like that one, it
+// is not published to the live event stream: see [eventStreamSuppressed]. ExpireSignals does not call
 // TransitionItemWithReason directly: that method stamps last_actor from the
 // caller's own [Context] (empty for a plain context.Context), whereas a
 // scheduled detector should record an identifiable mechanism name — the
@@ -89,7 +91,7 @@ type SignalExpiryConfig struct {
 // the SELECT and this row's UPDATE — most importantly read -> acknowledged,
 // terminal — is left untouched rather than silently overwritten with
 // "expired": RowsAffected() == 0 means that race happened, and the row is
-// counted as skipped with no signal.transitioned event, not as a partial or
+// counted as skipped with no signal.transitioned webhook, not as a partial or
 // incorrect expiry.
 //
 // Returns walked (rows examined), expired (rows actually transitioned),
@@ -171,7 +173,7 @@ func (a *App) ExpireSignals(ctx context.Context, cfg SignalExpiryConfig) (walked
 		// acknowledged with expired: an illegal transition that discards
 		// the real answer. RowsAffected == 0 means exactly that race
 		// happened; the row is left untouched, counted as skipped, and no
-		// signal.transitioned event fires for it (found in commit review,
+		// signal.transitioned webhook fires for it (found in commit review,
 		// architect).
 		result, updateErr := db.ExecContext(ctx,
 			"UPDATE smeldr_signals SET status = $1, updated_at = $2, last_actor = $3 WHERE id = $4 AND status = $5",
@@ -201,7 +203,7 @@ func (a *App) ExpireSignals(ctx context.Context, cfg SignalExpiryConfig) (walked
 		}
 		expired++
 		dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, r.receiver,
-			"signal.transitioned",
+			eventSignalTransitioned,
 			transitionWebhookData{
 				Type:      "signal",
 				ID:        r.id,

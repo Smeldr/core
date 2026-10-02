@@ -401,7 +401,8 @@ type transitionWebhookData struct {
 // inserted by raw SQL with no corresponding Go value in hand.
 func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, channel, eventName string, data transitionWebhookData) {
 	webhooksConfigured := store != nil && pool != nil
-	if !webhooksConfigured && broadcaster == nil {
+	streamed := broadcaster != nil && !eventStreamSuppressed(eventName)
+	if !webhooksConfigured && !streamed {
 		return
 	}
 	dataJSON, err := json.Marshal(data)
@@ -422,13 +423,30 @@ func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *w
 	if webhooksConfigured {
 		enqueueWebhookEvent(ctx, store, pool, eventName, payload)
 	}
-	if broadcaster != nil {
+	if streamed {
 		if channel == "" {
 			broadcaster.broadcast(payload)
 		} else {
 			broadcaster.publish(channel, payload)
 		}
 	}
+}
+
+// eventSignalTransitioned is the event name [App.TransitionItemWithReason] and
+// [App.ExpireSignals] give a Signal state transition.
+const eventSignalTransitioned = "signal.transitioned"
+
+// eventStreamSuppressed reports whether eventName is delivered to outbound
+// webhooks but never to the live event stream ([App.EventStream]). Today that
+// is only [eventSignalTransitioned]: a Signal routes on its Receiver and only
+// the receiver moves it through pending, read and acknowledged, so the event
+// could only ever echo back to the very session that caused it, waking its own
+// stream listener for nothing. "signal.created", which is the wake-up for new
+// work, and every other type's events are unaffected. Webhook delivery is
+// deliberately unchanged: the two sinks are independent in
+// [dispatchTransitionWebhook].
+func eventStreamSuppressed(eventName string) bool {
+	return eventName == eventSignalTransitioned
 }
 
 // NotifySignalCreated broadcasts a "signal.created" webhook/event-stream

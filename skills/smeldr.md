@@ -277,7 +277,9 @@ app.EventStream() // mounts GET /_events/stream
 `/_audit`) holds the connection open and writes one NDJSON line per event,
 flushed immediately. Same payload envelope and event names as an outbound
 webhook delivery (`"{type}.created"` … `"{type}.transitioned"`,
-`"signal.created"`) — `{"id","event","timestamp","data"}` per line. A
+`"signal.created"`) — `{"id","event","timestamp","data"}` per line. One exception
+(v1.106.0): `signal.transitioned` is webhook-only and is not published to the stream,
+because a Signal's own transition could only echo back to the session that made it. A
 `{"type":"ping"}` heartbeat arrives every 25s while idle, to survive
 reverse-proxy idle timeouts.
 

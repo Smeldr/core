@@ -599,6 +599,96 @@ func TestDispatchTransitionWebhook_nilStoreNilPoolBroadcasterSet(t *testing.T) {
 	}
 }
 
+func TestEventStreamSuppressed(t *testing.T) {
+	cases := []struct {
+		event string
+		want  bool
+	}{
+		{"signal.transitioned", true},
+		{"signal.created", false},
+		{"task.transitioned", false},
+		{"decision.transitioned", false},
+		{"goal.transitioned", false},
+		{"amendment.transitioned", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.event, func(t *testing.T) {
+			if got := eventStreamSuppressed(tc.event); got != tc.want {
+				t.Errorf("eventStreamSuppressed(%q) = %v, want %v", tc.event, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDispatchTransitionWebhook_SignalTransitioned_NotStreamed: with only a
+// broadcaster wired, a Signal transition reaches no subscriber, whether the
+// caller names a channel or asks for a true broadcast, and does not panic.
+func TestDispatchTransitionWebhook_SignalTransitioned_NotStreamed(t *testing.T) {
+	for _, channel := range []string{"architect", ""} {
+		t.Run("channel="+channel, func(t *testing.T) {
+			b := newEventBroadcaster()
+			allCh, err := b.subscribe("u1", eventStreamChannelAll)
+			if err != nil {
+				t.Fatalf("subscribe all: %v", err)
+			}
+			defer b.unsubscribe(allCh)
+			archCh, err := b.subscribe("u2", "architect")
+			if err != nil {
+				t.Fatalf("subscribe architect: %v", err)
+			}
+			defer b.unsubscribe(archCh)
+			dispatchTransitionWebhook(context.Background(), nil, nil, b, channel, "signal.transitioned",
+				transitionWebhookData{Type: "signal", ID: "s1", ToState: "read"})
+			for name, ch := range map[string]chan []byte{"all": allCh, "architect": archCh} {
+				select {
+				case got := <-ch:
+					t.Errorf("%s subscriber: expected no delivery for signal.transitioned, got %q", name, got)
+				default:
+				}
+			}
+		})
+	}
+}
+
+// TestDispatchTransitionWebhook_SignalTransitioned_StillEnqueuesWebhook: the
+// stream suppression leaves the independent webhook sink alone, so a
+// subscribed endpoint still gets its job while the stream stays silent.
+func TestDispatchTransitionWebhook_SignalTransitioned_StillEnqueuesWebhook(t *testing.T) {
+	pool, store := outboundTestDB(t)
+	createWebhookEndpointsTable(t, store.db)
+	ctx := context.Background()
+	if _, _, err := store.Create(ctx, "https://8.8.8.8/hook", []string{"signal.transitioned"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	b := newEventBroadcaster()
+	streamCh, err := b.subscribe("u1", eventStreamChannelAll)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer b.unsubscribe(streamCh)
+
+	dispatchTransitionWebhook(ctx, store, pool, b, "core", "signal.transitioned",
+		transitionWebhookData{Type: "signal", ID: "s1", Slug: "s1-slug", FromState: "pending", ToState: "read"})
+
+	select {
+	case got := <-streamCh:
+		t.Fatalf("expected no stream delivery for signal.transitioned, got %q", got)
+	default:
+	}
+	endpoints, err := store.EndpointsForEvent(ctx, "signal.transitioned")
+	if err != nil || len(endpoints) != 1 {
+		t.Fatalf("EndpointsForEvent: %v, endpoints=%d", err, len(endpoints))
+	}
+	jobs, err := pool.ListJobsForEndpoint(ctx, endpoints[0].ID)
+	if err != nil {
+		t.Fatalf("ListJobsForEndpoint: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].Event != "signal.transitioned" {
+		t.Fatalf("jobs = %+v, want exactly one signal.transitioned job", jobs)
+	}
+}
+
 func TestDispatchTransitionWebhook_success(t *testing.T) {
 	pool, store := outboundTestDB(t)
 	createWebhookEndpointsTable(t, store.db)
