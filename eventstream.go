@@ -36,6 +36,10 @@ const eventStreamChannelAll = "all"
 type eventStreamSub struct {
 	tokenID string
 	channel string
+	// includeOwn opts this connection back in to events its own token caused
+	// (GET /_events/stream?include_own=true). The default, false, drops them:
+	// see [eventBroadcaster.broadcastFrom].
+	includeOwn bool
 }
 
 // eventBroadcaster fans a payload out to connected subscribers — either to
@@ -66,13 +70,20 @@ func newEventBroadcaster() *eventBroadcaster {
 // concurrent connections (T271). The caller must eventually call
 // unsubscribe with the same channel on success.
 func (b *eventBroadcaster) subscribe(tokenID, channel string) (chan []byte, error) {
+	return b.subscribeOpts(tokenID, channel, false)
+}
+
+// subscribeOpts is [eventBroadcaster.subscribe] with the includeOwn option:
+// when true the connection also receives events its own token caused, which
+// the default drops (see [eventBroadcaster.broadcastFrom]).
+func (b *eventBroadcaster) subscribeOpts(tokenID, channel string, includeOwn bool) (chan []byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.byToken[tokenID] >= eventStreamMaxSubscribersPerToken {
 		return nil, ErrTooManyRequests
 	}
 	ch := make(chan []byte, eventStreamSubscriberBuffer)
-	b.subs[ch] = eventStreamSub{tokenID: tokenID, channel: channel}
+	b.subs[ch] = eventStreamSub{tokenID: tokenID, channel: channel, includeOwn: includeOwn}
 	b.byToken[tokenID]++
 	return ch, nil
 }
@@ -104,9 +115,22 @@ func (b *eventBroadcaster) unsubscribe(ch chan []byte) {
 // path). Logged at Warn so a persistently wedged listener is visible, not
 // silent.
 func (b *eventBroadcaster) broadcast(payload []byte) {
+	b.broadcastFrom("", payload)
+}
+
+// broadcastFrom is [eventBroadcaster.broadcast] for an event caused by the
+// token origin: a subscriber holding that same token is skipped, unless it
+// asked for its own events with include_own. An empty origin (a system actor,
+// or an unauthenticated caller) skips nobody. The match is on the token's
+// User.ID, the same value [eventBroadcaster.subscribe] is keyed on and the
+// request context's User().ID carries.
+func (b *eventBroadcaster) broadcastFrom(origin string, payload []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for ch := range b.subs {
+	for ch, sub := range b.subs {
+		if origin != "" && !sub.includeOwn && sub.tokenID == origin {
+			continue
+		}
 		select {
 		case ch <- payload:
 		default:
@@ -120,10 +144,19 @@ func (b *eventBroadcaster) broadcast(payload []byte) {
 // to one channel" (A302). Same non-blocking drop-and-warn semantics as
 // broadcast for a full subscriber buffer.
 func (b *eventBroadcaster) publish(channel string, payload []byte) {
+	b.publishFrom("", channel, payload)
+}
+
+// publishFrom is [eventBroadcaster.publish] for an event caused by the token
+// origin, with the same self-skip rule as [eventBroadcaster.broadcastFrom].
+func (b *eventBroadcaster) publishFrom(origin, channel string, payload []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for ch, sub := range b.subs {
 		if sub.channel != channel && sub.channel != eventStreamChannelAll {
+			continue
+		}
+		if origin != "" && !sub.includeOwn && sub.tokenID == origin {
 			continue
 		}
 		select {
@@ -185,6 +218,13 @@ var eventStreamHeartbeat = 25 * time.Second
 // channel name (free-form, matching Band/Scope/Receiver's own unrestricted-
 // string convention elsewhere), and an absent/empty value is not an error,
 // it is the documented default (A302).
+//
+// The include_own query parameter has no error path either: exactly "true"
+// opts the connection back in to events its own token caused, anything else
+// (or nothing) keeps the default of not delivering them. The connection is
+// keyed on the authenticated user's ID, the same value a request context
+// carries as User().ID, which is what the self-skip in
+// [eventBroadcaster.broadcastFrom] compares.
 func newEventStreamHandler(auth AuthFunc, b *eventBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
@@ -211,7 +251,7 @@ func newEventStreamHandler(auth AuthFunc, b *eventBroadcaster) http.Handler {
 		// subscribe before any header is written — headers cannot be
 		// unwritten, so a 429 rejection (T271) has to happen before the
 		// status line commits to 200.
-		ch, err := b.subscribe(user.ID, channel)
+		ch, err := b.subscribeOpts(user.ID, channel, r.URL.Query().Get("include_own") == "true")
 		if err != nil {
 			WriteError(w, r, err)
 			return

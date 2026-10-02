@@ -287,7 +287,9 @@ func TestDispatchBus_BroadcastsToEventStreamOnAfterCreate(t *testing.T) {
 	app.EventStream()
 	app.wireSignalBus()
 
-	ch, err := app.eventBroadcaster.subscribe("u1", eventStreamChannelAll)
+	// A different token than the creating actor below: an event is never
+	// delivered to the connection whose own token caused it.
+	ch, err := app.eventBroadcaster.subscribe("u2", eventStreamChannelAll)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -602,29 +604,52 @@ func TestDispatchBus_DecisionChannelRoutesViaScope(t *testing.T) {
 	}
 }
 
-// TestDispatchBus_AmendmentAlwaysBroadcasts confirms an Amendment's
-// AfterCreate event — the one compiled orchestration type with no
-// band/scope/receiver-shaped field — still reaches a subscriber on an
-// unrelated channel, matching TransitionItem's own Amendment behaviour
-// (A302) and the plan's explicit sign-off that this stays a true broadcast.
-func TestDispatchBus_AmendmentAlwaysBroadcasts(t *testing.T) {
-	app := New(MustConfig(Config{
-		BaseURL: "http://localhost:8080",
-		Secret:  []byte("test-secret-dispatchbus-amendment-channel"),
-	}))
+// TestDispatchBus_AmendmentNotStreamed_WebhookStillEnqueued confirms an
+// Amendment's AfterCreate event no longer reaches the live event stream: it
+// has no routing column, so it used to be a true broadcast that woke every
+// listener, and no role waits on it live. It replaces the earlier
+// "always broadcasts" test, which pinned exactly the behaviour removed here.
+// The webhook sink is a separate OnSignal handler and still enqueues it.
+func TestDispatchBus_AmendmentNotStreamed_WebhookStillEnqueued(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
 	app.EventStream()
-
-	ch, err := app.eventBroadcaster.subscribe("u1", "unrelated-channel")
-	if err != nil {
-		t.Fatalf("subscribe: %v", err)
+	store := wireWebhooksForTest(t, app, db)
+	ctx := context.Background()
+	if _, _, err := store.Create(ctx, "https://8.8.8.8/hook", []string{"amendment.created"}); err != nil {
+		t.Fatalf("Create webhook endpoint: %v", err)
 	}
-	defer app.eventBroadcaster.unsubscribe(ch)
 
-	app.dispatchBus(context.Background(), SignalEvent{Type: "Amendment", raw: &Amendment{}}, AfterCreate)
+	chUnrelated, err := app.eventBroadcaster.subscribe("u1", "unrelated-channel")
+	if err != nil {
+		t.Fatalf("subscribe unrelated: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(chUnrelated)
+	chAll, err := app.eventBroadcaster.subscribe("u2", eventStreamChannelAll)
+	if err != nil {
+		t.Fatalf("subscribe all: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(chAll)
 
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("expected a true broadcast — Amendment has no channelColumns entry")
+	app.dispatchBus(ctx, SignalEvent{
+		Type: "Amendment", Slug: "amend-bus", raw: &Amendment{Node: Node{ID: "amend-bus", Slug: "amend-bus"}},
+	}, AfterCreate)
+
+	for name, ch := range map[string]chan []byte{"unrelated": chUnrelated, "all": chAll} {
+		select {
+		case got := <-ch:
+			t.Errorf("%s subscriber: expected no stream delivery for an Amendment event, got %q", name, got)
+		default:
+		}
+	}
+	endpoints, err := store.EndpointsForEvent(ctx, "amendment.created")
+	if err != nil || len(endpoints) != 1 {
+		t.Fatalf("EndpointsForEvent: %v, endpoints=%d", err, len(endpoints))
+	}
+	jobs, err := app.WebhookPool().ListJobsForEndpoint(ctx, endpoints[0].ID)
+	if err != nil {
+		t.Fatalf("ListJobsForEndpoint: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].Event != "amendment.created" {
+		t.Fatalf("jobs = %+v, want exactly one amendment.created webhook job", jobs)
 	}
 }

@@ -307,8 +307,12 @@ app.EventStream() // mounts GET /_events/stream; independent of app.Webhooks(...
 connection open and writes one NDJSON line per event — same payload shape
 as an outbound webhook delivery (`{"id","event","timestamp","data"}`),
 covering the same event names (`"{type}.created"` … `"{type}.transitioned"`,
-`"signal.created"`), except that `signal.transitioned` is webhook-only and is
-never published to the stream (v1.106.0). A `{"type":"ping"}` line arrives every 25s while idle.
+`"signal.created"`), except that `signal.transitioned` (v1.106.0) and every
+`amendment.*` event (v1.107.0) are webhook-only and never published to the
+stream. An event is also not delivered to the connection whose own token
+caused it (v1.107.0, matched on `User.ID`); `?include_own=true` opts back in,
+and system-originated events are never suppressed. A `{"type":"ping"}` line
+arrives every 25s while idle.
 At-most-once delivery — no replay on reconnect.
 
 **Channel subscription (v1.81.0+, A302; extended v1.89.2+, 01a0a683):**
@@ -320,9 +324,10 @@ listener written before this feature existed keeps working unmodified.
 Channel routing applies to every event those four types produce — both
 `*.transitioned` (A302; not `signal.transitioned`, see above) and `*.created`/`*.updated` (01a0a683, which closed
 a gap where the latter had been an unconditional broadcast to every
-subscriber regardless of channel). An `Amendment` event, and every generic
-content-module lifecycle event, has no such field and is always delivered
-to every subscriber regardless of its requested channel. No new role is
+subscriber regardless of channel). Every generic content-module lifecycle
+event has no such field and is always delivered to every subscriber
+regardless of its requested channel (`Amendment` events are no longer
+streamed at all, v1.107.0). No new role is
 required for `?channel=all` — same access an Author-role token already
 had. Event-*type* filtering (as opposed to channel) is still client-side
 only. Route is absent (404) unless `EventStream` was called.
@@ -646,8 +651,8 @@ These tools are available when the site has `App.Webhooks(store)` configured:
 - Orchestration state transitions (`Task`/`Decision`/`Amendment`/`Goal`/`Signal`, via
   the `transition_item` tool) fire a separate `{type}.transitioned` event
   (e.g. `task.transitioned`) — subscribe to it, not `created`/`updated`/`published`,
-  to observe orchestration state changes (a `Signal`'s own `signal.transitioned` reaches
-  webhooks only, not the event stream, since v1.106.0); a `Signal` created automatically when a
+  to observe orchestration state changes (a `Signal`'s own `signal.transitioned` and every `amendment.*` event reach
+  webhooks only, not the event stream, since v1.106.0 and v1.107.0); a `Signal` created automatically when a
   role-gated automated transition is blocked fires `signal.created`, same as a
   human-created Signal
 

@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.107.0] — 2026-10-02
+
+### Added
+- `include_own` query parameter for `GET /_events/stream`. `?include_own=true` opts a connection back in to events its own token caused; any other value, or omitting it, keeps the default described below. It combines with `channel`, e.g. `?channel=core&include_own=true`. (A390)
+
+### Changed
+- An event is no longer delivered on the event stream to the connection whose own token caused it ("self-echo"). Previously an implementer's own claim, transition or edit came straight back to its own session and woke it for nothing, because events route on what they are about (Task and Goal on band, Signal on receiver), not on who caused them. The match is on the authenticated user's `User.ID`: the stream subscribes a connection under it, and the event's actor is the request context's `User().ID`. It covers transitions (`App.TransitionItemWithReason`), creates and updates through the lifecycle bus, and Signals created through `App.NotifySignalCreated`. Events caused by anyone else still arrive. System-originated events have no actor and are never suppressed: the expiry sweep and the `authorization-required` and `conflict-detected` Signals. Suppression is per token, not per connection, so two sessions sharing one token no longer see each other's events; `include_own=true` restores that. A Signal sent to oneself is suppressed like any other self-caused event. (A390)
+- `amendment.*` events (`amendment.created`, `amendment.updated`, `amendment.transitioned`) are no longer published to the live event stream. An Amendment has no routing field, so every one of them, five per Amendment, was a true broadcast that woke every listener, and no role waits on them live. Outbound webhooks are unchanged: a subscribed endpoint still receives them. A runtime-defined dynamic type literally named `amendment` shares the event-name prefix and is not streamed either. (A390)
+- D97's deprecation window (add, never break, three months) is deliberately not applied to these two removals. The project owner requested both directly, and no consumer of `amendment.*` on the stream was found: no other Smeldr repository references it, and the live instance has no registered webhook endpoints. The one consumer that depended on seeing its own events, the orchestration addon, which streams and calls `create_signal` with one token, is handled by sending `include_own=true`. A generic Discord relay that renders every `*.transitioned` event will stop showing Amendment lines. This is a stated exception, not a precedent.
+- Release order: deploy the orchestration addon's `include_own=true` change before redeploying an instance to this version, or the addon will stop showing Signals it sends itself.
+- Internal only: `eventBroadcaster` gained `broadcastFrom`, `publishFrom` and `subscribeOpts`, and `dispatchTransitionWebhookFrom` carries the actor; the previous functions keep their signatures. No exported symbol, signature or table changed.
+
+---
+
 ## [1.106.0] — 2026-10-02
 
 ### Changed

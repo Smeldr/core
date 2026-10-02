@@ -609,7 +609,10 @@ func TestEventStreamSuppressed(t *testing.T) {
 		{"task.transitioned", false},
 		{"decision.transitioned", false},
 		{"goal.transitioned", false},
-		{"amendment.transitioned", false},
+		{"amendment.created", true},
+		{"amendment.updated", true},
+		{"amendment.transitioned", true},
+		{"amendmentary.created", false},
 		{"", false},
 	}
 	for _, tc := range cases {

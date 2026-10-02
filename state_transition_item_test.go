@@ -762,35 +762,58 @@ func TestApp_TransitionItem_DecisionChannelRoutesViaScope(t *testing.T) {
 	}
 }
 
-// TestApp_TransitionItem_AmendmentAlwaysBroadcasts confirms an Amendment
-// transition — the one compiled type with no band/receiver-shaped field —
-// is always delivered as a true broadcast (A302), reaching a subscriber on
-// an unrelated channel rather than being silently dropped or requiring
-// eventStreamChannelAll.
-func TestApp_TransitionItem_AmendmentAlwaysBroadcasts(t *testing.T) {
+// TestApp_TransitionItem_Amendment_NotStreamed_WebhookStillEnqueued confirms
+// an Amendment transition no longer reaches the live event stream (it has no
+// routing column, so it used to be a true broadcast waking every listener),
+// while its webhook is still enqueued. It replaces the earlier "always
+// broadcasts" test, which pinned exactly the behaviour removed here.
+func TestApp_TransitionItem_Amendment_NotStreamed_WebhookStillEnqueued(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	app.EventStream()
+	store := wireWebhooksForTest(t, app, db)
+	ctx := context.Background()
 	repo := NewSQLRepo[*Amendment](db, Table("smeldr_amendments"))
-	if err := repo.Save(context.Background(), &Amendment{
+	if err := repo.Save(ctx, &Amendment{
 		Node: Node{ID: "amend-1", Slug: "amend-1-slug", Status: "scoped"},
 	}); err != nil {
 		t.Fatalf("insert amendment: %v", err)
 	}
-
-	ch, err := app.eventBroadcaster.subscribe("u1", "unrelated-channel")
-	if err != nil {
-		t.Fatalf("subscribe: %v", err)
+	if _, _, err := store.Create(ctx, "https://8.8.8.8/hook", []string{"amendment.transitioned"}); err != nil {
+		t.Fatalf("Create webhook endpoint: %v", err)
 	}
-	defer app.eventBroadcaster.unsubscribe(ch)
 
-	if _, err := app.TransitionItem(context.Background(), "Amendment", "amend-1-slug", "in-progress"); err != nil {
+	chUnrelated, err := app.eventBroadcaster.subscribe("u1", "unrelated-channel")
+	if err != nil {
+		t.Fatalf("subscribe unrelated: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(chUnrelated)
+	chAll, err := app.eventBroadcaster.subscribe("u2", eventStreamChannelAll)
+	if err != nil {
+		t.Fatalf("subscribe all: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(chAll)
+
+	if _, err := app.TransitionItem(ctx, "Amendment", "amend-1-slug", "in-progress"); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("expected a true broadcast — Amendment has no channelColumns entry")
+	for name, ch := range map[string]chan []byte{"unrelated": chUnrelated, "all": chAll} {
+		select {
+		case got := <-ch:
+			t.Errorf("%s subscriber: expected no stream delivery for an Amendment transition, got %q", name, got)
+		default:
+		}
+	}
+	endpoints, err := store.EndpointsForEvent(ctx, "amendment.transitioned")
+	if err != nil || len(endpoints) != 1 {
+		t.Fatalf("EndpointsForEvent: %v, endpoints=%d", err, len(endpoints))
+	}
+	jobs, err := app.WebhookPool().ListJobsForEndpoint(ctx, endpoints[0].ID)
+	if err != nil {
+		t.Fatalf("ListJobsForEndpoint: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].Event != "amendment.transitioned" {
+		t.Fatalf("jobs = %+v, want exactly one amendment.transitioned webhook job", jobs)
 	}
 }
 
@@ -948,5 +971,216 @@ func TestApp_TransitionItem_FailsOpenWhenLastActorColumnMissing(t *testing.T) {
 	}
 	if status != "published" {
 		t.Errorf("stored status = %q, want %q", status, "published")
+	}
+}
+
+// Self-echo suppression across the dispatch paths: an event is never delivered
+// to the connection whose own token caused it, and every other token still
+// receives it. System-originated events have no actor and suppress nothing.
+
+// TestApp_TransitionItem_Task_ActorsOwnConnectionSkipped_OthersReceive: a Task
+// transition performed under one user's context is not delivered to that
+// user's own stream connection, but is delivered to another user's connection
+// on the same channel.
+func TestApp_TransitionItem_Task_ActorsOwnConnectionSkipped_OthersReceive(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	app.EventStream()
+	repo := NewSQLRepo[*Task](db, Table("smeldr_tasks"))
+	if err := repo.Save(context.Background(), &Task{
+		Node: Node{ID: "task-se-1", Slug: "task-se-1-slug", Status: "backlog"},
+		Band: "core",
+	}); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	ownCh, err := app.eventBroadcaster.subscribe("u-actor", "core")
+	if err != nil {
+		t.Fatalf("subscribe actor: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(ownCh)
+	otherCh, err := app.eventBroadcaster.subscribe("u-other", "core")
+	if err != nil {
+		t.Fatalf("subscribe other: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(otherCh)
+
+	ctx := NewTestContext(User{ID: "u-actor", Roles: []Role{Author}})
+	if _, err := app.TransitionItem(ctx, "Task", "task-se-1-slug", "active"); err != nil {
+		t.Fatalf("TransitionItem: %v", err)
+	}
+
+	select {
+	case <-otherCh:
+	case <-time.After(time.Second):
+		t.Fatal("another user's connection on the Task's channel received nothing, want task.transitioned")
+	}
+	select {
+	case got := <-ownCh:
+		t.Fatalf("the actor's own connection received %q, want nothing", got)
+	default:
+	}
+}
+
+// TestApp_TransitionItem_Task_IncludeOwnReceivesOwnEvent: the same transition
+// reaches the actor's own connection when it opted in with include_own.
+func TestApp_TransitionItem_Task_IncludeOwnReceivesOwnEvent(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	app.EventStream()
+	repo := NewSQLRepo[*Task](db, Table("smeldr_tasks"))
+	if err := repo.Save(context.Background(), &Task{
+		Node: Node{ID: "task-se-2", Slug: "task-se-2-slug", Status: "backlog"},
+		Band: "core",
+	}); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	ownCh, err := app.eventBroadcaster.subscribeOpts("u-actor", "core", true)
+	if err != nil {
+		t.Fatalf("subscribeOpts: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(ownCh)
+
+	ctx := NewTestContext(User{ID: "u-actor", Roles: []Role{Author}})
+	if _, err := app.TransitionItem(ctx, "Task", "task-se-2-slug", "active"); err != nil {
+		t.Fatalf("TransitionItem: %v", err)
+	}
+	select {
+	case <-ownCh:
+	case <-time.After(time.Second):
+		t.Fatal("an include_own connection received nothing for its own transition")
+	}
+}
+
+// TestDispatchBus_SkipsActorsOwnConnection: an event routed through the
+// lifecycle bus is skipped for the connection whose token is the event's
+// ActorID, and still reaches another token on the same channel.
+func TestDispatchBus_SkipsActorsOwnConnection(t *testing.T) {
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte("test-secret-dispatchbus-self-echo"),
+	}))
+	app.EventStream()
+	ownCh, err := app.eventBroadcaster.subscribe("u-actor", "core")
+	if err != nil {
+		t.Fatalf("subscribe actor: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(ownCh)
+	otherCh, err := app.eventBroadcaster.subscribe("u-other", "core")
+	if err != nil {
+		t.Fatalf("subscribe other: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(otherCh)
+
+	for _, sig := range []LifecycleEvent{AfterCreate, AfterUpdate} {
+		app.dispatchBus(context.Background(), SignalEvent{
+			Type: "Task", ActorID: "u-actor", raw: &Task{Band: "core"},
+		}, sig)
+	}
+
+	if len(otherCh) != 2 {
+		t.Errorf("another token received %d events, want 2 (created and updated)", len(otherCh))
+	}
+	if len(ownCh) != 0 {
+		t.Errorf("the actor's own connection received %d events, want 0", len(ownCh))
+	}
+}
+
+// TestDispatchBus_NoActorSkipsNobody: an event with no ActorID (an
+// unauthenticated or system caller) is delivered to every matching connection.
+func TestDispatchBus_NoActorSkipsNobody(t *testing.T) {
+	app := New(MustConfig(Config{
+		BaseURL: "http://localhost:8080",
+		Secret:  []byte("test-secret-dispatchbus-no-actor"),
+	}))
+	app.EventStream()
+	ch, err := app.eventBroadcaster.subscribe("u1", "core")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(ch)
+
+	app.dispatchBus(context.Background(), SignalEvent{Type: "Task", raw: &Task{Band: "core"}}, AfterCreate)
+
+	if len(ch) != 1 {
+		t.Errorf("connection received %d events, want 1", len(ch))
+	}
+}
+
+// TestNotifySignalCreated_SkipsCreatorsOwnConnection: the Signal's creator
+// (the user in the context) does not get its own signal.created back on a
+// connection of the same token; another token on the receiver channel does,
+// and a plain context carries no user, so it suppresses nothing.
+func TestNotifySignalCreated_SkipsCreatorsOwnConnection(t *testing.T) {
+	app, db, _ := setupTransitionItemApp(t)
+	app.EventStream()
+	repo := NewSQLRepo[*Signal](db, Table("smeldr_signals"))
+	if err := repo.Save(context.Background(), &Signal{
+		Node:     Node{ID: "sig-nc-1", Slug: "sig-nc-1-slug", Status: "pending"},
+		Receiver: "core",
+	}); err != nil {
+		t.Fatalf("insert signal: %v", err)
+	}
+	creatorCh, err := app.eventBroadcaster.subscribe("u-creator", "core")
+	if err != nil {
+		t.Fatalf("subscribe creator: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(creatorCh)
+	otherCh, err := app.eventBroadcaster.subscribe("u-other", "core")
+	if err != nil {
+		t.Fatalf("subscribe other: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(otherCh)
+
+	app.NotifySignalCreated(NewTestContext(User{ID: "u-creator", Roles: []Role{Author}}), "sig-nc-1", "sig-nc-1-slug")
+	if len(otherCh) != 1 || len(creatorCh) != 0 {
+		t.Fatalf("with the creator's context: other=%d creator=%d, want other=1 creator=0", len(otherCh), len(creatorCh))
+	}
+
+	// A plain context.Context has no user: nobody is suppressed.
+	app.NotifySignalCreated(context.Background(), "sig-nc-1", "sig-nc-1-slug")
+	if len(otherCh) != 2 || len(creatorCh) != 1 {
+		t.Fatalf("with a plain context: other=%d creator=%d, want other=2 creator=1", len(otherCh), len(creatorCh))
+	}
+}
+
+// TestRecordAuthorizationRequiredSignal_NotSuppressedForCallersToken: this
+// Signal is system-originated (sender "system"); the user in the context is
+// the person whose transition was blocked, not the Signal's author, so even a
+// connection of that same token still receives it.
+func TestRecordAuthorizationRequiredSignal_NotSuppressedForCallersToken(t *testing.T) {
+	_, db, _ := setupTransitionItemApp(t)
+	b := newEventBroadcaster()
+	ch, err := b.subscribe("u-blocked", "approve")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer b.unsubscribe(ch)
+
+	ctx := NewTestContext(User{ID: "u-blocked", Roles: []Role{Author}})
+	if err := recordAuthorizationRequiredSignal(ctx, db, nil, nil, b, "Decision", "d-1", "proposed", "ratified", "approve"); err != nil {
+		t.Fatalf("recordAuthorizationRequiredSignal: %v", err)
+	}
+	if len(ch) != 1 {
+		t.Errorf("the blocked caller's own connection received %d events, want 1 (system-originated, never suppressed)", len(ch))
+	}
+}
+
+// TestEmitConflictDetectedSignal_NotSuppressedForCallersToken: the two
+// conflict-detected Signals are system-originated, so a connection of the same
+// token as the asserting caller still receives both.
+func TestEmitConflictDetectedSignal_NotSuppressedForCallersToken(t *testing.T) {
+	store := setupRelationStoreWithSignals(t)
+	b := newEventBroadcaster()
+	store.setSignalDeps(nil, nil, b)
+	ch, err := b.subscribe("u-asserter", decisionRatifyOperation)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer b.unsubscribe(ch)
+
+	ctx := NewTestContext(User{ID: "u-asserter", Roles: []Role{Author}})
+	if _, err := store.MCPAssertRelation(ctx, "Decision", "d1", "Decision", "d2", "contradicts", nil, nil, nil, nil); err != nil {
+		t.Fatalf("MCPAssertRelation: %v", err)
+	}
+	if len(ch) != 2 {
+		t.Errorf("the asserting caller's own connection received %d events, want 2 (system-originated, never suppressed)", len(ch))
 	}
 }

@@ -400,6 +400,15 @@ type transitionWebhookData struct {
 // [StateFlow]-driven transition on an arbitrary named state, or a Signal
 // inserted by raw SQL with no corresponding Go value in hand.
 func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, channel, eventName string, data transitionWebhookData) {
+	dispatchTransitionWebhookFrom(ctx, store, pool, broadcaster, "", channel, eventName, data)
+}
+
+// dispatchTransitionWebhookFrom is [dispatchTransitionWebhook] for an event
+// caused by the authenticated actor actorID (a User.ID): the stream delivery
+// skips a subscriber holding that same token, unless it opted in with
+// include_own. An empty actorID, as for every system-originated caller, skips
+// nobody. The webhook sink is unaffected by actorID.
+func dispatchTransitionWebhookFrom(ctx context.Context, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, actorID, channel, eventName string, data transitionWebhookData) {
 	webhooksConfigured := store != nil && pool != nil
 	streamed := broadcaster != nil && !eventStreamSuppressed(eventName)
 	if !webhooksConfigured && !streamed {
@@ -425,9 +434,9 @@ func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *w
 	}
 	if streamed {
 		if channel == "" {
-			broadcaster.broadcast(payload)
+			broadcaster.broadcastFrom(actorID, payload)
 		} else {
-			broadcaster.publish(channel, payload)
+			broadcaster.publishFrom(actorID, channel, payload)
 		}
 	}
 }
@@ -437,16 +446,24 @@ func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *w
 const eventSignalTransitioned = "signal.transitioned"
 
 // eventStreamSuppressed reports whether eventName is delivered to outbound
-// webhooks but never to the live event stream ([App.EventStream]). Today that
-// is only [eventSignalTransitioned]: a Signal routes on its Receiver and only
-// the receiver moves it through pending, read and acknowledged, so the event
-// could only ever echo back to the very session that caused it, waking its own
-// stream listener for nothing. "signal.created", which is the wake-up for new
-// work, and every other type's events are unaffected. Webhook delivery is
-// deliberately unchanged: the two sinks are independent in
-// [dispatchTransitionWebhook].
+// webhooks but never to the live event stream ([App.EventStream]). Two cases:
+//
+//   - [eventSignalTransitioned]: a Signal routes on its Receiver and only the
+//     receiver moves it through pending, read and acknowledged, so the event
+//     could only ever echo back to the very session that caused it, waking its
+//     own stream listener for nothing.
+//   - every "amendment." event: an Amendment has no routing column, so each
+//     one (created plus every transition) was a true broadcast that woke every
+//     role, and no role waits on them live. A runtime-defined dynamic type
+//     literally named "amendment" shares the event-name prefix and is
+//     suppressed too.
+//
+// "signal.created", which is the wake-up for new work, and every other type's
+// events are unaffected. Webhook delivery is deliberately unchanged: the two
+// sinks are independent in [dispatchTransitionWebhookFrom] and in
+// [App.OnSignal]'s webhook handler.
 func eventStreamSuppressed(eventName string) bool {
-	return eventName == eventSignalTransitioned
+	return eventName == eventSignalTransitioned || strings.HasPrefix(eventName, "amendment.")
 }
 
 // NotifySignalCreated broadcasts a "signal.created" webhook/event-stream
@@ -478,7 +495,15 @@ func (a *App) NotifySignalCreated(ctx context.Context, id, slug string) {
 			channel = ""
 		}
 	}
-	dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, channel, "signal.created", transitionWebhookData{
+	// The creator's own stream connection (same token) is skipped, like any
+	// other self-caused event; a plain context.Context carries no user and
+	// skips nobody.
+	type userAccessor interface{ User() User }
+	actorID := ""
+	if uc, ok := ctx.(userAccessor); ok {
+		actorID = uc.User().ID
+	}
+	dispatchTransitionWebhookFrom(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, actorID, channel, "signal.created", transitionWebhookData{
 		Type: "signal", ID: id, Slug: slug, ToState: "pending",
 	})
 }

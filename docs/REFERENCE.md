@@ -3026,6 +3026,12 @@ connection subscribes to.
 - No new authorization is added for `?channel=all`: it is the same access
   every Author-role token already had, not a new grant.
 
+**`include_own` query parameter (v1.107.0):** by default a connection does
+not receive an event its own token caused, see "Self-echo" below.
+`?include_own=true` opts the connection back in to its own events; any
+other value, or the parameter omitted, keeps the default. It combines with
+`channel`, e.g. `?channel=core&include_own=true`.
+
 **Response on success (200 OK):**
 
 ```
@@ -3079,8 +3085,8 @@ to a webhook event name is delivered to the stream:
   `"{type}.unpublished"`, `"{type}.archived"`, `"{type}.deleted"`,
   `"{type}.scheduled"`
 - State transitions: `"{type}.transitioned"` (item moves between states); the
-  one exception is `signal.transitioned`, which is webhook-only and never
-  published to the stream (v1.106.0)
+  exceptions are `signal.transitioned` (v1.106.0) and every `amendment.*`
+  event (v1.107.0), which are webhook-only and never published to the stream
 - Signals: `"signal.created"` (new explicit signal)
 
 The JSON payload shape is identical to webhook event payloads — a
@@ -3100,15 +3106,32 @@ The JSON payload shape is identical to webhook event payloads — a
   not streamed at all as of v1.106.0) and `"{type}.created"`/
   `"{type}.updated"`/etc. (01a0a683 — before this, those events reached
   every subscriber regardless of channel, an unclosed gap in A302's own
-  scoping). An `Amendment` event, and every generic content-module
-  lifecycle event (a blog post's own publish/update/etc.), has no such
-  field and is always delivered as a true broadcast, reaching every
-  connected subscriber regardless of the channel it requested. A subscriber
+  scoping). Every generic content-module lifecycle event (a blog post's
+  own publish/update/etc.) has no such field and is always delivered as a
+  true broadcast, reaching every connected subscriber regardless of the
+  channel it requested. (`Amendment` events used to be broadcast too; as of
+  v1.107.0 they are not streamed at all, see below.) A subscriber
   connected with `?channel=all` (or no parameter — see above) also receives
   everything, channel-routed or broadcast alike. A listener that only cares
   about certain event *types* (as opposed to channels) must still filter
   those client-side — channel scoping and event-type filtering are
   different dimensions.
+- **Self-echo (v1.107.0):** an event is not delivered to a connection whose
+  own token caused it. The comparison is on the token's `User.ID`, the same
+  value the stream subscribes a connection under and a request context
+  carries as `User().ID`. It covers transitions, creates and updates, and a
+  Signal created through `NotifySignalCreated`. Events caused by anyone else
+  still arrive, and so do system-originated ones, which have no actor: the
+  `authorization-required` and `conflict-detected` Signals, and the expiry
+  sweep. Suppression is per token, not per connection, so two sessions that
+  share a token do not see each other's events; `?include_own=true` restores
+  that. A Signal sent to yourself is suppressed like any other self-caused
+  event.
+- **Amendment events (v1.107.0):** `amendment.*` events are not published to
+  the stream. They had no routing field, so every one was a true broadcast
+  that woke every listener, and nothing waits on them live. Webhook delivery
+  is unchanged. A runtime-defined dynamic type literally named `amendment`
+  shares the event-name prefix and is not streamed either.
 - **Client buffer:** A subscriber whose local event buffer fills (32 events,
   not configurable in this version) has further events silently dropped for
   that subscriber only (logged server-side at Warn level) rather than blocking

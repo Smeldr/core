@@ -1207,7 +1207,10 @@ func (a *App) OnSignal(sig LifecycleEvent, h func(context.Context, SignalEvent) 
 // single channel for the compiled orchestration types it covers (Task/
 // Goal/Decision/Signal), the same scoping [App.TransitionItem] already
 // applies to `*.transitioned` events — everything else (dynamic content
-// modules, Amendment) still gets a true broadcast. A sig with no
+// modules) still gets a true broadcast. An event the stream never carries
+// ([eventStreamSuppressed], today every Amendment event) is skipped before
+// its payload is built, and the stream skips the connection whose own token
+// is ev.ActorID unless it asked for its own events (include_own). A sig with no
 // webhook-event mapping ([buildWebhookPayload] erroring) is silently
 // skipped, matching [webhookDispatch]'s own handling of the same case via
 // [buildEventName]'s ok check.
@@ -1218,11 +1221,15 @@ func (a *App) OnSignal(sig LifecycleEvent, h func(context.Context, SignalEvent) 
 // Handler errors are logged; nothing is returned or propagated.
 func (a *App) dispatchBus(ctx context.Context, ev SignalEvent, sig LifecycleEvent) {
 	if a.eventBroadcaster != nil {
-		if payload, err := buildWebhookPayload(ev.Type, ev.raw, sig); err == nil {
+		// An event the stream never carries (see eventStreamSuppressed) is
+		// skipped here before its payload is even built. ev.ActorID, the
+		// caller's User.ID, makes the stream skip that caller's own connection.
+		name, named := buildEventName(ev.Type, sig)
+		if payload, err := buildWebhookPayload(ev.Type, ev.raw, sig); err == nil && !(named && eventStreamSuppressed(name)) {
 			if channel := channelValueFromItem(ev.Type, ev.raw); channel != "" {
-				a.eventBroadcaster.publish(channel, payload)
+				a.eventBroadcaster.publishFrom(ev.ActorID, channel, payload)
 			} else {
-				a.eventBroadcaster.broadcast(payload)
+				a.eventBroadcaster.broadcastFrom(ev.ActorID, payload)
 			}
 		}
 	}

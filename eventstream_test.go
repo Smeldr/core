@@ -1141,3 +1141,273 @@ func TestEventStreamHandler_SetWriteDeadlineUnsupported_StillWrites(t *testing.T
 		t.Fatal("handler did not return after context cancellation")
 	}
 }
+
+// Self-echo suppression: broadcastFrom, publishFrom and include_own.
+
+// recvOrNone reports whether ch has a delivery pending right now, without
+// blocking.
+func recvOrNone(ch chan []byte) (string, bool) {
+	select {
+	case got := <-ch:
+		return string(got), true
+	default:
+		return "", false
+	}
+}
+
+func TestEventBroadcaster_BroadcastFrom_SkipsOriginToken(t *testing.T) {
+	b := newEventBroadcaster()
+	own, err := b.subscribe("u1", "core")
+	if err != nil {
+		t.Fatalf("subscribe u1: %v", err)
+	}
+	defer b.unsubscribe(own)
+	other, err := b.subscribe("u2", "cloud")
+	if err != nil {
+		t.Fatalf("subscribe u2: %v", err)
+	}
+	defer b.unsubscribe(other)
+
+	b.broadcastFrom("u1", []byte(`{"event":"x"}`))
+
+	if got, ok := recvOrNone(own); ok {
+		t.Errorf("origin token's own connection received %q, want nothing", got)
+	}
+	if _, ok := recvOrNone(other); !ok {
+		t.Error("another token's connection received nothing, want the broadcast")
+	}
+}
+
+func TestEventBroadcaster_PublishFrom_SkipsOriginToken(t *testing.T) {
+	b := newEventBroadcaster()
+	own, err := b.subscribe("u1", "core")
+	if err != nil {
+		t.Fatalf("subscribe u1: %v", err)
+	}
+	defer b.unsubscribe(own)
+	ownAll, err := b.subscribe("u1", eventStreamChannelAll)
+	if err != nil {
+		t.Fatalf("subscribe u1 all: %v", err)
+	}
+	defer b.unsubscribe(ownAll)
+	other, err := b.subscribe("u2", "core")
+	if err != nil {
+		t.Fatalf("subscribe u2: %v", err)
+	}
+	defer b.unsubscribe(other)
+	wrongChannel, err := b.subscribe("u3", "cloud")
+	if err != nil {
+		t.Fatalf("subscribe u3: %v", err)
+	}
+	defer b.unsubscribe(wrongChannel)
+
+	b.publishFrom("u1", "core", []byte(`{"event":"x"}`))
+
+	for name, ch := range map[string]chan []byte{"u1 on core": own, "u1 on all": ownAll} {
+		if got, ok := recvOrNone(ch); ok {
+			t.Errorf("%s received %q, want nothing (its own token caused the event)", name, got)
+		}
+	}
+	if _, ok := recvOrNone(other); !ok {
+		t.Error("another token on the same channel received nothing, want the event")
+	}
+	if got, ok := recvOrNone(wrongChannel); ok {
+		t.Errorf("subscriber on another channel received %q, want nothing", got)
+	}
+}
+
+func TestEventBroadcaster_FromEmptyOriginSkipsNobody(t *testing.T) {
+	b := newEventBroadcaster()
+	one, err := b.subscribe("u1", "core")
+	if err != nil {
+		t.Fatalf("subscribe u1: %v", err)
+	}
+	defer b.unsubscribe(one)
+	two, err := b.subscribe("u2", "core")
+	if err != nil {
+		t.Fatalf("subscribe u2: %v", err)
+	}
+	defer b.unsubscribe(two)
+
+	b.broadcastFrom("", []byte(`{"event":"a"}`))
+	b.publishFrom("", "core", []byte(`{"event":"b"}`))
+
+	for name, ch := range map[string]chan []byte{"u1": one, "u2": two} {
+		if len(ch) != 2 {
+			t.Errorf("%s has %d deliveries, want 2 (a system actor suppresses nothing)", name, len(ch))
+		}
+	}
+}
+
+func TestEventBroadcaster_FromSameTokenManyConnectionsAllSkipped(t *testing.T) {
+	b := newEventBroadcaster()
+	var own []chan []byte
+	for i := 0; i < 3; i++ {
+		ch, err := b.subscribe("u1", "core")
+		if err != nil {
+			t.Fatalf("subscribe %d: %v", i, err)
+		}
+		defer b.unsubscribe(ch)
+		own = append(own, ch)
+	}
+	b.publishFrom("u1", "core", []byte(`{"event":"x"}`))
+	for i, ch := range own {
+		if got, ok := recvOrNone(ch); ok {
+			t.Errorf("connection %d of the origin token received %q, want nothing", i, got)
+		}
+	}
+}
+
+func TestEventBroadcaster_FromIncludeOwnReceives(t *testing.T) {
+	b := newEventBroadcaster()
+	optedIn, err := b.subscribeOpts("u1", "core", true)
+	if err != nil {
+		t.Fatalf("subscribeOpts: %v", err)
+	}
+	defer b.unsubscribe(optedIn)
+	plain, err := b.subscribe("u1", "core")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer b.unsubscribe(plain)
+
+	b.publishFrom("u1", "core", []byte(`{"event":"p"}`))
+	b.broadcastFrom("u1", []byte(`{"event":"b"}`))
+
+	if len(optedIn) != 2 {
+		t.Errorf("include_own connection has %d deliveries, want 2", len(optedIn))
+	}
+	if len(plain) != 0 {
+		t.Errorf("default connection of the same token has %d deliveries, want 0", len(plain))
+	}
+}
+
+// subscriberTokenIDs returns the token IDs currently subscribed, so a test
+// can see which key the real stream handler registered a connection under.
+func subscriberTokenIDs(b *eventBroadcaster) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var ids []string
+	for _, sub := range b.subs {
+		ids = append(ids, sub.tokenID)
+	}
+	return ids
+}
+
+// TestEventStream_SubscriberKeyMatchesRequestUserID proves, rather than
+// assumes, that the value the stream handler subscribes a connection under is
+// the same value a request context carries as User().ID for the same bearer
+// token. Self-echo suppression compares exactly these two, so they must be one
+// identity space. It then shows the effect end to end through the handler.
+func TestEventStream_SubscriberKeyMatchesRequestUserID(t *testing.T) {
+	b := newEventBroadcaster()
+	auth := BearerHMAC(eventStreamTestSecret)
+	srv := httptest.NewServer(newEventStreamHandler(auth, b))
+	defer srv.Close()
+
+	tok, err := SignToken(User{ID: "user-proof-1", Roles: []Role{Author}}, eventStreamTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+
+	// The context the same bearer token produces on an ordinary request, as
+	// every tool call and handler sees it.
+	var ctxUserID string
+	probe := Authenticate(auth)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctxUserID = ContextFrom(w, r).User().ID
+	}))
+	probeReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	probeReq.Header.Set("Authorization", "Bearer "+tok)
+	probe.ServeHTTP(httptest.NewRecorder(), probeReq)
+	if ctxUserID != "user-proof-1" {
+		t.Fatalf("request context User().ID = %q, want %q", ctxUserID, "user-proof-1")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"?channel=core", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for b.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	ids := subscriberTokenIDs(b)
+	if len(ids) != 1 || ids[0] != ctxUserID {
+		t.Fatalf("stream subscribed under %v, want exactly [%q] (the request context's User().ID)", ids, ctxUserID)
+	}
+
+	lineCh := make(chan string, 4)
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		for sc.Scan() {
+			lineCh <- sc.Text()
+		}
+	}()
+
+	// An event this user caused is not delivered to the user's own connection.
+	b.publishFrom(ctxUserID, "core", []byte(`{"event":"own"}`))
+	// An event another user caused is.
+	b.publishFrom("someone-else", "core", []byte(`{"event":"theirs"}`))
+
+	select {
+	case line := <-lineCh:
+		if line != `{"event":"theirs"}` {
+			t.Errorf("first streamed line = %q, want the other user's event; the user's own event must not arrive", line)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the other user's event")
+	}
+}
+
+func TestEventStream_IncludeOwnParameter(t *testing.T) {
+	cases := []struct {
+		name  string
+		query string
+		want  bool
+	}{
+		{"absent means suppression stays on", "?channel=core", false},
+		{"true opts in", "?channel=core&include_own=true", true},
+		{"any other value does not opt in", "?channel=core&include_own=1", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newEventBroadcaster()
+			auth := BearerHMAC(eventStreamTestSecret)
+			srv := httptest.NewServer(newEventStreamHandler(auth, b))
+			defer srv.Close()
+			tok, err := SignToken(User{ID: "u-io", Roles: []Role{Author}}, eventStreamTestSecret, 0)
+			if err != nil {
+				t.Fatalf("SignToken: %v", err)
+			}
+			req, err := http.NewRequest(http.MethodGet, srv.URL+tc.query, nil)
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+			req.Header.Set("Authorization", "Bearer "+tok)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			defer resp.Body.Close()
+			deadline := time.Now().Add(2 * time.Second)
+			for b.count() == 0 && time.Now().Before(deadline) {
+				time.Sleep(5 * time.Millisecond)
+			}
+			b.mu.Lock()
+			var got bool
+			for _, sub := range b.subs {
+				got = sub.includeOwn
+			}
+			b.mu.Unlock()
+			if got != tc.want {
+				t.Errorf("includeOwn = %v, want %v for %q", got, tc.want, tc.query)
+			}
+		})
+	}
+}

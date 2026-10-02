@@ -1030,7 +1030,7 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 			channel = ""
 		}
 	}
-	dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, channel,
+	dispatchTransitionWebhookFrom(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, actorID, channel,
 		eventName,
 		transitionWebhookData{
 			Type:      strings.ToLower(typeName),
