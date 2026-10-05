@@ -211,23 +211,68 @@ func recordTransitionProvenance(ctx context.Context, store ProvenanceStore, type
 	if store == nil {
 		return
 	}
-	var actorID string
-	var roles []Role
-	if sc, ok := ctx.(interface{ User() User }); ok {
-		u := sc.User()
-		actorID, roles = u.ID, u.Roles
+	actorID, actorKind := actorFromContext(ctx)
+	recordStateChange(ctx, store, stateChange{
+		typeName:  typeName,
+		id:        id,
+		from:      fromState,
+		to:        toState,
+		reason:    reason,
+		surface:   surface,
+		actorKind: actorKind,
+		actorID:   actorID,
+	})
+}
+
+// stateChange describes one completed state change of an item, whoever caused
+// it: a caller's transition, a side effect of another item's transition, or a
+// scheduled job. It is the input of [recordStateChange], the single place a
+// state change becomes a [ProvenanceRecord].
+type stateChange struct {
+	typeName, id, from, to, reason, surface, actorKind, actorID string
+	// verb is the [ProvenanceRecord.Verb]; empty means the verb
+	// [provenanceVerbFor] gives an update from from to to.
+	verb string
+}
+
+// recordStateChange is the one internal writer of state-change provenance:
+// [recordTransitionProvenance], the conflict-supersede side effect,
+// [App.ExpireSignals], [App.DrainEvalQueue] and the [App.Provenance] signal
+// subscriber all build their record here, so anything that must happen
+// whenever an item's state changes (a later standing writer, D100) has exactly
+// one place to hook. Fail-open and a no-op for a nil store, by way of
+// [recordProvenance]. Call it only after the status UPDATE succeeded.
+func recordStateChange(ctx context.Context, store ProvenanceStore, c stateChange) {
+	if store == nil {
+		return
+	}
+	verb := c.verb
+	if verb == "" {
+		verb = provenanceVerbFor(AfterUpdate, c.from, c.to)
 	}
 	recordProvenance(ctx, store, ProvenanceRecord{
-		SubjectType: typeName,
-		SubjectID:   id,
-		Verb:        provenanceVerbFor(AfterUpdate, fromState, toState),
-		FromState:   fromState,
-		ToState:     toState,
-		ActorKind:   actorKindFor(actorID, roles),
-		ActorID:     actorID,
-		Surface:     surface,
-		Reason:      reason,
+		SubjectType: c.typeName,
+		SubjectID:   c.id,
+		Verb:        verb,
+		FromState:   c.from,
+		ToState:     c.to,
+		ActorKind:   c.actorKind,
+		ActorID:     c.actorID,
+		Surface:     c.surface,
+		Reason:      c.reason,
 	})
+}
+
+// actorFromContext returns the actor identity and its kind that ctx carries
+// when it is a [Context] (the same extraction every generic transition path
+// already uses for last_actor), and empty strings otherwise.
+func actorFromContext(ctx context.Context) (id, kind string) {
+	sc, ok := ctx.(interface{ User() User })
+	if !ok {
+		return "", ""
+	}
+	u := sc.User()
+	return u.ID, actorKindFor(u.ID, u.Roles)
 }
 
 // provenanceLifecycleEvents is every [LifecycleEvent] that represents a completed
@@ -299,16 +344,16 @@ func (a *App) Provenance(store ProvenanceStore) *App {
 		s := sig
 		a.OnSignal(s, func(ctx context.Context, ev SignalEvent) error {
 			toState := currentStatusOf(ev.raw)
-			recordProvenance(ctx, a.provenanceStore, ProvenanceRecord{
-				SubjectType: ev.Type,
-				SubjectID:   ev.NodeID,
-				Verb:        provenanceVerbFor(s, ev.PreviousState, toState),
-				FromState:   ev.PreviousState,
-				ToState:     toState,
-				ActorKind:   actorKindFor(ev.ActorID, ev.ActorRoles),
-				ActorID:     ev.ActorID,
-				Surface:     ev.Surface,
-				Reason:      ev.Reason,
+			recordStateChange(ctx, a.provenanceStore, stateChange{
+				typeName:  ev.Type,
+				id:        ev.NodeID,
+				verb:      provenanceVerbFor(s, ev.PreviousState, toState),
+				from:      ev.PreviousState,
+				to:        toState,
+				actorKind: actorKindFor(ev.ActorID, ev.ActorRoles),
+				actorID:   ev.ActorID,
+				surface:   ev.Surface,
+				reason:    ev.Reason,
 			})
 			return nil
 		})

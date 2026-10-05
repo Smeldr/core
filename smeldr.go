@@ -312,6 +312,8 @@ type App struct {
 
 	findingStoreModules []interface{ setFindingStore(FindingStore) } // modules that receive the FindingStore at Handler() time (decision-governance-model.md §6)
 
+	provenanceStoreModules []interface{ setProvenanceStore(ProvenanceStore) } // modules that receive the ProvenanceStore at Handler() time (conflict-supersede provenance)
+
 	logRing        *logRing // non-nil when App.CaptureLogs() was called; backs GET /_logs
 	logsHandlerReg bool     // true once GET /_logs is registered
 
@@ -626,6 +628,9 @@ func (a *App) Content(v any, opts ...Option) {
 		}
 		if fs, ok := r.(interface{ setFindingStore(FindingStore) }); ok {
 			a.findingStoreModules = append(a.findingStoreModules, fs)
+		}
+		if ps, ok := r.(interface{ setProvenanceStore(ProvenanceStore) }); ok {
+			a.provenanceStoreModules = append(a.provenanceStoreModules, ps)
 		}
 		if hk, ok := r.(interface {
 			setAfterHook(func(Context, LifecycleEvent, afterHookMeta, any))
@@ -1595,6 +1600,11 @@ func (a *App) Handler() http.Handler {
 	if a.findingStore != nil {
 		for _, m := range a.findingStoreModules {
 			m.setFindingStore(a.findingStore)
+		}
+	}
+	if a.provenanceStore != nil {
+		for _, m := range a.provenanceStoreModules {
+			m.setProvenanceStore(a.provenanceStore)
 		}
 	}
 	// A34: trigger a one-shot startup rebuild of all derived content (sitemap,

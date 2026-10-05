@@ -3027,7 +3027,7 @@ func TestRegisterFlow_conflictPolicyStored(t *testing.T) {
 // ——— applyConflictPolicy — guard paths ————————————————————————————————————
 
 func TestApplyConflictPolicy_nilDB(t *testing.T) {
-	if err := applyConflictPolicy(context.Background(), nil, nil, "T", "published", "id1"); err != nil {
+	if err := applyConflictPolicy(context.Background(), nil, nil, nil, "T", "published", "id1", ""); err != nil {
 		t.Errorf("nil DB: expected nil, got %v", err)
 	}
 }
@@ -3035,7 +3035,7 @@ func TestApplyConflictPolicy_nilDB(t *testing.T) {
 func TestApplyConflictPolicy_noFlow(t *testing.T) {
 	db := newMigratedDB(t)
 	// No flow registered for "UnknownType" — should return nil.
-	if err := applyConflictPolicy(context.Background(), db, nil, "UnknownType", "published", "id1"); err != nil {
+	if err := applyConflictPolicy(context.Background(), db, nil, nil, "UnknownType", "published", "id1", ""); err != nil {
 		t.Errorf("no flow: expected nil, got %v", err)
 	}
 }
@@ -3051,7 +3051,7 @@ func TestApplyConflictPolicy_emptyActiveState(t *testing.T) {
 		t.Fatalf("RegisterFlow: %v", err)
 	}
 	// ActiveState="" → no enforcement.
-	if err := applyConflictPolicy(context.Background(), db, nil, "NoActiveType", "draft", "id1"); err != nil {
+	if err := applyConflictPolicy(context.Background(), db, nil, nil, "NoActiveType", "draft", "id1", ""); err != nil {
 		t.Errorf("empty active_state: expected nil, got %v", err)
 	}
 }
@@ -3060,7 +3060,7 @@ func TestApplyConflictPolicy_toStateNotActiveState(t *testing.T) {
 	db := newMigratedDB(t)
 	registerConflictFlow(t, db, ConflictReject)
 	// Transitioning to "archived", not to "published" (the active state).
-	if err := applyConflictPolicy(context.Background(), db, nil, "ConflictType", "archived", "id1"); err != nil {
+	if err := applyConflictPolicy(context.Background(), db, nil, nil, "ConflictType", "archived", "id1", ""); err != nil {
 		t.Errorf("toState != activeState: expected nil, got %v", err)
 	}
 }
@@ -3071,7 +3071,7 @@ func TestApplyConflictPolicy_reject_noConflict(t *testing.T) {
 	db := newMigratedDB(t)
 	registerConflictFlow(t, db, ConflictReject)
 	// No items in "published" state → no conflict.
-	if err := applyConflictPolicy(context.Background(), db, nil, "ConflictType", "published", "new-id"); err != nil {
+	if err := applyConflictPolicy(context.Background(), db, nil, nil, "ConflictType", "published", "new-id", ""); err != nil {
 		t.Errorf("no conflict: expected nil, got %v", err)
 	}
 }
@@ -3080,7 +3080,7 @@ func TestApplyConflictPolicy_reject_conflict(t *testing.T) {
 	db := newMigratedDB(t)
 	registerConflictFlow(t, db, ConflictReject)
 	insertConflictItem(t, db, "existing", "published")
-	err := applyConflictPolicy(context.Background(), db, nil, "ConflictType", "published", "new-id")
+	err := applyConflictPolicy(context.Background(), db, nil, nil, "ConflictType", "published", "new-id", "")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("conflict: expected ErrConflict, got %v", err)
 	}
@@ -3125,7 +3125,7 @@ func TestApplyConflictPolicy_smeldrPrefixedTable(t *testing.T) {
 	); err != nil {
 		t.Fatalf("insert existing task: %v", err)
 	}
-	err := applyConflictPolicy(ctx, db, nil, "Task", "published", "new-task")
+	err := applyConflictPolicy(ctx, db, nil, nil, "Task", "published", "new-task", "")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("smeldr_-prefixed table: want ErrConflict (real conflict against smeldr_tasks), got %v", err)
 	}
@@ -3138,7 +3138,7 @@ func TestApplyConflictPolicy_reject_dbError(t *testing.T) {
 	registerConflictFlow(t, db, ConflictReject)
 	// Use a wrapped DB that fails QueryContext after the sqlite_master probe.
 	wrapped := &countFailAfterProbeDB{DB: db}
-	if err := applyConflictPolicy(context.Background(), wrapped, nil, "ConflictType", "published", "id1"); err != nil {
+	if err := applyConflictPolicy(context.Background(), wrapped, nil, nil, "ConflictType", "published", "id1", ""); err != nil {
 		t.Errorf("db error: expected nil (fail-open), got %v", err)
 	}
 }
@@ -3170,7 +3170,7 @@ func TestApplyConflictPolicy_supersede_noConflict(t *testing.T) {
 	db := newMigratedDB(t)
 	registerConflictFlow(t, db, ConflictSupersede)
 	// No items in "published" → supersede is a no-op.
-	if err := applyConflictPolicy(context.Background(), db, nil, "ConflictType", "published", "new-id"); err != nil {
+	if err := applyConflictPolicy(context.Background(), db, nil, nil, "ConflictType", "published", "new-id", ""); err != nil {
 		t.Errorf("no conflict: expected nil, got %v", err)
 	}
 }
@@ -3180,7 +3180,7 @@ func TestApplyConflictPolicy_supersede_happyPath(t *testing.T) {
 	registerConflictFlow(t, db, ConflictSupersede)
 	insertConflictItem(t, db, "old-item", "published")
 
-	if err := applyConflictPolicy(context.Background(), db, nil, "ConflictType", "published", "new-id"); err != nil {
+	if err := applyConflictPolicy(context.Background(), db, nil, nil, "ConflictType", "published", "new-id", ""); err != nil {
 		t.Fatalf("supersede: unexpected error: %v", err)
 	}
 
@@ -3217,7 +3217,7 @@ func TestApplyConflictPolicy_supersede_noSupersededTransition(t *testing.T) {
 		t.Fatalf("RegisterFlow: %v", err)
 	}
 	// No items in published → fallback to reject, but count=0 → nil.
-	if err := applyConflictPolicy(ctx, db, nil, "NoSuperType", "published", "id1"); err != nil {
+	if err := applyConflictPolicy(ctx, db, nil, nil, "NoSuperType", "published", "id1", ""); err != nil {
 		t.Errorf("no super transition, no conflict: expected nil, got %v", err)
 	}
 }
@@ -3246,7 +3246,7 @@ func TestApplyConflictPolicy_supersede_noSupersededTransition_conflict(t *testin
 		t.Fatalf("insert: %v", err)
 	}
 	// No superseded transition → falls back to reject → ErrConflict.
-	err := applyConflictPolicy(ctx, db, nil, "NoSuperType", "published", "id1")
+	err := applyConflictPolicy(ctx, db, nil, nil, "NoSuperType", "published", "id1", "")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("fallback to reject: expected ErrConflict, got %v", err)
 	}
@@ -3257,7 +3257,7 @@ func TestApplyConflictPolicy_supersede_nilRelationStore(t *testing.T) {
 	registerConflictFlow(t, db, ConflictSupersede)
 	insertConflictItem(t, db, "old", "published")
 	// nil RelationStore → no panic, item still superseded.
-	if err := applyConflictPolicy(context.Background(), db, nil, "ConflictType", "published", "new"); err != nil {
+	if err := applyConflictPolicy(context.Background(), db, nil, nil, "ConflictType", "published", "new", ""); err != nil {
 		t.Fatalf("nil rs: unexpected error: %v", err)
 	}
 	var status string
@@ -3300,7 +3300,7 @@ func TestApplyConflictPolicy_dynamic_reject(t *testing.T) {
 	); err != nil {
 		t.Fatalf("insert dynamic: %v", err)
 	}
-	err := applyConflictPolicy(ctx, db, nil, "DynRejectType", "published", "new-dyn")
+	err := applyConflictPolicy(ctx, db, nil, nil, "DynRejectType", "published", "new-dyn", "")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("dynamic reject: expected ErrConflict, got %v", err)
 	}
@@ -3333,7 +3333,7 @@ func TestApplyConflictPolicy_dynamic_supersede(t *testing.T) {
 	); err != nil {
 		t.Fatalf("insert dynamic: %v", err)
 	}
-	if err := applyConflictPolicy(ctx, db, nil, "DynSuperType", "published", "dyn-new"); err != nil {
+	if err := applyConflictPolicy(ctx, db, nil, nil, "DynSuperType", "published", "dyn-new", ""); err != nil {
 		t.Fatalf("dynamic supersede: unexpected error: %v", err)
 	}
 	var status string
@@ -3352,7 +3352,7 @@ func TestApplyConflictPolicy_dynamic_supersede(t *testing.T) {
 func TestApplyConflictPolicy_nonSQLite(t *testing.T) {
 	// queryFailDB: QueryRowContext queries a nonexistent table → scan returns error
 	// → sqlite_master probe fails → return nil (not SQLite).
-	if err := applyConflictPolicy(context.Background(), &queryFailDB{}, nil, "T", "published", "id1"); err != nil {
+	if err := applyConflictPolicy(context.Background(), &queryFailDB{}, nil, nil, "T", "published", "id1", ""); err != nil {
 		t.Errorf("non-SQLite: expected nil, got %v", err)
 	}
 }
@@ -3369,7 +3369,7 @@ func TestApplyConflictPolicy_unknownPolicy(t *testing.T) {
 	); err != nil {
 		t.Fatalf("insert flow: %v", err)
 	}
-	if err := applyConflictPolicy(ctx, db, nil, "UnknownPolicyType", "published", "id1"); err != nil {
+	if err := applyConflictPolicy(ctx, db, nil, nil, "UnknownPolicyType", "published", "id1", ""); err != nil {
 		t.Errorf("unknown policy: expected nil, got %v", err)
 	}
 }
@@ -3383,7 +3383,7 @@ func TestApplyConflictPolicy_flowIDFail(t *testing.T) {
 	registerConflictFlow(t, db, ConflictSupersede)
 	insertConflictItem(t, db, "existing", "published")
 	wrapped := &nthQueryRowFailDB{DB: db, fail: 4}
-	err := applyConflictPolicy(context.Background(), wrapped, nil, "ConflictType", "published", "new-id")
+	err := applyConflictPolicy(context.Background(), wrapped, nil, nil, "ConflictType", "published", "new-id", "")
 	if err != nil {
 		t.Errorf("flowID fail: expected nil (fail-open), got %v", err)
 	}
@@ -3426,7 +3426,7 @@ func TestConflictRejectCheck_queryFail(t *testing.T) {
 
 func TestConflictSupersede_conflictIDsFail(t *testing.T) {
 	// queryFailDB: QueryContext fails → conflictIDs returns error → return nil (fail-open).
-	err := conflictSupersede(context.Background(), &queryFailDB{}, nil, "T", "published", "new1", "ts", false)
+	err := conflictSupersede(context.Background(), &queryFailDB{}, nil, nil, "T", "published", "new1", "", "ts", false)
 	if err != nil {
 		t.Errorf("expected nil (fail-open on conflictIDs error), got %v", err)
 	}
@@ -3438,7 +3438,7 @@ func TestConflictSupersede_updateFail(t *testing.T) {
 	registerConflictFlow(t, db, ConflictSupersede)
 	insertConflictItem(t, db, "old-upd", "published")
 	wrapped := &conflictExecFailDB{DB: db}
-	err := conflictSupersede(context.Background(), wrapped, nil, "ConflictType", "published", "new-upd", "conflict_types", false)
+	err := conflictSupersede(context.Background(), wrapped, nil, nil, "ConflictType", "published", "new-upd", "", "conflict_types", false)
 	if err != nil {
 		t.Errorf("expected nil (fail-open on UPDATE error), got %v", err)
 	}
@@ -3464,7 +3464,7 @@ func TestConflictSupersede_rsNonNilAssertFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRelationStore: %v", err)
 	}
-	if err := conflictSupersede(context.Background(), db, rs, "ConflictType", "published", "new-rs", "conflict_types", false); err != nil {
+	if err := conflictSupersede(context.Background(), db, rs, nil, "ConflictType", "published", "new-rs", "", "conflict_types", false); err != nil {
 		t.Errorf("expected nil (fail-open on Assert error), got %v", err)
 	}
 	var status string

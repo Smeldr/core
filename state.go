@@ -724,8 +724,17 @@ func isStateLocked(ctx context.Context, db DB, typeName, statusName string) bool
 //
 // newItemID is the ID of the item being transitioned into ActiveState, used
 // to create the optional "supersedes" relation in [ConflictSupersede] mode.
-// rs may be nil — relation creation is always fail-open.
-func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, typeName, toState, newItemID string) error {
+// rs may be nil, relation creation is always fail-open (every production
+// caller passes nil today, so the edge is not asserted live).
+//
+// prov and surface describe the winning transition: in [ConflictSupersede]
+// mode each item it supersedes gets one [ProvenanceRecord] (actor from ctx,
+// surface as given, reason naming the winner) once its UPDATE succeeded. prov
+// may be nil, surface may be empty. A superseded item changes state with no
+// webhook, stream event, After* signal or async trigger, so a live surface
+// that relies on the event stream does not see it change until it re-reads;
+// the provenance record is the trace of it.
+func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, prov ProvenanceStore, typeName, toState, newItemID, surface string) error {
 	if db == nil {
 		return nil
 	}
@@ -774,7 +783,7 @@ func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, typeName
 			// No superseded transition — fall back to reject behaviour.
 			return conflictRejectCheck(ctx, db, typeName, activeState, staticTable, isDynamic)
 		}
-		return conflictSupersede(ctx, db, rs, typeName, activeState, newItemID, staticTable, isDynamic)
+		return conflictSupersede(ctx, db, rs, prov, typeName, activeState, newItemID, surface, staticTable, isDynamic)
 	}
 	return nil
 }
@@ -805,30 +814,54 @@ func conflictRejectCheck(ctx context.Context, db DB, typeName, activeState, tabl
 }
 
 // conflictSupersede transitions all existing items of typeName in activeState to
-// "superseded" and optionally creates a "supersedes" relation for each via rs.
-// Individual UPDATE and relation failures are logged but do not block the caller.
-func conflictSupersede(ctx context.Context, db DB, rs *RelationStore, typeName, activeState, newItemID, table string, isDynamic bool) error {
+// "superseded", stamps last_actor with the actor that triggered the winning
+// transition, records one [ProvenanceRecord] per superseded item (after its
+// UPDATE succeeded), and optionally creates a "supersedes" relation for each
+// via rs. Individual UPDATE and relation failures are logged but do not block
+// the caller; an item whose UPDATE failed gets no record.
+func conflictSupersede(ctx context.Context, db DB, rs *RelationStore, prov ProvenanceStore, typeName, activeState, newItemID, surface, table string, isDynamic bool) error {
 	ids, err := conflictIDs(ctx, db, typeName, activeState, table, isDynamic)
 	if err != nil {
 		return nil // fail-open
 	}
 	now := time.Now().UTC()
+	actorID, actorKind := actorFromContext(ctx)
 	for _, oldID := range ids {
 		var updateErr error
 		if isDynamic {
 			_, updateErr = db.ExecContext(ctx,
-				`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1 WHERE id = $2 AND type_name = $3`,
-				now, oldID, typeName)
+				`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1, last_actor = $2 WHERE id = $3 AND type_name = $4`,
+				now, actorID, oldID, typeName)
+			if isNoSuchColumn(updateErr, "last_actor") {
+				_, updateErr = db.ExecContext(ctx,
+					`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1 WHERE id = $2 AND type_name = $3`,
+					now, oldID, typeName)
+			}
 		} else {
 			_, updateErr = db.ExecContext(ctx,
-				`UPDATE `+quoteIdent(table)+` SET status = 'superseded', updated_at = $1 WHERE id = $2`,
-				now, oldID)
+				`UPDATE `+quoteIdent(table)+` SET status = 'superseded', updated_at = $1, last_actor = $2 WHERE id = $3`,
+				now, actorID, oldID)
+			if isNoSuchColumn(updateErr, "last_actor") {
+				_, updateErr = db.ExecContext(ctx,
+					`UPDATE `+quoteIdent(table)+` SET status = 'superseded', updated_at = $1 WHERE id = $2`,
+					now, oldID)
+			}
 		}
 		if updateErr != nil {
 			slog.WarnContext(ctx, "smeldr: applyConflictPolicy: supersede UPDATE failed",
 				"type", typeName, "id", oldID, "error", updateErr)
 			continue
 		}
+		recordStateChange(ctx, prov, stateChange{
+			typeName:  typeName,
+			id:        oldID,
+			from:      activeState,
+			to:        "superseded",
+			reason:    "superseded by " + typeName + " " + newItemID,
+			surface:   surface,
+			actorKind: actorKind,
+			actorID:   actorID,
+		})
 		if rs != nil && newItemID != "" {
 			if relErr := rs.Assert(ctx, RelationEdge{
 				SourceType:   typeName,
@@ -996,7 +1029,7 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	if err := authorizeDecisionScopeByID(ctx, db, a.governance, actorID, typeName, id, decisionScopeRoles); err != nil {
 		return nil, err
 	}
-	if err := applyConflictPolicy(ctx, db, nil, typeName, toState, id); err != nil {
+	if err := applyConflictPolicy(ctx, db, nil, a.provenanceStore, typeName, toState, id, surface); err != nil {
 		return nil, err
 	}
 
@@ -1387,18 +1420,15 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 				// recordProvenance itself logs-and-swallows an Append
 				// failure — the queue row is still deleted below regardless
 				// (A241's own "not re-queued" rule, unweakened).
-				if a.provenanceStore != nil {
-					recordProvenance(ctx, a.provenanceStore, ProvenanceRecord{
-						SubjectType: r.typeName,
-						SubjectID:   r.itemID,
-						Verb:        provenanceVerbFor(AfterUpdate, fromState, r.toState),
-						FromState:   fromState,
-						ToState:     r.toState,
-						ActorKind:   "job",
-						ActorID:     "drain-eval-queue",
-						Surface:     "trigger",
-					})
-				}
+				recordStateChange(ctx, a.provenanceStore, stateChange{
+					typeName:  r.typeName,
+					id:        r.itemID,
+					from:      fromState,
+					to:        r.toState,
+					actorKind: "job",
+					actorID:   "drain-eval-queue",
+					surface:   "trigger",
+				})
 				// D51: the "scheduled" Finding provenance — a re-evaluation
 				// condition newly arrived at, distinct from provenance
 				// above (an audit trail entry) and from SweepStructural's

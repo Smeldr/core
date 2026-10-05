@@ -22,6 +22,11 @@ const DefaultSignalExpiryMaxAge = 14 * 24 * time.Hour
 // existence.
 const DefaultSignalExpiryBatchCap = 200
 
+// signalExpiryActor names the expiry sweep as the actor of its own state
+// changes: stamped in last_actor and written as the ActorID of the
+// [ProvenanceRecord] (ActorKind "job"), one name for the mechanism.
+const signalExpiryActor = "signal-expiry-sweep"
+
 // DefaultSignalExpiryExcludedTypes are signal_type values that represent a
 // standing condition — closed only by being answered, never by growing
 // old — always applied in addition to any types named in
@@ -74,7 +79,9 @@ type SignalExpiryConfig struct {
 // deleted.
 //
 // Each expiry is an ordinary transition: last_actor is stamped
-// "signal-expiry-sweep", and a signal.transitioned webhook fires, exactly
+// "signal-expiry-sweep", one [ProvenanceRecord] is written when [App.Provenance]
+// is wired (ActorKind "job", the same actor name, surface "trigger", written
+// only for a row whose UPDATE took effect), and a signal.transitioned webhook fires, exactly
 // as a human-driven transition would, the same [dispatchTransitionWebhook]
 // mechanism [App.TransitionItemWithReason] itself uses. Like that one, it
 // is not published to the live event stream: see [eventStreamSuppressed]. ExpireSignals does not call
@@ -177,7 +184,7 @@ func (a *App) ExpireSignals(ctx context.Context, cfg SignalExpiryConfig) (walked
 		// architect).
 		result, updateErr := db.ExecContext(ctx,
 			"UPDATE smeldr_signals SET status = $1, updated_at = $2, last_actor = $3 WHERE id = $4 AND status = $5",
-			"expired", now, "signal-expiry-sweep", r.id, r.status,
+			"expired", now, signalExpiryActor, r.id, r.status,
 		)
 		if updateErr != nil {
 			if !isNoSuchColumn(updateErr, "last_actor") {
@@ -202,6 +209,20 @@ func (a *App) ExpireSignals(ctx context.Context, cfg SignalExpiryConfig) (walked
 			continue
 		}
 		expired++
+		// One name for the mechanism, the same one stamped in last_actor
+		// above. Recorded only now that the UPDATE is known to have taken
+		// effect (not the lost-race, skipped case). Bounded per run by
+		// BatchCap, so at most that many synchronous INSERTs.
+		recordStateChange(ctx, a.provenanceStore, stateChange{
+			typeName:  "Signal",
+			id:        r.id,
+			from:      r.status,
+			to:        "expired",
+			reason:    reason,
+			surface:   surfaceTrigger,
+			actorKind: "job",
+			actorID:   signalExpiryActor,
+		})
 		dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, r.receiver,
 			eventSignalTransitioned,
 			transitionWebhookData{

@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.110.0] - 2026-10-05
+
+### Changed
+- When a transition into a flow's active state supersedes other items under ConflictSupersede, each superseded item now gets `last_actor` stamped with the actor that triggered the winning transition, and one ProvenanceRecord: verb transition, from the active state to `superseded`, actor and actor kind of the triggering caller (empty for a plain context), the winning transition's surface, and the reason "superseded by <Type> <id>" naming the winner. The record is written only after that item's UPDATE succeeded, fail-open. No event fires for the superseded item (no webhook, no stream event, no After signal, no async trigger), so a live surface that relies on the event stream does not see it change until it re-reads. No built-in flow uses ConflictSupersede, so this affects customer-defined types only. (A395)
+- `App.ExpireSignals` now writes one ProvenanceRecord per expired Signal when `App.Provenance` is wired: actor kind `job`, actor `signal-expiry-sweep` (the same name already stamped in `last_actor`), surface `trigger`, the existing "expired by age" reason. Nothing is written for a Signal that was skipped (excluded type, batch cap, lost race, failed UPDATE). Bounded per run by the existing batch cap. (A395)
+- Internal: every state-change record (transitions, the conflict-supersede side effect, the expiry sweep, DrainEvalQueue, and the App.Provenance signal subscriber) is now built by one unexported writer, so records written by DrainEvalQueue and the signal subscriber are unchanged. No exported symbol was added or changed. (A395)
+- Earlier state changes are not backfilled, and nothing is recorded unless `App.Provenance` is wired (the example server wires it only when `ENABLE_PROVENANCE` is set). (A395)
+
+---
+
 ## [1.109.1] - 2026-10-05
 
 ### Fixed

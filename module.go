@@ -527,6 +527,7 @@ type Module[T any] struct {
 	db                DB                                                // set by App.Content via setDB; used for transition validation
 	roleStore         *RoleStore                                        // nil unless App.Governance is wired; set by App.Handler via setRoleStore
 	relationStore     *RelationStore                                    // nil unless App.Relations() is wired; set by App.Handler via setRelationStore
+	provenanceStore   ProvenanceStore                                   // nil unless App.Provenance() is wired; set by App.Handler via setProvenanceStore
 	checkStore        CheckStore                                        // nil unless App.Check() is wired; set by App.Handler via setCheckStore
 	findingStore      FindingStore                                      // nil unless App.Findings() is wired; set by App.Handler via setFindingStore
 	cacheInvalidators []func()                                          // extra invalidation callbacks wired by App.Route for aggregate routes
@@ -790,6 +791,15 @@ func (m *Module[T]) setRoleStore(store *RoleStore) {
 // Called by [App.Handler] when [App.Relations] has been wired.
 func (m *Module[T]) setRelationStore(store *RelationStore) {
 	m.relationStore = store
+}
+
+// setProvenanceStore injects the application [ProvenanceStore] into the
+// module so that applyConflictPolicy's supersede side effect can record the
+// state change it makes to the other item (the module's own lifecycle
+// transitions are recorded through the signal bus, not through this field).
+// Called by [App.Handler] when [App.Provenance] has been wired.
+func (m *Module[T]) setProvenanceStore(store ProvenanceStore) {
+	m.provenanceStore = store
 }
 
 // setCheckStore injects the application [CheckStore] into the module, used
@@ -2648,7 +2658,7 @@ func (m *Module[T]) MCPPublish(ctx Context, slug, reason string) error {
 	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Published), reason); err != nil {
 		return err
 	}
-	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Published), nodeIDOf(item)); err != nil {
+	if err := applyConflictPolicy(ctx, m.db, nil, m.provenanceStore, m.contentTypeName, string(Published), nodeIDOf(item), surfaceMCP); err != nil {
 		return err
 	}
 	setNodeStatus(item, Published)
@@ -2678,7 +2688,7 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time, reason s
 	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Scheduled), reason); err != nil {
 		return err
 	}
-	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Scheduled), nodeIDOf(item)); err != nil {
+	if err := applyConflictPolicy(ctx, m.db, nil, m.provenanceStore, m.contentTypeName, string(Scheduled), nodeIDOf(item), surfaceMCP); err != nil {
 		return err
 	}
 	setNodeStatus(item, Scheduled)
@@ -2706,7 +2716,7 @@ func (m *Module[T]) MCPArchive(ctx Context, slug, reason string) error {
 	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Archived), reason); err != nil {
 		return err
 	}
-	if err := applyConflictPolicy(ctx, m.db, nil, m.contentTypeName, string(Archived), nodeIDOf(item)); err != nil {
+	if err := applyConflictPolicy(ctx, m.db, nil, m.provenanceStore, m.contentTypeName, string(Archived), nodeIDOf(item), surfaceMCP); err != nil {
 		return err
 	}
 	setNodeStatus(item, Archived)

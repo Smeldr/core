@@ -2,7 +2,7 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.109.1 + smeldr.dev/mcp v1.44.0 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
+Last updated: v1.110.0 + smeldr.dev/mcp v1.44.0 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
 
 ## Module stability
 
@@ -157,7 +157,10 @@ Opt-in: an app that never calls `App.Governance(store)` sees no governance behav
   to state, actor, actor kind, surface, reason) (v1.109.0). `TransitionItemVia` names the entry point;
   the older methods record an empty surface (the `transition_item` MCP tool passes `mcp` from
   smeldr.dev/mcp v1.44.0). Synchronous and fail-open, nothing recorded for a rejected
-  transition, earlier transitions are not backfilled. `CreateProvenanceTable` also indexes
+  transition, earlier transitions are not backfilled. Since v1.110.0 the same record is written for
+  the item a ConflictSupersede transition supersedes (actor of the triggering caller, reason naming
+  the winner; no event fires for it) and for each Signal expired by `App.ExpireSignals` (job
+  `signal-expiry-sweep`, surface trigger). `CreateProvenanceTable` also indexes
   (subject_type, subject_id)
 - Actor provenance — every orchestration item (`Signal`, `Task`, `Decision`, `Amendment`,
   `Goal`, `Run`) and `DynamicNode` gained a `LastActor` field (v1.95.0), stamped at creation

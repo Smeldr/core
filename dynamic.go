@@ -278,7 +278,7 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 	if err := validateTransition(ctx, r.db, r.rs, r.relStore, actorID, id, r.typeName, string(node.Status), string(status), reason); err != nil {
 		return err
 	}
-	if err := applyConflictPolicy(ctx, r.db, nil, r.typeName, string(status), id); err != nil {
+	if err := applyConflictPolicy(ctx, r.db, nil, r.prov, r.typeName, string(status), id, surface); err != nil {
 		return err
 	}
 	now := time.Now().UTC()

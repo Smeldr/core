@@ -3364,8 +3364,20 @@ name). Before this these paths recorded only `last_actor`.
 - `POST /_content/{type}/{id}/status` records surface `"http"` and the authenticated caller as
   actor (v1.109.1; v1.109.0 recorded no actor there because the handler passed the plain request
   context).
-- Not yet recorded: the `ConflictSupersede` side effect on the superseded item, and the Signal
-  expiry sweep.
+- Since v1.110.0 two more state changes outside the transition code are recorded, by the same
+  internal writer:
+  - **The `ConflictSupersede` side effect.** An item that a winning transition moves to
+    `superseded` gets `last_actor` stamped with the triggering actor and one record: verb
+    `"transition"`, the active state to `superseded`, the triggering caller as actor (empty for a
+    plain context), the winning transition's surface, and the reason `superseded by <Type> <id>`
+    naming the winner. **No event of any kind fires for the superseded item** (no webhook, stream
+    event, `After*` signal or async trigger), so a live surface that relies on the event stream does
+    not see it change until it re-reads. No built-in flow uses `ConflictSupersede`, so this affects
+    customer-defined types only.
+  - **The Signal expiry sweep** (`App.ExpireSignals`). Each expired Signal gets one record: actor
+    kind `"job"`, actor `"signal-expiry-sweep"`, surface `"trigger"`, reason `expired by age: N
+    days`. Bounded per run by the sweep's batch cap. Nothing is written for a Signal the sweep
+    skipped.
 - `ENABLE_PROVENANCE` (the example server's switch for `App.Provenance`) must be set, otherwise
   nothing is recorded at all.
 
