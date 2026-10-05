@@ -23,10 +23,17 @@ const (
 	// supersede the existing item first.
 	ConflictReject ConflictPolicy = "reject"
 
-	// ConflictSupersede automatically transitions all existing items of the same
-	// type in [StateFlow.ActiveState] to "superseded" before proceeding with the
-	// new transition. A "supersedes" relation (winner to loser, by item ID, with the
-	// triggering actor as created_by) is asserted via [RelationStore] only when
+	// ConflictSupersede automatically transitions all other items of the same
+	// type in [StateFlow.ActiveState] to "superseded" when an item enters it. The
+	// entering item's own write comes first and the items it supersedes after it:
+	// atomically, in one transaction, for [App.TransitionItemVia] and a
+	// runtime-defined type when the database handle supports transactions; not
+	// atomically for the [Module] lifecycle methods, whose own write goes through
+	// the module's repository, so a failure of the second write there leaves two
+	// items in the active state (logged at Error), never none. A failed write of
+	// the entering item leaves every other item untouched. A "supersedes"
+	// relation (winner to loser, by item ID, with the triggering actor as
+	// created_by) is asserted via [RelationStore] only when
 	// the instance wired [App.Relations] AND a "supersedes" relation kind that
 	// permits Type to Type is registered. [RegisterOrchestrationRelationKinds]
 	// registers that kind for Decision to Decision only, so a customer-defined
@@ -750,38 +757,44 @@ func isStateLocked(ctx context.Context, db DB, typeName, statusName string) bool
 	return locked
 }
 
-// applyConflictPolicy enforces the uniqueness invariant declared by
-// [StateFlow.ActiveState] and [StateFlow.ConflictPolicy] at transition time.
-// It must be called after [validateTransition] succeeds, before the status UPDATE.
+// conflictPlan is what a transition into a flow's [StateFlow.ActiveState] owes
+// the other items of its type under [ConflictSupersede]: the items to supersede,
+// decided by reads alone before anything is written. It exists so the winning
+// transition's own write can come first and the losers' writes and every side
+// effect (provenance, standing, the supersedes edge) after it, instead of the
+// other way round (task_plan item-68). A nil *conflictPlan means there is
+// nothing to do, and every method is safe on it.
+type conflictPlan struct {
+	typeName, activeState, newItemID, table string
+	isDynamic                               bool
+	losers                                  []string
+}
+
+// planConflict enforces the uniqueness invariant declared by
+// [StateFlow.ActiveState] and [StateFlow.ConflictPolicy] with reads only. It
+// must be called after [validateTransition] succeeds and before the winning
+// transition's own write; it never writes.
 //
-// Returns nil (fail-open) when:
+// It returns (nil, nil), fail-open and nothing to do, when:
 //   - db is nil
 //   - the database is not SQLite
 //   - no flow is registered for typeName
 //   - ActiveState is empty or ConflictPolicy is empty
 //   - toState does not equal ActiveState
+//   - the policy is [ConflictSupersede] and there is no other item in ActiveState
+//     (the winner itself is never its own loser), or the lookup fails
 //
-// newItemID is the ID of the item being transitioned into ActiveState, used
-// to create the optional "supersedes" relation in [ConflictSupersede] mode.
-// rs may be nil (App.Relations not wired); relation creation is always
-// fail-open and skipped, with one Info line per type per process, when the
-// "supersedes" kind is unregistered or does not permit typeName to typeName
-// (see [ConflictSupersede]).
-//
-// prov and surface describe the winning transition: in [ConflictSupersede]
-// mode each item it supersedes gets one [ProvenanceRecord] (actor from ctx,
-// surface as given, reason naming the winner) once its UPDATE succeeded. prov
-// may be nil, surface may be empty. A superseded item changes state with no
-// webhook, stream event, After* signal or async trigger, so a live surface
-// that relies on the event stream does not see it change until it re-reads;
-// the provenance record is the trace of it.
-func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, prov ProvenanceStore, typeName, toState, newItemID, surface string) error {
+// Under [ConflictReject], or [ConflictSupersede] with no active -> superseded
+// transition in the flow (it falls back to reject), it returns [ErrConflict]
+// when another item is already in ActiveState. newItemID is the ID of the item
+// being transitioned into ActiveState.
+func planConflict(ctx context.Context, db DB, typeName, toState, newItemID string) (*conflictPlan, error) {
 	if db == nil {
-		return nil
+		return nil, nil
 	}
 	var dummy int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
-		return nil // not SQLite — skip
+		return nil, nil // not SQLite — skip
 	}
 
 	var activeState, conflictPolicy string
@@ -790,10 +803,10 @@ func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, prov Pro
 		 FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`,
 		typeName,
 	).Scan(&activeState, &conflictPolicy); err != nil {
-		return nil // no flow registered — no enforcement
+		return nil, nil // no flow registered — no enforcement
 	}
 	if activeState == "" || conflictPolicy == "" || toState != activeState {
-		return nil
+		return nil, nil
 	}
 
 	// Detect whether items live in a typed table or in smeldr_dynamic_content.
@@ -806,7 +819,7 @@ func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, prov Pro
 
 	switch ConflictPolicy(conflictPolicy) {
 	case ConflictReject:
-		return conflictRejectCheck(ctx, db, typeName, activeState, staticTable, isDynamic)
+		return nil, conflictRejectCheck(ctx, db, typeName, activeState, staticTable, isDynamic)
 
 	case ConflictSupersede:
 		// Check whether activeState → superseded transition exists.
@@ -814,7 +827,7 @@ func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, prov Pro
 		if err := db.QueryRowContext(ctx,
 			`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
 		).Scan(&flowID); err != nil {
-			return nil // fail-open
+			return nil, nil // fail-open
 		}
 		var transCount int
 		if err := db.QueryRowContext(ctx,
@@ -822,11 +835,27 @@ func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, prov Pro
 			flowID, activeState,
 		).Scan(&transCount); err != nil || transCount == 0 {
 			// No superseded transition — fall back to reject behaviour.
-			return conflictRejectCheck(ctx, db, typeName, activeState, staticTable, isDynamic)
+			return nil, conflictRejectCheck(ctx, db, typeName, activeState, staticTable, isDynamic)
 		}
-		return conflictSupersede(ctx, db, rs, prov, typeName, activeState, newItemID, surface, staticTable, isDynamic)
+		ids, err := conflictIDs(ctx, db, typeName, activeState, staticTable, isDynamic)
+		if err != nil {
+			return nil, nil // fail-open
+		}
+		var losers []string
+		for _, id := range ids {
+			if id != newItemID {
+				losers = append(losers, id)
+			}
+		}
+		if len(losers) == 0 {
+			return nil, nil
+		}
+		return &conflictPlan{
+			typeName: typeName, activeState: activeState, newItemID: newItemID,
+			table: staticTable, isDynamic: isDynamic, losers: losers,
+		}, nil
 	}
-	return nil
+	return nil, nil
 }
 
 // conflictRejectCheck returns ErrConflict when any item of typeName is already
@@ -854,71 +883,124 @@ func conflictRejectCheck(ctx context.Context, db DB, typeName, activeState, tabl
 	return nil
 }
 
-// conflictSupersede transitions all existing items of typeName in activeState to
-// "superseded", stamps last_actor with the actor that triggered the winning
-// transition, records one [ProvenanceRecord] per superseded item (after its
-// UPDATE succeeded), and optionally creates a "supersedes" relation for each
-// via rs. Individual UPDATE and relation failures are logged but do not block
-// the caller; an item whose UPDATE failed gets no record.
-func conflictSupersede(ctx context.Context, db DB, rs *RelationStore, prov ProvenanceStore, typeName, activeState, newItemID, surface, table string, isDynamic bool) error {
-	ids, err := conflictIDs(ctx, db, typeName, activeState, table, isDynamic)
-	if err != nil {
-		return nil // fail-open
+// supersede moves every planned loser to "superseded" through exec, stamping
+// last_actor with the actor that triggered the winning transition (two-column
+// fallback for a table that predates the column), and returns the IDs it
+// actually moved. exec is the transaction the winner's own write ran in, or
+// the plain handle where there is none. A failed UPDATE for one item is logged
+// and that item skipped: both policies fail open, the documented behaviour (on
+// a database where a failed statement aborts the transaction, the failure
+// surfaces on the winner's commit instead). When fewer items moved than were
+// planned the type is left with more than one item in its active state, which
+// violates what the policy exists for, so it is logged at Error.
+func (p *conflictPlan) supersede(ctx context.Context, exec DB) []string {
+	if p == nil {
+		return nil
 	}
 	now := time.Now().UTC()
-	actorID, actorKind := actorFromContext(ctx)
-	assertEdge := supersedeEdgeAllowed(ctx, rs, typeName, newItemID)
-	for _, oldID := range ids {
+	actorID, _ := actorFromContext(ctx)
+	var moved []string
+	for _, oldID := range p.losers {
 		var updateErr error
-		if isDynamic {
-			_, updateErr = db.ExecContext(ctx,
+		if p.isDynamic {
+			_, updateErr = exec.ExecContext(ctx,
 				`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1, last_actor = $2 WHERE id = $3 AND type_name = $4`,
-				now, actorID, oldID, typeName)
+				now, actorID, oldID, p.typeName)
 			if isNoSuchColumn(updateErr, "last_actor") {
-				_, updateErr = db.ExecContext(ctx,
+				_, updateErr = exec.ExecContext(ctx,
 					`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1 WHERE id = $2 AND type_name = $3`,
-					now, oldID, typeName)
+					now, oldID, p.typeName)
 			}
 		} else {
-			_, updateErr = db.ExecContext(ctx,
-				`UPDATE `+quoteIdent(table)+` SET status = 'superseded', updated_at = $1, last_actor = $2 WHERE id = $3`,
+			_, updateErr = exec.ExecContext(ctx,
+				`UPDATE `+quoteIdent(p.table)+` SET status = 'superseded', updated_at = $1, last_actor = $2 WHERE id = $3`,
 				now, actorID, oldID)
 			if isNoSuchColumn(updateErr, "last_actor") {
-				_, updateErr = db.ExecContext(ctx,
-					`UPDATE `+quoteIdent(table)+` SET status = 'superseded', updated_at = $1 WHERE id = $2`,
+				_, updateErr = exec.ExecContext(ctx,
+					`UPDATE `+quoteIdent(p.table)+` SET status = 'superseded', updated_at = $1 WHERE id = $2`,
 					now, oldID)
 			}
 		}
 		if updateErr != nil {
-			slog.WarnContext(ctx, "smeldr: applyConflictPolicy: supersede UPDATE failed",
-				"type", typeName, "id", oldID, "error", updateErr)
+			slog.WarnContext(ctx, "smeldr: conflict policy: supersede UPDATE failed",
+				"type", p.typeName, "id", oldID, "error", updateErr)
 			continue
 		}
+		moved = append(moved, oldID)
+	}
+	if len(moved) < len(p.losers) {
+		slog.ErrorContext(ctx, "smeldr: conflict policy: not every active item was superseded, the type now has more than one item in its active state",
+			"type", p.typeName, "active_state", p.activeState, "winner", p.newItemID,
+			"planned", len(p.losers), "superseded", len(moved))
+	}
+	return moved
+}
+
+// afterCommit records what [conflictPlan.supersede] did, once the winning
+// transition and the losers are committed: for each moved item one
+// [ProvenanceRecord] and its standing ([applyStateChange], actor from ctx, the
+// winning transition's surface, reason naming the winner) and, when the
+// instance wired [App.Relations] and a "supersedes" kind permitting
+// typeName to typeName is registered, the supersedes edge from the winner by
+// item ID ([supersedeEdgeAllowed]). Nothing is recorded for an item that was
+// not moved, so a rolled-back or failed change leaves no trace. Fail-open.
+func (p *conflictPlan) afterCommit(ctx context.Context, db DB, rs *RelationStore, prov ProvenanceStore, surface string, moved []string) {
+	if p == nil || len(moved) == 0 {
+		return
+	}
+	actorID, actorKind := actorFromContext(ctx)
+	assertEdge := supersedeEdgeAllowed(ctx, rs, p.typeName, p.newItemID)
+	for _, oldID := range moved {
 		applyStateChange(ctx, db, prov, stateChange{
-			typeName:  typeName,
+			typeName:  p.typeName,
 			id:        oldID,
-			from:      activeState,
+			from:      p.activeState,
 			to:        "superseded",
-			reason:    "superseded by " + typeName + " " + newItemID,
+			reason:    "superseded by " + p.typeName + " " + p.newItemID,
 			surface:   surface,
 			actorKind: actorKind,
 			actorID:   actorID,
 		})
 		if assertEdge {
 			if relErr := rs.Assert(ctx, RelationEdge{
-				SourceType:   typeName,
-				SourceID:     newItemID,
-				TargetType:   typeName,
+				SourceType:   p.typeName,
+				SourceID:     p.newItemID,
+				TargetType:   p.typeName,
 				TargetID:     oldID,
 				RelationKind: supersedesKind,
 				EdgeClass:    "asserted",
 			}); relErr != nil {
-				slog.WarnContext(ctx, "smeldr: applyConflictPolicy: supersedes relation failed",
-					"type", typeName, "new_id", newItemID, "old_id", oldID, "error", relErr)
+				slog.WarnContext(ctx, "smeldr: conflict policy: supersedes relation failed",
+					"type", p.typeName, "new_id", p.newItemID, "old_id", oldID, "error", relErr)
 			}
 		}
 	}
-	return nil
+}
+
+// run is supersede and afterCommit on one handle, for callers whose winning
+// write cannot share a transaction with the losers (the Module paths write the
+// winner through the module's own repository): call it right after the winner
+// was saved.
+func (p *conflictPlan) run(ctx context.Context, db DB, rs *RelationStore, prov ProvenanceStore, surface string) {
+	p.afterCommit(ctx, db, rs, prov, surface, p.supersede(ctx, db))
+}
+
+// conflictTx begins a transaction on db when the handle supports one
+// ([txBeginner], which *sql.DB does) and returns the DB to write through, a
+// commit and a rollback. Without BeginTx it returns db itself with no-op
+// commit and rollback, the fallback every other transactional write here has:
+// the same writes in the same order, only not atomic. rollback is safe to call
+// after commit. A BeginTx failure is returned wrapped in [ErrInternal].
+func conflictTx(ctx context.Context, db DB) (exec DB, commit func() error, rollback func(), err error) {
+	txdb, ok := db.(txBeginner)
+	if !ok {
+		return db, func() error { return nil }, func() {}, nil
+	}
+	tx, err := txdb.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%w: begin transaction: %s", ErrInternal, err)
+	}
+	return tx, tx.Commit, func() { tx.Rollback() }, nil //nolint:errcheck
 }
 
 // resolveItemTable returns the DB table name that stores items of typeName.
@@ -1071,11 +1153,21 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	if err := authorizeDecisionScopeByID(ctx, db, a.governance, actorID, typeName, id, decisionScopeRoles); err != nil {
 		return nil, err
 	}
-	if err := applyConflictPolicy(ctx, db, a.relationStore, a.provenanceStore, typeName, toState, id, surface); err != nil {
+	// The conflict policy decides with reads only, before anything is written;
+	// the winner's own write comes first and the items it supersedes after it,
+	// in one transaction where the handle supports one, so a failed winner
+	// leaves every loser untouched (task_plan item-68).
+	plan, err := planConflict(ctx, db, typeName, toState, id)
+	if err != nil {
 		return nil, err
 	}
 
 	now := time.Now().UTC()
+	exec, commit, rollback, err := conflictTx(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	defer rollback()
 	// D78: persist the actor alongside status/updated_at. table is resolved
 	// generically above and may be a third-party module's own table that
 	// predates the last_actor column (Finding 4, plan 01a0ce3a) — attempt
@@ -1083,21 +1175,26 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	// UPDATE when the column doesn't exist, rather than special-casing by
 	// type. Tables this framework owns (the six orchestration tables,
 	// smeldr_dynamic_content) always have the column from this commit on.
-	if _, err := db.ExecContext(ctx,
+	if _, err := exec.ExecContext(ctx,
 		"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2, last_actor = $3 WHERE id = $4",
 		toState, now, actorID, id,
 	); err != nil {
 		if !isNoSuchColumn(err, "last_actor") {
 			return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
 		}
-		if _, err := db.ExecContext(ctx,
+		if _, err := exec.ExecContext(ctx,
 			"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
 			toState, now, id,
 		); err != nil {
 			return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
 		}
 	}
-	// Both UPDATE forms above succeeded: the transition is real, so record it.
+	moved := plan.supersede(ctx, exec)
+	if err := commit(); err != nil {
+		return nil, fmt.Errorf("%w: TransitionItem: commit: %s", ErrInternal, err)
+	}
+	plan.afterCommit(ctx, db, a.relationStore, a.provenanceStore, surface, moved)
+	// The winner and its losers are committed: the transition is real, so record it.
 	// Placed before the async triggers and webhook, which are observers of a
 	// committed change, so a provenance entry exists for anything they cause.
 	recordTransitionProvenance(ctx, db, a.provenanceStore, typeName, id, currentStatus, toState, reason, surface)

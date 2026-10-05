@@ -23,6 +23,17 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.112.1] - 2026-10-05
+
+### Fixed
+- Under `ConflictSupersede`, the items a transition supersedes were superseded, recorded, given a standing and given a `supersedes` edge before the winning item's own write, so if that write failed (or the process died between the two) the type was left with no item in its active state. The entering item's own write now comes first and the items it supersedes after it. For `App.TransitionItemVia` and runtime-defined types the two run in one transaction when the database handle supports `BeginTx`, so they succeed or fail together; on a handle without `BeginTx` the same writes run in the same order without atomicity. A failed write of the entering item leaves every other item untouched and nothing recorded. (A398)
+- The provenance records, the `ceased` standing and the `supersedes` edge of a superseded item are now written after the change is committed, and only for items that really moved. (A398)
+- An item already in the active state is no longer selected as its own loser: before, re-entering the active state superseded the item itself and then set it active again. (A398)
+- Known limit, stated plainly: the `Module` lifecycle methods (`MCPPublish`, `MCPSchedule`, `MCPArchive`) write the entering item through the module's own repository, which cannot join a transaction, so they are not atomic. If the second write fails the type is left with more than one item in its active state (logged at Error), never none. On Postgres a failed write of one superseded item aborts the transaction and fails the transition; on SQLite it is skipped and logged. (A398)
+- Not changed here, tracked as follow-up Tasks: two concurrent winners can both pass the conflict check, and the policy is not enforced on `Module`'s HTTP PUT status change or the scheduler's publish. (A398)
+
+---
+
 ## [1.112.0] - 2026-10-05
 
 ### Added

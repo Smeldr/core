@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.112.0 · smeldr.dev/mcp v1.44.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.112.1 · smeldr.dev/mcp v1.44.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -363,7 +363,7 @@ err := app.RegisterFlow(smeldr.StateFlow{
 ```
 
 - `ConflictReject` — `MCPPublish`/`SetStatus` returns `ErrConflict` (409) when another item is already in `ActiveState`
-- `ConflictSupersede` — transitions all conflicting items to `"superseded"` before the new item enters `ActiveState`. Since v1.111.0 it also asserts a `supersedes` relation edge winner -> loser (by ID, triggering actor as `created_by`), only when `App.Relations` is wired and a `supersedes` kind permitting `Type -> Type` is registered (the orchestration kind permits Decision -> Decision only; a customer type needs its own `UpsertKind`, keeping the Decision pair)
+- `ConflictSupersede` — transitions the other items in `ActiveState` to `"superseded"` when an item enters it (since v1.112.1 the entering item's own write comes first, then the others, in one transaction for `TransitionItemVia` and dynamic types; the Module lifecycle methods are not atomic and can leave two active items, never none). Since v1.111.0 it also asserts a `supersedes` relation edge winner -> loser (by ID, triggering actor as `created_by`), only when `App.Relations` is wired and a `supersedes` kind permitting `Type -> Type` is registered (the orchestration kind permits Decision -> Decision only; a customer type needs its own `UpsertKind`, keeping the Decision pair)
 - Zero value = no enforcement. Both policies fail-open: DB errors never block a transition.
 
 **Standing (v1.112.0, D100):** a flow `State` may declare `Standing: smeldr.StandingHolds` ("in force"; other values rejected by `RegisterFlow`). Each item of such a type stores `holds` / `ceased` / `none` / `not recorded` (no row = `none`) in `smeldr_standing`, written only by the code that changes state: entering a holding state stores `holds`, leaving one for an untagged state `ceased`, untagged to untagged changes nothing. Events `standing-began` / `standing-ended` go to provenance (when wired) with the transition's actor, so ratifying a Decision reads as two entries. Smeldr's tags: Decision `ratified`/`pending-re-evaluation`, Amendment `merged`; Signal, Task, Goal have none. Read with `ItemStanding` / `CountStanding` or the context packet's `standing`; separate from the governed state name. `MigrateStanding` (boot, once per type, from the flow graph as registered then, no guessing) gives pre-existing items a standing; retagging never recomputes; `App.CheckStandingDrift` only reports. mcp `define_state_flow` does not pass `standing` yet.

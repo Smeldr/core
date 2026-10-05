@@ -2659,7 +2659,8 @@ func (m *Module[T]) MCPPublish(ctx Context, slug, reason string) error {
 	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Published), reason); err != nil {
 		return err
 	}
-	if err := applyConflictPolicy(ctx, m.db, m.relationStore, m.provenanceStore, m.contentTypeName, string(Published), nodeIDOf(item), surfaceMCP); err != nil {
+	plan, err := planConflict(ctx, m.db, m.contentTypeName, string(Published), nodeIDOf(item))
+	if err != nil {
 		return err
 	}
 	setNodeStatus(item, Published)
@@ -2667,6 +2668,11 @@ func (m *Module[T]) MCPPublish(ctx Context, slug, reason string) error {
 	if err := m.repo.Save(ctx, item); err != nil {
 		return err
 	}
+	// The winner is saved: now the items it supersedes. The repository is a
+	// separate abstraction that cannot join a transaction on m.db, so the two
+	// writes are not atomic; this order leaves two active items rather than
+	// none if the second one fails (logged at Error).
+	plan.run(ctx, m.db, m.relationStore, m.provenanceStore, surfaceMCP)
 	// A240: fire any registered async TransitionTrigger for this transition.
 	// Unconditional — matches dynamic.go's setStatus/ScheduleContent, which
 	// don't special-case a same-status call either.
@@ -2689,7 +2695,8 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time, reason s
 	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Scheduled), reason); err != nil {
 		return err
 	}
-	if err := applyConflictPolicy(ctx, m.db, m.relationStore, m.provenanceStore, m.contentTypeName, string(Scheduled), nodeIDOf(item), surfaceMCP); err != nil {
+	plan, err := planConflict(ctx, m.db, m.contentTypeName, string(Scheduled), nodeIDOf(item))
+	if err != nil {
 		return err
 	}
 	setNodeStatus(item, Scheduled)
@@ -2698,6 +2705,7 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time, reason s
 	if err := m.repo.Save(ctx, item); err != nil {
 		return err
 	}
+	plan.run(ctx, m.db, m.relationStore, m.provenanceStore, surfaceMCP)
 	// A240: fire any registered async TransitionTrigger for this transition.
 	fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(Scheduled), nodeIDOf(item))
 	m.notifyAfter(ctx, AfterSchedule, string(prevStatus), surfaceMCP, "", item)
@@ -2717,13 +2725,15 @@ func (m *Module[T]) MCPArchive(ctx Context, slug, reason string) error {
 	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Archived), reason); err != nil {
 		return err
 	}
-	if err := applyConflictPolicy(ctx, m.db, m.relationStore, m.provenanceStore, m.contentTypeName, string(Archived), nodeIDOf(item), surfaceMCP); err != nil {
+	plan, err := planConflict(ctx, m.db, m.contentTypeName, string(Archived), nodeIDOf(item))
+	if err != nil {
 		return err
 	}
 	setNodeStatus(item, Archived)
 	if err := m.repo.Save(ctx, item); err != nil {
 		return err
 	}
+	plan.run(ctx, m.db, m.relationStore, m.provenanceStore, surfaceMCP)
 	// A240: fire any registered async TransitionTrigger for this transition.
 	fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(Archived), nodeIDOf(item))
 	m.notifyAfter(ctx, AfterArchive, string(prevStatus), surfaceMCP, "", item)

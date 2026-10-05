@@ -283,7 +283,11 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 	if err := validateTransition(ctx, r.db, r.rs, r.relStore, actorID, id, r.typeName, string(node.Status), string(status), reason); err != nil {
 		return err
 	}
-	if err := applyConflictPolicy(ctx, r.db, r.relStore, r.prov, r.typeName, string(status), id, surface); err != nil {
+	// Reads only: the winner's own write comes first and the items it
+	// supersedes after it, in one transaction where the handle supports one, so
+	// a failed winner leaves every loser untouched (task_plan item-68).
+	plan, err := planConflict(ctx, r.db, r.typeName, string(status), id)
+	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -291,12 +295,21 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 	if status == Published && publishedAt.IsZero() {
 		publishedAt = now
 	}
-	_, err = r.db.ExecContext(ctx,
-		"UPDATE smeldr_dynamic_content SET status = $1, published_at = $2, updated_at = $3, last_actor = $4 WHERE id = $5 AND type_name = $6",
-		string(status), publishedAt, now, actorID, id, r.typeName)
+	exec, commit, rollback, err := conflictTx(ctx, r.db)
 	if err != nil {
 		return err
 	}
+	defer rollback()
+	if _, err = exec.ExecContext(ctx,
+		"UPDATE smeldr_dynamic_content SET status = $1, published_at = $2, updated_at = $3, last_actor = $4 WHERE id = $5 AND type_name = $6",
+		string(status), publishedAt, now, actorID, id, r.typeName); err != nil {
+		return err
+	}
+	moved := plan.supersede(ctx, exec)
+	if err := commit(); err != nil {
+		return fmt.Errorf("%w: SetStatus: commit: %s", ErrInternal, err)
+	}
+	plan.afterCommit(ctx, r.db, r.relStore, r.prov, surface, moved)
 	recordTransitionProvenance(ctx, r.db, r.prov, r.typeName, id, string(node.Status), string(status), reason, surface)
 	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(status), id)
 	return nil
