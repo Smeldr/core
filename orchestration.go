@@ -1249,8 +1249,8 @@ func orchDecisionFlow() StateFlow {
 			// ratified, DECISIONS.md's own documented model requires a new
 			// entry that supersedes it, never an in-place content edit — only
 			// "proposed" (pre-ratification draft) stays mutable.
-			{Name: "ratified", Locked: true},
-			{Name: "pending-re-evaluation", Locked: true},
+			{Name: "ratified", Locked: true, Standing: StandingHolds},
+			{Name: "pending-re-evaluation", Locked: true, Standing: StandingHolds},
 			{Name: "superseded", IsTerminal: true, Locked: true},
 			{Name: "archived", IsTerminal: true, Locked: true},
 		},
@@ -1312,7 +1312,7 @@ func orchAmendmentFlow() StateFlow {
 			// create-then-drive-through-in-one-action pattern for Amendment
 			// records — locking it would risk blocking the same action that
 			// authors the record.
-			{Name: "merged", IsTerminal: true, Locked: true},
+			{Name: "merged", IsTerminal: true, Locked: true, Standing: StandingHolds},
 			{Name: "rejected", IsTerminal: true, Locked: true},
 		},
 		Transitions: []Transition{

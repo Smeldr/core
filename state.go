@@ -132,6 +132,19 @@ type State struct {
 	// to "pending-re-evaluation" or "superseded" while never again accepting
 	// a content edit).
 	Locked bool
+
+	// Standing, when [StandingHolds], declares that an item in this state is in
+	// force (D100). Empty means the state carries no standing. The flow declares
+	// it, so a customer-defined type (for example a Contract) declares its own
+	// the same way. Entering a state tagged [StandingHolds] stores the item's
+	// standing as [StandingHolds]; leaving one for an untagged state stores
+	// [StandingCeased]; moving between untagged states leaves it unchanged (see
+	// [ItemStanding]). Smeldr's own flows tag Decision "ratified" and
+	// "pending-re-evaluation" and Amendment "merged". Only [StandingHolds] is a
+	// legal tag: [App.RegisterFlow] rejects any other non-empty value. Retagging
+	// a flow later changes only future transitions, never an item's stored
+	// standing.
+	Standing Standing
 }
 
 // Transition is a directed edge in a [StateFlow].
@@ -210,6 +223,12 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	if flow.TypeName == "" {
 		return fmt.Errorf("smeldr: RegisterFlow: StateFlow.TypeName is required")
 	}
+	for _, s := range flow.States {
+		if s.Standing != "" && s.Standing != StandingHolds {
+			return fmt.Errorf("%w: smeldr: RegisterFlow %q: state %q: Standing %q is not a legal tag (only %q or empty)",
+				ErrBadRequest, flow.Name, s.Name, s.Standing, StandingHolds)
+		}
+	}
 	db := a.cfg.DB
 	if db == nil {
 		return fmt.Errorf("smeldr: RegisterFlow %q: Config.DB is required", flow.Name)
@@ -248,8 +267,8 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	// Upsert states.
 	for _, s := range flow.States {
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_states(id, flow_id, name, is_initial, is_terminal, suppresses_signals, locked) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (flow_id, name) DO NOTHING`,
-			NewID(), flowID, s.Name, s.IsInitial, s.IsTerminal, s.SuppressesSignals, s.Locked,
+			`INSERT INTO smeldr_states(id, flow_id, name, is_initial, is_terminal, suppresses_signals, locked, standing) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (flow_id, name) DO UPDATE SET standing = EXCLUDED.standing`,
+			NewID(), flowID, s.Name, s.IsInitial, s.IsTerminal, s.SuppressesSignals, s.Locked, string(s.Standing),
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: upsert state %q: %w", flow.Name, s.Name, err)
 		}
@@ -312,6 +331,18 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 func EnsureStateLockedColumn(ctx context.Context, db DB) error {
 	if err := EnsureColumn(ctx, db, "smeldr_states", "locked", "BOOLEAN NOT NULL DEFAULT FALSE"); err != nil {
 		return fmt.Errorf("smeldr: EnsureStateLockedColumn: %w", err)
+	}
+	return nil
+}
+
+// EnsureStateStandingColumn adds State.Standing's standing column to smeldr_states
+// on pre-existing databases that predate D100. Fresh installs already have it via
+// CreateStateFlowTables, and [New] calls this too, so any App upgrades itself;
+// it is exported so a boot path can call it explicitly like
+// [EnsureStateLockedColumn]. Idempotent.
+func EnsureStateStandingColumn(ctx context.Context, db DB) error {
+	if err := EnsureColumn(ctx, db, "smeldr_states", "standing", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("smeldr: EnsureStateStandingColumn: %w", err)
 	}
 	return nil
 }
@@ -863,7 +894,7 @@ func conflictSupersede(ctx context.Context, db DB, rs *RelationStore, prov Prove
 				"type", typeName, "id", oldID, "error", updateErr)
 			continue
 		}
-		recordStateChange(ctx, prov, stateChange{
+		applyStateChange(ctx, db, prov, stateChange{
 			typeName:  typeName,
 			id:        oldID,
 			from:      activeState,
@@ -1069,7 +1100,7 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	// Both UPDATE forms above succeeded: the transition is real, so record it.
 	// Placed before the async triggers and webhook, which are observers of a
 	// committed change, so a provenance entry exists for anything they cause.
-	recordTransitionProvenance(ctx, a.provenanceStore, typeName, id, currentStatus, toState, reason, surface)
+	recordTransitionProvenance(ctx, db, a.provenanceStore, typeName, id, currentStatus, toState, reason, surface)
 	fireAsyncTriggers(ctx, db, typeName, currentStatus, toState, id)
 	// decision-governance-model.md §4: Check is an enforced precondition on
 	// Decision's proposed→ratified transition — a no-op for every other type
@@ -1431,7 +1462,7 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 				// recordProvenance itself logs-and-swallows an Append
 				// failure — the queue row is still deleted below regardless
 				// (A241's own "not re-queued" rule, unweakened).
-				recordStateChange(ctx, a.provenanceStore, stateChange{
+				applyStateChange(ctx, db, a.provenanceStore, stateChange{
 					typeName:  r.typeName,
 					id:        r.itemID,
 					from:      fromState,

@@ -213,7 +213,7 @@ func (a *App) ExpireSignals(ctx context.Context, cfg SignalExpiryConfig) (walked
 		// above. Recorded only now that the UPDATE is known to have taken
 		// effect (not the lost-race, skipped case). Bounded per run by
 		// BatchCap, so at most that many synchronous INSERTs.
-		recordStateChange(ctx, a.provenanceStore, stateChange{
+		applyStateChange(ctx, db, a.provenanceStore, stateChange{
 			typeName:  "Signal",
 			id:        r.id,
 			from:      r.status,

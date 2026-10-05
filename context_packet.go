@@ -49,6 +49,9 @@ type PacketAnchor struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	URL       string         `json:"url"`
 	Fields    map[string]any `json:"fields"`
+	// Standing is the item's stored standing (D100), separate from Status (the
+	// governed state name). Omitted for a type whose flow tags no state.
+	Standing Standing `json:"standing,omitempty"`
 }
 
 // PacketBoundary declares how the packet was assembled.
@@ -75,6 +78,9 @@ type PacketItem struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	URL       string         `json:"url"`
 	Fields    map[string]any `json:"fields"`
+	// Standing is the item's stored standing (D100); omitted for a type whose
+	// flow tags no state.
+	Standing Standing `json:"standing,omitempty"`
 }
 
 // PacketRelation is one edge from the relation graph included in the packet.
@@ -258,6 +264,7 @@ func BuildContextPacket(
 			UpdatedAt: anchorNode.UpdatedAt,
 			URL:       packetItemURL(baseURL, entry.path, anchorNode.Slug),
 			Fields:    anchorFields,
+			Standing:  packetStanding(ctx, db, entry.relationType, anchorNode.ID),
 		},
 		Boundary:  PacketBoundary{Method: "relations", Depth: depth},
 		Items:     []PacketItem{},
@@ -354,6 +361,7 @@ func BuildContextPacket(
 				UpdatedAt: nd.UpdatedAt,
 				URL:       packetItemURL(baseURL, linkedEntry.path, nd.Slug),
 				Fields:    f,
+				Standing:  packetStanding(ctx, db, linkedEntry.relationType, nd.ID),
 			})
 			resolvedItems[ref.relType+ref.nodeID] = cid
 			included++
@@ -433,4 +441,15 @@ func (a *App) ContextPacketHandler(rs *RelationStore, sourceName string) {
 			slog.ErrorContext(r.Context(), "smeldr: ContextPacketHandler: encode", "error", encErr)
 		}
 	}))
+}
+
+// packetStanding returns the stored standing of an item for the packet, or ""
+// when its type has no standing or the lookup fails (the packet is built from
+// what is readable; a standing it cannot read is left out, never guessed).
+func packetStanding(ctx context.Context, db DB, typeName, id string) Standing {
+	s, has, err := ItemStanding(ctx, db, typeName, id)
+	if err != nil || !has {
+		return ""
+	}
+	return s
 }

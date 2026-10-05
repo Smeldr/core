@@ -4463,6 +4463,54 @@ app.RegisterFlow(smeldr.StateFlow{
 })
 ```
 
+### Standing (D100)
+
+Standing says whether an item's claim is in force. It is separate from the governed state name (D56): the state name says where the item is in its lifecycle, standing says whether it holds.
+
+```go
+type Standing string
+
+const (
+    StandingHolds       Standing = "holds"        // in force (also the one legal State.Standing tag)
+    StandingCeased      Standing = "ceased"       // held, no longer does
+    StandingNone        Standing = "none"         // never held
+    StandingNotRecorded Standing = "not recorded" // history would decide it, and it was not recorded
+)
+```
+
+**Declaring it.** A flow state may carry `Standing: smeldr.StandingHolds`, which says an item in that state is in force. Any other non-empty value is rejected by `App.RegisterFlow` with `ErrBadRequest`. A customer-defined type declares its own the same way. Smeldr's own flows tag Decision `ratified` and `pending-re-evaluation`, and Amendment `merged`; Signal, Task and Goal have no standing.
+
+```go
+smeldr.State{Name: "ratified", Locked: true, Standing: smeldr.StandingHolds}
+```
+
+`App.RegisterFlow` updates the tag of a state row that already exists (the other state flags, `locked`, `suppresses_signals`, `is_initial`, `is_terminal`, still do not update an existing row).
+
+**What each item stores.** Each item of a type whose flow tags a state stores its own standing in `smeldr_standing(subject_type, subject_id, standing, updated_at)`. The code that changes the item's state is the only writer:
+
+- entering a state that holds (from an untagged state, or on creation) stores `holds`;
+- leaving a state that holds for an untagged state stores `ceased`;
+- any other move changes nothing, so an item that never held stays `none` (a Decision archived straight from `proposed` is `none`, never `ceased`) and a ceased item stays `ceased`.
+
+An item with no row is `none`. Every path that changes state writes it: `App.TransitionItemVia`, `DynamicTypeRepo` status changes and creation, the Module lifecycle paths (HTTP and MCP, through `notifyAfter`), the conflict-supersede side effect (an automatically superseded Decision becomes `ceased`), the Signal expiry sweep and `DrainEvalQueue`. The write is synchronous and fail-open: a failure is logged and never fails the state change that was already made, and `App.CheckStandingDrift` is the backstop. It is written whether or not provenance is wired.
+
+**Events.** Every change of standing is also recorded as a provenance event, verb `"standing-began"` or `"standing-ended"`, carrying the transition's own actor, surface, reason and from/to states, when `App.Provenance` is wired. `SubjectProvenance` returns them like any other entry and gates them exactly like the transition (the actor is shown only for a transition that required an operation under `Strict` enforcement), so ratifying a Decision now reads as two entries.
+
+**Reading it.**
+
+```go
+func ItemStanding(ctx context.Context, db DB, typeName, id string) (Standing, bool, error)
+func CountStanding(ctx context.Context, db DB, typeName string) (map[Standing]int, error)
+```
+
+`ItemStanding` returns `(_, false, nil)` for a type whose flow tags no state, and `StandingNone` for an item of a type that has standing but no stored row. `CountStanding` counts stored rows by value (an item without a row is `none` and is not counted). Both are plain functions over a `DB` handle, like `SubjectProvenance`. `BuildContextPacket` also fills an additive `standing` field on the anchor and on each item (omitted for a type without standing).
+
+**Items that existed before.** `MigrateStanding(ctx, db)` gives them a standing, once per type (marker table `smeldr_standing_migrations`), from the flow graph **as registered when the migration ran**, and writes nothing it cannot be certain of: `holds` for an item in a state that holds (start unknown); `ceased` for a state only reachable from states that hold (Decision `superseded`); `none`, left as no row, for a state no path from a state that holds reaches (Decision `proposed`, Amendment `scoped` to `committed` and `rejected`); `not recorded` for anything else (Decision `archived`, reachable from `proposed` and from `superseded`). Run it at boot after the flows are registered; it is idempotent, and an item created afterwards without a row is `none` and is never relabelled. Retagging a flow later never recomputes stored standings: only later transitions use the new tags.
+
+**Drift check.** `App.CheckStandingDrift(ctx) (checked, drifted int, err error)` compares each item's stored standing with its state's tag (an item in a state that holds must hold; one in an untagged state must not) and records a `Finding` (detector `standing-drift`) per mismatch when `App.Findings` is wired. It only reports; it never repairs. The example server schedules it behind `ENABLE_STANDING_DRIFT_CHECK` (default off, `STANDING_DRIFT_CHECK_SCHEDULE`, default `30 3 * * *`).
+
+**Upgrading.** `smeldr_states.standing` is added by `New` to an older database (and by `EnsureStateStandingColumn`); `smeldr_standing` and `smeldr_standing_migrations` are created with the flow tables. The example server also calls `EnsureStateStandingColumn` and `MigrateStanding` at boot.
+
 ### `ErrConflict`
 
 ```go

@@ -100,6 +100,11 @@ func (r *DynamicTypeRepo) CreateDraft(ctx context.Context, fields map[string]any
 	if err := repo.Save(ctx, node); err != nil {
 		return nil, fmt.Errorf("smeldr: CreateDraft save: %w", err)
 	}
+	actorID, actorKind := actorFromContext(ctx)
+	writeStanding(ctx, r.db, r.prov, stateChange{
+		typeName: r.typeName, id: node.ID, to: string(node.Status),
+		surface: "", actorKind: actorKind, actorID: actorID,
+	})
 	return node, nil
 }
 
@@ -292,7 +297,7 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 	if err != nil {
 		return err
 	}
-	recordTransitionProvenance(ctx, r.prov, r.typeName, id, string(node.Status), string(status), reason, surface)
+	recordTransitionProvenance(ctx, r.db, r.prov, r.typeName, id, string(node.Status), string(status), reason, surface)
 	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(status), id)
 	return nil
 }
@@ -322,7 +327,7 @@ func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, schedu
 	if err != nil {
 		return err
 	}
-	recordTransitionProvenance(ctx, r.prov, r.typeName, id, string(node.Status), string(Scheduled), "", "")
+	recordTransitionProvenance(ctx, r.db, r.prov, r.typeName, id, string(node.Status), string(Scheduled), "", "")
 	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(Scheduled), id)
 	return nil
 }

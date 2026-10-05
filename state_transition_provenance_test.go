@@ -337,12 +337,24 @@ func TestTransitionItemVia_SubjectProvenance_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubjectProvenance(Decision): %v", err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("Decision entries = %d, want 1", len(entries))
+	// Ratifying enters a state that holds (D100), so the transition is followed
+	// by a "standing-began" event carrying the same from/to states, which the
+	// read side gates exactly like the transition.
+	if len(entries) != 2 {
+		t.Fatalf("Decision entries = %d, want 2 (transition and standing-began)", len(entries))
 	}
-	g := entries[0]
-	if !g.Gated || g.ActorID != tokenID || g.Surface != "mcp" || g.Reason != "ratified by steward" {
-		t.Errorf("gated Decision entry = %+v, want actor %s, surface mcp, reason shown", g, tokenID)
+	seen := map[string]ProvenanceEntry{}
+	for _, g := range entries {
+		seen[g.Verb] = g
+		if !g.Gated || g.ActorID != tokenID || g.Surface != "mcp" || g.Reason != "ratified by steward" {
+			t.Errorf("gated Decision entry = %+v, want actor %s, surface mcp, reason shown", g, tokenID)
+		}
+	}
+	if _, ok := seen["transition"]; !ok {
+		t.Errorf("no transition entry among %+v", entries)
+	}
+	if ev, ok := seen["standing-began"]; !ok || ev.FromState != "proposed" || ev.ToState != "ratified" {
+		t.Errorf("standing-began entry = %+v (present %v), want proposed -> ratified", ev, ok)
 	}
 }
 

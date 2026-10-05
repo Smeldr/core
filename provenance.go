@@ -203,16 +203,14 @@ func recordProvenance(ctx context.Context, store ProvenanceStore, rec Provenance
 // those paths already use for last_actor) and are empty otherwise.
 //
 // Call it only after the status UPDATE succeeded: a rejected or failed
-// transition must leave no record. Fail-open and a no-op for a nil store, by
-// way of [recordProvenance]. SubjectType is the registered type name, which is
+// transition must leave no record. It also stores the item's standing (D100) when
+// the type's flow tags a state, through [applyStateChange]. Fail-open, and the
+// record is a no-op for a nil store, by way of [recordProvenance]. SubjectType is the registered type name, which is
 // what [transitionIsGated] looks the flow up by when the record is read back
 // through [SubjectProvenance].
-func recordTransitionProvenance(ctx context.Context, store ProvenanceStore, typeName, id, fromState, toState, reason, surface string) {
-	if store == nil {
-		return
-	}
+func recordTransitionProvenance(ctx context.Context, db DB, store ProvenanceStore, typeName, id, fromState, toState, reason, surface string) {
 	actorID, actorKind := actorFromContext(ctx)
-	recordStateChange(ctx, store, stateChange{
+	applyStateChange(ctx, db, store, stateChange{
 		typeName:  typeName,
 		id:        id,
 		from:      fromState,

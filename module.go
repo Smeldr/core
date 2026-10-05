@@ -923,6 +923,7 @@ const (
 // signature, when it threads a real reason through the REST/MCP lifecycle
 // paths.
 func (m *Module[T]) notifyAfter(ctx Context, sig LifecycleEvent, prevState, surface, reason string, item any) {
+	m.applyStanding(ctx, sig, prevState, surface, reason, item)
 	if suppressesSignals(ctx, m.db, m.contentTypeName, string(nodeStatusOf(item))) {
 		return
 	}
@@ -2814,4 +2815,36 @@ func (m *Module[T]) findAndServeAIDoc(w http.ResponseWriter, r *http.Request, sl
 	n := extractNode(item)
 	renderAIDoc(w, r, head, n, item, m.withoutID)
 	return true
+}
+
+// applyStanding is the Module path's hook into the standing writer (D100):
+// every module state change ends in notifyAfter, so this is where an item's
+// stored standing follows it, synchronously and independent of whether
+// provenance is wired (the "standing-began"/"standing-ended" events use
+// m.provenanceStore when it is). A delete removes the row; a create starts from
+// no state; an update that does not move the item changes nothing.
+func (m *Module[T]) applyStanding(ctx Context, sig LifecycleEvent, prevState, surface, reason string, item any) {
+	if m.db == nil {
+		return
+	}
+	id := nodeIDOf(item)
+	if sig == AfterDelete {
+		forgetStanding(ctx, m.db, m.contentTypeName, id)
+		return
+	}
+	from := prevState
+	if sig == AfterCreate {
+		from = ""
+	}
+	actorID, actorKind := actorFromContext(ctx)
+	writeStanding(ctx, m.db, m.provenanceStore, stateChange{
+		typeName:  m.contentTypeName,
+		id:        id,
+		from:      from,
+		to:        string(nodeStatusOf(item)),
+		reason:    reason,
+		surface:   surface,
+		actorKind: actorKind,
+		actorID:   actorID,
+	})
 }

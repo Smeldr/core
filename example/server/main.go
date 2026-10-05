@@ -56,6 +56,10 @@
 //	SIGNAL_EXPIRY_MAX_AGE_DAYS  age in days after which a pending/read Signal is
 //	                      eligible for expiry (default: 14)
 //	SIGNAL_EXPIRY_BATCH_CAP  max Signals expired per run (default: 200)
+//	ENABLE_STANDING_DRIFT_CHECK  wire a scheduled standing drift check (report-only: compares
+//	                             each item's stored standing with its state's tag, records a Finding
+//	                             per mismatch; requires ENABLE_ORCHESTRATION; default off)
+//	STANDING_DRIFT_CHECK_SCHEDULE  5-field cron expression for the check (default: "30 3 * * *", daily)
 //	ENABLE_CONTEXT_PACKET wire GET /packet/{type}/{slug} (Editor role required; requires
 //	                      ENABLE_RELATIONS and ENABLE_ORCHESTRATION, T159)
 //	ENABLE_REACHABILITY   wire GET /reachability/{type}/{id} (Author role required; requires
@@ -118,6 +122,8 @@ type ServerConfig struct {
 	EnableEvalQueueDrain      bool
 	EvalQueueDrainSchedule    string
 	EnableSignalExpirySweep   bool
+	EnableStandingDriftCheck  bool
+	StandingDriftSchedule     string
 	SignalExpirySweepSchedule string
 	SignalExpiryMaxAgeDays    int
 	SignalExpiryBatchCap      int
@@ -173,6 +179,8 @@ func parseConfig() ServerConfig {
 		EnableEvalQueueDrain:      os.Getenv("ENABLE_EVAL_QUEUE_DRAIN") != "",
 		EvalQueueDrainSchedule:    envOr("EVAL_QUEUE_DRAIN_SCHEDULE", "*/5 * * * *"),
 		EnableSignalExpirySweep:   os.Getenv("ENABLE_SIGNAL_EXPIRY_SWEEP") != "",
+		EnableStandingDriftCheck:  os.Getenv("ENABLE_STANDING_DRIFT_CHECK") != "",
+		StandingDriftSchedule:     envOr("STANDING_DRIFT_CHECK_SCHEDULE", "30 3 * * *"),
 		SignalExpirySweepSchedule: envOr("SIGNAL_EXPIRY_SWEEP_SCHEDULE", "0 3 * * *"),
 		SignalExpiryMaxAgeDays:    envIntOr("SIGNAL_EXPIRY_MAX_AGE_DAYS", 0),
 		SignalExpiryBatchCap:      envIntOr("SIGNAL_EXPIRY_BATCH_CAP", 0),
@@ -299,7 +307,17 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.EnsureStateLockedColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure state locked column: %w", err)
 		}
+		// D100: smeldr_states.standing, needed by RegisterFlow below.
+		if err := smeldr.EnsureStateStandingColumn(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure state standing column: %w", err)
+		}
 		smeldr.RegisterOrchestrationTypes(app, db)
+		// D100: store a standing for the items that existed before their type's
+		// flow tagged a state, once per type (idempotent), now that the flows are
+		// registered.
+		if err := smeldr.MigrateStanding(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("migrate standing: %w", err)
+		}
 	}
 
 	// D78: additive migration for last_actor across whichever of the seven
@@ -551,6 +569,42 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 		expirySweep.Start()
 		stopFuncs = append(stopFuncs, expirySweep.Stop)
+	}
+
+	if cfg.EnableStandingDriftCheck {
+		if !cfg.EnableOrchestration {
+			return ServerResult{}, fmt.Errorf("ENABLE_STANDING_DRIFT_CHECK requires ENABLE_ORCHESTRATION")
+		}
+		runStore := smeldr.NewSweepRunStore(db)
+		if err := smeldr.CreateSweepRunTable(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create sweep run table: %w", err)
+		}
+		schedule := cfg.StandingDriftSchedule
+		if schedule == "" {
+			schedule = "30 3 * * *"
+		}
+		// Report-only: CheckStandingDrift records a Finding per mismatch and never
+		// repairs. Each run is recorded via SweepRunStore, same pattern as the
+		// other scheduled detectors above.
+		driftFn := func(ctx context.Context) (int, int, int, error) {
+			checked, drifted, checkErr := app.CheckStandingDrift(ctx)
+			errStr := ""
+			if checkErr != nil {
+				errStr = checkErr.Error()
+			}
+			_ = runStore.Append(ctx, smeldr.SweepRunRecord{
+				ID: smeldr.NewID(), Detector: "standing-drift", RanAt: time.Now().UTC(),
+				Interval: schedule, Walked: checked, Flagged: drifted, Skipped: 0, Err: errStr,
+				ActorKind: "job", ActorID: "standing-drift-check",
+			})
+			return checked, drifted, 0, checkErr
+		}
+		driftCheck, err := agent.NewSweepScheduler(schedule, "UTC", driftFn)
+		if err != nil {
+			return ServerResult{}, fmt.Errorf("standing drift check scheduler: %w", err)
+		}
+		driftCheck.Start()
+		stopFuncs = append(stopFuncs, driftCheck.Stop)
 	}
 
 	// ENABLE_AGENTS must register before mcp.New so AgentJob appears in MCP tools.

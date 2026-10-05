@@ -112,6 +112,13 @@
 //     [TransitionTrigger]) — a data-driven state machine registered per
 //     content type via [App.RegisterFlow], for lifecycles beyond the built-in
 //     Draft → Published → Archived progression.
+//   - Standing ([Standing], [State].Standing): a flow state may declare that an
+//     item in it is in force ([StandingHolds]); each item then stores whether it
+//     holds, has ceased, never held or was not recorded, written only by the code
+//     that changes its state and recorded as "standing-began"/"standing-ended"
+//     provenance events. Read it with [ItemStanding] and [CountStanding]; check it
+//     with [App.CheckStandingDrift]; give pre-existing items a standing once with
+//     [MigrateStanding].
 //   - Relation graph ([RelationStore], [RelationEdge], [RelationKindDef]) —
 //     typed, directional edges between items (asserted, inferred, or
 //     observed). Create a store with [NewRelationStore]. Designate a dynamic

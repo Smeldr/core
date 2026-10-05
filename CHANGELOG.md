@@ -23,6 +23,24 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.112.0] - 2026-10-05
+
+### Added
+- `Standing` type (a string) with constants `StandingHolds`, `StandingCeased`, `StandingNone` and `StandingNotRecorded`, and `State.Standing`: a flow state may declare `StandingHolds` to say that an item in that state is in force. Only `StandingHolds` is a legal tag; `App.RegisterFlow` rejects any other non-empty value with `ErrBadRequest`. Smeldr's own flows tag Decision `ratified` and `pending-re-evaluation`, and Amendment `merged`. Signal, Task and Goal have no standing. (A397)
+- Each item of a type that has such a state stores its own standing, set only by the code that changes the item's state: entering a state that holds stores `holds`, leaving one for an untagged state stores `ceased`, and moving between untagged states changes nothing, so an item that never held stays `none` (a Decision archived straight from `proposed` is `none`, never `ceased`). Stored in the new table `smeldr_standing`; an item with no row is `none`. Every path that changes state writes it: `TransitionItemVia`, `DynamicTypeRepo` status changes and creation, the Module lifecycle paths (HTTP and MCP), the conflict-supersede side effect (an automatically superseded item becomes `ceased`), the Signal expiry sweep and `DrainEvalQueue`. A failed write is logged and never fails the change. (A397)
+- Every change of standing is recorded as a provenance event, `standing-began` or `standing-ended`, with the same actor, surface, reason and from/to states as the transition, written when `App.Provenance` is wired. `SubjectProvenance` therefore returns one more entry for such a transition, gated exactly like the transition. (A397)
+- `ItemStanding(ctx, db, typeName, id)` and `CountStanding(ctx, db, typeName)` read the stored standing; `PacketAnchor` and `PacketItem` of `BuildContextPacket` gain an additive `standing` field, omitted for a type without standing. (A397)
+- `MigrateStanding(ctx, db)` gives items that existed before their type tagged a state a standing, once per type (marker table `smeldr_standing_migrations`), from the flow graph as registered when the migration ran and without guessing: `holds` in a state that holds, `ceased` in a state only reachable from states that hold, `none` (left as no row) in a state no path from a state that holds reaches, `not recorded` otherwise (a Decision `archived`). Idempotent. (A397)
+- `App.CheckStandingDrift(ctx)` compares each item's stored standing with its state's tag and records a Finding (detector `standing-drift`) per mismatch when `App.Findings` is wired; it only reports and never repairs. (A397)
+- `EnsureStateStandingColumn` and the column `smeldr_states.standing`; `New` adds the column to an older database by itself. (A397)
+- Example server: calls `EnsureStateStandingColumn` and `MigrateStanding` at boot, and schedules the drift check behind `ENABLE_STANDING_DRIFT_CHECK` (default off), `STANDING_DRIFT_CHECK_SCHEDULE` (default "30 3 * * *"). (A397)
+
+### Changed
+- `App.RegisterFlow` now updates the `standing` tag of an existing state row. The other state flags (`locked`, `suppresses_signals`, `is_initial`, `is_terminal`) still do not update an existing row. (A397)
+- Retagging a flow never recomputes stored standings: only later transitions use the new tags. Items are not backfilled except by `MigrateStanding`. (A397)
+
+---
+
 ## [1.111.0] - 2026-10-05
 
 ### Fixed

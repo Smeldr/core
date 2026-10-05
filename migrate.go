@@ -39,6 +39,7 @@ func CreateStateFlowTables(db DB) error {
 			is_terminal        BOOLEAN NOT NULL DEFAULT FALSE,
 			suppresses_signals BOOLEAN NOT NULL DEFAULT FALSE,
 			locked             BOOLEAN NOT NULL DEFAULT FALSE,
+			standing           TEXT    NOT NULL DEFAULT '',
 			UNIQUE(flow_id, name)
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_transitions (
@@ -66,6 +67,17 @@ func CreateStateFlowTables(db DB) error {
 			eval_at    TIMESTAMP NOT NULL,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(type_name, item_id, to_state)
+		)`,
+		`CREATE TABLE IF NOT EXISTS smeldr_standing (
+			subject_type TEXT      NOT NULL,
+			subject_id   TEXT      NOT NULL,
+			standing     TEXT      NOT NULL,
+			updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (subject_type, subject_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS smeldr_standing_migrations (
+			type_name  TEXT      NOT NULL PRIMARY KEY,
+			applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 	}
 	for _, s := range stmts {
@@ -193,6 +205,12 @@ func deleteOrphanedStateFlow(ctx context.Context, db DB, flowID string) error {
 // Called once at startup from [New] when [Config.DB] is non-nil.
 func migrateStateFlows(ctx context.Context, db DB) error {
 	if err := CreateStateFlowTables(db); err != nil {
+		return fmt.Errorf("smeldr: migrateStateFlows: %w", err)
+	}
+	// A database created before D100 has smeldr_states without the standing
+	// column; add it here so any App built by New upgrades itself, not only an
+	// example server that calls EnsureStateStandingColumn at boot.
+	if err := EnsureStateStandingColumn(ctx, db); err != nil {
 		return fmt.Errorf("smeldr: migrateStateFlows: %w", err)
 	}
 	if err := migrateDuplicateStateFlowRows(ctx, db); err != nil {
