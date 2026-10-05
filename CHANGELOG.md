@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.109.0] - 2026-10-05
+
+### Added
+- `App.TransitionItemVia(ctx, surface, typeName, slug, toState, reason)`: `App.TransitionItemWithReason` with the entry point named ("http", "mcp", "cli" or "trigger"; empty when the caller cannot tell), so the provenance record it writes can say which surface the change came through. `App.TransitionItem` and `App.TransitionItemWithReason` keep their signatures and record an empty surface. (A392)
+- `DynamicTypeRepo.WithProvenance(store)`; `App.DynamicContentRepo` wires it from `App.Provenance`. (A392)
+
+### Changed
+- When `App.Provenance` is wired, every successful state change made through `App.TransitionItemVia` (and the two older methods that delegate to it), `DynamicTypeRepo.SetStatus`/`SetStatusWithReason`, the `POST /_content/{type}/{id}/status` endpoint (surface "http") and `DynamicTypeRepo.ScheduleContent` now writes a `ProvenanceRecord` (verb "transition", from and to state, actor and actor kind from the context, surface, reason). Before this, those paths recorded only `last_actor`, so most state history on a real instance was never recorded. Recording is synchronous and fail-open: a failed write is logged and never fails the transition, and a rejected or failed transition records nothing. Module HTTP, MCP lifecycle and scheduler transitions are unchanged (they already recorded through the signal bus). **Transitions made before this release are not backfilled**: there is no historical record to read for them. `POST /_content/{type}/{id}/status` records no actor, because it passes the plain request context. (A392)
+- `CreateProvenanceTable` now also creates an index on `smeldr_provenance (subject_type, subject_id)`, which `SubjectProvenance` filters on, since every transition now adds a row. It is idempotent, so calling it at boot on an existing table adds the index without touching rows. A table created from your own DDL needs the same index added by hand. (A392)
+
+---
+
 ## [1.108.0] - 2026-10-05
 
 ### Added

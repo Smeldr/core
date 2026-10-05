@@ -23,6 +23,7 @@ type DynamicTypeRepo struct {
 	schema   *ContentTypeSchema // used for title-Role slug generation; may be nil
 	rs       *RoleStore         // nil unless WithGovernance was called
 	relStore *RelationStore     // nil unless WithRelations was called
+	prov     ProvenanceStore    // nil unless WithProvenance was called
 }
 
 // NewDynamicTypeRepo returns a DynamicTypeRepo bound to the given type name.
@@ -54,6 +55,18 @@ func (r *DynamicTypeRepo) WithGovernance(rs *RoleStore) *DynamicTypeRepo {
 func (r *DynamicTypeRepo) WithRelations(store *RelationStore) *DynamicTypeRepo {
 	cp := *r
 	cp.relStore = store
+	return &cp
+}
+
+// WithProvenance returns a shallow copy of r that records a [ProvenanceRecord]
+// for every successful state change made through [DynamicTypeRepo.SetStatus],
+// [DynamicTypeRepo.SetStatusWithReason] and [DynamicTypeRepo.ScheduleContent].
+// [App.DynamicContentRepo] wires it from [App.Provenance]; pass nil to obtain a
+// copy that records nothing (identical to the default state). Recording is
+// fail-open: a failed Append is logged and never fails the transition.
+func (r *DynamicTypeRepo) WithProvenance(store ProvenanceStore) *DynamicTypeRepo {
+	cp := *r
+	cp.prov = store
 	return &cp
 }
 
@@ -232,7 +245,7 @@ func (r *DynamicTypeRepo) UpdateFields(ctx context.Context, id string, patch map
 // are rejected here with [ErrBadRequest], same as any other caller with no way
 // to supply one.
 func (r *DynamicTypeRepo) SetStatus(ctx context.Context, id string, status Status) error {
-	return r.setStatus(ctx, id, status, "")
+	return r.setStatusVia(ctx, id, status, "", "")
 }
 
 // SetStatusWithReason is [DynamicTypeRepo.SetStatus] with a caller-supplied
@@ -241,10 +254,14 @@ func (r *DynamicTypeRepo) SetStatus(ctx context.Context, id string, status Statu
 // SetStatus's signature, preserving the API stability promise for existing
 // callers of the unchanged method.
 func (r *DynamicTypeRepo) SetStatusWithReason(ctx context.Context, id string, status Status, reason string) error {
-	return r.setStatus(ctx, id, status, reason)
+	return r.setStatusVia(ctx, id, status, reason, "")
 }
 
-func (r *DynamicTypeRepo) setStatus(ctx context.Context, id string, status Status, reason string) error {
+// setStatusVia is the shared implementation behind SetStatus,
+// SetStatusWithReason and [App.TransitionItemVia]. surface names the entry
+// point for the [ProvenanceRecord] it writes after a successful UPDATE; empty
+// when the caller cannot tell.
+func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status Status, reason, surface string) error {
 	node, err := r.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -275,6 +292,7 @@ func (r *DynamicTypeRepo) setStatus(ctx context.Context, id string, status Statu
 	if err != nil {
 		return err
 	}
+	recordTransitionProvenance(ctx, r.prov, r.typeName, id, string(node.Status), string(status), reason, surface)
 	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(status), id)
 	return nil
 }
@@ -304,6 +322,7 @@ func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, schedu
 	if err != nil {
 		return err
 	}
+	recordTransitionProvenance(ctx, r.prov, r.typeName, id, string(node.Status), string(Scheduled), "", "")
 	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(Scheduled), id)
 	return nil
 }
@@ -449,6 +468,9 @@ func (a *App) DynamicContentRepo(typeName string) (*DynamicTypeRepo, error) {
 	}
 	if a.relationStore != nil {
 		repo = repo.WithRelations(a.relationStore)
+	}
+	if a.provenanceStore != nil {
+		repo = repo.WithProvenance(a.provenanceStore)
 	}
 	return repo, nil
 }
@@ -820,7 +842,7 @@ func newSetStatusHandler(a *App, auth AuthFunc) http.Handler {
 			return
 		}
 		st := Status(body.Status)
-		if err := repo.SetStatus(r.Context(), id, st); err != nil {
+		if err := repo.setStatusVia(r.Context(), id, st, "", surfaceHTTP); err != nil {
 			switch {
 			case errors.Is(err, ErrNotFound):
 				WriteError(w, r, ErrNotFound)

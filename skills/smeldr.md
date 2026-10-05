@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.108.0 · smeldr.dev/mcp v1.43.1 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.109.0 · smeldr.dev/mcp v1.43.1 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -412,6 +412,16 @@ Return and block doors (v1.108.0, A391), all additive:
 - `blocked` -> `implementing`: the question is answered and the build resumes. `blocked` -> `active` still exists.
 
 `blocked` does not remember where it was entered from. A block raised mid-build resumes to `implementing`, not `active` (which would re-enter planning). None of these doors needs an operation; who may return a Task is governed by the process, not the flow. Use `transition_item` (or `smeldr-cli transition Task <slug> --to <state> --reason "<text>"`).
+
+### Transition provenance (v1.109.0, A392)
+
+With `App.Provenance` wired, every successful state change through `transition_item` (`App.TransitionItem`/`TransitionItemWithReason`, and `App.TransitionItemVia(ctx, surface, ...)` which they delegate to), `DynamicTypeRepo.SetStatus`/`ScheduleContent` and `POST /_content/{type}/{id}/status` writes a `ProvenanceRecord` (verb `transition`, from/to, actor, actor kind, surface, reason). A rejected transition records nothing; a failed write never fails the transition.
+
+- **Not backfilled.** Transitions made before the upgrade have no record.
+- **Nothing is recorded unless provenance is enabled.** The example server wires `App.Provenance` only when `ENABLE_PROVENANCE` is set. Check that before expecting history.
+- The older methods record an empty surface; `TransitionItemVia` names it (`mcp`, `http`, `cli`, `trigger`). The status endpoint records `http` but no actor.
+- Readers see the actor only for transitions that required an operation under `Strict` (`SubjectProvenance`), so a Task state change reads as verb, states and date; a Decision ratification also shows who did it.
+- `CreateProvenanceTable` also indexes `(subject_type, subject_id)`; add that index by hand if you created the table from your own DDL.
 
 ## MCP tool catalog
 

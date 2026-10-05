@@ -2,7 +2,7 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.108.0 + smeldr.dev/mcp v1.43.1 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
+Last updated: v1.109.0 + smeldr.dev/mcp v1.43.1 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
 
 ## Module stability
 
@@ -150,6 +150,14 @@ Opt-in: an app that never calls `App.Governance(store)` sees no governance behav
 - `lookup_token_names` MCP tool (v1.43.0) + `TokenStore.NamesForUserIDs(ctx, userIDs)`
   (v1.104.0) — batch-resolve actor IDs seen in `last_actor`/`RoleGrant.Grantor`/relation
   `created_by` back to their human-readable token names
+- Transition provenance - with `App.Provenance` wired, every successful state change through
+  `App.TransitionItemVia` (and `TransitionItem`/`TransitionItemWithReason`, which delegate to it),
+  `DynamicTypeRepo.SetStatus`/`SetStatusWithReason`/`ScheduleContent` and the
+  `POST /_content/{type}/{id}/status` endpoint writes a `ProvenanceRecord` (verb transition, from and
+  to state, actor, actor kind, surface, reason) (v1.109.0). `TransitionItemVia` names the entry point;
+  the older methods record an empty surface. Synchronous and fail-open, nothing recorded for a rejected
+  transition, earlier transitions are not backfilled. `CreateProvenanceTable` also indexes
+  (subject_type, subject_id)
 - Actor provenance — every orchestration item (`Signal`, `Task`, `Decision`, `Amendment`,
   `Goal`, `Run`) and `DynamicNode` gained a `LastActor` field (v1.95.0), stamped at creation
   time too, not only on transition (v1.97.0); `RelationEdge` gained `CreatedBy` (v1.97.0)

@@ -3306,7 +3306,9 @@ own record in their own store).
 ### Setup
 
 ```go
-// 1. Create the table once at startup
+// 1. Create the table once at startup. Also creates the
+//    (subject_type, subject_id) index SubjectProvenance reads by; idempotent,
+//    so calling it on boot against an existing table adds the index.
 smeldr.CreateProvenanceTable(db)
 
 // 2. Wire the provenance store
@@ -3338,6 +3340,37 @@ The verb values are `"assert"` when a role is granted and `"invalidate"` when a 
 These entries are always fully attributed (carrying `ActorKind`, `ActorID`, `Surface`, and `Reason`) when read back through `SubjectProvenance`, because neither `RoleGrant` nor `Token` has a registered `StateFlow` — this mirrors `GovernanceAuditStore`'s already-transparent posture for admin actions.
 
 Provenance writes only activate when both stores are configured on the same `App` instance — otherwise all `recordProvenance` call sites are silent no-ops.
+
+### State changes through `TransitionItem` also write provenance (A392, v1.109.0+)
+
+With `App.Provenance` wired, every successful state change made through
+`App.TransitionItemVia` (and `App.TransitionItem`/`App.TransitionItemWithReason`, which delegate
+to it), `DynamicTypeRepo.SetStatus`/`SetStatusWithReason`, the
+`POST /_content/{type}/{id}/status` endpoint, and `DynamicTypeRepo.ScheduleContent` writes one
+`ProvenanceRecord`: verb `"transition"`, from and to state, actor and actor kind (taken from the
+`smeldr.Context` in `ctx`, empty for a plain context), surface, and the reason when one was
+supplied. `SubjectType` is the registered type name (`"Task"`, `"Decision"`, a dynamic type's own
+name). Before this these paths recorded only `last_actor`.
+
+- Written after the status UPDATE succeeded, never before: a rejected or failed transition records
+  nothing.
+- Synchronous and fail-open: a failed write is logged and never fails the transition.
+- A runtime-defined content type is recorded once, by `DynamicTypeRepo`, not a second time by
+  `TransitionItemVia`.
+- Module HTTP, MCP lifecycle and scheduler transitions are unchanged: they already recorded through
+  the signal bus.
+- **No backfill.** Transitions made before the instance upgraded have no record and none can be
+  reconstructed.
+- `POST /_content/{type}/{id}/status` records surface `"http"` but no actor: it passes the plain
+  request context.
+- Not yet recorded: the `ConflictSupersede` side effect on the superseded item, and the Signal
+  expiry sweep.
+- `ENABLE_PROVENANCE` (the example server's switch for `App.Provenance`) must be set, otherwise
+  nothing is recorded at all.
+
+What a reader sees is unchanged and decided at read time: `SubjectProvenance` shows the actor only
+for a transition that required an operation under `Strict` enforcement, so a Task state change
+reads as verb, states and date, and a Decision ratification also shows who did it.
 
 ### Reading the trail — `SubjectProvenance`, not a route or tool
 
@@ -4361,6 +4394,24 @@ etc.). Before this, a never-transitioned item (every fresh `proposed`
 Decision, for example) had no `last_actor` at all — no proposer/asserter
 recorded. Always overwrites whatever the create payload itself may have set
 for `last_actor`; actor identity is never client-suppliable.
+
+### `App.TransitionItemVia` (A392, v1.109.0+)
+
+```go
+func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, toState, reason string) (map[string]any, error)
+```
+
+`App.TransitionItemWithReason` with the entry point named. `surface` takes the same values as
+`ProvenanceRecord.Surface` (`"http"`, `"mcp"`, `"cli"`, `"trigger"`) and may be empty when the
+caller cannot tell; it is written onto the `ProvenanceRecord` the transition produces (see
+[Provenance trail](#provenance-trail)). `App.TransitionItem` and `App.TransitionItemWithReason`
+keep their signatures and call it with an empty surface, so their callers are unaffected.
+Validation, authorization, `last_actor` and the returned map are identical to
+`TransitionItemWithReason`.
+
+```go
+result, err := app.TransitionItemVia(ctx, "mcp", "Task", "some-task-slug", "active", "")
+```
 
 ### `ConflictPolicy` (A186)
 

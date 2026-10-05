@@ -710,6 +710,54 @@ func TestAdminSetStatus_HappyPath(t *testing.T) {
 	}
 }
 
+// TestAdminSetStatus_RecordsProvenanceWithHTTPSurface proves the status
+// endpoint writes a provenance record naming itself as the surface.
+func TestAdminSetStatus_RecordsProvenanceWithHTTPSurface(t *testing.T) {
+	db := openDynDB(t)
+	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
+		BaseURL: "https://example.com",
+		Secret:  []byte(dynTestSecret),
+		DB:      db,
+	}))
+	if err := smeldr.CreateProvenanceTable(db); err != nil {
+		t.Fatalf("CreateProvenanceTable: %v", err)
+	}
+	store := smeldr.NewProvenanceStore(db)
+	app.Provenance(store)
+	app.DefineContentType(t.Context(), recipeSchema())
+	repo, _ := app.DynamicContentRepo("recipe")
+	node, _ := repo.CreateDraft(t.Context(), map[string]any{"Title": "X"})
+
+	handler := dynHandler(t, app)
+	w := dynPost(handler, fmt.Sprintf("/_content/recipe/%s/status", node.ID),
+		map[string]any{"status": "published"}, bearerToken(t, smeldr.Editor))
+	if w.Code != http.StatusOK {
+		t.Fatalf("set status = %d, body: %s", w.Code, w.Body.String())
+	}
+
+	got, err := store.List(t.Context(), smeldr.ProvenanceFilter{SubjectType: "recipe", SubjectID: node.ID})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d records, want 1: %+v", len(got), got)
+	}
+	r := got[0]
+	if r.Verb != "transition" || r.FromState != "draft" || r.ToState != "published" {
+		t.Errorf("verb/from/to = %s/%s/%s, want transition/draft/published", r.Verb, r.FromState, r.ToState)
+	}
+	if r.Surface != "http" {
+		t.Errorf("surface = %q, want http", r.Surface)
+	}
+	// The handler authenticates the caller but hands SetStatus the plain
+	// request context, not a smeldr.Context, so the actor is not derivable on
+	// this path (the same reason last_actor is empty here). Pinned as it is
+	// today; attributing it is a separate change, see the plan's follow-up.
+	if r.ActorID != "" || r.ActorKind != "" {
+		t.Errorf("actor/kind = %q/%q, want empty on this path", r.ActorID, r.ActorKind)
+	}
+}
+
 func TestAdminSetStatus_InvalidStatus(t *testing.T) {
 	// An unrecognised status (not in the default flow) is now rejected with 409
 	// by validateTransition inside SetStatus. Empty status is still 400.

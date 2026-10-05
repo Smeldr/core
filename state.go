@@ -896,7 +896,34 @@ func (a *App) TransitionItem(ctx context.Context, typeName, slug, toState string
 // exposure the existing dynamic-content and conflict-supersede paths
 // already carry, now extended to compiled types rather than newly
 // introduced.
+//
+// Records no surface on the provenance entry it writes (see
+// [App.TransitionItemVia], which this delegates to with an empty surface).
 func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toState, reason string) (map[string]any, error) {
+	return a.TransitionItemVia(ctx, "", typeName, slug, toState, reason)
+}
+
+// TransitionItemVia is [App.TransitionItemWithReason] with the entry point the
+// call came through named, so the [ProvenanceRecord] it writes can say so. surface
+// takes the same values as [SignalEvent.Surface] and [ProvenanceRecord.Surface]
+// ("http", "mcp", "cli", "trigger") and may be empty when the caller cannot
+// tell, which is what [App.TransitionItem] and [App.TransitionItemWithReason]
+// pass.
+//
+// Every successful state change is recorded as a [ProvenanceRecord] (verb
+// "transition", from and to state, actor and its kind taken from ctx, surface,
+// reason) when [App.Provenance] has been wired, for both compiled types and
+// runtime-defined content types (the latter through
+// [DynamicTypeRepo.SetStatusWithReason]), so it is written exactly once. A
+// rejected or failed transition records nothing. Recording is fail-open and
+// synchronous: an Append failure is logged and never fails a transition that
+// has already committed. Transitions made before this recording existed are
+// not backfilled.
+//
+// What a reader sees is decided at read time by [SubjectProvenance]: the actor
+// is shown only for a transition that required an operation under Strict
+// enforcement.
+func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, toState, reason string) (map[string]any, error) {
 	desc := a.typeRegistry.Lookup(typeName)
 	if desc == nil {
 		return nil, fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName)
@@ -910,7 +937,7 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 		if err != nil {
 			return nil, err
 		}
-		if err := repo.SetStatusWithReason(ctx, node.ID, Status(toState), reason); err != nil {
+		if err := repo.setStatusVia(ctx, node.ID, Status(toState), reason, surface); err != nil {
 			return nil, err
 		}
 		return map[string]any{"id": node.ID, "slug": slug, "status": toState}, nil
@@ -995,6 +1022,10 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 			return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
 		}
 	}
+	// Both UPDATE forms above succeeded: the transition is real, so record it.
+	// Placed before the async triggers and webhook, which are observers of a
+	// committed change, so a provenance entry exists for anything they cause.
+	recordTransitionProvenance(ctx, a.provenanceStore, typeName, id, currentStatus, toState, reason, surface)
 	fireAsyncTriggers(ctx, db, typeName, currentStatus, toState, id)
 	// decision-governance-model.md §4: Check is an enforced precondition on
 	// Decision's proposed→ratified transition — a no-op for every other type

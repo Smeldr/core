@@ -77,10 +77,20 @@ func NewProvenanceStore(db DB) ProvenanceStore {
 	return &sqlProvenanceStore{db: db}
 }
 
-// CreateProvenanceTable creates the smeldr_provenance table if it does not exist.
-// Call once at application startup before [NewProvenanceStore].
+// CreateProvenanceTable creates the smeldr_provenance table and its
+// (subject_type, subject_id) index if they do not exist. Call once at
+// application startup before [NewProvenanceStore].
+//
+// The index serves [SubjectProvenance] and [ProvenanceStore.List], which both
+// filter on exactly those two columns. Every state change made through
+// [App.TransitionItemVia] is now recorded, so the table grows much faster than
+// when only module lifecycle events wrote to it, and an unindexed read would
+// scan all of it. Both statements are idempotent, so calling this on boot
+// against a table that predates the index adds the index without touching any
+// row. A caller that creates the table from its own DDL (see
+// [NewProvenanceStore]) should add the same index.
 func CreateProvenanceTable(db DB) error {
-	_, err := db.ExecContext(context.Background(), `
+	if _, err := db.ExecContext(context.Background(), `
 		CREATE TABLE IF NOT EXISTS smeldr_provenance (
 			id           TEXT PRIMARY KEY,
 			timestamp    TIMESTAMPTZ NOT NULL,
@@ -93,7 +103,11 @@ func CreateProvenanceTable(db DB) error {
 			actor_id     TEXT NOT NULL,
 			surface      TEXT NOT NULL,
 			reason       TEXT NOT NULL
-		)`)
+		)`); err != nil {
+		return err
+	}
+	_, err := db.ExecContext(context.Background(),
+		`CREATE INDEX IF NOT EXISTS idx_smeldr_provenance_subject ON smeldr_provenance (subject_type, subject_id)`)
 	return err
 }
 
@@ -179,6 +193,41 @@ func recordProvenance(ctx context.Context, store ProvenanceStore, rec Provenance
 		slog.WarnContext(ctx, "smeldr: recordProvenance: append failed",
 			"subject_type", rec.SubjectType, "subject_id", rec.SubjectID, "verb", rec.Verb, "error", err)
 	}
+}
+
+// recordTransitionProvenance records one completed state change of typeName's
+// item id from fromState to toState, for the generic transition paths that do
+// not go through a [Module]'s signal bus ([App.TransitionItemVia],
+// [DynamicTypeRepo.SetStatus], [DynamicTypeRepo.ScheduleContent]). The actor
+// and its kind come from ctx when it carries a [Context] (the same extraction
+// those paths already use for last_actor) and are empty otherwise.
+//
+// Call it only after the status UPDATE succeeded: a rejected or failed
+// transition must leave no record. Fail-open and a no-op for a nil store, by
+// way of [recordProvenance]. SubjectType is the registered type name, which is
+// what [transitionIsGated] looks the flow up by when the record is read back
+// through [SubjectProvenance].
+func recordTransitionProvenance(ctx context.Context, store ProvenanceStore, typeName, id, fromState, toState, reason, surface string) {
+	if store == nil {
+		return
+	}
+	var actorID string
+	var roles []Role
+	if sc, ok := ctx.(interface{ User() User }); ok {
+		u := sc.User()
+		actorID, roles = u.ID, u.Roles
+	}
+	recordProvenance(ctx, store, ProvenanceRecord{
+		SubjectType: typeName,
+		SubjectID:   id,
+		Verb:        provenanceVerbFor(AfterUpdate, fromState, toState),
+		FromState:   fromState,
+		ToState:     toState,
+		ActorKind:   actorKindFor(actorID, roles),
+		ActorID:     actorID,
+		Surface:     surface,
+		Reason:      reason,
+	})
 }
 
 // provenanceLifecycleEvents is every [LifecycleEvent] that represents a completed
