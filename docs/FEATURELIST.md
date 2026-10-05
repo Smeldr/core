@@ -2,14 +2,14 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.109.1 + smeldr.dev/mcp v1.43.1 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
+Last updated: v1.109.1 + smeldr.dev/mcp v1.44.0 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
 | `smeldr.dev/core` | v1.107.0 | Stable |
-| `smeldr.dev/mcp` | v1.43.1 | Stable |
+| `smeldr.dev/mcp` | v1.44.0 | Stable |
 | `smeldr.dev/oauth` | v0.5.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.2.0 | Beta |
 | `smeldr.dev/media` | v1.6.3 | Beta |
@@ -155,7 +155,8 @@ Opt-in: an app that never calls `App.Governance(store)` sees no governance behav
   `DynamicTypeRepo.SetStatus`/`SetStatusWithReason`/`ScheduleContent` and the
   `POST /_content/{type}/{id}/status` endpoint writes a `ProvenanceRecord` (verb transition, from and
   to state, actor, actor kind, surface, reason) (v1.109.0). `TransitionItemVia` names the entry point;
-  the older methods record an empty surface. Synchronous and fail-open, nothing recorded for a rejected
+  the older methods record an empty surface (the `transition_item` MCP tool passes `mcp` from
+  smeldr.dev/mcp v1.44.0). Synchronous and fail-open, nothing recorded for a rejected
   transition, earlier transitions are not backfilled. `CreateProvenanceTable` also indexes
   (subject_type, subject_id)
 - Actor provenance — every orchestration item (`Signal`, `Task`, `Decision`, `Amendment`,
