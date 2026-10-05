@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.110.0 · smeldr.dev/mcp v1.44.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.111.0 · smeldr.dev/mcp v1.44.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -363,7 +363,7 @@ err := app.RegisterFlow(smeldr.StateFlow{
 ```
 
 - `ConflictReject` — `MCPPublish`/`SetStatus` returns `ErrConflict` (409) when another item is already in `ActiveState`
-- `ConflictSupersede` — transitions all conflicting items to `"superseded"` before the new item enters `ActiveState`
+- `ConflictSupersede` — transitions all conflicting items to `"superseded"` before the new item enters `ActiveState`. Since v1.111.0 it also asserts a `supersedes` relation edge winner -> loser (by ID, triggering actor as `created_by`), only when `App.Relations` is wired and a `supersedes` kind permitting `Type -> Type` is registered (the orchestration kind permits Decision -> Decision only; a customer type needs its own `UpsertKind`, keeping the Decision pair)
 - Zero value = no enforcement. Both policies fail-open: DB errors never block a transition.
 
 **Decision freshness (v1.47.0+, A187):** Wire scheduled state transitions via `TransitionTrigger`.

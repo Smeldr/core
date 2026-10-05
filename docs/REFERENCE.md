@@ -4441,6 +4441,7 @@ Optional field on `StateFlow`. When `ActiveState` is set and an item transitions
 
 - `ConflictReject` — returns `ErrConflict` if any item of the same type is already in `ActiveState`.
 - `ConflictSupersede` — transitions conflicting items to `"superseded"` before the new item reaches `ActiveState`.
+  Since v1.111.0 each superseded item also gets a `supersedes` relation edge from the winner (by item ID, with the triggering actor as `created_by`), **but only when** the instance wired `App.Relations` **and** a `supersedes` relation kind that permits `Type -> Type` is registered. `RegisterOrchestrationRelationKinds` registers that kind for `Decision -> Decision` only, so a customer-defined type needs its own: `UpsertKind` a `supersedes` kind (`Mode: "asserted"`, `Directional: true`) whose `TypePairs` is empty (every pair) or lists your type, registered after `RegisterOrchestrationRelationKinds` and keeping its `Decision -> Decision` pair, since a kind has one definition. Otherwise items are still superseded and recorded, without an edge, and one Info line per type per process says so. `RelationStore.TraceLineage` from a superseded item then reaches its replacement.
 
 Zero value (empty string) means no enforcement. Both policies fail-open: DB errors return nil so the transition is never blocked by a hiccup in the conflict check.
 

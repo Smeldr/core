@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,8 +25,15 @@ const (
 
 	// ConflictSupersede automatically transitions all existing items of the same
 	// type in [StateFlow.ActiveState] to "superseded" before proceeding with the
-	// new transition. A "supersedes" relation is created via [RelationStore] when
-	// one is available; if not, the supersede still proceeds without a relation.
+	// new transition. A "supersedes" relation (winner to loser, by item ID, with the
+	// triggering actor as created_by) is asserted via [RelationStore] only when
+	// the instance wired [App.Relations] AND a "supersedes" relation kind that
+	// permits Type to Type is registered. [RegisterOrchestrationRelationKinds]
+	// registers that kind for Decision to Decision only, so a customer-defined
+	// type needs its own kind (for example an unconstrained "supersedes" via
+	// [RelationStore.UpsertKind], or one whose TypePairs lists the type). When
+	// either condition is missing the supersede still proceeds, without a
+	// relation, and one Info line per type per process says so.
 	ConflictSupersede ConflictPolicy = "supersede"
 )
 
@@ -724,8 +732,10 @@ func isStateLocked(ctx context.Context, db DB, typeName, statusName string) bool
 //
 // newItemID is the ID of the item being transitioned into ActiveState, used
 // to create the optional "supersedes" relation in [ConflictSupersede] mode.
-// rs may be nil, relation creation is always fail-open (every production
-// caller passes nil today, so the edge is not asserted live).
+// rs may be nil (App.Relations not wired); relation creation is always
+// fail-open and skipped, with one Info line per type per process, when the
+// "supersedes" kind is unregistered or does not permit typeName to typeName
+// (see [ConflictSupersede]).
 //
 // prov and surface describe the winning transition: in [ConflictSupersede]
 // mode each item it supersedes gets one [ProvenanceRecord] (actor from ctx,
@@ -826,6 +836,7 @@ func conflictSupersede(ctx context.Context, db DB, rs *RelationStore, prov Prove
 	}
 	now := time.Now().UTC()
 	actorID, actorKind := actorFromContext(ctx)
+	assertEdge := supersedeEdgeAllowed(ctx, rs, typeName, newItemID)
 	for _, oldID := range ids {
 		var updateErr error
 		if isDynamic {
@@ -862,13 +873,13 @@ func conflictSupersede(ctx context.Context, db DB, rs *RelationStore, prov Prove
 			actorKind: actorKind,
 			actorID:   actorID,
 		})
-		if rs != nil && newItemID != "" {
+		if assertEdge {
 			if relErr := rs.Assert(ctx, RelationEdge{
 				SourceType:   typeName,
 				SourceID:     newItemID,
 				TargetType:   typeName,
 				TargetID:     oldID,
-				RelationKind: "supersedes",
+				RelationKind: supersedesKind,
 				EdgeClass:    "asserted",
 			}); relErr != nil {
 				slog.WarnContext(ctx, "smeldr: applyConflictPolicy: supersedes relation failed",
@@ -1029,7 +1040,7 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	if err := authorizeDecisionScopeByID(ctx, db, a.governance, actorID, typeName, id, decisionScopeRoles); err != nil {
 		return nil, err
 	}
-	if err := applyConflictPolicy(ctx, db, nil, a.provenanceStore, typeName, toState, id, surface); err != nil {
+	if err := applyConflictPolicy(ctx, db, a.relationStore, a.provenanceStore, typeName, toState, id, surface); err != nil {
 		return nil, err
 	}
 
@@ -1591,4 +1602,42 @@ func fireAsyncTriggers(ctx context.Context, db DB, typeName, fromState, toState,
 			}
 		}()
 	}
+}
+
+// supersedeEdgeSkipLogged remembers the types for which
+// [supersedeEdgeAllowed] already logged that no "supersedes" edge is written,
+// so an operator sees the configuration gap once per type per process and not
+// on every supersede.
+var supersedeEdgeSkipLogged sync.Map
+
+// supersedeEdgeAllowed reports whether [conflictSupersede] should assert the
+// "supersedes" edge from newItemID to each item it supersedes: a relation
+// store was wired, there is a winner to name, the "supersedes" kind is
+// registered, and its TypePairs permit typeName to typeName (the kind
+// [RegisterOrchestrationRelationKinds] registers permits Decision to Decision
+// only). A missing kind or a refused pair is an expected configuration, not a
+// fault, so it is skipped with one Info line per type per process rather than
+// failing every Assert with a Warn.
+func supersedeEdgeAllowed(ctx context.Context, rs *RelationStore, typeName, newItemID string) bool {
+	if rs == nil || newItemID == "" {
+		return false
+	}
+	reason := ""
+	kind, ok := rs.GetKind(supersedesKind)
+	switch {
+	case !ok:
+		reason = "no \"supersedes\" relation kind is registered"
+	default:
+		if err := validateTypePairs(kind, RelationEdge{SourceType: typeName, TargetType: typeName, RelationKind: supersedesKind}); err != nil {
+			reason = "the registered \"supersedes\" relation kind does not permit " + typeName + " to " + typeName
+		}
+	}
+	if reason == "" {
+		return true
+	}
+	if _, logged := supersedeEdgeSkipLogged.LoadOrStore(typeName, struct{}{}); !logged {
+		slog.InfoContext(ctx, "smeldr: ConflictSupersede: no supersedes relation is written for this type, items are still superseded",
+			"type", typeName, "reason", reason)
+	}
+	return false
 }

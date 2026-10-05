@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.111.0] - 2026-10-05
+
+### Fixed
+- A transition into a flow's active state under `ConflictSupersede` now asserts a `supersedes` relation edge from the winning item to each item it supersedes. Before, the edge was documented but never written on a live instance, because every production caller of the conflict policy passed no relation store, so `RelationStore.TraceLineage` from a superseded item found no replacement. The edge uses raw item IDs (never slugs), carries the triggering actor as `created_by`, and, when `App.Provenance` is wired, gets its own assert provenance record. (A396)
+- The edge is written only when the instance wired `App.Relations` and a `supersedes` relation kind that permits the type's own pair is registered. `RegisterOrchestrationRelationKinds` registers that kind for Decision to Decision only, so a customer-defined type needs its own `supersedes` kind (for example an unconstrained one, or one whose TypePairs lists the type). When it is missing, items are still superseded and recorded without an edge, and one Info line per type per process says so. (A396)
+- Nothing changes on process.smeldr.dev today: no built-in flow uses `ConflictSupersede`, and its Decision lineage is asserted explicitly. Superseded items from before the upgrade are not backfilled with an edge. (A396)
+- Known weakness, not changed here: the conflict policy runs before the winning transition's own UPDATE, so if that UPDATE fails the superseded items (and now their edge) are already written. Tracked as the Task core-conflict-policy-applied-before-winning-update. (A396)
+
+---
+
 ## [1.110.0] - 2026-10-05
 
 ### Changed

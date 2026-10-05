@@ -15,8 +15,11 @@ import (
 var lineageWalkKinds = []string{"depends_on", "derives_from"}
 
 // supersedesKind is the relation kind recorded from a replacement item to
-// the item it replaced (see [conflictSupersede] in state.go). TraceLineage
-// follows it backward: from a visited node to whatever superseded it.
+// the item it replaced. A [ConflictSupersede] transition asserts it for each
+// item it supersedes (see [conflictSupersede] in state.go), but only when the
+// instance wired [App.Relations] and a "supersedes" kind permitting the
+// type's own pair is registered. TraceLineage follows it backward: from a
+// visited node to whatever superseded it.
 const supersedesKind = "supersedes"
 
 // MaxLineageDepth bounds [RelationStore.TraceLineage]'s maxDepth parameter —

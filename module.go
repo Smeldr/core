@@ -2658,7 +2658,7 @@ func (m *Module[T]) MCPPublish(ctx Context, slug, reason string) error {
 	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Published), reason); err != nil {
 		return err
 	}
-	if err := applyConflictPolicy(ctx, m.db, nil, m.provenanceStore, m.contentTypeName, string(Published), nodeIDOf(item), surfaceMCP); err != nil {
+	if err := applyConflictPolicy(ctx, m.db, m.relationStore, m.provenanceStore, m.contentTypeName, string(Published), nodeIDOf(item), surfaceMCP); err != nil {
 		return err
 	}
 	setNodeStatus(item, Published)
@@ -2688,7 +2688,7 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time, reason s
 	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Scheduled), reason); err != nil {
 		return err
 	}
-	if err := applyConflictPolicy(ctx, m.db, nil, m.provenanceStore, m.contentTypeName, string(Scheduled), nodeIDOf(item), surfaceMCP); err != nil {
+	if err := applyConflictPolicy(ctx, m.db, m.relationStore, m.provenanceStore, m.contentTypeName, string(Scheduled), nodeIDOf(item), surfaceMCP); err != nil {
 		return err
 	}
 	setNodeStatus(item, Scheduled)
@@ -2716,7 +2716,7 @@ func (m *Module[T]) MCPArchive(ctx Context, slug, reason string) error {
 	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Archived), reason); err != nil {
 		return err
 	}
-	if err := applyConflictPolicy(ctx, m.db, nil, m.provenanceStore, m.contentTypeName, string(Archived), nodeIDOf(item), surfaceMCP); err != nil {
+	if err := applyConflictPolicy(ctx, m.db, m.relationStore, m.provenanceStore, m.contentTypeName, string(Archived), nodeIDOf(item), surfaceMCP); err != nil {
 		return err
 	}
 	setNodeStatus(item, Archived)

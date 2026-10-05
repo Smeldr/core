@@ -2,7 +2,7 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.110.0 + smeldr.dev/mcp v1.44.0 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
+Last updated: v1.111.0 + smeldr.dev/mcp v1.44.0 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
 
 ## Module stability
 
@@ -337,7 +337,7 @@ MCP resource subscriptions (Beta):
 - `Transition` struct — `From`, `To`, `RequiredRole`
 - `ConflictPolicy` type — opt-in uniqueness enforcement at a designated `ActiveState` (A186)
   - `ConflictReject` (`"reject"`) — returns `ErrConflict` (409) when another item is already in `ActiveState`
-  - `ConflictSupersede` (`"supersede"`) — transitions conflicting items to `"superseded"` before the new item enters `ActiveState`
+  - `ConflictSupersede` (`"supersede"`) — transitions conflicting items to `"superseded"` before the new item enters `ActiveState`. Since v1.111.0 it also asserts a `supersedes` edge winner -> loser (by ID, triggering actor as `created_by`) when `App.Relations` is wired and a `supersedes` kind permitting the type's pair is registered
   - Both policies fail-open: DB errors return nil and never block a transition
 - State flow enforced automatically in `MCPPublish`, `MCPSchedule`, `MCPArchive`, and `DynamicTypeRepo.SetStatus`
 - `define_state_flow` MCP tool — registers a flow including `active_state` and `conflict_policy` params (Admin role)
