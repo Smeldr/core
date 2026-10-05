@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.105.1 · smeldr.dev/mcp v1.43.1 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.108.0 · smeldr.dev/mcp v1.43.1 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -399,6 +399,19 @@ err := app.RegisterFlow(smeldr.StateFlow{
 - Fail-open: nil DB, missing table, and empty `eval_field` are all silently skipped
 
 ---
+
+### Task flow (agent-task)
+
+`backlog -> active -> waiting-plan -> plan-reviewing -> implementing -> commit-reviewing -> done`, plus side doors:
+`backlog`/`active` -> `deferred`; `backlog`/`active`/`waiting-plan`/`plan-reviewing` -> `resolved` (reason required); `active` -> `done` (reason required, work that ends without a plan/commit cycle).
+
+Return and block doors (v1.108.0, A391), all additive:
+
+- `commit-reviewing` -> `implementing` (reason required): a reviewer returns the Task to the implementer after a failed review.
+- `implementing` -> `blocked` (reason required): the implementer stops mid-build to ask instead of guessing. The reason states what is being asked.
+- `blocked` -> `implementing`: the question is answered and the build resumes. `blocked` -> `active` still exists.
+
+`blocked` does not remember where it was entered from. A block raised mid-build resumes to `implementing`, not `active` (which would re-enter planning). None of these doors needs an operation; who may return a Task is governed by the process, not the flow. Use `transition_item` (or `smeldr-cli transition Task <slug> --to <state> --reason "<text>"`).
 
 ## MCP tool catalog
 

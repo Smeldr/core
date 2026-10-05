@@ -371,6 +371,47 @@ func TestRegisterFlow_TaskFlow_ActiveToDoneAddedOnUpgrade(t *testing.T) {
 	}
 }
 
+// TestRegisterFlow_TaskFlow_ReturnAndBlockAddedOnUpgrade is the same
+// upgrade-path pin as the D88 one above, for the three return/block doors: a
+// live instance running the pre-change agent-task flow (15 transitions)
+// picks them up on its next boot's RegisterFlow call, no migration needed.
+func TestRegisterFlow_TaskFlow_ReturnAndBlockAddedOnUpgrade(t *testing.T) {
+	db := newSQLiteDB(t)
+	ctx := context.Background()
+	if err := migrateStateFlows(ctx, db); err != nil {
+		t.Fatalf("migrateStateFlows: %v", err)
+	}
+	app := &App{cfg: Config{DB: db}}
+
+	// The pre-change shape: the current flow minus its last three transitions.
+	old := orchTaskFlow()
+	old.Transitions = old.Transitions[:15]
+	if err := app.RegisterFlow(old); err != nil {
+		t.Fatalf("RegisterFlow (old shape): %v", err)
+	}
+
+	doors := []struct{ from, to, reason string }{
+		{"commit-reviewing", "implementing", "returned by reviewer"},
+		{"implementing", "blocked", "question raised"},
+		{"blocked", "implementing", ""},
+	}
+	for _, d := range doors {
+		if err := validateTransition(ctx, db, nil, nil, "", "", "Task", d.from, d.to, d.reason); err == nil {
+			t.Fatalf("%s->%s: want error before upgrade, got nil", d.from, d.to)
+		}
+	}
+
+	if err := app.RegisterFlow(orchTaskFlow()); err != nil {
+		t.Fatalf("RegisterFlow (current shape): %v", err)
+	}
+
+	for _, d := range doors {
+		if err := validateTransition(ctx, db, nil, nil, "", "", "Task", d.from, d.to, d.reason); err != nil {
+			t.Errorf("%s->%s: want nil after upgrade, got %v", d.from, d.to, err)
+		}
+	}
+}
+
 func TestRegisterFlow_unknownStateError(t *testing.T) {
 	db := newSQLiteDB(t)
 	ctx := context.Background()

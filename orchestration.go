@@ -1176,6 +1176,27 @@ func orchSignalFlow() StateFlow {
 // work is what closed it, just not through a build. Only reachable from
 // "active" — a Task must be claimed first ("backlog" → "done" stays
 // illegal, matching every other terminal-state door in this flow).
+//
+// Three further doors (additive, D97's stability contract kept) let the
+// review and question steps of a gated build process be expressed as real
+// transitions instead of conventions:
+//
+//   - "commit-reviewing" → "implementing" (RequiredReason: true): a reviewer
+//     (brand visually, architect on code) returns the Task to the implementer
+//     after a failed review. Before this, "commit-reviewing" could only reach
+//     "done".
+//   - "implementing" → "blocked" (RequiredReason: true): the implementer
+//     stops mid-build to ask rather than guess. The reason states what is
+//     being asked. Before this, "blocked" was reachable only from "active".
+//   - "blocked" → "implementing": the question is answered and the build
+//     resumes. The existing "blocked" → "active" door is kept.
+//
+// "blocked" does not remember which state it was entered from: a block raised
+// mid-build resumes to "implementing", not "active" (which would re-enter
+// planning), and it is the caller's choice which door to take. None of the
+// three carries a RequiredOperation, matching every other Task door; who may
+// return a Task is governed by the process, not the flow. "resolved" stays
+// unreachable from "implementing", "commit-reviewing" and "blocked".
 func orchTaskFlow() StateFlow {
 	return StateFlow{
 		Name:     "agent-task",
@@ -1208,6 +1229,9 @@ func orchTaskFlow() StateFlow {
 			{From: "plan-reviewing", To: "resolved", RequiredReason: true},
 			{From: "backlog", To: "resolved", RequiredReason: true},
 			{From: "active", To: "done", RequiredReason: true},
+			{From: "commit-reviewing", To: "implementing", RequiredReason: true},
+			{From: "implementing", To: "blocked", RequiredReason: true},
+			{From: "blocked", To: "implementing"},
 		},
 	}
 }

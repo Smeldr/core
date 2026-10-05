@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.108.0] - 2026-10-05
+
+### Added
+- Task state flow `agent-task` gains three transitions: `commit-reviewing` to `implementing` (reason required; a reviewer returns the Task to the implementer after a failed review), `implementing` to `blocked` (reason required; the implementer stops mid-build to ask rather than guess), and `blocked` to `implementing` (the build resumes; a block raised mid-build resumes here, not in `active`). The existing `blocked` to `active` transition is unchanged and no state or transition was removed or renamed. None of the new transitions requires an operation. `transition_item` and `get_valid_transitions` now report them. Running instances pick them up on their next boot, no migration needed. (A391)
+
+---
+
 ## [1.107.0] — 2026-10-02
 
 ### Added

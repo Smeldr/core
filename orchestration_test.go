@@ -119,8 +119,8 @@ func TestTaskFlow_definition(t *testing.T) {
 	if len(f.States) != 10 {
 		t.Errorf("state count = %d, want 10", len(f.States))
 	}
-	if len(f.Transitions) != 15 {
-		t.Errorf("transition count = %d, want 15", len(f.Transitions))
+	if len(f.Transitions) != 18 {
+		t.Errorf("transition count = %d, want 18", len(f.Transitions))
 	}
 	if got := initialState(f); got != "backlog" {
 		t.Errorf("initial = %q, want %q", got, "backlog")
@@ -270,6 +270,103 @@ func TestTaskFlow_FullCommitPath_Unchanged(t *testing.T) {
 	err := validateTransition(context.Background(), db, nil, nil, "", "", "Task", "commit-reviewing", "done", "")
 	if err != nil {
 		t.Errorf("commit-reviewing->done: want nil, got %v", err)
+	}
+}
+
+// TestTaskFlow_ReturnAndBlockDoors covers the three additive doors that let a
+// reviewer return a Task from "commit-reviewing" and an implementer stop
+// mid-build: each legal transition succeeds, the two reason-gated ones reject
+// an empty reason, and the unchanged "blocked" → "active" door still works.
+func TestTaskFlow_ReturnAndBlockDoors(t *testing.T) {
+	db := setupTaskFlowDB(t)
+	tests := []struct {
+		name     string
+		from, to string
+		reason   string
+		wantErr  error
+	}{
+		{"commit-reviewing to implementing with reason", "commit-reviewing", "implementing", "visual review failed", nil},
+		{"commit-reviewing to implementing no reason", "commit-reviewing", "implementing", "", ErrBadRequest},
+		{"implementing to blocked with reason", "implementing", "blocked", "which field name?", nil},
+		{"implementing to blocked no reason", "implementing", "blocked", "", ErrBadRequest},
+		{"blocked to implementing", "blocked", "implementing", "", nil},
+		{"blocked to active unchanged", "blocked", "active", "", nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateTransition(context.Background(), db, nil, nil, "", "", "Task", tc.from, tc.to, tc.reason)
+			if tc.wantErr == nil && err != nil {
+				t.Errorf("%s->%s: want nil, got %v", tc.from, tc.to, err)
+			}
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Errorf("%s->%s: want %v, got %v", tc.from, tc.to, tc.wantErr, err)
+			}
+		})
+	}
+}
+
+// TestTaskFlow_ReturnAndBlock_NothingElseOpened confirms the three new doors
+// are the only ones added: neighbouring transitions stay illegal even with a
+// reason supplied.
+func TestTaskFlow_ReturnAndBlock_NothingElseOpened(t *testing.T) {
+	db := setupTaskFlowDB(t)
+	illegal := [][2]string{
+		{"commit-reviewing", "active"},
+		{"commit-reviewing", "blocked"},
+		{"plan-reviewing", "blocked"},
+		{"waiting-plan", "blocked"},
+		{"blocked", "done"},
+		{"blocked", "commit-reviewing"},
+		{"blocked", "resolved"},
+		{"implementing", "resolved"},
+		{"commit-reviewing", "resolved"},
+	}
+	for _, p := range illegal {
+		t.Run(p[0]+"->"+p[1], func(t *testing.T) {
+			if err := validateTransition(context.Background(), db, nil, nil, "", "", "Task", p[0], p[1], "a reason"); err == nil {
+				t.Errorf("%s->%s: want error, got nil", p[0], p[1])
+			}
+		})
+	}
+}
+
+// TestTaskFlow_ValidTransitions_ReturnAndBlock pins what ValidTransitions (the
+// lookup behind get_valid_transitions) reports from the three affected
+// states, including which options require a reason.
+func TestTaskFlow_ValidTransitions_ReturnAndBlock(t *testing.T) {
+	db := setupTaskFlowDB(t)
+	app := &App{cfg: Config{DB: db}}
+	tests := []struct {
+		from string
+		want map[string]bool // to-state -> RequiredReason
+	}{
+		{"commit-reviewing", map[string]bool{"done": false, "implementing": true}},
+		{"implementing", map[string]bool{"commit-reviewing": false, "blocked": true}},
+		{"blocked", map[string]bool{"active": false, "implementing": false}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.from, func(t *testing.T) {
+			got, err := app.ValidTransitions(context.Background(), "Task", tc.from)
+			if err != nil {
+				t.Fatalf("ValidTransitions: %v", err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("from %s: got %d options %v, want %d", tc.from, len(got), got, len(tc.want))
+			}
+			for _, opt := range got {
+				reason, ok := tc.want[opt.ToState]
+				if !ok {
+					t.Errorf("from %s: unexpected option %q", tc.from, opt.ToState)
+					continue
+				}
+				if opt.RequiredReason != reason {
+					t.Errorf("from %s to %s: RequiredReason = %v, want %v", tc.from, opt.ToState, opt.RequiredReason, reason)
+				}
+				if opt.RequiredOperation != "" {
+					t.Errorf("from %s to %s: RequiredOperation = %q, want none", tc.from, opt.ToState, opt.RequiredOperation)
+				}
+			}
+		})
 	}
 }
 

@@ -2,7 +2,7 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.107.0 + smeldr.dev/mcp v1.43.1 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
+Last updated: v1.108.0 + smeldr.dev/mcp v1.43.1 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
 
 ## Module stability
 
@@ -340,7 +340,7 @@ MCP resource subscriptions (Beta):
 ## Orchestration types — Experimental
 
 - `Signal` content type — protocol message between pilots and the architect (signal-protocol flow: pending -> read -> acknowledged/expired). `create_signal`'s `receiver` is optional (smeldr.dev/mcp v1.38.0) — omitting it broadcasts to every subscriber; `subject_type`/`subject_id` (v1.40.1) let any Signal point at a specific item; `list_signals` gained `sender` and `limit` filters (v1.37.0), querying signals sent as well as received
-- `Task` content type — work item in the architect/pilot state machine (agent-task flow: backlog -> active -> ... -> done/deferred/resolved). `backlog` also exits directly to `deferred`/`resolved` (v1.95.1 — a Task can turn out unnecessary before anyone claims it). `active` also exits directly to `done` with a required reason (v1.105.0) — for work that concludes without a plan/commit cycle at all (a review, sign-off, investigation, or design discussion), distinct from `resolved` (the need was met by work outside this Task)
+- `Task` content type — work item in the architect/pilot state machine (agent-task flow: backlog -> active -> ... -> done/deferred/resolved). `backlog` also exits directly to `deferred`/`resolved` (v1.95.1 — a Task can turn out unnecessary before anyone claims it). `active` also exits directly to `done` with a required reason (v1.105.0) — for work that concludes without a plan/commit cycle at all (a review, sign-off, investigation, or design discussion), distinct from `resolved` (the need was met by work outside this Task). `commit-reviewing` can return to `implementing` with a required reason (v1.108.0), a reviewer sends the Task back to the implementer after a failed review; `implementing` can go to `blocked` with a required reason, the implementer stops mid-build to ask rather than guess, and `blocked` resumes to `implementing` (a block raised mid-build resumes there, not in `active`, which would re-enter planning); the existing `blocked` to `active` exit is unchanged
 - `Decision` content type — ratified architectural decision with re-evaluation cycle (governance-decision flow: proposed -> ratified -> ... -> superseded/archived). Gained a short display `Title` field independent of the Markdown `Body` (v1.93.0), and `TensionRuleID`/`TensionReason` fields recording declared tension against a Rule (v1.91.0)
 - `Amendment` content type — committed changeset linking a Task to its code implementation (amendment-lifecycle flow: scoped -> in-progress -> commit-ready -> committed -> merged/rejected)
 - `Goal` content type — work goal with priority, band, and size; linked to Decisions and Tasks via the relation graph (goal-lifecycle flow: open -> in-progress -> done/resolved, open <-> parked, parked -> resolved)
