@@ -2,13 +2,13 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.112.1 + smeldr.dev/mcp v1.44.0 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
+Last updated: v1.113.0 + smeldr.dev/mcp v1.44.0 + smeldr.dev/cli v0.17.2 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.107.0 | Stable |
+| `smeldr.dev/core` | v1.113.0 | Stable |
 | `smeldr.dev/mcp` | v1.44.0 | Stable |
 | `smeldr.dev/oauth` | v0.5.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.2.0 | Beta |
@@ -349,6 +349,7 @@ MCP resource subscriptions (Beta):
   - `ConflictReject` (`"reject"`) — returns `ErrConflict` (409) when another item is already in `ActiveState`
   - `ConflictSupersede` (`"supersede"`) — transitions the other items in `ActiveState` to `"superseded"` when an item enters it, the entering item's own write first (v1.112.1; atomic for `TransitionItemVia` and dynamic types). Since v1.111.0 it also asserts a `supersedes` edge winner -> loser (by ID, triggering actor as `created_by`) when `App.Relations` is wired and a `supersedes` kind permitting the type's pair is registered
   - Both policies fail-open: DB errors return nil and never block a transition
+- RegisterFlow now updates all state flags on existing state rows (v1.113.0), clearing `is_initial` on rows no longer initial; previously rows stayed frozen at insert. (A399)
 - State flow enforced automatically in `MCPPublish`, `MCPSchedule`, `MCPArchive`, and `DynamicTypeRepo.SetStatus`
 - `define_state_flow` MCP tool — registers a flow including `active_state` and `conflict_policy` params (Admin role)
 - `TransitionTrigger` struct — `FromState`, `ToState`, `TriggerClass`, `TriggerType`, `Config`; declared in `StateFlow.Triggers`

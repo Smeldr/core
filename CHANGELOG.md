@@ -23,6 +23,17 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.113.0] - 2026-10-05
+
+### Changed
+- `App.RegisterFlow` now updates every flag of a state row that already exists (`is_initial`, `is_terminal`, `suppresses_signals`, `locked`, `standing`). Previously, changed rows stayed frozen at first insert; now every flag that differs triggers an UPDATE. A state unchanged from registration is not rewritten (the UPDATE compares all flags via WHERE clause). Each change is logged: Warn for `locked` and `suppresses_signals` (they change what is refused or silenced), Info for the others; each line names the flow, state, flag, old and new value. (A399)
+- A guard ensures that when the registered state list names an initial state, `is_initial` is cleared on rows the list no longer mentions, preventing two rows from both being initial when the initial state moves (logged at Info). A state dropped from a flow keeps its row otherwise. (A399)
+
+### Upgrading
+- Because every flag now updates, a `define_state_flow` call that omits `locked` or `standing` resets `locked` to false and `standing` to empty on a Go-defined type. The mcp tool `define_state_flow` does not yet pass `locked` and `standing` through (tracked as a follow-up Task in the mcp repo), so process.smeldr.dev must not be redeployed with this core version until that mcp release is tagged. (A399)
+
+---
+
 ## [1.112.1] - 2026-10-05
 
 ### Fixed

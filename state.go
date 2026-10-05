@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -271,13 +272,27 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 		return fmt.Errorf("smeldr: RegisterFlow %q: update conflict policy: %w", flow.Name, err)
 	}
 
-	// Upsert states.
+	// Upsert states. Every flag updates an existing row, so a flag changed in
+	// code reaches the database (before, a changed locked or suppresses_signals
+	// was silently ignored for any state that already had a row). The WHERE
+	// keeps an unchanged row from being rewritten on every boot; the columns are
+	// NOT NULL, so plain <> is correct on SQLite and Postgres. What is about to
+	// change is read first, best effort, so it can be logged.
+	existing := existingStateFlags(ctx, db, flowID)
 	for _, s := range flow.States {
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_states(id, flow_id, name, is_initial, is_terminal, suppresses_signals, locked, standing) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (flow_id, name) DO UPDATE SET standing = EXCLUDED.standing`,
+			`INSERT INTO smeldr_states(id, flow_id, name, is_initial, is_terminal, suppresses_signals, locked, standing) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			 ON CONFLICT (flow_id, name) DO UPDATE SET is_initial = EXCLUDED.is_initial, is_terminal = EXCLUDED.is_terminal,
+			   suppresses_signals = EXCLUDED.suppresses_signals, locked = EXCLUDED.locked, standing = EXCLUDED.standing
+			 WHERE smeldr_states.is_initial <> EXCLUDED.is_initial OR smeldr_states.is_terminal <> EXCLUDED.is_terminal
+			   OR smeldr_states.suppresses_signals <> EXCLUDED.suppresses_signals OR smeldr_states.locked <> EXCLUDED.locked
+			   OR smeldr_states.standing <> EXCLUDED.standing`,
 			NewID(), flowID, s.Name, s.IsInitial, s.IsTerminal, s.SuppressesSignals, s.Locked, string(s.Standing),
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: upsert state %q: %w", flow.Name, s.Name, err)
+		}
+		if old, had := existing[s.Name]; had {
+			logStateFlagChanges(ctx, flow.Name, s, old)
 		}
 	}
 
@@ -327,7 +342,101 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 		}
 	}
 
+	if err := clearStaleInitialStates(ctx, db, flowID, flow); err != nil {
+		return fmt.Errorf("smeldr: RegisterFlow %q: %w", flow.Name, err)
+	}
+
 	return validateFlowItems(ctx, db, flow)
+}
+
+// stateFlagRow is the flags of one smeldr_states row, as read before an upsert.
+type stateFlagRow struct {
+	initial, terminal, suppresses, locked bool
+	standing                              string
+}
+
+// existingStateFlags reads the flags of every state row the flow already has,
+// keyed by state name, so [App.RegisterFlow] can log what its upsert changes.
+// Best effort: a failed or empty read yields no rows (nothing to compare, no
+// log), and never fails the registration.
+func existingStateFlags(ctx context.Context, db DB, flowID string) map[string]stateFlagRow {
+	rows, err := db.QueryContext(ctx,
+		`SELECT name, is_initial, is_terminal, suppresses_signals, locked, standing FROM smeldr_states WHERE flow_id = $1`, flowID)
+	if err != nil || rows == nil {
+		return nil
+	}
+	defer rows.Close()
+	out := map[string]stateFlagRow{}
+	for rows.Next() {
+		var name string
+		var r stateFlagRow
+		if err := rows.Scan(&name, &r.initial, &r.terminal, &r.suppresses, &r.locked, &r.standing); err != nil {
+			return out
+		}
+		out[name] = r
+	}
+	return out
+}
+
+// logStateFlagChanges logs, for a state whose row already existed, each flag
+// the registration changed. A change to locked or suppresses_signals alters live
+// behaviour (content edits refused, After* hooks skipped) so it is a Warn; the
+// others are Info. A flag change on a live instance is never silent, and the
+// first boot after an upgrade shows exactly which rows moved.
+func logStateFlagChanges(ctx context.Context, flow string, s State, old stateFlagRow) {
+	log := func(level slog.Level, flag string, from, to any) {
+		slog.Log(ctx, level, "smeldr: RegisterFlow: state flag changed on an existing row",
+			"flow", flow, "state", s.Name, "flag", flag, "from", from, "to", to)
+	}
+	if old.locked != s.Locked {
+		log(slog.LevelWarn, "locked", old.locked, s.Locked)
+	}
+	if old.suppresses != s.SuppressesSignals {
+		log(slog.LevelWarn, "suppresses_signals", old.suppresses, s.SuppressesSignals)
+	}
+	if old.initial != s.IsInitial {
+		log(slog.LevelInfo, "is_initial", old.initial, s.IsInitial)
+	}
+	if old.terminal != s.IsTerminal {
+		log(slog.LevelInfo, "is_terminal", old.terminal, s.IsTerminal)
+	}
+	if Standing(old.standing) != s.Standing {
+		log(slog.LevelInfo, "standing", old.standing, string(s.Standing))
+	}
+}
+
+// clearStaleInitialStates keeps a flow at one initial state: a state dropped
+// from the flow keeps its row (nothing deletes states, items may still sit in
+// it), so when the registered list names an initial state, is_initial is
+// cleared on every row of the flow the list does not name. Without it, moving
+// the initial state to another one while removing the old from the list would
+// leave two rows initial and [defaultInitialState] would pick either. A flow
+// that names no initial state is left alone.
+func clearStaleInitialStates(ctx context.Context, db DB, flowID string, flow StateFlow) error {
+	hasInitial := false
+	args := []any{flowID}
+	placeholders := make([]string, 0, len(flow.States))
+	for _, s := range flow.States {
+		hasInitial = hasInitial || s.IsInitial
+		args = append(args, s.Name)
+		placeholders = append(placeholders, "$"+strconv.Itoa(len(args)))
+	}
+	if !hasInitial {
+		return nil
+	}
+	res, err := db.ExecContext(ctx,
+		`UPDATE smeldr_states SET is_initial = FALSE WHERE flow_id = $1 AND is_initial = TRUE AND name NOT IN (`+strings.Join(placeholders, ", ")+`)`,
+		args...)
+	if err != nil {
+		return fmt.Errorf("clear stale initial states: %w", err)
+	}
+	if res != nil {
+		if n, raErr := res.RowsAffected(); raErr == nil && n > 0 {
+			slog.InfoContext(ctx, "smeldr: RegisterFlow: cleared is_initial on states no longer in the flow",
+				"flow", flow.Name, "rows", n)
+		}
+	}
+	return nil
 }
 
 // EnsureStateLockedColumn adds State.Locked's locked column to smeldr_states on
