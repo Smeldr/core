@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.109.0 · smeldr.dev/mcp v1.43.1 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.109.1 · smeldr.dev/mcp v1.43.1 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -419,7 +419,7 @@ With `App.Provenance` wired, every successful state change through `transition_i
 
 - **Not backfilled.** Transitions made before the upgrade have no record.
 - **Nothing is recorded unless provenance is enabled.** The example server wires `App.Provenance` only when `ENABLE_PROVENANCE` is set. Check that before expecting history.
-- The older methods record an empty surface; `TransitionItemVia` names it (`mcp`, `http`, `cli`, `trigger`). The status endpoint records `http` but no actor.
+- The older methods record an empty surface; `TransitionItemVia` names it (`mcp`, `http`, `cli`, `trigger`). The status endpoint records `http` and, since v1.109.1, the authenticated actor. v1.109.1 is a security fix (A393): that endpoint used to pass no actor to the transition gate, so any Editor could perform a non-Strict `RequiredOperation` transition without the operation; it now returns 403 without it (400 when a reason is required).
 - Readers see the actor only for transitions that required an operation under `Strict` (`SubjectProvenance`), so a Task state change reads as verb, states and date; a Decision ratification also shows who did it.
 - `CreateProvenanceTable` also indexes `(subject_type, subject_id)`; add that index by hand if you created the table from your own DDL.
 

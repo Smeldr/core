@@ -3361,8 +3361,9 @@ name). Before this these paths recorded only `last_actor`.
   the signal bus.
 - **No backfill.** Transitions made before the instance upgraded have no record and none can be
   reconstructed.
-- `POST /_content/{type}/{id}/status` records surface `"http"` but no actor: it passes the plain
-  request context.
+- `POST /_content/{type}/{id}/status` records surface `"http"` and the authenticated caller as
+  actor (v1.109.1; v1.109.0 recorded no actor there because the handler passed the plain request
+  context).
 - Not yet recorded: the `ConflictSupersede` side effect on the superseded item, and the Signal
   expiry sweep.
 - `ENABLE_PROVENANCE` (the example server's switch for `App.Provenance`) must be set, otherwise
@@ -4239,7 +4240,7 @@ Call this once at startup. It:
 | `GET` | `/_content/{type}` | Editor+ | List all items (all statuses) |
 | `GET` | `/_content/{type}/{id}` | Editor+ | Get item by ID |
 | `PATCH` | `/_content/{type}/{id}` | Editor+ | Update fields (PATCH semantics) |
-| `POST` | `/_content/{type}/{id}/status` | Editor+ | Set status |
+| `POST` | `/_content/{type}/{id}/status` | Editor+ | Set status; enforces the transition's `RequiredOperation` as the authenticated caller (403 without it) and returns 400 when the transition requires a reason (v1.109.1) |
 
 `{type}` is the `type_name` (e.g. `recipe`), not the URL prefix.
 

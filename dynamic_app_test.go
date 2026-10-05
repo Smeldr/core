@@ -711,7 +711,8 @@ func TestAdminSetStatus_HappyPath(t *testing.T) {
 }
 
 // TestAdminSetStatus_RecordsProvenanceWithHTTPSurface proves the status
-// endpoint writes a provenance record naming itself as the surface.
+// endpoint writes a provenance record naming itself as the surface and the
+// authenticated caller as the actor, and stamps last_actor.
 func TestAdminSetStatus_RecordsProvenanceWithHTTPSurface(t *testing.T) {
 	db := openDynDB(t)
 	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
@@ -746,15 +747,103 @@ func TestAdminSetStatus_RecordsProvenanceWithHTTPSurface(t *testing.T) {
 	if r.Verb != "transition" || r.FromState != "draft" || r.ToState != "published" {
 		t.Errorf("verb/from/to = %s/%s/%s, want transition/draft/published", r.Verb, r.FromState, r.ToState)
 	}
-	if r.Surface != "http" {
-		t.Errorf("surface = %q, want http", r.Surface)
+	if r.Surface != "http" || r.ActorID != "u1" || r.ActorKind != "human" {
+		t.Errorf("surface/actor/kind = %q/%q/%q, want http/u1/human", r.Surface, r.ActorID, r.ActorKind)
 	}
-	// The handler authenticates the caller but hands SetStatus the plain
-	// request context, not a smeldr.Context, so the actor is not derivable on
-	// this path (the same reason last_actor is empty here). Pinned as it is
-	// today; attributing it is a separate change, see the plan's follow-up.
-	if r.ActorID != "" || r.ActorKind != "" {
-		t.Errorf("actor/kind = %q/%q, want empty on this path", r.ActorID, r.ActorKind)
+	var lastActor string
+	if err := db.QueryRowContext(t.Context(),
+		"SELECT last_actor FROM smeldr_dynamic_content WHERE id = ?", node.ID).Scan(&lastActor); err != nil {
+		t.Fatalf("read last_actor: %v", err)
+	}
+	if lastActor != "u1" {
+		t.Errorf("last_actor = %q, want u1", lastActor)
+	}
+}
+
+// TestAdminSetStatus_OperationGate pins the authenticated actor reaching the
+// transition gate. Before the fix the handler passed the plain request
+// context, so validateTransition saw an empty actor: a non-Strict
+// RequiredOperation was skipped (any Editor got 200 with no grant), and a
+// Strict one could never succeed and surfaced as 500.
+func TestAdminSetStatus_OperationGate(t *testing.T) {
+	tests := []struct {
+		name     string
+		gate     string // "none" | "operation" | "strict" | "reason"
+		granted  bool
+		wantCode int
+	}{
+		{"no gate, no grant", "none", false, http.StatusOK},
+		{"operation gate, no grant is forbidden", "operation", false, http.StatusForbidden},
+		{"operation gate, with grant", "operation", true, http.StatusOK},
+		{"strict gate, no grant is forbidden not 500", "strict", false, http.StatusForbidden},
+		{"strict gate, with grant", "strict", true, http.StatusOK},
+		{"required reason, none supplied is bad request not 500", "reason", false, http.StatusBadRequest},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openDynDB(t)
+			app := smeldr.New(smeldr.MustConfig(smeldr.Config{
+				BaseURL: "https://example.com",
+				Secret:  []byte(dynTestSecret),
+				DB:      db,
+			}))
+			rs := smeldr.NewRoleStore(db)
+			if err := app.Governance(rs); err != nil {
+				t.Fatalf("Governance: %v", err)
+			}
+			app.DefineContentType(t.Context(), recipeSchema())
+			if tc.gate != "none" {
+				tr := smeldr.Transition{From: "draft", To: "published"}
+				switch tc.gate {
+				case "operation":
+					tr.RequiredOperation = "approve"
+				case "strict":
+					tr.RequiredOperation, tr.Strict = "approve", true
+				case "reason":
+					tr.RequiredReason = true
+				}
+				if err := app.RegisterFlow(smeldr.StateFlow{
+					Name: "recipe-gated", TypeName: "recipe",
+					States:      []smeldr.State{{Name: "draft", IsInitial: true}, {Name: "published"}},
+					Transitions: []smeldr.Transition{tr},
+				}); err != nil {
+					t.Fatalf("RegisterFlow: %v", err)
+				}
+			}
+			if tc.granted {
+				if err := rs.DefineRole(t.Context(), smeldr.RoleDefinition{
+					Name: "recipe-approver", Operations: []string{"approve"}, ScopeMode: smeldr.ScopeGlobal,
+				}); err != nil {
+					t.Fatalf("DefineRole: %v", err)
+				}
+				// "u1" is the user ID bearerToken signs, i.e. the actor the gate sees.
+				if _, err := rs.Grant(t.Context(), smeldr.RoleGrant{TokenID: "u1", RoleName: "recipe-approver"}); err != nil {
+					t.Fatalf("Grant: %v", err)
+				}
+			}
+			repo, _ := app.DynamicContentRepo("recipe")
+			node, err := repo.CreateDraft(t.Context(), map[string]any{"Title": "X"})
+			if err != nil {
+				t.Fatalf("CreateDraft: %v", err)
+			}
+
+			w := dynPost(dynHandler(t, app), fmt.Sprintf("/_content/recipe/%s/status", node.ID),
+				map[string]any{"status": "published"}, bearerToken(t, smeldr.Editor))
+			if w.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d, body: %s", w.Code, tc.wantCode, w.Body.String())
+			}
+			got, err := repo.GetByID(t.Context(), node.ID)
+			if err != nil {
+				t.Fatalf("GetByID: %v", err)
+			}
+			wantStatus := smeldr.Draft
+			if tc.wantCode == http.StatusOK {
+				wantStatus = smeldr.Published
+			}
+			if got.Status != wantStatus {
+				t.Errorf("stored status = %q, want %q (a rejected request must not transition)", got.Status, wantStatus)
+			}
+		})
 	}
 }
 

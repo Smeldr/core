@@ -842,11 +842,21 @@ func newSetStatusHandler(a *App, auth AuthFunc) http.Handler {
 			return
 		}
 		st := Status(body.Status)
-		if err := repo.setStatusVia(r.Context(), id, st, "", surfaceHTTP); err != nil {
+		// This handler authenticates for itself rather than sitting behind the
+		// Authenticate middleware, so r.Context() carries no user. Store the
+		// authenticated user the way that middleware does and build the
+		// request's Context from it: without it validateTransition sees an empty
+		// actor, which it treats as pre-authorized unless the transition is
+		// Strict, so any Editor could perform a non-Strict operation-gated
+		// transition with no grant, a Strict one could never succeed, and
+		// last_actor and the provenance record carried no actor.
+		r = r.WithContext(context.WithValue(r.Context(), userContextKey, user))
+		ctx := ContextFrom(w, r)
+		if err := repo.setStatusVia(ctx, id, st, "", surfaceHTTP); err != nil {
 			switch {
 			case errors.Is(err, ErrNotFound):
 				WriteError(w, r, ErrNotFound)
-			case errors.Is(err, ErrConflict):
+			case errors.Is(err, ErrConflict), errors.Is(err, ErrForbidden), errors.Is(err, ErrBadRequest):
 				WriteError(w, r, err)
 			default:
 				slog.WarnContext(r.Context(), "smeldr: set_content_status", "id", id, "err", err)

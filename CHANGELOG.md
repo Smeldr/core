@@ -23,6 +23,15 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.109.1] - 2026-10-05
+
+### Fixed
+- **Security fix:** `POST /_content/{type}/{id}/status` did not pass the authenticated caller into the transition check, so the transition's `RequiredOperation` gate saw an empty actor. For a non-Strict `RequiredOperation` transition, any caller with the Editor role could perform it without holding the operation (HTTP 200, transition performed). The endpoint now passes the authenticated user, so the operation is enforced exactly as on every other transition path: **an Editor without the operation now gets HTTP 403 where it previously got 200**. Flows with no operation gate are unchanged. (A393)
+- The same endpoint could never succeed for a `Strict` operation-gated transition, even for an actor who holds the operation, and reported the denial as HTTP 500. It now succeeds (200) for an actor who holds the operation and returns 403 otherwise. (A393)
+- The endpoint now maps `ErrForbidden` to HTTP 403 and `ErrBadRequest` to HTTP 400 instead of 500; for example a transition that requires a reason (the endpoint has no way to supply one) now returns 400. As a consequence its `last_actor` and its provenance record now carry the authenticated actor (v1.109.0 recorded no actor on this endpoint). (A393)
+
+---
+
 ## [1.109.0] - 2026-10-05
 
 ### Added
