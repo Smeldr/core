@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.115.0 · smeldr.dev/mcp v1.46.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.115.0 · smeldr.dev/mcp v1.46.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.18.0 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -663,6 +663,10 @@ smeldr-cli audit list --actor <actor-id>
 # — dynamic content (snake_case type_name) or a compiled type (e.g. Decision, Task, Signal)
 smeldr-cli transition Decision <slug> --to ratified          # e.g. Decision ratification
 smeldr-cli transition <type_name> <slug> --to <state> --reason "<text>"  # when the gate requires a reason
+
+# Standing (D100, smeldr-cli v0.18.0+, needs mcp v1.46.0+ on the server): holds, ceased, none, or "no standing for this type"
+# (rarely also a failed flow lookup on the server). "<type> get/list" read REST and do not show standing.
+smeldr-cli standing Decision <slug> [--json]                   # Editor
 
 # Block system (T32, smeldr-cli v0.10.0+) — Fields keys are case-sensitive PascalCase
 smeldr-cli block node create --type hero --field Headline="Welcome"   # Author
