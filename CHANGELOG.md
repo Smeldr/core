@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.115.1] - 2026-10-06
+
+### Fixed
+- Two simultaneous transitions of one type into its `ActiveState` could both pass the conflict policy's reads before either wrote: under `ConflictReject` both were let through, under `ConflictSupersede` both superseded the old item and both became active, leaving two active items. The policy's reads, the entering item's write and the losers' writes now run under one lock per type, so the second winner sees the first one committed: it is rejected under `ConflictReject` and supersedes it under `ConflictSupersede`. The lock covers `App.TransitionItemVia`, `DynamicTypeRepo.SetStatus` and the three `Module` lifecycle methods (`MCPPublish`, `MCPSchedule`, `MCPArchive`). A nested transition of the same type made under the context the call hands on (a hook, say) is not blocked by its own caller. If the lock cannot be had within 10 seconds the transition goes ahead unlocked and an Error is logged (both policies stay fail-open); a cancelled context while waiting returns an error and nothing is written. (A405)
+- Known limits, stated plainly: the lock is in-process, so two processes writing the same database are not serialised; and the conflict policy is currently enforced on SQLite only, on any other database no policy is applied at all (a tracked follow-up). (A405)
+
+---
+
 ## [1.115.0] - 2026-10-06
 
 ### Added

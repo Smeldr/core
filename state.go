@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -871,32 +872,140 @@ func isStateLocked(ctx context.Context, db DB, typeName, statusName string) bool
 // decided by reads alone before anything is written. It exists so the winning
 // transition's own write can come first and the losers' writes and every side
 // effect (provenance, standing, the supersedes edge) after it, instead of the
-// other way round (task_plan item-68). A nil *conflictPlan means there is
-// nothing to do, and every method is safe on it.
+// other way round (task_plan item-68).
+//
+// It also carries the per-type lock that serialises transitions into the active
+// state within this process (task_plan item-74): the caller must `defer
+// plan.release()` right after [planConflict] returns it, and pass the context
+// through [conflictPlan.holding] so a nested transition of the same type under the
+// same call does not wait on its own caller. A nil *conflictPlan means there is
+// nothing to do, and every method is safe on it; a plan with no losers is what a
+// passed reject check and an empty supersede both return, so the lock is held
+// until release either way.
 type conflictPlan struct {
 	typeName, activeState, newItemID, table string
 	isDynamic                               bool
 	losers                                  []string
+	unlock                                  func()
+	locked                                  bool
+}
+
+// conflictLocks holds one single-slot channel per type name: transitions into
+// that type's active state take the slot for the duration of the plan, the
+// winner's write and the losers' writes, so two simultaneous winners cannot both
+// pass the policy's reads before either writes. In-process only: two processes
+// on one database are not serialised (documented in REFERENCE).
+var conflictLocks sync.Map
+
+// conflictLockWait bounds how long a transition waits for the lock. A package
+// variable so a test can shorten it. On expiry the transition goes ahead
+// unlocked and logs at Error: both policies stay fail-open, a transition is never
+// blocked forever.
+var conflictLockWait = 10 * time.Second
+
+// conflictHeldKey is the context key under which the type names whose conflict
+// lock the current call chain already holds are carried.
+type conflictHeldKey struct{}
+
+func conflictHeld(ctx context.Context, typeName string) bool {
+	held, _ := ctx.Value(conflictHeldKey{}).([]string)
+	return slices.Contains(held, typeName)
+}
+
+// heldContext is a [Context] that also answers the conflict-held key, so the
+// hooks and the module save a plan hands its context to keep every [Context]
+// method.
+type heldContext struct {
+	Context
+	held []string
+}
+
+func (h *heldContext) Value(key any) any {
+	if _, ok := key.(conflictHeldKey); ok {
+		return h.held
+	}
+	return h.Context.Value(key)
+}
+
+// acquireConflictLock takes typeName's lock, waiting at most [conflictLockWait].
+// Re-entrant per context: when ctx already carries typeName as held, it returns
+// at once with held false (the caller's own call chain is already serialised).
+// held reports whether this call took the lock. A cancelled ctx is returned as
+// [ErrInternal]; a timeout is fail-open (logged, unlocked, held false).
+func acquireConflictLock(ctx context.Context, typeName string) (release func(), held bool, err error) {
+	if conflictHeld(ctx, typeName) {
+		return func() {}, false, nil
+	}
+	v, _ := conflictLocks.LoadOrStore(typeName, make(chan struct{}, 1))
+	ch := v.(chan struct{})
+	timer := time.NewTimer(conflictLockWait)
+	defer timer.Stop()
+	select {
+	case ch <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-ch }) }, true, nil
+	case <-ctx.Done():
+		return nil, false, fmt.Errorf("%w: conflict policy: waiting for the %q lock: %s", ErrInternal, typeName, ctx.Err())
+	case <-timer.C:
+		slog.ErrorContext(ctx, "smeldr: conflict policy: lock wait timed out, proceeding unlocked, a concurrent winner may not be seen",
+			"type", typeName, "wait", conflictLockWait)
+		return func() {}, false, nil
+	}
+}
+
+// release gives up the plan's lock. Safe on nil and safe to call twice.
+func (p *conflictPlan) release() {
+	if p == nil || p.unlock == nil {
+		return
+	}
+	p.unlock()
+}
+
+// holding returns ctx marked as holding this plan's lock, so a nested transition
+// of the same type under it proceeds without waiting. ctx comes back unchanged
+// when the plan did not take the lock itself (nil, unlocked, or already held).
+func (p *conflictPlan) holding(ctx context.Context) context.Context {
+	if p == nil || !p.locked {
+		return ctx
+	}
+	held, _ := ctx.Value(conflictHeldKey{}).([]string)
+	held = append(slices.Clone(held), p.typeName)
+	if c, ok := ctx.(Context); ok {
+		return &heldContext{Context: c, held: held}
+	}
+	return context.WithValue(ctx, conflictHeldKey{}, held)
+}
+
+// holdingContext is [conflictPlan.holding] for a caller that holds a [Context]
+// and needs one back.
+func (p *conflictPlan) holdingContext(ctx Context) Context {
+	if c, ok := p.holding(ctx).(Context); ok {
+		return c
+	}
+	return ctx
 }
 
 // planConflict enforces the uniqueness invariant declared by
-// [StateFlow.ActiveState] and [StateFlow.ConflictPolicy] with reads only. It
-// must be called after [validateTransition] succeeds and before the winning
-// transition's own write; it never writes.
+// [StateFlow.ActiveState] and [StateFlow.ConflictPolicy] with reads only, under
+// the type's lock. It must be called after [validateTransition] succeeds and
+// before the winning transition's own write; it never writes. The caller must
+// call release on the plan it gets back.
 //
-// It returns (nil, nil), fail-open and nothing to do, when:
+// It returns (nil, nil), fail-open and nothing to do, and takes no lock, when:
 //   - db is nil
 //   - the database is not SQLite
 //   - no flow is registered for typeName
 //   - ActiveState is empty or ConflictPolicy is empty
 //   - toState does not equal ActiveState
-//   - the policy is [ConflictSupersede] and there is no other item in ActiveState
-//     (the winner itself is never its own loser), or the lookup fails
+//
+// Otherwise it takes the lock and returns a plan, whose losers are empty when
+// the reject check passed, when there is no other item in ActiveState (the
+// winner itself is never its own loser) or when a lookup fails (fail-open).
 //
 // Under [ConflictReject], or [ConflictSupersede] with no active -> superseded
 // transition in the flow (it falls back to reject), it returns [ErrConflict]
-// when another item is already in ActiveState. newItemID is the ID of the item
-// being transitioned into ActiveState.
+// (and has released the lock) when another item is already in ActiveState.
+// newItemID is the ID of the item being transitioned into ActiveState.
 func planConflict(ctx context.Context, db DB, typeName, toState, newItemID string) (*conflictPlan, error) {
 	if db == nil {
 		return nil, nil
@@ -918,17 +1027,28 @@ func planConflict(ctx context.Context, db DB, typeName, toState, newItemID strin
 		return nil, nil
 	}
 
+	// The policy applies: serialise with every other transition of this type into
+	// the active state from here, before the reads that decide the outcome.
+	unlock, locked, err := acquireConflictLock(ctx, typeName)
+	if err != nil {
+		return nil, err
+	}
+	plan := &conflictPlan{
+		typeName: typeName, activeState: activeState, newItemID: newItemID,
+		unlock: unlock, locked: locked,
+	}
+
 	// Detect whether items live in a typed table or in smeldr_dynamic_content.
 	// Reuses resolveItemTable rather than re-probing sqlite_master directly —
 	// its own probe order (smeldr_<snake>s, then <snake>s, then
 	// smeldr_dynamic_content) is what every other item-resolution path in
 	// this package already relies on (T229).
-	staticTable := resolveItemTable(ctx, db, typeName)
-	isDynamic := staticTable == "smeldr_dynamic_content"
+	plan.table = resolveItemTable(ctx, db, typeName)
+	plan.isDynamic = plan.table == "smeldr_dynamic_content"
 
 	switch ConflictPolicy(conflictPolicy) {
 	case ConflictReject:
-		return nil, conflictRejectCheck(ctx, db, typeName, activeState, staticTable, isDynamic)
+		return plan.rejectOrPass(ctx, db)
 
 	case ConflictSupersede:
 		// Check whether activeState → superseded transition exists.
@@ -936,7 +1056,7 @@ func planConflict(ctx context.Context, db DB, typeName, toState, newItemID strin
 		if err := db.QueryRowContext(ctx,
 			`SELECT id FROM smeldr_state_flows WHERE type_name = $1 LIMIT 1`, typeName,
 		).Scan(&flowID); err != nil {
-			return nil, nil // fail-open
+			return plan, nil // fail-open
 		}
 		var transCount int
 		if err := db.QueryRowContext(ctx,
@@ -944,27 +1064,31 @@ func planConflict(ctx context.Context, db DB, typeName, toState, newItemID strin
 			flowID, activeState,
 		).Scan(&transCount); err != nil || transCount == 0 {
 			// No superseded transition — fall back to reject behaviour.
-			return nil, conflictRejectCheck(ctx, db, typeName, activeState, staticTable, isDynamic)
+			return plan.rejectOrPass(ctx, db)
 		}
-		ids, err := conflictIDs(ctx, db, typeName, activeState, staticTable, isDynamic)
+		ids, err := conflictIDs(ctx, db, typeName, activeState, plan.table, plan.isDynamic)
 		if err != nil {
-			return nil, nil // fail-open
+			return plan, nil // fail-open
 		}
-		var losers []string
 		for _, id := range ids {
 			if id != newItemID {
-				losers = append(losers, id)
+				plan.losers = append(plan.losers, id)
 			}
 		}
-		if len(losers) == 0 {
-			return nil, nil
-		}
-		return &conflictPlan{
-			typeName: typeName, activeState: activeState, newItemID: newItemID,
-			table: staticTable, isDynamic: isDynamic, losers: losers,
-		}, nil
+		return plan, nil
 	}
-	return nil, nil
+	return plan, nil
+}
+
+// rejectOrPass runs the reject check for the plan: ErrConflict (after releasing
+// the lock) when another item is already in the active state, the plan itself,
+// still holding the lock, when not.
+func (p *conflictPlan) rejectOrPass(ctx context.Context, db DB) (*conflictPlan, error) {
+	if err := conflictRejectCheck(ctx, db, p.typeName, p.activeState, p.table, p.isDynamic); err != nil {
+		p.release()
+		return nil, err
+	}
+	return p, nil
 }
 
 // conflictRejectCheck returns ErrConflict when any item of typeName is already
@@ -1270,6 +1394,8 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	if err != nil {
 		return nil, err
 	}
+	defer plan.release()
+	ctx = plan.holding(ctx)
 
 	now := time.Now().UTC()
 	exec, commit, rollback, err := conflictTx(ctx, db)

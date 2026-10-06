@@ -290,6 +290,8 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 	if err != nil {
 		return err
 	}
+	defer plan.release()
+	ctx = plan.holding(ctx)
 	now := time.Now().UTC()
 	publishedAt := node.PublishedAt
 	if status == Published && publishedAt.IsZero() {

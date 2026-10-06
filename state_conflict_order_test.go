@@ -314,14 +314,17 @@ func TestPlanConflict_WinnerNeverItsOwnLoser(t *testing.T) {
 	if plan == nil || len(plan.losers) != 1 || plan.losers[0] != "other" {
 		t.Fatalf("plan = %+v, want exactly the other item as the loser", plan)
 	}
+	plan.release()
 
 	// Only the winner active: nothing to do.
 	db2 := newMigratedDB(t)
 	createConflictItemTable(t, db2, true, ConflictSupersede)
 	insertConflictItem(t, db2, "w", "published")
-	if plan, err := planConflict(context.Background(), db2, "ConflictType", "published", "w"); err != nil || plan != nil {
-		t.Errorf("plan = %+v, err = %v, want nil, nil", plan, err)
+	plan2, err := planConflict(context.Background(), db2, "ConflictType", "published", "w")
+	if err != nil || plan2 == nil || len(plan2.losers) != 0 {
+		t.Errorf("plan = %+v, err = %v, want a plan with no losers", plan2, err)
 	}
+	plan2.release()
 }
 
 // TestConflictPlan_NilIsSafe: every method of a nil plan is a no-op.

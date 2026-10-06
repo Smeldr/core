@@ -2663,6 +2663,8 @@ func (m *Module[T]) MCPPublish(ctx Context, slug, reason string) error {
 	if err != nil {
 		return err
 	}
+	defer plan.release()
+	ctx = plan.holdingContext(ctx)
 	setNodeStatus(item, Published)
 	setNodeTime(item, "PublishedAt", time.Now().UTC())
 	if err := m.repo.Save(ctx, item); err != nil {
@@ -2699,6 +2701,8 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time, reason s
 	if err != nil {
 		return err
 	}
+	defer plan.release()
+	ctx = plan.holdingContext(ctx)
 	setNodeStatus(item, Scheduled)
 	atCopy := at
 	setNodeTimePtr(item, "ScheduledAt", &atCopy)
@@ -2729,6 +2733,8 @@ func (m *Module[T]) MCPArchive(ctx Context, slug, reason string) error {
 	if err != nil {
 		return err
 	}
+	defer plan.release()
+	ctx = plan.holdingContext(ctx)
 	setNodeStatus(item, Archived)
 	if err := m.repo.Save(ctx, item); err != nil {
 		return err

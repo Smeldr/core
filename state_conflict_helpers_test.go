@@ -13,6 +13,7 @@ func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, prov Pro
 	if err != nil {
 		return err
 	}
+	defer plan.release()
 	plan.run(ctx, db, rs, prov, surface)
 	return nil
 }
