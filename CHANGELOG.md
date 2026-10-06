@@ -23,6 +23,13 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.115.0] - 2026-10-06
+
+### Added
+- Seeded tool policy row `get_item_standing` with required operation `read`, so the smeldr.dev/mcp tool of the same name (mcp v1.46.0) is callable when governance is wired; an existing instance gets the row at its next start. (A402)
+
+---
+
 ## [1.114.0] - 2026-10-06
 
 ### Added

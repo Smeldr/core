@@ -416,6 +416,11 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// workspace-delegate-region-v1.md §0 F4, 01a0e3f9-5). Read-only;
 		// same "not module-generated" reason as the rows above.
 		{"list_roles", "read"},
+		// Read one item's standing (Editor+, smeldr.dev/mcp v1.46.0, D100). Same
+		// "not module-generated" reason as the rows above: get_item_standing reads
+		// core's standing table through TypeHasStanding/ItemStandings, no MCPModule
+		// backs it, so without this row it falls closed for every caller.
+		{"get_item_standing", "read"},
 		// Batch-resolve JWT User.ID values to token Names (Author+,
 		// smeldr.dev/mcp, mcp-lookup-token-names, Article I
 		// explainability). Same "not module-generated" reason as the
