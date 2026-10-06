@@ -98,7 +98,7 @@ jobs:
         run: go vet ./...
 
   integration:
-    name: Test (Postgres: state machine and pgx)
+    name: "Test (Postgres: state machine and pgx)"
     runs-on: ubuntu-latest
 
     services:
@@ -127,7 +127,7 @@ jobs:
         working-directory: pgx
         run: go mod edit -replace smeldr.dev/core=../
 
-      - name: Run the Postgres integration tests (state machine, governance, repository parity)
+      - name: "Run the Postgres integration tests (state machine, governance, repository parity)"
         working-directory: pgx
         env:
           DATABASE_URL: postgres://forge:forge@localhost:5432/forgetest
