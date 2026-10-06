@@ -1606,23 +1606,17 @@ func (m *Module[T]) processScheduled(ctx Context, now time.Time) (int, *time.Tim
 		}
 
 		// Due — transition to Published.
-		setNodeStatus(item, Published)
-		setNodeTime(item, "PublishedAt", now)
-		setNodeTimePtr(item, "ScheduledAt", nil)
-
-		if err := m.repo.Save(ctx.Request().Context(), item); err != nil {
-			slog.Warn("smeldr: scheduler failed to publish item; skipping",
-				"id", nodeIDOf(item), "err", err)
-			continue
+		switch m.publishDue(ctx, item, now) {
+		case dueBlocked:
+			// Not published and not dropped: it stays Scheduled and is tried
+			// again on the next tick. The timer must not be set from its own
+			// (past) ScheduledAt, which would make nextDur spin at 1 ms.
+			if retry := now.Add(scheduledRetryInterval); next == nil || retry.Before(*next) {
+				next = &retry
+			}
+		case duePublished:
+			published++
 		}
-		// A240: fire any registered async TransitionTrigger for this
-		// transition. processScheduled is system-initiated (skips
-		// validateTransition entirely, unlike the other four transition
-		// sites) but a registered trigger doesn't care who initiated the
-		// transition, only that it happened.
-		fireAsyncTriggers(ctx.Request().Context(), m.db, m.contentTypeName, string(Scheduled), string(Published), nodeIDOf(item))
-		m.notifyAfter(ctx, AfterPublish, "scheduled", surfaceTrigger, "", item)
-		published++
 	}
 
 	if published > 0 {
@@ -1630,6 +1624,69 @@ func (m *Module[T]) processScheduled(ctx Context, now time.Time) (int, *time.Tim
 		m.triggerRebuild()
 	}
 	return published, next, nil
+}
+
+// scheduledRetryInterval is how long the scheduler waits before trying a due
+// item again after the conflict policy blocked it.
+const scheduledRetryInterval = 60 * time.Second
+
+// scheduledBlockedLogged remembers which due items the conflict policy has
+// already blocked, so the Warn is written once per item and not on every tick.
+// Keyed type/id; cleared when the item finally publishes.
+var scheduledBlockedLogged sync.Map
+
+type dueOutcome int
+
+const (
+	dueSkipped   dueOutcome = iota // the repository failed; logged, retried next tick
+	duePublished                   // saved as Published
+	dueBlocked                     // the conflict policy rejected it; stays Scheduled
+)
+
+// publishDue moves one due item from Scheduled to Published under the conflict
+// policy (task_plan item-75). The per-type lock is taken and released inside this
+// call, never across the whole tick. A reject leaves the item Scheduled (it
+// publishes the moment the active item leaves the state, so it can wait past its
+// time with no end) and is logged once at Warn; under supersede the losers follow
+// the winner's save.
+func (m *Module[T]) publishDue(ctx Context, item T, now time.Time) dueOutcome {
+	id := nodeIDOf(item)
+	plan, err := planConflict(ctx, m.db, m.contentTypeName, string(Published), id)
+	if err != nil {
+		key := m.contentTypeName + "/" + id
+		if errors.Is(err, ErrConflict) {
+			if _, seen := scheduledBlockedLogged.LoadOrStore(key, struct{}{}); !seen {
+				slog.Warn("smeldr: scheduler: scheduled item blocked by the conflict policy: it stays scheduled, past its time, and is retried every tick until the active item leaves the state",
+					"type", m.contentTypeName, "id", id, "err", err)
+			}
+			return dueBlocked
+		}
+		slog.Warn("smeldr: scheduler: conflict policy check failed; item stays scheduled and is retried on the next tick",
+			"type", m.contentTypeName, "id", id, "err", err)
+		return dueBlocked
+	}
+	defer plan.release()
+	ctx = plan.holdingContext(ctx)
+
+	setNodeStatus(item, Published)
+	setNodeTime(item, "PublishedAt", now)
+	setNodeTimePtr(item, "ScheduledAt", nil)
+
+	if err := m.repo.Save(ctx.Request().Context(), item); err != nil {
+		slog.Warn("smeldr: scheduler failed to publish item; skipping",
+			"id", id, "err", err)
+		return dueSkipped
+	}
+	plan.run(ctx, m.db, m.relationStore, m.provenanceStore, surfaceTrigger)
+	scheduledBlockedLogged.Delete(m.contentTypeName + "/" + id)
+	// A240: fire any registered async TransitionTrigger for this
+	// transition. processScheduled is system-initiated (skips
+	// validateTransition entirely, unlike the other four transition
+	// sites) but a registered trigger doesn't care who initiated the
+	// transition, only that it happened.
+	fireAsyncTriggers(ctx.Request().Context(), m.db, m.contentTypeName, string(Scheduled), string(Published), id)
+	m.notifyAfter(ctx, AfterPublish, "scheduled", surfaceTrigger, "", item)
+	return duePublished
 }
 
 // — newItemPtr allocates a *struct for T via reflection. ——————————————————
@@ -2030,10 +2087,27 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 		setNodeTime(item, "PublishedAt", time.Now().UTC())
 	}
 
+	// The conflict policy (task_plan item-75): a PUT that changes status into the
+	// flow's ActiveState is decided with reads before anything is saved, so a
+	// reject is a 409 with nothing written; under supersede the losers follow the
+	// winner's save (plan.run), like the MCP lifecycle methods.
+	var plan *conflictPlan
+	if prevStatus != newStatus {
+		var err error
+		plan, err = planConflict(ctx, m.db, m.contentTypeName, string(newStatus), nodeIDOf(existing))
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		defer plan.release()
+		ctx = plan.holdingContext(ctx)
+	}
+
 	if err := m.repo.Save(ctx, item); err != nil {
 		WriteError(w, r, err)
 		return
 	}
+	plan.run(ctx, m.db, m.relationStore, m.provenanceStore, surfaceHTTP)
 	if m.syncSaveHook != nil {
 		if err := m.syncSaveHook(ctx, m.contentTypeName, nodeIDOf(item), item); err != nil {
 			WriteError(w, r, err)

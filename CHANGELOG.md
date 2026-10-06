@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.116.0] - 2026-10-06
+
+### Changed
+- Behaviour change for a type that declares a `ConflictPolicy`: a PUT or a scheduled publication that used to succeed can now be a 409 or a wait. A `Module` HTTP PUT that changes status now applies the policy: a rejected PUT returns HTTP 409 and nothing is saved; under supersede the other active items are superseded after the save (A406)
+- The scheduler's publish of a scheduled item now applies the conflict policy: a rejected item stays scheduled and is retried every tick, with one Warn logged per item. It can therefore sit past its scheduled time with no end while another item holds the active state: that is the intended meaning, not a stuck scheduler (A406)
+- App.DrainEvalQueue now applies the conflict policy: a rejected drained transition is skipped and logged, its queue row deleted as for any other blocked transition (A406)
+- `DynamicTypeRepo.ScheduleContent` applies the policy too. Every status writer in core now either applies the conflict policy or cannot reach the active state: the create paths (`createHandler`, `MCPCreate`) cannot, because only the flow's initial state is admitted, `MCPUpdate` keeps the existing status, and `ExpireSignals` targets `expired` (A406)
+
+---
+
 ## [1.115.1] - 2026-10-06
 
 ### Fixed

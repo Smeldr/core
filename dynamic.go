@@ -335,6 +335,16 @@ func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, schedu
 	if err := validateTransition(ctx, r.db, r.rs, r.relStore, actorID, id, r.typeName, string(node.Status), string(Scheduled), ""); err != nil {
 		return err
 	}
+	// The conflict policy applies when Scheduled is the flow's ActiveState (rare,
+	// but it keeps "every status writer applies the policy or cannot reach the
+	// active state" true without an exception). Same shape as setStatusVia: reads,
+	// the winner's write, the losers, the effects; not transactional here.
+	plan, err := planConflict(ctx, r.db, r.typeName, string(Scheduled), id)
+	if err != nil {
+		return err
+	}
+	defer plan.release()
+	ctx = plan.holding(ctx)
 	now := time.Now().UTC()
 	_, err = r.db.ExecContext(ctx,
 		"UPDATE smeldr_dynamic_content SET status = $1, scheduled_at = $2, updated_at = $3, last_actor = $4 WHERE id = $5 AND type_name = $6",
@@ -342,6 +352,7 @@ func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, schedu
 	if err != nil {
 		return err
 	}
+	plan.run(ctx, r.db, r.relStore, r.prov, "")
 	recordTransitionProvenance(ctx, r.db, r.prov, r.typeName, id, string(node.Status), string(Scheduled), "", "")
 	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(Scheduled), id)
 	return nil

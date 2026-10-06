@@ -1763,6 +1763,19 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 			// ("drain-eval-queue") — one name for "the periodic sweep did
 			// this," not a second one. Fails open to the two-column form on
 			// a table that predates last_actor, same as TransitionItemWithReason.
+			//
+			// The conflict policy applies here too (task_plan item-75): a drained
+			// transition into the flow's ActiveState is rejected, or supersedes the
+			// active item, like every other status writer. A rejection is a skip:
+			// logged, counted, and the queue row is deleted below as for any other
+			// blocked transition.
+			plan, planErr := planConflict(ctx, db, r.typeName, r.toState, r.itemID)
+			if planErr != nil {
+				slog.WarnContext(ctx, "smeldr: DrainEvalQueue: skipped by the conflict policy, not re-queued",
+					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "error", planErr)
+				skipped++
+				break
+			}
 			_, updateErr := db.ExecContext(ctx,
 				"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2, last_actor = $3 WHERE id = $4",
 				r.toState, now, "drain-eval-queue", r.itemID,
@@ -1778,6 +1791,9 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "error", updateErr)
 				skipped++
 			} else {
+				// The winner is written: now the items it supersedes, then the
+				// winner's own record below.
+				plan.run(drainActorContext(ctx), db, a.relationStore, a.provenanceStore, "trigger")
 				// T211/D51: record the condition's arrival. This is the one
 				// absent write D51 identified — provenance only (signal
 				// dispatch, cache invalidation and rebuild triggers are
@@ -1823,6 +1839,7 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 				}
 				triggered++
 			}
+			plan.release()
 		}
 
 		// Always delete from queue — failed/blocked transitions are not
@@ -2004,3 +2021,19 @@ func supersedeEdgeAllowed(ctx context.Context, rs *RelationStore, typeName, newI
 	}
 	return false
 }
+
+// drainActorContext is ctx answering User() with the eval-queue drain's own
+// identity (actor "drain-eval-queue", the [Job] role), so the state changes the
+// drain triggers as side effects, the items a winning transition supersedes, name
+// the same actor in their provenance record and in last_actor as the winner's own
+// record does. A stateless periodic sweep has no caller of its own (A241, D78).
+func drainActorContext(ctx context.Context) context.Context {
+	return drainActorCtx{Context: ctx, user: User{ID: "drain-eval-queue", Roles: []Role{Job}}}
+}
+
+type drainActorCtx struct {
+	context.Context
+	user User
+}
+
+func (d drainActorCtx) User() User { return d.user }
