@@ -40,22 +40,20 @@ Task pipeline and session-start query lives there now, not here.
    storage.md). Read the relevant body file when a specific decision is needed.
    Do not work around locked decisions. If a decision seems wrong, raise it explicitly.
 3. Read `docs/ARCHITECTURE.md` — package structure, request lifecycle, stable interfaces.
-4. Read the milestone backlog file for the **current milestone only**
-   (e.g. `Milestone11_BACKLOG.md`). This is the authoritative task list.
-   Do not read completed milestone backlogs — they are historical record only.
-   Do not implement anything not listed in the current backlog.
-   Do not skip steps — the order is load-bearing (dependency layers).
+4. Your live Task, and its approved `task_plan` record once there is one, is the
+   authoritative task list. The per-milestone `Milestone{N}_BACKLOG.md` workflow is
+   retired (D50): none has existed since March 2026, and `Milestone_BACKLOG_TEMPLATE.md`
+   stays only as history. Do not implement anything the Task and its approved plan do
+   not name. Do not skip steps — the order is load-bearing (dependency layers).
 5. Apply document economy: completed items are removed from lists, not checked
    off. Resolved known issues are deleted. A document that does not influence
    a decision must be reduced or removed.
 
 ## After every commit
 
-- Delete `plans/core-next-plan.md` (or the task-scoped plan file) whole, in the same
-  commit as the implementation: `Remove-Item "C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md"`.
-  If another Task's plan is still open in the same shared file, extract it to its
-  own task-scoped file first — never delete a still-open Task's content along with
-  the shared file.
+- There is no plan file to delete (D81): the plan is a `task_plan` record, which stays
+  `approved` as the historical record. Close the Task (`commit-reviewing → done`) as
+  the embedded protocol's Task pipeline says.
 
 ## DECISIONS.md file structure (CRITICAL)
 
@@ -171,7 +169,7 @@ behaviour changed" — not "no exported symbol changed."
 **Level 2 — standard amendment or milestone step** (full cycle)
 Requires architect involvement, a live Decision or Amendment record with
 `body` fully populated (see "Recording a new Decision or Amendment" above),
-docs/ARCHITECTURE.md check, and explicit user approval before commit.
+docs/ARCHITECTURE.md check, and the architect's `commit-approved` before commit.
 Criteria: touches an exported Go symbol, interface, or function signature;
 affects a route or middleware behaviour; has consequences in more than one file.
 
@@ -199,8 +197,8 @@ When in doubt: Level 2.
   interface, file, or behaviour, `docs/ARCHITECTURE.md` must be updated in the same commit.
   Never update `docs/ARCHITECTURE.md` from a plan or backlog description — only from
   verified, running code.
-- A step that is deferred or descoped must be documented in `Milestone{N}_BACKLOG.md`
-  immediately with the reason and the target milestone. Never silently skip.
+- A step that is deferred or descoped must be recorded at once, in the `task_plan` or
+  as a new Task, with the reason. Never silently skip.
 - **Email addresses in public documents:** Never infer, guess, or construct email
   addresses. Only use an address that is explicitly stated in the Task's own Description.
   If a document requires a contact address and none is provided, use the placeholder
@@ -352,19 +350,20 @@ Every step — without exception — follows this exact sequence:
 - Send the plan to the architect as a `task_plan` record (see "Plan → approval →
   implementation → commit" in the embedded protocol); write no code before it is approved.
 
-### 2. Document the plan in the milestone backlog
-- Expand the step's section in `Milestone{N}_BACKLOG.md` with numbered
-  sub-sections (N.1, N.2, …) and atomic checkboxes.
-- Every step ends with a verification block and the architecture review checkbox.
-- Save the file. Implementation starts on the architect's `plan-reviewing → implementing`,
+### 2. Plan details
+- The `task_plan` record is the plan's only home. The `Milestone{N}_BACKLOG.md`
+  workflow is retired (D50); do not create one.
+- Every plan ends with a verification block and the architecture review.
+- Implementation starts on the architect's `plan-reviewing → implementing`,
   not on a confirmation from the user.
 
 ### 3. Implement the step
 - One step = one file (implementation + test file). Never mix two files in one step.
-- Never plan or implement two steps in the same session without explicit user approval.
+- Work through your `priority=0` batch without asking between Tasks (embedded protocol,
+  rule 1). Each Task still ends at its own commit review; a Task's plan and commit are
+  approved by the architect, never by the user.
 - Before writing any code, scan all existing files for patterns, types, or helpers
   that overlap with what you are about to implement. Reuse and extend — never duplicate.
-- Tick checkboxes in the backlog as each task is completed.
 - Run verification after implementation automatically — no permission needed:
   `go build ./...`, `go vet ./...`, `golangci-lint run ./...`, `gofmt -l .`, `go test ./...`.
   Fix any failures before proceeding. If `golangci-lint` is not installed, skip it
@@ -378,8 +377,8 @@ Every step — without exception — follows this exact sequence:
   are the only action that requires the architect's `commit-approved` signal.**
 - Read any file in the workspace automatically — no permission needed.
   Use PowerShell (`Get-Content`, `Select-String`, etc.) or the read_file tool
-  to read `DECISIONS.md`, `docs/ARCHITECTURE.md`, milestone backlog
-  files, or any source file before planning or implementing. Never ask the user
+  to read `DECISIONS.md`, `docs/ARCHITECTURE.md`,
+  or any source file before planning or implementing. Never ask the user
   whether to read a file that already exists in the workspace.
 
 **Cross-milestone integration test rule:**
@@ -405,7 +404,7 @@ in that file is a compile-verified extract of a README code example.
 This rule applies at three points:
 
 *Milestone planning:*
-When drafting a `Milestone{N}_BACKLOG.md`, review `example_test.go` and confirm
+When drafting a plan, review `example_test.go` and confirm
 that no planned change will break an existing Example function. If a planned
 change will break an Example, the plan must include an update to
 `example_test.go` as an explicit sub-task in the same step.
@@ -449,7 +448,9 @@ done.
 ### 4. Architecture and decision review
 - After verification passes, review `docs/ARCHITECTURE.md` and `DECISIONS.md`.
 - Ask: does this implementation reveal a gap, ambiguity, or conflict?
-- If yes: draft a new Decision or Amendment and present it to the user before proceeding.
+- If yes: draft a new Decision or Amendment and put it to the architect (in the plan,
+  the commit-ready, or a Signal) rather than deciding it yourself; a Decision is
+  proposed live and ratified by Peter.
 - Check this step's implementation against all previously implemented files: does it
   duplicate logic, diverge from an established pattern, or require a change to another
   file? Any change that crosses a file boundary requires an Amendment — not a fix.
@@ -458,9 +459,9 @@ done.
   planned files that are now implemented. Update it before proposing the commit.
 - The step is not complete until the review checkbox is ticked.
 
-### 5. Update the backlog
-- Mark the step `✅ Done` in the `Milestone{N}_BACKLOG.md` Progress table with the completion date.
-- Never batch updates — update immediately after the step is verified.
+### 5. Update the Task
+- The Task's own state transitions are the progress record; there is no backlog
+  file to update (the `Milestone{N}_BACKLOG.md` workflow is retired, D50).
 
 ### 6. Pre-commit documentation gate — then propose commit message
 
@@ -554,14 +555,14 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
 
 "No changes needed" is only valid after explicitly reading each file and confirming it already reflects the shipped code. Never assume.
 
-After the gate is clear, write the commit message in the plan file and transition
-the Task `implementing → commit-reviewing`.
+After the gate is clear, put the commit message in the `commit-ready` signal and
+transition the Task `implementing → commit-reviewing`.
 
-- Commits require the architect's written approval in the plan file (see the
+- Commits require the architect's written approval in the `task_plan` record (see the
   embedded protocol's Task pipeline) — never committed on `commit-reviewing`
   alone, and never on a chat answer to an unrelated technical question. Build,
   vet, format, and test commands are executed autonomously.
-- **A "yes" answer to a review question is not commit approval.** The confirmation of a technical fact and the approval of a commit are two distinct acts — approval is specifically the architect's written response in the plan file. Never collapse them into one.
+- **A "yes" answer to a review question is not commit approval.** The confirmation of a technical fact and the approval of a commit are two distinct acts — approval is specifically the architect's written response in the `task_plan` record. Never collapse them into one.
 
 ### Commit message format
 
@@ -606,21 +607,21 @@ current codebase and recent amendments:
 4. `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md` — does the version line match current versions?
    Are all MCP tools and CLI commands listed? Read it with the Read tool.
 
-Present any staleness findings to the user before proceeding. Do not silently
-skip this check.
+Report any staleness findings, in a Signal to the architect or in the commit-ready;
+do not stop for them, and do not silently skip this check.
 
 ### Docs and content task workflow
 
 Every docs or content task follows this sequence:
 
-**1. Propose commit scope**
-Before any work: propose what the commit will cover in one sentence.
-Wait for approval to proceed. Do not write anything yet.
+**1. State the commit scope**
+State what the commit will cover in one sentence, in the Task's plan (or in the
+commit-ready for a no-plan Task). The Task itself is the go: no separate wait.
 
 **2. Repo doc review**
 Read docs/REFERENCE.md, README.md, and docs/FEATURELIST.md.
-Present what needs updating — specific, concrete findings only.
-Wait for feedback before making any changes.
+List what needs updating (specific, concrete findings only) in the plan, and go on
+to step 3 in the same turn. Approval of the plan is the architect's.
 
 **3. Apply repo doc updates**
 Apply agreed changes to docs/REFERENCE.md, README.md, and/or docs/FEATURELIST.md.
@@ -681,20 +682,20 @@ Example: `20260505-143022-token-management.md`
 These files are for sitepilot to pick up — do not commit them to the core repo.
 
 **9. Propose commit message**
-Propose a conventional commit message covering all repo doc changes (steps 2–3).
-Wait for explicit approval before committing.
+Propose a conventional commit message covering all repo doc changes (steps 2–3) in
+the commit-ready signal. The architect's `commit-approved` is the approval.
 
 **10. After commit**
-Delete `smeldr/architect/plans/core-next-plan.md` if a plan file was created.
+Nothing to delete: plans are `task_plan` records (D81), kept as the historical record.
 
 ### Push follows commit approval
 
-Commit approval is the architect's written response in the plan file (see the
+Commit approval is the architect's written response in the `task_plan` record (see the
 embedded protocol's Task pipeline) — not a chat "yes", and not implied by
 answering an unrelated technical question.
 
 Push is not a separate gate: for feature-branch work, the architect's approval in
-the plan file means squash to main and push immediately, in the same step as the
+the `task_plan` record means squash to main and push immediately, in the same step as the
 `commit-reviewing → done` transition (see "Branching and commit timestamps"). For
 direct-commit work with no feature branch, push follows the commit in the same step.
 
@@ -709,8 +710,7 @@ fires after Peter's own direct words in chat approve *that specific version* (se
 and never satisfied by an earlier version's approval. If in doubt, stop after the
 push and ask.
 
-Write the plan for any docs task to:
-`C:\Users\peter\Documents\Code\Smeldr\architect\plans\core-next-plan.md`
+The plan for a docs task is a `task_plan` record like any other (D81).
 
 ---
 
@@ -735,7 +735,7 @@ than one file, it gets a feature branch — full stop, not a judgment call made 
 instance. Commits on the branch are free checkpoints — their timestamps do not matter
 and the branch is never pushed to GitHub unless explicitly requested.
 Branch naming: feature/m{N}-{slug} — e.g. feature/m11-webhooks.
-When the architect's written approval appears in the plan file and you transition
+When the architect's written approval appears in the `task_plan` record and you transition
 `commit-reviewing → done`, squash the branch to main.
 "Commit approved" means commit on the feature branch only — never auto-squash to main:
     git checkout main
@@ -896,79 +896,18 @@ Remove-Item release-notes.tmp
 
 ---
 
-## Milestone planning process
+## Milestone planning process (retired, D50)
 
-Before implementing any milestone, a dedicated backlog file must be created and
-agreed upon. This file is the single source of truth for that milestone's detail.
+The per-milestone workflow is retired: a `Milestone{N}_BACKLOG.md`, its Progress
+table, step-by-step milestone plans, and the milestone-close backlog cleanup. Since
+D50 every piece of work is a Task on `process.smeldr.dev` with a `task_plan` record,
+the Task's state transitions are the progress record, and the Task pipeline in the
+embedded protocol below is the process.
 
-### Planning documentation
-
-Smeldr uses one tier of planning documentation per active milestone:
-
-**`Milestone{N}_BACKLOG.md` (repo root)**
-- Full implementation plan for one milestone only
-- Contains numbered sub-sections (N.M), atomic checkboxes, verification blocks,
-  and the architecture review checkbox
-- The authoritative task list — implementation follows this file exactly
-- Updated after every step: tick all checkboxes, mark step ✅ in Progress table
-
-Delivery history lives in `CHANGELOG.md`. Current state and active sprint are
-tracked by the live Task on `process.smeldr.dev` and `plans/core-next-plan.md`
-in smeldr/architect (the plan file is written locally — never committed to
-this repo mid-sprint, deleted whole at commit time).
-
-### After completing a step
-
-1. Tick all sub-task checkboxes in `Milestone{N}_BACKLOG.md`
-2. Mark step ✅ Done in the `Milestone{N}_BACKLOG.md` Progress table
-
-### Structure of a milestone backlog file
-
-The file follows the structure defined in `Milestone_BACKLOG_TEMPLATE.md`.
-Copy that file and fill in the placeholders before implementation starts.
-
-### Milestone close — backlog cleanup
-
-When a milestone is marked ✅ Done, remove its backlog and test strategy
-files from the working tree in the final commit of that milestone:
-
-```powershell
-git rm Milestone{N}_BACKLOG.md
-git rm Milestone{N}_TEST_STRATEGY.md   # if one exists
-```
-
-These files are preserved in git history. Removing them keeps the repo
-root clean for developers who clone Smeldr to use it, not to study its
-internal planning history. `Milestone_BACKLOG_TEMPLATE.md` is never removed.
-
-### Rules for steps
-
-- **One step = one file** (implementation + test file). Never mix two files in one step.
-- **Steps are strictly separate** — never plan or implement two steps in the same
-  session without explicit user approval.
-- **Steps are ordered by dependency layer** — a step may not be started until all
-  steps it depends on are marked ✅.
-- **Sub-sections (N.M)** break the step into logical implementation chunks: define
-  the type, implement the logic, write the tests, verify. Keep sub-sections small
-  enough that each can be completed and verified in one sitting.
-- **Checkboxes are atomic** — each `- [ ]` item must be a single, unambiguous task.
-  Never write "implement X" without specifying what X requires.
-- **Every step ends with an architecture and decision review.** After the verification
-  block passes, review `docs/ARCHITECTURE.md` and `DECISIONS.md` and ask:
-  - Does the implementation reveal a gap, ambiguity, or conflict in an existing decision?
-  - Did any implementation choice introduce a pattern or constraint not yet captured?
-  - Does the file's dependency graph still match the rules in `docs/ARCHITECTURE.md`?
-  If yes to any of the above, a new Decision or Amendment must be proposed and agreed
-  upon before the next step begins. The step is not complete until this review is done.
-- **Every step ends with a commit.** After the architecture review, write a commit
-  message following the standard format in the plan file, transition the Task
-  `implementing → commit-reviewing`, and wait for the architect's written approval
-  in the plan file before committing. Never commit without it.
-  Add the following checkbox at the end of every step's verification block:
-  ```
-  - [ ] Review docs/ARCHITECTURE.md and DECISIONS.md — no new decisions required,
-        or new Decision/Amendment drafted and agreed upon
-  ```
+What was stated here and still holds is kept where it applies: every plan ends with a
+verification block and an architecture and decision review (see "Standard step
+workflow", step 4), and every commit waits for the architect's `commit-approved`.
+`Milestone_BACKLOG_TEMPLATE.md` stays as history and is never removed.
 
 ---
 
