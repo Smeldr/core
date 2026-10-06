@@ -4216,6 +4216,8 @@ Runtime-defined content types are created with `App.DefineContentType` and serve
 with `App.ServeDynamicContent`. Public URL routing is operator-controlled via
 `ContentTypeSchema.URLPrefix` (A154).
 
+**Databases (v1.119.2).** Runtime-defined content types work on SQLite and on Postgres, including through `smeldr.dev/core/pgx`: reads, `UpdateFields`, `SetStatus`, `ScheduleContent`, `App.TransitionItem`, the `Locked` check and the conflict policy (the winner and loser writes share a transaction from pgx v0.3.0). Before v1.119.2 every read of a dynamic item failed on Postgres, because the driver returns a TEXT column as a string and `database/sql` cannot store a string in a `json.RawMessage`. `Query` and `SQLRepo` now scan a `json.RawMessage` field from a string or bytes, and a NULL gives a nil message (before, a NULL was a scan error on every database), so the same holds for any struct of yours with a `json.RawMessage` field. `SeedBlockTypeSchemas` uses `ON CONFLICT DO NOTHING`. Not covered by a Postgres test: the `/_content/{type}` admin routes, which call the same repository. `PageMetaStore` (SEO overrides) is still SQLite only, tracked as `core-page-meta-on-postgres`.
+
 **Define a content type with a public URL**
 
 ```go

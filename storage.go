@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -70,6 +71,29 @@ func (ns nullTimeScanner) Scan(src any) error {
 	return nil
 }
 
+// rawMessageScanner wraps a *json.RawMessage scan destination. database/sql cannot
+// store a string into a json.RawMessage (a named []byte type has no case in its
+// conversion), and Postgres through pgx returns a TEXT column as a string where
+// SQLite returns bytes, so every json.RawMessage field of a struct scanned through
+// [Query] or [SQLRepo] failed on Postgres. NULL becomes a nil message: before this
+// scanner a NULL in such a column was a scan error on every database, SQLite
+// included, because database/sql has no conversion from NULL to this type.
+type rawMessageScanner struct{ dst *json.RawMessage }
+
+func (rs rawMessageScanner) Scan(src any) error {
+	switch v := src.(type) {
+	case nil:
+		*rs.dst = nil
+	case string:
+		*rs.dst = json.RawMessage(v)
+	case []byte:
+		*rs.dst = append(json.RawMessage(nil), v...)
+	default:
+		return fmt.Errorf("smeldr: cannot scan %T into json.RawMessage", src)
+	}
+	return nil
+}
+
 // scanDest returns the scan destination for a struct field. For time.Time
 // fields it wraps the address in a timeScanner so string values from SQLite
 // are parsed correctly; for nullable *time.Time fields it wraps the address
@@ -80,6 +104,9 @@ func scanDest(addr any) any {
 	}
 	if tpp, ok := addr.(**time.Time); ok {
 		return nullTimeScanner{dst: tpp}
+	}
+	if rp, ok := addr.(*json.RawMessage); ok {
+		return rawMessageScanner{dst: rp}
 	}
 	return addr
 }

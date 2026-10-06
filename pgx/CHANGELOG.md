@@ -10,6 +10,13 @@ within the `smeldr/core` repository, not a standalone repo.
 
 ---
 
+## [Unreleased]
+
+### Added
+- Postgres integration tests for runtime-defined content types (reads and writes, the `Locked` check, `SetStatus`, `ScheduleContent`, the conflict policy and its transaction, `SeedBlockTypeSchemas`), proving core v1.119.2. Tests only: no change to the adapter, so no tag.
+
+---
+
 ## [0.3.0] - 2026-10-06
 
 This release carries both `AcquireLock` (A410) and `BeginTx` (A411). Its `go.mod` floor is raised from core v1.52.1 to v1.119.1: with a `BeginTx` on the adapter core opens a transaction for the conflict policy, and only v1.119.1 runs the `last_actor` fail-open of a table that predates the column under a savepoint; against an older core a transition of such a table would fail on Postgres with "current transaction is aborted".

@@ -23,6 +23,24 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.119.2] - 2026-10-06
+
+### Fixed
+
+- Runtime-defined (dynamic) content types did not work on Postgres: every read of a dynamic item (`GetByID`, `GetBySlug`, `List`, `UpdateFields`, `SetStatus`, `ScheduleContent`, `App.TransitionItem` on a dynamic type) failed with "sql: Scan error on column index 4, name "fields": unsupported Scan, storing driver.Value type string into type *json.RawMessage", because Postgres returns a TEXT column as a string and `database/sql` cannot store a string in a `json.RawMessage`. `Query` and `SQLRepo` now scan a `json.RawMessage` field from a string or from bytes, which fixes `DynamicNode.Fields`, `ContentTypeSchema.Fields` and any struct of yours with such a field. This supersedes the dynamic-content known limit of v1.119.0 (A412)
+- `SeedBlockTypeSchemas` failed on Postgres with a syntax error (`INSERT OR IGNORE`, SQLite only); it now uses `ON CONFLICT (type_name) DO NOTHING`, valid on both, with the same effect: an existing row is kept as it is (A412)
+
+### Changed
+
+- A NULL in a column scanned into a `json.RawMessage` field is now a nil message. Before, `database/sql` returned a scan error for it on every database, SQLite included (A412)
+
+### Known limits
+
+- `PageMetaStore` (SEO overrides, `set_page_meta`, `get_page_meta`, `delete_page_meta`) still uses `?` placeholders and `INSERT OR REPLACE`, so it is SQLite only; tracked as `core-page-meta-on-postgres` (A412)
+- The `/_content/{type}` admin routes call the same repository and were not exercised on Postgres by a test of their own (A412)
+
+---
+
 ## [1.119.1] - 2026-10-06
 
 ### Fixed

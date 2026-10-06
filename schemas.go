@@ -173,8 +173,9 @@ func MigrateSchemaKindColumn(db DB) error {
 }
 
 // SeedBlockTypeSchemas inserts the 16 canonical block type schemas using
-// INSERT OR IGNORE so it is safe to call on every boot. Each row is skipped
-// when a row with that type_name already exists, preserving any customisation.
+// ON CONFLICT DO NOTHING (valid on SQLite and Postgres), so it is safe to call on
+// every boot. Each row is skipped when a row with that type_name already exists,
+// preserving any customisation.
 func SeedBlockTypeSchemas(db DB) error {
 	type seed struct {
 		typeName string
@@ -332,8 +333,9 @@ func SeedBlockTypeSchemas(db DB) error {
 			return fmt.Errorf("SeedBlockTypeSchemas: marshal %s: %w", s.typeName, err)
 		}
 		if _, err := db.ExecContext(ctx,
-			`INSERT OR IGNORE INTO smeldr_content_type_schemas (id, type_name, label, fields, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6)`,
+			`INSERT INTO smeldr_content_type_schemas (id, type_name, label, fields, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6)
+			 ON CONFLICT (type_name) DO NOTHING`,
 			NewID(), s.typeName, s.label, json.RawMessage(raw), now, now,
 		); err != nil {
 			return fmt.Errorf("SeedBlockTypeSchemas: insert %s: %w", s.typeName, err)
