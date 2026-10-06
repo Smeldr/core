@@ -23,6 +23,17 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.116.1] - 2026-10-06
+
+### Fixed
+- A context that has already ended (cancelled or timed out) made the internal SQLite probe fail, which was read as "not SQLite" and silently skipped the transition gate, the lock or the conflict policy for that call: validateTransition, validateInitialState, validateFlowItems and planConflict now return an internal error in that case, and the functions that cannot return an error log a Warn and fail open (A407)
+
+### Changed
+- App.RegisterFlow now logs one Warn per process and database handle type, saying that state flows are enforced on SQLite only: on any other database (including Postgres through the smeldr.dev/core/pgx adapter) a registered flow is stored but never consulted, so a transition's RequiredOperation gate and Strict are not checked (an authorization gap), State.Locked locks nothing, and async triggers do not fire and ConflictPolicy is not applied (A407)
+- README and docs/REFERENCE.md now document the SQLite-only enforcement and the authorization gap for non-SQLite databases, with a pointer to the follow-up Task that will make state enforcement dialect-neutral (A407)
+
+---
+
 ## [1.116.0] - 2026-10-06
 
 ### Changed

@@ -243,6 +243,7 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 		return fmt.Errorf("smeldr: RegisterFlow %q: Config.DB is required", flow.Name)
 	}
 	ctx := context.Background()
+	warnIfNotEnforced(ctx, db, flow)
 
 	// Upsert the flow row keyed on TypeName — the real identity resolveFlowID
 	// already assumes (its own query is "one row per type_name", enforced
@@ -473,8 +474,9 @@ func EnsureStateStandingColumn(ctx context.Context, db DB) error {
 // exist, the function returns nil (no items = nothing to validate).
 func validateFlowItems(ctx context.Context, db DB, flow StateFlow) error {
 	// Probe SQLite — returns silently for non-SQLite databases.
-	var dummy int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
+	if ok, err := isSQLite(ctx, db); err != nil {
+		return err
+	} else if !ok {
 		return nil
 	}
 
@@ -574,8 +576,9 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, rels *Relatio
 		return nil
 	}
 	// Probe SQLite — same guard as validateFlowItems.
-	var dummy int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
+	if ok, err := isSQLite(ctx, db); err != nil {
+		return err
+	} else if !ok {
 		return nil
 	}
 	if fromStatus == toStatus {
@@ -722,8 +725,9 @@ func validateInitialState(ctx context.Context, db DB, typeName, statusName strin
 	if db == nil || statusName == "" {
 		return nil
 	}
-	var dummy int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
+	if ok, err := isSQLite(ctx, db); err != nil {
+		return err
+	} else if !ok {
 		return nil
 	}
 	var flowID string
@@ -765,8 +769,7 @@ func defaultInitialState(ctx context.Context, db DB, typeName string) string {
 	if db == nil {
 		return ""
 	}
-	var dummy int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
+	if !isSQLiteFailOpen(ctx, db, "defaultInitialState") {
 		return ""
 	}
 	var flowID string
@@ -798,8 +801,7 @@ func suppressesSignals(ctx context.Context, db DB, typeName, statusName string) 
 	if db == nil {
 		return false
 	}
-	var dummy int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
+	if !isSQLiteFailOpen(ctx, db, "suppressesSignals") {
 		return false
 	}
 	var flowID string
@@ -840,8 +842,7 @@ func isStateLocked(ctx context.Context, db DB, typeName, statusName string) bool
 	if db == nil {
 		return false
 	}
-	var dummy int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
+	if !isSQLiteFailOpen(ctx, db, "isStateLocked") {
 		return false
 	}
 	var flowID string
@@ -1010,9 +1011,10 @@ func planConflict(ctx context.Context, db DB, typeName, toState, newItemID strin
 	if db == nil {
 		return nil, nil
 	}
-	var dummy int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
-		return nil, nil // not SQLite — skip
+	if ok, err := isSQLite(ctx, db); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, nil // not SQLite: the state machine is not enforced here (see isSQLite)
 	}
 
 	var activeState, conflictPolicy string
@@ -1891,9 +1893,8 @@ func fireAsyncTriggers(ctx context.Context, db DB, typeName, fromState, toState,
 	if db == nil {
 		return
 	}
-	var dummy int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
-		return // not SQLite — skip
+	if !isSQLiteFailOpen(ctx, db, "fireAsyncTriggers") {
+		return
 	}
 	rows, err := db.QueryContext(ctx, `
 		SELECT tt.trigger_type, tt.config
@@ -2037,3 +2038,58 @@ type drainActorCtx struct {
 }
 
 func (d drainActorCtx) User() User { return d.user }
+
+// isSQLite reports whether db is SQLite, by asking it for sqlite_master. The state
+// machine (transition validation, Locked, SuppressesSignals, the initial state,
+// async triggers, ConflictPolicy) is enforced on SQLite only today: on any other
+// database the probe fails and every caller returns as if there were nothing to
+// do (task_plan item-76). That is stated, not fixed, here.
+//
+// A probe that fails because ctx has ended is not "not SQLite": it is returned as
+// [ErrInternal], so a cancelled or timed-out call can never be read as "no flow
+// to enforce" and silently skip a gate, a lock or the conflict policy.
+func isSQLite(ctx context.Context, db DB) (bool, error) {
+	var dummy int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy)
+	if err == nil {
+		return true, nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, fmt.Errorf("%w: state flow check abandoned, the context ended: %s", ErrInternal, ctxErr)
+	}
+	return false, nil
+}
+
+// isSQLiteFailOpen is [isSQLite] for the callers that cannot return an error
+// (they answer a bool or a string, or nothing): a dead context is logged at Warn
+// and they fail open, as they always have, so a failure is at least visible.
+func isSQLiteFailOpen(ctx context.Context, db DB, caller string) bool {
+	ok, err := isSQLite(ctx, db)
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: state flow check skipped, the context ended", "caller", caller, "error", err)
+		return false
+	}
+	return ok
+}
+
+// nonSQLiteWarned remembers which database handle types already got the
+// "not enforced" Warn, so a process logs it once and not once per flow.
+var nonSQLiteWarned sync.Map
+
+// warnIfNotEnforced logs, once per handle type per process, that the state
+// machine is not enforced on this database. It says the security side plainly:
+// on a non-SQLite database a transition's RequiredOperation gate and Strict are
+// not checked, which is an authorization gap and not a missing nicety.
+func warnIfNotEnforced(ctx context.Context, db DB, flow StateFlow) {
+	ok, err := isSQLite(ctx, db)
+	if err != nil || ok {
+		return
+	}
+	if _, seen := nonSQLiteWarned.LoadOrStore(fmt.Sprintf("%T", db), struct{}{}); seen {
+		return
+	}
+	slog.WarnContext(ctx, "smeldr: state flows are enforced on SQLite only: on this database the flow is stored but never consulted. "+
+		"A transition's RequiredOperation gate, RequiredReason and Strict are NOT checked (an authorization gap), "+
+		"State.Locked locks nothing, SuppressesSignals and async triggers have no effect, and ConflictPolicy is not applied",
+		"flow", flow.Name, "type_name", flow.TypeName, "database", fmt.Sprintf("%T", db))
+}

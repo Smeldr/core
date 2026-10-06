@@ -4306,6 +4306,19 @@ source. Cloud rendering is outside core scope (A156).
 
 Custom state machines for content types. Defined in `state.go`.
 
+**Databases: enforced on SQLite only.** The state machine is enforced on SQLite only. Every function below that consults the registered flow starts by probing `sqlite_master`; on any other database the probe fails and the function returns as if there were nothing to do. A flow registered on such a database is stored in `smeldr_state_flows` and never consulted:
+
+| Function | What it enforces | On a non-SQLite database |
+|---|---|---|
+| `validateTransition` | the flow's edges, `RequiredOperation`, `RequiredReason`, `Strict`, the governance gate | **every transition is allowed; a role gate or reason requirement is not checked (an authorization gap)** |
+| `isStateLocked` | `State.Locked` (A306) | **nothing is locked** |
+| `validateInitialState`, `defaultInitialState`, `validateFlowItems` | the initial state, the state list | skipped |
+| `suppressesSignals`, `fireAsyncTriggers` | `State.SuppressesSignals`, async transition triggers | no effect |
+| `planConflict`, `resolveItemTable` | `ConflictPolicy`, the typed-versus-dynamic table choice | no policy applied |
+| `MigrateStanding`, `migrateLegacyTableNames`, `EnsureLastActorColumns`, `MigrateRedirectsToRoutes` | boot migrations | skipped; migrate manually |
+
+`isNoSuchTable` and `isNoSuchColumn` also match SQLite message text only. `process.smeldr.dev` and the Cloud product run on SQLite; the exposure is a deployment through `smeldr.dev/core/pgx`. Since v1.116.1 `App.RegisterFlow` logs a Warn, once per process and handle type, naming this plainly. A dead context is not "not SQLite": since v1.116.1 `validateTransition`, `validateInitialState`, `validateFlowItems` and `planConflict` return `ErrInternal` when the probe fails because the context ended (before, the call silently skipped its gate, lock or policy), and the functions that cannot return an error log a Warn and fail open. Making the state machine dialect-neutral is a separate, Decision-gated Task (`core-state-machine-dialect-neutral`): it would turn enforcement on for existing Postgres deployments.
+
 ### `StateFlow`
 
 ```go
