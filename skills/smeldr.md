@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.119.0 · smeldr.dev/mcp v1.46.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.18.0 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.119.1 · smeldr.dev/mcp v1.46.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.18.0 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -315,7 +315,7 @@ curl -N -H "Authorization: Bearer <token>" https://example.com/_events/stream
 
 Call `app.RegisterFlow(smeldr.StateFlow{...})` at startup (after `smeldr.New`) to
 register a data-driven state machine for a content type. Idempotent — safe to call
-on every restart. State flows are enforced on every supported database (v1.118.0, D103): SQLite and Postgres alike. Before v1.118.0 a flow was stored and never consulted on Postgres through core/pgx (a transition's role gate was not checked, Locked locked nothing); from v1.118.0 it is, with no opt-out, so an upgrade can refuse transitions that passed unchecked. Since v1.119.0 ConflictReject and ConflictSupersede are also exclusive across several processes on one Postgres database through core/pgx (an advisory lock the adapter provides through AcquireLock); a handle without that method, SQLite and a wrapper that hides it keep the in-process lock only. EnsureColumn and the boot migrations work on Postgres.
+on every restart. State flows are enforced on every supported database (v1.118.0, D103): SQLite and Postgres alike. Before v1.118.0 a flow was stored and never consulted on Postgres through core/pgx (a transition's role gate was not checked, Locked locked nothing); from v1.118.0 it is, with no opt-out, so an upgrade can refuse transitions that passed unchecked. Since v1.119.0 ConflictReject and ConflictSupersede are also exclusive across several processes on one Postgres database through core/pgx (an advisory lock the adapter provides through AcquireLock); a handle without that method, SQLite and a wrapper that hides it keep the in-process lock only. EnsureColumn and the boot migrations work on Postgres. Core opens a transaction for the conflict policy, audited governance mutations and relation diffs only when the handle has BeginTx; core/pgx adds it in adapter v0.3.0 (before, those ran statement by statement on Postgres), and since core v1.119.1 the last_actor fail-open of an older table runs under a savepoint inside that transaction.
 
 ```go
 err := app.RegisterFlow(smeldr.StateFlow{

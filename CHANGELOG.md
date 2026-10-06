@@ -23,6 +23,19 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.119.1] - 2026-10-06
+
+### Fixed
+
+- On Postgres, a transition of an item whose table has no `last_actor` column (a third-party module's own table, the case the D78 fail-open exists for) failed with an internal error ("current transaction is aborted, commands ignored until end of transaction block") whenever the database handle supports transactions, which a plain `*sql.DB` opened through a Postgres driver does, since v1.118.0 enforces the conflict policy there. The first `UPDATE` (with `last_actor`) fails by design and a failed statement aborts a Postgres transaction, so the fallback `UPDATE` failed too. The three places that try it inside the conflict transaction (the winner's write in `TransitionItem`, the losers' writes in the conflict policy, compiled and dynamic) now run the first attempt under a `SAVEPOINT` and roll back to it when the column is missing; on a plain handle and on SQLite nothing changes (A411)
+
+### Known limits
+
+- `core/pgx` adapter v0.2.x has no `BeginTx`, so through it the conflict policy's winner and loser writes, audited governance mutations and relation diffs still run statement by statement and are not atomic on Postgres. The next adapter release (v0.3.0, not yet released) adds `BeginTx` and raises its core floor to this release. Read from the code, not measured (A411)
+- The legacy `forge_*` table rename is wrapped in a transaction on a handle that supports one (v0.3.0 of the adapter does); its atomicity on Postgres is not tested (A411)
+
+---
+
 ## [1.119.0] - 2026-10-06
 
 ### Added

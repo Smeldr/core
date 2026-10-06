@@ -15,6 +15,13 @@
 //	    DB:      pgx.Wrap(pool),
 //	})
 //
+// # Transactions
+//
+// The handle Wrap returns also provides BeginTx, so core's multi-statement writes
+// (the conflict policy's winner and loser writes, an audited governance mutation, a
+// relation diff) are atomic on Postgres from adapter v0.3.0. Before it they ran
+// statement by statement.
+//
 // # Cross-process locking
 //
 // The handle Wrap returns also provides AcquireLock, which core's conflict policy
@@ -96,6 +103,18 @@ func lockKey(name string) int64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(name))
 	return int64(h.Sum64())
+}
+
+// BeginTx starts a transaction on one pooled connection, under the default READ
+// COMMITTED. Core opens a transaction only when its handle has exactly this method:
+// the conflict policy's winner and loser writes, a governance mutation with its
+// audit record, a relation diff and the legacy table rename. Without it (adapter
+// v0.2.x and earlier) each of them ran statement by statement, with no atomicity.
+// On Postgres a failed statement aborts the whole transaction; core's one statement
+// that is expected to fail sometimes (the last_actor fail-open) runs under a
+// savepoint for that reason.
+func (a *poolAdapter) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	return a.db.BeginTx(ctx, opts)
 }
 
 // AcquireLock takes the Postgres advisory lock for name and returns the function

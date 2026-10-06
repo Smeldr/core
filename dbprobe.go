@@ -225,3 +225,46 @@ func closeProbe(rows *sql.Rows) {
 		rows.Close()
 	}
 }
+
+// columnFallbackSavepoint is the name of the savepoint [execWithColumnFallback]
+// uses. One fixed name is enough: the helper runs statements only, calls no hook and
+// no caller code, and releases the savepoint before it returns, so two uses never
+// overlap and a loop over items never stacks them.
+const columnFallbackSavepoint = "smeldr_column_fallback"
+
+// execWithColumnFallback runs first and, when it fails because column does not
+// exist, runs fallback instead (the D78 fail-open: a table that predates last_actor
+// still gets its status change). It is the one place that tries a statement that is
+// expected to fail sometimes.
+//
+// On Postgres a failed statement aborts the whole transaction, so inside one the
+// fallback would fail too ("current transaction is aborted"). When exec is a
+// *sql.Tx the first attempt therefore runs under a SAVEPOINT, rolled back when the
+// column is missing; SQLite supports savepoints as well. On a plain handle the two
+// statements run exactly as before.
+//
+// Any other error from first is returned as it is and the transaction is NOT
+// rolled back to the savepoint: on Postgres it stays aborted, so a failed write
+// still fails the whole change atomically (A398), and on SQLite the caller sees
+// the error and decides. The savepoint is released best-effort in every case.
+func execWithColumnFallback(ctx context.Context, exec DB, column, first string, firstArgs []any, fallback string, fallbackArgs []any) error {
+	tx, inTx := exec.(*sql.Tx)
+	if inTx {
+		if _, err := tx.ExecContext(ctx, "SAVEPOINT "+columnFallbackSavepoint); err != nil {
+			return err
+		}
+	}
+	_, err := exec.ExecContext(ctx, first, firstArgs...)
+	if err != nil && isNoSuchColumn(err, column) {
+		if inTx {
+			if _, rerr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+columnFallbackSavepoint); rerr != nil {
+				return rerr
+			}
+		}
+		_, err = exec.ExecContext(ctx, fallback, fallbackArgs...)
+	}
+	if inTx {
+		_, _ = tx.ExecContext(ctx, "RELEASE SAVEPOINT "+columnFallbackSavepoint)
+	}
+	return err
+}

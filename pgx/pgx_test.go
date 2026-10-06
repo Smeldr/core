@@ -2,6 +2,7 @@ package pgx
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 )
 
@@ -38,3 +39,10 @@ func TestLockKey(t *testing.T) {
 		t.Error("two type names share a lock key")
 	}
 }
+
+// poolAdapter provides BeginTx with exactly the signature core asserts against
+// (core's txBeginner); a different shape would silently turn every transaction
+// path off on Postgres.
+var _ interface {
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
+} = (*poolAdapter)(nil)

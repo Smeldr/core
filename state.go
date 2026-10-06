@@ -1165,23 +1165,17 @@ func (p *conflictPlan) supersede(ctx context.Context, exec DB) []string {
 	for _, oldID := range p.losers {
 		var updateErr error
 		if p.isDynamic {
-			_, updateErr = exec.ExecContext(ctx,
+			updateErr = execWithColumnFallback(ctx, exec, "last_actor",
 				`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1, last_actor = $2 WHERE id = $3 AND type_name = $4`,
-				now, actorID, oldID, p.typeName)
-			if isNoSuchColumn(updateErr, "last_actor") {
-				_, updateErr = exec.ExecContext(ctx,
-					`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1 WHERE id = $2 AND type_name = $3`,
-					now, oldID, p.typeName)
-			}
+				[]any{now, actorID, oldID, p.typeName},
+				`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1 WHERE id = $2 AND type_name = $3`,
+				[]any{now, oldID, p.typeName})
 		} else {
-			_, updateErr = exec.ExecContext(ctx,
+			updateErr = execWithColumnFallback(ctx, exec, "last_actor",
 				`UPDATE `+quoteIdent(p.table)+` SET status = 'superseded', updated_at = $1, last_actor = $2 WHERE id = $3`,
-				now, actorID, oldID)
-			if isNoSuchColumn(updateErr, "last_actor") {
-				_, updateErr = exec.ExecContext(ctx,
-					`UPDATE `+quoteIdent(p.table)+` SET status = 'superseded', updated_at = $1 WHERE id = $2`,
-					now, oldID)
-			}
+				[]any{now, actorID, oldID},
+				`UPDATE `+quoteIdent(p.table)+` SET status = 'superseded', updated_at = $1 WHERE id = $2`,
+				[]any{now, oldID})
 		}
 		if updateErr != nil {
 			slog.WarnContext(ctx, "smeldr: conflict policy: supersede UPDATE failed",
@@ -1442,19 +1436,13 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	// UPDATE when the column doesn't exist, rather than special-casing by
 	// type. Tables this framework owns (the six orchestration tables,
 	// smeldr_dynamic_content) always have the column from this commit on.
-	if _, err := exec.ExecContext(ctx,
+	if err := execWithColumnFallback(ctx, exec, "last_actor",
 		"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2, last_actor = $3 WHERE id = $4",
-		toState, now, actorID, id,
+		[]any{toState, now, actorID, id},
+		"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
+		[]any{toState, now, id},
 	); err != nil {
-		if !isNoSuchColumn(err, "last_actor") {
-			return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
-		}
-		if _, err := exec.ExecContext(ctx,
-			"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
-			toState, now, id,
-		); err != nil {
-			return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
-		}
+		return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
 	}
 	moved := plan.supersede(ctx, exec)
 	if err := commit(); err != nil {
