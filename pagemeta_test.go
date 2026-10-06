@@ -347,3 +347,29 @@ func TestRenderListHTML_PageMeta_NoEntryForPath(t *testing.T) {
 		t.Errorf("expected empty title for unmatched path, got %q", w.Body.String())
 	}
 }
+
+// TestPageMetaStore_Set_ReplacesEveryField: a second Set replaces the whole row, so a
+// field given as empty is cleared (the INSERT OR REPLACE it replaced had the same
+// effect), and there is still one row for the path.
+func TestPageMetaStore_Set_ReplacesEveryField(t *testing.T) {
+	db := newSQLiteDB(t)
+	if err := CreatePageMetaTable(db); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	s := NewPageMetaStore(db)
+	ctx := context.Background()
+	if err := s.Set(ctx, "/p", "Title", "Desc", "https://example.com/i.png"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set(ctx, "/p", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, "/p")
+	if err != nil || got != (PageMeta{Path: "/p"}) {
+		t.Errorf("Get = %+v, %v, want the path with every field cleared", got, err)
+	}
+	all, err := s.List(ctx)
+	if err != nil || len(all) != 1 {
+		t.Errorf("List = %+v, %v, want one row", all, err)
+	}
+}

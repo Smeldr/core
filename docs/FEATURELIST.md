@@ -2,13 +2,13 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.119.2 + smeldr.dev/mcp v1.46.0 + smeldr.dev/cli v0.18.0 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
+Last updated: v1.119.3 + smeldr.dev/mcp v1.46.0 + smeldr.dev/cli v0.18.0 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.119.2 | Stable |
+| `smeldr.dev/core` | v1.119.3 | Stable |
 | `smeldr.dev/mcp` | v1.46.0 | Stable |
 | `smeldr.dev/oauth` | v0.5.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.2.0 | Beta |
@@ -357,6 +357,7 @@ MCP resource subscriptions (Beta):
 - Optional `AcquireLock(ctx context.Context, name string) (release func(), err error)` capability on the database handle, asked for with the name `smeldr:conflict:` plus the type name; the signature and the prefix are a stable contract for adapters (A410)
 - A conflict-policy transition of a table that predates `last_actor` works inside a Postgres transaction since v1.119.1: the fail-open attempt runs under a savepoint (A411)
 - Runtime-defined (dynamic) content types work on Postgres since v1.119.2: `Query` and `SQLRepo` scan a `json.RawMessage` field from a string as well as bytes, and `SeedBlockTypeSchemas` uses portable SQL (A412)
+- Per-path SEO overrides (`PageMetaStore`) work on Postgres since v1.119.3, and a test fails on SQLite-only SQL in any non-test source file of the core module (A413)
 - `define_state_flow` MCP tool — registers a flow including `active_state` and `conflict_policy` params (Admin role)
 - `TransitionTrigger` struct — `FromState`, `ToState`, `TriggerClass`, `TriggerType`, `Config`; declared in `StateFlow.Triggers`
 - `StateFlow.Triggers []TransitionTrigger` — async trigger handlers persisted to `smeldr_transition_triggers` by `RegisterFlow`; idempotent

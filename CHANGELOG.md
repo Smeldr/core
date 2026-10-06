@@ -23,6 +23,22 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.119.3] - 2026-10-06
+
+### Fixed
+
+- `PageMetaStore` (per-path SEO overrides) did not work on Postgres: `Set` used `INSERT OR REPLACE` (SQLite only, SQLSTATE 42601) and `Set`, `Get` and `Delete` used `?` placeholders, which pgx does not understand, so the `set_page_meta`, `get_page_meta` and `delete_page_meta` tools and the overrides rendered through `App.PageMeta` failed. `Set` is now `INSERT ... ON CONFLICT (path) DO UPDATE SET ...` with numbered placeholders, which replaces the stored row exactly as before and works on SQLite and Postgres. This supersedes the page meta known limit of v1.119.2 (A413)
+
+### Added
+
+- A test that reads the non-test Go files of the core module and fails on SQLite-only SQL in a string literal (`INSERT OR`, `REPLACE INTO`, `sqlite_master`, `PRAGMA`, `datetime(`, `strftime(`, `IFNULL(`, `?` placeholders, also in SQL built from fragments such as `" WHERE status = ?"` and `" ORDER BY ... LIMIT ?"`), with an allowlist that needs a reason per entry and is empty. The same defect had been found three times by running on Postgres by hand (A409, A412, A413) (A413)
+
+### Known limits
+
+- `PageMetaStore.List` orders by the database's own collation, so two paths that differ only in punctuation can sort differently on SQLite and on Postgres (A413)
+
+---
+
 ## [1.119.2] - 2026-10-06
 
 ### Fixed

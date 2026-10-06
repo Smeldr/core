@@ -52,14 +52,20 @@ CREATE TABLE IF NOT EXISTS smeldr_page_meta (
 	return err
 }
 
-// Set upserts the SEO overrides for path. Any combination of title, description,
+// Set upserts the SEO overrides for path: the stored row is replaced by the
+// values given, all three of them (the statement is portable SQL, so it works on
+// SQLite and on Postgres alike). Any combination of title, description,
 // and ogImage may be empty strings — empty values are stored as-is and will not
 // override the global fallback.
 func (s *PageMetaStore) Set(ctx context.Context, path, title, description, ogImage string) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO smeldr_page_meta
+		`INSERT INTO smeldr_page_meta
 		 (path, meta_title, meta_description, og_image)
-		 VALUES (?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (path) DO UPDATE SET
+		   meta_title = EXCLUDED.meta_title,
+		   meta_description = EXCLUDED.meta_description,
+		   og_image = EXCLUDED.og_image`,
 		path, title, description, ogImage)
 	return err
 }
@@ -71,7 +77,7 @@ func (s *PageMetaStore) Get(ctx context.Context, path string) (PageMeta, error) 
 	var m PageMeta
 	err := s.db.QueryRowContext(ctx,
 		`SELECT path, meta_title, meta_description, og_image
-		 FROM smeldr_page_meta WHERE path = ?`,
+		 FROM smeldr_page_meta WHERE path = $1`,
 		path).Scan(&m.Path, &m.MetaTitle, &m.Description, &m.OGImage)
 	if err == sql.ErrNoRows {
 		return PageMeta{}, nil
@@ -83,7 +89,7 @@ func (s *PageMetaStore) Get(ctx context.Context, path string) (PageMeta, error) 
 // entry.
 func (s *PageMetaStore) Delete(ctx context.Context, path string) error {
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM smeldr_page_meta WHERE path = ?`, path)
+		`DELETE FROM smeldr_page_meta WHERE path = $1`, path)
 	return err
 }
 

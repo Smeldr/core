@@ -13,6 +13,7 @@ within the `smeldr/core` repository, not a standalone repo.
 ## [Unreleased]
 
 ### Added
+- Postgres integration test for `PageMetaStore` (set, get, replace, list, delete), proving core v1.119.3. Tests only: no change to the adapter, so no tag.
 - Postgres integration tests for runtime-defined content types (reads and writes, the `Locked` check, `SetStatus`, `ScheduleContent`, the conflict policy and its transaction, `SeedBlockTypeSchemas`), proving core v1.119.2. Tests only: no change to the adapter, so no tag.
 
 ---
