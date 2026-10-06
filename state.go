@@ -925,12 +925,35 @@ func (h *heldContext) Value(key any) any {
 	return h.Context.Value(key)
 }
 
+// conflictLockPrefix is the start of the name under which a handle is asked for the
+// cross-process lock of a type: "smeldr:conflict:" plus the type name. The prefix
+// and the method signature of [crossProcessLocker] are a stable contract for every
+// database adapter that implements the capability (D22).
+const conflictLockPrefix = "smeldr:conflict:"
+
+// crossProcessLocker is the optional capability of a [DB] handle that lets the
+// conflict policy exclude other processes on the same database, not only other
+// goroutines of this one. AcquireLock takes the named lock, waiting until ctx ends,
+// and returns the function that gives it up; it is called once the in-process lock
+// is held and released before it. The pgx adapter (smeldr.dev/core/pgx) implements
+// it with a Postgres advisory lock. A handle without the method, or a wrapper that
+// hides it, keeps the in-process lock only. The interface is unexported on
+// purpose: the capability is satisfied structurally, by an exported method.
+type crossProcessLocker interface {
+	AcquireLock(ctx context.Context, name string) (release func(), err error)
+}
+
 // acquireConflictLock takes typeName's lock, waiting at most [conflictLockWait].
 // Re-entrant per context: when ctx already carries typeName as held, it returns
 // at once with held false (the caller's own call chain is already serialised).
 // held reports whether this call took the lock. A cancelled ctx is returned as
 // [ErrInternal]; a timeout is fail-open (logged, unlocked, held false).
-func acquireConflictLock(ctx context.Context, typeName string) (release func(), held bool, err error) {
+//
+// When db provides the cross-process lock ([crossProcessLocker]) it is taken after
+// the in-process one, waiting at most [conflictLockWait] again, and released
+// before it, with the same fail-open rule: a lock that cannot be had is logged at
+// Error and the transition goes ahead with the in-process lock only.
+func acquireConflictLock(ctx context.Context, db DB, typeName string) (release func(), held bool, err error) {
 	if conflictHeld(ctx, typeName) {
 		return func() {}, false, nil
 	}
@@ -940,8 +963,15 @@ func acquireConflictLock(ctx context.Context, typeName string) (release func(), 
 	defer timer.Stop()
 	select {
 	case ch <- struct{}{}:
+		cross, cerr := acquireCrossProcessLock(ctx, db, typeName)
+		if cerr != nil {
+			<-ch
+			return nil, false, cerr
+		}
+		// Released in the reverse order of taking: the cross-process lock first, the
+		// in-process one after it, once however often the plan is released.
 		var once sync.Once
-		return func() { once.Do(func() { <-ch }) }, true, nil
+		return func() { once.Do(func() { cross(); <-ch }) }, true, nil
 	case <-ctx.Done():
 		return nil, false, fmt.Errorf("%w: conflict policy: waiting for the %q lock: %s", ErrInternal, typeName, ctx.Err())
 	case <-timer.C:
@@ -1028,7 +1058,7 @@ func planConflict(ctx context.Context, db DB, typeName, toState, newItemID strin
 
 	// The policy applies: serialise with every other transition of this type into
 	// the active state from here, before the reads that decide the outcome.
-	unlock, locked, err := acquireConflictLock(ctx, typeName)
+	unlock, locked, err := acquireConflictLock(ctx, db, typeName)
 	if err != nil {
 		return nil, err
 	}
@@ -2007,3 +2037,30 @@ type drainActorCtx struct {
 }
 
 func (d drainActorCtx) User() User { return d.user }
+
+// acquireCrossProcessLock asks db for the named cross-process lock of typeName, if
+// it provides one. It returns a release that is safe to call once, and never nil.
+// The wait is bounded by [conflictLockWait]; a bound that expires, or a lock the
+// handle cannot give, is fail-open and logged at Error naming the type, the lock
+// and how long it waited, because a stuck holder must not block every writer of
+// the type. A caller context that ended while waiting is [ErrInternal].
+func acquireCrossProcessLock(ctx context.Context, db DB, typeName string) (func(), error) {
+	locker, ok := db.(crossProcessLocker)
+	if !ok {
+		return func() {}, nil
+	}
+	name := conflictLockPrefix + typeName
+	lctx, cancel := context.WithTimeout(ctx, conflictLockWait)
+	defer cancel()
+	start := time.Now()
+	release, err := locker.AcquireLock(lctx, name)
+	if err == nil && release != nil {
+		return release, nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("%w: conflict policy: waiting for the %q lock: %s", ErrInternal, name, ctxErr)
+	}
+	slog.ErrorContext(ctx, "smeldr: conflict policy: cross-process lock not taken, proceeding with the in-process lock only, a concurrent winner in another process may not be seen",
+		"type", typeName, "lock", name, "waited", time.Since(start).Round(time.Millisecond), "bound", conflictLockWait, "error", err)
+	return func() {}, nil
+}

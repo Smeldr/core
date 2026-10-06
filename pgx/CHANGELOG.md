@@ -12,7 +12,10 @@ within the `smeldr/core` repository, not a standalone repo.
 
 ## [Unreleased]
 
+The next adapter release (v0.3.0) is held until `core-pgx-adapter-begintx` has merged, so one release carries both `AcquireLock` and `BeginTx`.
+
 ### Added
+- `AcquireLock(ctx, name) (release func(), err error)` on the handle `Wrap` returns: a Postgres session advisory lock on a dedicated pooled connection, which smeldr.dev/core v1.119.0 asks for to make the conflict policy exclusive across application processes (A410). The signature and the `smeldr:conflict:` name prefix are a stable contract. The lock key is FNV-1a 64 of the name, computed in Go. The adapter refuses the lock whenever fewer than two pool connections are free at that moment (logged at Error by core; the transition goes ahead without the cross-process lock), which can happen under ordinary load on a small pool: a recurring Error line means raise `MaxConns`. Needs core v1.119.0 to have any effect.
 - Postgres integration tests for the state machine, run in CI against postgres:16 (build tag `integration`): transition rules, role gate, `RequiredReason`, async triggers, `ConflictReject` and `ConflictSupersede` (including a two-process race), `EnsureColumn` on an older schema, the production Task and Decision flows, `Locked`, the legacy table rename and `MigrateStanding`. Tests only: no change to `Wrap` or any exported symbol, so no tag. They prove core v1.118.0 (D103), which turns on state machine enforcement for Postgres.
 
 ---

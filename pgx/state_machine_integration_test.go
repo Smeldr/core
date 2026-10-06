@@ -438,14 +438,26 @@ type raceResult struct{ one, both, none int }
 // runRace moves item "a" and item "b" of each round's type into the active state
 // from two separate OS processes, "b" offsetB after "a" (zero is the same moment).
 // Each process is the test binary re-run as TestPG_RaceChild.
-func runRace(t *testing.T, db smeldr.DB, app *smeldr.App, schema, tokenID, prefix string, rounds int, offsetB time.Duration) raceResult {
+// raceFlow is pgFlow with the policy under test; supersede needs a state to move the
+// previous holder to.
+func raceFlow(typeName string, policy smeldr.ConflictPolicy) smeldr.StateFlow {
+	f := pgFlow(typeName)
+	f.ConflictPolicy = policy
+	if policy == smeldr.ConflictSupersede {
+		f.States = append(f.States, smeldr.State{Name: "superseded"})
+		f.Transitions = append(f.Transitions, smeldr.Transition{From: "published", To: "superseded"})
+	}
+	return f
+}
+
+func runRace(t *testing.T, db smeldr.DB, app *smeldr.App, schema, tokenID, prefix string, policy smeldr.ConflictPolicy, rounds int, offsetB time.Duration) raceResult {
 	t.Helper()
 	ctx := context.Background()
 	types := raceTypes(prefix, rounds)
 	for _, ty := range types {
 		createItemsTable(t, db, raceTable(ty))
 		registerType(app, ty)
-		if err := app.RegisterFlow(pgFlow(ty)); err != nil {
+		if err := app.RegisterFlow(raceFlow(ty, policy)); err != nil {
 			t.Fatalf("RegisterFlow %s: %v", ty, err)
 		}
 		insertItem(t, db, raceTable(ty), "a", "review")
@@ -502,17 +514,18 @@ func runRace(t *testing.T, db smeldr.DB, app *smeldr.App, schema, tokenID, prefi
 	return res
 }
 
-// TestPG_ConflictReject_TwoProcesses asks the question the in-process lock (A405)
-// cannot answer: it serialises within one process only, and on Postgres the reject
-// check and the winner's write are separate statements under READ COMMITTED, so
-// two processes can both pass the check. The first run is a control, one process
-// 400 ms behind the other, and must always end with exactly one holder: it shows
-// the harness and the rejection itself work across processes. The second run has
-// both processes move their item at the same moment.
+// TestPG_ConflictPolicy_TwoProcesses asks the question the in-process lock (A405)
+// cannot answer: whether two processes, not two goroutines, can both pass the
+// policy's check. Before the cross-process lock (the pgx adapter's AcquireLock) they
+// could: the reject check and the winner's write are separate statements under
+// READ COMMITTED, and every simultaneous round ended with two holders (A409).
 //
-// The second result is recorded, not asserted: a round that ends with two holders
-// is the known limit named in the CHANGELOG, not a failure of this test.
-func TestPG_ConflictReject_TwoProcesses(t *testing.T) {
+// Three runs, 25 rounds each, each round a fresh type: a control with one process
+// 250 ms behind the other (always one holder, so the harness and the rejection work
+// across processes); ConflictReject with both at the same moment; ConflictSupersede
+// with both at the same moment. The last two must end every round with exactly one
+// item in the active state.
+func TestPG_ConflictPolicy_TwoProcesses(t *testing.T) {
 	if os.Getenv("PG_RACE_CHILD") != "" {
 		t.Skip("child process")
 	}
@@ -528,28 +541,31 @@ func TestPG_ConflictReject_TwoProcesses(t *testing.T) {
 		t.Fatalf("Grant: %v", err)
 	}
 
-	control := runRace(t, db, app, schema, tokenID, "Ctrl", rounds, 400*time.Millisecond)
-	t.Logf("control, one process 400 ms behind the other, %d rounds: %d with one holder, %d with two, %d with none", rounds, control.one, control.both, control.none)
+	control := runRace(t, db, app, schema, tokenID, "Ctrl", smeldr.ConflictReject, rounds, 250*time.Millisecond)
+	t.Logf("control, reject, one process 250 ms behind the other, %d rounds: %d with one holder, %d with two, %d with none", rounds, control.one, control.both, control.none)
 	if control.one != rounds {
-		t.Errorf("the control must end every round with exactly one holder (the rejection works across processes when they do not overlap): %+v", control)
+		t.Errorf("the control must end every round with exactly one holder: %+v", control)
 	}
 
-	race := runRace(t, db, app, schema, tokenID, "Race", rounds, 0)
-	t.Logf("two processes at the same moment, %d rounds: %d with one holder, %d with TWO holders, %d with none", rounds, race.one, race.both, race.none)
-	if race.none != 0 {
-		t.Errorf("%d rounds ended with no holder: neither process won, which is a defect of its own", race.none)
+	reject := runRace(t, db, app, schema, tokenID, "Rej", smeldr.ConflictReject, rounds, 0)
+	t.Logf("reject, two processes at the same moment, %d rounds: %d with one holder, %d with TWO holders, %d with none", rounds, reject.one, reject.both, reject.none)
+	if reject.one != rounds {
+		t.Errorf("ConflictReject must end every simultaneous round with exactly one holder across processes: %+v", reject)
 	}
-	if race.both != 0 {
-		t.Logf("KNOWN LIMIT: ConflictReject is not exclusive across processes on Postgres (%d of %d simultaneous rounds ended with two holders)", race.both, rounds)
+
+	supersede := runRace(t, db, app, schema, tokenID, "Sup", smeldr.ConflictSupersede, rounds, 0)
+	t.Logf("supersede, two processes at the same moment, %d rounds: %d with one active item, %d with two, %d with none", rounds, supersede.one, supersede.both, supersede.none)
+	if supersede.one != rounds {
+		t.Errorf("ConflictSupersede must end every simultaneous round with exactly one active item: %+v", supersede)
 	}
 }
 
-// TestPG_RaceChild is the child process of TestPG_ConflictReject_TwoProcesses: it
+// TestPG_RaceChild is the child process of TestPG_ConflictPolicy_TwoProcesses: it
 // is not a test in a normal run (it skips without PG_RACE_CHILD). It moves its
 // item into the active state of each round's type at that round's slot.
 func TestPG_RaceChild(t *testing.T) {
 	if os.Getenv("PG_RACE_CHILD") == "" {
-		t.Skip("only runs as the child of TestPG_ConflictReject_TwoProcesses")
+		t.Skip("only runs as the child of TestPG_ConflictPolicy_TwoProcesses")
 	}
 	ctx := context.Background()
 	rounds, _ := strconv.Atoi(os.Getenv("PG_RACE_ROUNDS"))
@@ -572,7 +588,7 @@ func TestPG_RaceChild(t *testing.T) {
 	}
 	won, lost := 0, 0
 	for i, ty := range types {
-		slot := time.Unix(0, startNs).Add(time.Duration(i) * 600 * time.Millisecond)
+		slot := time.Unix(0, startNs).Add(time.Duration(i) * 400 * time.Millisecond)
 		time.Sleep(time.Until(slot))
 		if _, err := app.TransitionItem(actor, ty, os.Getenv("PG_RACE_ITEM"), "published"); err != nil {
 			lost++

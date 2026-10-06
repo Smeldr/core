@@ -23,6 +23,29 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.119.0] - 2026-10-06
+
+### Added
+
+- Optional cross-process lock capability on the database handle: a method `AcquireLock(ctx context.Context, name string) (release func(), err error)` that the conflict policy asks for after its in-process lock, with the name `smeldr:conflict:` plus the type name, and releases once the winner's write is committed. The method signature and the name prefix are a stable contract for every adapter that implements it; a handle without the method keeps the in-process lock only, exactly as before. No exported symbol in core (A410)
+
+### Fixed
+
+- `ConflictReject` and `ConflictSupersede` are now exclusive across application processes on one Postgres database through `smeldr.dev/core/pgx` (adapter v0.3.0 or later): two processes moving two items into the active state at the same moment used to both pass the check (measured against postgres:16, 25 of 25 simultaneous rounds ended with two holders); now 25 of 25 end with exactly one, under both policies (A410)
+
+### Changed
+
+- On Postgres through `core/pgx`, a transition into the active state of a type with a `ConflictPolicy` now takes two extra round trips and waits for the lock while another process holds it, up to 10 seconds; after that it goes ahead without the cross-process lock and logs an Error naming the type, the lock and the time waited, as the in-process lock already does. The pgx adapter refuses the lock whenever fewer than two pool connections are free at that moment (a holder that took the last one could not run its own statements), with the same Error line, instead of hanging; that can happen under ordinary load on a small or busy pool, not only on a pool of one, and a recurring Error line means raise `MaxConns`. SQLite and any handle without `AcquireLock` are unchanged (A410)
+
+### Known limits
+
+- SQLite with several processes on one file is not covered: measured, 25 of 25 simultaneous rounds ended with two holders (A410)
+- A wrapper that embeds `smeldr.DB` hides `AcquireLock` and silently keeps the in-process lock only; forward the method to keep the cross-process lock (A410)
+- If the lock's connection is lost while it is held, Postgres drops the lock with the session and exclusion is gone for that transition; this is logged at Error when the lock is given up (A410)
+- `core/pgx` has no `BeginTx` through v0.2.x, so on Postgres the conflict policy's winner and loser writes, governance audit writes and relation-diff writes run statement by statement and are not atomic; this was read from the code, not run (tracked as `core-pgx-adapter-begintx`) (A410)
+
+---
+
 ## [1.118.0] - 2026-10-06
 
 ### Changed

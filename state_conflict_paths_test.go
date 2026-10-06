@@ -157,7 +157,7 @@ func TestHTTPPut_SameStatus_NeverPlans(t *testing.T) {
 
 func acquireForTest(t *testing.T, typeName string) func() {
 	t.Helper()
-	release, held, err := acquireConflictLock(context.Background(), typeName)
+	release, held, err := acquireConflictLock(context.Background(), nil, typeName)
 	if err != nil || !held {
 		t.Fatalf("acquire %s: held=%v err=%v", typeName, held, err)
 	}

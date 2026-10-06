@@ -1,6 +1,9 @@
 package pgx
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // TestWrap_compilesAsSmeldrDB documents the compile-time guarantee that
 // poolAdapter satisfies smeldr.DB. The actual enforcement is the package-level
@@ -13,4 +16,25 @@ import "testing"
 func TestWrap_compilesAsSmeldrDB(t *testing.T) {
 	// Compilation of this package is the test.
 	// No runtime check needed — the guarantee is enforced at compile time.
+}
+
+// poolAdapter provides the cross-process lock core's conflict policy asks for. The
+// method signature is a stable contract (D22) for every adapter that implements it:
+// core asserts the handle against exactly this shape, so a signature change would
+// silently turn the lock off.
+var _ interface {
+	AcquireLock(ctx context.Context, name string) (release func(), err error)
+} = (*poolAdapter)(nil)
+
+// TestLockKey pins the advisory lock key of one known name. Processes of different
+// versions share the lock, so the hash must never change.
+func TestLockKey(t *testing.T) {
+	const name = "smeldr:conflict:Task"
+	const want = int64(-4667081937754432639)
+	if got := lockKey(name); got != want {
+		t.Errorf("lockKey(%q) = %d, want %d: a changed hash splits the lock between versions", name, got, want)
+	}
+	if lockKey("smeldr:conflict:Task") == lockKey("smeldr:conflict:Decision") {
+		t.Error("two type names share a lock key")
+	}
 }
