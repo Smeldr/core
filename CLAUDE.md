@@ -27,9 +27,11 @@ Task pipeline and session-start query lives there now, not here.
 
 ## Before writing any code
 
-1. If you have a claimed Task with no approved plan yet, you're already following
-   the embedded protocol's Task pipeline (below) — stop here and do not proceed with
-   steps 2–7 until the architect transitions `plan-reviewing → implementing`.
+1. If you have a claimed Task with no approved plan yet, you are in the embedded
+   protocol's Task pipeline (below): write no code until the architect transitions
+   `plan-reviewing → implementing`, but a claim is not a stopping point. Steps 2–7 are
+   the reading that builds the plan, and planning continues in the same turn as the
+   claim, through to the submitted `task_plan` record and the `plan-ready` signal.
 2. Read `DECISIONS.md` — index table only. Body text lives in `decisions/core.md`
    (D1–D22, A19–A65, A88–A95), `decisions/recent.md` (frozen at D67/A304 —
    no Decision/Amendment content after that point; anything newer is live
@@ -347,13 +349,15 @@ Every step — without exception — follows this exact sequence:
 ### 1. Plan the step
 - Write a detailed plan covering: what types/functions will be defined, their
   signatures, performance considerations, and how they will be tested.
-- Present the plan to the user before writing any code.
+- Send the plan to the architect as a `task_plan` record (see "Plan → approval →
+  implementation → commit" in the embedded protocol); write no code before it is approved.
 
 ### 2. Document the plan in the milestone backlog
 - Expand the step's section in `Milestone{N}_BACKLOG.md` with numbered
   sub-sections (N.1, N.2, …) and atomic checkboxes.
 - Every step ends with a verification block and the architecture review checkbox.
-- Save the file. Confirm with the user before starting implementation.
+- Save the file. Implementation starts on the architect's `plan-reviewing → implementing`,
+  not on a confirmation from the user.
 
 ### 3. Implement the step
 - One step = one file (implementation + test file). Never mix two files in one step.
@@ -970,7 +974,7 @@ internal planning history. `Milestone_BACKLOG_TEMPLATE.md` is never removed.
 
 # Smeldr Agent Protocol
 
-<!-- common-template-version: 2026-09-28c -->
+<!-- common-template-version: 2026-10-06a -->
 <!-- source: smeldr/architect/AGENT_PROTOCOL.md (canonical) -->
 
 **This file is the canonical source D77 calls `Template-Smeldr-Common-Agent.md`.** Not
@@ -1058,9 +1062,11 @@ event stream" below) before querying or reading anything else**, then check what
 actually waiting for you — `backlog` Tasks at `priority=0` in your own band (see "The
 live instance" below) plus any pending `Signal`.
 
-**Context files.** Only brand-expert has one (`smeldr/brand/context/brand-expert.md`).
-The other four roles' own context files were retired under D66 (2026-09-07/2026-09-15) —
-their session state comes from git and the live instance directly, not a file.
+**Context files.** No role has one. Core, site, cloud and devops retired theirs under
+D66 (2026-09-07/2026-09-15); brand-expert's went when brand moved to Tasks only (D88,
+2026-09-28). Session state comes from git and the live instance directly, not a file.
+`smeldr/brand/context/` still exists, but it holds brand's own reference material
+(design laws, messaging, audience rules), not a session-state file.
 
 **Doc-freshness check.** Before starting task work, check whether anything you're about
 to rely on (a version line, a skill file section, a stale cross-reference in your own
@@ -1092,6 +1098,26 @@ itself arrives.
    down from — every other number, including `priority=1`, means "not yet authorized."
    This holds at every backlog query: session start, mid-session after closing a Task,
    and right before ending a session are the same rule.
+
+   **A claim is not a stopping point (2026-10-06).** `priority=0` authorizes the whole
+   run from claim to `plan-ready`, in the same turn and without asking Peter: claim
+   (`backlog → active`), move to `waiting-plan`, read the code, write the `task_plan`,
+   submit it, move to `plan-reviewing`, send `plan-ready`. Do not end your turn after the
+   claim to report or to ask for a go; the Task is the go. The only places you stop and
+   wait are:
+   - **architect's review:** after `plan-ready` (until the plan is approved) and after
+     `commit-ready` (until the commit is approved);
+   - **Peter's own yes:** a release tag, a deploy, or a production, server, DNS or
+     credential action, given in your session;
+   - **a real blocker:** something the Task cannot proceed without (missing access, a
+     contradiction in the Task, a decision only Peter or architect can make). Say what it
+     is in an `implementation-question` Signal, or move the Task to `blocked` with the
+     reason.
+
+   A plan's open questions are not a blocker: write them into the `task_plan` and submit
+   it; architect answers them there. Found 2026-10-06: new sessions claimed and then
+   waited for Peter to say go, because nothing here said the claim was not a stopping
+   point.
 2. **The pipeline is the Task's own states**; each transition carries a `Reason` — put
    your one-line message there.
 
@@ -1319,12 +1345,22 @@ content and is not a review channel — the `task_plan` record stays the actual 
 **Chat discipline.** Since A302, most event types are channel-scoped, not a true
 broadcast — verified directly against `channelValueFromItem` in `smeldr/core`:
 `Task`/`Goal` events route on `Band`, `Decision` on `Scope`, `Signal` on `Receiver` —
-each reaches only subscribers on that one channel. **Amendment events, and every
-dynamic-content-module event, are the exception: those still always broadcast to every
-channel**, with no per-band narrowing. In practice this means your own `?channel=<band>`
-stream mostly shows only what already concerns you, except Amendment events, which you
-will see regardless of band — still only surface a notification in chat when it is
-actually relevant to you, and let an off-topic Amendment event pass silently.
+each reaches only subscribers on that one channel. Dynamic-content-module events are the
+exception and still broadcast to every channel.
+
+**What the stream no longer carries (core v1.106.0/v1.107.0, A389/A390, 2026-10-02):**
+- **Your own events.** An event caused by your own token is not sent back to you. When
+  you claim, transition or create something, expect no stream line for it; your own tool
+  call's result is the confirmation. Opt back in with `?include_own=true` only if your
+  role genuinely needs it.
+- **`signal.transitioned`.** Moving a Signal `pending → read → acknowledged` produces no
+  stream event. `signal.created` still arrives as before.
+- **`amendment.*`.** No Amendment event reaches the stream at all, created or
+  transitioned. Query `list_amendments` when you need them.
+
+Outbound webhooks are unaffected: they still receive all of these. A per-item
+subscription model that lets a role ask for some of them back is a separate, open design
+item, not built.
 `task.created`/`task.updated` means an item now exists in or changed within the backlog,
 nothing more — it is not a start signal, do not claim and start work the moment one
 arrives. `task.transitioned` is relevant only when it concerns a Task you are already
@@ -1618,7 +1654,15 @@ content under a `replace`.
   ship something intentionally incomplete on purpose (a `TODO`, an empty policy map, a
   "not wired up until X is decided" note), the comment may stay, but also `create_task`
   for it (band = your own, unless it clearly belongs elsewhere) and `Signal` architect.
-  Never set `priority` yourself on it — that authorization is architect's and Peter's.
+- **A follow-up Task gets `priority=0`, unless Peter has agreed otherwise** (Peter's
+  standing rule, 2026-10-05). A follow-up is a Task you or architect create for a finding
+  made while planning, reviewing or building another Task: a stubbed piece, a gap found
+  next to your change, a path you named as "not fixing, named" in your plan. Set
+  `priority: 0` on it yourself when you create it, put it after your current Task in your
+  band's order, and say where it sits in your Signal to architect (slug and position).
+  Architect may move it in the order; only Peter may give it a lower priority. Work that
+  is not a follow-up (a new idea, a wish, an unrelated improvement) still gets no
+  priority from you: create it without one and let architect and Peter decide.
 
 ---
 
@@ -1707,9 +1751,9 @@ actively swept as dead by `SweepStructural`'s own liveness check.
 
 You may always write to your own repo and your own context file. Beyond that:
 
-- **`smeldr/architect`**: your own context file only (brand-expert — the other five roles
-  have none, D66). Plans are no longer files here at all (D81) — write your `task_plan`
-  record on `process.smeldr.dev` instead.
+- **`smeldr/architect`**: nothing. No role has a context file here any more (D66, D88).
+  Plans are no longer files here at all (D81) — write your `task_plan` record on
+  `process.smeldr.dev` instead.
 - **Every other agent's repo**: read-only, except a `NEXT.md` an architect was explicitly
   told to write there (architect-only; implementers do not write `NEXT.md` for each other).
 - **`smeldr/common/content/drafts/`**: write to the subfolder your role owns (see your own
