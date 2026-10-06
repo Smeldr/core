@@ -10,9 +10,9 @@ within the `smeldr/core` repository, not a standalone repo.
 
 ---
 
-## [Unreleased]
+## [0.3.0] - 2026-10-06
 
-The next adapter release (v0.3.0) carries both `AcquireLock` (A410) and `BeginTx` (A411). Its `go.mod` floor is core v1.119.1: with a `BeginTx` on the adapter core opens a transaction for the conflict policy, and only v1.119.1 runs the `last_actor` fail-open of a table that predates the column under a savepoint; against an older core a transition of such a table would fail on Postgres with "current transaction is aborted".
+This release carries both `AcquireLock` (A410) and `BeginTx` (A411). Its `go.mod` floor is raised from core v1.52.1 to v1.119.1: with a `BeginTx` on the adapter core opens a transaction for the conflict policy, and only v1.119.1 runs the `last_actor` fail-open of a table that predates the column under a savepoint; against an older core a transition of such a table would fail on Postgres with "current transaction is aborted".
 
 ### Added
 - `BeginTx(ctx, opts) (*sql.Tx, error)` on the handle `Wrap` returns, which core asserts against exactly this signature. Core's multi-statement writes are now atomic on Postgres through this adapter: the conflict policy's winner and loser writes (a refused loser write fails the whole transition and leaves nothing half done), an audited governance mutation with its audit record (an audit failure rolls the mutation back), a relation diff, and the legacy table rename. Before it each ran statement by statement (A411). Proven on postgres:16: a refused loser write, a refused audit record and a failed insert in a relation diff each leave the earlier writes undone; the same tests fail against v0.2.x. Not tested: the atomicity of the legacy rename
