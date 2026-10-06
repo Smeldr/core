@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.113.0 · smeldr.dev/mcp v1.44.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.113.0 · smeldr.dev/mcp v1.45.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.17.2 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -452,7 +452,7 @@ Tools are named from the type in lower_snake_case.
 | `preview_impact` | Editor+ | Return dependents of a target item without firing signals. Gate: `app.Relations(store)` called. |
 | `upsert_relation_kind` | Admin | Register or update a relation kind. Gate: `app.Relations(store)` called. |
 | `list_relation_kinds` | Author+ | List all registered relation kinds. Includes `reverse_label` when the kind has one set (01a0c43f/v1.40.0). Gate: `app.Relations(store)` called. |
-| `define_state_flow` | Admin | Register or update a state flow for a dynamic content type. Calls `App.RegisterFlow`; idempotent. `type_name` required. Returns `{name, type_name, state_count, transition_count}`. Gate: `App.Config().DB != nil`. |
+| `define_state_flow` | Admin | Register or update a state flow for a dynamic content type. Calls `App.RegisterFlow`; idempotent. `type_name` required. States carry `locked` and `standing` (`holds` or omitted); the flow carries `active_state` and `conflict_policy`. Anything left out is reset, so send the full definition. A Go-defined `type_name` is refused (its flow is set in code). Returns `{name, type_name, state_count, transition_count}`. Gate: `App.Config().DB != nil`. |
 | `transition_item` | Editor | Move a dynamic content item to a new state; validates against registered flow (ErrConflict → -32001, ErrNotFound → -32000 as of v1.40.0, previously also -32001). Optional `reason` param (v1.31.0+) — required if the target transition has `RequiredReason` set, else returns -32602. Gate: `App.Config().DB != nil`. |
 | `get_valid_transitions` | Author | List legal target states for the item's current state; falls back to default flow. Gate: `App.Config().DB != nil`. |
 | `list_items_by_state` | Author | List items of a dynamic content type in a given state. Gate: `App.Config().DB != nil`. |
