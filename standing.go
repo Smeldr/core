@@ -5,9 +5,9 @@ package smeldr
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 )
 
@@ -152,20 +152,88 @@ func forgetStanding(ctx context.Context, db DB, typeName, id string) {
 // own), and the first result is then empty. For a type that has standing, an
 // item without a stored row reports [StandingNone]. A plain function over a
 // [DB] handle, like [SubjectProvenance], for a caller that already holds one.
+// It is [ItemStandings] for one id; for a page of items call that instead.
 func ItemStanding(ctx context.Context, db DB, typeName, id string) (Standing, bool, error) {
-	if len(holdsStates(ctx, db, typeName)) == 0 {
-		return "", false, nil
+	m, has, err := itemStandings(ctx, db, typeName, []string{id})
+	if !has || err != nil {
+		return "", has, err
 	}
-	var s string
-	err := db.QueryRowContext(ctx,
-		`SELECT standing FROM smeldr_standing WHERE subject_type = $1 AND subject_id = $2`, typeName, id).Scan(&s)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return StandingNone, true, nil
-	case err != nil:
-		return "", true, fmt.Errorf("%w: ItemStanding: %s", ErrInternal, err)
+	return m[id], true, nil
+}
+
+// TypeHasStanding reports whether typeName has standing at all: its registered
+// flow tags at least one state [StandingHolds]. A type without a registered
+// flow, with no tagged state, or whose lookup fails reports false (standing is
+// then simply not tracked for it; the lookup is fail-open like the rest of
+// D100). A caller that lists items asks this once, then [ItemStandings] once.
+func TypeHasStanding(ctx context.Context, db DB, typeName string) bool {
+	return len(holdsStates(ctx, db, typeName)) > 0
+}
+
+// ItemStandings reports the stored standing of every id in ids for typeName,
+// in one tagged-state lookup and one query per 400 ids (D100). The result maps
+// each id to its standing: an item without a stored row is [StandingNone], never
+// absent, so a type that has standing returns an entry for every id asked. The
+// map is empty, and no standing query is issued, when ids is empty or the type
+// has no standing (see [TypeHasStanding]); an id missing from a non-empty map is
+// therefore never "unknown", the whole type just has no standing. A failed read
+// returns [ErrInternal]. For one item use [ItemStanding].
+func ItemStandings(ctx context.Context, db DB, typeName string, ids []string) (map[string]Standing, error) {
+	m, _, err := itemStandings(ctx, db, typeName, ids)
+	return m, err
+}
+
+// standingChunk is how many ids one standing query carries: well under every
+// supported driver's bind-variable limit (SQLite's older default is 999).
+const standingChunk = 400
+
+// itemStandings is the one implementation behind [ItemStanding] and
+// [ItemStandings]; its second result is whether the type has standing.
+func itemStandings(ctx context.Context, db DB, typeName string, ids []string) (map[string]Standing, bool, error) {
+	out := map[string]Standing{}
+	if len(ids) == 0 {
+		return out, TypeHasStanding(ctx, db, typeName), nil
 	}
-	return Standing(s), true, nil
+	if !TypeHasStanding(ctx, db, typeName) {
+		return out, false, nil
+	}
+	for _, id := range ids {
+		out[id] = StandingNone
+	}
+	for start := 0; start < len(ids); start += standingChunk {
+		end := min(start+standingChunk, len(ids))
+		chunk := ids[start:end]
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, typeName)
+		ph := make([]byte, 0, len(chunk)*5)
+		for i, id := range chunk {
+			if i > 0 {
+				ph = append(ph, ',')
+			}
+			ph = append(ph, '$')
+			ph = strconv.AppendInt(ph, int64(i+2), 10)
+			args = append(args, id)
+		}
+		rows, err := db.QueryContext(ctx,
+			`SELECT subject_id, standing FROM smeldr_standing WHERE subject_type = $1 AND subject_id IN (`+string(ph)+`)`, args...)
+		if err != nil {
+			return nil, true, fmt.Errorf("%w: ItemStandings: %s", ErrInternal, err)
+		}
+		for rows.Next() {
+			var id, s string
+			if err := rows.Scan(&id, &s); err != nil {
+				rows.Close()
+				return nil, true, fmt.Errorf("%w: ItemStandings: %s", ErrInternal, err)
+			}
+			out[id] = Standing(s)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, true, fmt.Errorf("%w: ItemStandings: %s", ErrInternal, err)
+		}
+	}
+	return out, true, nil
 }
 
 // CountStanding counts the stored standing rows of typeName by value (for

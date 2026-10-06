@@ -23,6 +23,17 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.114.0] - 2026-10-06
+
+### Added
+- `TypeHasStanding(ctx, db, typeName) bool` reports whether the type's flow tags a state as holding (fail-open false). (A401)
+- `ItemStandings(ctx, db, typeName, ids []string) (map[string]Standing, error)` returns the stored standing of every id in one tagged-state lookup plus one query per 400 ids; an item of a type with standing but no stored row is `none`, never absent; for a type without standing, or empty ids, the map is empty and no standing query is issued; a failed read is ErrInternal. (A401)
+
+### Changed
+- `ItemStanding` is now implemented through the same code; results remain unchanged. (A401)
+
+---
+
 ## [1.113.0] - 2026-10-05
 
 ### Changed

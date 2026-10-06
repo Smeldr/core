@@ -4502,7 +4502,11 @@ An item with no row is `none`. Every path that changes state writes it: `App.Tra
 ```go
 func ItemStanding(ctx context.Context, db DB, typeName, id string) (Standing, bool, error)
 func CountStanding(ctx context.Context, db DB, typeName string) (map[Standing]int, error)
+func TypeHasStanding(ctx context.Context, db DB, typeName string) bool
+func ItemStandings(ctx context.Context, db DB, typeName string, ids []string) (map[string]Standing, error)
 ```
+
+`TypeHasStanding` and `ItemStandings` (since v1.114.0) are for a caller that shows a page of items: ask `TypeHasStanding` once, then `ItemStandings` once, instead of `ItemStanding` per item. `ItemStandings` costs one tagged-state lookup plus one query per 400 ids, and returns an entry for every id asked: an item of a type with standing but no stored row is `StandingNone`, never absent. For a type with no standing (or empty `ids`) the map is empty and no standing query is issued, so an absent id means the whole type has no standing, never that one item is unknown. A failed read is `ErrInternal`; `TypeHasStanding` is fail-open (false). `ItemStanding` is `ItemStandings` for one id.
 
 `ItemStanding` returns `(_, false, nil)` for a type whose flow tags no state, and `StandingNone` for an item of a type that has standing but no stored row. `CountStanding` counts stored rows by value (an item without a row is `none` and is not counted). Both are plain functions over a `DB` handle, like `SubjectProvenance`. `BuildContextPacket` also fills an additive `standing` field on the anchor and on each item (omitted for a type without standing).
 

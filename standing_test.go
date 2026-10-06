@@ -617,7 +617,7 @@ func (d *standingReadFailDB2) QueryRowContext(ctx context.Context, q string, arg
 }
 
 func (d *standingReadFailDB2) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	if strings.Contains(q, "GROUP BY standing") {
+	if strings.Contains(q, "GROUP BY standing") || strings.Contains(q, "subject_id IN") {
 		return nil, errors.New("simulated group failure")
 	}
 	return d.DB.QueryContext(ctx, q, args...)
