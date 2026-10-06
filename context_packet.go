@@ -291,11 +291,11 @@ func BuildContextPacket(
 	for d := 1; d <= depth; d++ {
 		var nextFrontier []frontierItem
 		for _, fi := range frontier {
-			srcEdges, err := rs.GetBySource(ctx, fi.relType, fi.nodeID, "")
+			srcEdges, err := rs.GetLiveBySource(ctx, fi.relType, fi.nodeID, "")
 			if err != nil {
 				return nil, err
 			}
-			tgtEdges, err := rs.GetByTarget(ctx, fi.relType, fi.nodeID, "")
+			tgtEdges, err := rs.GetLiveByTarget(ctx, fi.relType, fi.nodeID, "")
 			if err != nil {
 				return nil, err
 			}

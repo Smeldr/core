@@ -23,6 +23,17 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.117.0] - 2026-10-06
+
+### Added
+- `RelationStore.GetLiveBySource` and `RelationStore.GetLiveByTarget`: return only edges that are live now (invalid_at is NULL or in the future), complementing the existing GetBySource/GetByTarget which return the full history including ended edges (A408)
+
+### Changed
+- Reachability, the relation cascade, MCPPreviewImpact, get_goal_context and the context packet now read only live edges instead of all edges including ended ones: an ended relation no longer appears in reachability calculations, the cascade, the goal context or the context packet; GetBySource/GetByTarget are unchanged and still return all edges for the history view (A408)
+- MCPGetRelations continues to return ended edges; the history view is unaffected (A408)
+
+---
+
 ## [1.116.1] - 2026-10-06
 
 ### Fixed

@@ -3657,6 +3657,8 @@ role** via bearer auth — lower than `ContextPacket`'s `Editor` bar, since
 Reachability exposes graph structure only (type/id/edge_class/confidence),
 never item content.
 
+**Live edges only (v1.117.0).** Reachability walks only relations that are live now: `invalid_at` is NULL or in the future, the same predicate `SweepStructural` and governance use. A relation that has ended is neither traversed nor counted, so Pulse's held-open count and Navigator's neighbourhood no longer include it (before v1.117.0 they did). The relation store has two pairs of getters: `GetBySource`/`GetByTarget` return **every** edge, ended ones included (the history view, each edge carries `InvalidAt`), and `GetLiveBySource`/`GetLiveByTarget` (new in v1.117.0, same signatures) return only live edges. Inside core the live pair is used by reachability, the relation cascade and `MCPPreviewImpact` (the preview must match the cascade), `get_goal_context` and the context packet; `MCPGetRelations` keeps the all-edges pair, so an operator can still see what ended. A caller outside core that shows what an item is related to now should use the live pair.
+
 ### Setup
 
 ```go

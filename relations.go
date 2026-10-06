@@ -771,9 +771,10 @@ func (s *RelationStore) MCPGetRelations(ctx context.Context, typeName, id, direc
 
 // MCPPreviewImpact returns which items would receive an AfterRelationCascade
 // signal if the given item changed status — without firing any signals.
-// Returns the source-side dependents found via GetByTarget.
+// Returns the source-side dependents found via GetLiveByTarget (an ended
+// relation is not a dependency, so it would not cascade either).
 func (s *RelationStore) MCPPreviewImpact(ctx context.Context, typeName, id string) ([]RelationEdge, error) {
-	return s.GetByTarget(ctx, typeName, id, "")
+	return s.GetLiveByTarget(ctx, typeName, id, "")
 }
 
 // MCPUpsertRelationKind registers or updates a relation kind via MCP.
@@ -793,45 +794,54 @@ func (s *RelationStore) MCPListRelationKinds() []RelationKindDef {
 	return s.ListKinds()
 }
 
-// GetBySource returns all edges where source_type and source_id match.
+// GetBySource returns all edges where source_type and source_id match, including
+// edges that have ended (invalid_at in the past): it is the history view. Use
+// [RelationStore.GetLiveBySource] for what the item is related to now.
 // If kind is non-empty, only edges with that relation_kind are returned.
 func (s *RelationStore) GetBySource(ctx context.Context, sourceType, sourceID, kind string) ([]RelationEdge, error) {
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if kind == "" {
-		rows, err = s.db.QueryContext(ctx,
-			"SELECT "+relationColumns+" FROM smeldr_relations WHERE source_type=$1 AND source_id=$2",
-			sourceType, sourceID)
-	} else {
-		rows, err = s.db.QueryContext(ctx,
-			"SELECT "+relationColumns+" FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 AND relation_kind=$3",
-			sourceType, sourceID, kind)
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return collectEdges(rows)
+	return s.edgesAt(ctx, "source", sourceType, sourceID, kind, false)
 }
 
-// GetByTarget returns all edges where target_type and target_id match.
+// GetByTarget returns all edges where target_type and target_id match, including
+// edges that have ended (invalid_at in the past): it is the history view. Use
+// [RelationStore.GetLiveByTarget] for what is related to the item now.
 // If kind is non-empty, only edges with that relation_kind are returned.
 func (s *RelationStore) GetByTarget(ctx context.Context, targetType, targetID, kind string) ([]RelationEdge, error) {
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if kind == "" {
-		rows, err = s.db.QueryContext(ctx,
-			"SELECT "+relationColumns+" FROM smeldr_relations WHERE target_type=$1 AND target_id=$2",
-			targetType, targetID)
-	} else {
-		rows, err = s.db.QueryContext(ctx,
-			"SELECT "+relationColumns+" FROM smeldr_relations WHERE target_type=$1 AND target_id=$2 AND relation_kind=$3",
-			targetType, targetID, kind)
+	return s.edgesAt(ctx, "target", targetType, targetID, kind, false)
+}
+
+// GetLiveBySource is [RelationStore.GetBySource] limited to the edges that are
+// live now: invalid_at is NULL or in the future, the same predicate
+// [RelationStore.SweepStructural] and governance use. Read the current
+// neighbourhood of an item (reachability, the cascade, a goal's links, a context
+// packet) through this, not through GetBySource, which also returns relations
+// that have ended. now is taken once per call.
+func (s *RelationStore) GetLiveBySource(ctx context.Context, sourceType, sourceID, kind string) ([]RelationEdge, error) {
+	return s.edgesAt(ctx, "source", sourceType, sourceID, kind, true)
+}
+
+// GetLiveByTarget is [RelationStore.GetByTarget] limited to the edges that are
+// live now (invalid_at is NULL or in the future). See
+// [RelationStore.GetLiveBySource].
+func (s *RelationStore) GetLiveByTarget(ctx context.Context, targetType, targetID, kind string) ([]RelationEdge, error) {
+	return s.edgesAt(ctx, "target", targetType, targetID, kind, true)
+}
+
+// edgesAt is the one query behind the four getters. side is "source" or "target"
+// (a constant of the callers above, never user input); live adds the
+// still-valid condition.
+func (s *RelationStore) edgesAt(ctx context.Context, side, nodeType, nodeID, kind string, live bool) ([]RelationEdge, error) {
+	query := "SELECT " + relationColumns + " FROM smeldr_relations WHERE " + side + "_type=$1 AND " + side + "_id=$2"
+	args := []any{nodeType, nodeID}
+	if kind != "" {
+		args = append(args, kind)
+		query += fmt.Sprintf(" AND relation_kind=$%d", len(args))
 	}
+	if live {
+		args = append(args, time.Now().UTC())
+		query += fmt.Sprintf(" AND (invalid_at IS NULL OR invalid_at > $%d)", len(args))
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1265,7 +1275,7 @@ func (s *RelationStore) applyRelationDiff(ctx context.Context, db edgeExecer, to
 func buildCascadeHandler(store *RelationStore, app *App) func(context.Context, SignalEvent) error {
 	var debouncers sync.Map // "sourceType:sourceID" → *debouncer
 	return func(ctx context.Context, ev SignalEvent) error {
-		edges, err := store.GetByTarget(ctx, ev.Type, ev.NodeID, "")
+		edges, err := store.GetLiveByTarget(ctx, ev.Type, ev.NodeID, "")
 		if err != nil {
 			return err
 		}

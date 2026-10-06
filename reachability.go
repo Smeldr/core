@@ -191,7 +191,7 @@ func (s *RelationStore) reachabilityNeighbors(ctx context.Context, node reachabi
 	var out []reachabilityCandidate
 
 	if direction == "outgoing" || direction == "both" {
-		edges, err := s.GetBySource(ctx, node.typ, node.id, kind)
+		edges, err := s.GetLiveBySource(ctx, node.typ, node.id, kind)
 		if err != nil {
 			return nil, err
 		}
@@ -204,7 +204,7 @@ func (s *RelationStore) reachabilityNeighbors(ctx context.Context, node reachabi
 		}
 	}
 	if direction == "incoming" || direction == "both" {
-		edges, err := s.GetByTarget(ctx, node.typ, node.id, kind)
+		edges, err := s.GetLiveByTarget(ctx, node.typ, node.id, kind)
 		if err != nil {
 			return nil, err
 		}

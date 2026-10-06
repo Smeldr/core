@@ -84,7 +84,7 @@ func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID stri
 	seen := map[string]bool{}
 	var refs []relRef
 
-	srcEdges, err := rs.GetBySource(ctx, "Goal", goal.ID, "")
+	srcEdges, err := rs.GetLiveBySource(ctx, "Goal", goal.ID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID stri
 		refs = append(refs, relRef{typeName: e.TargetType, id: e.TargetID})
 	}
 
-	tgtEdges, err := rs.GetByTarget(ctx, "Goal", goal.ID, "")
+	tgtEdges, err := rs.GetLiveByTarget(ctx, "Goal", goal.ID, "")
 	if err != nil {
 		return nil, err
 	}

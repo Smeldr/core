@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.116.1 · smeldr.dev/mcp v1.46.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.18.0 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
+Current versions: smeldr.dev/core v1.117.0 · smeldr.dev/mcp v1.46.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.18.0 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.2.0
 
 ---
 
@@ -448,7 +448,7 @@ Tools are named from the type in lower_snake_case.
 | `list_webhook_deliveries` / `retry_webhook` | Admin | Delivery introspection and retry |
 | `create_redirect` / `list_redirects` / `delete_redirect` | Editor+ | Redirect rule management (requires `app.Redirects(db)`) |
 | `set_page_meta` / `get_page_meta` / `delete_page_meta` / `list_page_meta` | Admin | Per-path SEO overrides (requires `mcp.WithPageMeta(db)`) |
-| `assert_relation` / `propose_relation` / `observe_relation` / `get_relations` | Author+ | Relation graph: assert/propose/observe edges (edge_class=asserted/inferred/observed), query by source/target/both. Response includes `created_by` (the human/agent actor's ID, when set — v1.42.1) alongside the existing `created_by_job` (the system/job that wrote the edge, when applicable). Gate: `app.Relations(store)` called. |
+| `assert_relation` / `propose_relation` / `observe_relation` / `get_relations` | Author+ | Relation graph: assert/propose/observe edges (edge_class=asserted/inferred/observed), query by source/target/both. Response includes `created_by` (the human/agent actor's ID, when set — v1.42.1) alongside the existing `created_by_job` (the system/job that wrote the edge, when applicable). Gate: `app.Relations(store)` called. Since v1.117.0 reachability, the cascade, goal context and the context packet read live edges only (GetLiveBySource/GetLiveByTarget); get_relations still returns ended edges. |
 | `preview_impact` | Editor+ | Return dependents of a target item without firing signals. Gate: `app.Relations(store)` called. |
 | `upsert_relation_kind` | Admin | Register or update a relation kind. Gate: `app.Relations(store)` called. |
 | `list_relation_kinds` | Author+ | List all registered relation kinds. Includes `reverse_label` when the kind has one set (01a0c43f/v1.40.0). Gate: `app.Relations(store)` called. |
