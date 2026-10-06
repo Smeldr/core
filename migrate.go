@@ -213,6 +213,21 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 	if err := EnsureStateStandingColumn(ctx, db); err != nil {
 		return fmt.Errorf("smeldr: migrateStateFlows: %w", err)
 	}
+	// The columns the seed below, and every enforcement query after it, read: a
+	// database created by an older core has none of them, and the seed would fail
+	// on the first (D103: this is as true of a Postgres database as of SQLite).
+	if err := EnsureStateLockedColumn(ctx, db); err != nil {
+		return fmt.Errorf("smeldr: migrateStateFlows: %w", err)
+	}
+	if err := migrateStateFlowConflictColumns(ctx, db); err != nil {
+		return err
+	}
+	if err := migrateTransitionReasonColumn(ctx, db); err != nil {
+		return err
+	}
+	if err := migrateTransitionStrictColumn(ctx, db); err != nil {
+		return err
+	}
 	if err := migrateDuplicateStateFlowRows(ctx, db); err != nil {
 		return fmt.Errorf("smeldr: migrateStateFlows: %w", err)
 	}
@@ -269,22 +284,17 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 			return fmt.Errorf("smeldr: migrateStateFlows: seed transition %s→%s: %w", t[0], t[1], err)
 		}
 	}
-	if err := migrateStateFlowConflictColumns(ctx, db); err != nil {
-		return err
-	}
-	if err := migrateTransitionReasonColumn(ctx, db); err != nil {
-		return err
-	}
-	return migrateTransitionStrictColumn(ctx, db)
+	return nil
 }
 
 // EnsureColumn adds column to table if it does not already exist, using
 // columnDDL as the column's full type/constraint clause — for example,
 // "TEXT NOT NULL DEFAULT" followed by an empty-string literal, or
 // "INTEGER NOT NULL DEFAULT 0". Idempotent — safe to call on every application
-// startup. A no-op on non-SQLite databases (PRAGMA table_info is
-// SQLite-specific, matching every existing column migration in this
-// package); other database engines migrate by their own tooling.
+// startup. Works on SQLite and Postgres alike (D103): the column is looked up by
+// selecting it from the table, and added with a plain ALTER TABLE ... ADD COLUMN,
+// which both databases accept. A column that appears between the lookup and the
+// ADD (another process booting at the same moment added it) is not an error.
 //
 // Additive only — never drops a column, so downgrading to an older binary
 // after EnsureColumn has run leaves one unused column present, never lost
@@ -299,28 +309,16 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 // twice) calls EnsureColumn itself for its own added columns; ownership
 // follows whoever declared the field, not a shared migration list (T246).
 func EnsureColumn(ctx context.Context, db DB, table, column, columnDDL string) error {
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+quoteIdent(table)+")")
+	exists, err := columnExists(ctx, db, table, column)
 	if err != nil {
-		return nil // non-SQLite — assume schema is current
+		return fmt.Errorf("smeldr: EnsureColumn: %s.%s: %w", table, column, err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid, notNull, pk int
-		var name, colType string
-		var dflt *string
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			continue
-		}
-		if name == column {
-			return nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
+	if exists {
+		return nil
 	}
 	if _, err := db.ExecContext(ctx,
 		"ALTER TABLE "+quoteIdent(table)+" ADD COLUMN "+quoteIdent(column)+" "+columnDDL,
-	); err != nil {
+	); err != nil && !isDuplicateColumn(err, column) {
 		return fmt.Errorf("smeldr: EnsureColumn: %s.%s: %w", table, column, err)
 	}
 	return nil
@@ -331,8 +329,7 @@ func EnsureColumn(ctx context.Context, db DB, table, column, columnDDL string) e
 // column (T149). Fresh installs on any DB engine already have the column via
 // the CREATE TABLE statement above; this only upgrades an existing SQLite
 // database created before A220. Idempotent — safe to call on every boot.
-// A no-op on non-SQLite databases (PRAGMA not supported), same precedent
-// as migrateStateFlowConflictColumns.
+// Works on SQLite and Postgres (see [EnsureColumn]).
 func migrateTransitionReasonColumn(ctx context.Context, db DB) error {
 	return EnsureColumn(ctx, db, "smeldr_transitions", "required_reason", "BOOLEAN NOT NULL DEFAULT FALSE")
 }
@@ -342,15 +339,14 @@ func migrateTransitionReasonColumn(ctx context.Context, db DB) error {
 // Fresh installs on any DB engine already have the column via the CREATE
 // TABLE statement above; this only upgrades an existing SQLite database
 // created before this column existed. Idempotent — safe to call on every
-// boot. A no-op on non-SQLite databases (PRAGMA not supported), same
-// precedent as migrateTransitionReasonColumn.
+// boot. Works on SQLite and Postgres (see [EnsureColumn]).
 func migrateTransitionStrictColumn(ctx context.Context, db DB) error {
 	return EnsureColumn(ctx, db, "smeldr_transitions", "strict", "BOOLEAN NOT NULL DEFAULT FALSE")
 }
 
 // migrateStateFlowConflictColumns adds the active_state and conflict_policy
 // columns to smeldr_state_flows when they are absent. Idempotent — safe to
-// call on every boot. A no-op on non-SQLite databases (PRAGMA not supported).
+// call on every boot. Works on SQLite and Postgres (see [EnsureColumn]).
 func migrateStateFlowConflictColumns(ctx context.Context, db DB) error {
 	if err := EnsureColumn(ctx, db, "smeldr_state_flows", "active_state", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
@@ -362,8 +358,9 @@ func migrateStateFlowConflictColumns(ctx context.Context, db DB) error {
 // database to their smeldr_* equivalents. It is called from [New] once at
 // startup when [Config.DB] is non-nil.
 //
-// The function only operates on SQLite databases (identified by the presence
-// of sqlite_master). For other databases, the caller must migrate manually.
+// It works on SQLite and Postgres (a table is looked up by selecting from it, and
+// renamed with ALTER TABLE ... RENAME TO). Postgres keeps an index under its old
+// name when its table is renamed; that is harmless.
 // All renames are wrapped in a single transaction when the DB supports BeginTx.
 //
 // Idempotency: if both the source (forge_*) and destination (smeldr_*) tables
@@ -381,25 +378,15 @@ func migrateLegacyTableNames(ctx context.Context, db DB) error {
 		{"forge_webhook_endpoints", "smeldr_webhook_endpoints"},
 	}
 
-	// Probe sqlite_master. Returns silently when db is not SQLite.
-	var dummy int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy); err != nil {
-		return nil // not SQLite — skip silently
-	}
-
 	// Determine which legacy tables still exist and need renaming.
 	var toRename [][2]string
 	for _, pair := range pairs {
-		var srcN int
-		if err := db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$1`, pair[0],
-		).Scan(&srcN); err != nil || srcN == 0 {
-			continue // source doesn't exist — nothing to rename
+		if src, err := tableExists(ctx, db, pair[0]); err != nil {
+			return fmt.Errorf("smeldr: migrate legacy tables: check %s: %w", pair[0], err)
+		} else if !src {
+			continue // source doesn't exist - nothing to rename
 		}
-		var dstN int
-		if err := db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$1`, pair[1],
-		).Scan(&dstN); err == nil && dstN > 0 {
+		if dst, err := tableExists(ctx, db, pair[1]); err == nil && dst {
 			// Destination already exists — partial migration from a previous run.
 			// Skip this pair rather than failing the rename.
 			slog.Warn("smeldr: legacy table migration skipped — destination already exists",

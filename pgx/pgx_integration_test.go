@@ -246,7 +246,7 @@ func TestRepoParity_pgx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pgxpool.New: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered before the table drop below, so it runs after it
 
 	db := Wrap(pool)
 

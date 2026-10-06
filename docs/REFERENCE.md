@@ -1491,7 +1491,7 @@ if err := smeldr.EnsureColumn(ctx, db, "smeldr_site_configs", "custom_field", "T
 }
 ```
 
-Idempotent — safe to call on every application startup. SQLite-only (`PRAGMA table_info`); a no-op on other database engines, which migrate by their own tooling. Additive only — never drops a column, so a downgrade after `EnsureColumn` has run simply leaves one unused column present, never lost data.
+Idempotent — safe to call on every application startup. Works on SQLite and Postgres (v1.118.0, D103): the column is looked up by selecting it from the table, and added with a plain `ALTER TABLE ... ADD COLUMN`; a column another process adds in between is not an error, and a probe that fails for any other reason is returned, not skipped. Additive only — never drops a column, so a downgrade after `EnsureColumn` has run simply leaves one unused column present, never lost data.
 
 **Ownership:** call `EnsureColumn` for a column your own type declares, at your own application's startup, the same way `Create*Table` is already called — there is no central registry of "columns the framework knows about." An application extending a framework-provided table (for example, adding custom fields to `SiteConfig`) calls `EnsureColumn` itself for its own added columns.
 
@@ -4283,7 +4283,7 @@ err = repo.ScheduleContent(ctx, id, time.Now().Add(48*time.Hour))
 When upgrading an existing database that pre-dates A154, call once at startup:
 
 ```go
-smeldr.MigrateURLPrefixColumn(db) // idempotent; no-op on non-SQLite
+smeldr.MigrateURLPrefixColumn(db) // idempotent; SQLite and Postgres
 ```
 
 `ServeDynamicContent` calls this automatically. Use the explicit call only when
@@ -4308,18 +4308,22 @@ source. Cloud rendering is outside core scope (A156).
 
 Custom state machines for content types. Defined in `state.go`.
 
-**Databases: enforced on SQLite only.** The state machine is enforced on SQLite only. Every function below that consults the registered flow starts by probing `sqlite_master`; on any other database the probe fails and the function returns as if there were nothing to do. A flow registered on such a database is stored in `smeldr_state_flows` and never consulted:
+**Databases: enforced on SQLite and Postgres alike (v1.118.0, D103).** The state machine is enforced on every supported database. Every function below that consults the registered flow first asks one portable question, whether `smeldr_state_flows` is there (`SELECT 1 FROM smeldr_state_flows LIMIT 1`): when the table is absent there is no flow and nothing is enforced; when the question fails for any other reason the call returns `ErrInternal` (or, for the functions that cannot return an error, logs a Warn and fails open), never a silent skip. This holds for a cancelled context too.
 
-| Function | What it enforces | On a non-SQLite database |
-|---|---|---|
-| `validateTransition` | the flow's edges, `RequiredOperation`, `RequiredReason`, `Strict`, the governance gate | **every transition is allowed; a role gate or reason requirement is not checked (an authorization gap)** |
-| `isStateLocked` | `State.Locked` (A306) | **nothing is locked** |
-| `validateInitialState`, `defaultInitialState`, `validateFlowItems` | the initial state, the state list | skipped |
-| `suppressesSignals`, `fireAsyncTriggers` | `State.SuppressesSignals`, async transition triggers | no effect |
-| `planConflict`, `resolveItemTable` | `ConflictPolicy`, the typed-versus-dynamic table choice | no policy applied |
-| `MigrateStanding`, `migrateLegacyTableNames`, `EnsureLastActorColumns`, `MigrateRedirectsToRoutes` | boot migrations | skipped; migrate manually |
+| Function | What it enforces |
+|---|---|
+| `validateTransition` | the flow's edges, `RequiredOperation`, `RequiredReason`, `Strict`, the governance gate |
+| `isStateLocked` | `State.Locked` (A306) |
+| `validateInitialState`, `defaultInitialState`, `validateFlowItems` | the initial state, the state list |
+| `suppressesSignals`, `fireAsyncTriggers` | `State.SuppressesSignals`, async transition triggers |
+| `planConflict`, `resolveItemTable` | `ConflictPolicy`, the typed-versus-dynamic table choice |
+| `MigrateStanding`, `migrateLegacyTableNames`, `EnsureLastActorColumns`, `MigrateRedirectsToRoutes`, `EnsureColumn` | boot migrations |
 
-`isNoSuchTable` and `isNoSuchColumn` also match SQLite message text only. `process.smeldr.dev` and the Cloud product run on SQLite; the exposure is a deployment through `smeldr.dev/core/pgx`. Since v1.116.1 `App.RegisterFlow` logs a Warn, once per process and handle type, naming this plainly. A dead context is not "not SQLite": since v1.116.1 `validateTransition`, `validateInitialState`, `validateFlowItems` and `planConflict` return `ErrInternal` when the probe fails because the context ended (before, the call silently skipped its gate, lock or policy), and the functions that cannot return an error log a Warn and fail open. Making the state machine dialect-neutral is a separate, Decision-gated Task (`core-state-machine-dialect-neutral`): it would turn enforcement on for existing Postgres deployments.
+**Upgrading a Postgres deployment (breaking, no opt-out).** Before v1.118.0 the state machine was not enforced on Postgres through `smeldr.dev/core/pgx`: a flow was stored and never consulted. From v1.118.0 it is, so on upgrade a transition that passed unchecked can be refused (403, 409 or 400), content in a `Locked` state becomes read-only, async triggers fire and `ConflictPolicy` rejects or supersedes. This is a security fix (a transition's `RequiredOperation` gate was not checked on Postgres), shipped under D97 with no transition period. `process.smeldr.dev` and the Cloud product run on SQLite and are not affected.
+
+**Tables and columns are looked up by selecting from them**, not by `sqlite_master`, `PRAGMA` or `information_schema`, so `EnsureColumn` and the boot migrations now work on Postgres: a Postgres database created by an older core gets the `strict`, `required_reason`, `locked`, `standing`, `active_state`, `conflict_policy` and `last_actor` columns at boot, and the legacy `forge_*` tables are renamed. A column that another process adds between the lookup and the `ALTER TABLE` is not an error. `isNoSuchTable`, `isNoSuchColumn` and the duplicate-column check recognise the Postgres errors (SQLSTATE 42P01, 42703, 42701) as well as SQLite's text. These probes must run on the base handle, never inside a transaction: on Postgres a failed statement aborts the whole transaction.
+
+**Known limit: `ConflictReject` is exclusive within one process, not across processes.** The per-type lock (v1.115.1) serialises transitions into the active state inside one process. On Postgres the reject check and the winner's write are separate statements under READ COMMITTED, and two application processes that move two items into the active state at the same moment can both pass the check. Measured against postgres:16 with two processes over 25 simultaneous rounds, every round ended with two holders; with one process 400 ms behind the other, every round ended with exactly one. If you run several application processes against one database and rely on `ConflictReject`, serialise those transitions yourself until this is closed (`core-conflict-policy-cross-process-exclusion`).
 
 ### `StateFlow`
 

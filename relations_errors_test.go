@@ -75,13 +75,12 @@ func TestCreateRelationTables_ExecError5(t *testing.T) {
 	}
 }
 
-// TestCreateRelationTables_ExecError6 pins the 6th ExecContext call site
-// CreateRelationTables gained when EnsureColumn's own ALTER TABLE (T160,
-// reverse_label) was inserted between the smeldr_relation_kinds CREATE and
-// the smeldr_relations CREATE — failOnNthExecDB's QueryContext always
-// reports the column missing (an empty result set, not real schema state),
-// so EnsureColumn's ALTER always runs against this fake, shifting every
-// later statement's own position by one.
+// TestCreateRelationTables_ExecError6 pins the last ExecContext call site of
+// CreateRelationTables, the smeldr_reference_types CREATE TABLE (core-sweep-
+// invalidates-domain-edges, 2026-09-28). failOnNthExecDB's QueryContext answers
+// every lookup with an empty result set, which EnsureColumn (D103) reads as the
+// column being there, so its ALTER TABLE (T160, reverse_label) never runs against
+// this fake and the function issues six ExecContext calls here, not seven.
 func TestCreateRelationTables_ExecError6(t *testing.T) {
 	err := CreateRelationTables(&failOnNthExecDB{failAt: 6})
 	if err == nil {
@@ -89,15 +88,11 @@ func TestCreateRelationTables_ExecError6(t *testing.T) {
 	}
 }
 
-// TestCreateRelationTables_ExecError7 pins the smeldr_reference_types CREATE
-// TABLE call added by core-sweep-invalidates-domain-edges (2026-09-28) —
-// the last statement in the function, so it is unambiguously the 7th
-// ExecContext call regardless of how the six calls before it are internally
-// numbered.
-func TestCreateRelationTables_ExecError7(t *testing.T) {
-	err := CreateRelationTables(&failOnNthExecDB{failAt: 7})
-	if err == nil {
-		t.Error("want error on seventh ExecContext, got nil")
+// TestCreateRelationTables_NoSeventhExec pins that the six calls above are all of
+// them: a failure injected at a seventh call never fires.
+func TestCreateRelationTables_NoSeventhExec(t *testing.T) {
+	if err := CreateRelationTables(&failOnNthExecDB{failAt: 7}); err != nil {
+		t.Errorf("a seventh ExecContext call exists: %v", err)
 	}
 }
 

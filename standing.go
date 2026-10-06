@@ -451,15 +451,16 @@ func standingItems(ctx context.Context, db DB, typeName string) ([]standingItem,
 // the absence of a row); anything else is [StandingNotRecorded] (Decision
 // "archived", reachable from "proposed" and from "superseded"). Call it at
 // boot after the flows are registered. Like the other migrations it does
-// nothing on a database it cannot probe (not SQLite). A failure for one type
+// nothing when the state flow tables are absent. A failure for one type
 // is returned and leaves that type unmarked, so the next boot retries it.
 func MigrateStanding(ctx context.Context, db DB) error {
 	if db == nil {
 		return nil
 	}
-	var probe int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&probe); err != nil {
-		return nil
+	if ok, err := flowTablesPresent(ctx, db); err != nil {
+		return fmt.Errorf("smeldr: MigrateStanding: %w", err)
+	} else if !ok {
+		return nil // no flow tables: no flows to mark
 	}
 	graphs, err := loadFlowGraphs(ctx, db)
 	if err != nil {

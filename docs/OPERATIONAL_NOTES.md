@@ -58,7 +58,7 @@ naming the column in its own column list produces `table t has no column
 named <col>` instead — a different sentence, not just a different table
 name substituted in.
 
-`isNoSuchColumn` (`state.go`) checks for both shapes now, but every caller
+`isNoSuchColumn` (`dbprobe.go`) checks for both shapes now, but every caller
 of it before this date only ever used it against an `UPDATE` fallback
 (`App.TransitionItemWithReason`, `App.DrainEvalQueue`) — the `INSERT` shape
 was never exercised until `TokenStore.createToken`'s own fallback needed
@@ -99,3 +99,27 @@ leaving the BOM behind. Avoid `Set-Content`/`Out-File -Encoding utf8` on
 `.go` files entirely — use the `Edit`/`Write` tools instead, or if a raw
 PowerShell rewrite is unavoidable, use `[System.IO.File]::WriteAllText`
 with an explicit `New-Object System.Text.UTF8Encoding($false)`.
+
+## Probing for a column or table on SQLite and Postgres (found 2026-10-06, D103)
+
+`SELECT "x" FROM t WHERE 1=0` is **not** a column probe on SQLite: a double-quoted
+name that matches no column is read as a string literal, so the statement
+succeeds for a column that is not there. `columnExists` (`dbprobe.go`)
+qualifies the column with its table (`SELECT "t"."x" ...`), which is an error on
+SQLite and on Postgres alike. The qualified SQLite error is `no such column:
+t.x`, not `no such column: x`, so `isNoSuchColumn` reads the name after the last
+dot.
+
+Postgres words the same failure three ways, verified against postgres:16:
+`column "x" does not exist`, `column "x" of relation "t" does not exist` (an
+INSERT) and, for a qualified reference, `column t.x does not exist` with **no
+quotes around the name**. Matching on `column "x"` alone misses the last one;
+SQLSTATE 42703 does not say which column. A failed statement also aborts the
+whole transaction on Postgres, so a probe that is meant to fail (a missing table
+or column) must never run inside one: `refuseInTx` turns that into an error.
+
+`resolveItemTable` finds an item's table by probing `smeldr_<x>s` and then `<x>s`, so a
+runtime-defined type pays two probes that fail by design on every call. On Postgres each
+failed probe is an `ERROR: relation ... does not exist` line in the server log. That is
+noise, not a defect, and there is deliberately no cache of the result: table existence can
+change at runtime (architect, 2026-10-06, D103).

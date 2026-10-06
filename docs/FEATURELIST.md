@@ -2,13 +2,13 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.117.0 + smeldr.dev/mcp v1.46.0 + smeldr.dev/cli v0.18.0 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
+Last updated: v1.118.0 + smeldr.dev/mcp v1.46.0 + smeldr.dev/cli v0.18.0 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.2.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.117.0 | Stable |
+| `smeldr.dev/core` | v1.118.0 | Stable |
 | `smeldr.dev/mcp` | v1.46.0 | Stable |
 | `smeldr.dev/oauth` | v0.5.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.2.0 | Beta |
@@ -79,7 +79,7 @@ Last full label review: 2026-09-29, no label changes.
 - `App.DynamicContentRepo(typeName string) (*DynamicTypeRepo, error)` — returns a typed CRUD repo for a registered runtime-defined content type (A153)
 - `App.ServeDynamicContent() *App` — opt-in call that runs `MigrateURLPrefixColumn`, initialises the sitemap store, enables boot-time `loadDynamicTypes`, and registers 5 admin `/_content/{type}` endpoints (Editor+). Returns `*App` for chaining. Panics if `Config.DB` is nil. (A153/A154)
 - `ContentTypeSchema.URLPrefix string` — operator-set public URL prefix; empty = admin-only; must start with `"/"` (A154)
-- `MigrateURLPrefixColumn(db DB) error` — idempotent column migration for `url_prefix`; no-op on non-SQLite (A154)
+- `MigrateURLPrefixColumn(db DB) error` — idempotent column migration for `url_prefix`; works on SQLite and Postgres (A154, A409)
 - `PluralSnake(name string) string` — English plural helper (consonant+y→-ies rule) (A153)
 - `ValidateSchemaDef(schema *ContentTypeSchema) error` — validates TypeName, URLPrefix format, field types, and roles (A153/A154)
 - Admin content API (`/_content/{type}`) — 5 endpoints (Editor+): `POST` create draft, `GET` list all statuses, `GET /{id}` get by ID, `PATCH /{id}` update fields, `POST /{id}/status` set status; `POST /_content/types` (Admin) defines a type (A153/A154)
@@ -351,6 +351,8 @@ MCP resource subscriptions (Beta):
   - Both policies fail-open: DB errors return nil and never block a transition
 - RegisterFlow now updates all state flags on existing state rows (v1.113.0), clearing `is_initial` on rows no longer initial; previously rows stayed frozen at insert. (A399)
 - State flow enforced automatically in `MCPPublish`, `MCPSchedule`, `MCPArchive`, and `DynamicTypeRepo.SetStatus`; since v1.116.0 the conflict policy also applies on HTTP PUT status changes, the scheduler publish, `DrainEvalQueue` and `DynamicTypeRepo.ScheduleContent`
+- State flows are enforced on SQLite and Postgres alike since v1.118.0 (D103, A409): a Postgres deployment through `core/pgx` used to store a flow and never consult it. `ConflictReject` is exclusive within one process, not across processes
+- `EnsureColumn` and the boot migrations work on SQLite and Postgres since v1.118.0 (A409)
 - `define_state_flow` MCP tool — registers a flow including `active_state` and `conflict_policy` params (Admin role)
 - `TransitionTrigger` struct — `FromState`, `ToState`, `TriggerClass`, `TriggerType`, `Config`; declared in `StateFlow.Triggers`
 - `StateFlow.Triggers []TransitionTrigger` — async trigger handlers persisted to `smeldr_transition_triggers` by `RegisterFlow`; idempotent

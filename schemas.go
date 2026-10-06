@@ -160,60 +160,16 @@ CREATE TABLE IF NOT EXISTS smeldr_content_type_schemas (
 
 // MigrateURLPrefixColumn adds the url_prefix column to
 // smeldr_content_type_schemas when it is absent. Idempotent; safe to call on
-// every boot. A no-op on non-SQLite databases that do not support PRAGMA.
+// every boot. Works on SQLite and Postgres (see [EnsureColumn]).
 func MigrateURLPrefixColumn(db DB) error {
-	ctx := context.Background()
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_content_type_schemas)")
-	if err != nil {
-		return nil // non-SQLite; assume schema is current
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid, notNull, pk int
-		var name, colType string
-		var dflt *string
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			continue
-		}
-		if name == "url_prefix" {
-			return nil // already present
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	_, err = db.ExecContext(ctx,
-		`ALTER TABLE smeldr_content_type_schemas ADD COLUMN url_prefix TEXT NOT NULL DEFAULT ''`)
-	return err
+	return EnsureColumn(context.Background(), db, "smeldr_content_type_schemas", "url_prefix", "TEXT NOT NULL DEFAULT ''")
 }
 
 // MigrateSchemaKindColumn adds the kind column to smeldr_content_type_schemas
 // when it is missing. Safe to call on every boot; no-op when the column exists
-// or when the database does not support PRAGMA table_info (non-SQLite).
+// or (see [EnsureColumn]).
 func MigrateSchemaKindColumn(db DB) error {
-	ctx := context.Background()
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info(smeldr_content_type_schemas)")
-	if err != nil {
-		return nil // non-SQLite; assume schema is current
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid, notNull, pk int
-		var name, colType string
-		var dflt *string
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			continue
-		}
-		if name == "kind" {
-			return nil // already present
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	_, err = db.ExecContext(ctx,
-		`ALTER TABLE smeldr_content_type_schemas ADD COLUMN kind TEXT NOT NULL DEFAULT 'block'`)
-	return err
+	return EnsureColumn(context.Background(), db, "smeldr_content_type_schemas", "kind", "TEXT NOT NULL DEFAULT 'block'")
 }
 
 // SeedBlockTypeSchemas inserts the 16 canonical block type schemas using

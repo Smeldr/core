@@ -243,7 +243,6 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 		return fmt.Errorf("smeldr: RegisterFlow %q: Config.DB is required", flow.Name)
 	}
 	ctx := context.Background()
-	warnIfNotEnforced(ctx, db, flow)
 
 	// Upsert the flow row keyed on TypeName — the real identity resolveFlowID
 	// already assumes (its own query is "one row per type_name", enforced
@@ -469,12 +468,11 @@ func EnsureStateStandingColumn(ctx context.Context, db DB) error {
 // state defined by flow.States. Returns an error listing unknown states if any
 // are found.
 //
-// The check is SQLite-only (same as migrateLegacyTableNames): if the database
-// is not SQLite, the function returns nil. If the type's table does not yet
-// exist, the function returns nil (no items = nothing to validate).
+// If the flow tables are absent, or the type's table does not yet exist, the
+// function returns nil (no flow, or no items, means nothing to validate).
 func validateFlowItems(ctx context.Context, db DB, flow StateFlow) error {
-	// Probe SQLite — returns silently for non-SQLite databases.
-	if ok, err := isSQLite(ctx, db); err != nil {
+	// No flow tables: nothing to validate against.
+	if ok, err := flowTablesPresent(ctx, db); err != nil {
 		return err
 	} else if !ok {
 		return nil
@@ -483,11 +481,10 @@ func validateFlowItems(ctx context.Context, db DB, flow StateFlow) error {
 	table := camelToSnake(flow.TypeName) + "s"
 
 	// Check whether the table exists yet.
-	var tableCount int
-	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$1`, table,
-	).Scan(&tableCount); err != nil || tableCount == 0 {
-		return nil // table not yet created — no items to validate
+	if exists, err := tableExists(ctx, db, table); err != nil {
+		return fmt.Errorf("%w: RegisterFlow %q: check table %q: %s", ErrInternal, flow.Name, table, err)
+	} else if !exists {
+		return nil // table not yet created - no items to validate
 	}
 
 	// Build NOT IN clause from the registered state names.
@@ -568,15 +565,15 @@ func validateFlowItems(ctx context.Context, db DB, flow StateFlow) error {
 //
 // Returns nil when:
 //   - db is nil (no DB configured)
-//   - the database is not SQLite (non-SQLite databases skip flow validation)
+//   - the state flow tables are absent (no flow can be registered)
 //   - fromStatus == toStatus (identity transition — always allowed for idempotency)
 //   - no flow is registered for typeName and no default flow exists
 func validateTransition(ctx context.Context, db DB, rs *RoleStore, rels *RelationStore, actorID, itemID, typeName, fromStatus, toStatus, reason string) error {
 	if db == nil {
 		return nil
 	}
-	// Probe SQLite — same guard as validateFlowItems.
-	if ok, err := isSQLite(ctx, db); err != nil {
+	// No flow tables: nothing to enforce (same guard as validateFlowItems).
+	if ok, err := flowTablesPresent(ctx, db); err != nil {
 		return err
 	} else if !ok {
 		return nil
@@ -718,14 +715,14 @@ func lookupTransitionGate(ctx context.Context, db DB, flowID, fromState, toState
 // Fail-open cases (returns nil):
 //   - db is nil (no DB configured)
 //   - statusName is empty (caller omitted status — module defaults apply)
-//   - the database is not SQLite (sqlite_master probe fails)
+//   - the state flow tables are absent
 //   - no flow is registered for typeName and no default flow exists
 //   - the state membership query fails (structural DB error)
 func validateInitialState(ctx context.Context, db DB, typeName, statusName string) error {
 	if db == nil || statusName == "" {
 		return nil
 	}
-	if ok, err := isSQLite(ctx, db); err != nil {
+	if ok, err := flowTablesPresent(ctx, db); err != nil {
 		return err
 	} else if !ok {
 		return nil
@@ -759,7 +756,7 @@ func validateInitialState(ctx context.Context, db DB, typeName, statusName strin
 // defaultInitialState returns the IsInitial state registered for typeName's
 // own custom StateFlow, or "" when none is registered — or on any
 // structural/DB issue, fail-open, matching validateInitialState's own
-// fail-open cases (nil DB, non-SQLite, missing flow, query error). Callers
+// fail-open cases (nil DB, no flow tables, missing flow, query error). Callers
 // fall back to the literal Draft constant when this returns "": the
 // built-in default flow's own initial state is "draft" (migrateStateFlows),
 // so a second query against it here would return the same answer for no
@@ -769,7 +766,7 @@ func defaultInitialState(ctx context.Context, db DB, typeName string) string {
 	if db == nil {
 		return ""
 	}
-	if !isSQLiteFailOpen(ctx, db, "defaultInitialState") {
+	if !flowTablesPresentFailOpen(ctx, db, "defaultInitialState") {
 		return ""
 	}
 	var flowID string
@@ -794,14 +791,14 @@ func defaultInitialState(ctx context.Context, db DB, typeName string) string {
 //
 // Fail-open cases (returns false):
 //   - db is nil (no DB configured)
-//   - the database is not SQLite (sqlite_master probe fails)
+//   - the state flow tables are absent
 //   - no flow is registered for typeName and no default flow exists
 //   - the state is not found in the flow or any query fails
 func suppressesSignals(ctx context.Context, db DB, typeName, statusName string) bool {
 	if db == nil {
 		return false
 	}
-	if !isSQLiteFailOpen(ctx, db, "suppressesSignals") {
+	if !flowTablesPresentFailOpen(ctx, db, "suppressesSignals") {
 		return false
 	}
 	var flowID string
@@ -835,14 +832,14 @@ func suppressesSignals(ctx context.Context, db DB, typeName, statusName string) 
 //
 // Fail-open cases (returns false):
 //   - db is nil (no DB configured)
-//   - the database is not SQLite (sqlite_master probe fails)
+//   - the state flow tables are absent
 //   - no flow is registered for typeName and no default flow exists
 //   - the state is not found in the flow or any query fails
 func isStateLocked(ctx context.Context, db DB, typeName, statusName string) bool {
 	if db == nil {
 		return false
 	}
-	if !isSQLiteFailOpen(ctx, db, "isStateLocked") {
+	if !flowTablesPresentFailOpen(ctx, db, "isStateLocked") {
 		return false
 	}
 	var flowID string
@@ -994,7 +991,7 @@ func (p *conflictPlan) holdingContext(ctx Context) Context {
 //
 // It returns (nil, nil), fail-open and nothing to do, and takes no lock, when:
 //   - db is nil
-//   - the database is not SQLite
+//   - the state flow tables are absent
 //   - no flow is registered for typeName
 //   - ActiveState is empty or ConflictPolicy is empty
 //   - toState does not equal ActiveState
@@ -1011,10 +1008,10 @@ func planConflict(ctx context.Context, db DB, typeName, toState, newItemID strin
 	if db == nil {
 		return nil, nil
 	}
-	if ok, err := isSQLite(ctx, db); err != nil {
+	if ok, err := flowTablesPresent(ctx, db); err != nil {
 		return nil, err
 	} else if !ok {
-		return nil, nil // not SQLite: the state machine is not enforced here (see isSQLite)
+		return nil, nil // no flow tables: nothing to enforce here (see flowTablesPresent)
 	}
 
 	var activeState, conflictPolicy string
@@ -1041,7 +1038,7 @@ func planConflict(ctx context.Context, db DB, typeName, toState, newItemID strin
 	}
 
 	// Detect whether items live in a typed table or in smeldr_dynamic_content.
-	// Reuses resolveItemTable rather than re-probing sqlite_master directly —
+	// Reuses resolveItemTable rather than re-probing for the table directly —
 	// its own probe order (smeldr_<snake>s, then <snake>s, then
 	// smeldr_dynamic_content) is what every other item-resolution path in
 	// this package already relies on (T229).
@@ -1239,15 +1236,18 @@ func conflictTx(ctx context.Context, db DB) (exec DB, commit func() error, rollb
 }
 
 // resolveItemTable returns the DB table name that stores items of typeName.
-// It probes sqlite_master in order: smeldr_<snake>s (orchestration types),
+// It probes for the table in order: smeldr_<snake>s (orchestration types),
 // <snake>s (static module types), then falls back to smeldr_dynamic_content.
 func resolveItemTable(ctx context.Context, db DB, typeName string) string {
 	snake := camelToSnake(typeName) + "s"
 	for _, candidate := range []string{"smeldr_" + snake, snake} {
-		var n int
-		if db.QueryRowContext(ctx,
-			"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$1", candidate,
-		).Scan(&n) == nil && n > 0 {
+		exists, err := tableExists(ctx, db, candidate)
+		if err != nil {
+			slog.WarnContext(ctx, "smeldr: resolveItemTable: table check failed, treating it as absent",
+				"type_name", typeName, "table", candidate, "error", err)
+			continue
+		}
+		if exists {
 			return candidate
 		}
 	}
@@ -1481,37 +1481,6 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 			Reason:    reason,
 		})
 	return map[string]any{"id": id, "slug": realSlug, "status": toState, "last_actor": actorID}, nil
-}
-
-// isNoSuchTable reports whether err is a SQLite "no such table" error.
-func isNoSuchTable(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "no such table")
-}
-
-// isNoSuchColumn reports whether err is a SQLite missing-column error for
-// the given column — used by [App.TransitionItemWithReason]'s own
-// last_actor write (D78) to fail open on a compiled type's table that
-// predates the column (a third-party module table this framework does not
-// control), the same graceful-degradation shape [isNoSuchTable] already
-// provides for a missing table.
-//
-// SQLite (via modernc.org/sqlite) reports a missing column with two
-// different message shapes depending on the statement kind — verified
-// directly (token-record-user-id, 2026-09-28), not assumed: an UPDATE or
-// SELECT referencing the column produces "no such column: <column>", but an
-// INSERT naming it in its own column list produces "table <table> has no
-// column named <column>" instead. Every caller of this function before
-// token-record-user-id only ever used it against an UPDATE (never an
-// INSERT), so only the first shape was ever exercised — this second branch
-// closes that gap for [TokenStore]'s own INSERT-based fallback, and for any
-// future INSERT-based caller.
-func isNoSuchColumn(err error, column string) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "no such column: "+column) ||
-		strings.Contains(msg, "no column named "+column)
 }
 
 // drainAuthorizationGate reports whether typeName's fromState→toState
@@ -1893,7 +1862,7 @@ func fireAsyncTriggers(ctx context.Context, db DB, typeName, fromState, toState,
 	if db == nil {
 		return
 	}
-	if !isSQLiteFailOpen(ctx, db, "fireAsyncTriggers") {
+	if !flowTablesPresentFailOpen(ctx, db, "fireAsyncTriggers") {
 		return
 	}
 	rows, err := db.QueryContext(ctx, `
@@ -2038,58 +2007,3 @@ type drainActorCtx struct {
 }
 
 func (d drainActorCtx) User() User { return d.user }
-
-// isSQLite reports whether db is SQLite, by asking it for sqlite_master. The state
-// machine (transition validation, Locked, SuppressesSignals, the initial state,
-// async triggers, ConflictPolicy) is enforced on SQLite only today: on any other
-// database the probe fails and every caller returns as if there were nothing to
-// do (task_plan item-76). That is stated, not fixed, here.
-//
-// A probe that fails because ctx has ended is not "not SQLite": it is returned as
-// [ErrInternal], so a cancelled or timed-out call can never be read as "no flow
-// to enforce" and silently skip a gate, a lock or the conflict policy.
-func isSQLite(ctx context.Context, db DB) (bool, error) {
-	var dummy int
-	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master`).Scan(&dummy)
-	if err == nil {
-		return true, nil
-	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return false, fmt.Errorf("%w: state flow check abandoned, the context ended: %s", ErrInternal, ctxErr)
-	}
-	return false, nil
-}
-
-// isSQLiteFailOpen is [isSQLite] for the callers that cannot return an error
-// (they answer a bool or a string, or nothing): a dead context is logged at Warn
-// and they fail open, as they always have, so a failure is at least visible.
-func isSQLiteFailOpen(ctx context.Context, db DB, caller string) bool {
-	ok, err := isSQLite(ctx, db)
-	if err != nil {
-		slog.WarnContext(ctx, "smeldr: state flow check skipped, the context ended", "caller", caller, "error", err)
-		return false
-	}
-	return ok
-}
-
-// nonSQLiteWarned remembers which database handle types already got the
-// "not enforced" Warn, so a process logs it once and not once per flow.
-var nonSQLiteWarned sync.Map
-
-// warnIfNotEnforced logs, once per handle type per process, that the state
-// machine is not enforced on this database. It says the security side plainly:
-// on a non-SQLite database a transition's RequiredOperation gate and Strict are
-// not checked, which is an authorization gap and not a missing nicety.
-func warnIfNotEnforced(ctx context.Context, db DB, flow StateFlow) {
-	ok, err := isSQLite(ctx, db)
-	if err != nil || ok {
-		return
-	}
-	if _, seen := nonSQLiteWarned.LoadOrStore(fmt.Sprintf("%T", db), struct{}{}); seen {
-		return
-	}
-	slog.WarnContext(ctx, "smeldr: state flows are enforced on SQLite only: on this database the flow is stored but never consulted. "+
-		"A transition's RequiredOperation gate, RequiredReason and Strict are NOT checked (an authorization gap), "+
-		"State.Locked locks nothing, SuppressesSignals and async triggers have no effect, and ConflictPolicy is not applied",
-		"flow", flow.Name, "type_name", flow.TypeName, "database", fmt.Sprintf("%T", db))
-}

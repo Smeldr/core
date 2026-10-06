@@ -50,10 +50,14 @@ func TestEnsureColumn_Idempotent(t *testing.T) {
 	}
 }
 
-func TestEnsureColumn_NonSQLite(t *testing.T) {
+// TestEnsureColumn_ProbeFailureIsReturned: a database that fails the column lookup
+// for a reason other than a missing table or column is an error, not a skipped
+// migration (D103; before, any failure of the SQLite-only PRAGMA was read as
+// "not SQLite" and skipped).
+func TestEnsureColumn_ProbeFailureIsReturned(t *testing.T) {
 	db := &queryFailDB{}
-	if err := EnsureColumn(context.Background(), db, "any_table", "any_column", "TEXT"); err != nil {
-		t.Fatalf("non-SQLite: expected nil, got %v", err)
+	if err := EnsureColumn(context.Background(), db, "any_table", "any_column", "TEXT"); err == nil {
+		t.Fatal("a failing probe must be returned, not skipped")
 	}
 }
 

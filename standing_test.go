@@ -465,8 +465,8 @@ func TestMigrateStanding_NoTablesNoDB(t *testing.T) {
 	if err := MigrateStanding(context.Background(), newSQLiteDB(t)); err != nil {
 		t.Errorf("empty database (no flow tables): %v", err)
 	}
-	if err := MigrateStanding(context.Background(), &queryFailDB{}); err != nil {
-		t.Errorf("a database that cannot be probed: %v", err)
+	if err := MigrateStanding(context.Background(), &queryFailDB{}); err == nil {
+		t.Error("a database that fails the probe must be an error, not a skipped migration")
 	}
 }
 
@@ -733,7 +733,7 @@ func TestStandingHelpers_ErrorBranches(t *testing.T) {
 		}
 	})
 	t.Run("migrate: item read fails", func(t *testing.T) {
-		if err := MigrateStanding(ctx, &failMatchDB{DB: newDB(t), query: `FROM "smeldr_decisions"`}); err == nil {
+		if err := MigrateStanding(ctx, &failMatchDB{DB: newDB(t), query: `SELECT id, status FROM "smeldr_decisions"`}); err == nil {
 			t.Error("want the item read failure returned")
 		}
 	})
@@ -765,7 +765,7 @@ func TestStandingHelpers_ErrorBranches(t *testing.T) {
 		}
 	})
 	t.Run("drift: item read fails", func(t *testing.T) {
-		app := &App{cfg: Config{DB: &failMatchDB{DB: newDB(t), query: `FROM "smeldr_decisions"`}}}
+		app := &App{cfg: Config{DB: &failMatchDB{DB: newDB(t), query: `SELECT id, status FROM "smeldr_decisions"`}}}
 		if _, _, err := app.CheckStandingDrift(ctx); err == nil {
 			t.Error("want the item read failure returned")
 		}

@@ -38,13 +38,10 @@ func MigrateRedirectsToRoutes(db DB) error {
 	ctx := context.Background()
 
 	// Check whether smeldr_redirects still exists.
-	rows, err := db.QueryContext(ctx,
-		"SELECT name FROM sqlite_master WHERE type='table' AND name='smeldr_redirects'")
+	exists, err := tableExists(ctx, db, "smeldr_redirects")
 	if err != nil {
-		return nil // not SQLite (or a genuine query failure) — nothing to migrate
+		return fmt.Errorf("smeldr: migrate redirects: check source table: %w", err)
 	}
-	exists := rows.Next()
-	rows.Close()
 	if !exists {
 		return nil
 	}

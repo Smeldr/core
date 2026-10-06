@@ -168,11 +168,11 @@ func TestMigrateURLPrefixColumn_AddsColumn(t *testing.T) {
 	}
 }
 
-// TestMigrateURLPrefixColumn_NonSQLite verifies that a QueryContext error (e.g. from
-// a non-SQLite DB) causes MigrateURLPrefixColumn to return nil (assumed current schema).
-func TestMigrateURLPrefixColumn_NonSQLite(t *testing.T) {
-	if err := smeldr.MigrateURLPrefixColumn(errDB{}); err != nil {
-		t.Fatalf("expected nil for non-SQLite DB, got: %v", err)
+// TestMigrateURLPrefixColumn_ProbeFailureIsReturned verifies that a QueryContext
+// error that is not a missing table or column is returned (D103), not skipped.
+func TestMigrateURLPrefixColumn_ProbeFailureIsReturned(t *testing.T) {
+	if err := smeldr.MigrateURLPrefixColumn(errDB{}); err == nil {
+		t.Fatal("a failing probe must be returned, not skipped (D103)")
 	}
 }
 

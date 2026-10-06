@@ -23,6 +23,27 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.118.0] - 2026-10-06
+
+### Changed
+
+- **Breaking for Postgres users, no opt-out.** The state machine (transition rules, role gates, `RequiredReason`, `Strict`, `Locked` states, async triggers, conflict policies) was enforced on SQLite only before v1.118.0: on Postgres through `smeldr.dev/core/pgx` a registered flow was stored and never consulted, so a transition's `RequiredOperation` gate was not checked (an authorization gap). From v1.118.0 it is enforced on SQLite and Postgres alike. On upgrade, transitions that passed unchecked can now be refused (HTTP 403, 409 or 400), content in a `Locked` state becomes read-only, async triggers start firing and conflict policies start rejecting or superseding. This is a security fix shipped under D97 with no transition period and no opt-out switch (D103). Smeldr-run deployments (process.smeldr.dev and the Cloud product) run SQLite and are not affected (A409)
+- The one-time "enforced on SQLite only" Warn that `RegisterFlow` logged since v1.116.1 is removed, because enforcement is now real (A409)
+
+### Fixed
+
+- The state machine is enforced on Postgres: every caller now asks one portable question (is `smeldr_state_flows` there) instead of probing `sqlite_master`. A probe that fails for any reason other than a missing table, and a cancelled context, return an internal error and are never read as "nothing to enforce". Transitions of compiled types could not even find their item table on Postgres before (A409)
+- `EnsureColumn`, every `Ensure*` migration, `MigrateNodeRevColumn`, `MigrateURLPrefixColumn`, `MigrateSchemaKindColumn` and the boot migrations (legacy `forge_*` table rename, `MigrateStanding`, `EnsureLastActorColumns`, `MigrateRedirectsToRoutes`) now work on Postgres; before they were no-ops there, so a Postgres database created by an older core never received the `strict`, `required_reason`, `locked`, `standing`, `active_state`, `conflict_policy` and `last_actor` columns. A column another process adds at the same moment is treated as success (A409)
+- `isNoSuchTable` and `isNoSuchColumn` recognise Postgres errors (SQLSTATE 42P01 and 42703, and the message text), so the `last_actor` fail-open fallback works on Postgres (A409)
+- `migrateStateFlows` adds the `locked`, `active_state`, `conflict_policy`, `required_reason` and `strict` columns before it seeds the default flow; on an older database the seed failed first, on SQLite as well (A409)
+
+### Known limits
+
+- `ConflictReject` is exclusive within one process, not across processes. On Postgres the reject check and the winner's write are separate statements, so two application processes that move two items into the active state at the same moment can both pass the check: measured against postgres:16, with two processes every one of 25 simultaneous rounds ended with two holders, while with one process 400 ms behind the other every round ended with exactly one. Follow-up: `core-conflict-policy-cross-process-exclusion` (A409)
+- Runtime-defined (dynamic) content types do not work on Postgres: reading the `fields` column fails to scan a text value into `json.RawMessage`. Nothing was exercised for them on Postgres, including the state machine. Follow-up: `core-dynamic-content-on-postgres` (A409)
+
+---
+
 ## [1.117.0] - 2026-10-06
 
 ### Added

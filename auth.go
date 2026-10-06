@@ -616,10 +616,10 @@ func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 // column also returns an empty map with a nil error (fail-open — this
 // exists so a caller that just wants names gets an empty result, not an
 // error, from an application that hasn't migrated yet). The isNoSuchColumn/
-// isNoSuchTable checks this relies on match SQLite's own error text only,
-// like every other use of them in this codebase — an application on
-// another database engine must run [EnsureTokenUserIDColumn]'s own
-// equivalent migration before upgrading, not rely on this fallback.
+// isNoSuchTable checks this relies on recognise SQLite's and Postgres's error
+// text (v1.118.0); this path itself has only been exercised on SQLite. An
+// application should still run [EnsureTokenUserIDColumn] before upgrading rather
+// than rely on this fallback.
 func (ts *TokenStore) NamesForUserIDs(ctx context.Context, userIDs []string) (map[string]string, error) {
 	out := make(map[string]string, len(userIDs))
 	if len(userIDs) == 0 {

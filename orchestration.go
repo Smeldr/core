@@ -798,7 +798,7 @@ func EnsureAmendmentBodyColumn(ctx context.Context, db DB) error {
 // EnsureLastActorColumns adds the last_actor column (D78) to the six
 // orchestration tables (smeldr_signals, smeldr_tasks, smeldr_decisions,
 // smeldr_amendments, smeldr_goals, smeldr_runs) and to smeldr_dynamic_content
-// on pre-existing SQLite databases that predate this column. Fresh installs
+// on pre-existing databases that predate this column. Fresh installs
 // already have the column via [CreateOrchestrationTables]/[CreateBlockTables]'s
 // own CREATE TABLE statements; this only upgrades a database created before
 // this Amendment. Idempotent — safe to call on every boot, unconditionally:
@@ -819,13 +819,11 @@ func EnsureLastActorColumns(ctx context.Context, db DB) error {
 		"smeldr_dynamic_content",
 	}
 	for _, table := range tables {
-		var exists int
-		if err := db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$1`, table,
-		).Scan(&exists); err != nil {
-			return nil // non-SQLite — assume schema is current, matches EnsureColumn's own fail-open
+		exists, err := tableExists(ctx, db, table)
+		if err != nil {
+			return fmt.Errorf("smeldr: EnsureLastActorColumns: check %s: %w", table, err)
 		}
-		if exists == 0 {
+		if !exists {
 			continue // table not created by this deployment's own config — nothing to migrate
 		}
 		if err := EnsureColumn(ctx, db, table, "last_actor", "TEXT NOT NULL DEFAULT ''"); err != nil {

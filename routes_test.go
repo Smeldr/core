@@ -30,15 +30,13 @@ func TestMigrateRedirectsToRoutes_Idempotent(t *testing.T) {
 	}
 }
 
-// TestMigrateRedirectsToRoutes_NonSQLite pins T116: the sqlite_master
-// exists-check must fail open (return nil) on a non-SQLite database,
-// exactly like EnsureColumn (TestEnsureColumn_NonSQLite) and
-// migrateLegacyTableNames — not hard-fail and crash App.Redirects's own
-// documented log.Fatal(err) caller pattern (smeldr.go).
-func TestMigrateRedirectsToRoutes_NonSQLite(t *testing.T) {
+// TestMigrateRedirectsToRoutes_ProbeFailureIsReturned: the exists-check no longer
+// asks SQLite's sqlite_master (T116), so a database that fails it for a reason
+// other than a missing table is an error, not a database to skip (D103).
+func TestMigrateRedirectsToRoutes_ProbeFailureIsReturned(t *testing.T) {
 	db := &queryFailDB{}
-	if err := MigrateRedirectsToRoutes(db); err != nil {
-		t.Fatalf("non-SQLite: expected nil, got %v", err)
+	if err := MigrateRedirectsToRoutes(db); err == nil {
+		t.Fatal("a failing probe must be returned, not skipped")
 	}
 }
 

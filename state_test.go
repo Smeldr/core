@@ -2796,8 +2796,8 @@ func TestMigrateTransitionReasonColumn_idempotent(t *testing.T) {
 
 func TestMigrateTransitionReasonColumn_nonSQLite(t *testing.T) {
 	db := &queryFailDB{}
-	if err := migrateTransitionReasonColumn(context.Background(), db); err != nil {
-		t.Fatalf("non-SQLite: expected nil, got %v", err)
+	if err := migrateTransitionReasonColumn(context.Background(), db); err == nil {
+		t.Fatal("a failing probe must be returned, not skipped (D103)")
 	}
 }
 
@@ -2864,8 +2864,8 @@ func TestMigrateTransitionStrictColumn_idempotent(t *testing.T) {
 
 func TestMigrateTransitionStrictColumn_nonSQLite(t *testing.T) {
 	db := &queryFailDB{}
-	if err := migrateTransitionStrictColumn(context.Background(), db); err != nil {
-		t.Fatalf("non-SQLite: expected nil, got %v", err)
+	if err := migrateTransitionStrictColumn(context.Background(), db); err == nil {
+		t.Fatal("a failing probe must be returned, not skipped (D103)")
 	}
 }
 
@@ -2933,8 +2933,8 @@ func TestMigrateStateFlowConflictColumns_idempotent(t *testing.T) {
 func TestMigrateStateFlowConflictColumns_nonSQLite(t *testing.T) {
 	// A DB whose QueryContext always fails simulates a non-SQLite driver.
 	db := &queryFailDB{}
-	if err := migrateStateFlowConflictColumns(context.Background(), db); err != nil {
-		t.Fatalf("non-SQLite: expected nil, got %v", err)
+	if err := migrateStateFlowConflictColumns(context.Background(), db); err == nil {
+		t.Fatal("a failing probe must be returned, not skipped (D103)")
 	}
 }
 
@@ -3350,10 +3350,10 @@ func TestApplyConflictPolicy_dynamic_supersede(t *testing.T) {
 // ——— applyConflictPolicy — non-SQLite path ————————————————————————————————
 
 func TestApplyConflictPolicy_nonSQLite(t *testing.T) {
-	// queryFailDB: QueryRowContext queries a nonexistent table → scan returns error
-	// → sqlite_master probe fails → return nil (not SQLite).
-	if err := applyConflictPolicy(context.Background(), &queryFailDB{}, nil, nil, "T", "published", "id1", ""); err != nil {
-		t.Errorf("non-SQLite: expected nil, got %v", err)
+	// queryFailDB fails every query: the flow-table probe fails for a reason other
+	// than a missing table, which is an error, never a skipped policy (D103).
+	if err := applyConflictPolicy(context.Background(), &queryFailDB{}, nil, nil, "T", "published", "id1", ""); !errors.Is(err, ErrInternal) {
+		t.Errorf("a failing probe: expected ErrInternal, got %v", err)
 	}
 }
 
@@ -3481,10 +3481,11 @@ func TestConflictSupersede_rsNonNilAssertFail(t *testing.T) {
 // ——— validateFlowItems — non-SQLite and error paths ——————————————————————
 
 func TestValidateFlowItems_nonSQLite(t *testing.T) {
-	// queryFailDB: QueryRowContext always errors → sqlite_master probe fails → return nil.
+	// queryFailDB fails every query: the flow-table probe fails for a reason other
+	// than a missing table, which is an error, never a skip (D103).
 	flow := StateFlow{Name: "test", TypeName: "TestType"}
-	if err := validateFlowItems(context.Background(), &queryFailDB{}, flow); err != nil {
-		t.Errorf("non-SQLite: expected nil, got %v", err)
+	if err := validateFlowItems(context.Background(), &queryFailDB{}, flow); !errors.Is(err, ErrInternal) {
+		t.Errorf("a failing probe: expected ErrInternal, got %v", err)
 	}
 }
 

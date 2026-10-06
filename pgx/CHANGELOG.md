@@ -10,6 +10,13 @@ within the `smeldr/core` repository, not a standalone repo.
 
 ---
 
+## [Unreleased]
+
+### Added
+- Postgres integration tests for the state machine, run in CI against postgres:16 (build tag `integration`): transition rules, role gate, `RequiredReason`, async triggers, `ConflictReject` and `ConflictSupersede` (including a two-process race), `EnsureColumn` on an older schema, the production Task and Decision flows, `Locked`, the legacy table rename and `MigrateStanding`. Tests only: no change to `Wrap` or any exported symbol, so no tag. They prove core v1.118.0 (D103), which turns on state machine enforcement for Postgres.
+
+---
+
 ## [0.2.0] — 2026-07-28
 
 ### Changed

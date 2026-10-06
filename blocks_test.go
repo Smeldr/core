@@ -10,7 +10,7 @@ import (
 
 // tableExists reports whether a table or index of the given name exists in the
 // SQLite schema.
-func tableExists(t *testing.T, db DB, name string) bool {
+func sqliteTableExists(t *testing.T, db DB, name string) bool {
 	t.Helper()
 	var found string
 	err := db.QueryRowContext(context.Background(),
@@ -36,13 +36,13 @@ func TestCreateBlockTables(t *testing.T) {
 		"smeldr_content_edges",
 		"idx_content_edges_parent",
 	} {
-		if !tableExists(t, db, name) {
+		if !sqliteTableExists(t, db, name) {
 			t.Errorf("expected %q to exist after CreateBlockTables", name)
 		}
 	}
 
 	// content_type_schemas is a later component — it must NOT be created here.
-	if tableExists(t, db, "smeldr_content_type_schemas") {
+	if sqliteTableExists(t, db, "smeldr_content_type_schemas") {
 		t.Error("smeldr_content_type_schemas should not be created by CreateBlockTables")
 	}
 

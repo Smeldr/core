@@ -40,7 +40,7 @@ Or coordinate your entire pipeline and automated workflow, AI actions and human 
 
 Directly from chat.
 
-**v1.117.0 — stable.** Public APIs are stable within v1.
+**v1.118.0 — stable.** Public APIs are stable within v1.
 See [CHANGELOG.md](CHANGELOG.md).
 
 ## 30-second start
@@ -107,7 +107,7 @@ go get smeldr.dev/core
 
 Requires Go 1.26+. No other dependencies.
 
-**Databases.** State flows (transition rules and role gates, `Locked` states, `SuppressesSignals`, async triggers and `ConflictPolicy`) are enforced on SQLite only. On any other database, including Postgres through `smeldr.dev/core/pgx`, a registered flow is stored but never consulted, and a transition's `RequiredOperation` gate is not checked. `RegisterFlow` logs a warning when it sees this. See [State flows](docs/REFERENCE.md#state-flows).
+**Databases.** State flows (transition rules and role gates, `Locked` states, `SuppressesSignals`, async triggers and `ConflictPolicy`) are enforced on SQLite and on Postgres alike. From v1.118.0 that includes Postgres through `smeldr.dev/core/pgx`, where a flow used to be stored and never consulted: upgrading can refuse transitions that passed unchecked, so read the upgrade note in [State flows](docs/REFERENCE.md#state-flows).
 
 ---
 
