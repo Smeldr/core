@@ -5,6 +5,7 @@ package smeldr
 import (
 	"context"
 	"fmt"
+	"sort"
 )
 
 // MaxReachabilityDepth is the hard ceiling on [RelationStore.Reachability]'s maxDepth
@@ -23,6 +24,25 @@ type ReachabilityItem struct {
 	Confidence *float64 `json:"confidence,omitempty"`
 }
 
+// Bounds of [RelationStore.ReachabilityBounded]: the default and the ceiling on how
+// many items one walk may return (and so on how many nodes it expands).
+const (
+	DefaultReachabilityItems = 500
+	MaxReachabilityItems     = 2000
+)
+
+// ReachabilityCut says a bounded walk stopped before it was complete. Depth is
+// the ring the cap landed in and Dropped the exact number of nodes found in that
+// ring that were not returned. The ring at Depth is itself partial even when it
+// is empty (the cap landed at a ring boundary and the next ring had more), so the
+// rule that an empty ring is a genuine absence does not apply to it. Rings deeper
+// than Depth were not walked and are not in the result (not empty rings: an empty
+// ring means "nothing at that distance", and after a cut that is not known).
+type ReachabilityCut struct {
+	Depth   int `json:"depth"`
+	Dropped int `json:"dropped"`
+}
+
 // ReachabilityRing is one hop-distance layer of a bounded reachability traversal:
 // the items found at that distance from the anchor. A ring with zero Items is a
 // genuine absence at that distance — not an error, not a missing ring.
@@ -39,6 +59,9 @@ type Reachability struct {
 	Kind       string             `json:"kind"`
 	Direction  string             `json:"direction"`
 	Rings      []ReachabilityRing `json:"rings"`
+	// Cut is set only by [RelationStore.ReachabilityBounded], and only when its cap
+	// stopped the walk. Nil means the walk is complete.
+	Cut *ReachabilityCut `json:"cut,omitempty"`
 }
 
 // reachabilityNode identifies one graph node by (type, id) during traversal.
@@ -104,6 +127,33 @@ func betterCandidate(a, b reachabilityCandidate) bool {
 //
 // maxDepth must be between 1 and [MaxReachabilityDepth] inclusive.
 func (s *RelationStore) Reachability(ctx context.Context, anchorType, anchorID, kind, direction string, maxDepth int) (*Reachability, error) {
+	return s.reachability(ctx, anchorType, anchorID, kind, direction, maxDepth, 0)
+}
+
+// ReachabilityBounded is [RelationStore.Reachability] with a cap on how many items
+// the walk returns: maxItems 0 means [DefaultReachabilityItems], a larger value is
+// capped at [MaxReachabilityItems], a negative one is [ErrBadRequest]. Below the
+// cap the result is exactly Reachability's. When the cap lands inside ring D the
+// result holds the first items of that ring (sorted by type and id, so the choice
+// is the same on every call), [Reachability.Cut] says how many were dropped, and no
+// deeper ring is returned. A cap equal to the size of the walked component is not a
+// cut. Cost: the previous ring is expanded in full before cutting and it holds at
+// most maxItems nodes, so a walk costs at most maxItems expansions, one query per
+// direction each. Use it where the result is sent to a caller; the unbounded
+// Reachability is for in-process computations that need the whole walk.
+func (s *RelationStore) ReachabilityBounded(ctx context.Context, anchorType, anchorID, kind, direction string, maxDepth, maxItems int) (*Reachability, error) {
+	if maxItems < 0 {
+		return nil, ErrBadRequest
+	}
+	if maxItems == 0 {
+		maxItems = DefaultReachabilityItems
+	}
+	return s.reachability(ctx, anchorType, anchorID, kind, direction, maxDepth, min(maxItems, MaxReachabilityItems))
+}
+
+// reachability is the one walker behind both entry points. maxItems 0 means
+// unbounded.
+func (s *RelationStore) reachability(ctx context.Context, anchorType, anchorID, kind, direction string, maxDepth, maxItems int) (*Reachability, error) {
 	if anchorType == "" || anchorID == "" {
 		return nil, ErrBadRequest
 	}
@@ -127,6 +177,7 @@ func (s *RelationStore) Reachability(ctx context.Context, anchorType, anchorID, 
 
 	frontier := []reachabilityNode{anchor}
 	seenNodes := map[reachabilityNode]bool{anchor: true}
+	returned := 0
 
 	for depth := 1; depth <= maxDepth; depth++ {
 		var nextFrontier []reachabilityNode
@@ -154,6 +205,19 @@ func (s *RelationStore) Reachability(ctx context.Context, anchorType, anchorID, 
 			}
 		}
 
+		cut := 0
+		if maxItems > 0 && returned+len(order) > maxItems {
+			// The cap lands in this ring: keep a stable choice, count the rest.
+			sort.Slice(order, func(i, j int) bool {
+				if order[i].typ != order[j].typ {
+					return order[i].typ < order[j].typ
+				}
+				return order[i].id < order[j].id
+			})
+			keep := maxItems - returned
+			cut = len(order) - keep
+			order = order[:keep]
+		}
 		ring := ReachabilityRing{Depth: depth, Items: []ReachabilityItem{}}
 		for _, n := range order {
 			seenNodes[n] = true
@@ -164,20 +228,22 @@ func (s *RelationStore) Reachability(ctx context.Context, anchorType, anchorID, 
 			})
 			nextFrontier = append(nextFrontier, n)
 		}
+		returned += len(ring.Items)
 
 		result.Rings = append(result.Rings, ring)
+		if cut > 0 {
+			result.Cut = &ReachabilityCut{Depth: depth, Dropped: cut}
+			break
+		}
 		frontier = nextFrontier
 	}
 
 	return result, nil
 }
 
-// MCPReachability is a thin passthrough to [RelationStore.Reachability],
-// added purely for mcp's own uniform MCPXxx naming convention — matching
-// [RelationStore.MCPPreviewImpact]'s and [RelationStore.MCPListRelationKinds]'s
-// own established shape. Registering an actual MCP tool that calls this is
-// smeldr.dev/mcp's own separate, not-yet-built Task (A293) — this method
-// exists so that future work has no core-side prerequisite blocking it.
+// MCPReachability is a thin passthrough to [RelationStore.Reachability], kept for
+// mcp's uniform MCPXxx naming. The MCP tool get_reachability uses
+// [RelationStore.ReachabilityBounded], not this: a result sent to a caller is capped.
 func (s *RelationStore) MCPReachability(ctx context.Context, anchorType, anchorID, kind, direction string, maxDepth int) (*Reachability, error) {
 	return s.Reachability(ctx, anchorType, anchorID, kind, direction, maxDepth)
 }

@@ -3744,9 +3744,21 @@ simply returns a result whose rings all have zero items, matching
 `Reachability`'s own "absence is a genuine result, not an error" design
 (see [reachability.go]'s own doc comment).
 
-`RelationStore.MCPReachability` is a thin passthrough to `Reachability`,
-added for `smeldr.dev/mcp`'s own future tool registration (not yet built —
-a separate repo and Task) — no MCP tool ships with this route.
+`RelationStore.MCPReachability` is a thin passthrough to `Reachability`.
+
+**The HTTP route is unbounded, and what that costs.** `GET /reachability/{type}/{id}` and `Reachability` return the whole walk. The walk expands each visited node once, one indexed query per node per direction, so its cost and its response size are the size of the walked component (up to depth 10), not depth times fan-out. On a densely connected graph that is large in both queries and bytes. Use it where the whole walk is needed (Tension, in-process); use the bounded variant below for anything sent to a caller.
+
+### The bounded walk — `ReachabilityBounded` and `get_reachability` (A430, v1.124.0)
+
+```go
+res, err := store.ReachabilityBounded(ctx, "post", id, "", "both", 3, 500)
+if res.Cut != nil { /* the cap stopped the walk: res.Cut.Depth, res.Cut.Dropped */ }
+```
+
+- `maxItems` 0 means `DefaultReachabilityItems` (500), a larger value is capped at `MaxReachabilityItems` (2000), a negative one is `ErrBadRequest`. Below the cap the result is exactly `Reachability`'s.
+- **A cut is a count, never silent.** When the cap lands inside ring D, that ring holds the first items of the ring (sorted by type and id, so the choice is the same on every call), `Reachability.Cut` is `{Depth: D, Dropped: n}` with n the exact number of nodes found in ring D that were not returned, and **no deeper ring is returned**. Deeper rings are absent, not empty: an empty ring means "nothing at that distance", and after a cut that is not known. **The ring at `Cut.Depth` is itself partial, even when it is empty** (the cap landed exactly at a ring boundary and the next ring had more): the rule that an empty ring is a genuine absence does not apply to it. A cap equal to the size of the walked component is not a cut.
+- **Cost bound.** The previous ring is expanded in full before cutting and holds at most `maxItems` nodes, so a walk costs at most `maxItems` expansions, one query per direction each (at most 4000 queries, at most 2000 items). Batching a ring's lookups is not done; it waits for a measurement.
+- **MCP.** `get_reachability(type_name, id, kind?, direction?, depth?, max_items?, limit?, offset?)`, Author, policy row `read` (smeldr.dev/mcp v1.50.0). The result is `{items:[{depth, type, id, edge_class, confidence?}], ring_sizes, total, count, cut?}`: the rings flattened in ring order, the count per returned ring, the number of items the walk returned, the page, and the cut. `direction` is `incoming`, `outgoing` or `both` (default both), the walk's own vocabulary and **not** `get_relations`' `source`/`target`. **CLI.** `smeldr-cli reachability <type_name> <id> [flags]` (smeldr.dev/cli v0.21.0). In the capability terms of D94: resource reachability, verb read; the difference in direction words is recorded in the inventory.
 
 ---
 

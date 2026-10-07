@@ -23,6 +23,19 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.124.0] - 2026-10-07
+
+### Added
+
+- `RelationStore.ReachabilityBounded(ctx, anchorType, anchorID, kind, direction, maxDepth, maxItems)`, `ReachabilityCut`, `DefaultReachabilityItems` (500), `MaxReachabilityItems` (2000) and the optional `Reachability.Cut` field (A430, assessment B3): the reachability walk with a cap on how many items it returns. Below the cap it equals `Reachability`. When the cap lands inside ring D the ring holds the first items by type and id, `Cut` is `{Depth: D, Dropped: n}` with n the exact number left out, and no deeper ring is returned: deeper rings are absent, not empty, because an empty ring means a genuine absence and after a cut that is not known. A walk costs at most `maxItems` expansions, one query per direction each. smeldr.dev/mcp v1.50.0 serves it as `get_reachability` and smeldr.dev/cli v0.21.0 as `reachability`.
+- In the capability terms of D94: resource reachability, verb read. The tool's `direction` is the walk's own `incoming`/`outgoing`/`both`, not `get_relations`' `source`/`target`.
+
+### Notes
+
+- `Reachability` and `GET /reachability/{type}/{id}` are unchanged and unbounded: the walk expands each visited node once, one indexed query per node per direction, so cost and response size are the size of the walked component, not depth times fan-out. REFERENCE says so. Batching a ring's lookups waits for a measurement.
+
+---
+
 ## [1.123.0] - 2026-10-07
 
 ### Added
