@@ -3413,6 +3413,20 @@ query only, never an actor-scoped one.
 | `Timestamp`, `Verb`, `FromState`, `ToState`, `Gated` | Always |
 | `ActorKind`, `ActorID`, `Surface`, `Reason` | Only when `Gated == true` |
 
+### Since when is an item in its state — `App.ItemsStateSince` (A415, v1.120.0)
+
+```go
+since, err := app.ItemsStateSince(ctx, "Task", map[string]string{id: status})
+// since[id] is a smeldr.StateSince{Since time.Time; Reason string}
+```
+
+For a page of items of one type (item id to its current state) it returns when each entered the state it is in now and the reason that transition carried: the latest provenance record of verb `transition`, kept only when its `ToState` equals the item's current state. An id is **absent** when that does not hold: provenance is not wired (`App.Provenance`), the item moved before provenance was switched on, or its status changed by a path that wrote no record. Absence means unknown, never "has not moved".
+
+- `Since` has **second resolution** (the record stores it that way); two transitions in the same second are ordered by record id.
+- The **actor is deliberately not returned**. This is not a `SubjectProvenance` read and does not apply its gating: the `RequiredReason` transitions exist so the reason is written down, and no Task transition is `RequiredOperation` with `Strict`, so that gating would hide every Task reason. Who may see an actor is a separate rule (D101) delivered by its own read.
+- One query per 400 ids on the default store. A custom `ProvenanceStore` is read through `List`, one id at a time (the interface is unchanged), with one Warn per process. A failed read is `ErrInternal`.
+- The mcp tools `get_task`/`list_tasks`/`get_goal`/`list_goals` and `list_items_by_state` (Task, Goal) carry it as `state_since` (RFC3339 UTC) and `state_reason` (omitted when the transition carried none), since smeldr.dev/mcp v1.47.0. Works on SQLite and Postgres.
+
 ### Custom store
 
 Implement `ProvenanceStore` to use a different backend:

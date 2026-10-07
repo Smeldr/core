@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.120.0] - 2026-10-07
+
+### Added
+
+- `App.ItemsStateSince(ctx, typeName, current map[string]string) (map[string]StateSince, error)` and `type StateSince struct { Since time.Time; Reason string }` (A415): for each item of a type, when it entered the state it is in now and why. The answer is the latest provenance record of verb `transition` for the item, returned only when its `ToState` equals the item's current state in `current` (item id to current state); otherwise the id is absent, and absent means unknown, never "has not moved" (provenance not wired, the item moved before it was switched on, or its status changed by a path that wrote no record). One query per 400 ids for the default store; a custom `ProvenanceStore` is read through `List` one id at a time (the interface is unchanged) with one Warn per process. `Since` has second resolution (the record stores it so); two transitions in the same second are ordered by record id. The actor is deliberately not part of the result. A failed read is `ErrInternal`; a nil store or empty input is an empty map. smeldr.dev/mcp v1.47.0 uses it for `state_since` and `state_reason` on Task and Goal reads.
+
+Runs on SQLite and Postgres (proven on postgres:16 in the pgx suite). No behaviour change to any existing symbol.
+
+---
+
 ## [1.119.3] - 2026-10-06
 
 ### Fixed
