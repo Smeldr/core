@@ -27,7 +27,7 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ### Added
 
-- `*.transitioned` events on the event stream and in webhook deliveries carry `actor_id` and `actor_kind` (A426): who caused the transition, taken from the same extraction the provenance record of that transition uses, so the event and the record always name the same actor. `actor_kind` is `job`, `agent`, `human` or `unclassified` (D105; before core v1.121.0 an untagged actor read `human`). Both keys are omitted when no actor is known (the old JSON exactly), so existing consumers are unaffected. **Webhook deliveries now carry them too**, not only the stream: an admin who forwards deliveries to an external system should decide what to forward. `signal.transitioned` from the expiry sweep carries `job` and `signal-expiry-sweep`. The id is opaque and the same one `last_actor` holds.
+- `*.transitioned` events on the event stream and in webhook deliveries carry `actor_id` and `actor_kind` (A427): who caused the transition, taken from the same extraction the provenance record of that transition uses, so the event and the record always name the same actor. `actor_kind` is `job`, `agent`, `human` or `unclassified` (D105; before core v1.121.0 an untagged actor read `human`). Both keys are omitted when no actor is known (the old JSON exactly), so existing consumers are unaffected. **Webhook deliveries now carry them too**, not only the stream: an admin who forwards deliveries to an external system should decide what to forward. `signal.transitioned` from the expiry sweep carries `job` and `signal-expiry-sweep`. The id is opaque and the same one `last_actor` holds.
 
 ---
 
