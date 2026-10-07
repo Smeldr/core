@@ -379,6 +379,12 @@ type transitionWebhookData struct {
 	FromState string `json:"from_state,omitempty"`
 	ToState   string `json:"to_state"`
 	Reason    string `json:"reason,omitempty"`
+	// ActorID and ActorKind say who caused the transition: the same id and kind
+	// the provenance record of that transition holds (job, agent, human or
+	// unclassified, D105). Both are omitted when no actor is known. Webhook
+	// deliveries carry them like the event stream does.
+	ActorID   string `json:"actor_id,omitempty"`
+	ActorKind string `json:"actor_kind,omitempty"`
 }
 
 // dispatchTransitionWebhook builds the payload for a state-flow transition

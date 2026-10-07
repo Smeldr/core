@@ -232,6 +232,8 @@ func (a *App) ExpireSignals(ctx context.Context, cfg SignalExpiryConfig) (walked
 				FromState: r.status,
 				ToState:   "expired",
 				Reason:    reason,
+				ActorID:   signalExpiryActor,
+				ActorKind: "job",
 			})
 	}
 	return walked, expired, skipped, nil

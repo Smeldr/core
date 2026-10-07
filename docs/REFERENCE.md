@@ -2967,7 +2967,7 @@ MCP `transition_item` tool — fire a `"{type}.transitioned"` webhook event
 after a successful state-flow transition on a compiled orchestration type
 (`Task`, `Decision`, `Amendment`, `Goal`, `Signal`), e.g. `task.transitioned`.
 The payload's `data` object carries `type`, `id`, `slug`, `from_state`,
-`to_state`, and `reason` (when supplied). This is a separate delivery path
+`to_state`, and `reason` (when supplied). Since v1.122.0 (A426) it also carries `actor_id` and `actor_kind`: who caused the transition, the same id and kind the provenance record of that transition holds (`actor_kind` is `job`, `agent`, `human` or `unclassified`, D105; see Actor classification under Tokens). Both keys are omitted when no actor is known, and **webhook deliveries carry them exactly like the event stream does**, so an admin who forwards deliveries to an external system decides what to forward. The id is opaque and is the same one `last_actor` already holds; resolve it to a name with `lookup_token_names`. `signal.transitioned` from the expiry sweep carries `job` and `signal-expiry-sweep`. This is a separate delivery path
 from the `App.OnSignal` bus above — the bus's `LifecycleEvent` vocabulary
 (created/updated/published/…) doesn't fit an arbitrary per-flow state name,
 so subscribe to `"{type}.transitioned"` specifically, not the created/
@@ -3185,7 +3185,7 @@ Output (NDJSON):
 ```
 {"id":"e1","event":"task.created","timestamp":"2026-08-17T12:00:00Z","data":{"type":"task","id":"t1","slug":"t001-example"}}
 {"type":"ping"}
-{"id":"e2","event":"task.transitioned","timestamp":"2026-08-17T12:00:05Z","data":{"type":"task","id":"t1","slug":"t001-example","from_state":"active","to_state":"waiting-plan"}}
+{"id":"e2","event":"task.transitioned","timestamp":"2026-08-17T12:00:05Z","data":{"type":"task","id":"t1","slug":"t001-example","from_state":"active","to_state":"waiting-plan","actor_id":"u1","actor_kind":"agent"}}
 {"id":"e3","event":"signal.created","timestamp":"2026-08-17T12:00:10Z","data":{"type":"signal","id":"s1","slug":"plan-ready"}}
 ```
 

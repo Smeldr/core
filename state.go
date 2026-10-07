@@ -1395,11 +1395,9 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 		return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
 	}
 
-	type smeldrCtxAccessor interface{ User() User }
-	actorID := ""
-	if sc, ok := ctx.(smeldrCtxAccessor); ok {
-		actorID = sc.User().ID
-	}
+	// One extraction of the actor for validation, the stream self-skip and the
+	// event payload, the same one the provenance record of this transition uses.
+	actorID, actorKind := actorFromContext(ctx)
 	if err := validateTransition(ctx, db, a.governance, a.relationStore, actorID, id, typeName, currentStatus, toState, reason); err != nil {
 		return nil, err
 	}
@@ -1497,6 +1495,8 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 			FromState: currentStatus,
 			ToState:   toState,
 			Reason:    reason,
+			ActorID:   actorID,
+			ActorKind: actorKind,
 		})
 	return map[string]any{"id": id, "slug": realSlug, "status": toState, "last_actor": actorID}, nil
 }

@@ -649,4 +649,8 @@ func TestExpireSignals_NotStreamed_WebhookStillEnqueued(t *testing.T) {
 	if data.ToState != "expired" {
 		t.Errorf("webhook ToState = %q, want %q", data.ToState, "expired")
 	}
+	// The expiry sweep is a job: the same actor and kind its provenance record holds.
+	if data.ActorID != signalExpiryActor || data.ActorKind != "job" {
+		t.Errorf("webhook actor = %q/%q, want %s/job", data.ActorID, data.ActorKind, signalExpiryActor)
+	}
 }
