@@ -2973,12 +2973,9 @@ from the `App.OnSignal` bus above — the bus's `LifecycleEvent` vocabulary
 so subscribe to `"{type}.transitioned"` specifically, not the created/
 updated/… events, to observe orchestration state changes.
 
-One exception applies to the live event stream (`/_events/stream`, below):
-`signal.transitioned` is delivered to subscribed webhook endpoints but is
-**not** published to the stream (v1.106.0). A Signal routes on its `Receiver`
-and only the receiver moves it, so on the stream the event could only echo
-back to the session that caused it. `signal.created`, and every other type's
-`*.transitioned` event, are streamed as before.
+On the live event stream (`/_events/stream`, below) `signal.transitioned` and
+`amendment.transitioned` go to topic channels, not a role channel (v1.129.0):
+see "Topic channels".
 
 A `Signal` created by `DrainEvalQueue` when an automated transition hits a
 role-gated boundary (D42) fires the same `"signal.created"` event a
@@ -3050,7 +3047,10 @@ connection subscribes to.
   every Author-role token already had, not a new grant.
 
 **`include_own` query parameter (v1.107.0):** by default a connection does
-not receive an event its own token caused, see "Self-echo" below.
+not receive an event its own token caused, see "Self-echo" below. **A
+consumer that holds the stream with a service token (for example an
+organisation's bootstrap token) therefore never sees that token's own
+writes. Silence on the stream is not proof that nothing changed.**
 `?include_own=true` opts the connection back in to its own events; any
 other value, or the parameter omitted, keeps the default. It combines with
 `channel`, e.g. `?channel=core&include_own=true`.
@@ -3107,10 +3107,23 @@ to a webhook event name is delivered to the stream:
   → `"{type}.created"`, `"{type}.updated"`, `"{type}.published"`,
   `"{type}.unpublished"`, `"{type}.archived"`, `"{type}.deleted"`,
   `"{type}.scheduled"`
-- State transitions: `"{type}.transitioned"` (item moves between states); the
-  exceptions are `signal.transitioned` (v1.106.0) and every `amendment.*`
-  event (v1.107.0), which are webhook-only and never published to the stream
-- Signals: `"signal.created"` (new explicit signal)
+- State transitions: `"{type}.transitioned"` (item moves between states)
+- Signals: `"signal.created"` (new explicit signal), and `"signal.expiry_swept"`
+  (stream only, v1.129.0): one summary per expiry run that expired at least
+  one Signal, `data` `{type: "signal", expired: n, actor_id, actor_kind: "job"}`.
+  Webhooks still get one `signal.transitioned` per expired Signal.
+- Relations (v1.129.0): `"relation.asserted"` and `"relation.ended"`, also to
+  webhook endpoints subscribed to them. `data` is `{type: "relation", id,
+  relation_kind, edge_class, source_type, source_id, target_type, target_id,
+  actor_id, actor_kind}`, enough to re-read both ends. `relation.asserted`
+  adds `new_row` (true when the assert began a new life of the relation,
+  false when it touched a live one again). `relation.ended` adds `cause`
+  (`withdrawn`, `swept`, `recomputed`, `amendment-rejected`, `purged`) and
+  `reason`. Every end passes one place, so an ended relation always gets both
+  its provenance record and this event.
+
+Events are re-read hints, never a source of truth: on any event, re-read the
+item.
 
 The JSON payload shape is identical to webhook event payloads — a
 `WebhookEventPayload` envelope with `id`, `event`, `timestamp`, and `data` fields.
@@ -3124,16 +3137,16 @@ The JSON payload shape is identical to webhook event payloads — a
   a `Task`/`Goal` event is routed by the item's own `Band`; a `Decision`
   event by its own `Scope` (including the literal value `"cross-cutting"`,
   used verbatim as a channel name — not auto-broadcast); a `Signal` by its
-  own `Receiver`. This applies to every event those four types produce —
-  both `"{type}.transitioned"` (A302; except `signal.transitioned`, which is
-  not streamed at all as of v1.106.0) and `"{type}.created"`/
+  own `Receiver`. This applies to every event those four types produce,
+  `"{type}.transitioned"` (A302; except `signal.transitioned`, which goes to
+  the `signals` topic since v1.129.0) and `"{type}.created"`/
   `"{type}.updated"`/etc. (01a0a683 — before this, those events reached
   every subscriber regardless of channel, an unclosed gap in A302's own
   scoping). Every generic content-module lifecycle event (a blog post's
   own publish/update/etc.) has no such field and is always delivered as a
   true broadcast, reaching every connected subscriber regardless of the
-  channel it requested. (`Amendment` events used to be broadcast too; as of
-  v1.107.0 they are not streamed at all, see below.) A subscriber
+  channel it requested. (`Amendment` events go to the `amendments` topic, see
+  below.) A subscriber
   connected with `?channel=all` (or no parameter — see above) also receives
   everything, channel-routed or broadcast alike. A listener that only cares
   about certain event *types* (as opposed to channels) must still filter
@@ -3150,11 +3163,23 @@ The JSON payload shape is identical to webhook event payloads — a
   share a token do not see each other's events; `?include_own=true` restores
   that. A Signal sent to yourself is suppressed like any other self-caused
   event.
-- **Amendment events (v1.107.0):** `amendment.*` events are not published to
-  the stream. They had no routing field, so every one was a true broadcast
-  that woke every listener, and nothing waits on them live. Webhook delivery
-  is unchanged. A runtime-defined dynamic type literally named `amendment`
-  shares the event-name prefix and is not streamed either.
+- **Topic channels (v1.129.0):** events with no owning role are published on
+  a named topic, never broadcast and never on a role channel. They reach that
+  topic's subscribers and every `?channel=all` subscriber, so a role session
+  on `?channel=core` is not woken, while a consumer of everything (Cloud's live
+  updates, orch) gets them. Subscribe to one topic with `?channel=<topic>`.
+
+  | Topic | Events |
+  |---|---|
+  | `relations` | `relation.asserted`, `relation.ended` |
+  | `amendments` | every compiled `Amendment` event (`amendment.created`, `.updated`, `.transitioned`) |
+  | `signals` | `signal.transitioned` (a caller moving a Signal), `signal.expiry_swept` |
+
+  `signal.created` still routes on the Signal's receiver: it is the wake-up
+  for new work. Before v1.129.0 `signal.transitioned` (v1.106.0) and every
+  `amendment.*` event (v1.107.0) were not streamed at all, and relations had
+  no events. A runtime-defined dynamic type literally named `amendment` is an
+  ordinary dynamic type and is broadcast like any other.
 - **Client buffer:** A subscriber whose local event buffer fills (32 events,
   not configurable in this version) has further events silently dropped for
   that subscriber only (logged server-side at Warn level) rather than blocking

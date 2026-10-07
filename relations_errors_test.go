@@ -237,13 +237,13 @@ func TestApplyRelationDiff_BeginTxError(t *testing.T) {
 	}
 }
 
-// DELETE error: s.db does NOT implement txBeginner so exec = the db param;
-// db param returns error on ExecContext.
-func TestApplyRelationDiff_DeleteError(t *testing.T) {
+// End error: s.db does NOT implement txBeginner so exec = the db param; the db
+// param has no relations table, so ending a row (UPDATE ... RETURNING) fails.
+func TestApplyRelationDiff_EndError(t *testing.T) {
 	s := mockRelationStore(&errQueryDB{}) // errQueryDB has no BeginTx
-	err := s.applyRelationDiff(context.Background(), &errExecDB{}, []string{"id-1"}, nil, "a", "1")
+	err := s.applyRelationDiff(context.Background(), newSQLiteDB(t), []string{"id-1"}, nil, "a", "1")
 	if err == nil {
-		t.Error("want DELETE exec error from applyRelationDiff, got nil")
+		t.Error("want an end error from applyRelationDiff, got nil")
 	}
 }
 

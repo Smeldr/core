@@ -1099,6 +1099,16 @@ var channelColumns = map[string]string{
 	"Signal":   "receiver",
 }
 
+// transitionTopicChannels are the compiled types whose "<type>.transitioned"
+// event is published on a topic channel instead of their own routing column:
+// an Amendment has none, and a Signal's state changes concern its sender and
+// observers, not the receiver's role channel (core v1.129.0). Consulted by
+// [App.TransitionItemVia] before [channelColumns].
+var transitionTopicChannels = map[string]string{
+	"Amendment": eventStreamChannelAmendments,
+	"Signal":    eventStreamChannelSignals,
+}
+
 // channelValueFromItem returns the band/scope/receiver-shaped channel
 // value for a compiled orchestration type's own in-memory Go value — the
 // [App.dispatchBus] path's counterpart to [channelColumns]' DB-column
@@ -1114,6 +1124,9 @@ var channelColumns = map[string]string{
 // they coincide today only incidentally, and a generic FieldByName lookup
 // would break silently, with no compiler signal, if that ever diverged.
 func channelValueFromItem(typeName string, item any) string {
+	if _, ok := item.(*Amendment); ok && typeName == "Amendment" {
+		return eventStreamChannelAmendments
+	}
 	if _, ok := channelColumns[typeName]; !ok {
 		return ""
 	}

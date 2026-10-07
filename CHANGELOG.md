@@ -23,6 +23,24 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.129.0] - 2026-10-07
+
+### Behaviour change
+
+- **The event stream carries relation and Signal-state changes, and Amendment events again** (A435, D97, additive). New `relation.asserted` and `relation.ended` events (also to webhook endpoints subscribed to them); `signal.transitioned` by a caller and every `amendment.*` event, webhook-only on the stream since v1.106.0/v1.107.0, are streamed again; the Signal expiry sweep puts one `signal.expiry_swept` summary per run on the stream (webhooks still get one `signal.transitioned` per expired Signal). These events go to **topic channels** (`relations`, `amendments`, `signals`), which reach `?channel=<topic>` and `?channel=all` subscribers but never a role channel, so a session on `?channel=core` is not woken by them. `signal.created` still routes on the receiver. A consumer filtering `?channel=all` will see more events; a role-channel consumer sees no change.
+
+### Added
+
+- `relation.asserted` / `relation.ended` payload: `type`, `id`, `relation_kind`, `edge_class`, both ends, `actor_id`, `actor_kind`; `new_row` on asserted (a new life, or a live relation touched again); `cause` and `reason` on ended. Emitted from the one assert path and the one end path, so every end has both its provenance record and its event.
+- Topic channels `relations`, `amendments`, `signals` on `/_events/stream`.
+
+### Notes
+
+- REFERENCE now states plainly that a subscriber never receives events caused by its own token unless it connects with `include_own=true`: a consumer holding the stream with a service token does not see that token's own writes, so silence is not proof that nothing changed.
+- An ended relation's identity is read in the same round trip as the end (`UPDATE ... RETURNING`), on SQLite and Postgres.
+
+---
+
 ## [1.128.0] - 2026-10-07
 
 ### Behaviour change

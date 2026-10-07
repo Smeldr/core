@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -581,14 +582,24 @@ func TestExpireSignals_StampsActorAndReason(t *testing.T) {
 	}
 }
 
-func TestExpireSignals_NotStreamed_WebhookStillEnqueued(t *testing.T) {
+// TestExpireSignals_OneSummaryOnSignalsTopic: an expiry run puts one
+// signal.expiry_swept summary on the signals topic (and every "all"
+// subscriber), never one event per Signal and never a role channel; webhooks
+// still get one signal.transitioned per expired Signal.
+func TestExpireSignals_OneSummaryOnSignalsTopic(t *testing.T) {
 	db := newSQLiteDB(t)
 	if err := CreateOrchestrationTables(db); err != nil {
 		t.Fatalf("CreateOrchestrationTables: %v", err)
 	}
 	insertExpiryTestSignal(t, db, "notice", "pending", "architect", 20*24*time.Hour)
+	insertExpiryTestSignal(t, db, "notice", "pending", "core", 20*24*time.Hour)
 
 	b := newEventBroadcaster()
+	topicCh, subErr := b.subscribe("u4", eventStreamChannelSignals)
+	if subErr != nil {
+		t.Fatalf("subscribe signals: %v", subErr)
+	}
+	defer b.unsubscribe(topicCh)
 	streamCh, subErr := b.subscribe("u1", "architect")
 	if subErr != nil {
 		t.Fatalf("subscribe: %v", subErr)
@@ -612,17 +623,31 @@ func TestExpireSignals_NotStreamed_WebhookStillEnqueued(t *testing.T) {
 	}
 
 	app := &App{cfg: Config{DB: db}, eventBroadcaster: b, webhookStore: store, webhookPool: pool}
-	if _, expired, _, err := app.ExpireSignals(context.Background(), SignalExpiryConfig{}); err != nil || expired != 1 {
-		t.Fatalf("ExpireSignals: expired=%d err=%v, want 1 expired", expired, err)
+	if _, expired, _, err := app.ExpireSignals(context.Background(), SignalExpiryConfig{}); err != nil || expired != 2 {
+		t.Fatalf("ExpireSignals: expired=%d err=%v, want 2 expired", expired, err)
 	}
 
-	// A signal.transitioned event is no longer published to the live stream,
-	// on the row's own receiver channel or anywhere else: only the receiver
-	// ever moves a Signal, so it could only echo back to its own session.
-	for name, ch := range map[string]chan []byte{"architect": streamCh, "core": otherCh, "all": allCh} {
+	// No role channel is woken by the sweep.
+	for name, ch := range map[string]chan []byte{"architect": streamCh, "core": otherCh} {
 		select {
 		case got := <-ch:
 			t.Errorf("%s subscriber: expected no stream delivery for an expiry, got %q", name, got)
+		default:
+		}
+	}
+	// One summary, on the topic and to "all".
+	for name, ch := range map[string]chan []byte{"signals": topicCh, "all": allCh} {
+		select {
+		case got := <-ch:
+			if !strings.Contains(string(got), `"signal.expiry_swept"`) || !strings.Contains(string(got), `"expired":2`) {
+				t.Errorf("%s subscriber got %q, want one expiry_swept summary of 2", name, got)
+			}
+		default:
+			t.Errorf("%s subscriber received no summary", name)
+		}
+		select {
+		case got := <-ch:
+			t.Errorf("%s subscriber got a second event %q, want one summary per run", name, got)
 		default:
 		}
 	}
@@ -635,8 +660,8 @@ func TestExpireSignals_NotStreamed_WebhookStillEnqueued(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListJobsForEndpoint: %v", err)
 	}
-	if len(jobs) != 1 || jobs[0].Event != "signal.transitioned" {
-		t.Fatalf("jobs = %+v, want exactly one signal.transitioned webhook job", jobs)
+	if len(jobs) != 2 || jobs[0].Event != "signal.transitioned" {
+		t.Fatalf("jobs = %+v, want one signal.transitioned webhook job per expired Signal", jobs)
 	}
 	var payload WebhookEventPayload
 	if err := json.Unmarshal(jobs[0].Payload, &payload); err != nil {

@@ -29,6 +29,23 @@ const eventStreamMaxSubscribersPerToken = 4
 // (A302).
 const eventStreamChannelAll = "all"
 
+// Topic channels: events with no owning role are published on a named topic,
+// not broadcast, so they reach that topic's subscribers and every
+// [eventStreamChannelAll] subscriber but never wake a role's own channel. A
+// consumer can subscribe to one topic alone (?channel=relations).
+const (
+	// eventStreamChannelRelations carries relation.asserted and
+	// relation.ended.
+	eventStreamChannelRelations = "relations"
+	// eventStreamChannelAmendments carries every Amendment event.
+	eventStreamChannelAmendments = "amendments"
+	// eventStreamChannelSignals carries Signal state changes
+	// (signal.transitioned) and the expiry sweep's summary
+	// (signal.expiry_swept). signal.created still routes on the receiver: it
+	// is the wake-up for new work.
+	eventStreamChannelSignals = "signals"
+)
+
 // eventStreamSub is one subscriber's registration: which token owns the
 // connection (for the per-token concurrency cap) and which channel it
 // asked to receive — either a real channel name or [eventStreamChannelAll]

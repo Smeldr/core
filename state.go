@@ -1473,16 +1473,14 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	// x.transitioned event are already recorded above, once.
 	a.fireModuleAfterTransition(ctx, typeName, id, currentStatus, toState)
 
-	// Event-stream channel (A302): the type's own band/receiver-shaped
-	// column, when it has one (channelColumns has no entry for Amendment —
-	// its events are always a true broadcast, by design). A lookup failure
-	// degrades to broadcast rather than failing the transition itself —
-	// channel routing is best-effort. Skipped when the event is not published
-	// to the stream at all (a Signal transition, see eventStreamSuppressed):
-	// the lookup's only purpose is picking a stream channel.
+	// Event-stream channel: a topic for an Amendment or a Signal
+	// (transitionTopicChannels), otherwise the type's own band/scope-shaped
+	// column when it has one (A302), otherwise a true broadcast. A lookup
+	// failure degrades to broadcast rather than failing the transition itself:
+	// channel routing is best-effort.
 	eventName := strings.ToLower(typeName) + ".transitioned"
-	channel := ""
-	if col, ok := channelColumns[typeName]; ok && !eventStreamSuppressed(eventName) {
+	channel := transitionTopicChannels[typeName]
+	if col, ok := channelColumns[typeName]; ok && channel == "" {
 		if err := db.QueryRowContext(ctx,
 			"SELECT "+quoteIdent(col)+" FROM "+quoteIdent(table)+" WHERE id = $1", id,
 		).Scan(&channel); err != nil {

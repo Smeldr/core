@@ -608,11 +608,11 @@ func TestApp_TransitionItem_TaskChannelRoutesViaBand(t *testing.T) {
 	}
 }
 
-// TestApp_TransitionItem_Signal_NotStreamed confirms a Signal transition
-// succeeds and persists, and publishes nothing to the event stream: not to the
-// receiver's own channel and not to an all-channel subscriber. Only the
-// receiver ever moves a Signal, so the event could only echo back to its actor.
-func TestApp_TransitionItem_Signal_NotStreamed(t *testing.T) {
+// TestApp_TransitionItem_Signal_OnSignalsTopic confirms a Signal transition
+// succeeds and persists, and is published on the signals topic (and to every
+// "all" subscriber) but never on the receiver's own role channel (core
+// v1.129.0; before, the stream did not carry it at all).
+func TestApp_TransitionItem_Signal_OnSignalsTopic(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	app.EventStream()
 	repo := NewSQLRepo[*Signal](db, Table("smeldr_signals"))
@@ -622,6 +622,21 @@ func TestApp_TransitionItem_Signal_NotStreamed(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("insert signal: %v", err)
 	}
+	topicCh, err := app.eventBroadcaster.subscribe("u3", eventStreamChannelSignals)
+	if err != nil {
+		t.Fatalf("subscribe signals: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(topicCh)
+	defer func() {
+		select {
+		case got := <-topicCh:
+			if !strings.Contains(string(got), `"signal.transitioned"`) {
+				t.Errorf("signals topic got %q", got)
+			}
+		default:
+			t.Error("signals topic received nothing")
+		}
+	}()
 	coreCh, err := app.eventBroadcaster.subscribe("u1", "core")
 	if err != nil {
 		t.Fatalf("subscribe core: %v", err)
@@ -645,12 +660,18 @@ func TestApp_TransitionItem_Signal_NotStreamed(t *testing.T) {
 		`SELECT status FROM smeldr_signals WHERE id = 'sig-ns-1'`).Scan(&status); err != nil || status != "read" {
 		t.Errorf("stored status = %q (err %v), want \"read\"", status, err)
 	}
-	for name, ch := range map[string]chan []byte{"core": coreCh, "all": allCh} {
-		select {
-		case got := <-ch:
-			t.Errorf("%s subscriber: expected no delivery for a Signal transition, got %q", name, got)
-		default:
+	select {
+	case got := <-coreCh:
+		t.Errorf("the receiver's role channel got %q, want nothing", got)
+	default:
+	}
+	select {
+	case got := <-allCh:
+		if !strings.Contains(string(got), `"signal.transitioned"`) {
+			t.Errorf("all subscriber got %q", got)
 		}
+	default:
+		t.Error("all subscriber received nothing")
 	}
 }
 
@@ -762,12 +783,11 @@ func TestApp_TransitionItem_DecisionChannelRoutesViaScope(t *testing.T) {
 	}
 }
 
-// TestApp_TransitionItem_Amendment_NotStreamed_WebhookStillEnqueued confirms
-// an Amendment transition no longer reaches the live event stream (it has no
-// routing column, so it used to be a true broadcast waking every listener),
-// while its webhook is still enqueued. It replaces the earlier "always
-// broadcasts" test, which pinned exactly the behaviour removed here.
-func TestApp_TransitionItem_Amendment_NotStreamed_WebhookStillEnqueued(t *testing.T) {
+// TestApp_TransitionItem_Amendment_OnTopic_WebhookStillEnqueued confirms an
+// Amendment transition reaches the amendments topic and every "all"
+// subscriber but no role channel (core v1.129.0; before, it was not streamed),
+// and its webhook is still enqueued.
+func TestApp_TransitionItem_Amendment_OnTopic_WebhookStillEnqueued(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	app.EventStream()
 	store := wireWebhooksForTest(t, app, db)
@@ -797,12 +817,18 @@ func TestApp_TransitionItem_Amendment_NotStreamed_WebhookStillEnqueued(t *testin
 		t.Fatalf("TransitionItem: %v", err)
 	}
 
-	for name, ch := range map[string]chan []byte{"unrelated": chUnrelated, "all": chAll} {
-		select {
-		case got := <-ch:
-			t.Errorf("%s subscriber: expected no stream delivery for an Amendment transition, got %q", name, got)
-		default:
+	select {
+	case got := <-chUnrelated:
+		t.Errorf("a role channel got an Amendment transition: %q", got)
+	default:
+	}
+	select {
+	case got := <-chAll:
+		if !strings.Contains(string(got), `"amendment.transitioned"`) {
+			t.Errorf("all subscriber got %q", got)
 		}
+	default:
+		t.Error("all subscriber received nothing")
 	}
 	endpoints, err := store.EndpointsForEvent(ctx, "amendment.transitioned")
 	if err != nil || len(endpoints) != 1 {

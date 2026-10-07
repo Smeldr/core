@@ -599,65 +599,11 @@ func TestDispatchTransitionWebhook_nilStoreNilPoolBroadcasterSet(t *testing.T) {
 	}
 }
 
-func TestEventStreamSuppressed(t *testing.T) {
-	cases := []struct {
-		event string
-		want  bool
-	}{
-		{"signal.transitioned", true},
-		{"signal.created", false},
-		{"task.transitioned", false},
-		{"decision.transitioned", false},
-		{"goal.transitioned", false},
-		{"amendment.created", true},
-		{"amendment.updated", true},
-		{"amendment.transitioned", true},
-		{"amendmentary.created", false},
-		{"", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.event, func(t *testing.T) {
-			if got := eventStreamSuppressed(tc.event); got != tc.want {
-				t.Errorf("eventStreamSuppressed(%q) = %v, want %v", tc.event, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestDispatchTransitionWebhook_SignalTransitioned_NotStreamed: with only a
-// broadcaster wired, a Signal transition reaches no subscriber, whether the
-// caller names a channel or asks for a true broadcast, and does not panic.
-func TestDispatchTransitionWebhook_SignalTransitioned_NotStreamed(t *testing.T) {
-	for _, channel := range []string{"architect", ""} {
-		t.Run("channel="+channel, func(t *testing.T) {
-			b := newEventBroadcaster()
-			allCh, err := b.subscribe("u1", eventStreamChannelAll)
-			if err != nil {
-				t.Fatalf("subscribe all: %v", err)
-			}
-			defer b.unsubscribe(allCh)
-			archCh, err := b.subscribe("u2", "architect")
-			if err != nil {
-				t.Fatalf("subscribe architect: %v", err)
-			}
-			defer b.unsubscribe(archCh)
-			dispatchTransitionWebhook(context.Background(), nil, nil, b, channel, "signal.transitioned",
-				transitionWebhookData{Type: "signal", ID: "s1", ToState: "read"})
-			for name, ch := range map[string]chan []byte{"all": allCh, "architect": archCh} {
-				select {
-				case got := <-ch:
-					t.Errorf("%s subscriber: expected no delivery for signal.transitioned, got %q", name, got)
-				default:
-				}
-			}
-		})
-	}
-}
-
-// TestDispatchTransitionWebhook_SignalTransitioned_StillEnqueuesWebhook: the
-// stream suppression leaves the independent webhook sink alone, so a
-// subscribed endpoint still gets its job while the stream stays silent.
-func TestDispatchTransitionWebhook_SignalTransitioned_StillEnqueuesWebhook(t *testing.T) {
+// TestDispatchTransitionWebhook_SignalTransitioned_BothSinks: a Signal
+// transition reaches the stream on the channel it is given (TransitionItemVia
+// gives it the signals topic) and a subscribed webhook endpoint alike; the
+// dispatcher suppresses nothing (core v1.129.0).
+func TestDispatchTransitionWebhook_SignalTransitioned_BothSinks(t *testing.T) {
 	pool, store := outboundTestDB(t)
 	createWebhookEndpointsTable(t, store.db)
 	ctx := context.Background()
@@ -676,8 +622,11 @@ func TestDispatchTransitionWebhook_SignalTransitioned_StillEnqueuesWebhook(t *te
 
 	select {
 	case got := <-streamCh:
-		t.Fatalf("expected no stream delivery for signal.transitioned, got %q", got)
+		if !strings.Contains(string(got), `"signal.transitioned"`) {
+			t.Errorf("stream got %q", got)
+		}
 	default:
+		t.Fatal("the stream received nothing")
 	}
 	endpoints, err := store.EndpointsForEvent(ctx, "signal.transitioned")
 	if err != nil || len(endpoints) != 1 {

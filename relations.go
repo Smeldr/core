@@ -128,8 +128,9 @@ func (s *RelationStore) setProvenanceStore(store ProvenanceStore) {
 	s.provenanceStore = store
 }
 
-// setSignalDeps wires the dependencies emitConflictDetectedSignal needs to
-// dispatch a webhook/event-stream notification for each Signal it writes.
+// setSignalDeps wires the webhook and event-stream sinks: the
+// conflict-detected Signals emitConflictDetectedSignal writes, and the
+// relation.asserted / relation.ended events.
 // Unexported — called from App.Handler(), not part of the public API.
 func (s *RelationStore) setSignalDeps(store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster) {
 	s.webhookStore = store
@@ -533,6 +534,13 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 				ErrConflict, edge.ID, endedAt.UTC().Format(time.RFC3339))
 		}
 	}
+	newRow := edge.ID == ""
+	if edge.ID != "" {
+		var one int
+		if err := s.db.QueryRowContext(ctx, "SELECT 1 FROM smeldr_relations WHERE id=$1", edge.ID).Scan(&one); errors.Is(err, sql.ErrNoRows) {
+			newRow = true
+		}
+	}
 	if edge.ID == "" {
 		// Dedup key: (source, target, relation_kind, edge_class). D61's own
 		// literal text omitted edge_class, but that would let an "observed"
@@ -555,6 +563,7 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 		switch {
 		case lookupErr == nil:
 			edge.ID = existingID
+			newRow = false
 		case errors.Is(lookupErr, sql.ErrNoRows):
 			edge.ID = NewID()
 		default:
@@ -598,6 +607,7 @@ ON CONFLICT (id) DO UPDATE SET
 	}
 
 	s.recordAssertProvenance(ctx, edge)
+	s.emitRelationEvent(ctx, eventRelationAsserted, edge, &newRow, assertEnding(ctx, edge))
 	if edge.RelationKind == "contradicts" {
 		s.emitConflictDetectedSignal(ctx, edge)
 	}
@@ -893,15 +903,17 @@ func (s *RelationStore) edgesAt(ctx context.Context, side, nodeType, nodeID, kin
 // so the purge itself is on record. No-op, with no record, if the ID does not
 // exist. No tool exposes it.
 func (s *RelationStore) Delete(ctx context.Context, id string) error {
-	var one int
-	err := s.db.QueryRowContext(ctx, "SELECT 1 FROM smeldr_relations WHERE id=$1", id).Scan(&one)
+	edge := RelationEdge{ID: id}
+	err := s.db.QueryRowContext(ctx,
+		"SELECT relation_kind, edge_class, source_type, source_id, target_type, target_id FROM smeldr_relations WHERE id=$1", id).
+		Scan(&edge.RelationKind, &edge.EdgeClass, &edge.SourceType, &edge.SourceID, &edge.TargetType, &edge.TargetID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	s.recordEdgeEnd(ctx, id, endingFromContext(ctx, EdgeEndPurged, "administrative purge"))
+	s.recordEdgeEnd(ctx, edge, endingFromContext(ctx, EdgeEndPurged, "administrative purge"))
 	_, err = s.db.ExecContext(ctx, "DELETE FROM smeldr_relations WHERE id=$1", id)
 	return err
 }
@@ -1153,7 +1165,7 @@ func (s *RelationStore) SweepStructural(
 		if staled[e.ID] {
 			return nil
 		}
-		ended, updateErr := endEdgeRow(ctx, s.db, e.ID, now)
+		_, ended, updateErr := endEdgeRow(ctx, s.db, e.ID, now)
 		if updateErr != nil {
 			return updateErr
 		}
@@ -1162,7 +1174,7 @@ func (s *RelationStore) SweepStructural(
 			staled[e.ID] = true
 			return nil
 		}
-		s.recordEdgeEnd(ctx, e.ID, edgeEnding{
+		s.recordEdgeEnd(ctx, e, edgeEnding{
 			cause: EdgeEndSwept, reason: "source or target no longer alive",
 			actorKind: "job", actorID: sweepStructuralJob,
 		})
@@ -1264,6 +1276,7 @@ type txBeginner interface {
 
 type edgeExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 // applyRelationDiff ends the toDelete rows and inserts toInsert edges for the
@@ -1286,14 +1299,14 @@ func (s *RelationStore) applyRelationDiff(ctx context.Context, db edgeExecer, to
 	}
 
 	now := time.Now().UTC()
-	var ended []string
+	var ended []RelationEdge
 	for _, id := range toDelete {
-		ok, err := endEdgeRow(ctx, exec, id, now)
+		e, ok, err := endEdgeRow(ctx, exec, id, now)
 		if err != nil {
 			return err
 		}
 		if ok {
-			ended = append(ended, id)
+			ended = append(ended, e)
 		}
 	}
 
@@ -1335,14 +1348,17 @@ func (s *RelationStore) applyRelationDiff(ctx context.Context, db edgeExecer, to
 	if err := commit(); err != nil {
 		return err
 	}
-	for _, id := range ended {
-		s.recordEdgeEnd(ctx, id, ending)
+	for _, e := range ended {
+		s.recordEdgeEnd(ctx, e, ending)
 	}
+	newRow := true
 	for _, e := range inserted {
 		recordProvenance(ctx, s.provenanceStore, ProvenanceRecord{
 			SubjectType: "RelationEdge", SubjectID: e.ID, Verb: "assert",
 			ActorKind: ending.actorKind, ActorID: ending.actorID,
 		})
+		s.emitRelationEvent(ctx, eventRelationAsserted, e, &newRow,
+			edgeEnding{actorKind: ending.actorKind, actorID: ending.actorID})
 	}
 	return nil
 }

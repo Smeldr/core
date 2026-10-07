@@ -306,11 +306,15 @@ app.EventStream() // mounts GET /_events/stream; independent of app.Webhooks(...
 connection open and writes one NDJSON line per event — same payload shape
 as an outbound webhook delivery (`{"id","event","timestamp","data"}`),
 covering the same event names (`"{type}.created"` … `"{type}.transitioned"`,
-`"signal.created"`), except that `signal.transitioned` (v1.106.0) and every
-`amendment.*` event (v1.107.0) are webhook-only and never published to the
-stream. An event is also not delivered to the connection whose own token
-caused it (v1.107.0, matched on `User.ID`); `?include_own=true` opts back in,
-and system-originated events are never suppressed. A `{"type":"ping"}` line
+`"signal.created"`), plus `relation.asserted`/`relation.ended` and the
+`signal.expiry_swept` summary (v1.129.0). Events with no owning role go to
+topic channels, never a role channel: `relations`, `amendments` (every
+Amendment event) and `signals` (`signal.transitioned`, `signal.expiry_swept`);
+they reach `?channel=<topic>` and `?channel=all` subscribers. An event is also
+not delivered to the connection whose own token caused it (v1.107.0, matched
+on `User.ID`); `?include_own=true` opts back in, and system-originated events
+are never suppressed. A consumer holding the stream with a service token does
+not see that token's own writes: silence is not proof that nothing changed. A `{"type":"ping"}` line
 arrives every 25s while idle.
 At-most-once delivery — no replay on reconnect.
 

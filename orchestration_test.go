@@ -2034,6 +2034,7 @@ func TestChannelValueFromItem_KnownTypes(t *testing.T) {
 		{"Goal", "Goal", &Goal{Band: "cloud"}, "cloud"},
 		{"Decision", "Decision", &Decision{Scope: "cross-cutting"}, "cross-cutting"},
 		{"Signal", "Signal", &Signal{Receiver: "architect"}, "architect"},
+		{"Amendment goes to its topic", "Amendment", &Amendment{}, eventStreamChannelAmendments},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2049,8 +2050,8 @@ func TestChannelValueFromItem_KnownTypes(t *testing.T) {
 // returns "" — a true broadcast, matching [App.TransitionItem]'s own
 // no-entry handling for the same set of types.
 func TestChannelValueFromItem_UnmappedTypeBroadcasts(t *testing.T) {
-	if got := channelValueFromItem("Amendment", &Amendment{}); got != "" {
-		t.Errorf("channelValueFromItem(%q, ...) = %q, want \"\" (true broadcast)", "Amendment", got)
+	if got := channelValueFromItem("amendment", &struct{}{}); got != "" {
+		t.Errorf("a dynamic type named amendment = %q, want \"\" (true broadcast)", got)
 	}
 	if got := channelValueFromItem("Post", &struct{}{}); got != "" {
 		t.Errorf("channelValueFromItem(%q, ...) = %q, want \"\" (true broadcast)", "Post", got)

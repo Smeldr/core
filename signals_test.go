@@ -604,13 +604,13 @@ func TestDispatchBus_DecisionChannelRoutesViaScope(t *testing.T) {
 	}
 }
 
-// TestDispatchBus_AmendmentNotStreamed_WebhookStillEnqueued confirms an
-// Amendment's AfterCreate event no longer reaches the live event stream: it
-// has no routing column, so it used to be a true broadcast that woke every
-// listener, and no role waits on it live. It replaces the earlier
-// "always broadcasts" test, which pinned exactly the behaviour removed here.
-// The webhook sink is a separate OnSignal handler and still enqueues it.
-func TestDispatchBus_AmendmentNotStreamed_WebhookStillEnqueued(t *testing.T) {
+// TestDispatchBus_AmendmentOnTopicChannel confirms an Amendment's AfterCreate
+// event reaches the stream on the amendments topic (and every "all"
+// subscriber) but never a role's own channel: it has no routing column, and
+// no role waits on it live, while cloud and orch do (core v1.129.0; before, it
+// was not streamed at all). The webhook sink is a separate OnSignal handler
+// and still enqueues it.
+func TestDispatchBus_AmendmentOnTopicChannel(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	app.EventStream()
 	store := wireWebhooksForTest(t, app, db)
@@ -629,16 +629,29 @@ func TestDispatchBus_AmendmentNotStreamed_WebhookStillEnqueued(t *testing.T) {
 		t.Fatalf("subscribe all: %v", err)
 	}
 	defer app.eventBroadcaster.unsubscribe(chAll)
+	chTopic, err := app.eventBroadcaster.subscribe("u3", eventStreamChannelAmendments)
+	if err != nil {
+		t.Fatalf("subscribe amendments: %v", err)
+	}
+	defer app.eventBroadcaster.unsubscribe(chTopic)
 
 	app.dispatchBus(ctx, SignalEvent{
 		Type: "Amendment", Slug: "amend-bus", raw: &Amendment{Node: Node{ID: "amend-bus", Slug: "amend-bus"}},
 	}, AfterCreate)
 
-	for name, ch := range map[string]chan []byte{"unrelated": chUnrelated, "all": chAll} {
+	select {
+	case got := <-chUnrelated:
+		t.Errorf("a role channel received an Amendment event: %q", got)
+	default:
+	}
+	for name, ch := range map[string]chan []byte{"all": chAll, "amendments": chTopic} {
 		select {
 		case got := <-ch:
-			t.Errorf("%s subscriber: expected no stream delivery for an Amendment event, got %q", name, got)
+			if !strings.Contains(string(got), `"amendment.created"`) {
+				t.Errorf("%s subscriber got %q, want amendment.created", name, got)
+			}
 		default:
+			t.Errorf("%s subscriber received nothing", name)
 		}
 	}
 	endpoints, err := store.EndpointsForEvent(ctx, "amendment.created")

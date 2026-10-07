@@ -415,8 +415,17 @@ func dispatchTransitionWebhook(ctx context.Context, store *WebhookStore, pool *w
 // include_own. An empty actorID, as for every system-originated caller, skips
 // nobody. The webhook sink is unaffected by actorID.
 func dispatchTransitionWebhookFrom(ctx context.Context, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, actorID, channel, eventName string, data transitionWebhookData) {
+	dispatchEventFrom(ctx, store, pool, broadcaster, actorID, channel, eventName, data)
+}
+
+// dispatchEventFrom is the one marshal-and-fan-out behind every event that is
+// not a content module's lifecycle event: data becomes the envelope's data
+// object, delivered to webhook endpoints subscribed to eventName (store and
+// pool) and to the event stream (broadcaster) on channel, skipping actorID's
+// own connection. Either sink may be nil.
+func dispatchEventFrom(ctx context.Context, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, actorID, channel, eventName string, data any) {
 	webhooksConfigured := store != nil && pool != nil
-	streamed := broadcaster != nil && !eventStreamSuppressed(eventName)
+	streamed := broadcaster != nil
 	if !webhooksConfigured && !streamed {
 		return
 	}
@@ -448,28 +457,55 @@ func dispatchTransitionWebhookFrom(ctx context.Context, store *WebhookStore, poo
 }
 
 // eventSignalTransitioned is the event name [App.TransitionItemWithReason] and
-// [App.ExpireSignals] give a Signal state transition.
+// [App.ExpireSignals] give a Signal state transition. On the event stream a
+// caller's transition is published on the [eventStreamChannelSignals] topic
+// (core v1.129.0; before, the stream did not carry it); the expiry sweep sends
+// it to webhooks only and puts one [eventSignalExpirySwept] on the stream.
 const eventSignalTransitioned = "signal.transitioned"
 
-// eventStreamSuppressed reports whether eventName is delivered to outbound
-// webhooks but never to the live event stream ([App.EventStream]). Two cases:
-//
-//   - [eventSignalTransitioned]: a Signal routes on its Receiver and only the
-//     receiver moves it through pending, read and acknowledged, so the event
-//     could only ever echo back to the very session that caused it, waking its
-//     own stream listener for nothing.
-//   - every "amendment." event: an Amendment has no routing column, so each
-//     one (created plus every transition) was a true broadcast that woke every
-//     role, and no role waits on them live. A runtime-defined dynamic type
-//     literally named "amendment" shares the event-name prefix and is
-//     suppressed too.
-//
-// "signal.created", which is the wake-up for new work, and every other type's
-// events are unaffected. Webhook delivery is deliberately unchanged: the two
-// sinks are independent in [dispatchTransitionWebhookFrom] and in
-// [App.OnSignal]'s webhook handler.
-func eventStreamSuppressed(eventName string) bool {
-	return eventName == eventSignalTransitioned || strings.HasPrefix(eventName, "amendment.")
+// eventSignalExpirySwept is the stream-only summary [App.ExpireSignals] sends
+// once per run that expired at least one Signal: a re-read hint, on the
+// [eventStreamChannelSignals] topic.
+const eventSignalExpirySwept = "signal.expiry_swept"
+
+// Relation events, on the [eventStreamChannelRelations] topic and to webhook
+// endpoints subscribed to them.
+const (
+	// eventRelationAsserted: a relation was asserted (a new life, or a live
+	// one touched again: see relationEventData.NewRow).
+	eventRelationAsserted = "relation.asserted"
+	// eventRelationEnded: a relation's life ended, with its cause.
+	eventRelationEnded = "relation.ended"
+)
+
+// relationEventData is the data object of a relation event: enough to re-read
+// both ends without a lookup. Events are re-read hints, never a source of
+// truth.
+type relationEventData struct {
+	Type         string `json:"type"` // always "relation"
+	ID           string `json:"id"`
+	RelationKind string `json:"relation_kind"`
+	EdgeClass    string `json:"edge_class"`
+	SourceType   string `json:"source_type"`
+	SourceID     string `json:"source_id"`
+	TargetType   string `json:"target_type"`
+	TargetID     string `json:"target_id"`
+	// NewRow, on relation.asserted only: true when the assert began a new
+	// life (a new row), false when it touched a live one again.
+	NewRow *bool `json:"new_row,omitempty"`
+	// Cause and Reason, on relation.ended only: one of the EdgeEnd* causes.
+	Cause     string `json:"cause,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	ActorID   string `json:"actor_id,omitempty"`
+	ActorKind string `json:"actor_kind,omitempty"`
+}
+
+// signalExpirySweptData is the data object of [eventSignalExpirySwept].
+type signalExpirySweptData struct {
+	Type      string `json:"type"` // always "signal"
+	Expired   int    `json:"expired"`
+	ActorID   string `json:"actor_id"`
+	ActorKind string `json:"actor_kind"`
 }
 
 // NotifySignalCreated broadcasts a "signal.created" webhook/event-stream

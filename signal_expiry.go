@@ -15,9 +15,8 @@ const DefaultSignalExpiryMaxAge = 14 * 24 * time.Hour
 // expires in a single call by default. One signal.transitioned webhook
 // fires per expired Signal (same mechanism [App.TransitionItemWithReason]
 // uses); an unbounded first run against an established instance's full
-// backlog could flood webhook endpoints, and originally event-stream
-// subscribers too (the stream no longer carries this event, see
-// [eventStreamSuppressed]); found live: architect had 609 stale pending
+// backlog could flood webhook endpoints (the event stream gets one
+// [eventSignalExpirySwept] summary per run instead); found live: architect had 609 stale pending
 // Signals as of 2026-09-28, manually marked read pending this mechanism's
 // existence.
 const DefaultSignalExpiryBatchCap = 200
@@ -83,8 +82,10 @@ type SignalExpiryConfig struct {
 // is wired (ActorKind "job", the same actor name, surface "trigger", written
 // only for a row whose UPDATE took effect), and a signal.transitioned webhook fires, exactly
 // as a human-driven transition would, the same [dispatchTransitionWebhook]
-// mechanism [App.TransitionItemWithReason] itself uses. Like that one, it
-// is not published to the live event stream: see [eventStreamSuppressed]. ExpireSignals does not call
+// mechanism [App.TransitionItemWithReason] itself uses, to webhooks only: the
+// live event stream gets one [eventSignalExpirySwept] summary per run that
+// expired at least one Signal, on the [eventStreamChannelSignals] topic, not
+// one event per Signal. ExpireSignals does not call
 // TransitionItemWithReason directly: that method stamps last_actor from the
 // caller's own [Context] (empty for a plain context.Context), whereas a
 // scheduled detector should record an identifiable mechanism name — the
@@ -223,7 +224,7 @@ func (a *App) ExpireSignals(ctx context.Context, cfg SignalExpiryConfig) (walked
 			actorKind: "job",
 			actorID:   signalExpiryActor,
 		})
-		dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, r.receiver,
+		dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, nil, r.receiver,
 			eventSignalTransitioned,
 			transitionWebhookData{
 				Type:      "signal",
@@ -235,6 +236,10 @@ func (a *App) ExpireSignals(ctx context.Context, cfg SignalExpiryConfig) (walked
 				ActorID:   signalExpiryActor,
 				ActorKind: "job",
 			})
+	}
+	if expired > 0 {
+		dispatchEventFrom(ctx, nil, nil, a.eventBroadcaster, "", eventStreamChannelSignals, eventSignalExpirySwept,
+			signalExpirySweptData{Type: "signal", Expired: expired, ActorID: signalExpiryActor, ActorKind: "job"})
 	}
 	return walked, expired, skipped, nil
 }

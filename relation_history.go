@@ -76,31 +76,42 @@ func recomputeEnding(ctx context.Context) edgeEnding {
 	return e
 }
 
+// edgeRowQuerier is what [endEdgeRow] runs on: the store's DB or a
+// transaction.
+type edgeRowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // endEdgeRow ends the live row id at now: it sets invalid_at only when the row
-// is still live, and reports whether it did. It writes no record; see
-// [RelationStore.recordEdgeEnd], which the caller runs once the end is
-// committed.
-func endEdgeRow(ctx context.Context, exec edgeExecer, id string, now time.Time) (bool, error) {
-	res, err := exec.ExecContext(ctx,
-		"UPDATE smeldr_relations SET invalid_at=$1, updated_at=$2 WHERE id=$3 AND (invalid_at IS NULL OR invalid_at > $4)",
-		now, now, id, now)
-	if err != nil {
-		return false, err
+// is still live, and reports whether it did, returning the row's identity
+// (kind, class, both ends) in the same round trip for the end's record and
+// event. It writes no record; see [RelationStore.recordEdgeEnd], which the
+// caller runs once the end is committed.
+func endEdgeRow(ctx context.Context, q edgeRowQuerier, id string, now time.Time) (RelationEdge, bool, error) {
+	var e RelationEdge
+	err := q.QueryRowContext(ctx,
+		"UPDATE smeldr_relations SET invalid_at=$1, updated_at=$2 WHERE id=$3 AND (invalid_at IS NULL OR invalid_at > $4) "+
+			"RETURNING id, relation_kind, edge_class, source_type, source_id, target_type, target_id",
+		now, now, id, now).Scan(&e.ID, &e.RelationKind, &e.EdgeClass, &e.SourceType, &e.SourceID, &e.TargetType, &e.TargetID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RelationEdge{}, false, nil
 	}
-	n, err := res.RowsAffected()
 	if err != nil {
-		return false, err
+		return RelationEdge{}, false, err
 	}
-	return n > 0, nil
+	return e, true, nil
 }
 
 // recordEdgeEnd writes the "invalidate" provenance record of an ended relation
-// row: subject RelationEdge, from "live" to the cause. Fail-open (the end is
-// already written) and a no-op without a provenance store.
-func (s *RelationStore) recordEdgeEnd(ctx context.Context, id string, e edgeEnding) {
+// row (subject RelationEdge, from "live" to the cause) and sends
+// relation.ended. Every end passes here, so the record and the event cannot
+// disagree. Fail-open (the end is already written): no provenance store means
+// no record, no sink means no event.
+func (s *RelationStore) recordEdgeEnd(ctx context.Context, edge RelationEdge, e edgeEnding) {
+	s.emitRelationEvent(ctx, eventRelationEnded, edge, nil, e)
 	recordProvenance(ctx, s.provenanceStore, ProvenanceRecord{
 		SubjectType: "RelationEdge",
-		SubjectID:   id,
+		SubjectID:   edge.ID,
 		Verb:        "invalidate",
 		FromState:   "live",
 		ToState:     e.cause,
@@ -114,12 +125,43 @@ func (s *RelationStore) recordEdgeEnd(ctx context.Context, id string, e edgeEndi
 // row was ended; an unknown or already ended row ends nothing and records
 // nothing.
 func (s *RelationStore) endEdge(ctx context.Context, id string, e edgeEnding) (bool, error) {
-	ended, err := endEdgeRow(ctx, s.db, id, time.Now().UTC())
+	edge, ended, err := endEdgeRow(ctx, s.db, id, time.Now().UTC())
 	if err != nil || !ended {
 		return false, err
 	}
-	s.recordEdgeEnd(ctx, id, e)
+	s.recordEdgeEnd(ctx, edge, e)
 	return true, nil
+}
+
+// emitRelationEvent sends a relation event (asserted, or ended with e's cause)
+// to the event stream's [eventStreamChannelRelations] topic and to webhook
+// endpoints subscribed to it, skipping the causing actor's own stream
+// connection. newRow is set on relation.asserted only.
+func (s *RelationStore) emitRelationEvent(ctx context.Context, eventName string, edge RelationEdge, newRow *bool, e edgeEnding) {
+	if s.eventBroadcaster == nil && (s.webhookStore == nil || s.webhookPool == nil) {
+		return
+	}
+	data := relationEventData{
+		Type: "relation", ID: edge.ID, RelationKind: edge.RelationKind, EdgeClass: edge.EdgeClass,
+		SourceType: edge.SourceType, SourceID: edge.SourceID, TargetType: edge.TargetType, TargetID: edge.TargetID,
+		NewRow: newRow, Cause: e.cause, Reason: e.reason, ActorID: e.actorID, ActorKind: e.actorKind,
+	}
+	// The stream skips the causing token's own connection; a job actor is not
+	// a token, so it skips nobody.
+	origin := e.actorID
+	if e.actorKind == "job" {
+		origin = ""
+	}
+	dispatchEventFrom(ctx, s.webhookStore, s.webhookPool, s.eventBroadcaster, origin, eventStreamChannelRelations, eventName, data)
+}
+
+// assertEnding names ctx's caller (or the edge's job) as the actor of an
+// assert event.
+func assertEnding(ctx context.Context, edge RelationEdge) edgeEnding {
+	if edge.CreatedByJob != nil && *edge.CreatedByJob != "" {
+		return edgeEnding{actorKind: "job", actorID: *edge.CreatedByJob}
+	}
+	return endingFromContext(ctx, "", "")
 }
 
 // Withdraw ends the live relation id on purpose: its row stays, as history,
