@@ -23,6 +23,19 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.127.0] - 2026-10-07
+
+### Behaviour change
+
+- A module's own `On` After handlers now see the same events for a status change on every path (A433, D97): `AfterUpdate`, then `AfterPublish`, `AfterUnpublish`, `AfterArchive` or `AfterSchedule` as the change calls for, exactly as an HTTP `PUT` making the same change fires them. **`transition_item` on a compiled type now runs these handlers**; before, it ran none of them, so for example an `On(AfterPublish, ...)` rebuild did not run when an item was published through `transition_item`. The MCP publish, schedule and archive tools and the scheduler now also run the module's `AfterUpdate` handlers, and an MCP archive or schedule of a published item runs `AfterUnpublish`. A handler with side effects now runs on those paths too. On `transition_item` the handlers get the caller's own `Context`.
+
+### Notes
+
+- Only the module's own handlers changed. What `App.OnSignal` subscribers, the event stream, webhooks and provenance receive per path is unchanged: `transition_item` still sends one `<type>.transitioned` event and writes one provenance record. Making that side the same on every path is the follow-up `core-one-bus-event-and-provenance-record-per-transition`, which waits for a Decision. It covers an HTTP `PUT` status change, which today writes two provenance records.
+- If `transition_item` cannot load the item for its handlers after the change has committed, the handlers are skipped with a log line and the transition still succeeds. A module with no After handler does not load the item at all.
+
+---
+
 ## [1.126.0] - 2026-10-07
 
 ### Behaviour change

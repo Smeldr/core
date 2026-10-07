@@ -927,6 +927,90 @@ func (m *Module[T]) beforeSave(ctx Context, sig LifecycleEvent, existing, item a
 	return m.saveBefore(ctx, m.db, existing, item)
 }
 
+// statusSignals returns the status events a change from one state to another
+// fires, after [AfterUpdate]: [AfterPublish] into published, [AfterUnpublish]
+// out of it, [AfterArchive] into archived and [AfterSchedule] into scheduled.
+// It is the one table the PUT handler and every transition path share, so a
+// module's handlers see the same events whichever door made the change.
+func statusSignals(from, to Status) []LifecycleEvent {
+	var sigs []LifecycleEvent
+	if from != Published && to == Published {
+		sigs = append(sigs, AfterPublish)
+	} else if from == Published && to != Published {
+		sigs = append(sigs, AfterUnpublish)
+	}
+	if to == Archived {
+		sigs = append(sigs, AfterArchive)
+	}
+	if from != Scheduled && to == Scheduled {
+		sigs = append(sigs, AfterSchedule)
+	}
+	return sigs
+}
+
+// dispatchModuleAfter fires only this module's own [On] handlers for sig,
+// asynchronously, unless the item's state suppresses signals. Unlike
+// [Module.notifyAfter] it writes no standing and reaches no App-level
+// subscriber (event stream, [App.OnSignal], provenance, audit, webhooks): it is
+// for a path that records the change on that side itself, so nothing there is
+// recorded twice.
+func (m *Module[T]) dispatchModuleAfter(ctx Context, sig LifecycleEvent, item any) {
+	if len(m.signals[sig]) == 0 || suppressesSignals(ctx, m.db, m.contentTypeName, string(nodeStatusOf(item))) {
+		return
+	}
+	dispatchAfter(ctx, m.signals[sig], snapshotItem(item))
+}
+
+// transitionTypeName is the registered type name [App.TransitionItemVia]
+// matches this module by.
+func (m *Module[T]) transitionTypeName() string { return m.contentTypeName }
+
+// afterTransition fires this module's own After handlers for a status change
+// made outside the module ([App.TransitionItemVia]'s raw status update): the
+// same [AfterUpdate] plus [statusSignals] a PUT making that change fires. It
+// loads the item, which is already saved in state to. Fail-open: the change has
+// committed, so an item this module's repository does not hold is skipped and
+// a load error is logged, never returned.
+func (m *Module[T]) afterTransition(ctx Context, id, from, to string) {
+	if !m.hasTransitionHandlers() {
+		return
+	}
+	item, err := m.repo.FindByID(ctx, id)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			slog.WarnContext(ctx, "smeldr: module After handlers not run for a transition: the item could not be loaded",
+				"type", m.contentTypeName, "id", id, "from", from, "to", to, "error", err)
+		}
+		return
+	}
+	m.dispatchModuleTransition(ctx, Status(from), Status(to), "", item)
+}
+
+// dispatchModuleTransition fires this module's own handlers for a status change
+// from one state to another: [AfterUpdate] and every [statusSignals] event,
+// except already, which the caller has fired through [Module.notifyAfter]
+// itself ("" when it fired none). Together the module's handlers see what a PUT
+// making the same change fires.
+func (m *Module[T]) dispatchModuleTransition(ctx Context, from, to Status, already LifecycleEvent, item any) {
+	m.dispatchModuleAfter(ctx, AfterUpdate, item)
+	for _, sig := range statusSignals(from, to) {
+		if sig != already {
+			m.dispatchModuleAfter(ctx, sig, item)
+		}
+	}
+}
+
+// hasTransitionHandlers reports whether any handler is registered for an event
+// a transition can fire, so a module without one skips the item load.
+func (m *Module[T]) hasTransitionHandlers() bool {
+	for _, sig := range []LifecycleEvent{AfterUpdate, AfterPublish, AfterUnpublish, AfterArchive, AfterSchedule} {
+		if len(m.signals[sig]) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // notifyAfter fires the registered signal handlers for sig asynchronously
 // (via dispatchAfter) and then, if an afterHook has been wired by the App,
 // invokes it in a separate goroutine carrying [afterHookMeta] and the item.
@@ -1704,6 +1788,7 @@ func (m *Module[T]) publishDue(ctx Context, item T, now time.Time) dueOutcome {
 	// sites) but a registered trigger doesn't care who initiated the
 	// transition, only that it happened.
 	fireAsyncTriggers(ctx.Request().Context(), m.db, m.contentTypeName, string(Scheduled), string(Published), id)
+	m.dispatchModuleTransition(ctx, Scheduled, nodeStatusOf(item), AfterPublish, item)
 	m.notifyAfter(ctx, AfterPublish, "scheduled", surfaceTrigger, "", item)
 	return duePublished
 }
@@ -2153,16 +2238,8 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	m.notifyAfter(ctx, AfterUpdate, string(prevStatus), surfaceHTTP, "", item)
 
 	// Status-transition hooks.
-	if prevStatus != Published && newStatus == Published {
-		m.notifyAfter(ctx, AfterPublish, string(prevStatus), surfaceHTTP, "", item)
-	} else if prevStatus == Published && newStatus != Published {
-		m.notifyAfter(ctx, AfterUnpublish, "published", surfaceHTTP, "", item)
-	}
-	if newStatus == Archived {
-		m.notifyAfter(ctx, AfterArchive, string(prevStatus), surfaceHTTP, "", item)
-	}
-	if prevStatus != Scheduled && newStatus == Scheduled {
-		m.notifyAfter(ctx, AfterSchedule, string(prevStatus), surfaceHTTP, "", item)
+	for _, sig := range statusSignals(prevStatus, newStatus) {
+		m.notifyAfter(ctx, sig, string(prevStatus), surfaceHTTP, "", item)
 	}
 
 	m.invalidateCache()
@@ -2786,6 +2863,7 @@ func (m *Module[T]) MCPPublish(ctx Context, slug, reason string) error {
 	// Unconditional — matches dynamic.go's setStatus/ScheduleContent, which
 	// don't special-case a same-status call either.
 	fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(Published), nodeIDOf(item))
+	m.dispatchModuleTransition(ctx, prevStatus, nodeStatusOf(item), AfterPublish, item)
 	m.notifyAfter(ctx, AfterPublish, string(prevStatus), surfaceMCP, "", item)
 	m.invalidateCache()
 	m.triggerRebuild()
@@ -2819,6 +2897,7 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time, reason s
 	plan.run(ctx, m.db, m.relationStore, m.provenanceStore, surfaceMCP)
 	// A240: fire any registered async TransitionTrigger for this transition.
 	fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(Scheduled), nodeIDOf(item))
+	m.dispatchModuleTransition(ctx, prevStatus, nodeStatusOf(item), AfterSchedule, item)
 	m.notifyAfter(ctx, AfterSchedule, string(prevStatus), surfaceMCP, "", item)
 	m.invalidateCache()
 	return nil
@@ -2849,6 +2928,7 @@ func (m *Module[T]) MCPArchive(ctx Context, slug, reason string) error {
 	plan.run(ctx, m.db, m.relationStore, m.provenanceStore, surfaceMCP)
 	// A240: fire any registered async TransitionTrigger for this transition.
 	fireAsyncTriggers(ctx, m.db, m.contentTypeName, string(prevStatus), string(Archived), nodeIDOf(item))
+	m.dispatchModuleTransition(ctx, prevStatus, nodeStatusOf(item), AfterArchive, item)
 	m.notifyAfter(ctx, AfterArchive, string(prevStatus), surfaceMCP, "", item)
 	m.invalidateCache()
 	m.triggerRebuild()

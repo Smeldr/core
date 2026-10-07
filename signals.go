@@ -32,7 +32,16 @@ const (
 	// Return an error to abort the operation; nothing is saved.
 	BeforeUpdate LifecycleEvent = "before_update"
 
-	// AfterUpdate fires after a content item has been updated.
+	// AfterUpdate fires after a content item has been updated: on every
+	// content update (HTTP PUT and PATCH, the MCP update tool) and on every
+	// status transition. For a transition a module's own [On] handlers get it
+	// on every path (HTTP PUT, the MCP publish, schedule and archive tools,
+	// transition_item, the scheduler), followed by the status event the change
+	// calls for (AfterPublish, AfterUnpublish, AfterArchive, AfterSchedule),
+	// exactly as a PUT making the same change fires them. App-level
+	// subscribers ([App.OnSignal], the event stream, webhooks) are fed per
+	// path as before: transition_item reaches them as its own
+	// "<type>.transitioned" event, not as these events.
 	// Runs asynchronously — errors and panics are logged, never returned.
 	AfterUpdate LifecycleEvent = "after_update"
 
@@ -45,19 +54,23 @@ const (
 	// Runs asynchronously — errors and panics are logged, never returned.
 	AfterDelete LifecycleEvent = "after_delete"
 
-	// AfterPublish fires after a content item transitions to Published.
+	// AfterPublish fires after a content item transitions to Published, on
+	// every transition path (see [AfterUpdate] for which side sees what).
 	// Runs asynchronously — triggers sitemap and feed regeneration.
 	AfterPublish LifecycleEvent = "after_publish"
 
-	// AfterUnpublish fires after a content item is moved out of Published status.
+	// AfterUnpublish fires after a content item is moved out of Published
+	// status, on every transition path (see [AfterUpdate]).
 	// Runs asynchronously — triggers sitemap and feed regeneration.
 	AfterUnpublish LifecycleEvent = "after_unpublish"
 
-	// AfterArchive fires after a content item transitions to Archived.
+	// AfterArchive fires after a content item transitions to Archived, on
+	// every transition path (see [AfterUpdate]).
 	// Runs asynchronously — triggers sitemap and feed regeneration.
 	AfterArchive LifecycleEvent = "after_archive"
 
-	// AfterSchedule fires after a content item transitions to Scheduled status.
+	// AfterSchedule fires after a content item transitions to Scheduled status,
+	// on every transition path (see [AfterUpdate]).
 	// It fires in addition to AfterUpdate — not instead of it. Runs
 	// asynchronously — errors and panics are logged, never returned.
 	AfterSchedule LifecycleEvent = "after_schedule"

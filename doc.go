@@ -99,7 +99,9 @@
 //
 // The synchronous [BeforeCreate], [BeforeUpdate] and [BeforeDelete] module
 // hooks can refuse a write by returning an error. They run on HTTP and MCP
-// writes alike, so a validation hook guards every surface.
+// writes alike, so a validation hook guards every surface. Likewise a module's
+// After handlers see the same events for a status change on every path,
+// including transition_item and the scheduler.
 //
 // # Orchestration and governance
 //

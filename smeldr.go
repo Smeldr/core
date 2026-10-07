@@ -325,6 +325,7 @@ type App struct {
 	hookableModules []interface {
 		setAfterHook(func(Context, LifecycleEvent, afterHookMeta, any))
 	} // modules whose afterHook is wired at Run time
+	transitionModules map[string][]transitionHookModule // by type name; App.TransitionItemVia fires their After handlers
 
 	eventBroadcaster      *eventBroadcaster // non-nil when App.EventStream() was called; backs GET /_events/stream
 	eventStreamHandlerReg bool              // true once GET /_events/stream is registered
@@ -636,6 +637,13 @@ func (a *App) Content(v any, opts ...Option) {
 			setAfterHook(func(Context, LifecycleEvent, afterHookMeta, any))
 		}); ok {
 			a.hookableModules = append(a.hookableModules, hk)
+		}
+		if tm, ok := r.(transitionHookModule); ok {
+			if a.transitionModules == nil {
+				a.transitionModules = map[string][]transitionHookModule{}
+			}
+			name := tm.transitionTypeName()
+			a.transitionModules[name] = append(a.transitionModules[name], tm)
 		}
 		if sh, ok := r.(interface {
 			setSyncSaveHook(func(context.Context, string, string, any) error)

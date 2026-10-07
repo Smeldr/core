@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -1467,6 +1468,10 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	// — deliberately both wired here (TransitionItem) and in
 	// updateHandler (module.go), matching Check's own dual-wiring.
 	runDeclaredTensionAggregationByID(ctx, db, a.findingStore, typeName, id, currentStatus, toState)
+	// The module's own After handlers (On), the same events a PUT making this
+	// change fires. Only the module's handlers: provenance, standing and the
+	// x.transitioned event are already recorded above, once.
+	a.fireModuleAfterTransition(ctx, typeName, id, currentStatus, toState)
 
 	// Event-stream channel (A302): the type's own band/receiver-shaped
 	// column, when it has one (channelColumns has no entry for Amendment —
@@ -1499,6 +1504,38 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 			ActorKind: actorKind,
 		})
 	return map[string]any{"id": id, "slug": realSlug, "status": toState, "last_actor": actorID}, nil
+}
+
+// transitionHookModule is a compiled [Module] whose own After handlers
+// [App.TransitionItemVia] fires after a status change it made with a raw
+// update. Collected by type name in [App.Content].
+type transitionHookModule interface {
+	transitionTypeName() string
+	afterTransition(ctx Context, id, from, to string)
+}
+
+// fireModuleAfterTransition fires the After handlers of every module registered
+// for typeName for a committed change of item id from one state to another.
+// Handlers get the caller's own [Context] when ctx is one, so they see the same
+// user as on a PUT or an MCP publish; a caller with no Context (a system path)
+// gets a [NewBackgroundContext], whose user is [GuestUser].
+func (a *App) fireModuleAfterTransition(ctx context.Context, typeName, id, from, to string) {
+	mods := a.transitionModules[typeName]
+	if len(mods) == 0 {
+		return
+	}
+	sc, ok := ctx.(Context)
+	if !ok {
+		u, _ := url.Parse(a.cfg.BaseURL)
+		host := ""
+		if u != nil {
+			host = u.Hostname()
+		}
+		sc = NewBackgroundContext(host)
+	}
+	for _, m := range mods {
+		m.afterTransition(sc, id, from, to)
+	}
 }
 
 // drainAuthorizationGate reports whether typeName's fromState→toState

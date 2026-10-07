@@ -4809,6 +4809,28 @@ on every surface instead. A `PUT` that also changes the status is a content writ
 run `BeforeUpdate`. Before v1.126.0, `BeforeCreate`, `BeforeUpdate` and `BeforeDelete` ran
 on HTTP only (not on MCP create, update or delete, and not on `PATCH`).
 
+**Which transitions fire the After handlers (v1.127.0).** A module's own `On` After
+handlers see the same events for a status change, whichever path makes it: `AfterUpdate`,
+then the status event the change calls for.
+
+| Change | Module `On` handlers get |
+|---|---|
+| into `published` | `AfterUpdate`, `AfterPublish` |
+| out of `published` | `AfterUpdate`, `AfterUnpublish` (and `AfterArchive` / `AfterSchedule` when it goes there) |
+| into `archived` | `AfterUpdate`, `AfterArchive` |
+| into `scheduled` | `AfterUpdate`, `AfterSchedule` |
+| any other state change (a custom flow) | `AfterUpdate` |
+
+The paths are HTTP `PUT`, the MCP `publish_*`, `schedule_*` and `archive_*` tools,
+`transition_item` and the scheduler. On `transition_item` the handlers get the caller's own
+`Context`; a caller with no `Context` (a system path) gets a background context whose user
+is the guest. If the item cannot be loaded after the change has committed, the handlers do
+not run and the transition still succeeds (the failure is logged). The App-level side is
+unchanged by this: `transition_item` still reaches `App.OnSignal`, the event stream and
+webhooks as one `<type>.transitioned` event with one provenance record. Before v1.127.0,
+`transition_item` fired none of a compiled type's module After handlers, and the MCP
+lifecycle tools and the scheduler did not fire the module's `AfterUpdate`.
+
 ### `RegisterOrchestrationRelationKinds` (A296)
 
 ```go
