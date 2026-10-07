@@ -498,7 +498,7 @@ already-issued long-lived token (a bootstrap admin token, an agent's own
 token minted before the upgrade): it stays absent from
 `NamesForUserIDs`'s results until it is revoked and reissued.
 
-#### Actor classification — `CreateClassified` (A416, D105, v1.121.0)
+#### Actor classification — `CreateClassified` (A418, D105, v1.121.0)
 
 A token can carry a classification tag beside its permission role, so
 provenance records what kind of actor used it. There are three tags, all

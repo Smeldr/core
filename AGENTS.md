@@ -440,7 +440,7 @@ Write operations require `Author` role or higher. The Bearer token you
 were given determines your role. If an operation returns `forbidden`,
 you do not have sufficient role — do not retry.
 
-**Actor classification (`Job`/`Agent`/`Human` tags, A224, A416, D105):** three `Role`
+**Actor classification (`Job`/`Agent`/`Human` tags, A224, A418, D105):** three `Role`
 constants classify *who* is acting, not *what* they may do. They are outside
 the permission hierarchy and never grant or change a permission. Mint a
 classified token with `TokenStore.CreateClassified(ctx, name, role, class, ttl)`

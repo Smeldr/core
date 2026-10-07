@@ -359,7 +359,7 @@ MCP resource subscriptions (Beta):
 - Runtime-defined (dynamic) content types work on Postgres since v1.119.2: `Query` and `SQLRepo` scan a `json.RawMessage` field from a string as well as bytes, and `SeedBlockTypeSchemas` uses portable SQL (A412)
 - Per-path SEO overrides (`PageMetaStore`) work on Postgres since v1.119.3, and a test fails on SQLite-only SQL in any non-test source file of the core module (A413)
 - `App.ItemsStateSince` reports when each Task or Goal-like item entered its current state and why, from provenance (core v1.120.0, A415); the mcp `state_since` and `state_reason` keys on Task and Goal reads use it (mcp v1.47.0). Absent means unknown, second resolution, the actor is not on this surface
-- Actor classification (D105, A416, v1.121.0): `TokenStore.CreateClassified` mints a token tagged `agent`, `job` or `human` (`create_token` `actor_class`, `token create --class`), provenance records that kind, and an untagged actor now records `unclassified` instead of `human`; older rows keep `human` and mean unclassified
+- Actor classification (D105, A418, v1.121.0): `TokenStore.CreateClassified` mints a token tagged `agent`, `job` or `human` (`create_token` `actor_class`, `token create --class`), provenance records that kind, and an untagged actor now records `unclassified` instead of `human`; older rows keep `human` and mean unclassified
 - `define_state_flow` MCP tool — registers a flow including `active_state` and `conflict_policy` params (Admin role)
 - `TransitionTrigger` struct — `FromState`, `ToState`, `TriggerClass`, `TriggerType`, `Config`; declared in `StateFlow.Triggers`
 - `StateFlow.Triggers []TransitionTrigger` — async trigger handlers persisted to `smeldr_transition_triggers` by `RegisterFlow`; idempotent
