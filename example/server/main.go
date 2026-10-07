@@ -307,6 +307,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.EnsureAmendmentBodyColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure amendment body column: %w", err)
 		}
+		if err := smeldr.EnsureAmendmentAmendsColumn(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure amendment amends column: %w", err)
+		}
 		if err := smeldr.EnsureStateLockedColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure state locked column: %w", err)
 		}

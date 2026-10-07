@@ -2,13 +2,13 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.124.0 + smeldr.dev/mcp v1.50.0 + smeldr.dev/cli v0.21.0 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.3.0.
+Last updated: v1.125.0 + smeldr.dev/mcp v1.50.0 + smeldr.dev/cli v0.21.0 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.3.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.124.0 | Stable |
+| `smeldr.dev/core` | v1.125.0 | Stable |
 | `smeldr.dev/mcp` | v1.50.0 | Stable |
 | `smeldr.dev/oauth` | v0.5.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.3.0 | Beta |
@@ -363,6 +363,7 @@ MCP resource subscriptions (Beta):
 - `*.transitioned` events (stream and webhooks) carry `actor_id` and `actor_kind` (v1.122.0, A427), the same actor and kind as the provenance record; omitted when no actor is known
 - Item history read (D101, A428, v1.123.0): `App.ItemProvenance` and the `get_item_provenance` tool / `smeldr-cli history` return one item's history newest first, paged, with the actor on every entry for members and only on gated transitions in the gated view; provenance not enabled is an explicit error; relation events are not in this read yet
 - Bounded reachability (A430, v1.124.0): RelationStore.ReachabilityBounded, the get_reachability tool and smeldr-cli reachability walk the live relation graph from one item up to 10 hops with a cap on items returned; a cut is reported as {depth, dropped} and deeper rings are absent, not empty
+- The amends relation (A431, D102, v1.125.0): an Amendment names the Decision it changes in its optional write-once amends field, core asserts the amends edge and refuses a number that names no Decision; EnsureAmendmentAmendsColumn; a reviewed-mapping backfill for existing Amendments; a rejected Amendment's edge stays live until Withdraw
 - `define_state_flow` MCP tool — registers a flow including `active_state` and `conflict_policy` params (Admin role)
 - `TransitionTrigger` struct — `FromState`, `ToState`, `TriggerClass`, `TriggerType`, `Config`; declared in `StateFlow.Triggers`
 - `StateFlow.Triggers []TransitionTrigger` — async trigger handlers persisted to `smeldr_transition_triggers` by `RegisterFlow`; idempotent

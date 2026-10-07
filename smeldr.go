@@ -860,6 +860,12 @@ func (a *App) GetPageMeta(ctx context.Context, path string) Head {
 // SyncSaveHook is a synchronous callback fired by Module save handlers
 // immediately after a successful repo.Save. Returning a non-nil error aborts
 // the request with that error. Wire one via [App.Relations].
+//
+// The hook [App.Relations] wires serves schema-based dynamic content types: it
+// recomputes every asserted edge of the saved item from its schema fields, and
+// [RelationStore.RecomputeAsserted] deletes the source's other asserted edges. It
+// must never be pointed at a compiled type, whose edges are asserted by other
+// means (an Amendment's amends edge, for one).
 type SyncSaveHook func(ctx context.Context, typeName, id string, item any) error
 
 func (a *App) Relations(store *RelationStore) *App {

@@ -522,7 +522,9 @@ type Module[T any] struct {
 
 	contentTypeName   string                                            // unqualified type name; set by NewModule
 	afterHook         func(Context, LifecycleEvent, afterHookMeta, any) // nil until wired by App; called async on delivery signals
-	syncSaveHook      func(context.Context, string, string, any) error  // nil until wired by App.Relations; called sync after save
+	syncSaveHook      func(context.Context, string, string, any) error  // nil until wired by App.Relations; called sync after save (dynamic types only: never for a compiled type, RecomputeAsserted would delete its other asserted edges)
+	saveBefore        func(Context, DB, any, any) error                 // nil unless the type has an internal pre-save check (existing is nil on create); an error aborts the write
+	saveAfter         func(Context, DB, *RelationStore, any, any)       // nil unless the type has an internal post-save step, fail-open (existing is nil on create)
 	secret            []byte                                            // set by App.Content via setSecret; used for preview token validation
 	db                DB                                                // set by App.Content via setDB; used for transition validation
 	roleStore         *RoleStore                                        // nil unless App.Governance is wired; set by App.Handler via setRoleStore
@@ -610,6 +612,8 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 			}
 		case signalOption:
 			m.signals[v.signal] = append(m.signals[v.signal], v.handler)
+		case saveHooksOption:
+			m.saveBefore, m.saveAfter = v.before, v.after
 		case SitemapConfig:
 			cfg := v
 			m.sitemapCfg = &cfg
@@ -1948,6 +1952,10 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := m.runSaveBefore(ctx, nil, item); err != nil {
+		WriteError(w, r, err)
+		return
+	}
 	if err := m.repo.Save(ctx, item); err != nil {
 		WriteError(w, r, err)
 		return
@@ -1958,6 +1966,7 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	m.runSaveAfter(ctx, nil, item)
 
 	// AfterCreate hooks (asynchronous).
 	m.notifyAfter(ctx, AfterCreate, "", surfaceHTTP, "", item)
@@ -2103,6 +2112,10 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 		ctx = plan.holdingContext(ctx)
 	}
 
+	if err := m.runSaveBefore(ctx, any(existing), item); err != nil {
+		WriteError(w, r, err)
+		return
+	}
 	if err := m.repo.Save(ctx, item); err != nil {
 		WriteError(w, r, err)
 		return
@@ -2114,6 +2127,7 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	m.runSaveAfter(ctx, any(existing), item)
 
 	// A240: fire any registered async TransitionTrigger for this transition.
 	// Guarded by the same prevStatus != newStatus check already gating
@@ -2607,6 +2621,9 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 			return nil, err
 		}
 	}
+	if err := m.runSaveBefore(ctx, nil, item); err != nil {
+		return nil, err
+	}
 	if err := m.repo.Save(ctx, item); err != nil {
 		return nil, err
 	}
@@ -2615,6 +2632,7 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 			return nil, err
 		}
 	}
+	m.runSaveAfter(ctx, nil, item)
 	m.notifyAfter(ctx, AfterCreate, "", surfaceMCP, "", item)
 	m.invalidateCache()
 	return item, nil
@@ -2671,6 +2689,9 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 	if err := RunValidation(item); err != nil {
 		return nil, err
 	}
+	if err := m.runSaveBefore(ctx, any(existing), item); err != nil {
+		return nil, err
+	}
 	if err := m.repo.Save(ctx, item); err != nil {
 		return nil, err
 	}
@@ -2679,6 +2700,7 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 			return nil, err
 		}
 	}
+	m.runSaveAfter(ctx, any(existing), item)
 	m.notifyAfter(ctx, AfterUpdate, string(nodeStatusOf(existing)), surface, "", item)
 	m.invalidateCache()
 	return item, nil

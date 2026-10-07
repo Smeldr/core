@@ -4701,7 +4701,7 @@ smeldr.RegisterOrchestrationTypes(app, db)
 | `Signal` | `smeldr_signals` | signal-protocol (4 states) | sender, receiver, signal_type, message, task_ref, sequence, subject_type, subject_id, from_state, to_state, required_role |
 | `Task` | `smeldr_tasks` | agent-task (10 states) | task_id, priority, band, size, description, note_ref |
 | `Decision` | `smeldr_decisions` | governance-decision (5 states) | decision_number, title, scope, body, next_eval_at, eval_note |
-| `Amendment` | `smeldr_amendments` | amendment-lifecycle (6 states) | amendment_number, amendment_type, version, commit_hash, pilot, summary |
+| `Amendment` | `smeldr_amendments` | amendment-lifecycle (6 states) | amendment_number, amendment_type, version, commit_hash, pilot, summary, body, amends |
 | `Goal` | `smeldr_goals` | goal-lifecycle (4 states) | goal_id, priority, band, size, description |
 
 All five types embed `Node` and receive auto-generated MCP tools (`create_*`, `get_*`,
@@ -4806,6 +4806,7 @@ safe to call on every boot; `UpsertKind` updates in place if a kind is already r
 | `derives_from` | directional | Task→Goal | asserted |
 | `depends_on` | directional | Task→Task | asserted |
 | `ships_as` | directional | Task→Amendment | asserted |
+| `amends` | directional | Amendment→Decision | asserted |
 | `supersedes` | directional | Decision→Decision | asserted |
 | `contains` | directional | Goal→{Goal,Task,Decision,Amendment,Signal} | asserted |
 | `contradicts` | symmetric (`Directional: false`) | Decision↔Decision | asserted |
@@ -4829,6 +4830,17 @@ narrow-by-default precedent as `addresses`. Who asserts either edge, and when, i
 the same `assert_relation` convention already used for every other kind here — no new core
 machinery.
 
+
+### The `amends` relation and `Amendment.Amends` (A431, D102, v1.125.0)
+
+An Amendment says which Decision it changes with its optional field `amends` (a Decision number, `"D104"`), and core turns that into an `amends` edge from the Amendment to the Decision (kind `amends`, label "Amends", reverse "Amended By", the pair Amendment to Decision and no other), so Trace's relation lanes and Navigator read one graph.
+
+- **Declared at creation, refused when wrong.** A non-empty `amends` must name exactly one Decision. `D104`, `d104` and the older bare `104` are all read, and the value is stored in the canonical `D104` form. A number that names no Decision, names several, or is not a Decision number refuses the write (a validation error naming it), in every write path: the HTTP create and PUT and the MCP create and update. An empty `amends` creates no edge: most Amendments amend no Decision.
+- **Write-once.** `amends` is set at creation, or later only while it is empty. A different value is refused ("is write-once"), and an empty value never clears it (a full-replace PUT that does not know the field keeps it), so the field and the edge cannot disagree. The edge is asserted once, when the field becomes set, with the caller's own actor (an `assert` provenance record names who recorded the Amendment); no relation store wired means no edge and a Warn, never a failed write. An edge is not asserted twice for the same pair.
+- **Reading it.** `get_amendment` returns the field; `get_relations` (type_name `Amendment`, kind `amends`) returns the live edge. The edge is what queries use.
+- **What does not happen yet, stated plainly.** A **rejected Amendment's edge stays live**, and a stored `amends` is never moved: nothing can end an edge on purpose until `core-relation-history-one-row-per-life` ships `Withdraw`, whose design already lists "ended because its Amendment was rejected" with the actor of that transition. A test pins the current behaviour so that work has one to turn.
+- **Existing Amendments have no link.** Amendments written before this field name their Decision only in free text, and a body that mentions D104 does not mean the Amendment amends D104, so nothing is derived. `App.AmendsBackfillCandidates(ctx)` is read-only: per Amendment with an empty `amends`, the existing Decisions its summary and body mention, for a person to read. `App.BackfillAmendsEdges(ctx, links, dryRun)` takes a mapping the caller has reviewed (`[]AmendsLink{{"A412", "D104"}}`), asserts the missing edges with the caller's own actor in ctx, fills `amends` where it is empty, skips pairs that already have a live edge, reports `asserted`, `already present`, `unresolved` and `ambiguous` per link, and with `dryRun` writes nothing. Exported Go, not an MCP tool.
+- **Database.** The column `smeldr_amendments.amends` comes with `CreateOrchestrationTables`; an existing database needs `EnsureAmendmentAmendsColumn` before the first Amendment read (the example server calls it at boot). Without the column every Amendment read fails.
 `belongs_to_domain`/`belongs_to_area` (A338, D71/D72) connect a Decision to its Domain/Area —
 per-instance dynamic content types, not compiled into core, hence the lowercase target type
 name (`domain`/`area`) unlike every other kind above's PascalCase compiled-type targets. No

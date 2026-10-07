@@ -23,6 +23,21 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.125.0] - 2026-10-07
+
+### Added
+
+- The `amends` relation kind (Amendment to Decision, "Amends" / "Amended By") and the optional `Amendment.Amends` field (A431, D102): an Amendment names the Decision it changes (`"D104"`, also read as `d104` or `104`), and core asserts the edge when the field becomes set. A number that names no Decision, several, or is malformed refuses the write in every write path (HTTP create and PUT, MCP create and update). `amends` is write-once: set at creation or later only while empty; a different value is refused and an empty one never clears it. Before this the Amendment type had no field that named a Decision, only free text.
+- `EnsureAmendmentAmendsColumn`: adds `smeldr_amendments.amends` to a database that predates it. **Call it before the first Amendment is read** (an old table without the column makes every Amendment read fail); the example server does at boot.
+- `App.BackfillAmendsEdges(ctx, links, dryRun)` and `App.AmendsBackfillCandidates(ctx)`, `AmendsLink`, `AmendsOutcome`, `AmendsBackfillReport`, `AmendsCandidate`: existing Amendments have no link and none is guessed (a body that mentions D104 does not mean it amends D104), so the backfill takes a reviewed mapping, asserts with the caller's own actor, and reports every link; the candidates list is read-only.
+
+### Notes
+
+- A rejected Amendment's `amends` edge stays live until the relation-history work (`Withdraw`) can end an edge on purpose; this is named in REFERENCE and pinned by a test.
+- Internally modules gain an unexported pre-save check and post-save step that run in all four write paths; the public `BeforeCreate`/`BeforeUpdate` hooks are unchanged (they still do not run on MCP creates and updates).
+
+---
+
 ## [1.124.0] - 2026-10-07
 
 ### Added

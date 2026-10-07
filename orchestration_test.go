@@ -1307,6 +1307,7 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 		"derives_from": {"Derives From", "", `[{"source_type":"Task","target_type":"Goal"}]`, true},
 		"depends_on":   {"Depends On", "", `[{"source_type":"Task","target_type":"Task"}]`, true},
 		"ships_as":     {"Ships As", "", `[{"source_type":"Task","target_type":"Amendment"}]`, true},
+		"amends":       {"Amends", "Amended By", `[{"source_type":"Amendment","target_type":"Decision"}]`, true},
 		"supersedes":   {"Supersedes", "Superseded By", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
 		"contains": {"Contains", "Part Of", `[{"source_type":"Goal","target_type":"Goal"},` +
 			`{"source_type":"Goal","target_type":"Task"},` +

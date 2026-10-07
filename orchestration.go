@@ -466,6 +466,15 @@ type Amendment struct {
 	// primary for new work): Summary alone cannot carry what
 	// decisions/recent.md's own Amendment bodies held before the freeze.
 	Body string `json:"body" smeldr_format:"markdown"`
+	// Amends is the number of the Decision this Amendment changes (e.g. "D104"),
+	// or empty when it amends none. It is declared when the Amendment is created
+	// and is write-once: set at creation, or later only while empty; a different
+	// value is refused and an empty one never clears it. A value that names no
+	// Decision, or more than one, refuses the write. Once saved it becomes an
+	// "amends" edge to that Decision (D102), and the edge, read with
+	// get_relations, is what queries use. Amendments written before this field
+	// have none until an administrator maps them ([App.BackfillAmendsEdges]).
+	Amends string `json:"amends,omitempty" db:"amends"`
 	// LastActor is the actor ID of whoever performed this item's most
 	// recent state transition (D78). Empty when no caller identity was
 	// available (a system-initiated transition) or the item has never
@@ -655,6 +664,7 @@ func CreateOrchestrationTables(db DB) error {
 			pilot            TEXT NOT NULL DEFAULT '',
 			summary          TEXT NOT NULL DEFAULT '',
 			body             TEXT NOT NULL DEFAULT '',
+			amends           TEXT NOT NULL DEFAULT '',
 			last_actor       TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_goals (
@@ -865,6 +875,7 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 	))
 	app.Content(NewModule[*Amendment]((*Amendment)(nil),
 		At("/amendments"), Repo(NewSQLRepo[*Amendment](db, Table("smeldr_amendments"))), MCP(MCPRead, MCPWrite),
+		amendsSaveHooks(),
 	))
 	app.Content(NewModule[*Goal]((*Goal)(nil),
 		At("/goals"), Repo(NewSQLRepo[*Goal](db, Table("smeldr_goals"))), MCP(MCPRead, MCPWrite),
@@ -884,7 +895,7 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 // RegisterOrchestrationRelationKinds registers the relation kinds that
 // connect the orchestration types (Task, Goal, Decision, Amendment,
 // Signal): derives_from (Task→Goal), depends_on (Task→Task), ships_as
-// (Task→Amendment), supersedes (Decision→Decision), contains
+// (Task→Amendment), amends (Amendment→Decision), supersedes (Decision→Decision), contains
 // (Goal→{Goal,Task,Decision,Amendment,Signal}), contradicts
 // (Decision↔Decision, symmetric), investigates (Task→Decision), addresses
 // (Decision→Decision, a decline-Decision asserting back to the original it
@@ -914,6 +925,17 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			Mode:        "asserted",
 			Directional: true,
 			TypePairs:   json.RawMessage(`[{"source_type":"Task","target_type":"Amendment"}]`),
+		},
+		{
+			// D102: an Amendment amends the Decision it changes. Asserted when
+			// the Amendment is created with its amends field set; the pair is the
+			// only one allowed (narrow by default, as addresses and grounded_in).
+			TypeName:     "amends",
+			Label:        "Amends",
+			ReverseLabel: "Amended By",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Amendment","target_type":"Decision"}]`),
 		},
 		{
 			TypeName:     "supersedes",
