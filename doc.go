@@ -103,6 +103,10 @@
 // After handlers see the same events for a status change on every path,
 // including transition_item and the scheduler.
 //
+// Relations between items keep their history: one row is one life of a
+// relation, an end is never a delete, and every end records its cause and
+// actor ([RelationStore.Withdraw], [EdgeEnd]).
+//
 // # Orchestration and governance
 //
 // Beyond the base content-lifecycle framework above, Smeldr ships a set of

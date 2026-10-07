@@ -84,6 +84,12 @@ type RelationEdge struct {
 	// witness certificate needs (distinct from any [ProvenanceRecord] verb,
 	// all of which are deliberate actions on an item).
 	LastConfirmedAt *time.Time `db:"last_confirmed_at"`
+
+	// Ended says how and when this row's life ended, for a row read through
+	// [RelationStore.MCPGetRelations] whose invalid_at has passed; nil for a
+	// live row and on every other read. Not a column: it is read from the
+	// row's "invalidate" provenance record.
+	Ended *EdgeEnd `db:"-"`
 }
 
 // RelationKindRegistry is an in-memory thread-safe store of relation kind definitions,
@@ -482,10 +488,15 @@ func canonicalizeNonDirectional(kind RelationKindDef, edge RelationEdge) Relatio
 // and returns its own error first; this is defense in depth, not the
 // primary gate.
 //
-// A fresh edge (edge.ID == "") reuses an existing row's ID when one already
-// matches (source, target, kind, edge_class) exactly, rather than creating a
-// duplicate (D61, item 3's dedup half) — an explicit edge.ID from the caller
-// is never overridden, preserving the existing update-by-id contract.
+// A fresh edge (edge.ID == "") reuses an existing row's ID when a live row
+// (invalid_at NULL or in the future) already matches (source, target, kind,
+// edge_class) exactly, rather than creating a duplicate (D61, item 3's dedup
+// half). One row is one life of a relation: a tuple whose rows have all ended
+// gets a new row with a new ID, and the ended rows stay as history (relation
+// history, design/relation-history-v1.md). An explicit edge.ID from the caller
+// is never overridden, preserving the existing update-by-id contract, but an
+// explicit ID of a row that has ended is refused ([ErrConflict]) rather than
+// revived.
 func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (RelationEdge, error) {
 	now := time.Now().UTC()
 
@@ -510,6 +521,18 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 		edge = canonicalizeNonDirectional(kind, edge)
 	}
 
+	if edge.ID != "" {
+		var endedAt *time.Time
+		err := s.db.QueryRowContext(ctx, "SELECT invalid_at FROM smeldr_relations WHERE id=$1", edge.ID).
+			Scan(nullTimeScanner{dst: &endedAt})
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return RelationEdge{}, err
+		}
+		if err == nil && endedAt != nil && !endedAt.After(now) {
+			return RelationEdge{}, fmt.Errorf("%w: relation %s ended at %s; assert it again without an id to start a new row",
+				ErrConflict, edge.ID, endedAt.UTC().Format(time.RFC3339))
+		}
+	}
 	if edge.ID == "" {
 		// Dedup key: (source, target, relation_kind, edge_class). D61's own
 		// literal text omitted edge_class, but that would let an "observed"
@@ -524,9 +547,10 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 		var existingID string
 		lookupErr := s.db.QueryRowContext(ctx,
 			`SELECT id FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 `+
-				`AND target_type=$3 AND target_id=$4 AND relation_kind=$5 AND edge_class=$6`,
+				`AND target_type=$3 AND target_id=$4 AND relation_kind=$5 AND edge_class=$6 `+
+				`AND (invalid_at IS NULL OR invalid_at > $7)`,
 			edge.SourceType, edge.SourceID, edge.TargetType, edge.TargetID,
-			edge.RelationKind, edge.EdgeClass,
+			edge.RelationKind, edge.EdgeClass, now,
 		).Scan(&existingID)
 		switch {
 		case lookupErr == nil:
@@ -745,28 +769,39 @@ func (s *RelationStore) MCPObserveRelation(ctx context.Context,
 	})
 }
 
-// MCPGetRelations queries the relation graph for a given item.
+// MCPGetRelations queries the relation graph for a given item: the history
+// view, every row including the ones that have ended, in creation order per
+// side (one row is one life of a relation, so a relation that ended and was
+// added again reads as two rows). Each ended row carries [RelationEdge.Ended]:
+// its cause, reason and actor from its "invalidate" provenance record, or
+// [EdgeEndNotRecorded].
 // direction must be "source", "target", or "both".
 // kind filters by relation kind; empty string returns all kinds.
 func (s *RelationStore) MCPGetRelations(ctx context.Context, typeName, id, direction, kind string) ([]RelationEdge, error) {
 	switch direction {
-	case "source":
-		return s.GetBySource(ctx, typeName, id, kind)
-	case "target":
-		return s.GetByTarget(ctx, typeName, id, kind)
-	case "both":
+	case "source", "target", "both":
+	default:
+		return nil, fmt.Errorf("smeldr: MCPGetRelations: direction must be source, target, or both; got %q", direction)
+	}
+	var edges []RelationEdge
+	if direction != "target" {
 		src, err := s.GetBySource(ctx, typeName, id, kind)
 		if err != nil {
 			return nil, err
 		}
+		edges = append(edges, src...)
+	}
+	if direction != "source" {
 		tgt, err := s.GetByTarget(ctx, typeName, id, kind)
 		if err != nil {
 			return nil, err
 		}
-		return append(src, tgt...), nil
-	default:
-		return nil, fmt.Errorf("smeldr: MCPGetRelations: direction must be source, target, or both; got %q", direction)
+		edges = append(edges, tgt...)
 	}
+	if err := s.fillEdgeEnds(ctx, edges); err != nil {
+		return nil, fmt.Errorf("%w: get relations: reading how ended relations ended: %s", ErrInternal, err)
+	}
+	return edges, nil
 }
 
 // MCPPreviewImpact returns which items would receive an AfterRelationCascade
@@ -841,6 +876,7 @@ func (s *RelationStore) edgesAt(ctx context.Context, side, nodeType, nodeID, kin
 		args = append(args, time.Now().UTC())
 		query += fmt.Sprintf(" AND (invalid_at IS NULL OR invalid_at > $%d)", len(args))
 	}
+	query += " ORDER BY created_at, id"
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -849,9 +885,24 @@ func (s *RelationStore) edgesAt(ctx context.Context, side, nodeType, nodeID, kin
 	return collectEdges(rows)
 }
 
-// Delete removes a relation edge by ID. No-op if the ID does not exist.
+// Delete is the administrative purge: it removes the row id entirely, history
+// and all, for an edge that should never have existed (one written by a bug,
+// test data). It is not how a relation ends: end one with
+// [RelationStore.Withdraw], which keeps the row. Delete first writes an
+// "invalidate" provenance record (cause [EdgeEndPurged], the caller from ctx),
+// so the purge itself is on record. No-op, with no record, if the ID does not
+// exist. No tool exposes it.
 func (s *RelationStore) Delete(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM smeldr_relations WHERE id=$1", id)
+	var one int
+	err := s.db.QueryRowContext(ctx, "SELECT 1 FROM smeldr_relations WHERE id=$1", id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	s.recordEdgeEnd(ctx, id, endingFromContext(ctx, EdgeEndPurged, "administrative purge"))
+	_, err = s.db.ExecContext(ctx, "DELETE FROM smeldr_relations WHERE id=$1", id)
 	return err
 }
 
@@ -936,8 +987,12 @@ type RelationSource struct {
 }
 
 // RecomputeAsserted performs a differential update of the asserted edges for
-// one content item. It selects the current asserted rows, diffs against
-// incoming, and applies only the delta (delete stale, insert new).
+// one content item. It selects the current live asserted rows, diffs against
+// incoming, and applies only the delta: a removed edge is ended (its row stays,
+// with an "invalidate" record, cause [EdgeEndRecomputed], naming the content
+// write's caller from ctx, or the job "relation-recompute" without one), and a
+// new one is inserted with an "assert" record. An edge that ended but is still
+// in the content fields gets a new row: the field says the relation holds.
 //
 // Key: (target_type, target_id, relation_kind). Returns nil immediately when
 // the diff is empty — the common case costs exactly one SELECT and zero writes.
@@ -946,8 +1001,9 @@ type RelationSource struct {
 func (s *RelationStore) RecomputeAsserted(ctx context.Context, sourceType, sourceID string, incoming []RelationEdge) error {
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT "+relationColumns+
-			" FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 AND edge_class='asserted'",
-		sourceType, sourceID)
+			" FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 AND edge_class='asserted'"+
+			" AND (invalid_at IS NULL OR invalid_at > $3)",
+		sourceType, sourceID, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -980,8 +1036,9 @@ func (s *RelationStore) BulkRecompute(ctx context.Context, items []RelationSourc
 	for _, src := range items {
 		rows, err := s.db.QueryContext(ctx,
 			"SELECT "+relationColumns+
-				" FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 AND edge_class='asserted'",
-			src.SourceType, src.SourceID)
+				" FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 AND edge_class='asserted'"+
+				" AND (invalid_at IS NULL OR invalid_at > $3)",
+			src.SourceType, src.SourceID, time.Now().UTC())
 		if err != nil {
 			return err
 		}
@@ -1096,12 +1153,19 @@ func (s *RelationStore) SweepStructural(
 		if staled[e.ID] {
 			return nil
 		}
-		if _, updateErr := s.db.ExecContext(ctx,
-			"UPDATE smeldr_relations SET invalid_at=$1 WHERE id=$2",
-			now, e.ID,
-		); updateErr != nil {
+		ended, updateErr := endEdgeRow(ctx, s.db, e.ID, now)
+		if updateErr != nil {
 			return updateErr
 		}
+		if !ended {
+			// Ended by someone else since the select: theirs is the record.
+			staled[e.ID] = true
+			return nil
+		}
+		s.recordEdgeEnd(ctx, e.ID, edgeEnding{
+			cause: EdgeEndSwept, reason: "source or target no longer alive",
+			actorKind: "job", actorID: sweepStructuralJob,
+		})
 		e.InvalidAt = &now
 		onStale(ctx, e)
 		staled[e.ID] = true
@@ -1202,9 +1266,11 @@ type edgeExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
-// applyRelationDiff deletes toDelete IDs and inserts toInsert edges for the
-// given source, stamping SourceType/SourceID/EdgeClass/timestamps on inserts.
-// Wraps in a transaction when exec implements BeginTx.
+// applyRelationDiff ends the toDelete rows and inserts toInsert edges for the
+// given source, stamping SourceType/SourceID/EdgeClass/CreatedBy/timestamps on
+// inserts. Wraps in a transaction when exec implements BeginTx. Once the writes
+// are committed it records an "invalidate" (cause [EdgeEndRecomputed]) for
+// every row it ended and an "assert" for every row it inserted.
 func (s *RelationStore) applyRelationDiff(ctx context.Context, db edgeExecer, toDelete []string, toInsert []RelationEdge, sourceType, sourceID string) error {
 	var exec edgeExecer = db
 	commit := func() error { return nil }
@@ -1219,13 +1285,20 @@ func (s *RelationStore) applyRelationDiff(ctx context.Context, db edgeExecer, to
 		commit = tx.Commit
 	}
 
+	now := time.Now().UTC()
+	var ended []string
 	for _, id := range toDelete {
-		if _, err := exec.ExecContext(ctx, "DELETE FROM smeldr_relations WHERE id=$1", id); err != nil {
+		ok, err := endEdgeRow(ctx, exec, id, now)
+		if err != nil {
 			return err
+		}
+		if ok {
+			ended = append(ended, id)
 		}
 	}
 
-	now := time.Now().UTC()
+	ending := recomputeEnding(ctx)
+	inserted := make([]RelationEdge, 0, len(toInsert))
 	for _, e := range toInsert {
 		if e.ID == "" {
 			e.ID = NewID()
@@ -1240,6 +1313,10 @@ func (s *RelationStore) applyRelationDiff(ctx context.Context, db edgeExecer, to
 		if e.Attributes == nil {
 			e.Attributes = json.RawMessage("{}")
 		}
+		if e.CreatedBy == nil && ending.actorKind != "job" && ending.actorID != "" {
+			actor := ending.actorID
+			e.CreatedBy = &actor
+		}
 		_, err := exec.ExecContext(ctx,
 			"INSERT INTO smeldr_relations ("+relationInsertColumns+") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
 			e.ID, e.SourceType, e.SourceID,
@@ -1252,9 +1329,22 @@ func (s *RelationStore) applyRelationDiff(ctx context.Context, db edgeExecer, to
 		if err != nil {
 			return err
 		}
+		inserted = append(inserted, e)
 	}
 
-	return commit()
+	if err := commit(); err != nil {
+		return err
+	}
+	for _, id := range ended {
+		s.recordEdgeEnd(ctx, id, ending)
+	}
+	for _, e := range inserted {
+		recordProvenance(ctx, s.provenanceStore, ProvenanceRecord{
+			SubjectType: "RelationEdge", SubjectID: e.ID, Verb: "assert",
+			ActorKind: ending.actorKind, ActorID: ending.actorID,
+		})
+	}
+	return nil
 }
 
 // buildCascadeHandler returns a func suitable for [App.OnSignal] that implements

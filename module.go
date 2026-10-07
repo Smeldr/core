@@ -520,20 +520,21 @@ type Module[T any] struct {
 	navTree       *NavTree       // non-nil when App.NavTree is active; set by App.Handler via setNavTree
 	pageMetaStore *PageMetaStore // nil until App.PageMeta is called; injected by App.Handler push loop
 
-	contentTypeName   string                                            // unqualified type name; set by NewModule
-	afterHook         func(Context, LifecycleEvent, afterHookMeta, any) // nil until wired by App; called async on delivery signals
-	syncSaveHook      func(context.Context, string, string, any) error  // nil until wired by App.Relations; called sync after save (dynamic types only: never for a compiled type, RecomputeAsserted would delete its other asserted edges)
-	saveBefore        func(Context, DB, any, any) error                 // nil unless the type has an internal pre-save check (existing is nil on create); an error aborts the write
-	saveAfter         func(Context, DB, *RelationStore, any, any)       // nil unless the type has an internal post-save step, fail-open (existing is nil on create)
-	secret            []byte                                            // set by App.Content via setSecret; used for preview token validation
-	db                DB                                                // set by App.Content via setDB; used for transition validation
-	roleStore         *RoleStore                                        // nil unless App.Governance is wired; set by App.Handler via setRoleStore
-	relationStore     *RelationStore                                    // nil unless App.Relations() is wired; set by App.Handler via setRelationStore
-	provenanceStore   ProvenanceStore                                   // nil unless App.Provenance() is wired; set by App.Handler via setProvenanceStore
-	checkStore        CheckStore                                        // nil unless App.Check() is wired; set by App.Handler via setCheckStore
-	findingStore      FindingStore                                      // nil unless App.Findings() is wired; set by App.Handler via setFindingStore
-	cacheInvalidators []func()                                          // extra invalidation callbacks wired by App.Route for aggregate routes
-	slugCheckers      []func(ctx context.Context, slug string) error    // collision checkers wired by App.Route for aggregate routes
+	contentTypeName   string                                                 // unqualified type name; set by NewModule
+	afterHook         func(Context, LifecycleEvent, afterHookMeta, any)      // nil until wired by App; called async on delivery signals
+	syncSaveHook      func(context.Context, string, string, any) error       // nil until wired by App.Relations; called sync after save (dynamic types only: never for a compiled type, RecomputeAsserted would delete its other asserted edges)
+	saveBefore        func(Context, DB, any, any) error                      // nil unless the type has an internal pre-save check (existing is nil on create); an error aborts the write
+	saveAfter         func(Context, DB, *RelationStore, any, any)            // nil unless the type has an internal post-save step, fail-open (existing is nil on create)
+	saveStatusChanged func(Context, DB, *RelationStore, any, string, string) // nil unless the type has an internal step after a committed status change, fail-open
+	secret            []byte                                                 // set by App.Content via setSecret; used for preview token validation
+	db                DB                                                     // set by App.Content via setDB; used for transition validation
+	roleStore         *RoleStore                                             // nil unless App.Governance is wired; set by App.Handler via setRoleStore
+	relationStore     *RelationStore                                         // nil unless App.Relations() is wired; set by App.Handler via setRelationStore
+	provenanceStore   ProvenanceStore                                        // nil unless App.Provenance() is wired; set by App.Handler via setProvenanceStore
+	checkStore        CheckStore                                             // nil unless App.Check() is wired; set by App.Handler via setCheckStore
+	findingStore      FindingStore                                           // nil unless App.Findings() is wired; set by App.Handler via setFindingStore
+	cacheInvalidators []func()                                               // extra invalidation callbacks wired by App.Route for aggregate routes
+	slugCheckers      []func(ctx context.Context, slug string) error         // collision checkers wired by App.Route for aggregate routes
 
 	stopCh chan struct{} // closed by Stop() to terminate the cache sweep goroutine
 }
@@ -613,7 +614,7 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 		case signalOption:
 			m.signals[v.signal] = append(m.signals[v.signal], v.handler)
 		case saveHooksOption:
-			m.saveBefore, m.saveAfter = v.before, v.after
+			m.saveBefore, m.saveAfter, m.saveStatusChanged = v.before, v.after, v.statusChanged
 		case SitemapConfig:
 			cfg := v
 			m.sitemapCfg = &cfg
@@ -972,7 +973,7 @@ func (m *Module[T]) transitionTypeName() string { return m.contentTypeName }
 // committed, so an item this module's repository does not hold is skipped and
 // a load error is logged, never returned.
 func (m *Module[T]) afterTransition(ctx Context, id, from, to string) {
-	if !m.hasTransitionHandlers() {
+	if !m.hasTransitionHandlers() && m.saveStatusChanged == nil {
 		return
 	}
 	item, err := m.repo.FindByID(ctx, id)
@@ -986,12 +987,14 @@ func (m *Module[T]) afterTransition(ctx Context, id, from, to string) {
 	m.dispatchModuleTransition(ctx, Status(from), Status(to), "", item)
 }
 
-// dispatchModuleTransition fires this module's own handlers for a status change
-// from one state to another: [AfterUpdate] and every [statusSignals] event,
-// except already, which the caller has fired through [Module.notifyAfter]
-// itself ("" when it fired none). Together the module's handlers see what a PUT
-// making the same change fires.
+// dispatchModuleTransition runs the type's internal status-change step
+// ([Module.runStatusChanged]) and fires this module's own handlers for a status
+// change from one state to another: [AfterUpdate] and every [statusSignals]
+// event, except already, which the caller has fired through
+// [Module.notifyAfter] itself ("" when it fired none). Together the module's
+// handlers see what a PUT making the same change fires.
 func (m *Module[T]) dispatchModuleTransition(ctx Context, from, to Status, already LifecycleEvent, item any) {
+	m.runStatusChanged(ctx, item, from, to)
 	m.dispatchModuleAfter(ctx, AfterUpdate, item)
 	for _, sig := range statusSignals(from, to) {
 		if sig != already {
@@ -2238,6 +2241,9 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	m.notifyAfter(ctx, AfterUpdate, string(prevStatus), surfaceHTTP, "", item)
 
 	// Status-transition hooks.
+	if prevStatus != newStatus {
+		m.runStatusChanged(ctx, item, prevStatus, newStatus)
+	}
 	for _, sig := range statusSignals(prevStatus, newStatus) {
 		m.notifyAfter(ctx, sig, string(prevStatus), surfaceHTTP, "", item)
 	}

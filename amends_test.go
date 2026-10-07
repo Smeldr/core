@@ -245,21 +245,62 @@ func TestAmends_AssertIsIdempotent(t *testing.T) {
 	}
 }
 
-// A rejected Amendment's edge stays live for now: nothing can end an edge on
-// purpose until the relation-history work ships. This pins that stated gap so
-// that work has a test to turn.
-func TestAmends_RejectedAmendmentKeepsItsEdgeForNow(t *testing.T) {
-	e := newAmendsEnv(t, true)
-	e.decision(t, "dec-1", "D1")
-	a, _ := e.create(t, map[string]any{"amendment_number": "A906", "amends": "D1"})
-	if _, err := e.app.TransitionItem(amCtx(), "Amendment", a.Slug, "in-progress"); err != nil {
-		t.Fatalf("in-progress: %v", err)
+// A rejected Amendment's "amends" edge ends (D102), on every transition path:
+// its row stays, ended, with an "invalidate" record naming the rejecting
+// caller and the cause amendment-rejected. Rejecting it a second time, or any
+// other transition, ends nothing more.
+func TestAmends_RejectedAmendmentEndsItsEdge(t *testing.T) {
+	rejecter := NewTestContext(User{ID: "rejecter-9", Roles: []Role{Editor}})
+	cases := map[string]func(t *testing.T, e *amendsEnv, a *Amendment){
+		"transition_item": func(t *testing.T, e *amendsEnv, a *Amendment) {
+			if _, err := e.app.TransitionItem(rejecter, "Amendment", a.Slug, "rejected"); err != nil {
+				t.Fatalf("reject: %v", err)
+			}
+		},
+		"PUT": func(t *testing.T, e *amendsEnv, a *Amendment) {
+			got, err := e.m.MCPGet(amCtx(), a.Slug)
+			if err != nil {
+				t.Fatalf("get: %v", err)
+			}
+			body := *got.(*Amendment)
+			body.Status = "rejected"
+			b, _ := json.Marshal(body)
+			r := httptest.NewRequest(http.MethodPut, "/amendments/"+a.Slug, bytes.NewReader(b))
+			r = withUser(r, rejecter.User())
+			r.SetPathValue("slug", a.Slug)
+			w := httptest.NewRecorder()
+			e.m.updateHandler(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("PUT reject = %d: %s", w.Code, w.Body.String())
+			}
+		},
 	}
-	if _, err := e.app.TransitionItem(amCtx(), "Amendment", a.Slug, "rejected"); err != nil {
-		t.Fatalf("reject: %v", err)
-	}
-	if n := len(e.liveAmends(t, a.ID)); n != 1 {
-		t.Errorf("%d live edges after rejection, want 1 (the known gap)", n)
+	for name, reject := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := newAmendsEnv(t, true)
+			e.decision(t, "dec-1", "D1")
+			a, _ := e.create(t, map[string]any{"amendment_number": "A906", "amends": "D1"})
+			if _, err := e.app.TransitionItem(amCtx(), "Amendment", a.Slug, "in-progress"); err != nil {
+				t.Fatalf("in-progress: %v", err)
+			}
+			reject(t, e, a)
+			if n := len(e.liveAmends(t, a.ID)); n != 0 {
+				t.Errorf("%d live edges after rejection, want 0", n)
+			}
+			all, err := e.rs.GetBySource(context.Background(), "Amendment", a.ID, "amends")
+			if err != nil || len(all) != 1 || all[0].InvalidAt == nil {
+				t.Fatalf("rows = %+v, %v, want the one row kept, ended", all, err)
+			}
+			var ends []ProvenanceRecord
+			for _, r := range e.prov.Appended() {
+				if r.SubjectType == "RelationEdge" && r.SubjectID == all[0].ID && r.Verb == "invalidate" {
+					ends = append(ends, r)
+				}
+			}
+			if len(ends) != 1 || ends[0].ToState != EdgeEndAmendmentRejected || ends[0].ActorID != "rejecter-9" || ends[0].FromState != "live" {
+				t.Errorf("invalidate records = %+v, want one: live -> amendment-rejected by rejecter-9", ends)
+			}
+		})
 	}
 }
 

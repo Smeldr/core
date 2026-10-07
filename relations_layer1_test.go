@@ -118,15 +118,19 @@ func TestRecomputeAsserted_Delete(t *testing.T) {
 		t.Fatalf("reduced RecomputeAsserted: %v", err)
 	}
 
-	edges, err := store.GetBySource(ctx, "article", "art-1", "")
+	edges, err := store.GetLiveBySource(ctx, "article", "art-1", "")
 	if err != nil {
-		t.Fatalf("GetBySource: %v", err)
+		t.Fatalf("GetLiveBySource: %v", err)
 	}
 	if len(edges) != 1 {
-		t.Fatalf("want 1 edge after delete, got %d", len(edges))
+		t.Fatalf("want 1 live edge after the field dropped tag-2, got %d", len(edges))
 	}
 	if edges[0].TargetID != "tag-1" {
 		t.Errorf("wrong edge survived: %+v", edges[0])
+	}
+	// The removed edge is ended, not deleted: its row stays as history.
+	if n := countEdges(t, store, "article", "art-1"); n != 2 {
+		t.Errorf("want 2 rows (one live, one ended), got %d", n)
 	}
 }
 
@@ -144,8 +148,15 @@ func TestRecomputeAsserted_EmptyIncoming(t *testing.T) {
 	if err := store.RecomputeAsserted(ctx, "article", "art-1", nil); err != nil {
 		t.Fatalf("empty RecomputeAsserted: %v", err)
 	}
-	if n := countEdges(t, store, "article", "art-1"); n != 0 {
-		t.Fatalf("want 0 edges after empty incoming, got %d", n)
+	live, err := store.GetLiveBySource(ctx, "article", "art-1", "")
+	if err != nil {
+		t.Fatalf("GetLiveBySource: %v", err)
+	}
+	if len(live) != 0 {
+		t.Fatalf("want 0 live edges after empty incoming, got %d", len(live))
+	}
+	if n := countEdges(t, store, "article", "art-1"); n != 1 {
+		t.Fatalf("want the ended row kept, got %d rows", n)
 	}
 }
 

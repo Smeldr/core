@@ -1,4 +1,4 @@
-﻿# Smeldr — Full API Reference
+# Smeldr — Full API Reference
 
 Complete API reference for the Smeldr framework.
 For the short overview and quick-start examples see [README.md](README.md).
@@ -4877,7 +4877,7 @@ An Amendment says which Decision it changes with its optional field `amends` (a 
 - **Declared at creation, refused when wrong.** A non-empty `amends` must name exactly one Decision. `D104`, `d104` and the older bare `104` are all read, and the value is stored in the canonical `D104` form. A number that names no Decision, names several, or is not a Decision number refuses the write (a validation error naming it), in every write path: the HTTP create and PUT and the MCP create and update. An empty `amends` creates no edge: most Amendments amend no Decision.
 - **Write-once.** `amends` is set at creation, or later only while it is empty. A different value is refused ("is write-once"), and an empty value never clears it (a full-replace PUT that does not know the field keeps it), so the field and the edge cannot disagree. The edge is asserted once, when the field becomes set, with the caller's own actor (an `assert` provenance record names who recorded the Amendment); no relation store wired means no edge and a Warn, never a failed write. An edge is not asserted twice for the same pair.
 - **Reading it.** `get_amendment` returns the field; `get_relations` (type_name `Amendment`, kind `amends`) returns the live edge. The edge is what queries use.
-- **What does not happen yet, stated plainly.** A **rejected Amendment's edge stays live**, and a stored `amends` is never moved: nothing can end an edge on purpose until `core-relation-history-one-row-per-life` ships `Withdraw`, whose design already lists "ended because its Amendment was rejected" with the actor of that transition. A test pins the current behaviour so that work has one to turn.
+- **A rejected Amendment's edge ends (v1.128.0).** When an Amendment moves to `rejected`, on any path (transition_item, a PUT), its live `amends` edge ends with cause `amendment-rejected` and the rejecting caller as the actor (see "Relation history" below). A stored `amends` is never moved.
 - **Existing Amendments have no link.** Amendments written before this field name their Decision only in free text, and a body that mentions D104 does not mean the Amendment amends D104, so nothing is derived. `App.AmendsBackfillCandidates(ctx)` is read-only: per Amendment with an empty `amends`, the existing Decisions its summary and body mention, for a person to read. `App.BackfillAmendsEdges(ctx, links, dryRun)` takes a mapping the caller has reviewed (`[]AmendsLink{{"A412", "D104"}}`), asserts the missing edges with the caller's own actor in ctx, fills `amends` where it is empty, skips pairs that already have a live edge, reports `asserted`, `already present`, `unresolved` and `ambiguous` per link, and with `dryRun` writes nothing. Exported Go, not an MCP tool.
 - **Database.** The column `smeldr_amendments.amends` comes with `CreateOrchestrationTables`; an existing database needs `EnsureAmendmentAmendsColumn` before the first Amendment read (the example server calls it at boot). Without the column every Amendment read fails.
 `belongs_to_domain`/`belongs_to_area` (A338, D71/D72) connect a Decision to its Domain/Area —
@@ -4892,6 +4892,28 @@ enumerate ahead of time, so it carries no `TypePairs` at all, unlike every other
 [`RelationStore.RegisterReferenceType`](#registerreferencetype) for `"domain"` and
 `"area"` — see that section for what a reference-type designation changes about how the
 structural sweep treats a Domain or Area item that has never been published.
+
+### Relation history: one row per life (A434, v1.128.0)
+
+A row of `smeldr_relations` is **one life** of a relation: `created_at` is when it began, `invalid_at` when it ended (NULL while live). A relation that ends and is added again gets a **new row with a new ID**; the ended row stays as history. Nothing is hard-deleted in normal operation.
+
+- **Asserting.** Dedup looks at live rows only (`invalid_at` NULL or in the future). Re-asserting a live relation updates its row and records `assert` again; re-asserting one whose rows have all ended inserts a new row. An explicit `ID` naming an ended row is refused with `ErrConflict`, never revived.
+- **Every end is recorded.** An end writes a `ProvenanceRecord` with subject `RelationEdge`, verb `invalidate`, `FromState` `"live"` and the **cause** in `ToState`. The causes are a closed set, exported as constants:
+
+| Cause | Constant | Ended by | Actor |
+|---|---|---|---|
+| `withdrawn` | `EdgeEndWithdrawn` | `RelationStore.Withdraw` / `withdraw_relation` | the caller, with a required reason |
+| `swept` | `EdgeEndSwept` | `RelationStore.SweepStructural` (source or target no longer alive) | job `sweep-structural` |
+| `recomputed` | `EdgeEndRecomputed` | `RecomputeAsserted` / `BulkRecompute` (the content field no longer names it) | the content write's caller, or job `relation-recompute` |
+| `amendment-rejected` | `EdgeEndAmendmentRejected` | an Amendment's `amends` edge when the Amendment is rejected (D102) | the rejecting caller |
+| `purged` | `EdgeEndPurged` | `RelationStore.Delete`, the administrative purge | the caller |
+| `not-recorded` | `EdgeEndNotRecorded` | (read only) an end with no record: every end before v1.128.0; nothing is backfilled | none |
+
+- **`Withdraw(ctx, id, reason)`** ends a live relation on purpose. The reason is required (a `ValidationError` otherwise); an unknown id is `ErrNotFound`; a relation that has already ended is `ErrConflict` naming when, never a silent success. MCP `withdraw_relation(id, reason)` (smeldr.dev/mcp v1.51.0) is gated on the **`archive`** operation, the same Author tier as asserting (ending a relation keeps it, an archived-class move). CLI: `smeldr-cli relation withdraw <id> --reason <text>`.
+- **Recompute ends, it does not delete.** A derived edge the content field no longer names is ended (`recomputed`); new ones are inserted with an `assert` record and `CreatedBy`. The current set is the live rows only, so an edge that ended but is still in the field gets a new life on the next save (and, if its target is still dead, is swept again, with a record each time).
+- **`Delete` is the administrative purge**: it removes the row, history and all, for an edge that should never have existed. It records `invalidate` (`purged`) first. No tool exposes it; end relations with `Withdraw`.
+- **Reading it.** Current-state readers read live rows (reachability, `GetLive*`, `preview_impact`, the cascade, goal context, context packets, governance). History readers read every row: `GetBySource`/`GetByTarget` and `get_relations` return rows **in creation order**, and on `get_relations` (`RelationStore.MCPGetRelations`) every ended row carries `RelationEdge.Ended` (`EdgeEnd{Cause, At, Reason, ActorKind, ActorID}`; MCP `ended: {cause, at, reason, actor_kind, actor_id}`), read in one batched query. The actor is shown to every caller who passes the tool (D101 members audience). A remote reader tells a withdrawn relation from a swept one by `cause`, never from timing.
+- **No schema change.** The cause lives in the provenance record. Without a provenance store wired, ends are still kept but every one reads `not-recorded`.
 
 ### `RegisterReferenceType`
 

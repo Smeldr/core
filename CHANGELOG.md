@@ -23,6 +23,29 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.128.0] - 2026-10-07
+
+### Behaviour change
+
+- **Relations keep their history: one row is one life** (A434, design relation-history-v1, D97). Re-asserting a relation whose rows have all ended now inserts a **new row with a new ID**; before, it revived the ended row and erased its end. A recompute (`RecomputeAsserted`, `BulkRecompute`, the dynamic-content save hook) now **ends** a derived edge the content field no longer names instead of deleting it, so the row stays. A **rejected Amendment's `amends` edge now ends** (D102). `GetBySource`, `GetByTarget` and `get_relations` return rows in creation order and therefore show more ended rows than before. A reader that took "a row exists" for "the relation holds" was already wrong for swept edges and is now wrong more often: read live rows (`GetLive*`, reachability) for what holds now. An explicit `ID` naming an ended row is refused (`ErrConflict`) instead of revived.
+
+### Added
+
+- `RelationStore.Withdraw(ctx, id, reason)`: end a live relation on purpose, keeping its row. The reason is required; an unknown id is `ErrNotFound`; an already ended relation is `ErrConflict` naming when. smeldr.dev/mcp v1.51.0 serves it as `withdraw_relation`, gated on the `archive` operation (the policy row is seeded); smeldr.dev/cli v0.22.0 as `relation withdraw`.
+- Every end of a relation writes a `ProvenanceRecord` (subject `RelationEdge`, verb `invalidate`, `FromState` `live`, the cause in `ToState`). Causes, a closed set: `EdgeEndWithdrawn`, `EdgeEndSwept` (job `sweep-structural`), `EdgeEndRecomputed` (the content write's caller, or job `relation-recompute`), `EdgeEndAmendmentRejected`, `EdgeEndPurged`; `EdgeEndNotRecorded` is what an end with no record reads as. A recompute's inserts now record `assert` and set `CreatedBy`.
+- `EdgeEnd` and `RelationEdge.Ended`: `MCPGetRelations` (`get_relations`) fills, for every ended row, its cause, time, reason and actor from the record, in one batched query, so a remote reader tells a withdrawn relation from a swept one without inferring it from timing.
+
+### Changed
+
+- `RelationStore.Delete` is now documented and behaves as the administrative purge: it records `invalidate` (`purged`) before removing the row. It has no tool; end relations with `Withdraw`.
+
+### Notes
+
+- No schema change and no backfill: an end before this release has no record and reads `not-recorded`.
+- Follow-ups filed: a recompute treats every asserted edge of a dynamic-type source as derived, so a hand-asserted relation there is ended (before: deleted) at the next content save (`core-recompute-keeps-manual-asserts-on-dynamic-types`). Governance's relation-scoped check binds its time as text, so on SQLite an edge ending later the same UTC day reads as ended (`core-governance-relation-exists-time-binding`, verified).
+
+---
+
 ## [1.127.0] - 2026-10-07
 
 ### Behaviour change

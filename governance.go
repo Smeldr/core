@@ -339,6 +339,10 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		{"list_items_by_state", "read"},
 		// Relation tools
 		{"assert_relation", "create"},
+		// withdraw_relation (relation history): ending a relation keeps its
+		// row as history, an archived-class move at the same Author tier as
+		// asserting one, so it is gated on archive, not delete.
+		{"withdraw_relation", "archive"},
 		{"propose_relation", "create"},
 		// observe_relation (core-tool-policy-gaps-schedule-observe-blocks,
 		// 2026-09-29): same Author floor and doc contract as assert_relation/

@@ -4,6 +4,7 @@ package smeldr
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"time"
@@ -24,8 +25,8 @@ type ProvenanceRecord struct {
 	SubjectType string    `json:"subject_type"` // Go type name, e.g. "Decision", "RelationEdge"
 	SubjectID   string    `json:"subject_id"`   // Node.ID or RelationEdge.ID
 	Verb        string    `json:"verb"`         // "create" | "update" | "transition" | "assert" | "invalidate"
-	FromState   string    `json:"from_state"`   // empty for create/assert
-	ToState     string    `json:"to_state"`     // empty for invalidate
+	FromState   string    `json:"from_state"`   // empty for create/assert; "live" for a RelationEdge invalidate
+	ToState     string    `json:"to_state"`     // empty for invalidate, except a RelationEdge invalidate: its cause, one of the EdgeEnd* constants (withdrawn, swept, recomputed, amendment-rejected, purged)
 	ActorKind   string    `json:"actor_kind"`   // "job" | "agent" | "human" (attested tags, D105) or "unclassified" (no tag); empty only if truly unattributable. Rows written before v1.121.0 say "human" for an untagged actor: that means unclassified
 	ActorID     string    `json:"actor_id"`     // user UUID, job identifier, or agent identifier
 	Surface     string    `json:"surface"`      // "http" | "mcp" | "cli" | "trigger"; empty when not derivable
@@ -163,6 +164,12 @@ func (s *sqlProvenanceStore) List(ctx context.Context, f ProvenanceFilter) ([]Pr
 		return nil, err
 	}
 	defer rows.Close()
+	return scanProvenanceRows(rows)
+}
+
+// scanProvenanceRows reads rows selected as id, timestamp, subject_type,
+// subject_id, verb, from_state, to_state, actor_kind, actor_id, surface, reason.
+func scanProvenanceRows(rows *sql.Rows) ([]ProvenanceRecord, error) {
 	var out []ProvenanceRecord
 	for rows.Next() {
 		var r ProvenanceRecord

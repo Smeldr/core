@@ -21,10 +21,24 @@ import (
 type saveHooksOption struct {
 	before func(ctx Context, db DB, existing, item any) error
 	after  func(ctx Context, db DB, rs *RelationStore, existing, item any)
+	// statusChanged runs synchronously after a committed status change of
+	// item from one state to another, on every transition path (HTTP PUT, the
+	// MCP publish/schedule/archive tools, the scheduler, transition_item).
+	// Fail-open: the change has committed.
+	statusChanged func(ctx Context, db DB, rs *RelationStore, item any, from, to string)
 }
 
 // isOption marks saveHooksOption as a valid [Option] value.
 func (saveHooksOption) isOption() {}
+
+// runStatusChanged runs the type's step after a committed status change, if it
+// has one and the state did change.
+func (m *Module[T]) runStatusChanged(ctx Context, item any, from, to Status) {
+	if m.saveStatusChanged == nil || from == to {
+		return
+	}
+	m.saveStatusChanged(ctx, m.db, m.relationStore, item, string(from), string(to))
+}
 
 // runSaveAfter runs the type's post-save step, if it has one. It is fail-open:
 // the write is already saved.
@@ -36,10 +50,41 @@ func (m *Module[T]) runSaveAfter(ctx Context, existing, item any) {
 }
 
 // amendsSaveHooks are [Amendment]'s hooks: a non-empty Amends must name one
-// Decision (and is written in its canonical "D104" form), it is write-once, and
-// once saved it becomes an "amends" edge from the Amendment to that Decision.
+// Decision (and is written in its canonical "D104" form), it is write-once,
+// once saved it becomes an "amends" edge from the Amendment to that Decision,
+// and a rejected Amendment's edge ends (D102).
 func amendsSaveHooks() Option {
-	return saveHooksOption{before: amendsBeforeSave, after: amendsAfterSave}
+	return saveHooksOption{before: amendsBeforeSave, after: amendsAfterSave, statusChanged: amendsStatusChanged}
+}
+
+// amendmentRejectedState is the Amendment flow's terminal rejected state.
+const amendmentRejectedState = "rejected"
+
+// amendsStatusChanged ends every live "amends" edge of an Amendment that has
+// just been rejected: the Amendment no longer amends the Decision, and the end
+// is recorded with the rejecting transition's actor (cause
+// [EdgeEndAmendmentRejected]). Fail-open: the transition has committed.
+func amendsStatusChanged(ctx Context, _ DB, rs *RelationStore, item any, _, to string) {
+	a := amendmentOf(item)
+	if a == nil || to != amendmentRejectedState {
+		return
+	}
+	if rs == nil {
+		slog.WarnContext(ctx, "smeldr: Amendment rejected: no relation store is wired, its amends edge was not ended",
+			"amendment", a.ID)
+		return
+	}
+	live, err := rs.GetLiveBySource(ctx, "Amendment", a.ID, "amends")
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: Amendment rejected: its amends edges could not be read", "amendment", a.ID, "error", err)
+		return
+	}
+	for _, e := range live {
+		if _, err := rs.endEdge(ctx, e.ID, endingFromContext(ctx, EdgeEndAmendmentRejected, "Amendment rejected")); err != nil {
+			slog.WarnContext(ctx, "smeldr: Amendment rejected: its amends edge was not ended",
+				"amendment", a.ID, "edge", e.ID, "error", err)
+		}
+	}
 }
 
 // amendmentOf reads an Amendment out of a module's item or existing value.
