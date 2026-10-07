@@ -4370,6 +4370,28 @@ err = repo.SetStatus(ctx, id, "published")
 err = repo.ScheduleContent(ctx, id, time.Now().Add(48*time.Hour))
 ```
 
+**Who wrote it (v1.130.0).** A create and a content update record their actor,
+like a transition does. The caller comes from `ctx` when it is a
+`smeldr.Context` (every MCP tool and the `/_content` REST routes pass one); a
+plain `context.Context` is a system write with no actor.
+
+- `last_actor` is set to the caller on create and on every update, so for a
+  dynamic item it means "the most recent writer". A compiled type's
+  `last_actor` is narrower: it is set on create and on transitions, not on a
+  content update (a follow-up decides whether to align them).
+- With provenance wired (`App.Provenance`), a create writes a `create` entry
+  and an update an `update` entry (from and to the item's current status),
+  each with `actor_kind`, `actor_id` and the surface. `get_item_provenance`
+  and `App.ItemProvenance` show them. A refused write (validation, not found,
+  a locked state) records nothing; a failed provenance write never fails the
+  write it records.
+- `CreateDraftVia(ctx, surface, fields)` and `UpdateFieldsVia(ctx, surface,
+  id, patch)` name the entry point (`"http"`, `"mcp"`, `"cli"`) for the
+  record; `CreateDraft` and `UpdateFields` are the same with no surface. The
+  REST routes pass `"http"`; smeldr.dev/mcp passes `"mcp"` from v1.52.0.
+- Nothing is backfilled: earlier creates and edits of dynamic items have no
+  entry.
+
 **Database migration**
 
 When upgrading an existing database that pre-dates A154, call once at startup:

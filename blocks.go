@@ -33,10 +33,13 @@ type DynamicNode struct {
 	// by the block type's schema, not by this struct.
 	Fields json.RawMessage `db:"fields" json:"fields"`
 
-	// LastActor is the actor ID of whoever performed this item's most
-	// recent state transition (D78). Empty when no caller identity was
-	// available (a system-initiated transition) or the item has never
-	// been transitioned since this column was added.
+	// LastActor is the actor ID of whoever wrote this item most recently:
+	// its creation, a content update ([DynamicTypeRepo.UpdateFieldsVia],
+	// since v1.130.0) or a state transition (D78). Empty when no caller
+	// identity was available (a system-initiated write) or the item has not
+	// been written since this column was added. A compiled type's LastActor
+	// is narrower: it is set on create and on transitions, not on a content
+	// update.
 	LastActor string `db:"last_actor" json:"last_actor,omitempty"`
 }
 

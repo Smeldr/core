@@ -55,7 +55,9 @@ func defineProvenanceDynamicType(t *testing.T, app *App, db *sql.DB, typeName st
 	if err != nil {
 		t.Fatalf("DynamicContentRepo: %v", err)
 	}
-	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Provenance " + typeName})
+	// The fixture item is setup, not under test: created without provenance so
+	// each test counts only the records its own action writes.
+	node, err := repo.WithProvenance(nil).CreateDraft(context.Background(), map[string]any{"Title": "Provenance " + typeName})
 	if err != nil {
 		t.Fatalf("CreateDraft: %v", err)
 	}

@@ -265,7 +265,7 @@ func TestRepoSetStatus_Supersede_RecordsLoserAndWinnerOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DynamicContentRepo: %v", err)
 	}
-	b, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "second"})
+	b, err := repo.WithProvenance(nil).CreateDraft(context.Background(), map[string]any{"Title": "second"})
 	if err != nil {
 		t.Fatalf("CreateDraft: %v", err)
 	}

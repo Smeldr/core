@@ -23,6 +23,23 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.130.0] - 2026-10-07
+
+### Behaviour change
+
+- **A dynamic item's create and content update now record who made them** (A436, D101, D105, D97). `last_actor` is set to the caller on create and on every content update (before: only on transitions), so for a dynamic item it now means "the most recent writer", and with provenance wired a `create` and an `update` entry name the caller, its kind and the surface. History read through `get_item_provenance` therefore gains entries it did not have. A compiled type's `last_actor` is unchanged (create and transitions only); that difference is stated in REFERENCE and the `LastActor` godoc. The `/_content` REST create and update routes now pass the authenticated user on: before, they called the repo with the plain request context, so no actor could reach it.
+
+### Added
+
+- `DynamicTypeRepo.CreateDraftVia(ctx, surface, fields)` and `DynamicTypeRepo.UpdateFieldsVia(ctx, surface, id, patch)`: `CreateDraft` and `UpdateFields` with the entry point named for the record. The old forms are unchanged and record with no surface.
+
+### Notes
+
+- Fail-open, as every provenance write: a failed record is logged and never fails the write. A refused write records nothing. Nothing is backfilled.
+- smeldr.dev/mcp passes surface `mcp` from its next minor; until then its records carry the right actor and an empty surface.
+
+---
+
 ## [1.129.0] - 2026-10-07
 
 ### Behaviour change

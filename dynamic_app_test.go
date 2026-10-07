@@ -727,7 +727,7 @@ func TestAdminSetStatus_RecordsProvenanceWithHTTPSurface(t *testing.T) {
 	app.Provenance(store)
 	app.DefineContentType(t.Context(), recipeSchema())
 	repo, _ := app.DynamicContentRepo("recipe")
-	node, _ := repo.CreateDraft(t.Context(), map[string]any{"Title": "X"})
+	node, _ := repo.WithProvenance(nil).CreateDraft(t.Context(), map[string]any{"Title": "X"}) // fixture: no create record
 
 	handler := dynHandler(t, app)
 	w := dynPost(handler, fmt.Sprintf("/_content/recipe/%s/status", node.ID),

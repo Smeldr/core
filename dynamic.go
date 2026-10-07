@@ -74,7 +74,18 @@ func (r *DynamicTypeRepo) WithProvenance(store ProvenanceStore) *DynamicTypeRepo
 // from the field with Role "title"; collisions are resolved by appending -2, -3,
 // and so on. The node ID and timestamps are set automatically.
 // Returns a [*ValidationError] when the fields map does not conform to the schema.
+// It is [DynamicTypeRepo.CreateDraftVia] with no surface.
 func (r *DynamicTypeRepo) CreateDraft(ctx context.Context, fields map[string]any) (*DynamicNode, error) {
+	return r.CreateDraftVia(ctx, "", fields)
+}
+
+// CreateDraftVia is [DynamicTypeRepo.CreateDraft] with the entry point the call
+// came through named ("http", "mcp", "cli"; empty when the caller cannot tell),
+// for the record it writes. The caller (from ctx when it is a [Context]) is
+// stored as the item's LastActor, and a "create" [ProvenanceRecord] names the
+// caller and surface when provenance is wired ([DynamicTypeRepo.WithProvenance]).
+// The record is fail-open and written only after the item is saved.
+func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fields map[string]any) (*DynamicNode, error) {
 	if ve := ValidateFields(r.schema, fields); ve != nil {
 		return nil, ve
 	}
@@ -96,15 +107,19 @@ func (r *DynamicTypeRepo) CreateDraft(ctx context.Context, fields map[string]any
 		TypeName: r.typeName,
 		Fields:   json.RawMessage(raw),
 	}
+	actorID, actorKind := actorFromContext(ctx)
+	node.LastActor = actorID
 	repo := NewDynamicContentRepo(r.db)
 	if err := repo.Save(ctx, node); err != nil {
 		return nil, fmt.Errorf("smeldr: CreateDraft save: %w", err)
 	}
-	actorID, actorKind := actorFromContext(ctx)
-	writeStanding(ctx, r.db, r.prov, stateChange{
+	created := stateChange{
 		typeName: r.typeName, id: node.ID, to: string(node.Status),
-		surface: "", actorKind: actorKind, actorID: actorID,
-	})
+		surface: surface, actorKind: actorKind, actorID: actorID,
+	}
+	writeStanding(ctx, r.db, r.prov, created)
+	created.verb = "create"
+	recordStateChange(ctx, r.prov, created)
 	return node, nil
 }
 
@@ -204,7 +219,19 @@ func (r *DynamicTypeRepo) List(ctx context.Context, opts ListOptions) ([]map[str
 // ID. Keys present in patch overwrite their stored counterparts; absent keys
 // are preserved. UpdatedAt is set to the current UTC time.
 // Returns a [*ValidationError] when the patch contains unknown or mistyped fields.
+// It is [DynamicTypeRepo.UpdateFieldsVia] with no surface.
 func (r *DynamicTypeRepo) UpdateFields(ctx context.Context, id string, patch map[string]any) error {
+	return r.UpdateFieldsVia(ctx, "", id, patch)
+}
+
+// UpdateFieldsVia is [DynamicTypeRepo.UpdateFields] with the entry point the
+// call came through named, for the record it writes. A successful update sets
+// the item's last_actor to the caller (from ctx when it is a [Context]; empty
+// for a system caller) and writes an "update" [ProvenanceRecord] (from and to
+// the current status) naming the caller and surface when provenance is wired.
+// The record is fail-open and written only after the update succeeded; a
+// refused update (validation, not found, a locked state) records nothing.
+func (r *DynamicTypeRepo) UpdateFieldsVia(ctx context.Context, surface, id string, patch map[string]any) error {
 	if ve := ValidatePartialFields(r.schema, patch); ve != nil {
 		return ve
 	}
@@ -229,10 +256,17 @@ func (r *DynamicTypeRepo) UpdateFields(ctx context.Context, id string, patch map
 	if err != nil {
 		return fmt.Errorf("smeldr: UpdateFields marshal: %w", err)
 	}
-	_, err = r.db.ExecContext(ctx,
-		"UPDATE smeldr_dynamic_content SET fields = $1, updated_at = $2 WHERE id = $3 AND type_name = $4",
-		json.RawMessage(merged), time.Now().UTC(), id, r.typeName)
-	return err
+	actorID, actorKind := actorFromContext(ctx)
+	if _, err = r.db.ExecContext(ctx,
+		"UPDATE smeldr_dynamic_content SET fields = $1, updated_at = $2, last_actor = $3 WHERE id = $4 AND type_name = $5",
+		json.RawMessage(merged), time.Now().UTC(), actorID, id, r.typeName); err != nil {
+		return err
+	}
+	recordStateChange(ctx, r.prov, stateChange{
+		typeName: r.typeName, id: id, from: string(node.Status), to: string(node.Status),
+		verb: "update", surface: surface, actorKind: actorKind, actorID: actorID,
+	})
+	return nil
 }
 
 // SetStatus transitions the node to the given status. When transitioning to
@@ -785,7 +819,10 @@ func newCreateContentHandler(a *App, auth AuthFunc) http.Handler {
 			WriteError(w, r, ErrBadRequest)
 			return
 		}
-		node, err := repo.CreateDraft(r.Context(), fields)
+		// The caller authenticated above: carry them in a Context so the
+		// create records who made it.
+		r = r.WithContext(context.WithValue(r.Context(), userContextKey, user))
+		node, err := repo.CreateDraftVia(ContextFrom(w, r), surfaceHTTP, fields)
 		if err != nil {
 			slog.WarnContext(r.Context(), "smeldr: create_content", "type", desc.Name, "err", err)
 			WriteError(w, r, ErrInternal)
@@ -822,7 +859,8 @@ func newUpdateContentHandler(a *App, auth AuthFunc) http.Handler {
 			WriteError(w, r, ErrBadRequest)
 			return
 		}
-		if err := repo.UpdateFields(r.Context(), id, patch); err != nil {
+		r = r.WithContext(context.WithValue(r.Context(), userContextKey, user))
+		if err := repo.UpdateFieldsVia(ContextFrom(w, r), surfaceHTTP, id, patch); err != nil {
 			if err == ErrNotFound {
 				WriteError(w, r, ErrNotFound)
 			} else {
