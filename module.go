@@ -912,6 +912,21 @@ const (
 	surfaceTrigger = "trigger"
 )
 
+// beforeSave runs, in order, the module's public Before hooks for sig ([On]) and
+// the type's own internal pre-save check ([saveHooksOption]). Every content
+// write path calls it (HTTP POST, PUT and PATCH, MCP create and update), so
+// neither can be skipped on one surface only. The first error aborts the write
+// before anything is saved. existing is nil on a create.
+func (m *Module[T]) beforeSave(ctx Context, sig LifecycleEvent, existing, item any) error {
+	if err := dispatchBefore(ctx, m.signals[sig], item); err != nil {
+		return err
+	}
+	if m.saveBefore == nil {
+		return nil
+	}
+	return m.saveBefore(ctx, m.db, existing, item)
+}
+
 // notifyAfter fires the registered signal handlers for sig asynchronously
 // (via dispatchAfter) and then, if an afterHook has been wired by the App,
 // invokes it in a separate goroutine carrying [afterHookMeta] and the item.
@@ -1937,8 +1952,9 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// BeforeCreate hooks (synchronous — first error aborts).
-	if err := dispatchBefore(ctx, m.signals[BeforeCreate], item); err != nil {
+	// BeforeCreate hooks, then the type's own pre-save check (synchronous —
+	// first error aborts).
+	if err := m.beforeSave(ctx, BeforeCreate, nil, item); err != nil {
 		WriteError(w, r, err)
 		return
 	}
@@ -1952,10 +1968,6 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := m.runSaveBefore(ctx, nil, item); err != nil {
-		WriteError(w, r, err)
-		return
-	}
 	if err := m.repo.Save(ctx, item); err != nil {
 		WriteError(w, r, err)
 		return
@@ -2071,7 +2083,10 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := dispatchBefore(ctx, m.signals[BeforeUpdate], item); err != nil {
+	// BeforeUpdate hooks, then the type's own pre-save check. Both run before
+	// the conflict lock below is taken: they only read, and hook code stays
+	// outside the lock.
+	if err := m.beforeSave(ctx, BeforeUpdate, any(existing), item); err != nil {
 		WriteError(w, r, err)
 		return
 	}
@@ -2112,10 +2127,6 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 		ctx = plan.holdingContext(ctx)
 	}
 
-	if err := m.runSaveBefore(ctx, any(existing), item); err != nil {
-		WriteError(w, r, err)
-		return
-	}
 	if err := m.repo.Save(ctx, item); err != nil {
 		WriteError(w, r, err)
 		return
@@ -2621,7 +2632,7 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 			return nil, err
 		}
 	}
-	if err := m.runSaveBefore(ctx, nil, item); err != nil {
+	if err := m.beforeSave(ctx, BeforeCreate, nil, item); err != nil {
 		return nil, err
 	}
 	if err := m.repo.Save(ctx, item); err != nil {
@@ -2689,7 +2700,7 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 	if err := RunValidation(item); err != nil {
 		return nil, err
 	}
-	if err := m.runSaveBefore(ctx, any(existing), item); err != nil {
+	if err := m.beforeSave(ctx, BeforeUpdate, any(existing), item); err != nil {
 		return nil, err
 	}
 	if err := m.repo.Save(ctx, item); err != nil {
@@ -2845,10 +2856,14 @@ func (m *Module[T]) MCPArchive(ctx Context, slug, reason string) error {
 }
 
 // MCPDelete permanently removes the item with the given slug, fires
-// AfterDelete, and triggers derived-content rebuild.
+// AfterDelete, and triggers derived-content rebuild. BeforeDelete hooks run
+// first, as on the HTTP DELETE route; an error aborts the delete.
 func (m *Module[T]) MCPDelete(ctx Context, slug string) error {
 	item, err := m.resolveItem(ctx, slug)
 	if err != nil {
+		return err
+	}
+	if err := dispatchBefore(ctx, m.signals[BeforeDelete], item); err != nil {
 		return err
 	}
 	if err := m.repo.Delete(ctx, nodeIDOf(item)); err != nil {

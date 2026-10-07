@@ -97,6 +97,10 @@
 // Available signal constants: [AfterCreate], [AfterUpdate], [AfterPublish],
 // [AfterUnpublish], [AfterSchedule], [AfterArchive], [AfterDelete].
 //
+// The synchronous [BeforeCreate], [BeforeUpdate] and [BeforeDelete] module
+// hooks can refuse a write by returning an error. They run on HTTP and MCP
+// writes alike, so a validation hook guards every surface.
+//
 // # Orchestration and governance
 //
 // Beyond the base content-lifecycle framework above, Smeldr ships a set of

@@ -409,6 +409,9 @@ correct wiring order — some calls have load-bearing ordering constraints (e.g.
 - Read `ERROR_HANDLING.md` before writing any error-handling code
 - Never use `smeldr.SignToken` in `main()` when `TokenStore` is wired —
   stateless HMAC tokens are rejected by `VerifyBearerToken` when a store is configured
+- Put write validation in `smeldr.On(smeldr.BeforeCreate/BeforeUpdate/BeforeDelete, ...)`:
+  since v1.126.0 these hooks run on HTTP and MCP writes alike (POST/PUT/PATCH/DELETE
+  and the MCP create/update/delete tools), not on status-only transitions
 
 ---
 
@@ -433,6 +436,10 @@ Admin-role agents also have access to token management tools (see below).
 Content follows `Draft → Scheduled → Published → Archived`. You cannot
 bypass this. Publishing requires an explicit `publish` tool call after
 `create`.
+
+A site's own validation hooks run on your `create`, `update` and `delete`
+calls exactly as on its HTTP API: a refusal comes back as the tool error,
+naming the field, and nothing is saved.
 
 ### Role enforcement
 

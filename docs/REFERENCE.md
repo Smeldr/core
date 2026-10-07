@@ -4792,6 +4792,23 @@ const (
 )
 ```
 
+**Which writes run the Before hooks (v1.126.0).** A `BeforeCreate`, `BeforeUpdate` or
+`BeforeDelete` hook registered with `On` runs on every content write, whichever surface
+it comes through. If it returns an error, the write is aborted before anything is saved
+or deleted. A hook that changes the item has that change saved.
+
+| Write | HTTP | MCP | Hook |
+|---|---|---|---|
+| create | `POST` | `create_*` | `BeforeCreate` |
+| content update | `PUT`, `PATCH` | `update_*` | `BeforeUpdate` |
+| delete | `DELETE` | `delete_*` | `BeforeDelete` |
+
+Status-only transitions do not run `BeforeUpdate`: the MCP `publish_*`, `schedule_*` and
+`archive_*` tools, `transition_item`, and the scheduler. The type's state flow gates them
+on every surface instead. A `PUT` that also changes the status is a content write and does
+run `BeforeUpdate`. Before v1.126.0, `BeforeCreate`, `BeforeUpdate` and `BeforeDelete` ran
+on HTTP only (not on MCP create, update or delete, and not on `PATCH`).
+
 ### `RegisterOrchestrationRelationKinds` (A296)
 
 ```go

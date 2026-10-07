@@ -14,24 +14,31 @@ type LifecycleEvent string
 
 // Lifecycle signals fired by content modules.
 const (
-	// BeforeCreate fires before a new content item is persisted.
-	// Return an error to abort the operation.
+	// BeforeCreate fires before a new content item is persisted, on every
+	// create path: HTTP POST and the MCP create tool alike.
+	// Return an error to abort the operation; nothing is saved.
 	BeforeCreate LifecycleEvent = "before_create"
 
 	// AfterCreate fires after a new content item has been persisted.
 	// Runs asynchronously — errors and panics are logged, never returned.
 	AfterCreate LifecycleEvent = "after_create"
 
-	// BeforeUpdate fires before an existing content item is updated.
-	// Return an error to abort the operation.
+	// BeforeUpdate fires before an existing content item's content is
+	// updated, on every content-update path: HTTP PUT, HTTP PATCH and the MCP
+	// update tool alike. It does not fire on a status-only transition (the MCP
+	// publish, schedule and archive tools, transition_item, the scheduler):
+	// those are gated by the type's state flow instead. A PUT that also changes
+	// the status is a content write and does fire it.
+	// Return an error to abort the operation; nothing is saved.
 	BeforeUpdate LifecycleEvent = "before_update"
 
 	// AfterUpdate fires after a content item has been updated.
 	// Runs asynchronously — errors and panics are logged, never returned.
 	AfterUpdate LifecycleEvent = "after_update"
 
-	// BeforeDelete fires before a content item is deleted.
-	// Return an error to abort the operation.
+	// BeforeDelete fires before a content item is deleted, on HTTP DELETE and
+	// the MCP delete tool alike.
+	// Return an error to abort the operation; nothing is deleted.
 	BeforeDelete LifecycleEvent = "before_delete"
 
 	// AfterDelete fires after a content item has been deleted.

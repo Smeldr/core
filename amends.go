@@ -14,10 +14,10 @@ import (
 )
 
 // saveHooksOption is an internal [Option]: a type's own check before a write is
-// saved and its own step after. Module[T] runs them in every write path (the
-// HTTP create and PUT handlers and the MCP create and update), which the public
-// [BeforeCreate]/[BeforeUpdate] hooks do not (MCP creates and updates do not
-// dispatch them). existing is nil on a create.
+// saved and its own step after. Module[T] runs them in every content write path
+// (HTTP POST, PUT and PATCH, MCP create and update): the check through
+// [Module.beforeSave], right after the public [BeforeCreate]/[BeforeUpdate]
+// hooks. existing is nil on a create.
 type saveHooksOption struct {
 	before func(ctx Context, db DB, existing, item any) error
 	after  func(ctx Context, db DB, rs *RelationStore, existing, item any)
@@ -25,15 +25,6 @@ type saveHooksOption struct {
 
 // isOption marks saveHooksOption as a valid [Option] value.
 func (saveHooksOption) isOption() {}
-
-// runSaveBefore runs the type's pre-save check, if it has one. A non-nil error
-// aborts the write, before anything is saved.
-func (m *Module[T]) runSaveBefore(ctx Context, existing, item any) error {
-	if m.saveBefore == nil {
-		return nil
-	}
-	return m.saveBefore(ctx, m.db, existing, item)
-}
 
 // runSaveAfter runs the type's post-save step, if it has one. It is fail-open:
 // the write is already saved.

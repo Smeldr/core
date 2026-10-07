@@ -23,6 +23,23 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.126.0] - 2026-10-07
+
+### Behaviour change
+
+- A module's `BeforeCreate`, `BeforeUpdate` and `BeforeDelete` hooks (`On`) now run on every content write, whichever surface it comes through (A432, D97). Before, they ran on HTTP `POST`, `PUT` and `DELETE` only. They were skipped on the MCP create, update and delete tools and on HTTP `PATCH`. **An application whose Before hook refuses or changes an item now sees that on MCP and `PATCH` too.** A write that passed a hook-guarded type over MCP before can now be refused with the hook's error. That is the intent: whether a write is allowed must not depend on the door it uses (D94/D96). Status-only transitions (the MCP publish, schedule and archive tools, `transition_item`, the scheduler) still do not run `BeforeUpdate`; the state flow gates them.
+
+### Changed
+
+- One dispatch point for the Before side of a content write: the public hooks first, then the type's internal pre-save check (the `amends` check from A431). HTTP `POST`, `PUT`, `PATCH`, MCP create and MCP update all call it. A refusal still leaves nothing saved. On `PUT` the internal check now runs with the public hook, before the conflict lock is taken (it only reads).
+- MCP delete runs `BeforeDelete` before deleting, as HTTP `DELETE` does.
+
+### Notes
+
+- After hooks on transitions are a separate follow-up (`core-transition-paths-fire-module-after-hooks`): `transition_item` does not fire a module's After hooks on compiled types, and the MCP lifecycle tools do not fire `AfterUpdate`.
+
+---
+
 ## [1.125.0] - 2026-10-07
 
 ### Added
