@@ -124,7 +124,9 @@ func (s *sqlProvenanceStore) Append(ctx context.Context, r ProvenanceRecord) err
 	return err
 }
 
-// List returns provenance records matching f, ordered by timestamp descending.
+// List returns provenance records matching f, newest first: by timestamp
+// descending, and for records of the same second by id descending (ids are UUID
+// v7, time ordered), so the order is the same on every call.
 func (s *sqlProvenanceStore) List(ctx context.Context, f ProvenanceFilter) ([]ProvenanceRecord, error) {
 	query := `SELECT id, timestamp, subject_type, subject_id, verb, from_state, to_state, actor_kind, actor_id, surface, reason
 	          FROM smeldr_provenance WHERE 1=1`
@@ -154,7 +156,7 @@ func (s *sqlProvenanceStore) List(ctx context.Context, f ProvenanceFilter) ([]Pr
 		query += fmt.Sprintf(" AND actor_id = $%d", n)
 		args = append(args, f.ActorID)
 	}
-	query += " ORDER BY timestamp DESC"
+	query += " ORDER BY timestamp DESC, id DESC"
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -397,27 +399,43 @@ type ProvenanceEntry struct {
 // Both are the conservative choice for their own question — stated
 // explicitly so a future reader does not assume they point the same way.
 //
-// The `err != nil` check against [resolveFlowID]'s own return is correct
-// defensive code but structurally unreachable today: resolveFlowID
-// currently swallows a genuine DB error into found=false, nil error rather
-// than propagating it (T249 — a real, separate fail-open finding on
-// validateTransition's own authorization path, found by architect
-// reviewing this code, not introduced by it). This check stays correct
-// and dormant, not dead weight, until T249 fixes resolveFlowID to
-// propagate a real error — at which point this branch gets a live path.
+// This is the fail-closed wrapper [SubjectProvenance] uses. A caller that must
+// not decide visibility on a swallowed error ([App.ItemProvenance]) uses
+// [transitionGate], which returns the database error instead.
 func transitionIsGated(ctx context.Context, db DB, typeName, fromState, toState string) bool {
+	gated, err := transitionGate(ctx, db, typeName, fromState, toState)
+	return err == nil && gated
+}
+
+// transitionGate is [transitionIsGated] without the swallowing: a genuine
+// database error from [resolveFlowID] or [lookupTransitionGate] is returned,
+// never turned into "not gated". No registered flow, and an edge the flow does
+// not declare, are not errors: they are not gated.
+func transitionGate(ctx context.Context, db DB, typeName, fromState, toState string) (bool, error) {
 	if db == nil || fromState == toState {
-		return false
+		return false, nil
+	}
+	// A database that has no state-flow tables has no gates: not an error.
+	if present, err := flowTablesPresent(ctx, db); err != nil {
+		return false, err
+	} else if !present {
+		return false, nil
 	}
 	flowID, flowFound, err := resolveFlowID(ctx, db, typeName)
-	if err != nil || !flowFound {
-		return false
+	if err != nil {
+		return false, err
+	}
+	if !flowFound {
+		return false, nil
 	}
 	requiredRole, _, strict, edgeFound, err := lookupTransitionGate(ctx, db, flowID, fromState, toState)
-	if err != nil || !edgeFound {
-		return false
+	if err != nil {
+		return false, err
 	}
-	return requiredRole != "" && strict
+	if !edgeFound {
+		return false, nil
+	}
+	return requiredRole != "" && strict, nil
 }
 
 // SubjectProvenance returns subjectType+subjectID's gating-aware provenance

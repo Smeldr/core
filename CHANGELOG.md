@@ -23,6 +23,23 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.123.0] - 2026-10-07
+
+### Added
+
+- `App.ItemProvenance(ctx, typeName, itemID, audience, limit, offset)`, `ProvenanceAudience` (`ProvenanceMembers`, `ProvenanceGated`) and `ProvenancePage` (A428, D101): one item's history, newest first, paged, with the actor shown by audience. `ProvenanceMembers` returns the whole record on every entry (actor kind and id, surface, reason); `ProvenanceGated` keeps the rule of `SubjectProvenance` (the actor only on a transition gated with `RequiredOperation` under `Strict`). An unknown audience is an error, never the wider view. With no provenance store wired the read is an `ErrNotFound` saying so, never an empty page. In the capability terms of D94: resource item provenance, verb read. smeldr.dev/mcp v1.49.0 serves it as `get_item_provenance` and smeldr.dev/cli v0.20.0 as `history`.
+- Relation events (an edge asserted or ended) are recorded against the relation, not the item, and are not part of this read yet; they join with the relation-history work.
+
+### Fixed
+
+- A provenance read no longer decides visibility on a swallowed database error: a real error while looking up whether a transition was gated is `ErrInternal` in `ItemProvenance`. `SubjectProvenance` is unchanged and still fails closed (withholds the actor). The comment that said `resolveFlowID` swallows errors was out of date and is corrected.
+
+### Changed
+
+- `ProvenanceStore.List` of the SQL store orders the records of the same second by id (newest first), `ORDER BY timestamp DESC, id DESC`, so a page never reshuffles between two calls.
+
+---
+
 ## [1.122.0] - 2026-10-07
 
 ### Added

@@ -2,18 +2,18 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.122.0 + smeldr.dev/mcp v1.48.0 + smeldr.dev/cli v0.19.0 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.3.0.
+Last updated: v1.123.0 + smeldr.dev/mcp v1.49.0 + smeldr.dev/cli v0.20.0 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.3.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.122.0 | Stable |
-| `smeldr.dev/mcp` | v1.48.0 | Stable |
+| `smeldr.dev/core` | v1.123.0 | Stable |
+| `smeldr.dev/mcp` | v1.49.0 | Stable |
 | `smeldr.dev/oauth` | v0.5.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.3.0 | Beta |
 | `smeldr.dev/media` | v1.6.3 | Beta |
-| `smeldr.dev/cli` | v0.19.0 | Beta |
+| `smeldr.dev/cli` | v0.20.0 | Beta |
 | `smeldr.dev/social` | v0.10.5 | Experimental |
 | `smeldr.dev/agent` | v0.9.2 | Experimental |
 
@@ -361,6 +361,7 @@ MCP resource subscriptions (Beta):
 - `App.ItemsStateSince` reports when each Task or Goal-like item entered its current state and why, from provenance (core v1.120.0, A415); the mcp `state_since` and `state_reason` keys on Task and Goal reads use it (mcp v1.47.0). Absent means unknown, second resolution, the actor is not on this surface
 - Actor classification (D105, A418, v1.121.0): `TokenStore.CreateClassified` mints a token tagged `agent`, `job` or `human` (`create_token` `actor_class`, `token create --class`), provenance records that kind, and an untagged actor now records `unclassified` instead of `human`; older rows keep `human` and mean unclassified
 - `*.transitioned` events (stream and webhooks) carry `actor_id` and `actor_kind` (v1.122.0, A427), the same actor and kind as the provenance record; omitted when no actor is known
+- Item history read (D101, A428, v1.123.0): `App.ItemProvenance` and the `get_item_provenance` tool / `smeldr-cli history` return one item's history newest first, paged, with the actor on every entry for members and only on gated transitions in the gated view; provenance not enabled is an explicit error; relation events are not in this read yet
 - `define_state_flow` MCP tool — registers a flow including `active_state` and `conflict_policy` params (Admin role)
 - `TransitionTrigger` struct — `FromState`, `ToState`, `TriggerClass`, `TriggerType`, `Config`; declared in `StateFlow.Triggers`
 - `StateFlow.Triggers []TransitionTrigger` — async trigger handlers persisted to `smeldr_transition_triggers` by `RegisterFlow`; idempotent

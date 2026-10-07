@@ -3408,10 +3408,26 @@ What a reader sees is unchanged and decided at read time: `SubjectProvenance` sh
 for a transition that required an operation under `Strict` enforcement, so a Task state change
 reads as verb, states and date, and a Decision ratification also shows who did it.
 
-### Reading the trail — `SubjectProvenance`, not a route or tool
+### Reading an item's history — `App.ItemProvenance` and `get_item_provenance` (A428, D101, v1.123.0)
 
-There is **no HTTP endpoint and no MCP tool** for reading provenance, by
-design — `SubjectProvenance` is a plain Go function, meant to be composed
+One item's history, newest first, with the actor shown by audience (D101). The capability, in the terms of D94: resource **item provenance**, verb **read**.
+
+```go
+page, err := app.ItemProvenance(ctx, "Decision", decisionID, smeldr.ProvenanceMembers, 50, 0)
+// page.Entries newest first, page.Total the item's whole history
+```
+
+- **Audience.** `ProvenanceMembers`: every entry carries `ActorKind`, `ActorID`, `Surface` and `Reason` (the whole record); `Gated` still says whether the act had to pass an authority check. `ProvenanceGated`: the rule of `SubjectProvenance` below, the actor only on a transition that required `RequiredOperation` under `Strict`. An unknown audience is an error, never the wider view.
+- **Who is a member.** A core instance is one organisation. Every credential that reaches the MCP tool was minted on the instance and the tool requires Editor and the `read` operation, so every caller that passes the tool's own authorization is a member, and the tool defaults to `members`. A caller can only **narrow** its view: the optional `view` argument takes `members` (default) or `gated`, so a surface for a wider audience asks for `gated` and the actor never leaves core. The gated view is also what an in-process consumer serving a public audience passes.
+- **Paging.** `limit` 0 means 50 and is capped at 500, `offset` must not be negative, an offset past the end is an empty page with the true `Total`. Entries of the same second (the record stores second resolution) are ordered by id, newest first, so a page never reshuffles.
+- **Honest errors.** With no provenance store wired (`App.Provenance`, behind `ENABLE_PROVENANCE` in the example server) the read is an `ErrNotFound` saying provenance is not enabled, never an empty page: an empty history and "not recorded here" are different statements. A real database error while deciding whether a transition was gated is `ErrInternal`: visibility is never decided by a swallowed error. A type with no flow, or a transition its flow does not declare, is not an error, it is not gated. (`SubjectProvenance` below keeps its fail-closed behaviour.)
+- **What an entry is.** Time, verb (`create`, `update`, `transition`, and the standing events `standing-began` and `standing-ended`, from which held and ceased intervals are read), from and to state, and by audience the actor. `actor_kind` is `job`, `agent`, `human` or `unclassified` (D105). **Rows written before core v1.121.0 say `human` for an actor with no classification and mean unclassified, never a verified person.** History exists only for changes made after provenance was switched on.
+- **Relation events are not in this read.** An edge asserted or ended is recorded against the `RelationEdge`, not the item, so an item's history here is not complete for relations; they join with `core-relation-history-one-row-per-life`.
+- **MCP.** `get_item_provenance(type_name, slug, limit?, offset?, view?)`, Editor, policy row `read` (since smeldr.dev/mcp v1.49.0). **CLI.** `smeldr-cli history <type_name> <slug> [--limit n] [--offset n] [--view members|gated]` (smeldr.dev/cli v0.20.0).
+
+### The gated-only read — `SubjectProvenance`
+
+There is **no HTTP endpoint** for reading provenance, and the MCP tool above (`get_item_provenance`, since mcp v1.49.0) is the remote read; `SubjectProvenance` is the older, gated-only plain Go function, meant to be composed
 directly by a caller holding its own `DB` handle (the same pattern
 `smeldr.dev/cloud`'s own read layer already uses for other core data), not
 reached over a network round trip:

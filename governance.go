@@ -421,6 +421,10 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// core's standing table through TypeHasStanding/ItemStandings, no MCPModule
 		// backs it, so without this row it falls closed for every caller.
 		{"get_item_standing", "read"},
+		// Read one item's history (Editor+, smeldr.dev/mcp v1.49.0, D101). Same "not
+		// module-generated" reason as get_item_standing: no MCPModule backs it, so
+		// without this row it falls closed for every caller (the A402 lesson).
+		{"get_item_provenance", "read"},
 		// Batch-resolve JWT User.ID values to token Names (Author+,
 		// smeldr.dev/mcp, mcp-lookup-token-names, Article I
 		// explainability). Same "not module-generated" reason as the

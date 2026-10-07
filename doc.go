@@ -119,6 +119,10 @@
 //     provenance events. Read it with [ItemStanding] and [CountStanding]; check it
 //     with [App.CheckStandingDrift]; give pre-existing items a standing once with
 //     [MigrateStanding].
+//   - Item history ([App.ItemProvenance], [ProvenanceAudience]): one item's
+//     provenance, newest first and paged, with the actor on every entry for the
+//     organisation's members and only on gated transitions for a wider audience
+//     (D101). [SubjectProvenance] is the older gated-only read.
 //   - Relation graph ([RelationStore], [RelationEdge], [RelationKindDef]) —
 //     typed, directional edges between items (asserted, inferred, or
 //     observed). Create a store with [NewRelationStore]. Designate a dynamic
