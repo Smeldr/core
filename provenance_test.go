@@ -501,8 +501,8 @@ func TestActorKindFor(t *testing.T) {
 	if got := actorKindFor("", nil); got != "" {
 		t.Errorf("actorKindFor(\"\", nil) = %q, want empty", got)
 	}
-	if got := actorKindFor("u1", []Role{Editor}); got != "human" {
-		t.Errorf("actorKindFor(u1, [Editor]) = %q, want human", got)
+	if got := actorKindFor("u1", []Role{Editor}); got != "unclassified" {
+		t.Errorf("actorKindFor(u1, [Editor]) = %q, want unclassified", got)
 	}
 	if got := actorKindFor("job-1", []Role{Editor, Job}); got != "job" {
 		t.Errorf("actorKindFor(job-1, [Editor,Job]) = %q, want job", got)
@@ -693,7 +693,7 @@ func TestAppProvenance_SubscribedSignalsFire(t *testing.T) {
 		if r.SubjectType != "Post" || r.SubjectID != "n1" {
 			t.Errorf("subject: got %s/%s, want Post/n1", r.SubjectType, r.SubjectID)
 		}
-		if r.ActorID != "u1" || r.ActorKind != "human" {
+		if r.ActorID != "u1" || r.ActorKind != "unclassified" {
 			t.Errorf("actor: got %s/%s, want u1/human", r.ActorID, r.ActorKind)
 		}
 	}

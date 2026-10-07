@@ -498,6 +498,27 @@ already-issued long-lived token (a bootstrap admin token, an agent's own
 token minted before the upgrade): it stays absent from
 `NamesForUserIDs`'s results until it is revoked and reissued.
 
+#### Actor classification — `CreateClassified` (A416, D105, v1.121.0)
+
+A token can carry a classification tag beside its permission role, so
+provenance records what kind of actor used it. There are three tags, all
+outside the role hierarchy (`HasRole` ignores them, so a tag never grants or
+changes a permission): `smeldr.Agent`, `smeldr.Job` and `smeldr.Human`.
+
+```go
+raw, userID, err := tokens.CreateClassified(ctx, "core-implementer", "editor", smeldr.Agent, 90*24*time.Hour)
+```
+
+- `class` is `Agent`, `Job` or `Human`; `""` is an unclassified token (the same as `CreateWithID`); anything else is a `ValidationError`. `role` must be `author`, `editor` or `admin`. The minting Admin **attests** the class: .
+- The tag is the second entry of the signed token's roles (`[editor, agent]`); the permission role stays first, because the signal bus reads the first role as the actor's role. Provenance follows the signed token.
+- The class is also stored in the nullable column `smeldr_tokens.actor_class`, added with `smeldr.EnsureTokenActorClassColumn` (call it at boot; the example server does), and `TokenStore.List` returns it as `TokenRecord.ActorClass` (`""` for an unclassified token, a token created before the column, and every token from `Create`/`CreateWithID`). A **classified mint on a table without the column is refused** with an error naming `EnsureTokenActorClassColumn`; an unclassified mint keeps working.
+- An issued token cannot be classified afterwards: the class is inside its signature. Issue a new token and revoke the old one. `list_tokens` shows what was stored, provenance follows the signature; they differ only if the table is edited by hand.
+- `Create` and `CreateWithID` keep accepting any role string as before (a custom registered role works through them); only `CreateClassified` validates the role. This inconsistency is deliberate and unchanged.
+
+**What `actor_kind` records (D105).** `job`, then `agent`, then `human` is the order when several tags are present, so an automated actor never reads as a person (a hand-signed `[editor, human, agent]` records `agent`). An actor with **none** of the three tags records **`unclassified`**: it makes no claim to be a person. Every actor that is not a minted bearer token is unclassified too: a session or magic-link user, a Basic-auth user, a token from `Create`/`CreateWithID`.
+
+**Cutover: core v1.121.0 (2026-10-07).** Before v1.121.0 an untagged actor recorded `human`, and no token could carry a tag, so every agent action was recorded as `human`. **Provenance rows written before the cutover keep the value they were written with and are not rewritten: an older `human` row means unclassified, never a verified person.** From v1.121.0 `human` means a person attested by the Admin who minted the token. A reader that compared `actor_kind == "human"` must now also expect `unclassified`.
+
 ### Bootstrap
 
 On first startup with an empty `smeldr_tokens` table, Smeldr auto-creates a
@@ -544,8 +565,8 @@ active admin token. Create a replacement first.
 
 | Tool | Description |
 |------|-------------|
-| `create_token` | Issues a new named token with a given role and TTL |
-| `list_tokens` | Lists all tokens with name, role, expiry, revoked status |
+| `create_token` | Issues a new named token with a given role and TTL; optional `actor_class` (`agent`, `job` or `human`, mcp v1.48.0) classifies its actor |
+| `list_tokens` | Lists all tokens with name, role, expiry, revoked status and `ActorClass` |
 | `revoke_token` | Revokes a token by ID — effective immediately |
 
 `create_token` returns the plaintext token once. Copy it immediately —
@@ -3328,7 +3349,7 @@ app.Provenance(smeldr.NewProvenanceStore(db))
 | `Verb` | `verb` | `"create"` \| `"update"` \| `"transition"` \| `"assert"` \| `"invalidate"` |
 | `FromState` | `from_state` | Empty for create/assert |
 | `ToState` | `to_state` | Empty for invalidate |
-| `ActorKind` | `actor_kind` | `"human"` \| `"job"` \| `"agent"`; empty only if truly unattributable |
+| `ActorKind` | `actor_kind` | `"job"`, `"agent"`, `"human"` (the attested tags, D105) or `"unclassified"` (no tag); empty only if truly unattributable. Rows written before v1.121.0 say `"human"` for an untagged actor: that means unclassified |
 | `ActorID` | `actor_id` | User UUID, job identifier, or agent identifier |
 | `Surface` | `surface` | `"http"` \| `"mcp"` \| `"cli"` \| `"trigger"`; `"cli"` has no current producer — nothing distinguishes a `smeldr-cli` HTTP request from any other |
 | `Reason` | `reason` | Free text, empty unless the caller supplied one — most acts carry none |
@@ -3501,7 +3522,7 @@ CREATE TABLE IF NOT EXISTS smeldr_sweep_runs (
 | `Flagged` | `flagged` | Items with issues (e.g. relations invalidated, items transitioned) |
 | `Skipped` | `skipped` | Items the detector could not fully check this run (e.g. a target- or source-checker error in `SweepStructural` — D61/T233 extended the sweep to check source existence as well as target, not target-only — or a role-gated/erroring item in `DrainEvalQueue`) — logged, not fatal to the run |
 | `Err` | `err` | Non-empty when the run itself returned an error; empty string for success |
-| `ActorKind` | `actor_kind` | `"human"` \| `"job"` \| `"agent"`; empty only if truly unattributable, matching `ProvenanceRecord`'s own vocabulary (A289) |
+| `ActorKind` | `actor_kind` | `"job"`, `"agent"`, `"human"` or `"unclassified"`; empty only if truly unattributable, matching `ProvenanceRecord`'s own vocabulary (A289) |
 | `ActorID` | `actor_id` | Fixed mechanism identifier for a scheduled detector, e.g. `"sweep-structural"`, `"drain-eval-queue"` |
 
 ### Custom store

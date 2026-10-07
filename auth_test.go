@@ -635,7 +635,7 @@ func TestTokenStore_Revoke_RecordsProvenance(t *testing.T) {
 	if rec.SubjectType != "Token" || rec.SubjectID != id || rec.Verb != "invalidate" {
 		t.Errorf("got %+v, want SubjectType=Token SubjectID=%s Verb=invalidate", rec, id)
 	}
-	if rec.ActorID != "u3" || rec.ActorKind != "human" {
+	if rec.ActorID != "u3" || rec.ActorKind != "unclassified" {
 		t.Errorf("got ActorID=%q ActorKind=%q, want u3/human", rec.ActorID, rec.ActorKind)
 	}
 }

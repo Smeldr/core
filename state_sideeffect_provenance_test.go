@@ -59,10 +59,10 @@ func TestApplyConflictPolicy_Supersede_RecordsProvenance(t *testing.T) {
 		wantKind      string
 		withLastActor bool
 	}{
-		{"human via mcp", NewTestContext(User{ID: "u-human", Roles: []Role{Editor}}), "mcp", "u-human", "human", true},
+		{"untagged via mcp", NewTestContext(User{ID: "u-human", Roles: []Role{Editor}}), "mcp", "u-human", "unclassified", true},
 		{"agent via http", NewTestContext(User{ID: "u-agent", Roles: []Role{Editor, Agent}}), "http", "u-agent", "agent", true},
 		{"plain context, unattributable", context.Background(), "", "", "", true},
-		{"table without last_actor still recorded", NewTestContext(User{ID: "u-human", Roles: []Role{Editor}}), "mcp", "u-human", "human", false},
+		{"table without last_actor still recorded", NewTestContext(User{ID: "u-human", Roles: []Role{Editor}}), "mcp", "u-human", "unclassified", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

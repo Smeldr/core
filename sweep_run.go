@@ -20,7 +20,7 @@ type SweepRunRecord struct {
 	Err      string    `json:"err"` // non-empty when the run itself returned an error
 
 	// ActorKind and ActorID identify what triggered this run, matching
-	// [ProvenanceRecord]'s own vocabulary ("human" | "job" | "agent"; empty
+	// [ProvenanceRecord]'s own vocabulary ("human" | "job" | "agent" | "unclassified"; empty
 	// only if truly unattributable). A scheduled detector is a fixed,
 	// non-enumerable mechanism, not a per-request actor — see
 	// [App.DrainEvalQueue]'s own ActorKind:"job" write (state.go) for the

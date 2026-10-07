@@ -23,6 +23,22 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.121.0] - 2026-10-07
+
+### Changed (a visible change to recorded data, read this first)
+
+- **An actor with no classification tag now records `actor_kind: "unclassified"`, no longer `"human"` (D105, which supersedes D104; A416).** Before v1.121.0 `human` was the fallback for every actor without a tag, and because no token could carry a tag, every agent action on an instance was recorded as `human`. `human` therefore never meant a person. It now means one: a person attested by the Admin who minted the token. This changes the value written for every untagged actor: a token made by `Create` or `CreateWithID`, a session or magic-link user, a Basic-auth user. **Provenance rows written before this version are not rewritten: an older `human` row means unclassified, never a verified person.** A reader that compares `actor_kind == "human"` must now also expect `unclassified`. Minor version, as D103's break was, because the Go API only grows.
+- When several tags are present the order is `job`, then `agent`, then `human`, so an automated actor never reads as a person.
+
+### Added
+
+- `smeldr.Human`, a third actor classification tag beside `smeldr.Agent` and `smeldr.Job`. All three are outside the role hierarchy and never grant or change a permission (`HasRole` ignores them).
+- `TokenStore.CreateClassified(ctx, name, role, class, ttl)`: mints a token whose signed roles are `[role, class]` (permission role first, because the signal bus reads the first role as the actor's role), so provenance records `agent`, `job` or `human` for it. `class` is `Agent`, `Job` or `Human` (`""` is an unclassified token), `role` is `author`, `editor` or `admin`. `Create` and `CreateWithID` are unchanged and keep accepting any role string.
+- `smeldr_tokens.actor_class` (nullable), added with `EnsureTokenActorClassColumn` (the example server calls it at boot), and `TokenRecord.ActorClass`, returned by `TokenStore.List` (`""` for an unclassified token and for a table that predates the column). A classified mint on a table without the column is refused with an error naming `EnsureTokenActorClassColumn`; an unclassified mint keeps working.
+- An issued token cannot be classified afterwards, because the class is inside its signature: issue a new token and revoke the old one. smeldr.dev/mcp v1.48.0 and smeldr.dev/cli v0.19.0 add `actor_class` and `--class` to `create_token` and `token create`.
+
+---
+
 ## [1.120.0] - 2026-10-07
 
 ### Added

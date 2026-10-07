@@ -209,6 +209,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.EnsureTokenUserIDColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure smeldr_tokens.user_id: %w", err)
 		}
+		if err := smeldr.EnsureTokenActorClassColumn(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure smeldr_tokens.actor_class: %w", err)
+		}
 		tokenStore = smeldr.NewTokenStore(db, cfg.Secret)
 	}
 

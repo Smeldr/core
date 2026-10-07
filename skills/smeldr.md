@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.120.0 · smeldr.dev/mcp v1.47.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.18.0 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.121.0 · smeldr.dev/mcp v1.48.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.6.3 · smeldr.dev/cli v0.19.0 · smeldr.dev/social v0.10.5 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -442,7 +442,7 @@ Tools are named from the type in lower_snake_case.
 | `get_{type}` | Editor+ | Single item at any status |
 | `create_upload_token` | Author+ | forge-media: generate upload token |
 | `create_preview_url` | Editor+ | Draft preview URL (prefix + slug) |
-| `create_token` | Admin | Mint bearer token |
+| `create_token` | Admin | Mint bearer token. Optional `actor_class` (`agent`, `job` or `human`, mcp v1.48.0, A416): provenance then records that `actor_kind` for everything done with the token; it never changes permissions, a token may be `human` only if every use of it is the direct result of one authenticated request by that person (D105), and an issued token cannot be classified afterwards (issue a new one and revoke the old). **An untagged actor records `unclassified` since core v1.121.0** (before, `human`; older rows keep `human` and mean unclassified, not a verified person). `list_tokens` returns `ActorClass` per token. cli: `token create ... --class agent|job|human` (v0.19.0). Call `smeldr.EnsureTokenActorClassColumn` at boot: a classified mint on a table without it is refused. |
 | `list_tokens` / `revoke_token` | Admin | Token management |
 | `create_webhook` / `list_webhooks` / `delete_webhook` | Admin | Webhook endpoints |
 | `list_webhook_deliveries` / `retry_webhook` | Admin | Delivery introspection and retry |

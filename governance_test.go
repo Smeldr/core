@@ -2903,7 +2903,7 @@ func TestRoleStore_Grant_RecordsProvenance(t *testing.T) {
 	if rec.SubjectType != "RoleGrant" || rec.SubjectID != grantID || rec.Verb != "assert" {
 		t.Errorf("got %+v, want SubjectType=RoleGrant SubjectID=%s Verb=assert", rec, grantID)
 	}
-	if rec.ActorID != "u1" || rec.ActorKind != "human" {
+	if rec.ActorID != "u1" || rec.ActorKind != "unclassified" {
 		t.Errorf("got ActorID=%q ActorKind=%q, want u1/human", rec.ActorID, rec.ActorKind)
 	}
 }
@@ -2970,7 +2970,7 @@ func TestRoleStore_Revoke_RecordsProvenance(t *testing.T) {
 	if rec.SubjectType != "RoleGrant" || rec.SubjectID != grantID || rec.Verb != "invalidate" {
 		t.Errorf("got %+v, want SubjectType=RoleGrant SubjectID=%s Verb=invalidate", rec, grantID)
 	}
-	if rec.ActorID != "u2" || rec.ActorKind != "human" {
+	if rec.ActorID != "u2" || rec.ActorKind != "unclassified" {
 		t.Errorf("got ActorID=%q ActorKind=%q, want u2/human", rec.ActorID, rec.ActorKind)
 	}
 }

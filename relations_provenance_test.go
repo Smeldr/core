@@ -35,7 +35,7 @@ func TestInsertEdge_RecordsProvenance_WithActor(t *testing.T) {
 	if r.Verb != "assert" {
 		t.Errorf("Verb = %q, want assert", r.Verb)
 	}
-	if r.ActorID != "u1" || r.ActorKind != "human" {
+	if r.ActorID != "u1" || r.ActorKind != "unclassified" {
 		t.Errorf("actor: got %s/%s, want u1/human", r.ActorID, r.ActorKind)
 	}
 	if r.SubjectID == "" {

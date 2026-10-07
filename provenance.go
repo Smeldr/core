@@ -26,7 +26,7 @@ type ProvenanceRecord struct {
 	Verb        string    `json:"verb"`         // "create" | "update" | "transition" | "assert" | "invalidate"
 	FromState   string    `json:"from_state"`   // empty for create/assert
 	ToState     string    `json:"to_state"`     // empty for invalidate
-	ActorKind   string    `json:"actor_kind"`   // "human" | "job" | "agent"; empty only if truly unattributable
+	ActorKind   string    `json:"actor_kind"`   // "job" | "agent" | "human" (attested tags, D105) or "unclassified" (no tag); empty only if truly unattributable. Rows written before v1.121.0 say "human" for an untagged actor: that means unclassified
 	ActorID     string    `json:"actor_id"`     // user UUID, job identifier, or agent identifier
 	Surface     string    `json:"surface"`      // "http" | "mcp" | "cli" | "trigger"; empty when not derivable
 	Reason      string    `json:"reason"`       // optional free text, empty unless supplied
@@ -456,13 +456,18 @@ func SubjectProvenance(ctx context.Context, db DB, store ProvenanceStore, subjec
 }
 
 // actorKindFor returns "" when actorID is empty (matching ProvenanceRecord's
-// own "empty only if truly unattributable" principle), "job" or "agent" when
-// roles contains the matching [Job]/[Agent] classification role (checked via
-// [IsRole], independent of the permission hierarchy — a token can carry both
-// a real permission role and a classification role at once, e.g.
-// []Role{Editor, Job}), and "human" otherwise. No caller mints a [Job]- or
-// [Agent]-tagged token anywhere in this codebase today; the classification
-// mechanism is real and wired regardless, ready for the first caller that does.
+// own "empty only if truly unattributable" principle), and otherwise the
+// actor's attested kind from the classification tags in roles (checked via
+// [IsRole], independent of the permission hierarchy: a token carries a real
+// permission role and a tag at once, e.g. []Role{Editor, Job}): "job" for
+// [Job], then "agent" for [Agent], then "human" for [Human] (D105), in that
+// order, so an automated actor never reads as a person even when a hand-made
+// token carries several tags. An actor with none of the three tags is
+// "unclassified": it makes no claim to be a person. Before v1.121.0 an
+// untagged actor recorded "human"; that value in an older row means
+// unclassified, never a verified person. [TokenStore.CreateClassified] mints a
+// tagged token. Every user who is not a minted bearer token (a session or
+// Basic-auth user, a token made by [TokenStore.Create]) is unclassified.
 func actorKindFor(actorID string, roles []Role) string {
 	if actorID == "" {
 		return ""
@@ -473,5 +478,8 @@ func actorKindFor(actorID string, roles []Role) string {
 	if IsRole(roles, Agent) {
 		return "agent"
 	}
-	return "human"
+	if IsRole(roles, Human) {
+		return "human"
+	}
+	return "unclassified"
 }

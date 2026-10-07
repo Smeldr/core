@@ -384,6 +384,16 @@ type TokenRecord struct {
 	// mints a fresh [NewID] for every token), so at most one TokenRecord
 	// carries any given value.
 	UserID *string
+
+	// ActorClass is the actor classification the token was minted with:
+	// "agent", "job" or "human" (see [TokenStore.CreateClassified], D105), or
+	// "" for an unclassified token. "" is also what a token created before this
+	// column existed, and every token minted by [TokenStore.Create] or
+	// [TokenStore.CreateWithID], reports. Unclassified tokens record
+	// [ProvenanceRecord.ActorKind] "unclassified". This is the stored display
+	// record; what provenance records follows the classification inside the
+	// signed token itself.
+	ActorClass string
 }
 
 // TokenStore manages named, revocable bearer tokens stored in a smeldr_tokens
@@ -400,7 +410,8 @@ type TokenRecord struct {
 //	    expires_at TEXT NOT NULL,     -- RFC3339 UTC
 //	    revoked_at TEXT,              -- NULL when not revoked; RFC3339 UTC when revoked
 //	    created_at TEXT NOT NULL,     -- RFC3339 UTC
-//	    user_id    TEXT               -- optional; see EnsureTokenUserIDColumn
+//	    user_id    TEXT,              -- optional; see EnsureTokenUserIDColumn
+//	    actor_class TEXT              -- optional; see EnsureTokenActorClassColumn
 //	);
 //
 // user_id is optional on this required DDL — [TokenStore.Create]/[List] both
@@ -408,7 +419,8 @@ type TokenRecord struct {
 // own "no such column" error text, like every other such fallback in this
 // codebase), so an application that hasn't added it yet keeps working
 // unmodified. Add it with [EnsureTokenUserIDColumn] to start recording
-// [TokenRecord.UserID].
+// [TokenRecord.UserID]; actor_class is optional the same way (see
+// [EnsureTokenActorClassColumn]) and only [TokenStore.CreateClassified] needs it.
 type TokenStore struct {
 	db              DB
 	secret          string
@@ -442,6 +454,21 @@ func NewTokenStore(db DB, secret string) *TokenStore {
 func EnsureTokenUserIDColumn(ctx context.Context, db DB) error {
 	if err := EnsureColumn(ctx, db, "smeldr_tokens", "user_id", "TEXT"); err != nil {
 		return fmt.Errorf("smeldr: EnsureTokenUserIDColumn: %w", err)
+	}
+	return nil
+}
+
+// EnsureTokenActorClassColumn adds smeldr_tokens' own actor_class column on a
+// database that predates it, so [TokenStore.CreateClassified] can mint and
+// [TokenStore.List] can report [TokenRecord.ActorClass]. Idempotent, safe on
+// every startup, like [EnsureTokenUserIDColumn] (which must have run first on a
+// table that lacks user_id). Nullable with no DEFAULT: every existing token
+// stays NULL, which [TokenStore.List] reports as unclassified. Nothing is ever
+// backfilled, because a token's class lives in its signature and an issued
+// token cannot be reclassified.
+func EnsureTokenActorClassColumn(ctx context.Context, db DB) error {
+	if err := EnsureColumn(ctx, db, "smeldr_tokens", "actor_class", "TEXT"); err != nil {
+		return fmt.Errorf("smeldr: EnsureTokenActorClassColumn: %w", err)
 	}
 	return nil
 }
@@ -480,7 +507,7 @@ func (ts *TokenStore) ensureBootstrap(ctx context.Context) (userID string, creat
 	if err := row.Scan(&n); err != nil || n > 0 {
 		return "", false
 	}
-	raw, uid, err := ts.createToken(ctx, "bootstrap-admin", "admin", 10*365*24*time.Hour)
+	raw, uid, err := ts.createToken(ctx, "bootstrap-admin", "admin", "", 10*365*24*time.Hour)
 	if err != nil {
 		slog.Warn("smeldr: failed to create bootstrap admin token", "err", err)
 		return "", false
@@ -495,8 +522,14 @@ func (ts *TokenStore) ensureBootstrap(ctx context.Context) (userID string, creat
 // smeldr_tokens.id fingerprint — callers that need to reference this token's
 // identity elsewhere (e.g. granting a governance role) get it directly,
 // without redundantly decoding the token they just created.
-func (ts *TokenStore) createToken(ctx context.Context, name, role string, ttl time.Duration) (raw, userID string, err error) {
-	user := User{ID: NewID(), Name: name, Roles: []Role{Role(role)}}
+func (ts *TokenStore) createToken(ctx context.Context, name, role string, class Role, ttl time.Duration) (raw, userID string, err error) {
+	// The permission role is always first: signals.go reads Roles[0] as the
+	// actor's role, and the classification tag carries no permission at all.
+	roles := []Role{Role(role)}
+	if class != "" {
+		roles = append(roles, class)
+	}
+	user := User{ID: NewID(), Name: name, Roles: roles}
 	raw, err = SignToken(user, ts.secret, ttl)
 	if err != nil {
 		return "", "", ErrInternal
@@ -505,6 +538,22 @@ func (ts *TokenStore) createToken(ctx context.Context, name, role string, ttl ti
 	id := hex.EncodeToString(h[:])
 	now := time.Now().UTC()
 	expiresAt := now.Add(ttl)
+	if class != "" {
+		_, err = ts.db.ExecContext(ctx,
+			`INSERT INTO smeldr_tokens (id, name, role, expires_at, created_at, user_id, actor_class) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			id, name, role, expiresAt.Format(time.RFC3339), now.Format(time.RFC3339), user.ID, string(class),
+		)
+		if isNoSuchColumn(err, "actor_class") || isNoSuchColumn(err, "user_id") {
+			// Refuse rather than mint a token whose list entry would not say
+			// what it is: the signed payload would carry the class, the table
+			// would not.
+			return "", "", Err("actor_class", "smeldr_tokens has no actor_class column: run EnsureTokenActorClassColumn (and EnsureTokenUserIDColumn) before minting a classified token")
+		}
+		if err != nil {
+			return "", "", ErrInternal
+		}
+		return raw, user.ID, nil
+	}
 	_, err = ts.db.ExecContext(ctx,
 		`INSERT INTO smeldr_tokens (id, name, role, expires_at, created_at, user_id) VALUES ($1, $2, $3, $4, $5, $6)`,
 		id, name, role, expiresAt.Format(time.RFC3339), now.Format(time.RFC3339), user.ID,
@@ -535,8 +584,47 @@ func (ts *TokenStore) createToken(ctx context.Context, name, role string, ttl ti
 // role must be a valid [Role] string ("author", "editor", "admin").
 // ttl must be positive.
 func (ts *TokenStore) Create(ctx context.Context, name, role string, ttl time.Duration) (string, error) {
-	raw, _, err := ts.createToken(ctx, name, role, ttl)
+	raw, _, err := ts.createToken(ctx, name, role, "", ttl)
 	return raw, err
+}
+
+// CreateClassified mints a token like [TokenStore.CreateWithID] and classifies
+// its actor, so provenance records [ProvenanceRecord.ActorKind] "agent", "job" or
+// "human" for what it does instead of "unclassified" (D105).
+//
+//	raw, userID, err := tokens.CreateClassified(ctx, "core-implementer", "editor", smeldr.Agent, 90*24*time.Hour)
+//
+// class must be [Agent], [Job] or [Human]; "" mints an unclassified token
+// exactly like CreateWithID, and any other value is a [*ValidationError]. The
+// minting Admin attests the class: a token may be [Human] only if every use
+// of it is the direct result of one authenticated request by that person (an
+// interactive session, or a personal token a service uses only inside that
+// person's own request); a token that software uses on its own initiative is
+// never [Human]. role must be "author", "editor" or "admin". The classification is
+// carried inside the signed token as a second entry after the permission role
+// ([]Role{Editor, Agent}), and stored in smeldr_tokens.actor_class for
+// [TokenStore.List]. It never grants or changes a permission: the three tags
+// are outside the role hierarchy, so [HasRole] ignores them. One class per
+// token; a hand-signed token carrying several is read as job, then agent, then
+// human.
+//
+// A classified mint needs smeldr_tokens.actor_class ([EnsureTokenActorClassColumn]);
+// on a table without it CreateClassified returns a [*ValidationError] naming
+// that function and mints nothing. An already issued token cannot be
+// classified afterwards, because the class is inside its signature: issue a
+// new one and revoke the old.
+func (ts *TokenStore) CreateClassified(ctx context.Context, name, role string, class Role, ttl time.Duration) (raw, userID string, err error) {
+	if class != "" {
+		if class != Agent && class != Job && class != Human {
+			return "", "", Err("actor_class", `must be "agent", "job" or "human" (leave it empty for an unclassified token)`)
+		}
+		switch Role(role) {
+		case Author, Editor, Admin:
+		default:
+			return "", "", Err("role", `must be "author", "editor" or "admin" for a classified token`)
+		}
+	}
+	return ts.createToken(ctx, name, role, class, ttl)
 }
 
 // CreateWithID behaves exactly like [TokenStore.Create], but also returns
@@ -549,21 +637,26 @@ func (ts *TokenStore) Create(ctx context.Context, name, role string, ttl time.Du
 // caller that also needs to grant one must hold this ID before calling
 // [RoleStore.Grant].
 func (ts *TokenStore) CreateWithID(ctx context.Context, name, role string, ttl time.Duration) (raw, userID string, err error) {
-	return ts.createToken(ctx, name, role, ttl)
+	return ts.createToken(ctx, name, role, "", ttl)
 }
 
 // List returns all token records from smeldr_tokens ordered by created_at
 // descending (newest first). Revoked and expired tokens are included; inspect
-// [TokenRecord.RevokedAt] to filter client-side.
+// [TokenRecord.RevokedAt] to filter client-side. A table that predates the
+// user_id or actor_class column is read without it (see
+// [EnsureTokenUserIDColumn], [EnsureTokenActorClassColumn]).
 func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
-	rows, err := ts.db.QueryContext(ctx,
-		`SELECT id, name, role, expires_at, revoked_at, created_at, user_id FROM smeldr_tokens ORDER BY created_at DESC`,
-	)
-	legacySchema := isNoSuchColumn(err, "user_id")
-	if legacySchema {
-		rows, err = ts.db.QueryContext(ctx,
-			`SELECT id, name, role, expires_at, revoked_at, created_at FROM smeldr_tokens ORDER BY created_at DESC`,
-		)
+	const base = `SELECT id, name, role, expires_at, revoked_at, created_at`
+	const tail = ` FROM smeldr_tokens ORDER BY created_at DESC`
+	hasUserID, hasClass := true, true
+	rows, err := ts.db.QueryContext(ctx, base+`, user_id, actor_class`+tail)
+	if isNoSuchColumn(err, "actor_class") {
+		hasClass = false
+		rows, err = ts.db.QueryContext(ctx, base+`, user_id`+tail)
+	}
+	if isNoSuchColumn(err, "user_id") {
+		hasUserID, hasClass = false, false
+		rows, err = ts.db.QueryContext(ctx, base+tail)
 	}
 	if err != nil {
 		return nil, ErrInternal
@@ -573,13 +666,15 @@ func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 	for rows.Next() {
 		var rec TokenRecord
 		var expiresAtStr, createdAtStr string
-		var revokedAtStr, userID *string
-		if legacySchema {
-			err = rows.Scan(&rec.ID, &rec.Name, &rec.Role, &expiresAtStr, &revokedAtStr, &createdAtStr)
-		} else {
-			err = rows.Scan(&rec.ID, &rec.Name, &rec.Role, &expiresAtStr, &revokedAtStr, &createdAtStr, &userID)
+		var revokedAtStr, userID, class *string
+		dest := []any{&rec.ID, &rec.Name, &rec.Role, &expiresAtStr, &revokedAtStr, &createdAtStr}
+		if hasUserID {
+			dest = append(dest, &userID)
 		}
-		if err != nil {
+		if hasClass {
+			dest = append(dest, &class)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, ErrInternal
 		}
 		rec.ExpiresAt, _ = time.Parse(time.RFC3339, expiresAtStr)
@@ -588,6 +683,9 @@ func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 			rec.RevokedAt, _ = time.Parse(time.RFC3339, *revokedAtStr)
 		}
 		rec.UserID = userID
+		if class != nil {
+			rec.ActorClass = *class
+		}
 		out = append(out, rec)
 	}
 	if err := rows.Err(); err != nil {

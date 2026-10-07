@@ -2,18 +2,18 @@
 
 Complete list of what Smeldr generates and includes automatically.
 Updated with every amendment that adds or changes a feature.
-Last updated: v1.120.0 + smeldr.dev/mcp v1.47.0 + smeldr.dev/cli v0.18.0 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.3.0.
+Last updated: v1.121.0 + smeldr.dev/mcp v1.48.0 + smeldr.dev/cli v0.19.0 + smeldr.dev/oauth v0.5.0 + smeldr.dev/social v0.10.5 + smeldr.dev/agent v0.9.2 + smeldr.dev/media v1.6.3 + smeldr.dev/core/pgx v0.3.0.
 
 ## Module stability
 
 | Package | Version | Stability |
 |---------|---------|-----------|
-| `smeldr.dev/core` | v1.120.0 | Stable |
-| `smeldr.dev/mcp` | v1.47.0 | Stable |
+| `smeldr.dev/core` | v1.121.0 | Stable |
+| `smeldr.dev/mcp` | v1.48.0 | Stable |
 | `smeldr.dev/oauth` | v0.5.0 | Beta |
 | `smeldr.dev/core/pgx` | v0.3.0 | Beta |
 | `smeldr.dev/media` | v1.6.3 | Beta |
-| `smeldr.dev/cli` | v0.18.0 | Beta |
+| `smeldr.dev/cli` | v0.19.0 | Beta |
 | `smeldr.dev/social` | v0.10.5 | Experimental |
 | `smeldr.dev/agent` | v0.9.2 | Experimental |
 
@@ -359,6 +359,7 @@ MCP resource subscriptions (Beta):
 - Runtime-defined (dynamic) content types work on Postgres since v1.119.2: `Query` and `SQLRepo` scan a `json.RawMessage` field from a string as well as bytes, and `SeedBlockTypeSchemas` uses portable SQL (A412)
 - Per-path SEO overrides (`PageMetaStore`) work on Postgres since v1.119.3, and a test fails on SQLite-only SQL in any non-test source file of the core module (A413)
 - `App.ItemsStateSince` reports when each Task or Goal-like item entered its current state and why, from provenance (core v1.120.0, A415); the mcp `state_since` and `state_reason` keys on Task and Goal reads use it (mcp v1.47.0). Absent means unknown, second resolution, the actor is not on this surface
+- Actor classification (D105, A416, v1.121.0): `TokenStore.CreateClassified` mints a token tagged `agent`, `job` or `human` (`create_token` `actor_class`, `token create --class`), provenance records that kind, and an untagged actor now records `unclassified` instead of `human`; older rows keep `human` and mean unclassified
 - `define_state_flow` MCP tool — registers a flow including `active_state` and `conflict_policy` params (Admin role)
 - `TransitionTrigger` struct — `FromState`, `ToState`, `TriggerClass`, `TriggerType`, `Config`; declared in `StateFlow.Triggers`
 - `StateFlow.Triggers []TransitionTrigger` — async trigger handlers persisted to `smeldr_transition_triggers` by `RegisterFlow`; idempotent

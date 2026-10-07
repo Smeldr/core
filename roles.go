@@ -32,6 +32,19 @@ const (
 	// Agent classifies an actor as an AI agent rather than a human. See [Job]
 	// for the same classification-tag convention.
 	Agent Role = "agent"
+
+	// Human classifies an actor as an attested person (D105). It is a
+	// classification tag like [Job] and [Agent]: outside the role hierarchy,
+	// never granting or changing a permission. An actor with none of the three
+	// tags records [ProvenanceRecord.ActorKind] "unclassified". Mint a token
+	// with it through [TokenStore.CreateClassified]. A token may be Human only if
+	// every use of it is the direct result of one authenticated request by that
+	// person (an interactive session, or a personal token a service uses only
+	// inside that person's own request); a token that software uses on its own
+	// initiative is never Human. If more than one tag is present the
+	// order is Job, then Agent, then Human: an automated actor never reads as a
+	// person.
+	Human Role = "human"
 )
 
 // roleMu protects roleLevels for concurrent custom role registration.

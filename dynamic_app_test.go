@@ -747,7 +747,7 @@ func TestAdminSetStatus_RecordsProvenanceWithHTTPSurface(t *testing.T) {
 	if r.Verb != "transition" || r.FromState != "draft" || r.ToState != "published" {
 		t.Errorf("verb/from/to = %s/%s/%s, want transition/draft/published", r.Verb, r.FromState, r.ToState)
 	}
-	if r.Surface != "http" || r.ActorID != "u1" || r.ActorKind != "human" {
+	if r.Surface != "http" || r.ActorID != "u1" || r.ActorKind != "unclassified" {
 		t.Errorf("surface/actor/kind = %q/%q/%q, want http/u1/human", r.Surface, r.ActorID, r.ActorKind)
 	}
 	var lastActor string

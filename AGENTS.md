@@ -440,15 +440,25 @@ Write operations require `Author` role or higher. The Bearer token you
 were given determines your role. If an operation returns `forbidden`,
 you do not have sufficient role — do not retry.
 
-**Actor classification (`Job`/`Agent` roles, T178/A224):** two `Role`
-constants exist purely to classify *who* is acting, not *what* they're
-permitted to do — include one alongside a real permission role in a token's
-`Roles` (e.g. `[]Role{Editor, Job}`) to have that actor recorded as
-`ActorKind: "job"` or `"agent"` (instead of `"human"`) in
-`ProvenanceRecord`s written by `App.Provenance()`. No tool documented here
-currently mints a `Job`- or `Agent`-tagged token — this is a mechanism for a
-future job-runner or agent-authentication integration, not a capability any
-MCP tool exposes today.
+**Actor classification (`Job`/`Agent`/`Human` tags, A224, A416, D105):** three `Role`
+constants classify *who* is acting, not *what* they may do. They are outside
+the permission hierarchy and never grant or change a permission. Mint a
+classified token with `TokenStore.CreateClassified(ctx, name, role, class, ttl)`
+(`class` is `smeldr.Agent`, `smeldr.Job` or `smeldr.Human`), or with the
+`create_token` tool's optional `actor_class` (mcp v1.48.0) or
+`smeldr-cli token create ... --class` (cli v0.19.0); the token then carries
+`[editor, agent]` and provenance records `ActorKind` `"agent"`, `"job"` or
+`"human"`. **An actor with no tag records `"unclassified"`** (since core
+v1.121.0): a token from `Create`/`CreateWithID`, a session or Basic-auth user.
+It never claims to be a person. The Admin who mints a token attests its class:
+. When several tags are
+present the order is job, agent, human. **Before v1.121.0 an untagged actor
+recorded `"human"` and no token could carry a tag; older provenance rows keep
+that value and mean unclassified, not a verified person.** An issued token
+cannot be classified afterwards: issue a new one and revoke the old one.
+`list_tokens` shows each token's stored `ActorClass`; call
+`smeldr.EnsureTokenActorClassColumn` at boot (a classified mint on a table
+without the column is refused).
 
 ### Available tools (MCPWrite)
 
@@ -525,7 +535,7 @@ nothing those three protect, only a name for an ID already visible elsewhere (se
 
 | Tool | Role | Description |
 |------|------|-------------|
-| `create_token` | Admin | Issues a new named token with a given role and TTL. Returns `token_id` alongside the raw token — pass it directly to `grant_role`. |
+| `create_token` | Admin | Issues a new named token with a given role and TTL; optional `actor_class` (`agent`, `job` or `human`, mcp v1.48.0, never changes permissions). Returns `token_id` alongside the raw token — pass it directly to `grant_role`. |
 | `list_tokens` | Admin | Lists all tokens with name, role, expiry, revoked status, and `user_id` (the JWT identity this token was minted for — `null` for a token created before this field existed) |
 | `revoke_token` | Admin | Revokes a token by ID — effective immediately |
 | `lookup_token_names` | Author | Batch-resolves a list of `user_id` values (e.g. from `last_actor`, `RoleGrant.Grantor`, or a relation edge's `created_by`) back to each token's own `Name`. An ID with no matching token is simply absent from the result, never guessed. |

@@ -73,7 +73,7 @@ func TestTransitionItemVia_Compiled_RecordsProvenance(t *testing.T) {
 		wantActor string
 		wantKind  string
 	}{
-		{"human via mcp", NewTestContext(User{ID: "u-human", Roles: []Role{Editor}}), "mcp", "u-human", "human"},
+		{"untagged via mcp", NewTestContext(User{ID: "u-human", Roles: []Role{Editor}}), "mcp", "u-human", "unclassified"},
 		{"job via trigger", NewTestContext(User{ID: "u-job", Roles: []Role{Editor, Job}}), "trigger", "u-job", "job"},
 		{"agent via http", NewTestContext(User{ID: "u-agent", Roles: []Role{Editor, Agent}}), "http", "u-agent", "agent"},
 		{"plain context, unattributable", context.Background(), "", "", ""},
@@ -226,7 +226,7 @@ func TestTransitionItemVia_Dynamic_RecordsOnce(t *testing.T) {
 	}
 	r := got[0]
 	if r.SubjectType != typeName || r.Verb != "transition" || r.FromState != "draft" || r.ToState != "published" ||
-		r.ActorID != "u-dyn" || r.ActorKind != "human" || r.Surface != "mcp" || r.Reason != "go live" {
+		r.ActorID != "u-dyn" || r.ActorKind != "unclassified" || r.Surface != "mcp" || r.Reason != "go live" {
 		t.Errorf("unexpected record: %+v", r)
 	}
 }

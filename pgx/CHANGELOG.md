@@ -13,6 +13,7 @@ within the `smeldr/core` repository, not a standalone repo.
 ## [Unreleased]
 
 ### Added
+- Postgres integration test for classified tokens (`actor_class` added to a table that predates it, the refused classified mint before that, mint and list), proving core v1.121.0. Tests only: no change to the adapter, so no tag.
 - Postgres integration test for `App.ItemsStateSince` (latest transition wins, verb and type filters, same-second ties, a state mismatch, more than one chunk of ids), proving core v1.120.0. Tests only: no change to the adapter, so no tag.
 - Postgres integration test for `PageMetaStore` (set, get, replace, list, delete), proving core v1.119.3. Tests only: no change to the adapter, so no tag.
 - Postgres integration tests for runtime-defined content types (reads and writes, the `Locked` check, `SetStatus`, `ScheduleContent`, the conflict policy and its transaction, `SeedBlockTypeSchemas`), proving core v1.119.2. Tests only: no change to the adapter, so no tag.
