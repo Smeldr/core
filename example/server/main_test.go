@@ -348,7 +348,12 @@ func TestServerToggles(t *testing.T) {
 		cfg.EnableProvenance = true
 		cfg.EnableOrchestration = true
 		ts := buildTestServer(t, cfg)
-		authorToken := createToken(t, ts, "author", "author")
+		// A token classified human (D105): an untagged token's actor is
+		// recorded "unclassified", and this row asserts a human actor.
+		authorToken, _, err := ts.TokenStore.CreateClassified(context.Background(), "author", "author", smeldr.Human, 24*time.Hour)
+		if err != nil {
+			t.Fatalf("CreateClassified: %v", err)
+		}
 
 		// No explicit status — proves the T180/A225 fix from a third angle:
 		// create_goal must default to Goal's own registered initial state
