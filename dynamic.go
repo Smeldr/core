@@ -94,11 +94,12 @@ func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fi
 		return nil, fmt.Errorf("smeldr: CreateDraft marshal: %w", err)
 	}
 	base := titleSlug(r.schema, fields)
-	slug := r.uniqueSlug(ctx, base)
+	id := NewID()
+	slug := r.uniqueSlug(ctx, base, id)
 	now := time.Now().UTC()
 	node := &DynamicNode{
 		Node: Node{
-			ID:        NewID(),
+			ID:        id,
 			Slug:      slug,
 			Status:    Draft,
 			CreatedAt: now,
@@ -111,7 +112,16 @@ func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fi
 	node.LastActor = actorID
 	repo := NewDynamicContentRepo(r.db)
 	if err := repo.Save(ctx, node); err != nil {
-		return nil, fmt.Errorf("smeldr: CreateDraft save: %w", err)
+		// Another create took the slug between uniqueSlug and the insert (the
+		// unique (type_name, slug) index refused this one): retry once under
+		// the collision-checked fallback. Any other error is returned.
+		if !r.slugExists(ctx, slug) {
+			return nil, fmt.Errorf("smeldr: CreateDraft save: %w", err)
+		}
+		node.Slug = r.fallbackSlug(ctx, base, id)
+		if err := repo.Save(ctx, node); err != nil {
+			return nil, fmt.Errorf("smeldr: CreateDraft save: %w", err)
+		}
 	}
 	created := stateChange{
 		typeName: r.typeName, id: node.ID, to: string(node.Status),
@@ -434,17 +444,69 @@ func PluralSnake(name string) string {
 	return name + "s"
 }
 
-func (r *DynamicTypeRepo) uniqueSlug(ctx context.Context, base string) string {
-	if !r.slugExists(ctx, base) {
-		return base
+// slugCandidates is how many numbered slugs (base, base-2 .. base-N) a new
+// dynamic item tries before the fallback.
+const slugCandidates = 100
+
+// uniqueSlug returns the first free slug of base, base-2 .. base-100 for this
+// type, read in one query, and [DynamicTypeRepo.fallbackSlug] when all are
+// taken. id is the new item's own ID. A query error reads as "none taken"
+// (fail-open, as slugExists): the insert, and the unique (type_name, slug)
+// index, decide then.
+func (r *DynamicTypeRepo) uniqueSlug(ctx context.Context, base, id string) string {
+	candidates := make([]string, 0, slugCandidates)
+	candidates = append(candidates, base)
+	for i := 2; i <= slugCandidates; i++ {
+		candidates = append(candidates, fmt.Sprintf("%s-%d", base, i))
 	}
-	for i := 2; i <= 100; i++ {
-		candidate := fmt.Sprintf("%s-%d", base, i)
-		if !r.slugExists(ctx, candidate) {
-			return candidate
+	taken := r.takenSlugs(ctx, candidates)
+	for _, c := range candidates {
+		if !taken[c] {
+			return c
 		}
 	}
-	return base + "-" + NewID()[:8]
+	return r.fallbackSlug(ctx, base, id)
+}
+
+// fallbackSlug is the slug of a new item whose numbered candidates are all
+// taken: base and the last 8 hex characters of its own ID, which are random
+// (the leading ones are the UUIDv7 timestamp and repeat for ~65 s), or base
+// and the whole ID when even that is taken. The ID is the primary key, so the
+// last form cannot collide.
+func (r *DynamicTypeRepo) fallbackSlug(ctx context.Context, base, id string) string {
+	if len(id) > 8 {
+		if tail := base + "-" + id[len(id)-8:]; !r.slugExists(ctx, tail) {
+			return tail
+		}
+	}
+	return base + "-" + id
+}
+
+// takenSlugs returns which of candidates this type already uses, in one
+// query. A query error returns an empty set.
+func (r *DynamicTypeRepo) takenSlugs(ctx context.Context, candidates []string) map[string]bool {
+	args := make([]any, 0, len(candidates)+1)
+	args = append(args, r.typeName)
+	ph := make([]string, len(candidates))
+	for i, c := range candidates {
+		args = append(args, c)
+		ph[i] = "$" + strconv.Itoa(i+2)
+	}
+	taken := map[string]bool{}
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT slug FROM smeldr_dynamic_content WHERE type_name = $1 AND slug IN ("+strings.Join(ph, ",")+")",
+		args...)
+	if err != nil {
+		return taken
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var s string
+		if rows.Scan(&s) == nil {
+			taken[s] = true
+		}
+	}
+	return taken
 }
 
 func (r *DynamicTypeRepo) slugExists(ctx context.Context, slug string) bool {

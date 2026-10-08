@@ -3,6 +3,8 @@ package smeldr
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
+	"strings"
 )
 
 // DynamicNode is the generic content type backing every block in the Smeldr
@@ -68,7 +70,8 @@ func NewDynamicContentRepo(db DB) *SQLRepo[*DynamicNode] {
 // CreateBlockTables creates the block-system tables if they do not already
 // exist: smeldr_dynamic_content (block storage) and smeldr_content_edges
 // (composition edges), plus the index that serves the ordered child-list read
-// path. Call once at application startup before using [NewDynamicContentRepo]
+// path and the unique (type_name, slug) index for non-empty slugs (skipped,
+// with a warning per duplicate, while duplicates exist). Call once at application startup before using [NewDynamicContentRepo]
 // or [NewContentEdgeStore].
 //
 // The function is idempotent (CREATE TABLE IF NOT EXISTS) and safe to call on
@@ -117,5 +120,65 @@ CREATE INDEX IF NOT EXISTS idx_content_edges_parent
 		return err
 	}
 
+	return ensureDynamicSlugIndex(ctx, db)
+}
+
+// ensureDynamicSlugIndex creates the partial unique index on
+// smeldr_dynamic_content (type_name, slug) for non-empty slugs, so one type
+// can never hold two items under one address. Blocks may carry an empty
+// slug, which the index leaves alone.
+//
+// Duplicates that already exist are never rewritten: when there are any, each
+// is logged (type, slug and the ids holding it) and the index is skipped, so
+// boot goes on. Resolve them (give all but one a new slug) and the next boot
+// creates the index. A failure of the CREATE INDEX statement itself is
+// handled the same way: logged, index skipped, boot goes on. Only a failure
+// to run the duplicate scan is returned.
+func ensureDynamicSlugIndex(ctx context.Context, db DB) error {
+	rows, err := db.QueryContext(ctx, `
+SELECT type_name, slug, id FROM smeldr_dynamic_content
+WHERE slug <> '' AND (type_name, slug) IN (
+	SELECT type_name, slug FROM smeldr_dynamic_content
+	WHERE slug <> '' GROUP BY type_name, slug HAVING COUNT(*) > 1)
+ORDER BY type_name, slug, id`)
+	if err != nil {
+		return err
+	}
+	type key struct{ typeName, slug string }
+	var order []key
+	ids := map[key][]string{}
+	for rows.Next() {
+		var k key
+		var id string
+		if err := rows.Scan(&k.typeName, &k.slug, &id); err != nil {
+			rows.Close()
+			return err
+		}
+		if _, seen := ids[k]; !seen {
+			order = append(order, k)
+		}
+		ids[k] = append(ids[k], id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if len(order) > 0 {
+		for _, k := range order {
+			slog.WarnContext(ctx, "smeldr: dynamic content slug held by more than one item; unique slug index not created until resolved",
+				"type", k.typeName, "slug", k.slug, "ids", strings.Join(ids[k], ","))
+		}
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_content_type_slug
+	ON smeldr_dynamic_content (type_name, slug) WHERE slug <> ''`); err != nil {
+		// A duplicate written between the scan and this statement, or any
+		// other refusal, must not fail boot either: the index is skipped the
+		// same way, and the next boot tries again.
+		slog.WarnContext(ctx, "smeldr: dynamic content unique slug index not created; boot continues without it",
+			"error", err)
+	}
 	return nil
 }

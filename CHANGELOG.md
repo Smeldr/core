@@ -23,6 +23,23 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.134.0] - 2026-10-08
+
+### Behaviour change
+
+- **A dynamic type never holds two items under one slug** (A443, D97). `CreateBlockTables` now creates a unique index on `smeldr_dynamic_content (type_name, slug)` for non-empty slugs, so a write that would give a second item of a type an existing slug is refused. Empty slugs (blocks) are not affected. If an existing database already has duplicates, `CreateBlockTables` logs each one (`smeldr: dynamic content slug held by more than one item`, with the type, slug and ids), skips the index and changes no row: give all but one a new slug and the next boot creates the index. If the `CREATE INDEX` statement itself fails (a duplicate written after the scan, for one), that is logged too (`smeldr: dynamic content unique slug index not created`) and boot goes on; only a failure to run the duplicate scan is returned. No step of the change fails a boot on existing data.
+- **New slugs in a saturated type change shape.** When `base` .. `base-100` are all taken, a new item's slug is `base-` plus the last 8 hex characters of its own id (random), or `base-` plus the whole id if that is taken too. It used to be `base-` plus the id's first 8 characters, a timestamp prefix that repeats for about 65 seconds.
+
+### Fixed
+
+- Two dynamic items of a type whose numbered slugs were used up, created within about 65 seconds of each other, got the same slug, and the second could not be reached by slug. A create that loses its slug to a concurrent one between the check and the insert is now retried once under the fallback.
+
+### Performance
+
+- A dynamic create finds its slug with one query over the 100 candidates instead of up to 100 queries.
+
+---
+
 ## [1.133.0] - 2026-10-08
 
 ### Behaviour change

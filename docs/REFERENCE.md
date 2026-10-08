@@ -4393,6 +4393,21 @@ plain `context.Context` is a system write with no actor.
 - Nothing is backfilled: earlier creates and edits of dynamic items have no
   entry.
 
+**Slugs (v1.134.0).** A new dynamic item's slug comes from its
+schema's title field (`item` when there is none). The first free one of
+`base`, `base-2` .. `base-100` is taken, read in one query. When all are taken
+the slug is `base-` and the last 8 hex characters of the item's own id (its
+random tail), or `base-` and the whole id if that is taken too. One type never
+holds two items under one non-empty slug: `CreateBlockTables` creates the
+unique index `idx_dynamic_content_type_slug` on `(type_name, slug) WHERE slug
+<> ''`. If duplicates already exist it logs each one (`smeldr: dynamic content
+slug held by more than one item`, with the type, slug and ids), skips the index
+and changes no row; give all but one of each a new slug and the next boot
+creates the index. A failure of the `CREATE INDEX` statement itself is logged
+the same way and boot goes on; only a failure to run the duplicate scan is
+returned. A create that loses its slug to a concurrent one is retried
+once under the fallback.
+
 **Database migration**
 
 When upgrading an existing database that pre-dates A154, call once at startup:
