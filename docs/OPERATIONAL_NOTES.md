@@ -139,9 +139,16 @@ carries the incident that produced it.
 1. **cli version string.** `cliVersion` in `cmd/smeldr-cli/main.go` is set by hand.
    Build the binary and compare `smeldr-cli --version` with the tag before tagging.
    cli v0.19.0 shipped printing 0.18.0; v0.20.0 fixed it.
-2. **staticcheck before every push**, in core and in every module whose CI runs it
-   (mcp). A tests-only mcp commit went red in CI on SA4006 while `go vet` and the
-   tests were green.
+2. **staticcheck before every push**, in core and in every standalone module: all six
+   (mcp, cli, media, social, oauth, agent) run it in CI, pinned to v0.8.1 (2026.2.1)
+   since 2026-10-08. Run the same version locally
+   (`go install honnef.co/go/tools/cmd/staticcheck@v0.8.1`); a newer local one can
+   report checks CI does not run, an older one can miss them. Raise the pin in all six
+   in one round. A tests-only mcp commit went red in CI on SA4006 while `go vet` and
+   the tests were green; social had nine findings in test files while its CI did not
+   run staticcheck. A deliberate exception is marked with staticcheck's own
+   `//lint:ignore <check> <reason>`, not golangci-lint's `//nolint`, which
+   staticcheck ignores.
 3. **Amendment number placeholder.** While planning and building, write `@@AMEND@@`
    in docs (and `@@VERSION@@` on a branch whose release is held). After approval,
    read the live `^A\d+$` maximum (`list_amendments`) and substitute max+1 everywhere:
