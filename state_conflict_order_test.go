@@ -333,8 +333,8 @@ func TestConflictPlan_NilIsSafe(t *testing.T) {
 	if got := p.supersede(context.Background(), nil); got != nil {
 		t.Errorf("nil plan supersede = %v", got)
 	}
-	p.afterCommit(context.Background(), nil, nil, nil, "", []string{"x"})
-	p.run(context.Background(), nil, nil, nil, "")
+	p.afterCommit(context.Background(), nil, nil, nil, nil, true, "", []string{"x"})
+	p.run(context.Background(), nil, nil, nil, nil, true, "")
 }
 
 // TestConflictTx covers the three outcomes of starting the write transaction.

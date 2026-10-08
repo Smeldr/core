@@ -39,9 +39,11 @@ const (
 	// transition_item, the scheduler), followed by the status event the change
 	// calls for (AfterPublish, AfterUnpublish, AfterArchive, AfterSchedule),
 	// exactly as a PUT making the same change fires them. App-level
-	// subscribers ([App.OnSignal], the event stream, webhooks) are fed per
-	// path as before: transition_item reaches them as its own
-	// "<type>.transitioned" event, not as these events.
+	// subscribers ([App.OnSignal], the event stream, webhooks) get it for a
+	// content edit only (D107): a status change reaches them as one
+	// "<type>.transitioned" event plus the status events above, the same on
+	// every path, and a PUT that changes the status gives them AfterUpdate
+	// only when it also changed content.
 	// Runs asynchronously — errors and panics are logged, never returned.
 	AfterUpdate LifecycleEvent = "after_update"
 
@@ -93,6 +95,16 @@ const (
 	//   - ActorID holds the NodeID of the changed target item (for traceability),
 	//     not a human actor ID.
 	AfterRelationCascade LifecycleEvent = "relation.cascade"
+
+	// AfterTransition is delivered only to [App.AddSignalListener] callbacks,
+	// once per status change of an item on every path (HTTP PUT, the MCP
+	// lifecycle tools, the scheduler, transition_item, a runtime-defined
+	// type's status change, an item a conflict supersedes), with the item in
+	// its new state (D107). It is not a bus signal: no [App.OnSignal] handler,
+	// module [On] handler, webhook or event-stream line receives it; those get
+	// the "<type>.transitioned" event and the named milestones instead. A
+	// listener that switches over the events it knows ignores it by default.
+	AfterTransition LifecycleEvent = "after_transition"
 )
 
 // signalHandler is the internal, type-erased handler signature used by
@@ -148,8 +160,14 @@ func dispatchBefore(ctx Context, handlers []signalHandler, payload any) error {
 
 // dispatchAfter runs all handlers in a single goroutine, asynchronously.
 // Errors are logged. Panics are recovered and logged. Nothing is returned
-// to the caller — the request has already completed.
+// to the caller: the request has already completed. The handlers get ctx
+// without the caller's conflict-lock mark ([withoutConflictHold]): they run
+// after the lock is released.
 func dispatchAfter(ctx Context, handlers []signalHandler, payload any) {
+	if len(handlers) == 0 {
+		return
+	}
+	ctx = withoutConflictHoldContext(ctx)
 	go func() {
 		for _, h := range handlers {
 			if err := safeCall(ctx, h, payload); err != nil {
@@ -277,6 +295,12 @@ type SignalEvent struct {
 	// to thread; several typed-content call sites do not yet (T237).
 	Reason string
 
+	// fromTransition marks a milestone event ([AfterPublish] and the others
+	// [statusSignals] names) dispatched by [App.afterStatusChange], which has
+	// already written the transition's provenance record and standing: the
+	// [App.Provenance] subscriber skips it (D107).
+	fromTransition bool
+
 	// raw holds the original content item. Used internally by the webhook
 	// delivery handler to build the full payload. Not exposed to external
 	// OnSignal subscribers.
@@ -306,6 +330,10 @@ type afterHookMeta struct {
 	// see [SignalEvent.Reason]. Threaded from [Module.notifyAfter]'s own
 	// reason parameter (T243).
 	Reason string
+
+	// FromTransition is set by [App.afterStatusChange] on the milestone events
+	// it dispatches; it becomes [SignalEvent]'s fromTransition.
+	FromTransition bool
 }
 
 // buildSignalEvent constructs a [SignalEvent] from the parameters available
@@ -327,18 +355,19 @@ func buildSignalEvent(ctx Context, _ LifecycleEvent, meta afterHookMeta, item an
 	}
 	url := strings.TrimRight(baseURL, "/") + meta.Prefix + "/" + slug
 	return SignalEvent{
-		Type:          meta.TypeName,
-		Slug:          slug,
-		NodeID:        n.ID,
-		Title:         title,
-		URL:           url,
-		Timestamp:     time.Now(),
-		PreviousState: meta.PrevState,
-		ActorRole:     role,
-		ActorID:       actorID,
-		ActorRoles:    actorRoles,
-		Surface:       meta.Surface,
-		Reason:        meta.Reason,
-		raw:           item,
+		Type:           meta.TypeName,
+		Slug:           slug,
+		NodeID:         n.ID,
+		Title:          title,
+		URL:            url,
+		Timestamp:      time.Now(),
+		PreviousState:  meta.PrevState,
+		ActorRole:      role,
+		ActorID:        actorID,
+		ActorRoles:     actorRoles,
+		Surface:        meta.Surface,
+		Reason:         meta.Reason,
+		fromTransition: meta.FromTransition,
+		raw:            item,
 	}
 }

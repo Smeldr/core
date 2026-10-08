@@ -638,6 +638,11 @@ func (a *App) Content(v any, opts ...Option) {
 		}); ok {
 			a.hookableModules = append(a.hookableModules, hk)
 		}
+		if sa, ok := r.(interface {
+			setStatusAnnouncer(func(context.Context, statusTransition))
+		}); ok {
+			sa.setStatusAnnouncer(a.afterStatusChange)
+		}
 		if tm, ok := r.(transitionHookModule); ok {
 			if a.transitionModules == nil {
 				a.transitionModules = map[string][]transitionHookModule{}
@@ -1318,16 +1323,7 @@ func (a *App) wireSignalBus() {
 	if !hasBus && len(a.signalListeners) == 0 && a.eventBroadcaster == nil {
 		return
 	}
-	app := a
-	listeners := a.signalListeners
-
-	fn := func(ctx Context, sig LifecycleEvent, meta afterHookMeta, item any) {
-		ev := buildSignalEvent(ctx, sig, meta, item, app.cfg.BaseURL)
-		app.dispatchBus(ctx, ev, sig)
-		for _, l := range listeners {
-			l(sig, meta.TypeName, item)
-		}
-	}
+	fn := a.signalBus
 
 	for _, m := range a.hookableModules {
 		m.setAfterHook(fn)

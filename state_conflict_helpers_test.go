@@ -14,7 +14,7 @@ func applyConflictPolicy(ctx context.Context, db DB, rs *RelationStore, prov Pro
 		return err
 	}
 	defer plan.release()
-	plan.run(ctx, db, rs, prov, surface)
+	plan.run(ctx, db, rs, prov, nil, true, surface)
 	return nil
 }
 
@@ -35,6 +35,6 @@ func conflictSupersede(ctx context.Context, db DB, rs *RelationStore, prov Prove
 		return nil
 	}
 	plan := &conflictPlan{typeName: typeName, activeState: activeState, newItemID: newItemID, table: table, isDynamic: isDynamic, losers: losers}
-	plan.run(ctx, db, rs, prov, surface)
+	plan.run(ctx, db, rs, prov, nil, true, surface)
 	return nil
 }

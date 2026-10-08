@@ -334,6 +334,9 @@ func currentStatusOf(item any) (status string) {
 
 // Provenance wires store to record a [ProvenanceRecord] for every completed
 // lifecycle transition on every Node-subject (see [provenanceLifecycleEvents]).
+// A status change is recorded once, by the transition itself on every path
+// (D107); the subscriber records creations, content edits and deletions, and
+// skips the status events a transition dispatches.
 // Additive and independent of [App.Audit] — both may be wired at once; the four
 // events they both cover (AfterPublish/AfterSchedule/AfterArchive/AfterDelete)
 // produce one record in each store, not a shared or migrated one. This is
@@ -352,6 +355,11 @@ func (a *App) Provenance(store ProvenanceStore) *App {
 	for _, sig := range provenanceLifecycleEvents {
 		s := sig
 		a.OnSignal(s, func(ctx context.Context, ev SignalEvent) error {
+			if ev.fromTransition {
+				// The transition's own record is already written, once, by
+				// App.afterStatusChange (D107).
+				return nil
+			}
 			toState := currentStatusOf(ev.raw)
 			recordStateChange(ctx, a.provenanceStore, stateChange{
 				typeName:  ev.Type,

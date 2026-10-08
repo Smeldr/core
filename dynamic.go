@@ -24,6 +24,11 @@ type DynamicTypeRepo struct {
 	rs       *RoleStore         // nil unless WithGovernance was called
 	relStore *RelationStore     // nil unless WithRelations was called
 	prov     ProvenanceStore    // nil unless WithProvenance was called
+	// announce records and announces a committed status change
+	// ([App.afterStatusChange], D107); set by [App.DynamicContentRepo]. Nil for
+	// a repository built without an App, which records provenance and standing
+	// only.
+	announce func(context.Context, statusTransition)
 }
 
 // NewDynamicTypeRepo returns a DynamicTypeRepo bound to the given type name.
@@ -355,10 +360,48 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 	if err := commit(); err != nil {
 		return fmt.Errorf("%w: SetStatus: commit: %s", ErrInternal, err)
 	}
-	plan.afterCommit(ctx, r.db, r.relStore, r.prov, surface, moved)
-	recordTransitionProvenance(ctx, r.db, r.prov, r.typeName, id, string(node.Status), string(status), reason, surface)
+	plan.afterCommit(ctx, r.db, r.relStore, r.prov, r.announce, true, surface, moved)
+	changed := *node
+	changed.Status = status
+	changed.PublishedAt = publishedAt
+	changed.UpdatedAt = now
+	changed.LastActor = actorID
+	r.statusChanged(ctx, &changed, node.Status, reason, surface)
 	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(status), id)
 	return nil
+}
+
+// statusChanged records and announces a committed status change of changed
+// (the item in its new state) from the state from: through the App
+// ([App.afterStatusChange], D107) when the repository came from
+// [App.DynamicContentRepo], else its provenance record and standing only.
+func (r *DynamicTypeRepo) statusChanged(ctx context.Context, changed *DynamicNode, from Status, reason, surface string) {
+	if r.announce == nil {
+		recordTransitionProvenance(ctx, r.db, r.prov, r.typeName, changed.ID, string(from), string(changed.Status), reason, surface)
+		return
+	}
+	r.announce(ctx, statusTransition{
+		typeName:   r.typeName,
+		id:         changed.ID,
+		slug:       changed.Slug,
+		from:       string(from),
+		to:         string(changed.Status),
+		surface:    surface,
+		reason:     reason,
+		milestones: true,
+		item:       changed,
+		prefix:     r.urlPrefix(),
+		store:      r.prov,
+		storeSet:   true,
+	})
+}
+
+// urlPrefix is the type's public URL prefix from its schema, "" when it has none.
+func (r *DynamicTypeRepo) urlPrefix() string {
+	if r.schema == nil {
+		return ""
+	}
+	return r.schema.URLPrefix
 }
 
 // ScheduleContent transitions the node to [Scheduled] status and records the
@@ -396,8 +439,13 @@ func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, schedu
 	if err != nil {
 		return err
 	}
-	plan.run(ctx, r.db, r.relStore, r.prov, "")
-	recordTransitionProvenance(ctx, r.db, r.prov, r.typeName, id, string(node.Status), string(Scheduled), "", "")
+	plan.run(ctx, r.db, r.relStore, r.prov, r.announce, true, "")
+	changed := *node
+	changed.Status = Scheduled
+	changed.ScheduledAt = &scheduledAt
+	changed.UpdatedAt = now
+	changed.LastActor = actorID
+	r.statusChanged(ctx, &changed, node.Status, "", "")
 	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(Scheduled), id)
 	return nil
 }
@@ -599,6 +647,7 @@ func (a *App) DynamicContentRepo(typeName string) (*DynamicTypeRepo, error) {
 	if a.provenanceStore != nil {
 		repo = repo.WithProvenance(a.provenanceStore)
 	}
+	repo.announce = a.afterStatusChange
 	return repo, nil
 }
 

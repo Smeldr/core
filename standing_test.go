@@ -300,8 +300,10 @@ func TestModulePath_Standing(t *testing.T) {
 				t.Errorf("after archive: %q, want ceased", s)
 			}
 			got := verbsOf(prov.Appended())
-			if withProv && strings.Join(got, ",") != "standing-began,standing-ended" {
-				t.Errorf("events = %v, want standing-began then standing-ended (the signal subscriber, not wired here, writes the transition records)", got)
+			// D107: the transition writes its own record on every path, also for
+			// a module used without an App.
+			if withProv && strings.Join(got, ",") != "transition,standing-began,transition,standing-ended" {
+				t.Errorf("events = %v, want each transition record followed by its standing event", got)
 			}
 			if !withProv && len(got) != 0 {
 				t.Errorf("events written without a provenance store: %v", got)

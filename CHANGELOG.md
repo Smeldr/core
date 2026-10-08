@@ -23,6 +23,33 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.137.0] - 2026-10-08
+
+### Behaviour change
+
+**One record and one event per status change, the same on every path (A452, D107, D97).**
+
+- **`after_update` / `x.updated` now mean a content edit only.** A status change through HTTP PUT no longer fires them for `App.OnSignal` subscribers, the event stream or webhooks unless the PUT also changed content (anything but `Status`, `PublishedAt`, `ScheduledAt`, `UpdatedAt`, `CreatedAt`, `Rev` and the last writer). An agent job or webhook keyed on `after_update`/`x.updated` stops running on a status-only PUT; key it on `x.transitioned` or on the status event (`after_publish` and so on) instead. A module's own `On` handlers are unchanged: they still get `AfterUpdate` plus the status events on every path.
+- Every status change, through any door (HTTP PUT, the MCP lifecycle tools, the scheduler, `transition_item`, a runtime-defined type's `set_content_status`/`SetStatus`/`ScheduleContent`, an item a conflict supersedes, `DrainEvalQueue`), now gives exactly one provenance record and standing write, one `<type>.transitioned` event (stream and webhooks) and the named status events (`<type>.published`, `.unpublished`, `.archived`, `.scheduled`) once each. Before, a status-changing PUT wrote two or three records and events; `transition_item` and dynamic types reached no `OnSignal` subscriber (Audit, the relations cascade, agent jobs, social routes); dynamic types and superseded items sent no event at all; and `x.transitioned` came from `transition_item` only.
+- `DrainEvalQueue` and a target state with `SuppressesSignals` send no status events: the record, `x.transitioned` and `AfterTransition` still go out. For the drain this keeps the T211/D51 exclusion: background automation does not activate human-publish subscribers.
+- The MCP `archive_*` tool on a published item now also gives `AfterUnpublish` on the bus, as a PUT making the same change does.
+- Provenance written before this version may repeat one transition two or three times (same subject, verb `transition`, from, to, actor and surface, within the same second). Nothing is rewritten; a reader that counts transitions collapses those.
+
+### Added
+
+- `AfterTransition`, a `LifecycleEvent` delivered only to `App.AddSignalListener` callbacks, once per status change on every path, with the item in its new state. It is not a bus signal: no `On` or `OnSignal` handler, webhook or stream line receives it. smeldr.dev/mcp uses it, so resource subscribers are notified when `transition_item` moves an item of a compiled type.
+
+### Changed
+
+- The MCP `publish_*`, `schedule_*` and `archive_*` tools store their `reason` on the transition's provenance record and its `x.transitioned` event (before, it gated the transition only).
+
+### Fixed
+
+- An `OnSignal` handler (or a module's own `On` After handler) that transitioned an item of the same type could bypass the conflict lock: the handlers ran after the transition released the lock, with a context still saying it was held, so a nested transition skipped the lock and could leave two items in a flow's `ActiveState`. Async handlers now get the context without that mark.
+- doc.go's `OnSignal` example used a field `SignalEvent` does not have (`ev.ContentType`; it is `ev.Type`).
+
+---
+
 ## [1.136.0] - 2026-10-08
 
 ### Added

@@ -1194,30 +1194,48 @@ func (p *conflictPlan) supersede(ctx context.Context, exec DB) []string {
 }
 
 // afterCommit records what [conflictPlan.supersede] did, once the winning
-// transition and the losers are committed: for each moved item one
-// [ProvenanceRecord] and its standing ([applyStateChange], actor from ctx, the
-// winning transition's surface, reason naming the winner) and, when the
-// instance wired [App.Relations] and a "supersedes" kind permitting
-// typeName to typeName is registered, the supersedes edge from the winner by
-// item ID ([supersedeEdgeAllowed]). Nothing is recorded for an item that was
+// transition and the losers are committed: each moved item's change goes
+// through announce ([App.afterStatusChange]: one [ProvenanceRecord] and its
+// standing, its "<type>.transitioned" event and its milestones, D107), with
+// the actor from ctx, the winning transition's surface and a reason naming the
+// winner; with no announcer (a module or repository used without an App) the
+// record and standing only ([applyStateChange]). When the instance wired
+// [App.Relations] and a "supersedes" kind permitting typeName to typeName is
+// registered, the supersedes edge from the winner by item ID
+// ([supersedeEdgeAllowed]) follows. Nothing is recorded for an item that was
 // not moved, so a rolled-back or failed change leaves no trace. Fail-open.
-func (p *conflictPlan) afterCommit(ctx context.Context, db DB, rs *RelationStore, prov ProvenanceStore, surface string, moved []string) {
+func (p *conflictPlan) afterCommit(ctx context.Context, db DB, rs *RelationStore, prov ProvenanceStore, announce func(context.Context, statusTransition), milestones bool, surface string, moved []string) {
 	if p == nil || len(moved) == 0 {
 		return
 	}
 	actorID, actorKind := actorFromContext(ctx)
 	assertEdge := supersedeEdgeAllowed(ctx, rs, p.typeName, p.newItemID)
 	for _, oldID := range moved {
-		applyStateChange(ctx, db, prov, stateChange{
-			typeName:  p.typeName,
-			id:        oldID,
-			from:      p.activeState,
-			to:        "superseded",
-			reason:    "superseded by " + p.typeName + " " + p.newItemID,
-			surface:   surface,
-			actorKind: actorKind,
-			actorID:   actorID,
-		})
+		reason := "superseded by " + p.typeName + " " + p.newItemID
+		if announce != nil {
+			announce(ctx, statusTransition{
+				typeName:   p.typeName,
+				id:         oldID,
+				from:       p.activeState,
+				to:         "superseded",
+				surface:    surface,
+				reason:     reason,
+				milestones: milestones,
+				store:      prov,
+				storeSet:   true,
+			})
+		} else {
+			applyStateChange(ctx, db, prov, stateChange{
+				typeName:  p.typeName,
+				id:        oldID,
+				from:      p.activeState,
+				to:        "superseded",
+				reason:    reason,
+				surface:   surface,
+				actorKind: actorKind,
+				actorID:   actorID,
+			})
+		}
 		if assertEdge {
 			if relErr := rs.Assert(ctx, RelationEdge{
 				SourceType:   p.typeName,
@@ -1238,8 +1256,8 @@ func (p *conflictPlan) afterCommit(ctx context.Context, db DB, rs *RelationStore
 // write cannot share a transaction with the losers (the Module paths write the
 // winner through the module's own repository): call it right after the winner
 // was saved.
-func (p *conflictPlan) run(ctx context.Context, db DB, rs *RelationStore, prov ProvenanceStore, surface string) {
-	p.afterCommit(ctx, db, rs, prov, surface, p.supersede(ctx, db))
+func (p *conflictPlan) run(ctx context.Context, db DB, rs *RelationStore, prov ProvenanceStore, announce func(context.Context, statusTransition), milestones bool, surface string) {
+	p.afterCommit(ctx, db, rs, prov, announce, milestones, surface, p.supersede(ctx, db))
 }
 
 // conflictTx begins a transaction on db when the handle supports one
@@ -1398,7 +1416,7 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 
 	// One extraction of the actor for validation, the stream self-skip and the
 	// event payload, the same one the provenance record of this transition uses.
-	actorID, actorKind := actorFromContext(ctx)
+	actorID, _ := actorFromContext(ctx)
 	if err := validateTransition(ctx, db, a.governance, a.relationStore, actorID, id, typeName, currentStatus, toState, reason); err != nil {
 		return nil, err
 	}
@@ -1447,11 +1465,39 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	if err := commit(); err != nil {
 		return nil, fmt.Errorf("%w: TransitionItem: commit: %s", ErrInternal, err)
 	}
-	plan.afterCommit(ctx, db, a.relationStore, a.provenanceStore, surface, moved)
-	// The winner and its losers are committed: the transition is real, so record it.
-	// Placed before the async triggers and webhook, which are observers of a
-	// committed change, so a provenance entry exists for anything they cause.
-	recordTransitionProvenance(ctx, db, a.provenanceStore, typeName, id, currentStatus, toState, reason, surface)
+	plan.afterCommit(ctx, db, a.relationStore, a.provenanceStore, a.afterStatusChange, true, surface, moved)
+
+	// Event-stream channel: a topic for an Amendment or a Signal
+	// (transitionTopicChannels), otherwise the type's own band/scope-shaped
+	// column when it has one (A302), otherwise a true broadcast. A lookup
+	// failure degrades to broadcast rather than failing the transition itself:
+	// channel routing is best-effort.
+	channel := transitionTopicChannels[typeName]
+	if col, ok := channelColumns[typeName]; ok && channel == "" {
+		if err := db.QueryRowContext(ctx,
+			"SELECT "+quoteIdent(col)+" FROM "+quoteIdent(table)+" WHERE id = $1", id,
+		).Scan(&channel); err != nil {
+			slog.WarnContext(ctx, "smeldr: TransitionItem: channel column lookup failed, broadcasting instead",
+				"type_name", typeName, "column", col, "error", err)
+			channel = ""
+		}
+	}
+	// The winner and its losers are committed: the transition is real, so record
+	// and announce it, once (D107). Placed before the async triggers, which are
+	// observers of a committed change, so a provenance entry exists for anything
+	// they cause.
+	a.afterStatusChange(ctx, statusTransition{
+		typeName:   typeName,
+		id:         id,
+		slug:       realSlug,
+		from:       currentStatus,
+		to:         toState,
+		surface:    surface,
+		reason:     reason,
+		milestones: true,
+		channel:    channel,
+		channelSet: true,
+	})
 	fireAsyncTriggers(ctx, db, typeName, currentStatus, toState, id)
 	// decision-governance-model.md §4: Check is an enforced precondition on
 	// Decision's proposed→ratified transition — a no-op for every other type
@@ -1469,47 +1515,31 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	// updateHandler (module.go), matching Check's own dual-wiring.
 	runDeclaredTensionAggregationByID(ctx, db, a.findingStore, typeName, id, currentStatus, toState)
 	// The module's own After handlers (On), the same events a PUT making this
-	// change fires. Only the module's handlers: provenance, standing and the
-	// x.transitioned event are already recorded above, once.
+	// change fires. Only the module's handlers: provenance, standing, the
+	// x.transitioned event and the App's bus are already handled above, once.
 	a.fireModuleAfterTransition(ctx, typeName, id, currentStatus, toState)
-
-	// Event-stream channel: a topic for an Amendment or a Signal
-	// (transitionTopicChannels), otherwise the type's own band/scope-shaped
-	// column when it has one (A302), otherwise a true broadcast. A lookup
-	// failure degrades to broadcast rather than failing the transition itself:
-	// channel routing is best-effort.
-	eventName := strings.ToLower(typeName) + ".transitioned"
-	channel := transitionTopicChannels[typeName]
-	if col, ok := channelColumns[typeName]; ok && channel == "" {
-		if err := db.QueryRowContext(ctx,
-			"SELECT "+quoteIdent(col)+" FROM "+quoteIdent(table)+" WHERE id = $1", id,
-		).Scan(&channel); err != nil {
-			slog.WarnContext(ctx, "smeldr: TransitionItem: channel column lookup failed, broadcasting instead",
-				"type_name", typeName, "column", col, "error", err)
-			channel = ""
-		}
-	}
-	dispatchTransitionWebhookFrom(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, actorID, channel,
-		eventName,
-		transitionWebhookData{
-			Type:      strings.ToLower(typeName),
-			ID:        id,
-			Slug:      realSlug,
-			FromState: currentStatus,
-			ToState:   toState,
-			Reason:    reason,
-			ActorID:   actorID,
-			ActorKind: actorKind,
-		})
 	return map[string]any{"id": id, "slug": realSlug, "status": toState, "last_actor": actorID}, nil
 }
 
 // transitionHookModule is a compiled [Module] whose own After handlers
 // [App.TransitionItemVia] fires after a status change it made with a raw
-// update. Collected by type name in [App.Content].
+// update, and which loads an item for that change's bus events
+// ([App.loadForAnnounce]). Collected by type name in [App.Content].
 type transitionHookModule interface {
 	transitionTypeName() string
 	afterTransition(ctx Context, id, from, to string)
+	loadByID(ctx context.Context, id string) (any, string, error)
+}
+
+// backgroundContext is the [Context] a system path's work runs under: no
+// request, the user [GuestUser], the host of Config.BaseURL.
+func (a *App) backgroundContext() Context {
+	u, _ := url.Parse(a.cfg.BaseURL)
+	host := ""
+	if u != nil {
+		host = u.Hostname()
+	}
+	return NewBackgroundContext(host)
 }
 
 // fireModuleAfterTransition fires the After handlers of every module registered
@@ -1524,12 +1554,7 @@ func (a *App) fireModuleAfterTransition(ctx context.Context, typeName, id, from,
 	}
 	sc, ok := ctx.(Context)
 	if !ok {
-		u, _ := url.Parse(a.cfg.BaseURL)
-		host := ""
-		if u != nil {
-			host = u.Hostname()
-		}
-		sc = NewBackgroundContext(host)
+		sc = a.backgroundContext()
 	}
 	for _, m := range mods {
 		m.afterTransition(sc, id, from, to)
@@ -1817,31 +1842,25 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 			} else {
 				// The winner is written: now the items it supersedes, then the
 				// winner's own record below.
-				plan.run(drainActorContext(ctx), db, a.relationStore, a.provenanceStore, "trigger")
-				// T211/D51: record the condition's arrival. This is the one
-				// absent write D51 identified — provenance only (signal
-				// dispatch, cache invalidation and rebuild triggers are
-				// deliberately out of scope, argued in the Amendment: this
-				// drain's only target today is D40's Decision re-evaluation
-				// flow, and firing AfterPublish-class signals for an
-				// automated transition would activate every human-publish
-				// subscriber with no operator decision that background
-				// automation should trigger them). ActorKind "job" with a
-				// fixed ActorID naming the mechanism, not a Run (D38) — a
-				// stateless periodic sweep has no claim/lease/worktree
-				// lifecycle to attach a Run to; generalises to
-				// SweepStructural (T223) as the same pattern. Fail-open:
-				// recordProvenance itself logs-and-swallows an Append
-				// failure — the queue row is still deleted below regardless
+				plan.run(drainActorContext(ctx), db, a.relationStore, a.provenanceStore, a.afterStatusChange, false, "trigger")
+				// T211/D51: record the condition's arrival. One record, its standing,
+				// the canonical "<type>.transitioned" event and AfterTransition go
+				// through the one helper (D107), with the milestones off: firing
+				// AfterPublish-class signals for an automated transition would
+				// activate every human-publish subscriber with no operator decision
+				// that background automation should trigger them, so the T211/D51
+				// exclusion stays and D107's "every path" is met for the record and
+				// the canonical event. The actor is the job "drain-eval-queue" (a
+				// stateless periodic sweep has no Run to attach, D38), the same name
+				// last_actor carries. Fail-open: the queue row is still deleted below
 				// (A241's own "not re-queued" rule, unweakened).
-				applyStateChange(ctx, db, a.provenanceStore, stateChange{
-					typeName:  r.typeName,
-					id:        r.itemID,
-					from:      fromState,
-					to:        r.toState,
-					actorKind: "job",
-					actorID:   "drain-eval-queue",
-					surface:   "trigger",
+				a.afterStatusChange(drainActorContext(ctx), statusTransition{
+					typeName:   r.typeName,
+					id:         r.itemID,
+					from:       fromState,
+					to:         r.toState,
+					surface:    "trigger",
+					milestones: false,
 				})
 				// D51: the "scheduled" Finding provenance — a re-evaluation
 				// condition newly arrived at, distinct from provenance

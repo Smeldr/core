@@ -202,6 +202,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-10-08 | A444 (Task core-mcp-reason-on-token-and-grant-tools, Level 2, task_plan item-01a11a46, D96, D105; held for Peter): a reason on minting, revoking and granting. auth.go: `createToken(..., reason, mechanism)` writes a `Token`/`assert` record on every mint (new; subject the fingerprint), `recordTokenAct` shared with revoke; `CreateClassifiedWithReason`, `RevokeWithReason`; `TokenRecord.Reason`/`RevokeReason` filled by `fillTokenReasons` (fail-open). governance.go: `RoleGrant.Reason`, `RevokeWithReason`, `recordGrantProvenance(..., reason)`, `ListGrants` fills Reason. provenance.go: `latestBySubject` (batched via `provenanceBySubjects`, per-id fallback), now also used by `fillEdgeEnds` (DRY); `actReason` (trim, 1000-character cap); `actActor` (caller, else the mechanism as a job: `token-bootstrap`, `token-store`). Tests `access_reason_test.go` and pgx `TestPG_AccessReasons`; mutation proofs on each record, the mint record and both list fills. |
 | 2026-10-08 | A445 (Task core-media-social-postgres-support, part 1 of 2: core export; task_plan item-01a11a4a; core v1.136.0): `RenameLegacyTables(ctx, db, pairs)` exported from migrate.go (identifier check, quoted names) and now the body of `migrateLegacyTableNames`; sqlportability_test.go gains three patterns (DATETIME in DDL, a bare `"?"` literal, the "duplicate column name" text, with dbprobe.go's `isDuplicateColumn` allowlisted). Tests `rename_legacy_tables_test.go`, pgx `TestPG_RenameLegacyTables`. media and social follow in their own repos. |
 | 2026-10-08 | A451 (Task social-staticcheck-clean-and-in-ci, Level 1, test files and CI only, task_plan item-01a11b21): staticcheck pinned to v0.8.1 (2026.2.1) in the CI of all six standalone modules (mcp moved from `@latest`; cli, media, social, oauth and agent gained the step). social's nine findings, all in test files, fixed: the unused `nthQueryFailDB`, a no-op `OnPublish` call, an S1021 merge, and the three deliberate nil contexts marked `//lint:ignore SA1012`. OPERATIONAL_NOTES rule 2 names the pin and the directive. No version, no tag. |
+| 2026-10-08 | A452 (Task core-one-bus-event-and-provenance-record-per-transition, Level 2, task_plan item-01a11a93, D107, D97; core v1.137.0): one record and one canonical event per status change, on every path. transition_event.go (new): `statusTransition`, `App.afterStatusChange` (record + standing via `applyStateChange`; one `x.transitioned`; async the `statusSignals` on the bus through `App.signalBus`, marked `afterHookMeta.FromTransition` → `SignalEvent.fromTransition` so the Provenance subscriber skips them; one `AfterTransition` to `AddSignalListener` only), `hasBusWork`, `loadForAnnounce` (dynamic repo or the type's modules, `Module.loadByID`), `transitionChannel`, `signalContext`/`valuesContext`, `withoutConflictHold`, `contentChanged`/`contentIgnored`. signals.go: exported `AfterTransition` (listener-only); `dispatchAfter` clears the conflict-lock mark. module.go: `statusAnnouncer` (set by `App.Content`), `Module.afterStatusChange` (module handlers via `dispatchModuleTransition`, then the App announcer; a PUT edit adds AfterUpdate through `notifyApp`), used by PUT, MCPPublish/MCPSchedule/MCPArchive (now with their reason) and `publishDue`. state.go: `TransitionItemVia` calls the helper; `conflictPlan.afterCommit`/`run` take the announcer and an explicit `milestones`; `DrainEvalQueue` goes through the helper with milestones off (T211/D51 kept); `App.backgroundContext`. dynamic.go: `DynamicTypeRepo.announce` (set by `App.DynamicContentRepo`), `statusChanged`, `urlPrefix`. smeldr.go: the bus closure is `App.signalBus`. Fixed on the way: async handlers inherited the conflict-lock mark. Tests `transition_event_test.go` (per-path table, dynamic, superseded, drain, suppressed, failure paths, Audit, lock, comparison); pgx `TestPG_OneRecordAndEventPerTransition` (revert proof on main: PUT 2 records + AfterUpdate, transition_item and dynamic reach no subscriber); mcp `TestTransitionItem_NotifiesResourceSubscribers`. |
 
 ---
 
@@ -658,6 +659,11 @@ smeldr.dev/
 │                     item's stored standing, D100), applyStateChange (recordStateChange + writeStanding),
 │                     forgetStanding, holdsStates, flowGraph.classify/loadFlowGraphs, see the A397 row;
 │                     Module.applyStanding (module.go) is the Module paths' synchronous hook
+├── transition_event.go App.afterStatusChange (D107): the one place a committed status change is
+│                     recorded and announced, on every path: one record + standing, one
+│                     x.transitioned, the status events on the bus (FromTransition), one
+│                     AfterTransition to the listeners; contentChanged (a PUT's edit test),
+│                     withoutConflictHold, loadForAnnounce, transitionChannel, App.signalBus
 ├── sweep_run.go       SweepRunRecord, SweepRunStore interface, NewSweepRunStore(DB),
 │                     CreateSweepRunTable(DB); Append/Last/List — one immutable record per
 │                     completed scheduled detector run (App.SweepStructural, App.DrainEvalQueue),
@@ -1732,9 +1738,20 @@ AfterCreate / AfterUpdate / AfterDelete / AfterPublish / AfterUnpublish / AfterA
       (App.TransitionItemVia → fireModuleAfterTransition → Module.afterTransition,
       which loads the item; the caller's Context, else NewBackgroundContext)
     → Module.dispatchModuleAfter fires only the module's On handlers: no
-      standing, no App bus. Used where the path records the App side itself
-      (transition_item: x.transitioned + one provenance record) or already fires
-      that event through notifyAfter
+      standing, no App bus. The App side of a status change is recorded and
+      announced once, by App.afterStatusChange (transition_event.go, D107)
+    → App.afterStatusChange, every status-change path (Module.afterStatusChange
+      for HTTP PUT, MCPPublish/MCPSchedule/MCPArchive and the scheduler;
+      App.TransitionItemVia; DynamicTypeRepo.statusChanged; conflictPlan.afterCommit
+      for superseded items; DrainEvalQueue): one record + standing
+      (applyStateChange), one x.transitioned (dispatchTransitionWebhookFrom), then
+      async the statusSignals on the bus (App.signalBus, marked FromTransition so
+      the Provenance subscriber skips them; off for DrainEvalQueue and a
+      SuppressesSignals state) and one AfterTransition to AddSignalListener only.
+      A PUT that also changed content (contentChanged) adds AfterUpdate on the bus
+    → async handlers (dispatchAfter, notifyApp, the helper's goroutine) get the
+      context without the conflict-lock mark (withoutConflictHold): they run after
+      the lock is released
     → errors logged, never returned to client
     → panic recovered and logged
 

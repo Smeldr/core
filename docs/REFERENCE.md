@@ -2995,10 +2995,14 @@ event name suffix (`"mytype.scheduled"`).
 
 ### Orchestration transition events (T231)
 
-`App.TransitionItem`/`TransitionItemWithReason` — the mechanism behind the
-MCP `transition_item` tool — fire a `"{type}.transitioned"` webhook event
-after a successful state-flow transition on a compiled orchestration type
-(`Task`, `Decision`, `Amendment`, `Goal`, `Signal`), e.g. `task.transitioned`.
+Every status change of an item fires one `"{type}.transitioned"` event, e.g.
+`task.transitioned`, on every path (v1.137.0; D107): HTTP `PUT`,
+the MCP `publish_*`, `schedule_*` and `archive_*` tools, the scheduler,
+`App.TransitionItem`/`TransitionItemWithReason` (the MCP `transition_item`
+tool), a runtime-defined type's status change (`set_content_status`,
+`DynamicTypeRepo.SetStatus`/`ScheduleContent`), an item a conflict supersedes,
+and `DrainEvalQueue`. Before, only `App.TransitionItem` fired it, and only on
+a compiled type.
 The payload's `data` object carries `type`, `id`, `slug`, `from_state`,
 `to_state`, and `reason` (when supplied). Since v1.122.0 (A427) it also carries `actor_id` and `actor_kind`: who caused the transition, the same id and kind the provenance record of that transition holds (`actor_kind` is `job`, `agent`, `human` or `unclassified`, D105; see Actor classification under Tokens). Both keys are omitted when no actor is known, and **webhook deliveries carry them exactly like the event stream does**, so an admin who forwards deliveries to an external system decides what to forward. The id is opaque and is the same one `last_actor` already holds; resolve it to a name with `lookup_token_names`. `signal.transitioned` from the expiry sweep carries `job` and `signal-expiry-sweep`. This is a separate delivery path
 from the `App.OnSignal` bus above — the bus's `LifecycleEvent` vocabulary
@@ -3140,7 +3144,10 @@ to a webhook event name is delivered to the stream:
   → `"{type}.created"`, `"{type}.updated"`, `"{type}.published"`,
   `"{type}.unpublished"`, `"{type}.archived"`, `"{type}.deleted"`,
   `"{type}.scheduled"`
-- State transitions: `"{type}.transitioned"` (item moves between states)
+- State transitions: `"{type}.transitioned"` (item moves between states), once
+  per status change on every path (v1.137.0; D107). From the same
+  version `"{type}.updated"` means a content edit only: a status-only `PUT` no
+  longer sends it.
 - Signals: `"signal.created"` (new explicit signal), and `"signal.expiry_swept"`
   (stream only, v1.129.0): one summary per expiry run that expired at least
   one Signal, `data` `{type: "signal", expired: n, actor_id, actor_kind: "job"}`.
@@ -3383,6 +3390,17 @@ Prints a tab-aligned table to stdout. Requires `SMELDR_TOKEN` (or legacy `FORGE_
 `ProvenanceRecord` per event — additive and independent of `App.Audit`
 (both may be wired at once; the four events they share each produce their
 own record in their own store).
+
+**One record per status change (v1.137.0; D107).** A status
+change is recorded once, by the transition itself, on every path (verb
+`transition`, from, to, actor, surface, reason); the subscriber records
+creations, content edits (verb `update`) and deletions, and skips the status
+events a transition dispatches. The MCP `publish_*`, `schedule_*` and
+`archive_*` tools now store their `reason` on that record. Records written
+before this version may repeat one transition two or three times (a
+status-changing `PUT` wrote one per event it fired): same subject, verb
+`transition`, from, to, actor and surface, within the same second. Nothing is
+rewritten; a reader that counts transitions collapses those.
 
 ### Setup
 
@@ -3829,7 +3847,12 @@ automatically by `New(app)` in `smeldr.dev/mcp`).
 
 Send `resources/subscribe` with `{"uri": "smeldr://posts/my-slug"}` to receive
 `notifications/resources/updated` events over the SSE connection when that
-resource changes.
+resource changes. A status change notifies on every path, `transition_item`
+included (v1.137.0; core's `AfterTransition`, D107): one
+notification for a move between custom states, and one per status event as
+well for a move into or out of `published`, `archived` or `scheduled`.
+Runtime-defined (dynamic) types have no resource URI, so they are not
+notified.
 
 ### Unsubscribe
 
@@ -4932,11 +4955,31 @@ The paths are HTTP `PUT`, the MCP `publish_*`, `schedule_*` and `archive_*` tool
 `transition_item` and the scheduler. On `transition_item` the handlers get the caller's own
 `Context`; a caller with no `Context` (a system path) gets a background context whose user
 is the guest. If the item cannot be loaded after the change has committed, the handlers do
-not run and the transition still succeeds (the failure is logged). The App-level side is
-unchanged by this: `transition_item` still reaches `App.OnSignal`, the event stream and
-webhooks as one `<type>.transitioned` event with one provenance record. Before v1.127.0,
+not run and the transition still succeeds (the failure is logged). Before v1.127.0,
 `transition_item` fired none of a compiled type's module After handlers, and the MCP
 lifecycle tools and the scheduler did not fire the module's `AfterUpdate`.
+
+**What the App side gets for a status change (v1.137.0; D107).** Every
+status change, on every path (the ones above, plus a runtime-defined type's status change,
+an item a conflict supersedes and `DrainEvalQueue`), gives the App-level consumers the same:
+
+| Consumer | Gets |
+|---|---|
+| provenance (`App.Provenance`) | one record (verb `transition`) and one standing write |
+| event stream and webhooks | one `"{type}.transitioned"`, plus `"{type}.published"`, `.unpublished`, `.archived`, `.scheduled` once each as the change calls for |
+| `App.OnSignal` (Audit, the relations cascade, agent jobs, social routes, webhooks) | the status events above once each; `AfterUpdate` only when a `PUT` also changed content |
+| `App.AddSignalListener` (mcp resource subscriptions) | the status events, and one `AfterTransition` |
+
+A `PUT` counts as a content edit when something other than `Status`, `PublishedAt`,
+`ScheduledAt`, `UpdatedAt`, `CreatedAt`, `Rev` or the last writer changed; it then also
+gives `AfterUpdate`/`"{type}.updated"` and an `update` record. A target state with
+`SuppressesSignals` gets no status events, and `DrainEvalQueue` none either (T211/D51: no
+human-publish subscriber is activated by background automation); both still get the record,
+`"{type}.transitioned"` and `AfterTransition`. Before this version a status-changing `PUT`
+wrote two or three records and sent `"{type}.updated"` with every status change,
+`transition_item` reached no `App.OnSignal` subscriber, and a runtime-defined type's status
+change sent no event at all. Bus handlers, module handlers and listeners run after the
+transition released its conflict lock, and their context no longer says it is held.
 
 ### `RegisterOrchestrationRelationKinds` (A296)
 

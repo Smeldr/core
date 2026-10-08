@@ -90,7 +90,7 @@
 // App-level bus handlers receive a [SignalEvent] and fire for all content types:
 //
 //	app.OnSignal(smeldr.AfterPublish, func(ctx context.Context, ev smeldr.SignalEvent) error {
-//	    log.Printf("published %s/%s", ev.ContentType, ev.Slug)
+//	    log.Printf("published %s/%s", ev.Type, ev.Slug)
 //	    return nil
 //	})
 //
@@ -102,6 +102,12 @@
 // writes alike, so a validation hook guards every surface. Likewise a module's
 // After handlers see the same events for a status change on every path,
 // including transition_item and the scheduler.
+//
+// A status change is recorded and announced once, the same way on every path
+// (D107): one provenance record, one "<type>.transitioned" event on the event
+// stream and to webhooks, the status events above once each on the App's bus,
+// and one [AfterTransition] to [App.AddSignalListener] callbacks. On the App's
+// bus [AfterUpdate] means a content edit only.
 //
 // Relations between items keep their history: one row is one life of a
 // relation, an end is never a delete, and every end records its cause and
