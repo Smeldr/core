@@ -870,10 +870,13 @@ func (a *App) GetPageMeta(ctx context.Context, path string) Head {
 // the request with that error. Wire one via [App.Relations].
 //
 // The hook [App.Relations] wires serves schema-based dynamic content types: it
-// recomputes every asserted edge of the saved item from its schema fields, and
-// [RelationStore.RecomputeAsserted] deletes the source's other asserted edges. It
-// must never be pointed at a compiled type, whose edges are asserted by other
-// means (an Amendment's amends edge, for one).
+// recomputes the saved item's asserted edges of the kinds its schema's edge
+// fields own, from those fields, and ends the ones the fields no longer name.
+// A relation of any other kind on the item (one asserted with assert_relation)
+// is left alone. Within an owned kind the field decides: a second edge of
+// that kind from the same item is ended at the next save. It must never be
+// pointed at a compiled type, whose edges are asserted by other means (an
+// Amendment's amends edge, for one).
 type SyncSaveHook func(ctx context.Context, typeName, id string, item any) error
 
 func (a *App) Relations(store *RelationStore) *App {
@@ -898,7 +901,7 @@ func (a *App) Relations(store *RelationStore) *App {
 			return nil
 		}
 		incoming := extractRelationEdges(typeName, id, fields, item, store)
-		return store.RecomputeAsserted(ctx, typeName, id, incoming)
+		return store.recomputeAssertedKinds(ctx, typeName, id, edgeFieldKinds(fields), incoming)
 	}
 	ch := buildCascadeHandler(store, a)
 	a.OnSignal(AfterPublish, ch)
@@ -906,6 +909,18 @@ func (a *App) Relations(store *RelationStore) *App {
 	a.OnSignal(AfterDelete, ch)
 	a.OnSignal(AfterUnpublish, ch)
 	return a
+}
+
+// edgeFieldKinds returns the relation kinds a schema's edge fields own: the
+// field names of every field with Relation "edge".
+func edgeFieldKinds(fields []SchemaField) []string {
+	var kinds []string
+	for _, f := range fields {
+		if f.Relation == "edge" {
+			kinds = append(kinds, f.Name)
+		}
+	}
+	return kinds
 }
 
 // extractRelationEdges reads the DynamicNode item's Fields JSON, finds all

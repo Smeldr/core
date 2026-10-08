@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.131.0] - 2026-10-08
+
+### Behaviour change
+
+- **A save of a dynamic item no longer ends hand-asserted relations of other kinds** (A439, D97). The save hook recomputed every asserted relation of the saved item against its schema's edge fields, so a relation added with `assert_relation` on a dynamic-type source was ended (cause `recomputed`; before v1.128.0 deleted) at the next unrelated save. It now recomputes only the kinds the schema's edge fields own. Within an owned kind the field still decides: a second edge of that kind from the same item is ended at the next save. Ends already recorded stay as history.
+
+### Notes
+
+- `RecomputeAsserted` and `BulkRecompute` are unchanged: their `incoming` is the source's whole asserted set, as documented.
+
+---
+
 ## [1.130.0] - 2026-10-07
 
 ### Behaviour change

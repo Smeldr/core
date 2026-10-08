@@ -1006,6 +1006,11 @@ type RelationSource struct {
 // new one is inserted with an "assert" record. An edge that ended but is still
 // in the content fields gets a new row: the field says the relation holds.
 //
+// incoming is the source's whole asserted set: every other live asserted row
+// of the source, of any kind, is ended. The save hook [App.Relations] wires
+// does not use this; it recomputes only the kinds the schema's edge fields
+// own, so a relation asserted by hand of another kind survives a save.
+//
 // Key: (target_type, target_id, relation_kind). Returns nil immediately when
 // the diff is empty — the common case costs exactly one SELECT and zero writes.
 // Runs inside a transaction when the DB supports BeginTx; falls back to
@@ -1025,6 +1030,44 @@ func (s *RelationStore) RecomputeAsserted(ctx context.Context, sourceType, sourc
 		return err
 	}
 
+	toDelete, toInsert := computeRelationDiff(currentEdges, incoming)
+	if len(toDelete) == 0 && len(toInsert) == 0 {
+		return nil
+	}
+	return s.applyRelationDiff(ctx, s.db, toDelete, toInsert, sourceType, sourceID)
+}
+
+// recomputeAssertedKinds is [RelationStore.RecomputeAsserted] limited to the
+// relation kinds a source's content fields own (the schema's edge fields):
+// only the live asserted rows of those kinds are diffed against incoming, so a
+// relation of any other kind on the same source, asserted by hand or by core,
+// is never ended by a save. Within an owned kind the field decides: a
+// hand-asserted edge of that kind to a target the field does not name is
+// ended (cause recomputed). An empty kinds runs no query and changes nothing.
+// The save hook [App.Relations] wires uses it.
+func (s *RelationStore) recomputeAssertedKinds(ctx context.Context, sourceType, sourceID string, kinds []string, incoming []RelationEdge) error {
+	if len(kinds) == 0 {
+		return nil
+	}
+	args := []any{sourceType, sourceID, time.Now().UTC()}
+	ph := make([]string, len(kinds))
+	for i, k := range kinds {
+		args = append(args, k)
+		ph[i] = fmt.Sprintf("$%d", len(args))
+	}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT "+relationColumns+
+			" FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 AND edge_class='asserted'"+
+			" AND (invalid_at IS NULL OR invalid_at > $3) AND relation_kind IN ("+strings.Join(ph, ",")+")",
+		args...)
+	if err != nil {
+		return err
+	}
+	currentEdges, err := collectEdges(rows)
+	rows.Close()
+	if err != nil {
+		return err
+	}
 	toDelete, toInsert := computeRelationDiff(currentEdges, incoming)
 	if len(toDelete) == 0 && len(toInsert) == 0 {
 		return nil
