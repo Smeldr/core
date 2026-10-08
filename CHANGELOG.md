@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.132.0] - 2026-10-08
+
+### Fixed
+
+- **A relation-scoped grant on SQLite denied access while its edge was still live** (A440). `RoleStore.Authorized` and `RoleGranted` check a `ScopeDynamic` grant's relation with `invalid_at > now`, and bound `now` as an RFC3339 string while `invalid_at` is written as a time. SQLite compared the two as text, so an edge whose end was still ahead but fell on the same UTC date read as already ended, and the grant was denied. It was denied, never wrongly allowed: an edge that had ended still read as ended. `now` is now bound as a time, as every other relation reader does. Postgres casts the string and was not affected.
+
+---
+
 ## [1.131.0] - 2026-10-08
 
 ### Behaviour change

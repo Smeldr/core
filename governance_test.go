@@ -3992,3 +3992,83 @@ func TestStewardedRuleTypes_ExpiredGrantExcluded(t *testing.T) {
 		t.Errorf("expected no stewarded rule types from an expired grant, got %#v", got)
 	}
 }
+
+// relationScopeEnv is a RoleStore and a RelationStore on one database, with
+// the tagged edge art-1 -> tag-1 asserted through RelationStore.Assert (so
+// invalid_at is written as a time.Time, as in production) ending at invalidAt.
+func relationScopeEnv(t *testing.T, invalidAt time.Time) *RoleStore {
+	t.Helper()
+	rel, db := newHistoryStore(t)
+	setupTokensTable(t, db)
+	if err := migrateGovernance(context.Background(), db); err != nil {
+		t.Fatalf("migrateGovernance: %v", err)
+	}
+	e := tagEdge()
+	e.InvalidAt = &invalidAt
+	if err := rel.Assert(histCtx("alice"), e); err != nil {
+		t.Fatalf("Assert: %v", err)
+	}
+	return NewRoleStore(db)
+}
+
+// grantTagged defines a ScopeDynamic role over the tagged kind in direction
+// and grants it to a new token, anchored on anchorID.
+func grantTagged(t *testing.T, store *RoleStore, role, direction, anchorID string) string {
+	t.Helper()
+	ctx := context.Background()
+	if err := store.DefineRole(ctx, RoleDefinition{
+		Name: role, Operations: []string{"update"},
+		ScopeMode: ScopeDynamic, ScopeRelationKind: "tagged", ScopeDirection: direction,
+	}); err != nil {
+		t.Fatalf("DefineRole: %v", err)
+	}
+	tokenID := NewID()
+	if _, err := store.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: role, ScopeAnchorID: anchorID}); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	return tokenID
+}
+
+// A relation-scoped grant holds while the edge's end is still ahead, also
+// when that end falls on the same UTC date: relationExists compares
+// invalid_at with a time, not an RFC3339 string, which SQLite would compare
+// as text against the stored time and read as already ended.
+func TestRelationScope_EndLaterTodayStillHolds(t *testing.T) {
+	cases := []struct {
+		name      string
+		direction string
+		anchor    string
+		target    string
+	}{
+		{"incoming", "incoming", "tag-1", "art-1"},
+		{"outgoing", "outgoing", "art-1", "tag-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := relationScopeEnv(t, time.Now().UTC().Add(time.Minute))
+			tokenID := grantTagged(t, store, "tag-"+tc.name, tc.direction, tc.anchor)
+			ok, err := store.Authorized(context.Background(), tokenID, "update", AuthTarget{ID: tc.target})
+			if err != nil || !ok {
+				t.Errorf("Authorized = %v, %v; want true for an edge ending in a minute", ok, err)
+			}
+			ok, err = store.RoleGranted(context.Background(), tokenID, "tag-"+tc.name, AuthTarget{ID: tc.target})
+			if err != nil || !ok {
+				t.Errorf("RoleGranted = %v, %v; want true for an edge ending in a minute", ok, err)
+			}
+		})
+	}
+}
+
+// An edge that has already ended grants nothing.
+func TestRelationScope_EndedEdgeDenied(t *testing.T) {
+	store := relationScopeEnv(t, time.Now().UTC().Add(-time.Minute))
+	tokenID := grantTagged(t, store, "tag-ended", "incoming", "tag-1")
+	ok, err := store.Authorized(context.Background(), tokenID, "update", AuthTarget{ID: "art-1"})
+	if err != nil || ok {
+		t.Errorf("Authorized = %v, %v; want false for an ended edge", ok, err)
+	}
+	ok, err = store.RoleGranted(context.Background(), tokenID, "tag-ended", AuthTarget{ID: "art-1"})
+	if err != nil || ok {
+		t.Errorf("RoleGranted = %v, %v; want false for an ended edge", ok, err)
+	}
+}

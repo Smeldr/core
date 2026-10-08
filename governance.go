@@ -1793,7 +1793,9 @@ func (s *RoleStore) StewardshipInbox(ctx context.Context, tokenID string) (*Stew
 // (invalid_at IS NULL OR invalid_at > now) are considered — reusing the same
 // "active edge" predicate applied by [RelationStore.SweepStructural].
 func (s *RoleStore) relationExists(ctx context.Context, kind, direction, itemID, anchorID string) (bool, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
+	// A time, not an RFC3339 string: invalid_at is written as a time.Time, and
+	// SQLite compares a string argument as text against the stored value.
+	now := time.Now().UTC()
 	checkIncoming := direction == "incoming" || direction == "both"
 	checkOutgoing := direction == "outgoing" || direction == "both"
 
