@@ -56,12 +56,22 @@ var sqliteOnlyPatterns = []sqliteOnlyPattern{
 	// deliberately operator-bound, so prose that merely ends in a question mark is not.
 	{"? placeholder (SQL fragment)", regexp.MustCompile(`(?is)^\s*(?:(?:limit|offset)\s+\?|(?:where|and|or|set|limit|offset|values|order\s+by|group\s+by|having)\b.*(?:=\s*\?|<\s*\?|>\s*\?|\blike\s+\?|\bin\s*\(\s*\?|\(\s*\?|,\s*\?|\blimit\s+\?|\boffset\s+\?))`),
 		"$1, $2, ... numbered placeholders, numbered from the count of arguments so far (pgx does not understand ?, SQLite accepts both)"},
+	// A placeholder built on its own (strings.Repeat or a loop joining "?" for an IN
+	// list) is a whole literal of "?", which no rule above can see.
+	{"? placeholder (bare)", regexp.MustCompile(`^\s*,?\s*\?\s*,?\s*$`),
+		`fmt.Sprintf("$%d", n), numbered from the count of arguments so far`},
+	{"DATETIME column type", regexp.MustCompile(`(?is)\b(create\s+table|add\s+column)\b.*\bdatetime\b`),
+		"TIMESTAMP (Postgres has no DATETIME type; SQLite treats both alike)"},
+	{"duplicate column name", regexp.MustCompile(`(?i)duplicate column name`),
+		"EnsureColumn (it probes first and recognises both SQLite's and Postgres' duplicate-column errors)"},
 }
 
 // sqliteOnlyAllowed lists the literals that may stay, each with a reason a reviewer
 // can check. A new entry needs one. It is empty: nothing in the core module needs to
 // be SQLite only.
-var sqliteOnlyAllowed = []struct{ file, text, reason string }{}
+var sqliteOnlyAllowed = []struct{ file, text, reason string }{
+	{"dbprobe.go", "duplicate column name", "isDuplicateColumn recognises SQLite's own error text next to Postgres' SQLSTATE 42701; it is what EnsureColumn uses"},
+}
 
 type sqliteOnlyHit struct {
 	file    string
@@ -188,6 +198,12 @@ func TestSQLiteOnlyGuard_Detects(t *testing.T) {
 		"a SET fragment":         "package x\nvar w = \"SET a = ?, b = ?\"",
 		"a VALUES fragment":      "package x\nvar w = \"VALUES (?, ?, 'pending')\"",
 		"an OR fragment":         "package x\nvar w = \" OR sender = ?\"",
+		// A placeholder list built from a bare literal (social's post.go before Postgres).
+		"a bare ? literal":       "package x\nvar p = \"?\"",
+		"a bare ?, literal":      "package x\nvar p = \"?, \"",
+		"DATETIME in a table":    "package x\nvar q = `CREATE TABLE t (id TEXT, at DATETIME NOT NULL)`",
+		"DATETIME in add column": "package x\nvar q = \"ALTER TABLE t ADD COLUMN at DATETIME\"",
+		"duplicate column text":  "package x\nvar s = \"duplicate column name\"",
 	}
 	for name, src := range fires {
 		hits, err := findSQLiteOnlySQL("x.go", src)
@@ -210,6 +226,9 @@ func TestSQLiteOnlyGuard_Detects(t *testing.T) {
 		"prose starting with and":     "package x\nvar s = \"and what then? (see the log)\"",
 		"prose starting with limit":   "package x\nvar s = \"limit exceeded, try again?\"",
 		"numbered fragments are fine": "package x\nvar w = \" WHERE status = $1 AND receiver = $2 ORDER BY created_at DESC LIMIT $3\"",
+		"a question mark in prose":    "package x\nvar s = \"why?\"",
+		"prose naming datetime":       "package x\nvar s = \"the DATETIME type is SQLite's\"",
+		"a timestamp column":          "package x\nvar q = `CREATE TABLE t (at TIMESTAMP NOT NULL)`",
 	}
 	for name, src := range quiet {
 		hits, err := findSQLiteOnlySQL("x.go", src)

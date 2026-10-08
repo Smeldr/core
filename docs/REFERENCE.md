@@ -1541,6 +1541,16 @@ Idempotent — safe to call on every application startup. Works on SQLite and Po
 
 **Ownership:** call `EnsureColumn` for a column your own type declares, at your own application's startup, the same way `Create*Table` is already called — there is no central registry of "columns the framework knows about." An application extending a framework-provided table (for example, adding custom fields to `SiteConfig`) calls `EnsureColumn` itself for its own added columns.
 
+**Renaming a module's legacy tables (v1.136.0).** `RenameLegacyTables` renames each table of a list of pairs that still exists, the way core moved its own `forge_*` tables to `smeldr_*`:
+
+```go
+err := smeldr.RenameLegacyTables(ctx, db, [][2]string{{"forge_media", "smeldr_media"}})
+```
+
+It works on SQLite and Postgres (each table is looked up by selecting no rows from it), skips a pair whose source is absent, skips with a warning a pair whose source and destination both exist, and runs the renames in one transaction when `db` supports `BeginTx`. It is safe on every boot. A name that is not a plain lower-case identifier is a `*ValidationError`. Call it with the database, not inside a transaction: on Postgres a failed probe aborts the transaction it runs in. smeldr.dev/media and smeldr.dev/social use it.
+
+**Which modules run on Postgres.** Core, smeldr.dev/mcp, smeldr.dev/media and smeldr.dev/social use the application's database and run on SQLite and Postgres (media from v1.7.0, social from v0.11.0). smeldr.dev/oauth keeps its state in its own SQLite file, never the application's database, by Decision D106: an application on Postgres can use it as it is, and a deployment that needs OAuth state elsewhere implements `oauth.Store` (and `oauth.RegistrationStore` for Dynamic Client Registration) and passes it to `oauth.New(cfg, store)`.
+
 ---
 
 ## Middleware

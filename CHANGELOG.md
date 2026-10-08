@@ -23,6 +23,15 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.136.0] - 2026-10-08
+
+### Added
+
+- `RenameLegacyTables(ctx, db, pairs)` (A445): renames a module's legacy tables on SQLite and Postgres, the portable form of core's own `forge_*` to `smeldr_*` migration, which now uses it. smeldr.dev/media and smeldr.dev/social call it instead of their SQLite-only `sqlite_master` probes.
+- The SQLite-only-SQL guard test also catches a `DATETIME` column type in DDL, a bare `"?"` placeholder literal, and code matching the text "duplicate column name" (use `EnsureColumn`).
+
+---
+
 ## [1.135.0] - 2026-10-08
 
 ### Added

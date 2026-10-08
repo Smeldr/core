@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"regexp"
 )
 
 // CreateStateFlowTables creates the five state-flow tables
@@ -377,6 +378,37 @@ func migrateLegacyTableNames(ctx context.Context, db DB) error {
 		{"forge_tokens", "smeldr_tokens"},
 		{"forge_webhook_endpoints", "smeldr_webhook_endpoints"},
 	}
+	return RenameLegacyTables(ctx, db, pairs)
+}
+
+// legacyTableName is the shape a table name passed to [RenameLegacyTables] must
+// have: it is put into ALTER TABLE as an identifier.
+var legacyTableName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
+// RenameLegacyTables renames each table pairs[i][0] that exists to pairs[i][1],
+// for a module that renamed its tables (smeldr.dev/media and smeldr.dev/social
+// moved from forge_* to smeldr_* names). It works on SQLite and Postgres: a table is
+// looked up by selecting no rows from it, and renamed with ALTER TABLE ... RENAME TO.
+// Postgres keeps an index under its old name when its table is renamed; that is
+// harmless.
+//
+//	err := smeldr.RenameLegacyTables(ctx, db, [][2]string{{"forge_media", "smeldr_media"}})
+//
+// A pair whose source does not exist is skipped. A pair whose source and
+// destination both exist (a partial earlier run) is skipped with a warning, and
+// the other pairs are still renamed, so it is safe to call on every boot. All
+// renames run in one transaction when db supports BeginTx. A name that is not a
+// plain lower-case identifier is a [*ValidationError] and nothing is renamed.
+// Call it with the database itself, not inside a transaction: on Postgres a
+// failed probe would abort the caller's transaction.
+func RenameLegacyTables(ctx context.Context, db DB, pairs [][2]string) error {
+	for _, pair := range pairs {
+		for _, name := range pair {
+			if !legacyTableName.MatchString(name) {
+				return Err("table", fmt.Sprintf("%q is not a plain lower-case table name", name))
+			}
+		}
+	}
 
 	// Determine which legacy tables still exist and need renaming.
 	var toRename [][2]string
@@ -420,7 +452,7 @@ func migrateLegacyTableNames(ctx context.Context, db DB) error {
 
 	for _, pair := range toRename {
 		slog.Info("smeldr: renaming legacy table", "from", pair[0], "to", pair[1])
-		if _, err := execDB.ExecContext(ctx, `ALTER TABLE `+pair[0]+` RENAME TO `+pair[1]); err != nil {
+		if _, err := execDB.ExecContext(ctx, `ALTER TABLE `+quoteIdent(pair[0])+` RENAME TO `+quoteIdent(pair[1])); err != nil {
 			_ = rollback()
 			return fmt.Errorf("smeldr: migrate legacy tables: %s → %s: %w", pair[0], pair[1], err)
 		}

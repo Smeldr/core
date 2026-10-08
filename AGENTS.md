@@ -808,6 +808,8 @@ The Go type `smeldr.Signal` was renamed to `smeldr.LifecycleEvent` to free the `
 
 **Dynamic content on Postgres (v1.119.2).** Runtime-defined content types now work on Postgres through `core/pgx` (reads, updates, status changes, the `Locked` check, the conflict policy): a `json.RawMessage` field of any struct scanned through `Query` or `SQLRepo` is scanned from a string or bytes, and `SeedBlockTypeSchemas` no longer uses SQLite-only SQL. Before, every read of a dynamic item failed with "unsupported Scan, storing driver.Value type string into type *json.RawMessage". `PageMetaStore` (SEO overrides) works on Postgres since v1.119.3.
 
+**Modules on Postgres (core v1.136.0, media v1.7.0, social v0.11.0).** smeldr.dev/media and smeldr.dev/social run on Postgres too: their tables live in the application database, and a legacy `forge_*` table is renamed with `smeldr.RenameLegacyTables`. In social, deleting a credential that posts still use is refused (409), and deleting a post also deletes its delivery log. smeldr.dev/oauth stays SQLite-only by D106: its state is in its own file, and an application on Postgres can use it as it is (implement `oauth.Store` to keep OAuth state elsewhere). When you write SQL for any of them, use `$1` placeholders and `TIMESTAMP`, never `?` or `DATETIME`: each module has a guard test that fails the build on SQLite-only SQL.
+
 ### Reference types and the structural sweep (A372)
 
 A dynamic content type an application registers via `define_content_type`
