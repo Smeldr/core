@@ -123,3 +123,52 @@ runtime-defined type pays two probes that fail by design on every call. On Postg
 failed probe is an `ERROR: relation ... does not exist` line in the server log. That is
 noise, not a defect, and there is deliberately no cache of the result: table existence can
 change at runtime (architect, 2026-10-06, D103).
+
+## Release practice (agreed 2026-10-07)
+
+Practice agreed with the architect during the 2026-10-07 release round. Each rule
+carries the incident that produced it.
+
+1. **cli version string.** `cliVersion` in `cmd/smeldr-cli/main.go` is set by hand.
+   Build the binary and compare `smeldr-cli --version` with the tag before tagging.
+   cli v0.19.0 shipped printing 0.18.0; v0.20.0 fixed it.
+2. **staticcheck before every push**, in core and in every module whose CI runs it
+   (mcp). A tests-only mcp commit went red in CI on SA4006 while `go vet` and the
+   tests were green.
+3. **Amendment number placeholder.** While planning and building, write `@@AMEND@@`
+   in docs (and `@@VERSION@@` on a branch whose release is held). After approval,
+   read the live `^A\d+$` maximum (`list_amendments`) and substitute max+1 everywhere:
+   CHANGELOG, REFERENCE, ARCHITECTURE, FEATURELIST, AGENTS and the squash message.
+   Before the squash, `git grep -n -e '@@AMEND@@' -e '@@VERSION@@' -- ':!docs/OPERATIONAL_NOTES.md'`
+   must print nothing (this file names the placeholders, so it is excluded). Read the maximum once more right before `create_amendment`: another band
+   can take the number in between. It happened twice (A416 became A418, A426 became
+   A427). If it happens after the tag, fix the docs and the release note; the tag
+   stays.
+4. **No Co-Authored-By trailer.** Check `git log -1 --format=%B` before each squash
+   and push. This is a project rule and overrides the harness default.
+5. **A Signal before any push to main that follows a commit approval**: floor bumps,
+   pins, docs corrections, test fixes. The skill file in `smeldr/common` is committed
+   only after commit approval.
+6. **GitHub push retry.** A push rejected with `Internal Server Error` while the
+   GitHub status page is green is retried after a pause; nothing is lost. Core main
+   refused pushes for about 25 minutes on 2026-10-07.
+7. **Re-arm the event watcher on every expiry notice.** The Monitor expires every 30
+   minutes. A stale watcher hid a commit-approved Signal for ten minutes.
+8. **Integration tests against local core.**
+   - pgx: use a scratch workspace outside the repo, for example
+     `$env:TEMP\pgxwork\go.work` with `use` lines for `core` and `core/pgx` and a
+     `go` line matching the modules. Run with the package path
+     (`go test -tags integration smeldr.dev/core/pgx`) against the local container
+     `smeldr-pg` (`DATABASE_URL=postgres://forge:forge@localhost:5432/forgetest?sslmode=disable`;
+     these credentials belong to that throwaway test container only, not to any real
+     database). From Git Bash the workspace path form can fail to match the module
+     path; run from PowerShell.
+   - mcp: the repo's own `go.work` overrides core with the local checkout, so a
+     release proof runs with `GOWORK=off`, against the core version `go.mod` pins.
+     See also "Standalone-module integration testing before a core push" above.
+9. **Race and coverage on the exact commit being tagged**, in a detached worktree
+   (`git worktree add --detach <tmp> <sha>`), not only in the working tree, which
+   may hold other changes.
+10. **CI result from the conclusion, not the watch exit code.** Before tagging,
+    confirm the run with `gh run list --json databaseId,headSha,status,conclusion`
+    (see "CI" above): `gh run watch --exit-status` alone is not proof.
