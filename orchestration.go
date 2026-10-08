@@ -29,10 +29,11 @@ type Goal struct {
 	Size string `json:"size"`
 	// Description is the full goal specification in Markdown.
 	Description string `json:"description" smeldr_format:"markdown"`
-	// LastActor is the actor ID of whoever performed this item's most
-	// recent state transition (D78). Empty when no caller identity was
-	// available (a system-initiated transition) or the item has never
-	// been transitioned since this column was added.
+	// LastActor is the actor ID of this item's most recent writer (D78;
+	// Option A, 2026-10-08): whoever created it, last changed its content or
+	// last moved it. Set by the server, never from a request body. Empty when
+	// no caller identity was available (a system-initiated write) or the item
+	// has not been written since this column was added.
 	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
@@ -188,10 +189,11 @@ type Signal struct {
 	// avoid a second, live-system-breaking change beyond what D64 itself
 	// scoped.
 	RequiredOperation string `json:"required_role" db:"required_role"`
-	// LastActor is the actor ID of whoever performed this item's most
-	// recent state transition (D78). Empty when no caller identity was
-	// available (a system-initiated transition) or the item has never
-	// been transitioned since this column was added.
+	// LastActor is the actor ID of this item's most recent writer (D78;
+	// Option A, 2026-10-08): whoever created it, last changed its content or
+	// last moved it. Set by the server, never from a request body. Empty when
+	// no caller identity was available (a system-initiated write) or the item
+	// has not been written since this column was added.
 	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
@@ -215,11 +217,11 @@ type Task struct {
 	Description string `json:"description" smeldr_format:"markdown"`
 	// NoteRef is an optional cross-reference to a design note or decision.
 	NoteRef string `json:"note_ref" db:"note_ref"`
-	// LastActor is the actor ID of whoever performed this item's most
-	// recent state transition (D78) — e.g. which scaled core instance
-	// (core, core-2, core-3) actually claimed this Task. Empty when no
-	// caller identity was available (a system-initiated transition) or
-	// the item has never been transitioned since this column was added.
+	// LastActor is the actor ID of this item's most recent writer (D78;
+	// Option A, 2026-10-08): whoever created it, last changed its content or
+	// last moved it. Set by the server, never from a request body. Empty when
+	// no caller identity was available (a system-initiated write) or the item
+	// has not been written since this column was added.
 	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
@@ -275,10 +277,11 @@ type Decision struct {
 	// when TensionRuleID is set (a future Check-precondition task, §4) —
 	// this field only records the declaration.
 	TensionReason string `json:"tension_reason" db:"tension_reason" smeldr_format:"markdown"`
-	// LastActor is the actor ID of whoever performed this item's most
-	// recent state transition (D78). Empty when no caller identity was
-	// available (a system-initiated transition) or the item has never
-	// been transitioned since this column was added.
+	// LastActor is the actor ID of this item's most recent writer (D78;
+	// Option A, 2026-10-08): whoever created it, last changed its content or
+	// last moved it. Set by the server, never from a request body. Empty when
+	// no caller identity was available (a system-initiated write) or the item
+	// has not been written since this column was added.
 	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
@@ -475,10 +478,11 @@ type Amendment struct {
 	// get_relations, is what queries use. Amendments written before this field
 	// have none until an administrator maps them ([App.BackfillAmendsEdges]).
 	Amends string `json:"amends,omitempty" db:"amends"`
-	// LastActor is the actor ID of whoever performed this item's most
-	// recent state transition (D78). Empty when no caller identity was
-	// available (a system-initiated transition) or the item has never
-	// been transitioned since this column was added.
+	// LastActor is the actor ID of this item's most recent writer (D78;
+	// Option A, 2026-10-08): whoever created it, last changed its content or
+	// last moved it. Set by the server, never from a request body. Empty when
+	// no caller identity was available (a system-initiated write) or the item
+	// has not been written since this column was added.
 	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
@@ -574,11 +578,11 @@ type Run struct {
 	// zero-means-unset convention [Decision].NextEvalAt uses for a nullable
 	// timestamp on a non-pointer field.
 	AcknowledgedAt time.Time `json:"acknowledged_at" db:"acknowledged_at"`
-	// LastActor is the actor ID of whoever performed this item's most
-	// recent state transition (D78). Run registers no StateFlow (see this
-	// type's own doc comment), so this is set only if a future caller
-	// ever routes a Run through TransitionItem/TransitionItemWithReason
-	// rather than its own lease-based lifecycle. Empty otherwise.
+	// LastActor is the actor ID of this item's most recent writer (D78;
+	// Option A, 2026-10-08): whoever created it, last changed its content or
+	// last moved it. Set by the server, never from a request body. Empty when
+	// no caller identity was available (a system-initiated write) or the item
+	// has not been written since this column was added.
 	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 

@@ -37,9 +37,8 @@ type DynamicNode struct {
 	// its creation, a content update ([DynamicTypeRepo.UpdateFieldsVia],
 	// since v1.130.0) or a state transition (D78). Empty when no caller
 	// identity was available (a system-initiated write) or the item has not
-	// been written since this column was added. A compiled type's LastActor
-	// is narrower: it is set on create and on transitions, not on a content
-	// update.
+	// been written since this column was added. Compiled types follow the same
+	// rule (v1.133.0).
 	LastActor string `db:"last_actor" json:"last_actor,omitempty"`
 }
 

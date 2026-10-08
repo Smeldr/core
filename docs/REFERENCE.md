@@ -4059,9 +4059,10 @@ repo.Save(ctx, node)
 (the table name cannot be derived from the type), with the full
 `FindByID` / `FindBySlug` / `FindAll` / `Save` / `Delete` / `Seq` surface.
 
-`LastActor` (D78, Amendment A347) is the actor ID of whoever performed this
-item's most recent state transition — set by `SetStatus`/`SetStatusWithReason`/
-`ScheduleContent`, empty when no caller identity was available.
+`LastActor` (D78, Amendment A347) is the actor ID of the item's most recent
+writer: set by `CreateDraftVia`, `UpdateFieldsVia` (v1.130.0) and by
+`SetStatus`/`SetStatusWithReason`/`ScheduleContent`, empty when no caller
+identity was available.
 
 `Save` writes the post-save `Rev`, `UpdatedAt`, and `CreatedAt` back onto `node`
 itself once the write succeeds (v1.64.1+) — no re-read needed to see the current
@@ -4376,9 +4377,9 @@ like a transition does. The caller comes from `ctx` when it is a
 plain `context.Context` is a system write with no actor.
 
 - `last_actor` is set to the caller on create and on every update, so for a
-  dynamic item it means "the most recent writer". A compiled type's
-  `last_actor` is narrower: it is set on create and on transitions, not on a
-  content update (a follow-up decides whether to align them).
+  dynamic item it means "the most recent writer". Compiled types follow the
+  same rule (v1.133.0; see "`last_actor` means the most recent
+  writer" below).
 - With provenance wired (`App.Provenance`), a create writes a `create` entry
   and an update an `update` entry (from and to the item's current status),
   each with `actor_kind`, `actor_id` and the surface. `get_item_provenance`
@@ -4542,6 +4543,17 @@ etc.). Before this, a never-transitioned item (every fresh `proposed`
 Decision, for example) had no `last_actor` at all — no proposer/asserter
 recorded. Always overwrites whatever the create payload itself may have set
 for `last_actor`; actor identity is never client-suppliable.
+
+**`last_actor` means the most recent writer (v1.133.0; Option A,
+Peter, 2026-10-08).** On a compiled type, every create and content update
+stamps `last_actor` from the caller, as transitions already did and as dynamic
+items do since v1.130.0: HTTP `POST`, `PUT` and `PATCH`, and the MCP
+`create_{type}` and `update_{type}` tools. A value in the request body is
+ignored on every one of them, and a full-replace `PUT` that omits the field no
+longer erases it. A caller with no user ID (a system write) keeps the stored
+value on an update and leaves it empty on a create. So an edit moves
+`last_actor`: a reader that wants the item's proposer reads the `create` entry
+of `get_item_provenance`, not `last_actor`.
 
 ### `App.TransitionItemVia` (A392, v1.109.0+)
 

@@ -2024,6 +2024,7 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		pv.Elem().FieldByIndex(f.slug).SetString(slug)
 	}
 	applyDefaultStatus(ctx, m.db, m.contentTypeName, pv, f)
+	stampLastActor(ctx, pv, nil)
 
 	item := ptrToT[T](pv, m.proto)
 	stampPublishedAt(item)
@@ -2114,6 +2115,7 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	f := getNodeFields(elemType)
 	pv.Elem().FieldByIndex(f.id).SetString(nodeIDOf(existing))
 	pv.Elem().FieldByIndex(f.slug).SetString(slug)
+	stampLastActor(ctx, pv, existing)
 
 	item := ptrToT[T](pv, m.proto)
 
@@ -2640,29 +2642,47 @@ func applyDefaultPriority(typeName string, fields map[string]any, pv reflect.Val
 	f.SetInt(defaultPriority)
 }
 
-// stampLastActorOnCreate sets item's LastActor field (D78) to the calling
-// user's ID on create, for any content type that has one — not gated by
-// type name (unlike [applyDefaultPriority]'s Task/Goal-only check), since a
-// settable LastActor field is itself the signal that a type opted in, the
-// same role Priority's own field-presence check already plays there. Leaves
-// the field untouched when ctx carries no user ID (a system-initiated
-// create) — same "empty means no caller identity was available" convention
-// [DynamicTypeRepo.SetStatus] and [App.TransitionItemWithReason] already use
-// for the same field on the transition path.
+// stampLastActor sets item's LastActor field to the most recent writer (D78;
+// Option A, 2026-10-08): the calling user's ID on every create and content
+// update, the same rule dynamic items follow since v1.130.0. It applies to any
+// content type with a settable string LastActor field, a field-presence check
+// like [applyDefaultPriority]'s. When ctx carries no user ID (a
+// system-initiated write) the field keeps existing's value, or stays empty on
+// a create (existing nil).
 //
-// Always overwrites whatever the unmarshaled request body may have set —
-// unlike Priority, actor identity must never be client-suppliable; it comes
-// from ctx's own authenticated user, never from the create payload.
-func stampLastActorOnCreate(ctx Context, pv reflect.Value) {
-	userID := ctx.User().ID
-	if userID == "" {
-		return
-	}
+// It always overwrites whatever the decoded request body set: actor identity
+// is never client-suppliable, on create, PATCH, MCP update or a full-replace
+// PUT alike. It comes from ctx's authenticated user or from the stored item.
+func stampLastActor(ctx Context, pv reflect.Value, existing any) {
 	f := pv.Elem().FieldByName("LastActor")
 	if !f.IsValid() || !f.CanSet() || f.Kind() != reflect.String {
 		return
 	}
-	f.SetString(userID)
+	if userID := ctx.User().ID; userID != "" {
+		f.SetString(userID)
+		return
+	}
+	f.SetString(lastActorOf(existing))
+}
+
+// lastActorOf returns item's LastActor field, or "" when item is nil or has
+// no such string field.
+func lastActorOf(item any) string {
+	v := reflect.ValueOf(item)
+	for v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return ""
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return ""
+	}
+	f := v.FieldByName("LastActor")
+	if !f.IsValid() || f.Kind() != reflect.String {
+		return ""
+	}
+	return f.String()
 }
 
 // stampPublishedAt sets PublishedAt to now when item's status is Published and
@@ -2703,7 +2723,7 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	}
 	applyDefaultStatus(ctx, m.db, m.contentTypeName, pv, f)
 	applyDefaultPriority(m.contentTypeName, fields, pv)
-	stampLastActorOnCreate(ctx, pv)
+	stampLastActor(ctx, pv, nil)
 
 	item := ptrToT[T](pv, m.proto)
 	stampPublishedAt(item)
@@ -2778,6 +2798,7 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 	pv.Elem().FieldByIndex(f.id).SetString(nodeIDOf(existing))
 	pv.Elem().FieldByIndex(f.slug).SetString(nodeSlugOf(existing))
 	pv.Elem().FieldByIndex(f.status).Set(reflect.ValueOf(nodeStatusOf(existing)))
+	stampLastActor(ctx, pv, existing)
 
 	item := ptrToT[T](pv, m.proto)
 	if err := RunValidation(item); err != nil {

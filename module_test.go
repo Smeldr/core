@@ -852,7 +852,7 @@ func (p *testSlicePost) Head() Head { return Head{Title: p.Title} }
 // — 01a0e3bc-8 LastActor-on-create ——————————————————————————————————————————
 
 // testActorPost is a content type with a LastActor field, mirroring the six
-// orchestration types' own shape, for testing [stampLastActorOnCreate]
+// orchestration types' own shape, for testing [stampLastActor]
 // without the six real types' own DB/table setup.
 type testActorPost struct {
 	Node

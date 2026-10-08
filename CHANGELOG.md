@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.133.0] - 2026-10-08
+
+### Behaviour change
+
+- **A content edit now moves `last_actor` on compiled types** (A441, D97; D78, Option A chosen by Peter 2026-10-08). `last_actor` means the item's most recent writer on every type: every create and content update of a compiled type (HTTP `POST`, `PUT`, `PATCH`; MCP `create_{type}`, `update_{type}`) now sets it to the caller, as transitions already did and as dynamic items do since v1.130.0. Before, a content edit kept the earlier actor. A system create with no user now writes an empty `last_actor`, even when the body names someone. A reader that used `last_actor` for "who proposed it" or "who last moved it" should read the item's provenance instead (`get_item_provenance`, the `create` or `transition` entry).
+
+### Fixed
+
+- **`last_actor` could be set by the caller on a compiled type.** MCP `update_{type}` and HTTP `PATCH` wrote a `last_actor` sent in the request; HTTP `PUT` wrote the body's value and erased the field when the body left it out; HTTP `POST` kept the body's value. The server now always sets it, from the caller or, for a system write, from the stored item. Provenance records were never affected.
+
+---
+
 ## [1.132.0] - 2026-10-08
 
 ### Fixed
