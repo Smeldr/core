@@ -239,32 +239,10 @@ func (s *RelationStore) fillEdgeEnds(ctx context.Context, edges []RelationEdge) 
 	if len(ids) == 0 {
 		return nil
 	}
-	records := map[string]ProvenanceRecord{}
-	if s.provenanceStore != nil {
-		var recs []ProvenanceRecord
-		if bs, ok := s.provenanceStore.(provenanceBySubjects); ok {
-			var err error
-			if recs, err = bs.listBySubjects(ctx, "RelationEdge", "invalidate", ids); err != nil {
-				return err
-			}
-		} else {
-			for _, id := range ids {
-				got, err := s.provenanceStore.List(ctx, ProvenanceFilter{SubjectType: "RelationEdge", SubjectID: id})
-				if err != nil {
-					return err
-				}
-				recs = append(recs, got...)
-			}
-		}
-		for _, r := range recs {
-			if r.Verb != "invalidate" {
-				continue
-			}
-			// A row ends once; should several records exist, the latest wins.
-			if prev, ok := records[r.SubjectID]; !ok || r.Timestamp.After(prev.Timestamp) {
-				records[r.SubjectID] = r
-			}
-		}
+	// A row ends once; should several records exist, the latest wins.
+	records, err := latestBySubject(ctx, s.provenanceStore, "RelationEdge", "invalidate", ids)
+	if err != nil {
+		return err
 	}
 	for i := range edges {
 		e := &edges[i]

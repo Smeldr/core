@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.135.0] - 2026-10-08
+
+### Added
+
+- **A reason on minting, revoking and granting** (A444, D96). `TokenStore.CreateClassifiedWithReason`, `TokenStore.RevokeWithReason`, `RoleStore.RevokeWithReason` and the new `RoleGrant.Reason` field store an optional reason on the act's provenance record; `TokenStore.List` (`TokenRecord.Reason`, `RevokeReason`) and `RoleStore.ListGrants` (`RoleGrant.Reason`) read it back. Trimmed; over 1000 characters is a `ValidationError`. Never put a secret in it.
+
+### Changed
+
+- **Minting a token now writes a provenance record** (`Token`/`assert`, subject the fingerprint id, never the raw token). Before, only revocation was recorded. With no caller identity, the actor is the mechanism as a `job`: `token-bootstrap` for the boot-time admin token, `token-store` otherwise. A revocation with no caller now records `job` `token-store` instead of an empty actor.
+
+---
+
 ## [1.134.0] - 2026-10-08
 
 ### Behaviour change

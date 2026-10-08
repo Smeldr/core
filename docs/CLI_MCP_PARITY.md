@@ -45,13 +45,13 @@ that discipline being enforced consistently.
 | `nav` | `list_nav_items`, `create_nav_item`, `update_nav_item`, `delete_nav_item` |
 | `redirect` | `create_redirect`, `list_redirects`, `delete_redirect` |
 | `transition` | `transition_item` |
+| `grant`, `grant revoke`, `grant list` (cli v0.23.0) | `grant_role`, `revoke_grant`, `list_grants` |
 | `oauth` (CLI) | CIMD/OAuth flows — a different surface entirely, not a 1:1 tool mapping, not a gap |
 
 ## Real gaps — MCP tools with no CLI command at all
 
 | MCP tool(s) | Feature area | Suggested CLI command |
 |---|---|---|
-| `grant_role`, `list_grants`, `revoke_grant` | RoleStore governance grants | `smeldr-cli grant <verb>` |
 | `set_page_meta`, `get_page_meta`, `delete_page_meta`, `list_page_meta` | Per-path SEO overrides | `smeldr-cli pagemeta <verb>` |
 | `assert_relation`, `propose_relation`, `observe_relation`, `get_relations`, `preview_impact`, `upsert_relation_kind`, `list_relation_kinds` | Relation graph (distinct from block section/item composition — `edge.go` only covers block composition, not the relation graph). `get_goal_context`'s own linked-item assembly depends on this same graph and has no CLI equivalent for the same reason — not a separate gap, a consequence of this one. | `smeldr-cli relation <verb>` |
 | `get_valid_transitions`, `list_items_by_state`, `define_state_flow` | State-flow introspection/definition — `transition` (CLI) only executes a transition, it doesn't let an operator inspect or define the flow itself | `smeldr-cli flow <verb>` |

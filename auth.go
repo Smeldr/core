@@ -394,6 +394,17 @@ type TokenRecord struct {
 	// record; what provenance records follows the classification inside the
 	// signed token itself.
 	ActorClass string
+
+	// Reason is the reason given when the token was minted
+	// ([TokenStore.CreateClassifiedWithReason]), read from its "assert"
+	// provenance record. Empty when none was given, when provenance is not
+	// wired, or for a token minted before reasons were recorded.
+	Reason string
+
+	// RevokeReason is the reason given when the token was revoked
+	// ([TokenStore.RevokeWithReason]), from its "invalidate" provenance
+	// record. Empty under the same conditions as Reason.
+	RevokeReason string
 }
 
 // TokenStore manages named, revocable bearer tokens stored in a smeldr_tokens
@@ -507,7 +518,7 @@ func (ts *TokenStore) ensureBootstrap(ctx context.Context) (userID string, creat
 	if err := row.Scan(&n); err != nil || n > 0 {
 		return "", false
 	}
-	raw, uid, err := ts.createToken(ctx, "bootstrap-admin", "admin", "", 10*365*24*time.Hour)
+	raw, uid, err := ts.createToken(ctx, "bootstrap-admin", "admin", "", 10*365*24*time.Hour, "", mintActorBootstrap)
 	if err != nil {
 		slog.Warn("smeldr: failed to create bootstrap admin token", "err", err)
 		return "", false
@@ -522,7 +533,13 @@ func (ts *TokenStore) ensureBootstrap(ctx context.Context) (userID string, creat
 // smeldr_tokens.id fingerprint — callers that need to reference this token's
 // identity elsewhere (e.g. granting a governance role) get it directly,
 // without redundantly decoding the token they just created.
-func (ts *TokenStore) createToken(ctx context.Context, name, role string, class Role, ttl time.Duration) (raw, userID string, err error) {
+//
+// Every successful mint writes a "Token"/"assert" [ProvenanceRecord] (subject:
+// the fingerprint id, never the raw token) with reason and the actor from
+// [actActor]: the caller, or mechanism as a job when there is none
+// ([mintActorBootstrap] for the boot-time admin token, [mintActorStore] for a
+// program minting outside a request). Fail-open, written after the insert.
+func (ts *TokenStore) createToken(ctx context.Context, name, role string, class Role, ttl time.Duration, reason, mechanism string) (raw, userID string, err error) {
 	// The permission role is always first: signals.go reads Roles[0] as the
 	// actor's role, and the classification tag carries no permission at all.
 	roles := []Role{Role(role)}
@@ -552,6 +569,7 @@ func (ts *TokenStore) createToken(ctx context.Context, name, role string, class 
 		if err != nil {
 			return "", "", ErrInternal
 		}
+		ts.recordTokenAct(ctx, id, "assert", reason, mechanism)
 		return raw, user.ID, nil
 	}
 	_, err = ts.db.ExecContext(ctx,
@@ -573,7 +591,34 @@ func (ts *TokenStore) createToken(ctx context.Context, name, role string, class 
 	if err != nil {
 		return "", "", ErrInternal
 	}
+	ts.recordTokenAct(ctx, id, "assert", reason, mechanism)
 	return raw, user.ID, nil
+}
+
+// The mechanism names recorded as the actor ("job") of a token act with no
+// caller identity in its context.
+const (
+	// mintActorBootstrap is the boot-time bootstrap admin token's minter.
+	mintActorBootstrap = "token-bootstrap"
+	// mintActorStore is a program calling the [TokenStore] outside a request.
+	mintActorStore = "token-store"
+)
+
+// recordTokenAct writes the "Token" provenance record of a mint ("assert") or
+// a revocation ("invalidate"). Fail-open; a no-op without a provenance store.
+func (ts *TokenStore) recordTokenAct(ctx context.Context, id, verb, reason, mechanism string) {
+	if ts.provenanceStore == nil {
+		return
+	}
+	kind, actor := actActor(ctx, mechanism)
+	recordProvenance(ctx, ts.provenanceStore, ProvenanceRecord{
+		SubjectType: "Token",
+		SubjectID:   id,
+		Verb:        verb,
+		ActorKind:   kind,
+		ActorID:     actor,
+		Reason:      reason,
+	})
 }
 
 // Create generates a signed named bearer token with the given role and ttl,
@@ -584,7 +629,7 @@ func (ts *TokenStore) createToken(ctx context.Context, name, role string, class 
 // role must be a valid [Role] string ("author", "editor", "admin").
 // ttl must be positive.
 func (ts *TokenStore) Create(ctx context.Context, name, role string, ttl time.Duration) (string, error) {
-	raw, _, err := ts.createToken(ctx, name, role, "", ttl)
+	raw, _, err := ts.createToken(ctx, name, role, "", ttl, "", mintActorStore)
 	return raw, err
 }
 
@@ -614,6 +659,22 @@ func (ts *TokenStore) Create(ctx context.Context, name, role string, ttl time.Du
 // classified afterwards, because the class is inside its signature: issue a
 // new one and revoke the old.
 func (ts *TokenStore) CreateClassified(ctx context.Context, name, role string, class Role, ttl time.Duration) (raw, userID string, err error) {
+	return ts.CreateClassifiedWithReason(ctx, name, role, class, ttl, "")
+}
+
+// CreateClassifiedWithReason is [TokenStore.CreateClassified] with the reason
+// for minting the token, stored on the mint's provenance record and shown as
+// [TokenRecord.Reason] by [TokenStore.List]. The reason is free text that
+// people read: never put a token value or other secret in it. It is trimmed;
+// longer than 1000 characters is a [*ValidationError] and nothing is minted;
+// "" means no reason was given.
+//
+//	raw, userID, err := tokens.CreateClassifiedWithReason(ctx, "ci-bot", "editor", smeldr.Job, 30*24*time.Hour, "nightly import job")
+func (ts *TokenStore) CreateClassifiedWithReason(ctx context.Context, name, role string, class Role, ttl time.Duration, reason string) (raw, userID string, err error) {
+	reason, err = actReason(reason)
+	if err != nil {
+		return "", "", err
+	}
 	if class != "" {
 		if class != Agent && class != Job && class != Human {
 			return "", "", Err("actor_class", `must be "agent", "job" or "human" (leave it empty for an unclassified token)`)
@@ -624,7 +685,7 @@ func (ts *TokenStore) CreateClassified(ctx context.Context, name, role string, c
 			return "", "", Err("role", `must be "author", "editor" or "admin" for a classified token`)
 		}
 	}
-	return ts.createToken(ctx, name, role, class, ttl)
+	return ts.createToken(ctx, name, role, class, ttl, reason, mintActorStore)
 }
 
 // CreateWithID behaves exactly like [TokenStore.Create], but also returns
@@ -637,7 +698,7 @@ func (ts *TokenStore) CreateClassified(ctx context.Context, name, role string, c
 // caller that also needs to grant one must hold this ID before calling
 // [RoleStore.Grant].
 func (ts *TokenStore) CreateWithID(ctx context.Context, name, role string, ttl time.Duration) (raw, userID string, err error) {
-	return ts.createToken(ctx, name, role, "", ttl)
+	return ts.createToken(ctx, name, role, "", ttl, "", mintActorStore)
 }
 
 // List returns all token records from smeldr_tokens ordered by created_at
@@ -691,7 +752,37 @@ func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 	if err := rows.Err(); err != nil {
 		return nil, ErrInternal
 	}
+	ts.fillTokenReasons(ctx, out)
 	return out, nil
+}
+
+// fillTokenReasons sets Reason and RevokeReason on records from their mint
+// and revocation provenance records: two queries for the whole list with the
+// default store. Fail-open: a failed read leaves the reasons empty and is
+// logged, and the list is still returned (it is the audit view of what
+// exists).
+func (ts *TokenStore) fillTokenReasons(ctx context.Context, records []TokenRecord) {
+	if ts.provenanceStore == nil || len(records) == 0 {
+		return
+	}
+	ids := make([]string, len(records))
+	for i, r := range records {
+		ids[i] = r.ID
+	}
+	minted, err := latestBySubject(ctx, ts.provenanceStore, "Token", "assert", ids)
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: TokenStore.List: mint reasons not read", "error", err)
+		return
+	}
+	revoked, err := latestBySubject(ctx, ts.provenanceStore, "Token", "invalidate", ids)
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: TokenStore.List: revoke reasons not read", "error", err)
+		return
+	}
+	for i := range records {
+		records[i].Reason = minted[records[i].ID].Reason
+		records[i].RevokeReason = revoked[records[i].ID].Reason
+	}
 }
 
 // NamesForUserIDs resolves each of the given JWT User.IDs (e.g. read from
@@ -758,6 +849,19 @@ func (ts *TokenStore) NamesForUserIDs(ctx context.Context, userIDs []string) (ma
 // non-nil [TokenStore] reject revoked tokens immediately. Use [TokenStore.List]
 // to obtain token IDs.
 func (ts *TokenStore) Revoke(ctx context.Context, id string) error {
+	return ts.RevokeWithReason(ctx, id, "")
+}
+
+// RevokeWithReason is [TokenStore.Revoke] with the reason for revoking,
+// stored on the revocation's provenance record and shown as
+// [TokenRecord.RevokeReason] by [TokenStore.List]. Never put a token value or
+// other secret in it. It is trimmed; longer than 1000 characters is a
+// [*ValidationError] and nothing is revoked.
+func (ts *TokenStore) RevokeWithReason(ctx context.Context, id, reason string) error {
+	reason, err := actReason(reason)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Look up the role of the token being revoked to determine whether the
@@ -783,28 +887,13 @@ func (ts *TokenStore) Revoke(ctx context.Context, id string) error {
 		}
 	}
 
-	_, err := ts.db.ExecContext(ctx,
+	if _, err := ts.db.ExecContext(ctx,
 		`UPDATE smeldr_tokens SET revoked_at = $1 WHERE id = $2`,
 		now, id,
-	)
-	if err != nil {
+	); err != nil {
 		return ErrInternal
 	}
-	if ts.provenanceStore != nil {
-		var actorID string
-		var roles []Role
-		if sc, ok := ctx.(Context); ok {
-			actorID = sc.User().ID
-			roles = sc.User().Roles
-		}
-		recordProvenance(ctx, ts.provenanceStore, ProvenanceRecord{
-			SubjectType: "Token",
-			SubjectID:   id,
-			Verb:        "invalidate",
-			ActorKind:   actorKindFor(actorID, roles),
-			ActorID:     actorID,
-		})
-	}
+	ts.recordTokenAct(ctx, id, "invalidate", reason, mintActorStore)
 	return nil
 }
 

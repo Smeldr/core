@@ -7,7 +7,9 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ProvenanceRecord is one immutable record of who did what to a governed subject,
@@ -507,4 +509,68 @@ func actorKindFor(actorID string, roles []Role) string {
 		return "human"
 	}
 	return "unclassified"
+}
+
+// latestBySubject returns, for each id in ids, its latest provenance record of
+// subjectType and verb: one query with the default store
+// ([provenanceBySubjects]), one [ProvenanceStore.List] per id otherwise. An
+// id with no such record is absent from the map. A nil store returns an empty
+// map.
+func latestBySubject(ctx context.Context, store ProvenanceStore, subjectType, verb string, ids []string) (map[string]ProvenanceRecord, error) {
+	out := map[string]ProvenanceRecord{}
+	if store == nil || len(ids) == 0 {
+		return out, nil
+	}
+	var recs []ProvenanceRecord
+	if bs, ok := store.(provenanceBySubjects); ok {
+		var err error
+		if recs, err = bs.listBySubjects(ctx, subjectType, verb, ids); err != nil {
+			return nil, err
+		}
+	} else {
+		for _, id := range ids {
+			got, err := store.List(ctx, ProvenanceFilter{SubjectType: subjectType, SubjectID: id})
+			if err != nil {
+				return nil, err
+			}
+			recs = append(recs, got...)
+		}
+	}
+	for _, r := range recs {
+		if r.Verb != verb {
+			continue
+		}
+		if prev, ok := out[r.SubjectID]; !ok || r.Timestamp.After(prev.Timestamp) {
+			out[r.SubjectID] = r
+		}
+	}
+	return out, nil
+}
+
+// maxActReason is the longest reason, in characters, an access-management act
+// (minting, revoking, granting) accepts.
+const maxActReason = 1000
+
+// actReason trims reason and refuses one longer than [maxActReason]
+// characters with a [*ValidationError] on field "reason". Empty means no
+// reason was given.
+func actReason(reason string) (string, error) {
+	reason = strings.TrimSpace(reason)
+	if utf8.RuneCountInString(reason) > maxActReason {
+		return "", Err("reason", fmt.Sprintf("must be at most %d characters", maxActReason))
+	}
+	return reason, nil
+}
+
+// actActor is the actor of an access-management act: the caller when ctx is
+// a [Context] with a user ID, otherwise the named mechanism as a job (D105:
+// software acting on its own initiative is never human), so the record never
+// carries a silent empty actor.
+func actActor(ctx context.Context, mechanism string) (actorKind, actorID string) {
+	if sc, ok := ctx.(Context); ok {
+		if u := sc.User(); u.ID != "" {
+			return actorKindFor(u.ID, u.Roles), u.ID
+		}
+	}
+	return "job", mechanism
 }

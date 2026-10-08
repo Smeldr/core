@@ -519,6 +519,24 @@ raw, userID, err := tokens.CreateClassified(ctx, "core-implementer", "editor", s
 
 **Cutover: core v1.121.0 (2026-10-07).** Before v1.121.0 an untagged actor recorded `human`, and no token could carry a tag, so every agent action was recorded as `human`. **Provenance rows written before the cutover keep the value they were written with and are not rewritten: an older `human` row means unclassified, never a verified person.** From v1.121.0 `human` means a person attested by the Admin who minted the token. A reader that compared `actor_kind == "human"` must now also expect `unclassified`.
 
+#### Reasons on minting, revoking and granting (v1.135.0)
+
+Each access-management act can carry a reason, stored on its provenance record (D96), the same place a transition's reason lives:
+
+```go
+raw, userID, err := tokens.CreateClassifiedWithReason(ctx, "importer", "editor", smeldr.Job, 30*24*time.Hour, "nightly import")
+err = tokens.RevokeWithReason(ctx, fingerprintID, "import moved to the new service")
+grantID, err := roles.Grant(ctx, smeldr.RoleGrant{TokenID: userID, RoleName: "steward", Reason: "owns the docs area"})
+err = roles.RevokeWithReason(ctx, grantID, "rotation over")
+```
+
+- The reason is optional. It is trimmed; longer than 1000 characters is a `*ValidationError` and nothing is minted, revoked or granted. `Create`, `CreateWithID`, `CreateClassified`, `Revoke` and `RoleStore.Revoke` are unchanged and record no reason.
+- **The reason is free text that people read: never put a token value or other secret in it.**
+- **Minting now writes a record.** Every mint writes a `Token`/`assert` provenance record whose subject is the token's fingerprint id, never the raw token. Before this release only revocation was recorded. The actor is the caller; with no caller identity it is the mechanism as a `job`: `token-bootstrap` for the boot-time admin token, `token-store` for a program calling the store outside a request. A revocation with no caller is now recorded as `job` `token-store` too, where it used to record an empty actor.
+- **Read back:** `TokenStore.List` fills `TokenRecord.Reason` (the mint reason) and `RevokeReason`; `RoleStore.ListGrants` fills `RoleGrant.Reason`. They are read from provenance in one query per verb with the default store, and are empty when none was given, provenance is not wired, or the act predates recorded reasons (nothing is backfilled). A failed read leaves them empty and is logged; the list is still returned.
+- A revoked grant's row is deleted, so its revoke reason is in its provenance record only. smeldr.dev/mcp's `get_item_provenance` reads it (mcp v1.53.0): `type_name` `Token` with the fingerprint id, or `RoleGrant` with the grant id, gated like `list_tokens` / `list_grants`. Those two names are reserved for these histories: a content type named `Token` or `RoleGrant` cannot be read through `get_item_provenance`.
+- smeldr.dev/mcp: `create_token`, `revoke_token`, `grant_role` and `revoke_grant` take an optional `reason`; `list_tokens` and `list_grants` return it. smeldr.dev/cli: `token create ... --reason`, `token revoke <id> --reason`.
+
 ### Bootstrap
 
 On first startup with an empty `smeldr_tokens` table, Smeldr auto-creates a
@@ -716,6 +734,11 @@ Enforcement is automatic and requires no separate check: `RoleStore.Authorized`,
 underlying query — an expired grant simply stops authorizing anything, with
 no revocation call needed. Fail-closed is unchanged: a DB error still denies
 before the expiry check is ever evaluated.
+
+Over MCP and the CLI (mcp v1.53.0, cli v0.23.0): `grant_role` takes an optional
+`expires_in_days` (a positive number of days, fractions allowed, no upper cap;
+the same name and unit as `create_token` and `delegate_item`) and returns the
+resulting `expires_at`; `smeldr-cli grant ... --expires-in-days N` sends it.
 
 `RoleStore.ListGrants` deliberately does **not** filter by expiry — it is the
 "explainable authority" audit surface (`list_grants`), so a viewer can see
@@ -3381,7 +3404,7 @@ app.Provenance(smeldr.NewProvenanceStore(db))
 
 ### Admin objects also write provenance
 
-As of Amendment A281 (Task T203), `RoleStore.Grant`, `RoleStore.Revoke`, and `TokenStore.Revoke` each write a `ProvenanceRecord` in addition to their existing `GovernanceAuditStore` write. Two new `SubjectType` values exist as a result: `"RoleGrant"` (for grant/revoke actions) and `"Token"` (for revoked tokens) — the first non-`Node`, non-`RelationEdge` subjects the provenance system has carried.
+Minting a token writes one too (`Token`/`assert`, v1.135.0; see "Reasons on minting, revoking and granting"). As of Amendment A281 (Task T203), `RoleStore.Grant`, `RoleStore.Revoke`, and `TokenStore.Revoke` each write a `ProvenanceRecord` in addition to their existing `GovernanceAuditStore` write. Two new `SubjectType` values exist as a result: `"RoleGrant"` (for grant/revoke actions) and `"Token"` (for revoked tokens): the first non-`Node`, non-`RelationEdge` subjects the provenance system has carried.
 
 The verb values are `"assert"` when a role is granted and `"invalidate"` when a grant or token is revoked — reusing the same pair `RelationEdge` already employs for its own create/remove shape.
 

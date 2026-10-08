@@ -563,6 +563,13 @@ type RoleGrant struct {
 	ExpiresAt *time.Time
 	// CreatedAt is the RFC3339 creation timestamp. Populated by ListGrants.
 	CreatedAt string
+	// Reason is why the grant was made. On input to [RoleStore.Grant] it is
+	// stored on the grant's "assert" provenance record (trimmed; longer than
+	// 1000 characters is a [*ValidationError]); never put a token value or
+	// other secret in it. [RoleStore.ListGrants] fills it back from that
+	// record: empty when none was given, provenance is not wired, or the
+	// grant predates recorded reasons.
+	Reason string
 	// Grantor is the token ID recorded on the earliest smeldr_governance_audit
 	// row for this grant's own creation ("action" = "grant", "target_kind" =
 	// "grant", "target_id" = this grant's own ID) — the actor who originally
@@ -997,6 +1004,10 @@ func (s *RoleStore) GetRole(ctx context.Context, name string) (RoleDefinition, e
 // Returns an error when grant.TokenID or grant.RoleName is empty, the named role
 // does not exist, or any DB operation fails.
 func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) {
+	reason, err := actReason(grant.Reason)
+	if err != nil {
+		return "", err
+	}
 	if grant.TokenID == "" {
 		return "", fmt.Errorf("smeldr: Grant: TokenID must not be empty")
 	}
@@ -1104,7 +1115,7 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 	if err := w.commit(); err != nil {
 		return "", fmt.Errorf("smeldr: Grant: commit: %w", err)
 	}
-	s.recordGrantProvenance(ctx, grantID, "assert")
+	s.recordGrantProvenance(ctx, grantID, "assert", reason)
 	return grantID, nil
 }
 
@@ -1117,7 +1128,7 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 // (WithAudit's own actor slot for GovernanceAuditRecord) is a token
 // fingerprint, a different identity space than ProvenanceRecord.ActorID's
 // user/job/agent identifier contract — deliberately not reused here.
-func (s *RoleStore) recordGrantProvenance(ctx context.Context, grantID, verb string) {
+func (s *RoleStore) recordGrantProvenance(ctx context.Context, grantID, verb, reason string) {
 	if s.provenanceStore == nil {
 		return
 	}
@@ -1133,6 +1144,7 @@ func (s *RoleStore) recordGrantProvenance(ctx context.Context, grantID, verb str
 		Verb:        verb,
 		ActorKind:   actorKindFor(actorID, roles),
 		ActorID:     actorID,
+		Reason:      reason,
 	})
 }
 
@@ -1140,6 +1152,18 @@ func (s *RoleStore) recordGrantProvenance(ctx context.Context, grantID, verb str
 // grant does not exist — the call is idempotent with respect to absence.
 // Returns an error when grantID is empty or the DELETE fails.
 func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
+	return s.RevokeWithReason(ctx, grantID, "")
+}
+
+// RevokeWithReason is [RoleStore.Revoke] with the reason for revoking, stored
+// on the revocation's provenance record. Never put a token value or other
+// secret in it. It is trimmed; longer than 1000 characters is a
+// [*ValidationError] and nothing is revoked.
+func (s *RoleStore) RevokeWithReason(ctx context.Context, grantID, reason string) error {
+	reason, err := actReason(reason)
+	if err != nil {
+		return err
+	}
 	if grantID == "" {
 		return fmt.Errorf("smeldr: Revoke: grantID must not be empty")
 	}
@@ -1205,7 +1229,7 @@ func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
 	if err := w.commit(); err != nil {
 		return fmt.Errorf("smeldr: Revoke: commit: %w", err)
 	}
-	s.recordGrantProvenance(ctx, grantID, "invalidate")
+	s.recordGrantProvenance(ctx, grantID, "invalidate", reason)
 	return nil
 }
 
@@ -1265,6 +1289,14 @@ func (s *RoleStore) ListGrants(ctx context.Context, tokenID string) ([]RoleGrant
 		grantors := s.grantorsFor(ctx, ids)
 		for i := range out {
 			out[i].Grantor = grantors[out[i].ID]
+		}
+		// Fail-open, like Grantor: a failed read leaves Reason empty.
+		if reasons, err := latestBySubject(ctx, s.provenanceStore, "RoleGrant", "assert", ids); err != nil {
+			slog.WarnContext(ctx, "smeldr: ListGrants: grant reasons not read", "error", err)
+		} else {
+			for i := range out {
+				out[i].Reason = reasons[out[i].ID].Reason
+			}
 		}
 	}
 	return out, nil

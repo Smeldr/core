@@ -668,7 +668,9 @@ func TestTokenStore_Revoke_ProvenanceAppendFails_RevokeStillSucceeds(t *testing.
 	}
 }
 
-func TestTokenStore_Revoke_PlainContext_ActorEmpty(t *testing.T) {
+// A revocation with no caller identity names the mechanism as a job actor,
+// never a silent empty actor (D105).
+func TestTokenStore_Revoke_PlainContext_ActorIsTheMechanism(t *testing.T) {
 	secret := "test-secret-32-bytes-xxxxxxxxxxxx"
 	db := &stubDB{}
 	store := NewTokenStore(db, secret)
@@ -683,8 +685,8 @@ func TestTokenStore_Revoke_PlainContext_ActorEmpty(t *testing.T) {
 	if len(fake.appended) != 1 {
 		t.Fatalf("appended %d ProvenanceRecords, want 1", len(fake.appended))
 	}
-	if rec := fake.appended[0]; rec.ActorID != "" || rec.ActorKind != "" {
-		t.Errorf("got ActorID=%q ActorKind=%q for a plain context.Context, want both empty", rec.ActorID, rec.ActorKind)
+	if rec := fake.appended[0]; rec.ActorID != mintActorStore || rec.ActorKind != "job" {
+		t.Errorf("got ActorID=%q ActorKind=%q for a plain context.Context, want job %q", rec.ActorID, rec.ActorKind, mintActorStore)
 	}
 }
 
@@ -709,11 +711,18 @@ func TestAppHandler_WiresProvenanceIntoTokenStore(t *testing.T) {
 	if err := tokenStore.Revoke(context.Background(), id); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
-	if len(fake.appended) != 1 {
-		t.Fatalf("appended %d ProvenanceRecords via the real App wiring, want 1", len(fake.appended))
+	// The boot-time bootstrap mint, this mint, and the revocation.
+	if len(fake.appended) != 3 {
+		t.Fatalf("appended %d ProvenanceRecords via the real App wiring, want 3", len(fake.appended))
 	}
-	if fake.appended[0].SubjectType != "Token" {
-		t.Errorf("SubjectType = %q, want Token", fake.appended[0].SubjectType)
+	want := []struct{ verb, actor string }{
+		{"assert", mintActorBootstrap}, {"assert", mintActorStore}, {"invalidate", mintActorStore},
+	}
+	for i, w := range want {
+		r := fake.appended[i]
+		if r.SubjectType != "Token" || r.Verb != w.verb || r.ActorKind != "job" || r.ActorID != w.actor {
+			t.Errorf("record %d = %s/%s %s %q; want Token/%s job %q", i, r.SubjectType, r.Verb, r.ActorKind, r.ActorID, w.verb, w.actor)
+		}
 	}
 }
 
