@@ -20,6 +20,13 @@ underlying workflow run succeeded. Check `gh run list`'s own
 watch command's own exit code has been observed to report success while
 the run it was watching was still `failure`.
 
+The `examples` job builds, vets **and tests** every example module (`GOWORK=off`,
+against the checkout through each example's `replace` of core, and the pinned
+versions of the other modules). A deliberate behaviour change that breaks an
+example's test fixes that test in the same commit; before this, example tests ran
+only at the next pin bump (example/server's provenance test stayed red from v1.121.0
+to 1a8bd1e unnoticed).
+
 ## PowerShell working directory
 
 `cd`/`Set-Location` updates PowerShell's own logical location (what

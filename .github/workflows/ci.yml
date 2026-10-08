@@ -73,7 +73,7 @@ jobs:
         run: golangci-lint run ./...
 
   examples:
-    name: Build examples (clean clone)
+    name: Build and test examples (clean clone)
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -96,6 +96,12 @@ jobs:
         env:
           GOWORK: 'off'
         run: go vet ./...
+
+      - name: Test
+        working-directory: ${{ matrix.dir }}
+        env:
+          GOWORK: 'off'
+        run: go test ./...
 
   integration:
     name: "Test (Postgres: state machine and pgx)"
