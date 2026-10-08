@@ -29,9 +29,10 @@ type statusTransition struct {
 	// by id, and only when something will read it.
 	item   any
 	prefix string
-	// channel is the event-stream channel of the "<type>.transitioned" event
-	// when channelSet; otherwise it is derived from the type and the item.
-	channel    string
+	// channels are the event-stream channels of the "<type>.transitioned"
+	// event when channelSet (none: a broadcast); otherwise they are derived
+	// from the type and the item ([App.transitionChannels]).
+	channels   []string
 	channelSet bool
 	// store is where the record goes when storeSet: a [DynamicTypeRepo]
 	// passes its own ([DynamicTypeRepo.WithProvenance], nil records nothing);
@@ -82,9 +83,9 @@ func (a *App) afterStatusChange(ctx context.Context, t statusTransition) {
 		t.slug = nodeSlugOf(t.item)
 	}
 	if !t.channelSet {
-		t.channel = transitionChannel(t.typeName, t.item)
+		t.channels = a.transitionChannels(t.typeName, t.item)
 	}
-	dispatchTransitionWebhookFrom(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, actorID, t.channel,
+	dispatchEventToFrom(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, actorID, t.channels,
 		strings.ToLower(t.typeName)+".transitioned",
 		transitionWebhookData{
 			Type:      strings.ToLower(t.typeName),
@@ -227,17 +228,59 @@ func (a *App) loadForAnnounce(ctx context.Context, typeName, id string) (item an
 	return nil, ""
 }
 
-// transitionChannel is the event-stream channel of typeName's
+// transitionChannels are the event-stream channels of typeName's
 // "<type>.transitioned" event: its topic ([transitionTopicChannels]), else the
-// item's own routing field ([channelValueFromItem]), else "" (a broadcast).
-func transitionChannel(typeName string, item any) string {
+// channels of the item's other events ([App.eventChannels]).
+func (a *App) transitionChannels(typeName string, item any) []string {
 	if ch := transitionTopicChannels[typeName]; ch != "" {
-		return ch
+		return []string{ch}
 	}
-	if item == nil {
-		return ""
+	return a.eventChannels(typeName, item)
+}
+
+// eventChannels are the event-stream channels an event about item of typeName
+// goes to; none means a broadcast:
+//   - a compiled orchestration type: its own routing field
+//     ([channelValueFromItem]);
+//   - a runtime-defined type whose schema has a field with role "channel": that
+//     field's value and the type's topic ([typeTopic]), or the topic alone when
+//     the value is empty, so an item without one wakes no role;
+//   - anything else: a broadcast.
+func (a *App) eventChannels(typeName string, item any) []string {
+	if node, ok := item.(*DynamicNode); ok {
+		return a.dynamicChannels(typeName, node)
 	}
-	return channelValueFromItem(typeName, item)
+	return channelList(channelValueFromItem(typeName, item))
+}
+
+// dynamicChannels routes a runtime-defined type's event on its schema's
+// "channel" field ([eventChannels]).
+func (a *App) dynamicChannels(typeName string, node *DynamicNode) []string {
+	if a.typeRegistry == nil {
+		return nil
+	}
+	desc := a.typeRegistry.Lookup(typeName)
+	if desc == nil {
+		return nil
+	}
+	field := routeField(desc.Schema)
+	if field == "" {
+		return nil
+	}
+	var values map[string]any
+	_ = json.Unmarshal(node.Fields, &values)
+	if v, ok := values[field].(string); ok && strings.TrimSpace(v) != "" {
+		return []string{v, typeTopic(typeName)}
+	}
+	return []string{typeTopic(typeName)}
+}
+
+// channelList is channel as a channel list: none for "".
+func channelList(channel string) []string {
+	if channel == "" {
+		return nil
+	}
+	return []string{channel}
 }
 
 // withoutConflictHold returns ctx with no conflict lock marked as held. A

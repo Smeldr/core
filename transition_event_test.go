@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -744,16 +745,18 @@ func TestLoadForAnnounce(t *testing.T) {
 	}
 }
 
-// TestTransitionChannel covers the channel of the canonical event.
+// TestTransitionChannel covers the channels of the canonical event of a
+// compiled type.
 func TestTransitionChannel(t *testing.T) {
-	if got := transitionChannel("Signal", &Signal{Receiver: "core"}); got != eventStreamChannelSignals {
-		t.Errorf("Signal = %q; want its topic", got)
+	app := &App{}
+	if got := app.transitionChannels("Signal", &Signal{Receiver: "core"}); !reflect.DeepEqual(got, []string{eventStreamChannelSignals}) {
+		t.Errorf("Signal = %v; want its topic", got)
 	}
-	if got := transitionChannel("Task", &Task{Band: "core"}); got != "core" {
-		t.Errorf("Task = %q; want its band", got)
+	if got := app.transitionChannels("Task", &Task{Band: "core"}); !reflect.DeepEqual(got, []string{"core"}) {
+		t.Errorf("Task = %v; want its band", got)
 	}
-	if got := transitionChannel("Task", nil); got != "" {
-		t.Errorf("Task with no item = %q; want a broadcast", got)
+	if got := app.transitionChannels("Task", nil); got != nil {
+		t.Errorf("Task with no item = %v; want a broadcast", got)
 	}
 }
 

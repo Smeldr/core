@@ -3220,6 +3220,22 @@ The JSON payload shape is identical to webhook event payloads — a
   `amendment.*` event (v1.107.0) were not streamed at all, and relations had
   no events. A runtime-defined dynamic type literally named `amendment` is an
   ordinary dynamic type and is broadcast like any other.
+- **Routed runtime-defined types (held, version pending):** a dynamic type's
+  events (its `"{type}.transitioned"` and status events; dynamic creates and
+  edits put nothing on the stream) are a broadcast unless its schema gives a
+  string field the role `channel`. Then each event goes to the channel that
+  field's value names (for `task_plan`, its `band`) and to the type's topic
+  `type:<type name>` (e.g. `type:task_plan`), never to other bands. An item
+  whose field is empty goes to the type's topic only. A reviewer of a type
+  subscribes to its topic; the `type:` prefix keeps it apart from role and band
+  channels.
+- **Several channels on one connection (held, version pending):** `?channel=`
+  takes a comma-separated list, e.g. `?channel=architect,type:task_plan`. The
+  connection receives an event published to any of them, once, even when it
+  was published to two. Spaces and empty entries are ignored; `all` anywhere in
+  the list means everything. An older core reads the whole list as one channel
+  name and delivers nothing to it, so switch a watcher to a list only after the
+  server runs a version with this.
 - **Client buffer:** A subscriber whose local event buffer fills (32 events,
   not configurable in this version) has further events silently dropped for
   that subscriber only (logged server-side at Warn level) rather than blocking
@@ -4214,13 +4230,18 @@ type SchemaField struct {
     Type     string   // "string" | "integer" | "boolean" | "array" | "object"
     Required bool
     Format   string   // "url" etc. — format hint for validation
-    Role     string   // "title" | "description" | "og_image" | "body" | "summary"
+    Role     string   // "title" | "description" | "og_image" | "body" | "summary" | "channel"
     Relation string   // non-empty = future T06 edge-backed relation placeholder
 }
 ```
 
 `Role` is a semantic seam read by T72 (head/SEO) and the ContentList renderer
-(summary cards). At most one field per schema may carry each role.
+(summary cards). At most one field per schema may carry each role. `channel`
+(held, version pending) must be a `string` field: it routes the type's stream
+events on the field's value plus the topic `type:<type name>` (see "Routed
+runtime-defined types" under the event stream). A type opts in by redefining
+its schema with the role; `ValidateSchemaDef` refuses it on a non-string field
+or on a second field.
 
 ### `CreateSchemaTable` and `MigrateSchemaKindColumn`
 

@@ -3,6 +3,7 @@ package smeldr
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -46,13 +47,46 @@ const (
 	eventStreamChannelSignals = "signals"
 )
 
+// eventStreamTypeTopicPrefix starts the topic channel of a runtime-defined
+// type that routes its events (a schema field with role "channel"): every
+// event of such a type also goes to "type:<type name>", so a reviewer of the
+// type can follow every band's items without hearing other types. The prefix
+// keeps a type topic from ever colliding with a role or band channel.
+const eventStreamTypeTopicPrefix = "type:"
+
+// typeTopic is the topic channel of the runtime-defined type typeName.
+func typeTopic(typeName string) string { return eventStreamTypeTopicPrefix + typeName }
+
+// parseChannels splits a ?channel= value into its channels: comma-separated,
+// whitespace trimmed, empty entries dropped. An empty result, or "all" among
+// the entries, means every channel ([eventStreamChannelAll]).
+func parseChannels(q string) []string {
+	var out []string
+	for _, c := range strings.Split(q, ",") {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		if c == eventStreamChannelAll {
+			return []string{eventStreamChannelAll}
+		}
+		out = append(out, c)
+	}
+	if len(out) == 0 {
+		return []string{eventStreamChannelAll}
+	}
+	return out
+}
+
 // eventStreamSub is one subscriber's registration: which token owns the
 // connection (for the per-token concurrency cap) and which channel it
 // asked to receive — either a real channel name or [eventStreamChannelAll]
 // for the unfiltered firehose.
 type eventStreamSub struct {
 	tokenID string
-	channel string
+	// channels are the channels the connection asked for ([parseChannels]):
+	// one or more channel names, or just [eventStreamChannelAll].
+	channels []string
 	// includeOwn opts this connection back in to events its own token caused
 	// (GET /_events/stream?include_own=true). The default, false, drops them:
 	// see [eventBroadcaster.broadcastFrom].
@@ -100,7 +134,7 @@ func (b *eventBroadcaster) subscribeOpts(tokenID, channel string, includeOwn boo
 		return nil, ErrTooManyRequests
 	}
 	ch := make(chan []byte, eventStreamSubscriberBuffer)
-	b.subs[ch] = eventStreamSub{tokenID: tokenID, channel: channel, includeOwn: includeOwn}
+	b.subs[ch] = eventStreamSub{tokenID: tokenID, channels: parseChannels(channel), includeOwn: includeOwn}
 	b.byToken[tokenID]++
 	return ch, nil
 }
@@ -167,10 +201,22 @@ func (b *eventBroadcaster) publish(channel string, payload []byte) {
 // publishFrom is [eventBroadcaster.publish] for an event caused by the token
 // origin, with the same self-skip rule as [eventBroadcaster.broadcastFrom].
 func (b *eventBroadcaster) publishFrom(origin, channel string, payload []byte) {
+	b.publishToFrom(origin, []string{channel}, payload)
+}
+
+// publishToFrom sends payload, caused by the token origin, to every subscriber
+// listening on any of channels or on [eventStreamChannelAll]: once per
+// subscriber, however many of its channels match. No channels at all is a
+// broadcast ([eventBroadcaster.broadcastFrom]).
+func (b *eventBroadcaster) publishToFrom(origin string, channels []string, payload []byte) {
+	if len(channels) == 0 {
+		b.broadcastFrom(origin, payload)
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for ch, sub := range b.subs {
-		if sub.channel != channel && sub.channel != eventStreamChannelAll {
+		if !sub.wants(channels) {
 			continue
 		}
 		if origin != "" && !sub.includeOwn && sub.tokenID == origin {
@@ -182,6 +228,22 @@ func (b *eventBroadcaster) publishFrom(origin, channel string, payload []byte) {
 			slog.Warn("smeldr: event stream subscriber buffer full, dropping event")
 		}
 	}
+}
+
+// wants reports whether the subscriber listens on any of channels, or on
+// every channel.
+func (s eventStreamSub) wants(channels []string) bool {
+	for _, mine := range s.channels {
+		if mine == eventStreamChannelAll {
+			return true
+		}
+		for _, c := range channels {
+			if mine == c {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // count reports the current subscriber count. Test-only introspection.
@@ -231,10 +293,11 @@ var eventStreamHeartbeat = 25 * time.Second
 // holding eventStreamMaxSubscribersPerToken concurrent connections 429
 // (T271); a ResponseWriter that does not implement http.Flusher (never true
 // for a real HTTP/1.1+ connection) yields 500. The channel query parameter
-// itself has no error path — any non-empty value is used verbatim as a
-// channel name (free-form, matching Band/Scope/Receiver's own unrestricted-
-// string convention elsewhere), and an absent/empty value is not an error,
-// it is the documented default (A302).
+// itself has no error path. Any non-empty value is a comma-separated list of
+// channel names, each used verbatim (free-form, matching Band/Scope/Receiver's
+// own unrestricted-string convention elsewhere): the connection receives an
+// event published to any of them, once ([parseChannels]). An absent or empty
+// value is not an error; it is the documented default (A302).
 //
 // The include_own query parameter has no error path either: exactly "true"
 // opts the connection back in to events its own token caused, anything else

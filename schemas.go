@@ -21,8 +21,12 @@ type SchemaField struct {
 	Format      string `json:"format,omitempty"`
 	Description string `json:"description,omitempty"`
 	// Role identifies the semantic role of this field: "title", "description",
-	// "og_image", "body", or "summary". At most one field per role per schema.
-	// Drives auto-slug generation (title), ContentList cards, and T72 head derivation.
+	// "og_image", "body", "summary" or "channel". At most one field per role per
+	// schema. Drives auto-slug generation (title), ContentList cards, and T72
+	// head derivation. "channel" (a string field only) routes the type's events
+	// on the event stream: each event goes to the channel the field's value
+	// names and to the type's topic "type:<type name>"; a type without one is
+	// a broadcast.
 	Role string `json:"role,omitempty"`
 	// Relation is a placeholder for T06 edge-backed semantic links between types.
 	// Set to "edge" when this field points to another content type reactively.
@@ -367,8 +371,9 @@ func ValidateSchemaDef(schema *ContentTypeSchema) error {
 	}
 	knownRoles := map[string]bool{
 		"": true, "title": true, "description": true,
-		"og_image": true, "body": true, "summary": true,
+		"og_image": true, "body": true, "summary": true, "channel": true,
 	}
+	channels := 0
 	for _, f := range fields {
 		if f.Name == "" {
 			return fmt.Errorf("smeldr: schema field Name is required")
@@ -377,10 +382,37 @@ func ValidateSchemaDef(schema *ContentTypeSchema) error {
 			return fmt.Errorf("smeldr: schema field %q has unknown type %q", f.Name, f.Type)
 		}
 		if !knownRoles[f.Role] {
-			return fmt.Errorf("smeldr: schema field %q has unknown role %q (valid: title, description, og_image, body, summary)", f.Name, f.Role)
+			return fmt.Errorf("smeldr: schema field %q has unknown role %q (valid: title, description, og_image, body, summary, channel)", f.Name, f.Role)
+		}
+		if f.Role == "channel" {
+			if f.Type != "string" {
+				return fmt.Errorf("smeldr: schema field %q has role \"channel\" but type %q; the channel field must be a string", f.Name, f.Type)
+			}
+			if channels++; channels > 1 {
+				return fmt.Errorf("smeldr: schema field %q is a second field with role \"channel\"; a type routes on one field", f.Name)
+			}
 		}
 	}
 	return nil
+}
+
+// routeField is the name of schema's field with role "channel", the field a
+// runtime-defined type's stream events are routed on, or "" when it has none
+// (or schema is nil or its fields cannot be read).
+func routeField(schema *ContentTypeSchema) string {
+	if schema == nil {
+		return ""
+	}
+	fields, err := schema.ParseFields()
+	if err != nil {
+		return ""
+	}
+	for _, f := range fields {
+		if f.Role == "channel" {
+			return f.Name
+		}
+	}
+	return ""
 }
 
 // ValidateFields validates a complete field map against a ContentTypeSchema.

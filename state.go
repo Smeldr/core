@@ -1495,7 +1495,7 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 		surface:    surface,
 		reason:     reason,
 		milestones: true,
-		channel:    channel,
+		channels:   channelList(channel),
 		channelSet: true,
 	})
 	fireAsyncTriggers(ctx, db, typeName, currentStatus, toState, id)

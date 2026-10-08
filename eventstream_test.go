@@ -689,6 +689,57 @@ func TestEventStreamHandler_ChannelQueryParamScopesSubscription(t *testing.T) {
 	}
 }
 
+// A ?channel= list subscribes the connection to each channel in it: an event
+// published to two of them arrives once.
+func TestEventStreamHandler_ChannelList(t *testing.T) {
+	b := newEventBroadcaster()
+	srv := httptest.NewServer(newEventStreamHandler(BearerHMAC(eventStreamTestSecret), b))
+	defer srv.Close()
+	tok, err := SignToken(User{ID: "u1", Roles: []Role{Author}}, eventStreamTestSecret, 0)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"?channel=architect,type:task_plan", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for b.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	lines := make(chan string, 4)
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+	}()
+	b.publish("core", []byte(`{"event":"other"}`))
+	b.publishToFrom("", []string{"core", "type:task_plan"}, []byte(`{"event":"plan"}`))
+	b.publish("architect", []byte(`{"event":"mine"}`))
+	var got []string
+	timeout := time.After(2 * time.Second)
+	for len(got) < 2 {
+		select {
+		case l := <-lines:
+			got = append(got, l)
+		case <-timeout:
+			t.Fatalf("got %v; want the plan and mine", got)
+		}
+	}
+	select {
+	case l := <-lines:
+		t.Errorf("extra line %q", l)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if got[0] != `{"event":"plan"}` || got[1] != `{"event":"mine"}` {
+		t.Errorf("lines = %v", got)
+	}
+}
+
 func TestEventStreamHandler_MissingChannelDefaultsToAll(t *testing.T) {
 	b := newEventBroadcaster()
 	auth := BearerHMAC(eventStreamTestSecret)

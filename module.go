@@ -1116,8 +1116,6 @@ func (m *Module[T]) afterStatusChange(ctx Context, sig LifecycleEvent, from, to 
 		milestones: true,
 		item:       snap,
 		prefix:     m.prefix,
-		channel:    transitionChannel(m.contentTypeName, snap),
-		channelSet: true,
 	}
 	if m.statusAnnouncer != nil {
 		m.statusAnnouncer(ctx, t)

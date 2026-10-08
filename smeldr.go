@@ -1262,11 +1262,7 @@ func (a *App) dispatchBus(ctx context.Context, ev SignalEvent, sig LifecycleEven
 		// ev.ActorID, the caller's User.ID, makes the stream skip that
 		// caller's own connection.
 		if payload, err := buildWebhookPayload(ev.Type, ev.raw, sig); err == nil {
-			if channel := channelValueFromItem(ev.Type, ev.raw); channel != "" {
-				a.eventBroadcaster.publishFrom(ev.ActorID, channel, payload)
-			} else {
-				a.eventBroadcaster.broadcastFrom(ev.ActorID, payload)
-			}
+			a.eventBroadcaster.publishToFrom(ev.ActorID, a.eventChannels(ev.Type, ev.raw), payload)
 		}
 	}
 	a.busMu.RLock()

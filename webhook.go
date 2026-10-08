@@ -424,6 +424,17 @@ func dispatchTransitionWebhookFrom(ctx context.Context, store *WebhookStore, poo
 // pool) and to the event stream (broadcaster) on channel, skipping actorID's
 // own connection. Either sink may be nil.
 func dispatchEventFrom(ctx context.Context, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, actorID, channel, eventName string, data any) {
+	var channels []string
+	if channel != "" {
+		channels = []string{channel}
+	}
+	dispatchEventToFrom(ctx, store, pool, broadcaster, actorID, channels, eventName, data)
+}
+
+// dispatchEventToFrom is [dispatchEventFrom] for an event the stream delivers
+// on several channels at once ([eventBroadcaster.publishToFrom]: once per
+// subscriber); no channels is a broadcast.
+func dispatchEventToFrom(ctx context.Context, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, actorID string, channels []string, eventName string, data any) {
 	webhooksConfigured := store != nil && pool != nil
 	streamed := broadcaster != nil
 	if !webhooksConfigured && !streamed {
@@ -448,11 +459,7 @@ func dispatchEventFrom(ctx context.Context, store *WebhookStore, pool *workerPoo
 		enqueueWebhookEvent(ctx, store, pool, eventName, payload)
 	}
 	if streamed {
-		if channel == "" {
-			broadcaster.broadcastFrom(actorID, payload)
-		} else {
-			broadcaster.publishFrom(actorID, channel, payload)
-		}
+		broadcaster.publishToFrom(actorID, channels, payload)
 	}
 }
 

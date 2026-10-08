@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.138.0] - 2026-10-08
+
+### Behaviour change
+
+- **A runtime-defined type can route its stream events (A453, D97).** Since v1.137.0 (D107) a dynamic type's status changes put `"{type}.transitioned"` and its status events on the stream, and every one was a broadcast. A schema field of type `string` with the new role `channel` now routes them: each event goes to the channel the field's value names and to the type's topic `type:<type name>`, never to other bands. An item whose field is empty goes to the topic only. A type with no `channel` field is still a broadcast, so nothing changes until a type opts in by redefining its schema. For `task_plan`, routed on `band`, a role session stops hearing other bands' plan moves; a reviewer subscribes to `type:task_plan`.
+
+### Added
+
+- `?channel=` on `GET /_events/stream` takes a comma-separated list, e.g. `?channel=architect,type:task_plan`. A connection receives an event published to any of its channels, once. Spaces and empty entries are ignored, and `all` in the list means everything. An older core reads a list as one channel name, so switch a watcher to a list only after the server runs this version.
+- Schema field role `channel` (`ValidateSchemaDef` refuses it on a non-string field or on a second field). No migration: the role lives in the fields JSON.
+- No new operation: subscribing and defining a schema keep their existing roles and gates.
+
+---
+
 ## [1.137.0] - 2026-10-08
 
 ### Behaviour change
