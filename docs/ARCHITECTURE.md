@@ -2064,3 +2064,4 @@ via the published interfaces documented above.
 
 None of these modules are imported by Smeldr core. All integration is outbound:
 Smeldr core defines the interfaces; external modules implement or consume them.
+| 2026-10-09 | A456 (Level 1, CI and toolchain only): `toolchain go1.26.9` in core and the six standalone modules (was go1.26.6), for GO-2026-6612, GO-2026-6613 and GO-2026-6617 in `net/http` (fixed in go1.26.9), which turned govulncheck red in CI on core d88d14f. The `go` directive stays 1.26.5, so the minimum for consumers is unchanged, and a library's `toolchain` line does not reach their builds. No version, no tag. |
