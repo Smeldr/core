@@ -45,6 +45,9 @@ const (
 	// (signal.expiry_swept). signal.created still routes on the receiver: it
 	// is the wake-up for new work.
 	eventStreamChannelSignals = "signals"
+	// eventStreamChannelTypes carries content_type.redefined: a
+	// runtime-defined type's schema changed.
+	eventStreamChannelTypes = "types"
 )
 
 // eventStreamTypeTopicPrefix starts the topic channel of a runtime-defined

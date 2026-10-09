@@ -3214,6 +3214,7 @@ The JSON payload shape is identical to webhook event payloads — a
   | `relations` | `relation.asserted`, `relation.ended` |
   | `amendments` | every compiled `Amendment` event (`amendment.created`, `.updated`, `.transitioned`) |
   | `signals` | `signal.transitioned` (a caller moving a Signal), `signal.expiry_swept` |
+  | `types` | `content_type.redefined` (a runtime-defined type's schema changed; core v1.140.0) |
 
   `signal.created` still routes on the Signal's receiver: it is the wake-up
   for new work. Before v1.129.0 `signal.transitioned` (v1.106.0) and every
@@ -4407,6 +4408,37 @@ desc, err := app.DefineContentType(&smeldr.ContentTypeSchema{
 `GET {URLPrefix}/{slug}` as the public read route. Empty `URLPrefix` means the type
 is accessible via the admin API only.
 
+**Redefine a type (core v1.140.0)**
+
+```go
+desc, err := app.RedefineContentType(ctx, &smeldr.ContentTypeSchema{
+    TypeName: "recipe",
+    Fields:   fieldsJSON, // the full list, as for DefineContentType
+}, "reason, optional")
+```
+
+`RedefineContentType` (and `RedefineContentTypeVia` with a surface) replaces a
+registered runtime-defined type's schema, in the store and in the running App,
+without a restart. A redefinition may loosen and add, never take away or tighten:
+- **allowed:** the label (an empty one keeps the stored label), a field's role,
+  format, description and relation, a required field becoming optional, new
+  optional fields;
+- **refused**, as a validation error on the field with nothing saved: removing a
+  field, changing its type, making it required, adding a required field, and any
+  change of `URLPrefix`. Setting, moving or removing a public prefix decides what
+  is published, which a schema edit must not do.
+
+It writes one provenance record (subject `ContentType` / the type name, verb
+`update`, actor, surface, reason) and sends `content_type.redefined` on the `types`
+topic and to webhooks. The change applies to writes after it: existing items are
+not revalidated. It is in this process only: another process on the same database
+sees the new schema after a restart. Redefinitions in one App run one at a time,
+so two concurrent ones that each add a field cannot both pass: the second is
+checked against the first's schema and refused for removing its field. The
+public `GET {prefix}` and `GET {prefix}/{slug}` routes look the type up per
+request, so they serve the new schema at once. MCP: `redefine_content_type` (gated by
+`define-type`, like `define_content_type`); CLI: `smeldr-cli content-type redefine`.
+
 **Serve public and admin routes**
 
 ```go
@@ -4867,6 +4899,10 @@ one), its own human-facing identifier (`Task.TaskID`, `Goal.GoalID`,
 slug/ID-only. `get_task("T203")` and `get_task("<real slug>")` and `get_task("<real
 Node.ID>")` all work identically (A262/T253, A266/T214). The response always reports the
 item's own real slug, never the identifier you passed in.
+
+The schemas declare the identifier as `slug`; `id` is accepted as its alias on every one of
+these tools, `update_*` included (smeldr.dev/mcp v1.55.2). Both given with different values is
+refused with -32602 rather than acting on either.
 
 `Task` and `Goal` list results (`list_task`/`list_goal` via MCP, `GET /tasks`/`GET /goals`
 via HTTP) are sorted by `Priority` ascending by default (lower number is higher priority) —

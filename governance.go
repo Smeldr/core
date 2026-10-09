@@ -273,7 +273,8 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		{"list_nodes", "read"},
 		// Dynamic content tools (gate per roleFor in mcp/rolefor.go)
 		{"define_content_type", "define-type"},
-		{"create_content", "manage"}, // Editor-gated operational tool
+		{"redefine_content_type", "define-type"}, // the same act as defining (governance-model.md section 4)
+		{"create_content", "manage"},             // Editor-gated operational tool
 		{"get_content", "read"},
 		{"list_content", "read"},
 		{"update_content", "manage"},     // Editor-gated operational tool

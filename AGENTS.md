@@ -356,7 +356,11 @@ that way (mirrors core's own `recordAuthorizationRequiredSignal`).
 ### Generic reference server (example/server)
 
 `example/server/main.go` is a deployable binary with no custom Go content types.
-All content types are defined at runtime via the `define_content_type` MCP tool.
+All content types are defined at runtime via the `define_content_type` MCP tool,
+and changed with `redefine_content_type` (core v1.140.0, mcp v1.56.0): the label, roles,
+formats and descriptions, optional-making and new optional fields, never a removal,
+a retype, a tightening or a URL prefix change. The change applies at once, to later
+writes only, in this process (another process sees it after a restart).
 Optional subsystems are gated by environment variables — the binary compiles and
 runs with only `SECRET` set; every other feature is opt-in.
 

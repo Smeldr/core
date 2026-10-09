@@ -321,6 +321,7 @@ type App struct {
 	webhookPool     *workerPool                         // non-nil when App.Webhooks() was called
 	signalListeners []func(LifecycleEvent, string, any) // registered via AddSignalListener
 	busMu           sync.RWMutex
+	redefineMu      sync.Mutex                                                    // serializes RedefineContentTypeVia from lookup through registry swap
 	busHandlers     map[LifecycleEvent][]func(context.Context, SignalEvent) error // registered via OnSignal
 	hookableModules []interface {
 		setAfterHook(func(Context, LifecycleEvent, afterHookMeta, any))

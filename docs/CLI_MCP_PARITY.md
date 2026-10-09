@@ -46,6 +46,7 @@ that discipline being enforced consistently.
 | `redirect` | `create_redirect`, `list_redirects`, `delete_redirect` |
 | `transition` | `transition_item` |
 | `grant`, `grant revoke`, `grant list` (cli v0.23.0) | `grant_role`, `revoke_grant`, `list_grants` |
+| `content-type define`, `content-type redefine`, `content-type get` (cli v0.24.0) | `define_content_type`, `redefine_content_type`, `get_content_type_schema` |
 | `oauth` (CLI) | CIMD/OAuth flows — a different surface entirely, not a 1:1 tool mapping, not a gap |
 
 ## Real gaps — MCP tools with no CLI command at all
@@ -55,7 +56,7 @@ that discipline being enforced consistently.
 | `set_page_meta`, `get_page_meta`, `delete_page_meta`, `list_page_meta` | Per-path SEO overrides | `smeldr-cli pagemeta <verb>` |
 | `assert_relation`, `propose_relation`, `observe_relation`, `get_relations`, `preview_impact`, `upsert_relation_kind`, `list_relation_kinds` | Relation graph (distinct from block section/item composition — `edge.go` only covers block composition, not the relation graph). `get_goal_context`'s own linked-item assembly depends on this same graph and has no CLI equivalent for the same reason — not a separate gap, a consequence of this one. | `smeldr-cli relation <verb>` |
 | `get_valid_transitions`, `list_items_by_state`, `define_state_flow` | State-flow introspection/definition — `transition` (CLI) only executes a transition, it doesn't let an operator inspect or define the flow itself | `smeldr-cli flow <verb>` |
-| `get_content_type_schema`, `list_content_type_schemas` | Dynamic content type schema introspection | `smeldr-cli schema <verb>` |
+| `list_content_type_schemas` | Dynamic content type schema listing (`get_content_type_schema` is covered by `content-type get`, cli v0.24.0) | `smeldr-cli content-type list` |
 | `get_check_status` | Check (governance precondition) results | `smeldr-cli check status` |
 | `get_sweep_run` | Structural sweep run results | `smeldr-cli sweep status` |
 | `get_stewardship_inbox` | Stewardship/role-grant context for the caller's own token | `smeldr-cli stewardship` |

@@ -620,21 +620,30 @@ func (a *App) DefineContentType(ctx context.Context, schema *ContentTypeSchema) 
 		Fetch:  repo.List,
 	}
 	a.typeRegistry.Register(desc)
-	if prefix != "" {
-		appRef := a
-		a.mux.Handle("GET "+prefix, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			serveDynamicList(w, r, appRef, desc)
-		}))
-		a.mux.Handle("GET "+prefix+"/{slug}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			serveDynamicItem(w, r, appRef, desc, r.PathValue("slug"))
-		}))
-		insertDynamicRoutes(ctx, a.cfg.DB, schema.TypeName, prefix)
-		if a.llmsStore != nil {
-			a.llmsStore.registerCompact()
-			a.llmsStore.SetCompact(prefix, []LLMsEntry{})
-		}
-	}
+	a.handleDynamicRoutes(ctx, schema.TypeName, prefix)
 	return desc, nil
+}
+
+// handleDynamicRoutes registers the public GET routes of a runtime-defined
+// type with a public prefix, records them in smeldr_routes and opens its
+// llms.txt section. No-op when prefix is empty. The handlers look the type up
+// by name on every request, never through a captured descriptor, so a
+// redefinition ([App.RedefineContentType]) applies to them at once.
+func (a *App) handleDynamicRoutes(ctx context.Context, typeName, prefix string) {
+	if prefix == "" {
+		return
+	}
+	a.mux.Handle("GET "+prefix, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveDynamicList(w, r, a, typeName)
+	}))
+	a.mux.Handle("GET "+prefix+"/{slug}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveDynamicItem(w, r, a, typeName, r.PathValue("slug"))
+	}))
+	insertDynamicRoutes(ctx, a.cfg.DB, typeName, prefix)
+	if a.llmsStore != nil {
+		a.llmsStore.registerCompact()
+		a.llmsStore.SetCompact(prefix, []LLMsEntry{})
+	}
 }
 
 // DynamicContentRepo returns a [DynamicTypeRepo] for the named runtime-defined
@@ -701,21 +710,7 @@ func (a *App) loadDynamicTypes(ctx context.Context) {
 			Fetch:  repo.List,
 		}
 		a.typeRegistry.Register(desc)
-		if prefix != "" {
-			appRef := a
-			d := desc // capture loop variable
-			a.mux.Handle("GET "+prefix, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				serveDynamicList(w, r, appRef, d)
-			}))
-			a.mux.Handle("GET "+prefix+"/{slug}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				serveDynamicItem(w, r, appRef, d, r.PathValue("slug"))
-			}))
-			insertDynamicRoutes(ctx, a.cfg.DB, schema.TypeName, prefix)
-			if a.llmsStore != nil {
-				a.llmsStore.registerCompact()
-				a.llmsStore.SetCompact(prefix, []LLMsEntry{})
-			}
-		}
+		a.handleDynamicRoutes(ctx, schema.TypeName, prefix)
 	}
 }
 
@@ -742,9 +737,15 @@ func insertDynamicRoutes(ctx context.Context, db DB, typeName, prefix string) {
 
 // — public HTTP handlers ——————————————————————————————————————————————————————
 
-// serveDynamicList serves a JSON list of Published items for the given type.
-// Called from the type-specific GET /{prefix} route registered by DefineContentType.
-func serveDynamicList(w http.ResponseWriter, r *http.Request, a *App, desc *TypeDescriptor) {
+// serveDynamicList serves a JSON list of Published items of the named type,
+// looked up in the registry on each request. Called from the type-specific
+// GET /{prefix} route registered by [App.handleDynamicRoutes].
+func serveDynamicList(w http.ResponseWriter, r *http.Request, a *App, typeName string) {
+	desc := a.typeRegistry.Lookup(typeName)
+	if desc == nil {
+		WriteError(w, r, ErrNotFound)
+		return
+	}
 	opts := listOptsFromRequest(r)
 	opts.Status = []Status{Published}
 	items, err := desc.Fetch(r.Context(), opts)
@@ -759,10 +760,11 @@ func serveDynamicList(w http.ResponseWriter, r *http.Request, a *App, desc *Type
 	writeDynamicJSON(w, map[string]any{"items": items, "total": len(items)})
 }
 
-// serveDynamicItem serves a single Published item by slug as JSON.
-// Called from the type-specific GET /{prefix}/{slug} route registered by DefineContentType.
-func serveDynamicItem(w http.ResponseWriter, r *http.Request, a *App, desc *TypeDescriptor, slug string) {
-	repo, err := a.DynamicContentRepo(desc.Name)
+// serveDynamicItem serves a single Published item of the named type by slug as
+// JSON, through a repo built from the registry on each request. Called from the
+// type-specific GET /{prefix}/{slug} route registered by [App.handleDynamicRoutes].
+func serveDynamicItem(w http.ResponseWriter, r *http.Request, a *App, typeName, slug string) {
+	repo, err := a.DynamicContentRepo(typeName)
 	if err != nil {
 		WriteError(w, r, ErrInternal)
 		return

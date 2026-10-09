@@ -23,6 +23,16 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.140.0] - 2026-10-09
+
+### Added
+
+- `App.RedefineContentType(ctx, schema, reason)` and `RedefineContentTypeVia` (A459): replace a registered runtime-defined type's schema, in the store and in the running App, without a restart. A redefinition may loosen and add (label; a field's role, format, description and relation; required to optional; new optional fields). It refuses, as a validation error with nothing saved: removing a field, changing its type, making it required, adding a required field, and any `url_prefix` change. It writes a provenance record (subject `ContentType`, verb `update`, actor, surface, reason) and sends `content_type.redefined` on a new `types` topic and to webhooks. It applies to later writes in this process; existing items are not revalidated, and another process sees it after a restart.
+- Redefinitions in one App run one at a time, so two concurrent ones cannot drop each other's new field: the later one is checked against the earlier one's schema. The public `GET {prefix}` and `GET {prefix}/{slug}` routes of a runtime-defined type look the type up per request and serve a redefined schema at once.
+- A tool policy row `redefine_content_type` -> `define-type`, seeded on every boot, so an existing instance gains it on restart. No new operation word.
+
+---
+
 ## [1.139.1] - 2026-10-09
 
 ### Behaviour change

@@ -75,6 +75,24 @@ func (r *ContentTypeRegistry) Register(d *TypeDescriptor) {
 	}
 }
 
+// replace swaps in d for the registered type of the same name, keeping its
+// prefix, under the registry's lock: a new descriptor, never a change to the
+// old one, so a caller still holding the old one reads a consistent value. It
+// panics when the name is not registered or d's prefix differs (a
+// redefinition never moves a prefix, see [App.RedefineContentType]).
+func (r *ContentTypeRegistry) replace(d *TypeDescriptor) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	old, exists := r.types[d.Name]
+	if !exists {
+		panic(fmt.Sprintf("smeldr: cannot replace content type %q: not registered", d.Name))
+	}
+	if old.Prefix != d.Prefix {
+		panic(fmt.Sprintf("smeldr: cannot replace content type %q: prefix %q differs from %q", d.Name, d.Prefix, old.Prefix))
+	}
+	r.types[d.Name] = d
+}
+
 // Lookup returns the descriptor for the given type name, or nil when not found.
 func (r *ContentTypeRegistry) Lookup(name string) *TypeDescriptor {
 	r.mu.RLock()
