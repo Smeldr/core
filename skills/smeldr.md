@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.137.0 · smeldr.dev/mcp v1.54.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.23.1 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.140.0 · smeldr.dev/mcp v1.56.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.24.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -291,8 +291,16 @@ reverse-proxy idle timeouts.
   the same event data, either or both.
 - **At-most-once** — no replay/backfill on reconnect. A dropped connection
   misses whatever fired in the gap.
-- **Client-side filtering only** — every subscriber receives every event
-  type; a listener that wants a subset filters on its own end.
+- **Channels:** `?channel=<name>` receives the events routed to that channel
+  plus true broadcasts; `all` (or no parameter) receives everything. Since
+  core v1.138.0 (A453) `?channel=` takes a comma-separated list, e.g.
+  `?channel=architect,type:task_plan`, each event delivered once. A
+  runtime-defined type routes its events on the string field with schema role
+  `channel` (one per schema): to the field's value and to the topic
+  `type:<type name>`, the topic alone for an empty value; a type without that
+  role is a broadcast. Further topics: `relations`, `amendments`, `signals`,
+  `types` (`content_type.redefined`, core v1.140.0). An older core reads a
+  list as one channel name.
 - Route is absent (404) unless `EventStream` was called. No MCP tool by
   design, same reasoning as `/_logs` — this exists for exactly the
   situation where an agent has only this one HTTP connection to lean on.
@@ -433,7 +441,7 @@ Tools are named from the type in lower_snake_case.
 | Tool | Role | Description |
 |------|------|-------------|
 | `create_{type}` | Author+ | Create Draft |
-| `update_{type}` | Author+ | Partial field update by slug |
+| `update_{type}` | Author+ | Partial field update. Name the item with `slug` (an ID, slug or human ID); `id` is accepted as its alias (mcp v1.55.2), and `id` and `slug` with different values are refused with -32602 on every identifier tool. Since mcp v1.55.1 / core v1.139.1 (A457) the schema offers no `status`, a `status` is refused with -32602 naming `transition_item`, and a differing slug or ID is refused (422 over HTTP PATCH); an equal value is accepted. Deploy mcp >= v1.55.1 with or before core v1.139.1. |
 | `publish_{type}` | Author+ | Draft → Published |
 | `schedule_{type}` | Author+ | Draft → Scheduled (requires scheduled_at RFC 3339) |
 | `archive_{type}` | Author+ | Any → Archived |
@@ -455,6 +463,8 @@ Tools are named from the type in lower_snake_case.
 | `upsert_relation_kind` | Admin | Register or update a relation kind. Gate: `app.Relations(store)` called. |
 | `list_relation_kinds` | Author+ | List all registered relation kinds. Includes `reverse_label` when the kind has one set (01a0c43f/v1.40.0). Gate: `app.Relations(store)` called. |
 | `define_state_flow` | Admin | Register or update a state flow for a dynamic content type. Calls `App.RegisterFlow`; idempotent. `type_name` required. States carry `locked` and `standing` (`holds` or omitted); the flow carries `active_state` and `conflict_policy`. Anything left out is reset, so send the full definition. A Go-defined `type_name` is refused (its flow is set in code). Returns `{name, type_name, state_count, transition_count}`. Gate: `App.Config().DB != nil`. |
+| `redefine_content_type` | Admin (`define-type`) | Change a runtime-defined type's schema at once, without a restart (core v1.140.0, mcp v1.56.0, A459). Params `type_name`, `fields` (the full list), optional `label`, `reason`. Allowed: the label, a field's role, format, description and relation, required to optional, new optional fields. Refused with -32602 naming the field, nothing saved: removing a field, changing its type, making it required, a new required field, any `url_prefix` change. Later writes use the new schema; existing items are not revalidated; another process on the same database sees it after a restart. Writes a provenance record (ContentType, update) and sends `content_type.redefined` on the `types` topic. cli: `content-type redefine` (v0.24.0). |
+| Runtime-defined resources | Author | Since mcp v1.55.0 (A455) a runtime-defined type with a URL prefix is an MCP resource: `resources/list` (Published items), `resources/templates/list`, `resources/read` of `smeldr://{prefix}/{slug}`, and subscribers are notified on its status changes and, with core v1.139.0, content edits. A type without a prefix (e.g. `task_plan`) is not a resource. |
 | `transition_item` | Editor | Move a dynamic content item to a new state; validates against registered flow (ErrConflict → -32001, ErrNotFound → -32000 as of v1.40.0, previously also -32001). Optional `reason` param (v1.31.0+) — required if the target transition has `RequiredReason` set, else returns -32602. Gate: `App.Config().DB != nil`. Since core v1.137.0 / mcp v1.54.0 (D107) a move reaches `App.OnSignal` subscribers (Audit, agent jobs) as the status events, and resource subscribers of a compiled type are notified (`smeldr.AfterTransition`, listener-only). |
 | `get_valid_transitions` | Author | List legal target states for the item's current state; falls back to default flow. Gate: `App.Config().DB != nil`. |
 | `list_items_by_state` | Author | List items of a dynamic content type in a given state. Gate: `App.Config().DB != nil`. |
@@ -645,6 +655,11 @@ smeldr-cli grant <token-id> <role> --reason "<text>" --expires-in-days 14   # ti
 smeldr-cli grant revoke <grant-id> --reason "<text>"
 smeldr-cli grant list [<token-id>]
 smeldr-cli history RoleGrant <grant-id>
+
+# Runtime-defined content types (smeldr-cli v0.24.0+; redefine needs core v1.140.0 and mcp v1.56.0 on the server)
+smeldr-cli content-type define --type recipe --fields recipe-fields.json --url-prefix /recipes --label Recipe   # Admin
+smeldr-cli content-type redefine --type recipe --fields recipe-fields.json --reason "<text>"                  # Admin; loosen and add only
+smeldr-cli content-type get recipe                                                                             # Author
 
 # Webhooks
 smeldr-cli webhook create --url https://example.com/hook --events post.published
