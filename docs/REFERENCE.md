@@ -58,7 +58,7 @@ app.Run(":8080")
 - `GET /posts/{slug}` — single post
 - `POST /posts` — create (Author+)
 - `PUT /posts/{slug}` — update, full replace (Author+)
-- `PATCH /posts/{slug}` — update, partial — a field omitted from the body keeps its existing value (Author+, same tier as `PUT`) (T242)
+- `PATCH /posts/{slug}` — update, partial — a field omitted from the body keeps its existing value (Author+, same tier as `PUT`) (T242). A `status`, `slug` or `id` in the body that differs from the stored value is refused with 422 and the field named (held, version pending): a status changes through `PUT`, `transition_item` or the lifecycle tools, and an update never changes the slug or the ID. Before, PATCH and MCP `update_{type}` dropped those keys and reported success. The same value as stored is accepted.
 - `DELETE /posts/{slug}` — delete (Author+)
 - `GET /posts/sitemap.xml` — auto-generated, always fresh
 - Draft posts never visible to unauthenticated requests

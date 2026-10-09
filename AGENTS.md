@@ -485,7 +485,7 @@ without the column is refused).
 For each registered content type, these tools are available:
 
 - `create_{type}` — creates a Draft
-- `update_{type}` — partial update (absent fields preserved)
+- `update_{type}` — partial update (absent fields preserved). A `status`, `slug` or `id` that differs from the stored value is refused (-32602, the field named; held, version pending): change status with `transition_item` or `publish_`/`schedule_`/`archive_`. Before, the update dropped them and reported success. The item identifier (`slug` or `id` argument) is not a body field.
 - `publish_{type}` — transitions to Published
 - `schedule_{type}` — schedules for future publication (RFC3339 datetime)
 - `archive_{type}` — transitions to Archived

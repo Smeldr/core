@@ -23,6 +23,15 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.139.1] - 2026-10-09
+
+### Behaviour change
+
+- **An update that asks to change the status, the slug or the ID is refused (A457, D97).** HTTP `PATCH` and MCP `update_{type}` used to merge the request, quietly restore those three from the stored item and report success, so `update_task(slug, status="resolved")` returned success while the Task stayed where it was. A differing value is now a validation error on that field (422 over HTTP, -32602 over MCP) and nothing is saved. The message names the path that does change a status: `transition_item`, or the publish, schedule and archive tools. A value equal to the stored one is accepted, so a caller that sends a whole item back keeps working. `last_actor` in a body stays ignored by design (D108). Runtime-defined types already refused `status` in `update_content`.
+- **Release order (binding): smeldr.dev/mcp v1.55.1 or later first, or in the same deploy, never this core alone.** An older mcp passes the item identifier (`slug`/`id`) to core as a field to write. With this core it would read an update addressed by a Task's human ID as a slug change and refuse it.
+
+---
+
 ## [1.139.0] - 2026-10-09
 
 ### Behaviour change

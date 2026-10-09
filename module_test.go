@@ -1152,10 +1152,11 @@ func TestModule_PatchHandler_PartialUpdate_PreservesAbsentFields(t *testing.T) {
 	}
 }
 
-// TestModule_PatchHandler_RestoresIdentityAndStatus mirrors MCPUpdate's own
-// existing identity-restoration test, through the real HTTP path this time
-// — ID/Slug/Status in the PATCH body are silently discarded.
-func TestModule_PatchHandler_RestoresIdentityAndStatus(t *testing.T) {
+// TestModule_PatchHandler_RefusesIdentityAndStatus: ID, Slug or Status in a
+// PATCH body that differ from the stored values are refused (422, nothing
+// saved), where they used to be silently discarded while the PATCH reported
+// success; the same values as stored are accepted.
+func TestModule_PatchHandler_RefusesIdentityAndStatus(t *testing.T) {
 	repo := NewMemoryRepo[*testPost]()
 	p := &testPost{
 		Node:  Node{ID: NewID(), Slug: "existing-post", Status: Published},
@@ -1164,26 +1165,34 @@ func TestModule_PatchHandler_RestoresIdentityAndStatus(t *testing.T) {
 	if err := repo.Save(context.Background(), p); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-
 	m := newTestModule(repo)
-	body, _ := json.Marshal(map[string]any{
-		"ID": "evil-id", "Slug": "evil-slug", "Status": "draft", "Title": "New Title",
-	})
-	w := httptest.NewRecorder()
-	r := withUser(httptest.NewRequest(http.MethodPatch, "/testposts/existing-post", bytes.NewReader(body)), editorUser())
-	r.SetPathValue("slug", "existing-post")
-	m.patchHandler(w, r)
+	patch := func(fields map[string]any) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(fields)
+		w := httptest.NewRecorder()
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/testposts/existing-post", bytes.NewReader(body)), editorUser())
+		r.SetPathValue("slug", "existing-post")
+		m.patchHandler(w, r)
+		return w
+	}
 
+	w := patch(map[string]any{"ID": "evil-id", "Slug": "evil-slug", "Status": "draft", "Title": "New Title"})
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422, body: %s", w.Code, w.Body.String())
+	}
+	if stored, _ := repo.FindByID(context.Background(), p.ID); stored.Title != "Original Title" {
+		t.Errorf("title = %q; a refused PATCH must save nothing", stored.Title)
+	}
+
+	w = patch(map[string]any{"ID": p.ID, "Slug": "existing-post", "Status": "published", "Title": "New Title"})
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body: %s", w.Code, w.Body.String())
+		t.Fatalf("unchanged identity: status = %d, body: %s", w.Code, w.Body.String())
 	}
 	var got testPost
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if got.ID != p.ID || got.Slug != "existing-post" || got.Status != Published {
-		t.Errorf("identity/status = (%q,%q,%q), want (%q,%q,%q) — a PATCH body must never change these",
-			got.ID, got.Slug, got.Status, p.ID, "existing-post", Published)
+	if got.ID != p.ID || got.Slug != "existing-post" || got.Status != Published || got.Title != "New Title" {
+		t.Errorf("got (%q,%q,%q,%q)", got.ID, got.Slug, got.Status, got.Title)
 	}
 }
 

@@ -2848,6 +2848,9 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 		return nil, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
 			ErrConflict, m.contentTypeName, nodeIDOf(existing), nodeStatusOf(existing))
 	}
+	if err := refuseImmutableKeys(fields, existing); err != nil {
+		return nil, err
+	}
 
 	pv, elemType := m.newItemPtr()
 	// Seed pv from the existing item so that fields absent from the map are
@@ -2892,6 +2895,38 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 	m.notifyAfter(ctx, AfterUpdate, string(nodeStatusOf(existing)), surface, "", item)
 	m.invalidateCache()
 	return item, nil
+}
+
+// refuseImmutableKeys refuses a partial update that asks to change what
+// [Module.updateFields] restores from the stored item: the status, the slug
+// or the ID. The keys match the way encoding/json matches them (any case). A
+// value equal to the stored one asks for no change and is allowed, so a
+// caller that sends a whole item back keeps working; a different value, or a
+// value that is not a string, is refused with a [*ValidationError] on that
+// field naming the path that does change it (422 over HTTP, -32602 over MCP),
+// instead of being dropped while the update reports success.
+func refuseImmutableKeys(fields map[string]any, existing any) error {
+	for key, v := range fields {
+		var field, stored string
+		switch {
+		case strings.EqualFold(key, "status"):
+			field, stored = "status", string(nodeStatusOf(existing))
+		case strings.EqualFold(key, "slug"):
+			field, stored = "slug", nodeSlugOf(existing)
+		case strings.EqualFold(key, "id"):
+			field, stored = "id", nodeIDOf(existing)
+		default:
+			continue
+		}
+		if s, ok := v.(string); ok && s == stored {
+			continue
+		}
+		if field == "status" {
+			return Err("status", "cannot be changed by an update; use transition_item (or the publish, schedule and archive tools)")
+		}
+		return Err(field, "cannot be changed by an update")
+	}
+	return nil
 }
 
 // patchHandler implements PATCH {prefix}/{slug} — partial update over REST
