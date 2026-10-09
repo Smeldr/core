@@ -295,11 +295,12 @@ type SignalEvent struct {
 	// to thread; several typed-content call sites do not yet (T237).
 	Reason string
 
-	// fromTransition marks a milestone event ([AfterPublish] and the others
-	// [statusSignals] names) dispatched by [App.afterStatusChange], which has
-	// already written the transition's provenance record and standing: the
-	// [App.Provenance] subscriber skips it (D107).
-	fromTransition bool
+	// recorded marks an event whose provenance record the dispatching path
+	// has already written: the status events [App.afterStatusChange] sends
+	// (the transition's record and standing, D107) and the content edit
+	// [App.afterContentEdit] sends for a runtime-defined item (its "update"
+	// record). The [App.Provenance] subscriber skips it.
+	recorded bool
 
 	// raw holds the original content item. Used internally by the webhook
 	// delivery handler to build the full payload. Not exposed to external
@@ -331,9 +332,9 @@ type afterHookMeta struct {
 	// reason parameter (T243).
 	Reason string
 
-	// FromTransition is set by [App.afterStatusChange] on the milestone events
-	// it dispatches; it becomes [SignalEvent]'s fromTransition.
-	FromTransition bool
+	// Recorded is set by [App.afterStatusChange] and [App.afterContentEdit]
+	// on the events they dispatch; it becomes [SignalEvent]'s recorded.
+	Recorded bool
 }
 
 // buildSignalEvent constructs a [SignalEvent] from the parameters available
@@ -355,19 +356,19 @@ func buildSignalEvent(ctx Context, _ LifecycleEvent, meta afterHookMeta, item an
 	}
 	url := strings.TrimRight(baseURL, "/") + meta.Prefix + "/" + slug
 	return SignalEvent{
-		Type:           meta.TypeName,
-		Slug:           slug,
-		NodeID:         n.ID,
-		Title:          title,
-		URL:            url,
-		Timestamp:      time.Now(),
-		PreviousState:  meta.PrevState,
-		ActorRole:      role,
-		ActorID:        actorID,
-		ActorRoles:     actorRoles,
-		Surface:        meta.Surface,
-		Reason:         meta.Reason,
-		fromTransition: meta.FromTransition,
-		raw:            item,
+		Type:          meta.TypeName,
+		Slug:          slug,
+		NodeID:        n.ID,
+		Title:         title,
+		URL:           url,
+		Timestamp:     time.Now(),
+		PreviousState: meta.PrevState,
+		ActorRole:     role,
+		ActorID:       actorID,
+		ActorRoles:    actorRoles,
+		Surface:       meta.Surface,
+		Reason:        meta.Reason,
+		recorded:      meta.Recorded,
+		raw:           item,
 	}
 }

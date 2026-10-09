@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.139.0] - 2026-10-09
+
+### Behaviour change
+
+- **A content edit of a runtime-defined item reaches the App side (A455, D97).** `DynamicTypeRepo.UpdateFieldsVia` (MCP `update_content`, the content API's PATCH) on a repository from `App.DynamicContentRepo` now announces the edit as `AfterUpdate`: `App.OnSignal` handlers, the event stream as `<type>.updated` (routed like the type's other events, so a type with a `channel` field reaches its band and its `type:<name>` topic only) and the signal listeners, which notify MCP resource subscribers of a public type. Before, a dynamic edit wrote its `update` provenance record and reached nothing else. It is the meaning `AfterUpdate` has had for compiled types since v1.137.0 (D107): a content edit. The record is still written once. `task_plan` routes on its band since v1.138.0 (A453, A454), so a plan edit reaches its band and `type:task_plan` only.
+
+---
+
 ## [1.138.0] - 2026-10-08
 
 ### Behaviour change

@@ -225,3 +225,64 @@ func TestPublishToFrom(t *testing.T) {
 		t.Errorf("no channels did not broadcast: other %d", len(other))
 	}
 }
+
+// TestDynamicEdit_AnnouncedOnce: a content edit of a runtime-defined item gives
+// one AfterUpdate on the bus, one "<type>.updated" on its band and topic, one
+// listener call, and still exactly one "update" provenance record.
+func TestDynamicEdit_AnnouncedOnce(t *testing.T) {
+	e := newD107Env(t)
+	typeName := defineRoutedType(t, e, "plan", true)
+	core, _ := e.app.eventBroadcaster.subscribe("w-core", "core")
+	cloud, _ := e.app.eventBroadcaster.subscribe("w-cloud", "cloud")
+	t.Cleanup(func() { e.app.eventBroadcaster.unsubscribe(core); e.app.eventBroadcaster.unsubscribe(cloud) })
+	repo, err := e.app.DynamicContentRepo(typeName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.WithProvenance(nil).CreateDraft(context.Background(), map[string]any{"Title": "Plan", "band": "core"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateFieldsVia(hookCtx(), "mcp", node.ID, map[string]any{"Title": "Plan, edited"}); err != nil {
+		t.Fatalf("UpdateFieldsVia: %v", err)
+	}
+	e.settle(t, map[string]int{"bus " + string(AfterUpdate) + ":" + node.ID: 1, "listen " + string(AfterUpdate) + ":" + node.ID: 1})
+	if got := e.count("bus " + string(AfterUpdate) + ":" + node.ID); got != 1 {
+		t.Errorf("bus AfterUpdate = %d; want 1", got)
+	}
+	if got := e.count("listen " + string(AfterUpdate) + ":" + node.ID); got != 1 {
+		t.Errorf("listener AfterUpdate = %d; want 1", got)
+	}
+	c, cl := &routeSub{ch: core, got: map[string]int{}}, &routeSub{ch: cloud, got: map[string]int{}}
+	c.drain(t)
+	cl.drain(t)
+	if c.got[typeName+".updated:"+node.ID] != 1 || cl.got[typeName+".updated:"+node.ID] != 0 {
+		t.Errorf("stream core %v, cloud %v; want updated on core only", c.got, cl.got)
+	}
+	if got := e.verbs(node.ID)["update"]; got != 1 {
+		t.Errorf("update records = %d; want 1 (the subscriber must skip the announced edit)", got)
+	}
+}
+
+// TestDynamicEdit_NotAnnounced: a repository without an App, and a refused
+// edit, announce nothing.
+func TestDynamicEdit_NotAnnounced(t *testing.T) {
+	e := newD107Env(t)
+	typeName := defineRoutedType(t, e, "plan", true)
+	repo, _ := e.app.DynamicContentRepo(typeName)
+	node, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Plan", "band": "core"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := NewDynamicTypeRepo(e.db, typeName, repo.schema)
+	if err := bare.UpdateFieldsVia(hookCtx(), "mcp", node.ID, map[string]any{"Title": "Bare"}); err != nil {
+		t.Fatalf("bare UpdateFieldsVia: %v", err)
+	}
+	if err := repo.UpdateFieldsVia(hookCtx(), "mcp", node.ID, map[string]any{"nope": 1}); err == nil {
+		t.Fatal("an unknown field was accepted")
+	}
+	e.settle(t, map[string]int{})
+	if got := e.count("bus " + string(AfterUpdate) + ":" + node.ID); got != 0 {
+		t.Errorf("bus AfterUpdate = %d; want 0", got)
+	}
+}

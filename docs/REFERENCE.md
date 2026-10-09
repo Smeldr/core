@@ -3228,7 +3228,9 @@ The JSON payload shape is identical to webhook event payloads — a
   `type:<type name>` (e.g. `type:task_plan`), never to other bands. An item
   whose field is empty goes to the type's topic only. A reviewer of a type
   subscribes to its topic; the `type:` prefix keeps it apart from role and band
-  channels.
+  channels. A content edit of a runtime-defined item (`update_content`, the
+  content API's PATCH) sends `"{type}.updated"` the same way (held, next version
+  after the routing one); before, a dynamic edit sent no event.
 - **Several channels on one connection (held, version pending):** `?channel=`
   takes a comma-separated list, e.g. `?channel=architect,type:task_plan`. The
   connection receives an event published to any of them, once, even when it

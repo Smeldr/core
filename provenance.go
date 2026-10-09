@@ -355,9 +355,10 @@ func (a *App) Provenance(store ProvenanceStore) *App {
 	for _, sig := range provenanceLifecycleEvents {
 		s := sig
 		a.OnSignal(s, func(ctx context.Context, ev SignalEvent) error {
-			if ev.fromTransition {
-				// The transition's own record is already written, once, by
-				// App.afterStatusChange (D107).
+			if ev.recorded {
+				// The event's record is already written, once: by
+				// App.afterStatusChange for a transition (D107), by
+				// DynamicTypeRepo.UpdateFieldsVia for a runtime-defined edit.
 				return nil
 			}
 			toState := currentStatusOf(ev.raw)

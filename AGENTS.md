@@ -314,7 +314,9 @@ they reach `?channel=<topic>` and `?channel=all` subscribers. A runtime-defined
 type is a broadcast unless its schema gives a string field the role `channel`
 (held, version pending): then its events go to that field's value (e.g.
 `task_plan`'s `band`) and to the topic `type:<type name>`, or to the topic
-alone when the value is empty. `?channel=` takes a comma-separated list
+alone when the value is empty. A dynamic content edit (`update_content`)
+sends `<type>.updated` the same way (held, the version after the routing one;
+before, it sent nothing). `?channel=` takes a comma-separated list
 (`?channel=architect,type:task_plan`); each event arrives once per connection.
 Switch a watcher to a list only after the server runs that version: an older
 core reads the list as one channel name. An event is also

@@ -106,12 +106,12 @@ func (a *App) afterStatusChange(ctx context.Context, t statusTransition) {
 		sigs = statusSignals(Status(t.from), Status(t.to))
 	}
 	meta := afterHookMeta{
-		TypeName:       t.typeName,
-		Prefix:         t.prefix,
-		PrevState:      t.from,
-		Surface:        t.surface,
-		Reason:         t.reason,
-		FromTransition: true,
+		TypeName:  t.typeName,
+		Prefix:    t.prefix,
+		PrevState: t.from,
+		Surface:   t.surface,
+		Reason:    t.reason,
+		Recorded:  true,
 	}
 	sctx := a.signalContext(withoutConflictHold(ctx))
 	item := t.item
@@ -125,6 +125,36 @@ func (a *App) afterStatusChange(ctx context.Context, t statusTransition) {
 			a.signalBus(sctx, sig, meta, item)
 		}
 		a.notifyListeners(AfterTransition, t.typeName, item)
+	}()
+}
+
+// afterContentEdit announces a committed content edit of a runtime-defined
+// item (node, already in its new state) on the App side: [AfterUpdate] on the
+// bus ([App.OnSignal], the event stream as "<type>.updated", routed like the
+// type's other events) and to the [App.AddSignalListener] callbacks, the same
+// meaning AfterUpdate has for a compiled type since D107. The edit's "update"
+// provenance record is already written by [DynamicTypeRepo.UpdateFieldsVia],
+// so the event is marked recorded. Asynchronous and fail-open; nothing happens
+// when nothing listens or the item's state suppresses signals.
+func (a *App) afterContentEdit(ctx context.Context, node *DynamicNode, prefix, surface string) {
+	if !a.hasBusWork() || suppressesSignals(ctx, a.cfg.DB, node.TypeName, string(node.Status)) {
+		return
+	}
+	meta := afterHookMeta{
+		TypeName:  node.TypeName,
+		Prefix:    prefix,
+		PrevState: string(node.Status),
+		Surface:   surface,
+		Recorded:  true,
+	}
+	sctx := a.signalContext(withoutConflictHold(ctx))
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.ErrorContext(sctx, "smeldr: content edit announcement panic", "panic", r, "type", node.TypeName, "id", node.ID)
+			}
+		}()
+		a.signalBus(sctx, AfterUpdate, meta, node)
 	}()
 }
 

@@ -29,6 +29,9 @@ type DynamicTypeRepo struct {
 	// a repository built without an App, which records provenance and standing
 	// only.
 	announce func(context.Context, statusTransition)
+	// announceEdit announces a committed content edit ([App.afterContentEdit]);
+	// set by [App.DynamicContentRepo], nil (no event) without an App.
+	announceEdit func(ctx context.Context, node *DynamicNode, prefix, surface string)
 }
 
 // NewDynamicTypeRepo returns a DynamicTypeRepo bound to the given type name.
@@ -245,7 +248,10 @@ func (r *DynamicTypeRepo) UpdateFields(ctx context.Context, id string, patch map
 // for a system caller) and writes an "update" [ProvenanceRecord] (from and to
 // the current status) naming the caller and surface when provenance is wired.
 // The record is fail-open and written only after the update succeeded; a
-// refused update (validation, not found, a locked state) records nothing.
+// refused update (validation, not found, a locked state) records nothing. On a
+// repository from [App.DynamicContentRepo] the edit is also announced on the
+// App side as [AfterUpdate] ([App.afterContentEdit]): the bus, the event
+// stream as "<type>.updated" and the signal listeners.
 func (r *DynamicTypeRepo) UpdateFieldsVia(ctx context.Context, surface, id string, patch map[string]any) error {
 	if ve := ValidatePartialFields(r.schema, patch); ve != nil {
 		return ve
@@ -272,15 +278,23 @@ func (r *DynamicTypeRepo) UpdateFieldsVia(ctx context.Context, surface, id strin
 		return fmt.Errorf("smeldr: UpdateFields marshal: %w", err)
 	}
 	actorID, actorKind := actorFromContext(ctx)
+	now := time.Now().UTC()
 	if _, err = r.db.ExecContext(ctx,
 		"UPDATE smeldr_dynamic_content SET fields = $1, updated_at = $2, last_actor = $3 WHERE id = $4 AND type_name = $5",
-		json.RawMessage(merged), time.Now().UTC(), actorID, id, r.typeName); err != nil {
+		json.RawMessage(merged), now, actorID, id, r.typeName); err != nil {
 		return err
 	}
 	recordStateChange(ctx, r.prov, stateChange{
 		typeName: r.typeName, id: id, from: string(node.Status), to: string(node.Status),
 		verb: "update", surface: surface, actorKind: actorKind, actorID: actorID,
 	})
+	if r.announceEdit != nil {
+		edited := *node
+		edited.Fields = json.RawMessage(merged)
+		edited.UpdatedAt = now
+		edited.LastActor = actorID
+		r.announceEdit(ctx, &edited, r.urlPrefix(), surface)
+	}
 	return nil
 }
 
@@ -648,6 +662,7 @@ func (a *App) DynamicContentRepo(typeName string) (*DynamicTypeRepo, error) {
 		repo = repo.WithProvenance(a.provenanceStore)
 	}
 	repo.announce = a.afterStatusChange
+	repo.announceEdit = a.afterContentEdit
 	return repo, nil
 }
 
