@@ -214,6 +214,13 @@ CREATE INDEX IF NOT EXISTS idx_relations_target
 		return err
 	}
 
+	// ListRelations pages the whole table in this order.
+	if _, err := db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS idx_relations_created
+    ON smeldr_relations (created_at, id)`); err != nil {
+		return err
+	}
+
 	if _, err := db.ExecContext(ctx, `
 CREATE INDEX IF NOT EXISTS idx_relations_governance_temporal
     ON smeldr_relations (relation_kind, valid_at, invalid_at)

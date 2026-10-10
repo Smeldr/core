@@ -23,6 +23,14 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.142.0] - 2026-10-10
+
+### Added
+
+- **`RelationStore.ListRelations`: every relation on the instance, paged (A464).** `RelationListOptions{Kind, SourceType, TargetType, IncludeEnded, AsOf, Limit, Offset}` returns a `RelationPage{Edges, Total, AsOf}`, ordered by `created_at` then `id`; the limit defaults to 50 and is capped at 500. Every page and its total are cut at `AsOf`, which the first page returns and the client passes back, so the pages describe the graph at one moment and a snapshot then follows the event stream's `relations` topic from it. Live by default (as `GetLive*`). `source_id`/`target_id` are the items' `Node.ID`, the ID the item list tools return. A new index `idx_relations_created (created_at, id)`. Tool policy row `list_relations` -> `read`; no new operation.
+
+---
+
 ## [1.141.0] - 2026-10-10
 
 ### Added

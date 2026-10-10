@@ -47,6 +47,7 @@ that discipline being enforced consistently.
 | `transition` | `transition_item` |
 | `grant`, `grant revoke`, `grant list` (cli v0.23.0) | `grant_role`, `revoke_grant`, `list_grants` |
 | `content-type define`, `content-type redefine`, `content-type get` (cli v0.24.0) | `define_content_type`, `redefine_content_type`, `get_content_type_schema` |
+| `relation list` (cli v0.25.0) | `list_relations` |
 | `oauth` (CLI) | CIMD/OAuth flows — a different surface entirely, not a 1:1 tool mapping, not a gap |
 
 ## Real gaps — MCP tools with no CLI command at all

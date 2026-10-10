@@ -356,6 +356,7 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		// whenever governance was wired, until this row existed.
 		{"observe_relation", "create"},
 		{"get_relations", "read"},
+		{"list_relations", "read"}, // the whole graph, paged; same operation as get_relations
 		// Walk the live relation graph from one item, bounded (Author+, smeldr.dev/mcp
 		// v1.50.0, B3). Graph structure only, like get_relations.
 		{"get_reachability", "read"},

@@ -75,12 +75,6 @@ func TestCreateRelationTables_ExecError5(t *testing.T) {
 	}
 }
 
-// TestCreateRelationTables_ExecError6 pins the last ExecContext call site of
-// CreateRelationTables, the smeldr_reference_types CREATE TABLE (core-sweep-
-// invalidates-domain-edges, 2026-09-28). failOnNthExecDB's QueryContext answers
-// every lookup with an empty result set, which EnsureColumn (D103) reads as the
-// column being there, so its ALTER TABLE (T160, reverse_label) never runs against
-// this fake and the function issues six ExecContext calls here, not seven.
 func TestCreateRelationTables_ExecError6(t *testing.T) {
 	err := CreateRelationTables(&failOnNthExecDB{failAt: 6})
 	if err == nil {
@@ -88,11 +82,25 @@ func TestCreateRelationTables_ExecError6(t *testing.T) {
 	}
 }
 
-// TestCreateRelationTables_NoSeventhExec pins that the six calls above are all of
-// them: a failure injected at a seventh call never fires.
-func TestCreateRelationTables_NoSeventhExec(t *testing.T) {
-	if err := CreateRelationTables(&failOnNthExecDB{failAt: 7}); err != nil {
-		t.Errorf("a seventh ExecContext call exists: %v", err)
+// TestCreateRelationTables_ExecError7 pins the last ExecContext call site of
+// CreateRelationTables, the smeldr_reference_types CREATE TABLE (core-sweep-
+// invalidates-domain-edges, 2026-09-28). The fifth call is idx_relations_created
+// (core-mcp-list-relations-paged). failOnNthExecDB's QueryContext answers every
+// lookup with an empty result set, which EnsureColumn (D103) reads as the column
+// being there, so its ALTER TABLE (T160, reverse_label) never runs against this
+// fake and the function issues seven ExecContext calls here, not eight.
+func TestCreateRelationTables_ExecError7(t *testing.T) {
+	err := CreateRelationTables(&failOnNthExecDB{failAt: 7})
+	if err == nil {
+		t.Error("want error on seventh ExecContext, got nil")
+	}
+}
+
+// TestCreateRelationTables_NoEighthExec pins that the seven calls above are all of
+// them: a failure injected at an eighth call never fires.
+func TestCreateRelationTables_NoEighthExec(t *testing.T) {
+	if err := CreateRelationTables(&failOnNthExecDB{failAt: 8}); err != nil {
+		t.Errorf("an eighth ExecContext call exists: %v", err)
 	}
 }
 

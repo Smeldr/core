@@ -5153,6 +5153,27 @@ A row of `smeldr_relations` is **one life** of a relation: `created_at` is when 
 - **Reading it.** Current-state readers read live rows (reachability, `GetLive*`, `preview_impact`, the cascade, goal context, context packets, governance). History readers read every row: `GetBySource`/`GetByTarget` and `get_relations` return rows **in creation order**, and on `get_relations` (`RelationStore.MCPGetRelations`) every ended row carries `RelationEdge.Ended` (`EdgeEnd{Cause, At, Reason, ActorKind, ActorID}`; MCP `ended: {cause, at, reason, actor_kind, actor_id}`), read in one batched query. The actor is shown to every caller who passes the tool (D101 members audience). A remote reader tells a withdrawn relation from a swept one by `cause`, never from timing.
 - **No schema change.** The cause lives in the provenance record. Without a provenance store wired, ends are still kept but every one reads `not-recorded`.
 
+### The whole graph, paged: `RelationStore.ListRelations` (A464, v1.142.0)
+
+One paged read of every relation on the instance, for a client that holds the graph in memory (an org-level snapshot) instead of reading per item.
+
+```go
+page, err := rs.ListRelations(ctx, smeldr.RelationListOptions{
+    Kind: "depends_on", // optional; also SourceType, TargetType (exact match)
+    Limit: 500,         // 0 means 50; above 500 is clamped; negative is refused
+    Offset: 0,
+    AsOf: prev.AsOf,    // zero on the first page; then pass back the page's AsOf
+})
+// page.Edges, page.Total, page.AsOf
+```
+
+- **Order:** `created_at`, then `id`, so pages never repeat or skip. An index `idx_relations_created (created_at, id)` is created with the relation tables.
+- **One moment:** every page and its `Total` are cut at `AsOf`. An edge created after it is not in the set, and an edge that ended after it still counts as live and is returned with its `invalid_at`. The pages therefore describe the graph exactly as it was at `AsOf`. Then follow the event stream's `relations` topic from `AsOf` on: add an edge on `relation.asserted`, and drop it from the live set on `relation.ended`. Only an administrative purge (`Delete`, no tool) can shift a later page.
+- **Live by default,** as `GetLive*` define it: `invalid_at` is NULL or later than `AsOf`. The structural sweep additionally requires `valid_at <= now`; the read side keeps the `GetLive*` meaning. `IncludeEnded` adds ended rows, with `Ended` filled as on `get_relations`.
+- **IDs:** `SourceID` and `TargetID` are returned as stored. Every edge core writes uses the item's `Node.ID`, the `ID` the item list tools return, so an edge joins to an item on (type, `ID`) with no mapping. A context packet's canonical id is a different form. Type names are the registered names (`Decision`, `task_plan`), never folded. An edge asserted with a slug or a wrong type string is returned as stored until the structural sweep ends it.
+- **Errors:** a negative `Limit` or `Offset` is a `ValidationError`. A missing relations table gives an empty page. Any other failure is `ErrInternal`.
+- MCP: `list_relations` (Author, operation `read`). CLI: `smeldr-cli relation list [--all]`.
+
 ### `RegisterReferenceType`
 
 ```go
