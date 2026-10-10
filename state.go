@@ -155,6 +155,16 @@ type State struct {
 	// a flow later changes only future transitions, never an item's stored
 	// standing.
 	Standing Standing
+
+	// AwaitsAction declares that an item in this state waits for someone to act:
+	// the operator's word for it is "open" (D109); every other state is closed.
+	// A state without the declaration, and a state an item is in that the flow
+	// does not name, count as closed, so nothing unknown is shown as waiting. It
+	// is independent of IsTerminal and of Standing: a ratified Decision is closed
+	// and holds standing, a pending-re-evaluation one is open and holds standing.
+	// Read it through [StatesAwaitingAction] or [TransitionOption.ToAwaitsAction];
+	// no reader keeps its own copy of which states are open.
+	AwaitsAction bool
 }
 
 // Transition is a directed edge in a [StateFlow].
@@ -283,13 +293,14 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	existing := existingStateFlags(ctx, db, flowID)
 	for _, s := range flow.States {
 		if _, err := db.ExecContext(ctx,
-			`INSERT INTO smeldr_states(id, flow_id, name, is_initial, is_terminal, suppresses_signals, locked, standing) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			`INSERT INTO smeldr_states(id, flow_id, name, is_initial, is_terminal, suppresses_signals, locked, standing, awaits_action) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			 ON CONFLICT (flow_id, name) DO UPDATE SET is_initial = EXCLUDED.is_initial, is_terminal = EXCLUDED.is_terminal,
-			   suppresses_signals = EXCLUDED.suppresses_signals, locked = EXCLUDED.locked, standing = EXCLUDED.standing
+			   suppresses_signals = EXCLUDED.suppresses_signals, locked = EXCLUDED.locked, standing = EXCLUDED.standing,
+			   awaits_action = EXCLUDED.awaits_action
 			 WHERE smeldr_states.is_initial <> EXCLUDED.is_initial OR smeldr_states.is_terminal <> EXCLUDED.is_terminal
 			   OR smeldr_states.suppresses_signals <> EXCLUDED.suppresses_signals OR smeldr_states.locked <> EXCLUDED.locked
-			   OR smeldr_states.standing <> EXCLUDED.standing`,
-			NewID(), flowID, s.Name, s.IsInitial, s.IsTerminal, s.SuppressesSignals, s.Locked, string(s.Standing),
+			   OR smeldr_states.standing <> EXCLUDED.standing OR smeldr_states.awaits_action <> EXCLUDED.awaits_action`,
+			NewID(), flowID, s.Name, s.IsInitial, s.IsTerminal, s.SuppressesSignals, s.Locked, string(s.Standing), s.AwaitsAction,
 		); err != nil {
 			return fmt.Errorf("smeldr: RegisterFlow %q: upsert state %q: %w", flow.Name, s.Name, err)
 		}
@@ -353,8 +364,8 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 
 // stateFlagRow is the flags of one smeldr_states row, as read before an upsert.
 type stateFlagRow struct {
-	initial, terminal, suppresses, locked bool
-	standing                              string
+	initial, terminal, suppresses, locked, awaits bool
+	standing                                      string
 }
 
 // existingStateFlags reads the flags of every state row the flow already has,
@@ -363,7 +374,7 @@ type stateFlagRow struct {
 // log), and never fails the registration.
 func existingStateFlags(ctx context.Context, db DB, flowID string) map[string]stateFlagRow {
 	rows, err := db.QueryContext(ctx,
-		`SELECT name, is_initial, is_terminal, suppresses_signals, locked, standing FROM smeldr_states WHERE flow_id = $1`, flowID)
+		`SELECT name, is_initial, is_terminal, suppresses_signals, locked, standing, awaits_action FROM smeldr_states WHERE flow_id = $1`, flowID)
 	if err != nil || rows == nil {
 		return nil
 	}
@@ -372,7 +383,7 @@ func existingStateFlags(ctx context.Context, db DB, flowID string) map[string]st
 	for rows.Next() {
 		var name string
 		var r stateFlagRow
-		if err := rows.Scan(&name, &r.initial, &r.terminal, &r.suppresses, &r.locked, &r.standing); err != nil {
+		if err := rows.Scan(&name, &r.initial, &r.terminal, &r.suppresses, &r.locked, &r.standing, &r.awaits); err != nil {
 			return out
 		}
 		out[name] = r
@@ -404,6 +415,9 @@ func logStateFlagChanges(ctx context.Context, flow string, s State, old stateFla
 	}
 	if Standing(old.standing) != s.Standing {
 		log(slog.LevelInfo, "standing", old.standing, string(s.Standing))
+	}
+	if old.awaits != s.AwaitsAction {
+		log(slog.LevelInfo, "awaits_action", old.awaits, s.AwaitsAction)
 	}
 }
 
@@ -461,6 +475,19 @@ func EnsureStateLockedColumn(ctx context.Context, db DB) error {
 func EnsureStateStandingColumn(ctx context.Context, db DB) error {
 	if err := EnsureColumn(ctx, db, "smeldr_states", "standing", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("smeldr: EnsureStateStandingColumn: %w", err)
+	}
+	return nil
+}
+
+// EnsureStateAwaitsActionColumn adds State.AwaitsAction's awaits_action column
+// to smeldr_states on databases that predate D109. Fresh installs already have
+// it via CreateStateFlowTables, and [New] calls this too, so any App upgrades
+// itself; the next [App.RegisterFlow] of each flow then writes the declared
+// values. Exported so a boot path can call it explicitly like
+// [EnsureStateStandingColumn]. Idempotent.
+func EnsureStateAwaitsActionColumn(ctx context.Context, db DB) error {
+	if err := EnsureColumn(ctx, db, "smeldr_states", "awaits_action", "BOOLEAN NOT NULL DEFAULT FALSE"); err != nil {
+		return fmt.Errorf("smeldr: EnsureStateAwaitsActionColumn: %w", err)
 	}
 	return nil
 }
@@ -1625,6 +1652,10 @@ type TransitionOption struct {
 	RequiredOperation string // "" if the transition has no operation gate
 	RequiredReason    bool
 	Strict            bool
+	// ToAwaitsAction is the target state's [State.AwaitsAction] (D109): false
+	// means the transition closes the item, or keeps it closed. A target the
+	// flow does not name as a state is closed.
+	ToAwaitsAction bool
 }
 
 // ValidTransitions returns every legal transition out of fromState for
@@ -1656,7 +1687,10 @@ func (a *App) ValidTransitions(ctx context.Context, typeName, fromState string) 
 	}
 
 	rows, err := db.QueryContext(ctx,
-		`SELECT to_state, required_role, required_reason, strict FROM smeldr_transitions WHERE flow_id = $1 AND from_state = $2`,
+		`SELECT t.to_state, t.required_role, t.required_reason, t.strict, COALESCE(s.awaits_action, FALSE)
+		   FROM smeldr_transitions t
+		   LEFT JOIN smeldr_states s ON s.flow_id = t.flow_id AND s.name = t.to_state
+		  WHERE t.flow_id = $1 AND t.from_state = $2`,
 		flowID, fromState,
 	)
 	if err != nil {
@@ -1668,7 +1702,7 @@ func (a *App) ValidTransitions(ctx context.Context, typeName, fromState string) 
 	for rows.Next() {
 		var opt TransitionOption
 		var operation sql.NullString
-		if err := rows.Scan(&opt.ToState, &operation, &opt.RequiredReason, &opt.Strict); err != nil {
+		if err := rows.Scan(&opt.ToState, &operation, &opt.RequiredReason, &opt.Strict, &opt.ToAwaitsAction); err != nil {
 			return nil, fmt.Errorf("smeldr: ValidTransitions: scan: %w", err)
 		}
 		opt.RequiredOperation = operation.String

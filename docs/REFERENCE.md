@@ -4791,6 +4791,34 @@ func ItemStandings(ctx context.Context, db DB, typeName string, ids []string) (m
 
 **Upgrading.** `smeldr_states.standing` is added by `New` to an older database (and by `EnsureStateStandingColumn`); `smeldr_standing` and `smeldr_standing_migrations` are created with the flow tables. The example server also calls `EnsureStateStandingColumn` and `MigrateStanding` at boot.
 
+### Awaits action: open and closed (D109, v1.141.0)
+
+An item is **open** when it waits for someone to act, and **closed** otherwise (D109). The flow says which, per state: `State.AwaitsAction bool` is the developer's name for the operator's word "open" (the field is not called `Open` because Goal has a state named `open`, and D98's "held open" is a count). It is independent of `IsTerminal` and of standing: a ratified Decision is closed and holds standing; a Decision in `pending-re-evaluation` is open and holds standing.
+
+```go
+smeldr.State{Name: "blocked", AwaitsAction: true}
+```
+
+**Smeldr's own flows** declare D109's table:
+
+| Type | Open | Closed |
+|---|---|---|
+| Decision | proposed, pending-re-evaluation | ratified, superseded, archived |
+| Task | backlog, active, waiting-plan, plan-reviewing, implementing, commit-reviewing, blocked | done, deferred, resolved |
+| Amendment | scoped, in-progress, commit-ready, committed | merged, rejected |
+| Goal | open, in-progress, parked | done, resolved |
+| Signal | pending, read | acknowledged, expired |
+
+Every other state is closed, including Rule and AuthorityStub and the default flow, which declare none: **declared closed by omission**. A state without the declaration, and a status the flow does not name, count as closed, so nothing unknown is shown as waiting.
+
+**Reading it.** Nobody keeps a copy of the table; readers ask the flow.
+- `StatesAwaitingAction(ctx, db, typeName) (map[string]bool, found bool, error)` returns the open state names of the type's flow (its own, else the default flow). `found` false means no flow resolved: show unknown, never closed.
+- `TransitionOption.ToAwaitsAction` (from `App.ValidTransitions`) is the target state's answer, so false marks a transition that closes the item.
+- The context packet carries `awaits_action` on the anchor and on each item (true or false; omitted only when it cannot be read).
+- MCP item reads carry it next to `standing` (see the mcp section).
+
+**Stored with the flow.** `smeldr_states.awaits_action` (BOOLEAN, default false) is written by `App.RegisterFlow` in the same upsert as the other flags, and a change on an existing row is logged at Info. `New` adds the column to an older database (also `EnsureStateAwaitsActionColumn`, which the example server calls at boot). The next registration of each flow then writes its declared values, so an existing instance gains them on its first boot of this version, with no SQL step. A flow defined earlier through `define_state_flow` stays closed until it is defined again with `awaits_action`. Setting it is part of defining a flow (`define-flow`); there is no new operation.
+
 ### `ErrConflict`
 
 ```go

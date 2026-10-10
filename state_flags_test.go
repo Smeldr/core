@@ -25,18 +25,18 @@ func flagFlow(t *testing.T, db DB, typeName string, live State) {
 }
 
 type flagsRow struct {
-	initial, terminal, suppresses, locked bool
-	standing                              string
+	initial, terminal, suppresses, locked, awaits bool
+	standing                                      string
 }
 
 func readFlags(t *testing.T, db DB, typeName, state string) flagsRow {
 	t.Helper()
 	var r flagsRow
 	if err := db.QueryRowContext(context.Background(),
-		`SELECT s.is_initial, s.is_terminal, s.suppresses_signals, s.locked, s.standing
+		`SELECT s.is_initial, s.is_terminal, s.suppresses_signals, s.locked, s.standing, s.awaits_action
 		 FROM smeldr_states s JOIN smeldr_state_flows f ON f.id = s.flow_id
 		 WHERE f.type_name = $1 AND s.name = $2`, typeName, state,
-	).Scan(&r.initial, &r.terminal, &r.suppresses, &r.locked, &r.standing); err != nil {
+	).Scan(&r.initial, &r.terminal, &r.suppresses, &r.locked, &r.standing, &r.awaits); err != nil {
 		t.Fatalf("read flags of %s/%s: %v", typeName, state, err)
 	}
 	return r
@@ -61,6 +61,8 @@ func TestRegisterFlow_FlagsUpdateAnExistingRow(t *testing.T) {
 		{"is_initial on", State{}, State{IsInitial: true}, func(r flagsRow) bool { return r.initial }, "is_initial"},
 		{"standing on", State{}, State{Standing: StandingHolds}, func(r flagsRow) bool { return r.standing == "holds" }, "standing"},
 		{"standing off", State{Standing: StandingHolds}, State{}, func(r flagsRow) bool { return r.standing == "" }, "standing"},
+		{"awaits_action on", State{}, State{AwaitsAction: true}, func(r flagsRow) bool { return r.awaits }, "awaits_action"},
+		{"awaits_action off", State{AwaitsAction: true}, State{}, func(r flagsRow) bool { return !r.awaits }, "awaits_action"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -92,7 +94,7 @@ func TestRegisterFlow_FlagsUpdateAnExistingRow(t *testing.T) {
 // nothing either (there was no row to compare with).
 func TestRegisterFlow_UnchangedFlags_NoWriteNoLog(t *testing.T) {
 	db := newMigratedDB(t)
-	live := State{Locked: true, SuppressesSignals: true, Standing: StandingHolds}
+	live := State{Locked: true, SuppressesSignals: true, Standing: StandingHolds, AwaitsAction: true}
 	first := capturedLog(func() { flagFlow(t, db, "QuietT", live) })
 	if strings.Contains(first, "state flag changed") {
 		t.Errorf("a first registration logged a change:\n%s", first)

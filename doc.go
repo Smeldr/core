@@ -135,6 +135,10 @@
 //     provenance events. Read it with [ItemStanding] and [CountStanding]; check it
 //     with [App.CheckStandingDrift]; give pre-existing items a standing once with
 //     [MigrateStanding].
+//   - Open and closed ([State].AwaitsAction, D109): a flow state may declare that
+//     an item in it waits for someone to act (open); every other state is closed.
+//     Readers ask the flow with [StatesAwaitingAction] or
+//     [TransitionOption].ToAwaitsAction instead of keeping their own list.
 //   - Item history ([App.ItemProvenance], [ProvenanceAudience]): one item's
 //     provenance, newest first and paged, with the actor on every entry for the
 //     organisation's members and only on gated transitions for a wider audience

@@ -1167,8 +1167,8 @@ func orchSignalFlow() StateFlow {
 		Name:     "signal-protocol",
 		TypeName: "Signal",
 		States: []State{
-			{Name: "pending", IsInitial: true},
-			{Name: "read"},
+			{Name: "pending", IsInitial: true, AwaitsAction: true},
+			{Name: "read", AwaitsAction: true},
 			{Name: "acknowledged", IsTerminal: true},
 			{Name: "expired", IsTerminal: true},
 		},
@@ -1239,14 +1239,14 @@ func orchTaskFlow() StateFlow {
 		Name:     "agent-task",
 		TypeName: "Task",
 		States: []State{
-			{Name: "backlog", IsInitial: true},
-			{Name: "active"},
-			{Name: "waiting-plan"},
-			{Name: "plan-reviewing"},
-			{Name: "implementing"},
-			{Name: "commit-reviewing"},
+			{Name: "backlog", IsInitial: true, AwaitsAction: true},
+			{Name: "active", AwaitsAction: true},
+			{Name: "waiting-plan", AwaitsAction: true},
+			{Name: "plan-reviewing", AwaitsAction: true},
+			{Name: "implementing", AwaitsAction: true},
+			{Name: "commit-reviewing", AwaitsAction: true},
 			{Name: "done", IsTerminal: true},
-			{Name: "blocked"},
+			{Name: "blocked", AwaitsAction: true},
 			{Name: "deferred", IsTerminal: true},
 			{Name: "resolved", IsTerminal: true},
 		},
@@ -1280,14 +1280,14 @@ func orchDecisionFlow() StateFlow {
 		Name:     "governance-decision",
 		TypeName: "Decision",
 		States: []State{
-			{Name: "proposed", IsInitial: true},
+			{Name: "proposed", IsInitial: true, AwaitsAction: true},
 			// Locked from "ratified" onward (Amendment
 			// decision-content-mutable-after-ratification): once a Decision is
 			// ratified, DECISIONS.md's own documented model requires a new
 			// entry that supersedes it, never an in-place content edit — only
 			// "proposed" (pre-ratification draft) stays mutable.
 			{Name: "ratified", Locked: true, Standing: StandingHolds},
-			{Name: "pending-re-evaluation", Locked: true, Standing: StandingHolds},
+			{Name: "pending-re-evaluation", Locked: true, Standing: StandingHolds, AwaitsAction: true},
 			{Name: "superseded", IsTerminal: true, Locked: true},
 			{Name: "archived", IsTerminal: true, Locked: true},
 		},
@@ -1339,10 +1339,10 @@ func orchAmendmentFlow() StateFlow {
 		Name:     "amendment-lifecycle",
 		TypeName: "Amendment",
 		States: []State{
-			{Name: "scoped", IsInitial: true},
-			{Name: "in-progress"},
-			{Name: "commit-ready"},
-			{Name: "committed"},
+			{Name: "scoped", IsInitial: true, AwaitsAction: true},
+			{Name: "in-progress", AwaitsAction: true},
+			{Name: "commit-ready", AwaitsAction: true},
+			{Name: "committed", AwaitsAction: true},
 			// Locked at both terminal states only (Amendment
 			// decision-content-mutable-after-ratification): "committed"
 			// stays mutable through to "merged" to match D67's own
@@ -1381,10 +1381,10 @@ func orchGoalFlow() StateFlow {
 		Name:     "goal-lifecycle",
 		TypeName: "Goal",
 		States: []State{
-			{Name: "open", IsInitial: true},
-			{Name: "in-progress"},
+			{Name: "open", IsInitial: true, AwaitsAction: true},
+			{Name: "in-progress", AwaitsAction: true},
 			{Name: "done", IsTerminal: true},
-			{Name: "parked"},
+			{Name: "parked", AwaitsAction: true},
 			{Name: "resolved", IsTerminal: true},
 		},
 		Transitions: []Transition{

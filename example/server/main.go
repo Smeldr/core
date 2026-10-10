@@ -317,6 +317,10 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.EnsureStateStandingColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure state standing column: %w", err)
 		}
+		// D109: smeldr_states.awaits_action, written by RegisterFlow below.
+		if err := smeldr.EnsureStateAwaitsActionColumn(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure state awaits_action column: %w", err)
+		}
 		smeldr.RegisterOrchestrationTypes(app, db)
 		// D100: store a standing for the items that existed before their type's
 		// flow tagged a state, once per type (idempotent), now that the flows are

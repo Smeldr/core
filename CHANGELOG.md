@@ -23,6 +23,18 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.141.0] - 2026-10-10
+
+### Added
+
+- **A flow state declares whether it waits for action (A462, D109).** `State.AwaitsAction bool`: true means an item in that state waits for someone to act, "open"; every other state, and a state without the declaration, is closed. It is separate from `IsTerminal` and from standing: a ratified Decision is closed and holds standing. Smeldr's five orchestration flows declare D109's table (Decision proposed and pending-re-evaluation; Task backlog, active, waiting-plan, plan-reviewing, implementing, commit-reviewing and blocked; Amendment scoped to committed; Goal open, in-progress and parked; Signal pending and read). Rule, AuthorityStub and the default flow declare none, so they are closed.
+- `StatesAwaitingAction(ctx, db, typeName)`: the open state names of a type's flow, so a reader asks the flow instead of keeping its own list.
+- `TransitionOption.ToAwaitsAction` on `App.ValidTransitions`: false marks a transition that closes the item.
+- The context packet carries `awaits_action` on the anchor and on each item (omitted only when it cannot be read).
+- `EnsureStateAwaitsActionColumn`. `New` adds `smeldr_states.awaits_action` to an older database, and the next `RegisterFlow` writes each flow's values, so an existing instance gains them on its first boot of this version with no SQL step.
+
+---
+
 ## [1.140.0] - 2026-10-09
 
 ### Added

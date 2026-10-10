@@ -41,6 +41,7 @@ func CreateStateFlowTables(db DB) error {
 			suppresses_signals BOOLEAN NOT NULL DEFAULT FALSE,
 			locked             BOOLEAN NOT NULL DEFAULT FALSE,
 			standing           TEXT    NOT NULL DEFAULT '',
+			awaits_action      BOOLEAN NOT NULL DEFAULT FALSE,
 			UNIQUE(flow_id, name)
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_transitions (
@@ -218,6 +219,10 @@ func migrateStateFlows(ctx context.Context, db DB) error {
 	// database created by an older core has none of them, and the seed would fail
 	// on the first (D103: this is as true of a Postgres database as of SQLite).
 	if err := EnsureStateLockedColumn(ctx, db); err != nil {
+		return fmt.Errorf("smeldr: migrateStateFlows: %w", err)
+	}
+	// D109: State.AwaitsAction. RegisterFlow writes it on the same boot.
+	if err := EnsureStateAwaitsActionColumn(ctx, db); err != nil {
 		return fmt.Errorf("smeldr: migrateStateFlows: %w", err)
 	}
 	if err := migrateStateFlowConflictColumns(ctx, db); err != nil {

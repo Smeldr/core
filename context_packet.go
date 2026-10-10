@@ -52,6 +52,10 @@ type PacketAnchor struct {
 	// Standing is the item's stored standing (D100), separate from Status (the
 	// governed state name). Omitted for a type whose flow tags no state.
 	Standing Standing `json:"standing,omitempty"`
+	// AwaitsAction is whether the item's state waits for someone to act (D109,
+	// [State.AwaitsAction]). Present for every item of a type with a resolvable
+	// flow; omitted only when that cannot be read, which means unknown.
+	AwaitsAction *bool `json:"awaits_action,omitempty"`
 }
 
 // PacketBoundary declares how the packet was assembled.
@@ -81,6 +85,8 @@ type PacketItem struct {
 	// Standing is the item's stored standing (D100); omitted for a type whose
 	// flow tags no state.
 	Standing Standing `json:"standing,omitempty"`
+	// AwaitsAction is as on [PacketAnchor].
+	AwaitsAction *bool `json:"awaits_action,omitempty"`
 }
 
 // PacketRelation is one edge from the relation graph included in the packet.
@@ -250,21 +256,23 @@ func BuildContextPacket(
 		return nil, err
 	}
 
+	awaits := packetAwaits{}
 	pkt := &ContextPacket{
 		PacketVersion: packetVersion,
 		GeneratedAt:   time.Now().UTC(),
 		Source:        PacketSource{Name: sourceName, URL: baseURL},
 		Anchor: PacketAnchor{
-			Type:      anchorType,
-			ID:        anchorCID,
-			Slug:      anchorNode.Slug,
-			Status:    string(anchorNode.Status),
-			Rev:       anchorNode.Rev,
-			CreatedAt: anchorNode.CreatedAt,
-			UpdatedAt: anchorNode.UpdatedAt,
-			URL:       packetItemURL(baseURL, entry.path, anchorNode.Slug),
-			Fields:    anchorFields,
-			Standing:  packetStanding(ctx, db, entry.relationType, anchorNode.ID),
+			Type:         anchorType,
+			ID:           anchorCID,
+			Slug:         anchorNode.Slug,
+			Status:       string(anchorNode.Status),
+			Rev:          anchorNode.Rev,
+			CreatedAt:    anchorNode.CreatedAt,
+			UpdatedAt:    anchorNode.UpdatedAt,
+			URL:          packetItemURL(baseURL, entry.path, anchorNode.Slug),
+			Fields:       anchorFields,
+			Standing:     packetStanding(ctx, db, entry.relationType, anchorNode.ID),
+			AwaitsAction: awaits.of(ctx, db, entry.relationType, string(anchorNode.Status)),
 		},
 		Boundary:  PacketBoundary{Method: "relations", Depth: depth},
 		Items:     []PacketItem{},
@@ -352,16 +360,17 @@ func BuildContextPacket(
 				continue
 			}
 			pkt.Items = append(pkt.Items, PacketItem{
-				Type:      lowerType,
-				ID:        cid,
-				Slug:      nd.Slug,
-				Status:    string(nd.Status),
-				Rev:       nd.Rev,
-				CreatedAt: nd.CreatedAt,
-				UpdatedAt: nd.UpdatedAt,
-				URL:       packetItemURL(baseURL, linkedEntry.path, nd.Slug),
-				Fields:    f,
-				Standing:  packetStanding(ctx, db, linkedEntry.relationType, nd.ID),
+				Type:         lowerType,
+				ID:           cid,
+				Slug:         nd.Slug,
+				Status:       string(nd.Status),
+				Rev:          nd.Rev,
+				CreatedAt:    nd.CreatedAt,
+				UpdatedAt:    nd.UpdatedAt,
+				URL:          packetItemURL(baseURL, linkedEntry.path, nd.Slug),
+				Fields:       f,
+				Standing:     packetStanding(ctx, db, linkedEntry.relationType, nd.ID),
+				AwaitsAction: awaits.of(ctx, db, linkedEntry.relationType, string(nd.Status)),
 			})
 			resolvedItems[ref.relType+ref.nodeID] = cid
 			included++
@@ -441,6 +450,27 @@ func (a *App) ContextPacketHandler(rs *RelationStore, sourceName string) {
 			slog.ErrorContext(r.Context(), "smeldr: ContextPacketHandler: encode", "error", encErr)
 		}
 	}))
+}
+
+// packetAwaits answers [PacketAnchor.AwaitsAction] for a packet, one
+// [StatesAwaitingAction] lookup per type. A type whose flow cannot be resolved
+// or read answers nil (unknown), never false.
+type packetAwaits map[string]map[string]bool
+
+func (p packetAwaits) of(ctx context.Context, db DB, typeName, status string) *bool {
+	set, seen := p[typeName]
+	if !seen {
+		states, found, err := StatesAwaitingAction(ctx, db, typeName)
+		if err == nil && found {
+			set = states // non-nil, even when no state awaits action
+		}
+		p[typeName] = set
+	}
+	if set == nil {
+		return nil
+	}
+	v := set[status]
+	return &v
 }
 
 // packetStanding returns the stored standing of an item for the packet, or ""

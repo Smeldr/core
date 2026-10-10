@@ -4638,7 +4638,7 @@ func TestValidTransitions_ResolveFlowIDError(t *testing.T) {
 type validTransitionsQueryFailDB struct{ DB }
 
 func (d *validTransitionsQueryFailDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	if strings.Contains(q, "SELECT to_state, required_role, required_reason, strict") {
+	if strings.Contains(q, "LEFT JOIN smeldr_states s ON s.flow_id = t.flow_id") {
 		return nil, errors.New("injected QueryContext failure")
 	}
 	return d.DB.QueryContext(ctx, q, args...)
@@ -4665,7 +4665,7 @@ func TestValidTransitions_QueryError(t *testing.T) {
 type validTransitionsScanFailDB struct{ DB }
 
 func (d *validTransitionsScanFailDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	if strings.Contains(q, "SELECT to_state, required_role, required_reason, strict") {
+	if strings.Contains(q, "LEFT JOIN smeldr_states s ON s.flow_id = t.flow_id") {
 		return d.DB.QueryContext(ctx, "SELECT 1")
 	}
 	return d.DB.QueryContext(ctx, q, args...)
