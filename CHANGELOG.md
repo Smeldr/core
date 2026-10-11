@@ -23,6 +23,7 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ### Fixed
 
+- **Graceful shutdown ends streams and stops modules (A478).** Every restart of a server with an open `GET /_events/stream` or MCP SSE connection ended with `context deadline exceeded` five seconds after SIGTERM, because `http.Server.Shutdown` waits for idle connections and streams never go idle. That error made `App.Run` return early without stopping registered content modules, leaving their cache-sweep goroutine and sitemap/feed debounce timer running. `App.Run` now releases every event-stream client as shutdown begins, cancels all request contexts after a one-second grace period (half the timeout when it is two seconds or less), and always stops registered modules before returning any shutdown error. A second SIGINT or SIGTERM during shutdown now exits the process at once.
 - **Decision context packets include the title (A477).** `BuildContextPacket` (served at `GET /packet/{type}/{slug}`) left a Decision's `fields` without its `title`, so readers such as Smeldr Cloud showed the first line of the body as the headline. A Decision's packet `fields` now include `title`, both when it is the anchor and when it appears in `items`, as an additive change with no field removed and no migration. Every orchestration type's packet now carries its own headline field (Goal and Task `description`, Decision `title`, Amendment `summary`, Signal `message`).
 
 ---

@@ -3151,8 +3151,13 @@ is delivered as one line of JSON (NDJSON format), flushed immediately after
 each write. A periodic `{"type":"ping"}` heartbeat is sent every 25 seconds
 while idle to keep the connection alive through reverse proxies.
 
-The connection ends when the client disconnects, or if a write to the client
-fails (e.g. broken pipe).
+The connection ends when the client disconnects, if a write to the client
+fails (e.g. broken pipe), or when `App.Run` begins a graceful shutdown: every
+stream is released at once, so open streams no longer hold the shutdown for
+its full 5 seconds. Other long-lived handlers that return on
+`r.Context().Done()` (such as MCP SSE) end 1 second into the shutdown, when
+`Run` cancels every request context; registered modules are stopped even if
+the shutdown times out.
 
 **Response on auth failure:**
 

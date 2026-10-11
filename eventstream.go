@@ -107,6 +107,9 @@ type eventBroadcaster struct {
 	mu      sync.Mutex
 	subs    map[chan []byte]eventStreamSub
 	byToken map[string]int // token ID -> concurrent subscriber count
+
+	closing     chan struct{} // closed by shutdown; every stream handler returns on it
+	closingOnce sync.Once
 }
 
 // newEventBroadcaster returns an empty [eventBroadcaster].
@@ -114,7 +117,15 @@ func newEventBroadcaster() *eventBroadcaster {
 	return &eventBroadcaster{
 		subs:    make(map[chan []byte]eventStreamSub),
 		byToken: make(map[string]int),
+		closing: make(chan struct{}),
 	}
+}
+
+// shutdown releases every connected stream handler at once, so a graceful
+// server shutdown does not wait for stream clients to disconnect. Safe to
+// call more than once.
+func (b *eventBroadcaster) shutdown() {
+	b.closingOnce.Do(func() { close(b.closing) })
 }
 
 // subscribe registers a new subscriber channel for tokenID, listening on
@@ -354,6 +365,8 @@ func newEventStreamHandler(auth AuthFunc, b *eventBroadcaster) http.Handler {
 		for {
 			select {
 			case <-r.Context().Done():
+				return
+			case <-b.closing:
 				return
 			case payload, ok := <-ch:
 				if !ok {

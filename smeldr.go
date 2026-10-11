@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -1898,9 +1899,17 @@ func (a *App) Health() {
 // Run starts the HTTP server on addr (e.g. ":8080") and blocks until
 // SIGINT or SIGTERM is received.
 //
-// On receiving a signal, Run initiates a graceful shutdown with a 5-second
-// deadline, waits for active connections to drain, and returns nil.
-// Non-shutdown errors from ListenAndServe are returned directly.
+// On receiving a signal, Run shuts down gracefully within 5 seconds:
+//   - GET /_events/stream clients are released at once;
+//   - in-flight requests get 1 second to finish, after which every request
+//     context is cancelled, so long-lived handlers that return on
+//     r.Context().Done() (such as an MCP SSE stream) end too (with a shutdown
+//     timeout of 2 seconds or less this grace is half the timeout);
+//   - the server waits for connections to close, up to the 5 seconds;
+//   - every registered module is stopped, whether or not that wait succeeded.
+//
+// Run then returns nil, or the shutdown error if connections were still open
+// at the deadline. Errors from listening or serving are returned directly.
 //
 //	if err := app.Run(":8080"); err != nil {
 //	    log.Fatal(err)
@@ -1946,15 +1955,46 @@ func (a *App) Run(addr string) error {
 		fmt.Fprintf(os.Stderr, "smeldr: %s\n", strings.Join(parts, ", "))
 	}
 
+	if addr == "" {
+		addr = ":http"
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+
+	// Block until an OS signal or a fatal server error.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// After the first signal, restore default handling so a second one ends
+	// the process at once.
+	context.AfterFunc(ctx, stop)
+	return a.serve(ctx, ln, 5*time.Second)
+}
+
+// shutdownStreamGrace is how long a graceful shutdown lets in-flight requests
+// finish before it cancels every request context, which ends long-lived
+// handlers (event streams, MCP SSE) that only return on r.Context().Done().
+const shutdownStreamGrace = time.Second
+
+// serve runs the HTTP server on ln until ctx is done or the server fails,
+// then shuts down: event-stream clients are released at once; after
+// min(shutdownStreamGrace, shutdownTimeout/2) every request context is
+// cancelled; srv.Shutdown waits up to shutdownTimeout; the stoppable modules
+// are stopped whatever Shutdown returned; then Shutdown's error is returned.
+func (a *App) serve(ctx context.Context, ln net.Listener, shutdownTimeout time.Duration) error {
+	baseCtx, cancelBase := context.WithCancel(context.Background())
+	defer cancelBase()
+
 	srv := &http.Server{
-		Addr:         addr,
 		Handler:      a.Handler(),
 		ReadTimeout:  a.cfg.ReadTimeout,
 		WriteTimeout: a.cfg.WriteTimeout,
 		IdleTimeout:  a.cfg.IdleTimeout,
+		BaseContext:  func(net.Listener) context.Context { return baseCtx },
 	}
 
-	// serveErr receives the result of ListenAndServe.
+	// serveErr receives the result of Serve.
 	serveErr := make(chan error, 1)
 
 	// Already ran inside a.Handler() above (line ~1659) — re-run here too so
@@ -1984,12 +2024,8 @@ func (a *App) Run(addr string) error {
 	}
 
 	go func() {
-		serveErr <- srv.ListenAndServe()
+		serveErr <- srv.Serve(ln)
 	}()
-
-	// Block until an OS signal or a fatal server error.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	select {
 	case err := <-serveErr:
@@ -2000,17 +2036,21 @@ func (a *App) Run(addr string) error {
 		return err
 	case <-ctx.Done():
 		// Signal received — begin graceful shutdown.
-		stop()
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if a.eventBroadcaster != nil {
+		a.eventBroadcaster.shutdown()
+	}
+	grace := min(shutdownStreamGrace, shutdownTimeout/2)
+	cancelTimer := time.AfterFunc(grace, cancelBase)
+	defer cancelTimer.Stop()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return err
-	}
+	err := srv.Shutdown(shutdownCtx)
 	for _, sp := range a.stoppableModules {
 		sp.Stop()
 	}
-	return nil
+	return err
 }
