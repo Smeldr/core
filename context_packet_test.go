@@ -252,6 +252,46 @@ func TestBuildContextPacket_goalAnchor(t *testing.T) {
 	}
 }
 
+// A Decision's own title is in its packet fields, as the anchor and as a
+// related item, so a reader can show it as the headline.
+func TestContextPacket_DecisionFieldsIncludeTitle(t *testing.T) {
+	db, rs := setupPacketDB(t)
+	ctx := context.Background()
+
+	d := &Decision{
+		Node:           Node{ID: NewID(), Slug: GenerateSlug("decision-D98"), Status: Published},
+		DecisionNumber: "D98",
+		Title:          "Packets carry the title",
+		Scope:          "core",
+		Body:           "First line of the body",
+	}
+	if err := NewSQLRepo[*Decision](db, Table("smeldr_decisions")).Save(ctx, d); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	goalID := insertTestGoal(t, db, "T98", "P0", "S")
+	insertTestEdge(t, rs, "Goal", goalID, "Decision", d.ID, "uses")
+
+	pkt, err := BuildContextPacket(ctx, db, rs, "http://localhost", "test", "decision", d.Slug, 1)
+	if err != nil {
+		t.Fatalf("BuildContextPacket decision: %v", err)
+	}
+	if got := pkt.Anchor.Fields["title"]; got != d.Title {
+		t.Errorf("anchor fields[title] = %v, want %q", got, d.Title)
+	}
+
+	goalSlug := mustSlugForID(t, db, "smeldr_goals", goalID)
+	pkt, err = BuildContextPacket(ctx, db, rs, "http://localhost", "test", "goal", goalSlug, 1)
+	if err != nil {
+		t.Fatalf("BuildContextPacket goal: %v", err)
+	}
+	if len(pkt.Items) != 1 || pkt.Items[0].Type != "decision" {
+		t.Fatalf("items = %+v, want the one Decision", pkt.Items)
+	}
+	if got := pkt.Items[0].Fields["title"]; got != d.Title {
+		t.Errorf("items[0] fields[title] = %v, want %q", got, d.Title)
+	}
+}
+
 func TestBuildContextPacket_decisionAnchor(t *testing.T) {
 	db, rs := setupPacketDB(t)
 	ctx := context.Background()

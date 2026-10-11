@@ -135,6 +135,7 @@ func packetFieldsFromItem(item any) (canonicalID string, fields map[string]any) 
 	case *Decision:
 		return v.DecisionNumber, map[string]any{
 			"decision_number": v.DecisionNumber,
+			"title":           v.Title,
 			"scope":           v.Scope,
 			"body":            v.Body,
 			"next_eval_at":    v.NextEvalAt,

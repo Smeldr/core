@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Fixed
+
+- **Decision context packets include the title (A477).** `BuildContextPacket` (served at `GET /packet/{type}/{slug}`) left a Decision's `fields` without its `title`, so readers such as Smeldr Cloud showed the first line of the body as the headline. A Decision's packet `fields` now include `title`, both when it is the anchor and when it appears in `items`, as an additive change with no field removed and no migration. Every orchestration type's packet now carries its own headline field (Goal and Task `description`, Decision `title`, Amendment `summary`, Signal `message`).
+
 ---
 
 ## [1.143.0] - 2026-10-11
