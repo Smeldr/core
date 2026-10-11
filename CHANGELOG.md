@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.143.1] - 2026-10-11
+
 ### Fixed
 
 - **Graceful shutdown ends streams and stops modules (A478).** Every restart of a server with an open `GET /_events/stream` or MCP SSE connection ended with `context deadline exceeded` five seconds after SIGTERM, because `http.Server.Shutdown` waits for idle connections and streams never go idle. That error made `App.Run` return early without stopping registered content modules, leaving their cache-sweep goroutine and sitemap/feed debounce timer running. `App.Run` now releases every event-stream client as shutdown begins, cancels all request contexts after a one-second grace period (half the timeout when it is two seconds or less), and always stops registered modules before returning any shutdown error. A second SIGINT or SIGTERM during shutdown now exits the process at once.
