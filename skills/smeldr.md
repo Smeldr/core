@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.142.0 · smeldr.dev/mcp v1.58.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.25.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.143.0 · smeldr.dev/mcp v1.58.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.25.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -738,6 +738,7 @@ Config: `SMELDR_URL`, `SMELDR_TOKEN`, `SMELDR_MCP_URL` (or `.smeldr-cli.env`; le
 - **Verify go.mod deps before tagging** — `grep smeldr.dev go.mod`; run `go mod tidy`
 - **Module proxy caches permanently** — bad tag requires a new patch tag, no fix
 - **smeldr.Table()** — use when type name pluralises incorrectly (Story → storys)
+- **Markdown for untrusted text: `smeldr.RenderMarkdown(body)`, never the `markdown`/`smeldr_markdown` template funcs** (core v1.143.0, A465). The template funcs pass a line starting with `<` through as raw HTML, for trusted site authors. RenderMarkdown escapes everything, renders headings as one `<h3 class="md-h">` step, and is bounded against hostile input (whole text as escaped `<pre class="md-raw">` on a bound). `smeldr.StripMarkdown(body)` gives plain text for previews. `smeldr_excerpt` now returns escaped, markup-free text on one line (A466).
 - **Windows MIME** — add `mime.AddExtensionType(".webp", "image/webp")` in main()
 - **Docker volume** — forge_media volume at /app/media; COPY in Dockerfile seeds it on first run
 - **Archived ≠ Draft** — preview tokens bypass Draft/Scheduled only, never Archived
