@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.141.0 · smeldr.dev/mcp v1.57.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.24.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.142.0 · smeldr.dev/mcp v1.58.0 · smeldr.dev/oauth v0.5.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.25.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -459,6 +459,7 @@ Tools are named from the type in lower_snake_case.
 | `set_page_meta` / `get_page_meta` / `delete_page_meta` / `list_page_meta` | Admin | Per-path SEO overrides (requires `mcp.WithPageMeta(db)`) |
 | `assert_relation` / `propose_relation` / `observe_relation` / `get_relations` | Author+ | Relation graph: assert/propose/observe edges (edge_class=asserted/inferred/observed), query by source/target/both. Response includes `created_by` (the human/agent actor's ID, when set — v1.42.1) alongside the existing `created_by_job` (the system/job that wrote the edge, when applicable). Gate: `app.Relations(store)` called. Since v1.117.0 reachability, the cascade, goal context and the context packet read live edges only (GetLiveBySource/GetLiveByTarget); get_relations still returns ended edges. Since core v1.128.0 / mcp v1.51.0 (A434, relation history) one row is one life of a relation: re-asserting a live relation updates it, re-asserting an ended one starts a new row; get_relations returns every row in creation order and each ended row carries `ended: {cause, at, reason, actor_kind, actor_id}`, cause one of withdrawn, swept, recomputed, amendment-rejected, purged, or not-recorded (ended before causes were recorded). |
 | `withdraw_relation` | Author | End a live relation on purpose: params `id` (from get_relations), `reason` (required). The row stays as history, ended, with you and the reason on record (cause withdrawn); an already ended relation is refused. Gated on the `archive` operation. There is no delete tool for relations. mcp v1.51.0 (A434); cli: `relation withdraw <id> --reason <text>` (v0.22.0). |
+| `list_relations` | Author | Every relation on the instance, paged, for a whole-graph snapshot (core v1.142.0, mcp v1.58.0, A464). Params `kind`, `source_type`, `target_type`, `include_ended`, `as_of` (RFC3339), `limit` (default 50, max 500), `offset`. Returns `{edges, total, count, limit, offset, as_of}` in the get_relations edge shape, ordered created_at then id. Omit `as_of` on page 1, pass the returned one back on every next page so pages describe one moment; then follow the relations topic from as_of (add on relation.asserted, drop on relation.ended). `source_id`/`target_id` are the items' raw ID, as the list tools return it (not a context packet id). Live by default (invalid_at absent or after as_of). cli: `relation list [--all]`. |
 | `preview_impact` | Editor+ | Return dependents of a target item without firing signals. Gate: `app.Relations(store)` called. |
 | `upsert_relation_kind` | Admin | Register or update a relation kind. Gate: `app.Relations(store)` called. |
 | `list_relation_kinds` | Author+ | List all registered relation kinds. Includes `reverse_label` when the kind has one set (01a0c43f/v1.40.0). Gate: `app.Relations(store)` called. |
@@ -695,6 +696,7 @@ smeldr-cli transition <type_name> <slug> --to <state> --reason "<text>"  # when 
 
 # Relation (smeldr-cli v0.22.0+, needs mcp v1.51.0+ on the server): end a relation on purpose, keeping its row
 smeldr-cli relation withdraw <edge-id> --reason "<text>"       # Author
+smeldr-cli relation list [--kind K] [--source-type T] [--target-type T] [--include-ended] [--as-of RFC3339] [--limit N] [--offset N] [--all] [--json]   # Author; --all pages the whole graph at one as_of (cli v0.25.0)
 
 # Standing (D100, smeldr-cli v0.18.0+, needs mcp v1.46.0+ on the server): holds, ceased, none, or "no standing for this type"
 # (rarely also a failed flow lookup on the server). "<type> get/list" read REST and do not show standing.
