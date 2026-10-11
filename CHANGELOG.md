@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.143.2] - 2026-10-11
+
 ### Fixed
 
 - **Module.Stop flushes pending sitemap, AI index and feed regeneration (A479).** A publish in the last 2 seconds before shutdown left the sitemap, AI index and feed stale until the next publish, because `Module.Stop` cancelled the pending debounced regeneration. A regeneration already running was also not waited for, so it could finish after `App.Run` returned and the database was closed. `Module.Stop` now runs a pending regeneration once, immediately, and waits for a running one, so core's own sitemap, AI index and feed regeneration completes before `Run` returns. Handlers an app registers for `SitemapRegenerate` are still dispatched asynchronously and are not waited for. Stop can take as long as one regeneration. Calling Stop twice is still safe. The relation recomputation debounce is unchanged.
