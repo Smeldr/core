@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.143.0 · smeldr.dev/mcp v1.59.0 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.25.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.143.0 · smeldr.dev/mcp v1.59.1 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.25.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -738,7 +738,7 @@ Config: `SMELDR_URL`, `SMELDR_TOKEN`, `SMELDR_MCP_URL` (or `.smeldr-cli.env`; le
 - **Verify go.mod deps before tagging** — `grep smeldr.dev go.mod`; run `go mod tidy`
 - **Module proxy caches permanently** — bad tag requires a new patch tag, no fix
 - **smeldr.Table()** — use when type name pluralises incorrectly (Story → storys)
-- **OAuth Dynamic Client Registration** (mcp v1.59.0, oauth v0.6.0, A470/A471): `mcpSrv.Register(app)` serves the whole `/oauth/` prefix, so `POST /oauth/register` exists exactly when discovery advertises `registration_endpoint` (an `oauth.SQLiteStore` supports it). The endpoint bounds each request (64 KiB body, 10 redirect URIs of up to 2048 bytes, a 256-byte client_name) and accepts only https, loopback http or reverse-domain private-use redirect URIs. Rate limiting stays the App's job (`app.Use`).
+- **OAuth Dynamic Client Registration** (mcp v1.59.1, oauth v0.6.0, A470/A471/A473): `mcpSrv.Register(app)` mounts each oauth route with its method and full path, `POST /oauth/register` included; it is served exactly when discovery advertises `registration_endpoint` (an `oauth.SQLiteStore` supports it). Never use mcp v1.59.0 (retracted): its `/oauth/` prefix panics at startup next to an App `GET /`. The endpoint bounds each request (64 KiB body, 10 redirect URIs of up to 2048 bytes, a 256-byte client_name) and accepts only https, loopback http or reverse-domain private-use redirect URIs. Rate limiting stays the App's job (`app.Use`).
 - **Markdown for untrusted text: `smeldr.RenderMarkdown(body)`, never the `markdown`/`smeldr_markdown` template funcs** (core v1.143.0, A465). The template funcs pass a line starting with `<` through as raw HTML, for trusted site authors. RenderMarkdown escapes everything, renders headings as one `<h3 class="md-h">` step, and is bounded against hostile input (whole text as escaped `<pre class="md-raw">` on a bound). `smeldr.StripMarkdown(body)` gives plain text for previews. `smeldr_excerpt` now returns escaped, markup-free text on one line (A466).
 - **Windows MIME** — add `mime.AddExtensionType(".webp", "image/webp")` in main()
 - **Docker volume** — forge_media volume at /app/media; COPY in Dockerfile seeds it on first run
