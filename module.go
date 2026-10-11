@@ -706,9 +706,15 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 	return m
 }
 
-// Stop terminates background goroutines started by this module (cache sweep
-// ticker and any pending debounce timer). It is called automatically by
-// [App.Run] during graceful shutdown. Stop is idempotent — calling it more
+// Stop terminates background goroutines started by this module (the cache
+// sweep ticker) and flushes the sitemap, AI index and feed debounce: a
+// regeneration still pending from a recent publish runs now, once, and one
+// already running is waited for, so a publish just before a restart is not
+// lost. Stop can therefore take as long as one regeneration; it has no
+// timeout of its own. [App.Run] calls it during graceful shutdown, after the
+// server has stopped and before Run returns, so before the caller closes the
+// database. Handlers registered for [SitemapRegenerate] are dispatched
+// asynchronously and are not waited for. Stop is idempotent: calling it more
 // than once is safe.
 func (m *Module[T]) Stop() {
 	select {
@@ -717,7 +723,7 @@ func (m *Module[T]) Stop() {
 	default:
 		close(m.stopCh)
 	}
-	m.debounce.Stop()
+	m.debounce.flush()
 }
 
 // setAfterHook registers the function that is called asynchronously after each

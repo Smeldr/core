@@ -194,11 +194,18 @@ func safeCall(ctx Context, h signalHandler, payload any) (err error) {
 // debouncer delays invocation of fn until no further [debouncer.Trigger]
 // calls have arrived within the configured delay. Rapid bursts of calls
 // collapse into a single fn invocation.
+//
+// pending counts scheduled or running calls of fn. Invariant: every
+// pending.Add(1) happens under mu after checking stopped, and flush sets
+// stopped under mu before it calls pending.Wait, so no Add can race that
+// final Wait.
 type debouncer struct {
-	mu    sync.Mutex
-	timer *time.Timer
-	delay time.Duration
-	fn    func()
+	mu      sync.Mutex
+	timer   *time.Timer
+	delay   time.Duration
+	fn      func()
+	pending sync.WaitGroup
+	stopped bool // set by flush; Trigger is a no-op afterwards
 }
 
 // newDebouncer returns a debouncer that calls fn after delay elapses
@@ -207,24 +214,50 @@ func newDebouncer(delay time.Duration, fn func()) *debouncer {
 	return &debouncer{delay: delay, fn: fn}
 }
 
+// run is the timer callback: it calls fn and marks the call finished.
+func (d *debouncer) run() {
+	defer d.pending.Done()
+	d.fn()
+}
+
 // Trigger resets the debounce timer. fn fires only after delay elapses
-// with no subsequent Trigger calls.
+// with no subsequent Trigger calls. After flush, Trigger does nothing.
 func (d *debouncer) Trigger() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.timer != nil {
-		d.timer.Stop()
+	if d.stopped {
+		return
 	}
-	d.timer = time.AfterFunc(d.delay, d.fn)
+	if d.timer != nil && d.timer.Stop() {
+		d.pending.Done()
+	}
+	d.pending.Add(1)
+	d.timer = time.AfterFunc(d.delay, d.run)
 }
 
-// Stop cancels any pending debounce timer. Safe to call multiple times.
+// Stop cancels any pending debounce timer without running it. Safe to call
+// multiple times.
 func (d *debouncer) Stop() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.timer != nil {
-		d.timer.Stop()
+	if d.timer != nil && d.timer.Stop() {
+		d.pending.Done()
 	}
+}
+
+// flush runs a pending call of fn now instead of dropping it, waits for a
+// call that had already fired, and stops the debouncer: after flush returns,
+// fn never runs again. fn runs with mu released, so a Trigger from inside fn
+// is a no-op rather than a deadlock. Safe to call multiple times.
+func (d *debouncer) flush() {
+	d.mu.Lock()
+	d.stopped = true
+	due := d.timer != nil && d.timer.Stop()
+	d.mu.Unlock()
+	if due {
+		d.run()
+	}
+	d.pending.Wait()
 }
 
 // — Signal bus types ——————————————————————————————————————————————————————
