@@ -35,6 +35,10 @@ under Milestone 10 and the v2+ Roadmap section.
 - **Template `markdown` / `smeldr_markdown` and markdown block fields (D97):** numbered lists, nested lists, italic and `__strong__` are now formatted where they were literal text. A link whose target is `//host`, contains a backslash, a quote or an HTML character reference is now literal text where it was a link. `**` inside a code span stays literal where it became bold. `**` with a space on its inner side (`a ** b **`) no longer makes bold. An image `![a](b)` stays literal text. A table row with more cells than its header is cut to the header width. HTML passthrough and h1 to h6 are unchanged.
 - **`text/plain` responses of a `Markdownable` item** use `StripMarkdown`: `snake_case` and `2*3*4` are no longer mangled, and list markers, quote markers and table pipes go.
 
+### Security
+
+- **`smeldr_excerpt` escapes its text (A466, D97).** The template func returned its excerpt as `template.HTML`, so html/template trusted it and an author's raw HTML, a `<script>` included, reached the page unescaped. It now returns a `string`, which html/template escapes in whatever context the template puts it (element text, an attribute, a JSON-LD string), and it is made from the body's plain text (`StripMarkdown`) on one line, as the docs already described. A template that relied on raw HTML inside an excerpt now shows that HTML as text.
+
 ---
 
 ## [1.142.0] - 2026-10-10

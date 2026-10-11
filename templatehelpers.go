@@ -77,16 +77,25 @@ func smeldrHTML(s string) template.HTML {
 	return template.HTML(s)
 }
 
-// smeldrExcerpt returns a plain-text excerpt of s truncated at the last word
-// boundary within maxLen runes, with a Unicode ellipsis appended when truncated.
-// Wraps [Excerpt].
+// smeldrExcerpt returns a one-line plain-text excerpt of the markdown body s:
+// its markup stripped ([StripMarkdown]), each run of whitespace made one space,
+// and truncated at the last word boundary within maxLen runes, with a Unicode
+// ellipsis appended when truncated ([Excerpt]). It returns a string, not
+// template.HTML, so html/template escapes it in whatever context the template
+// puts it: element text, an attribute or a JSON-LD string.
 //
 // In templates, maxLen is passed as an explicit argument and s arrives via the
 // pipeline:
 //
 //	{{.Content.Body | smeldr_excerpt 120}}
-func smeldrExcerpt(maxLen int, s string) template.HTML {
-	return template.HTML(Excerpt(s, maxLen))
+func smeldrExcerpt(maxLen int, s string) string {
+	return Excerpt(oneLine(StripMarkdown(s)), maxLen)
+}
+
+// oneLine turns each run of whitespace in s into a single space and trims the
+// ends. It never makes s longer.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // smeldrCSRFToken reads the CSRF cookie from r and returns an HTML hidden input

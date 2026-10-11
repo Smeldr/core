@@ -1662,7 +1662,7 @@ All functions are registered in `TemplateFuncMap` and are available in every mod
 | `forge_html` | HTML string | `template.HTML` | Fields that already contain rendered HTML |
 | `smeldr_date` | `time.Time` | string | Human-readable date (`2 Jan 2006`) |
 | `smeldr_rfc3339` | `time.Time` | string | Machine-readable datetime for `<time datetime>` |
-| `smeldr_excerpt` | string, int | string | Truncated plain-text summary |
+| `smeldr_excerpt` | string, int | string | Truncated plain-text summary on one line: markdown stripped (`StripMarkdown`), escaped by html/template in its context (v1.143.0, A466) |
 | `smeldr_meta` | string | `template.HTML` | Escaped `<meta>` attribute value |
 | `smeldr_csrf_token` | — | `template.HTML` | Hidden CSRF input field |
 | `smeldr_llms_entries` | `.` (template data) | `template.HTML` | Rendered llms.txt entry list |
