@@ -1,0 +1,198 @@
+[
+  {
+    "in": "# H1",
+    "out": "\u003ch1\u003eH1\u003c/h1\u003e"
+  },
+  {
+    "in": "## H2",
+    "out": "\u003ch2\u003eH2\u003c/h2\u003e"
+  },
+  {
+    "in": "### H3",
+    "out": "\u003ch3\u003eH3\u003c/h3\u003e"
+  },
+  {
+    "in": "#### H4",
+    "out": "\u003ch4\u003eH4\u003c/h4\u003e"
+  },
+  {
+    "in": "##### H5",
+    "out": "\u003ch5\u003eH5\u003c/h5\u003e"
+  },
+  {
+    "in": "###### H6",
+    "out": "\u003ch6\u003eH6\u003c/h6\u003e"
+  },
+  {
+    "in": "## Hello **world**",
+    "out": "\u003ch2\u003eHello \u003cstrong\u003eworld\u003c/strong\u003e\u003c/h2\u003e"
+  },
+  {
+    "in": "#NoSpace",
+    "out": "\u003cp\u003e#NoSpace\u003c/p\u003e"
+  },
+  {
+    "in": "####### seven",
+    "out": "\u003cp\u003e####### seven\u003c/p\u003e"
+  },
+  {
+    "in": "```\nfoo()\n```",
+    "out": "\u003cpre\u003e\u003ccode\u003efoo()\u003c/code\u003e\u003c/pre\u003e"
+  },
+  {
+    "in": "```go\nfmt.Println(\"hi\")\n```",
+    "out": "\u003cpre\u003e\u003ccode class=\"language-go\"\u003efmt.Println(\u0026#34;hi\u0026#34;)\u003c/code\u003e\u003c/pre\u003e"
+  },
+  {
+    "in": "```\nsome code",
+    "out": "\u003cpre\u003e\u003ccode\u003esome code\u003c/code\u003e\u003c/pre\u003e"
+  },
+  {
+    "in": "```\n\u003cb\u003eraw\u003c/b\u003e \u0026 \"q\"\n```",
+    "out": "\u003cpre\u003e\u003ccode\u003e\u0026lt;b\u0026gt;raw\u0026lt;/b\u0026gt; \u0026amp; \u0026#34;q\u0026#34;\u003c/code\u003e\u003c/pre\u003e"
+  },
+  {
+    "in": "- alpha\n- beta\n- gamma",
+    "out": "\u003cul\u003e\n\u003cli\u003ealpha\u003c/li\u003e\n\u003cli\u003ebeta\u003c/li\u003e\n\u003cli\u003egamma\u003c/li\u003e\n\u003c/ul\u003e"
+  },
+  {
+    "in": "- one **bold**\n- two `code`\n- three [link](https://example.com)",
+    "out": "\u003cul\u003e\n\u003cli\u003eone \u003cstrong\u003ebold\u003c/strong\u003e\u003c/li\u003e\n\u003cli\u003etwo \u003ccode\u003ecode\u003c/code\u003e\u003c/li\u003e\n\u003cli\u003ethree \u003ca href=\"https://example.com\"\u003elink\u003c/a\u003e\u003c/li\u003e\n\u003c/ul\u003e"
+  },
+  {
+    "in": "- item\nafter the list",
+    "out": "\u003cul\u003e\n\u003cli\u003eitem\u003c/li\u003e\n\u003c/ul\u003e\n\u003cp\u003eafter the list\u003c/p\u003e"
+  },
+  {
+    "in": "para\n- item",
+    "out": "\u003cp\u003epara\u003c/p\u003e\n\u003cul\u003e\n\u003cli\u003eitem\u003c/li\u003e\n\u003c/ul\u003e"
+  },
+  {
+    "in": "| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |",
+    "out": "\u003ctable\u003e\n\u003cthead\u003e\u003ctr\u003e\u003cth\u003eA\u003c/th\u003e\u003cth\u003eB\u003c/th\u003e\u003c/tr\u003e\u003c/thead\u003e\n\u003ctbody\u003e\n\u003ctr\u003e\u003ctd\u003e1\u003c/td\u003e\u003ctd\u003e2\u003c/td\u003e\u003c/tr\u003e\n\u003ctr\u003e\u003ctd\u003e3\u003c/td\u003e\u003ctd\u003e4\u003c/td\u003e\u003c/tr\u003e\n\u003c/tbody\u003e\n\u003c/table\u003e"
+  },
+  {
+    "in": "| Left | Center |\n| :--- | :---: |\n| **b** | `c` |",
+    "out": "\u003ctable\u003e\n\u003cthead\u003e\u003ctr\u003e\u003cth\u003eLeft\u003c/th\u003e\u003cth\u003eCenter\u003c/th\u003e\u003c/tr\u003e\u003c/thead\u003e\n\u003ctbody\u003e\n\u003ctr\u003e\u003ctd\u003e\u003cstrong\u003eb\u003c/strong\u003e\u003c/td\u003e\u003ctd\u003e\u003ccode\u003ec\u003c/code\u003e\u003c/td\u003e\u003c/tr\u003e\n\u003c/tbody\u003e\n\u003c/table\u003e"
+  },
+  {
+    "in": "| only head |",
+    "out": "\u003ctable\u003e\n\u003cthead\u003e\u003ctr\u003e\u003cth\u003eonly head\u003c/th\u003e\u003c/tr\u003e\u003c/thead\u003e\n\u003c/table\u003e"
+  },
+  {
+    "in": "| A |\n| --- |\n| \u003cscript\u003ebad\u003c/script\u003e |",
+    "out": "\u003ctable\u003e\n\u003cthead\u003e\u003ctr\u003e\u003cth\u003eA\u003c/th\u003e\u003c/tr\u003e\u003c/thead\u003e\n\u003ctbody\u003e\n\u003ctr\u003e\u003ctd\u003e\u0026lt;script\u0026gt;bad\u0026lt;/script\u0026gt;\u003c/td\u003e\u003c/tr\u003e\n\u003c/tbody\u003e\n\u003c/table\u003e"
+  },
+  {
+    "in": "Hello **world** end",
+    "out": "\u003cp\u003eHello \u003cstrong\u003eworld\u003c/strong\u003e end\u003c/p\u003e"
+  },
+  {
+    "in": "**important**",
+    "out": "\u003cp\u003e\u003cstrong\u003eimportant\u003c/strong\u003e\u003c/p\u003e"
+  },
+  {
+    "in": "Use `fmt.Println` here",
+    "out": "\u003cp\u003eUse \u003ccode\u003efmt.Println\u003c/code\u003e here\u003c/p\u003e"
+  },
+  {
+    "in": "First para.\n\nSecond para.",
+    "out": "\u003cp\u003eFirst para.\u003c/p\u003e\n\u003cp\u003eSecond para.\u003c/p\u003e"
+  },
+  {
+    "in": "line one\nline two",
+    "out": "\u003cp\u003eline one line two\u003c/p\u003e"
+  },
+  {
+    "in": "---",
+    "out": "\u003chr\u003e"
+  },
+  {
+    "in": "text\n---\nmore",
+    "out": "\u003cp\u003etext\u003c/p\u003e\n\u003chr\u003e\n\u003cp\u003emore\u003c/p\u003e"
+  },
+  {
+    "in": "[Read more](https://example.com)",
+    "out": "\u003cp\u003e\u003ca href=\"https://example.com\"\u003eRead more\u003c/a\u003e\u003c/p\u003e"
+  },
+  {
+    "in": "[Docs](/docs)",
+    "out": "\u003cp\u003e\u003ca href=\"/docs\"\u003eDocs\u003c/a\u003e\u003c/p\u003e"
+  },
+  {
+    "in": "[plain](http://example.com/a?b=1\u0026c=2)",
+    "out": "\u003cp\u003e\u003ca href=\"http://example.com/a?b=1\u0026amp;c=2\"\u003eplain\u003c/a\u003e\u003c/p\u003e"
+  },
+  {
+    "in": "[bad](javascript:alert(1))",
+    "out": "\u003cp\u003e[bad](javascript:alert(1))\u003c/p\u003e"
+  },
+  {
+    "in": "[x](data:text/html,\u003ch1\u003exss\u003c/h1\u003e)",
+    "out": "\u003cp\u003e[x](data:text/html,\u0026lt;h1\u0026gt;xss\u0026lt;/h1\u0026gt;)\u003c/p\u003e"
+  },
+  {
+    "in": "**bold** and [link](https://example.com)",
+    "out": "\u003cp\u003e\u003cstrong\u003ebold\u003c/strong\u003e and \u003ca href=\"https://example.com\"\u003elink\u003c/a\u003e\u003c/p\u003e"
+  },
+  {
+    "in": "Fish \u0026 chips \u003c 5 \u003e 3 \"quoted\" 'single'",
+    "out": "\u003cp\u003eFish \u0026amp; chips \u0026lt; 5 \u0026gt; 3 \u0026#34;quoted\u0026#34; \u0026#39;single\u0026#39;\u003c/p\u003e"
+  },
+  {
+    "in": "**\u003cscript\u003exss\u003c/script\u003e**",
+    "out": "\u003cp\u003e\u003cstrong\u003e\u0026lt;script\u0026gt;xss\u0026lt;/script\u0026gt;\u003c/strong\u003e\u003c/p\u003e"
+  },
+  {
+    "in": "`\u003cimg src=x onerror=alert(1)\u003e`",
+    "out": "\u003cp\u003e\u003ccode\u003e\u0026lt;img src=x onerror=alert(1)\u0026gt;\u003c/code\u003e\u003c/p\u003e"
+  },
+  {
+    "in": "\u003cscript\u003ealert(1)\u003c/script\u003e",
+    "out": "\u003cscript\u003ealert(1)\u003c/script\u003e"
+  },
+  {
+    "in": "\u003cdiv class=\"pull-quote\"\u003etext\u003c/div\u003e",
+    "out": "\u003cdiv class=\"pull-quote\"\u003etext\u003c/div\u003e"
+  },
+  {
+    "in": "Before.\n\n\u003cdiv class=\"x\"\u003e\n\u003cp\u003einner\u003c/p\u003e\n\u003c/div\u003e\n\nAfter.",
+    "out": "\u003cp\u003eBefore.\u003c/p\u003e\n\u003cdiv class=\"x\"\u003e\n\u003cp\u003einner\u003c/p\u003e\n\u003c/div\u003e\n\u003cp\u003eAfter.\u003c/p\u003e"
+  },
+  {
+    "in": "",
+    "out": ""
+  },
+  {
+    "in": "   ",
+    "out": ""
+  },
+  {
+    "in": "Windows\r\nline endings\r\n\r\nsecond",
+    "out": "\u003cp\u003eWindows line endings\u003c/p\u003e\n\u003cp\u003esecond\u003c/p\u003e"
+  },
+  {
+    "in": "# Decision\n\nContext paragraph with **bold** and `code`.\n\n## Options\n\n- first option\n- second option\n\n| Option | Cost |\n| --- | --- |\n| A | low |\n| B | high |\n\n---\n\nSee [the spec](https://example.com/spec) and [docs](/docs).",
+    "out": "\u003ch1\u003eDecision\u003c/h1\u003e\n\u003cp\u003eContext paragraph with \u003cstrong\u003ebold\u003c/strong\u003e and \u003ccode\u003ecode\u003c/code\u003e.\u003c/p\u003e\n\u003ch2\u003eOptions\u003c/h2\u003e\n\u003cul\u003e\n\u003cli\u003efirst option\u003c/li\u003e\n\u003cli\u003esecond option\u003c/li\u003e\n\u003c/ul\u003e\n\u003ctable\u003e\n\u003cthead\u003e\u003ctr\u003e\u003cth\u003eOption\u003c/th\u003e\u003cth\u003eCost\u003c/th\u003e\u003c/tr\u003e\u003c/thead\u003e\n\u003ctbody\u003e\n\u003ctr\u003e\u003ctd\u003eA\u003c/td\u003e\u003ctd\u003elow\u003c/td\u003e\u003c/tr\u003e\n\u003ctr\u003e\u003ctd\u003eB\u003c/td\u003e\u003ctd\u003ehigh\u003c/td\u003e\u003c/tr\u003e\n\u003c/tbody\u003e\n\u003c/table\u003e\n\u003chr\u003e\n\u003cp\u003eSee \u003ca href=\"https://example.com/spec\"\u003ethe spec\u003c/a\u003e and \u003ca href=\"/docs\"\u003edocs\u003c/a\u003e.\u003c/p\u003e"
+  },
+  {
+    "in": "unclosed **bold here",
+    "out": "\u003cp\u003eunclosed **bold here\u003c/p\u003e"
+  },
+  {
+    "in": "unclosed `code here",
+    "out": "\u003cp\u003eunclosed `code here\u003c/p\u003e"
+  },
+  {
+    "in": "[unclosed link](https://example.com",
+    "out": "\u003cp\u003e[unclosed link](https://example.com\u003c/p\u003e"
+  },
+  {
+    "in": "[no paren] here",
+    "out": "\u003cp\u003e[no paren] here\u003c/p\u003e"
+  },
+  {
+    "in": "a ** b ** c",
+    "out": "\u003cp\u003ea \u003cstrong\u003e b \u003c/strong\u003e c\u003c/p\u003e"
+  }
+]

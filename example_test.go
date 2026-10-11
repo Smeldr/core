@@ -10,7 +10,10 @@ package smeldr
 // because it is the idiomatic path: it preserves type safety and ensures the
 // full AI/feed/sitemap wiring in App.Content is exercised.
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // examplePost is the minimal content type used by all examples in this file.
 // It implements Headable (for Head auto-detection, Amendment A28) and
@@ -312,4 +315,22 @@ func ExampleContextFunc() {
 	})
 	app.Content(m)
 	_ = app.Handler()
+}
+
+// ExampleRenderMarkdown renders an item's markdown body for a page: every
+// character is escaped, raw HTML included, and a heading renders one step.
+func ExampleRenderMarkdown() {
+	fmt.Println(RenderMarkdown("## Why\n\n1. It is **safe**\n2. <b>raw</b> stays text"))
+	// Output:
+	// <h3 class="md-h">Why</h3>
+	// <ol>
+	// <li>It is <strong>safe</strong></li>
+	// <li>&lt;b&gt;raw&lt;/b&gt; stays text</li>
+	// </ol>
+}
+
+// ExampleStripMarkdown makes a one-line preview from a markdown body.
+func ExampleStripMarkdown() {
+	fmt.Println(StripMarkdown("Use **snake_case** names, see [the guide](/guide)."))
+	// Output: Use snake_case names, see the guide.
 }

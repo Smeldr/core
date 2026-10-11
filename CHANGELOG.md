@@ -23,6 +23,20 @@ under Milestone 10 and the v2+ Roadmap section.
 
 ---
 
+## [1.143.0] - 2026-10-11
+
+### Added
+
+- **`RenderMarkdown` and `StripMarkdown` (A465).** One markdown renderer and one stripper as public API, for a caller that shows a body outside site templates. `RenderMarkdown(s) template.HTML` escapes every character, raw HTML included, renders headings one step (`<h3 class="md-h">`) and `> ` quotes one level. `StripMarkdown(s) string` returns the text without markup for previews and is never longer than its input. The parser is bounded (a linear work budget, a delimiter cap, link depth 3, 1 MiB); when a bound is hit the whole text renders as escaped `<pre class="md-raw">`, never cut.
+- Both renderers gain numbered lists (`1.`/`1)`, with `start`), one nested list level, an indented line continuing a list item, `*em*`, `_em_` and `__strong__`, backslash escapes, and table cells with an escaped `\|` or a pipe inside code.
+
+### Changed
+
+- **Template `markdown` / `smeldr_markdown` and markdown block fields (D97):** numbered lists, nested lists, italic and `__strong__` are now formatted where they were literal text. A link whose target is `//host`, contains a backslash, a quote or an HTML character reference is now literal text where it was a link. `**` inside a code span stays literal where it became bold. `**` with a space on its inner side (`a ** b **`) no longer makes bold. An image `![a](b)` stays literal text. A table row with more cells than its header is cut to the header width. HTML passthrough and h1 to h6 are unchanged.
+- **`text/plain` responses of a `Markdownable` item** use `StripMarkdown`: `snake_case` and `2*3*4` are no longer mangled, and list markers, quote markers and table pipes go.
+
+---
+
 ## [1.142.0] - 2026-10-10
 
 ### Added

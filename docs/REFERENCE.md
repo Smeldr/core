@@ -1669,8 +1669,13 @@ All functions are registered in `TemplateFuncMap` and are available in every mod
 
 #### smeldr_markdown
 
-`smeldr_markdown` converts a Markdown string to safe HTML. All content is HTML-escaped
-before tag wrapping — no XSS risk from user-authored text.
+`smeldr_markdown` (and its alias `markdown`) converts a Markdown string to HTML for
+**trusted site authors**. Inline text is escaped, but a line that starts with `<` is
+emitted verbatim (see below), so never use it for text from an untrusted author: use
+[`RenderMarkdown`](#rendering-markdown-bodies-rendermarkdown-and-stripmarkdown), which
+escapes everything. The subset is the one `RenderMarkdown` describes, with two template
+differences: headings keep their level (`<h1>` to `<h6>`), and `>` block quotes stay
+literal text.
 
 ```html
 {{.Content.Body | smeldr_markdown}}
@@ -1710,6 +1715,46 @@ with no escaping — the caller is responsible for ensuring the content is safe.
 | Input format | Markdown text | Already-rendered HTML |
 | HTML passthrough | Lines starting with `<` only | Entire value verbatim |
 | Use case | Body fields authored in Markdown | Pre-rendered content, iframes, migration |
+
+### Rendering markdown bodies: `RenderMarkdown` and `StripMarkdown`
+
+**v1.143.0, A465.** One renderer and one stripper for markdown bodies such as a Decision's text, for a caller that shows them outside site templates (Cloud's read layer, for example).
+
+```go
+html := smeldr.RenderMarkdown(decision.Body) // template.HTML, safe for any author
+preview := smeldr.StripMarkdown(decision.Body) // plain text, never longer than the input
+```
+
+**`RenderMarkdown` never passes raw HTML.** Every character of the input is escaped, including a line that starts with `<`. The `markdown` and `smeldr_markdown` template funcs do pass such a line through verbatim, for trusted site authors. So never use a template func for untrusted text.
+
+**The subset:**
+- **Blocks:**
+  - ATX headings: in a body every level renders one step, `<h3 class="md-h">`, so a body does not take over the page's outline;
+  - fenced code with a language class;
+  - `---` rules;
+  - tables with a separator row: an escaped `\|` and a pipe inside a code span stay in the cell, and a ragged row is padded or cut to the header's width;
+  - paragraphs;
+  - `- ` bullets and `1. ` or `1) ` numbered lists (`<ol start="n">` when the first number is not 1), with one nested level (a marker indented by two or more spaces; deeper levels flatten into it), and an indented line continues the item above it. A numbered line interrupts a paragraph only when it is `1.`;
+  - `> ` block quotes, one level (`>>` flattens).
+- **Inline:**
+  - `` `code` `` is taken first, so nothing inside it is interpreted;
+  - `**strong**`, `__strong__`, `*em*` and `_em_`: emphasis pairs only at word boundaries, so `snake_case` and `2*3*4` stay as written;
+  - `\` before punctuation escapes it;
+  - links `[label](target)`.
+- **Stays literal text:** images, setext headings, reference links and bare URLs.
+
+**Links:** a target becomes an `href` only when it is `http` or `https` with a host, or relative with neither scheme nor host (`/docs`, `docs/x`, `../a`, `#sec`, `?q=1`). Anything else is refused and the whole `[label](target)` stays literal text: `javascript:` in any case, `data:`, `vbscript:`, `mailto:`, `//host`, a backslash, whitespace, a quote, `<`, `>` or a backtick, a control character or its `%` escape, or an HTML character reference. There are no `target` or `rel` attributes; the caller decides.
+
+**Bounds:** the parser uses no regular expressions. Its look-ahead work is capped at 4 steps per input byte plus a constant (a normal body uses about 0.2), so it is linear. It allows at most 4096 emphasis delimiters per inline run and link labels nested three deep, and input over 1 MiB is not parsed. When any bound is hit, or the parser fails in any way, the whole text renders as escaped preformatted text, `<pre class="md-raw">…</pre>`. Nothing is cut, dropped or interpreted: a Decision body is the record. `StripMarkdown` returns its input unchanged in that case.
+
+**`StripMarkdown`:**
+- heading, list, quote and fence markers go;
+- a table row becomes its cells separated by spaces, and the separator row goes;
+- a link or image becomes its label;
+- a code span keeps its content;
+- emphasis markers go only where they pair.
+- Each block stays on its own line, and the result is never longer than the input.
+- It is also what a `text/plain` response of a [`Markdownable`](#content-negotiation) item uses.
 
 ### Template data shape
 

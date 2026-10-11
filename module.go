@@ -434,33 +434,6 @@ func autoSlug(rv reflect.Value) string {
 	return GenerateSlug(s)
 }
 
-// stripMarkdown removes common Markdown formatting from s for text/plain output.
-func stripMarkdown(s string) string {
-	s = strings.NewReplacer(
-		"**", "", "__", "", "*", "", "_", "",
-		"### ", "", "## ", "", "# ",
-		"",
-	).Replace(s)
-	var out strings.Builder
-	i := 0
-	for i < len(s) {
-		if s[i] == '[' {
-			closeIdx := strings.Index(s[i:], "](")
-			if closeIdx > 0 {
-				out.WriteString(s[i+1 : i+closeIdx])
-				rest := s[i+closeIdx+2:]
-				if parenEnd := strings.Index(rest, ")"); parenEnd >= 0 {
-					i = i + closeIdx + 2 + parenEnd + 1
-					continue
-				}
-			}
-		}
-		out.WriteByte(s[i])
-		i++
-	}
-	return out.String()
-}
-
 // — Module ————————————————————————————————————————————————————————————————
 
 // Module is the core routing and lifecycle unit for a content type T.
@@ -1588,7 +1561,7 @@ func writeContent(w http.ResponseWriter, r *http.Request, ct string, v any) {
 	case "text/plain":
 		var body string
 		if md, ok := v.(Markdownable); ok {
-			body = stripMarkdown(md.Markdown())
+			body = StripMarkdown(md.Markdown())
 		} else {
 			b, _ := json.Marshal(v)
 			body = string(b)

@@ -113,6 +113,14 @@
 // relation, an end is never a delete, and every end records its cause and
 // actor ([RelationStore.Withdraw], [EdgeEnd]).
 //
+// # Markdown
+//
+// [RenderMarkdown] renders a markdown body as HTML that is safe for text from
+// any author: everything is escaped, raw HTML included, and its parser is
+// bounded against hostile input. [StripMarkdown] returns the same body as
+// plain text for previews. The "markdown" template func is for trusted site
+// authors and passes raw HTML lines through; never use it for untrusted text.
+//
 // # Orchestration and governance
 //
 // Beyond the base content-lifecycle framework above, Smeldr ships a set of

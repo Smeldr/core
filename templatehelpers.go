@@ -48,20 +48,16 @@ func smeldrDate(t time.Time) string {
 	return t.Format("2 January 2006")
 }
 
-// smeldrMarkdown converts Markdown to safe HTML and returns it as [template.HTML]
-// so the template engine does not double-escape it. Delegates to [renderMarkdown].
+// smeldrMarkdown converts Markdown to HTML for trusted site templates and
+// returns it as [template.HTML] so the template engine does not double-escape
+// it. Delegates to [renderMarkdown].
 //
-// Supported syntax:
-//   - `# Heading` through `###### Heading` → <h1>–<h6>
-//   - ` ```lang … ``` ` fenced code blocks → <pre><code class="language-lang">
-//   - `- item` → <ul><li>
-//   - `| col |` tables with a `| --- |` separator row → <table>
-//   - `**text**` → <strong>
-//   - " `code` " → <code>
-//   - Blank-line-separated paragraphs → <p>
-//   - Standalone `---` → <hr>
-//
-// All content is HTML-entity-escaped before tag wrapping (XSS-safe).
+// It renders the subset of [RenderMarkdown] (headings, fenced code, tables,
+// bullet and numbered lists with one nested level, strong, em, code, safe
+// links, paragraphs, rules) with two differences for site authors: a line that
+// starts with "<" is emitted verbatim as raw HTML, and headings keep their
+// level (<h1> to <h6>). Block quotes stay literal text. Inline text is escaped.
+// Never use it for untrusted text; use [RenderMarkdown], which escapes all of it.
 //
 // Template usage:
 //

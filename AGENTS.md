@@ -85,6 +85,8 @@ Supported `smeldr_format` values:
 
 These tags are hints only. Smeldr performs no validation based on them.
 
+To show a markdown body outside a site template, use `smeldr.RenderMarkdown(body)` (escapes everything, raw HTML included; bounded against hostile input; headings render as one `<h3 class="md-h">` step) and `smeldr.StripMarkdown(body)` for a plain-text preview. The `markdown`/`smeldr_markdown` template funcs pass a line starting with `<` through as raw HTML, for trusted site authors only (core v1.143.0, A465).
+
 ### Extending a framework-provided table
 
 If you add a field to a type backed by a table Smeldr itself creates

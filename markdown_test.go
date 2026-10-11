@@ -285,7 +285,7 @@ func TestIsTableSep(t *testing.T) {
 		{"---", false},
 	}
 	for _, tc := range cases {
-		got := isTableSep(tc.input)
+		got := mdIsTableSep(tc.input)
 		if got != tc.want {
 			t.Errorf("isTableSep(%q) = %v; want %v", tc.input, got, tc.want)
 		}
@@ -293,7 +293,7 @@ func TestIsTableSep(t *testing.T) {
 }
 
 func TestParseTableRow(t *testing.T) {
-	cells := parseTableRow("| A | B | C |")
+	cells := mdSplitRow("| A | B | C |")
 	if len(cells) != 3 {
 		t.Fatalf("expected 3 cells, got %d: %v", len(cells), cells)
 	}

@@ -501,7 +501,7 @@ func TestStringField_nonStringField(t *testing.T) {
 // — Markdown helpers ——————————————————————————————————————————————————————————
 
 func TestMdApplyLinks_unsafeScheme(t *testing.T) {
-	result := mdApplyLinks("[click](javascript:alert(1))")
+	result := string(renderMarkdown("[click](javascript:alert(1))"))
 	if strings.Contains(result, "<a") {
 		t.Errorf("unsafe URL scheme should not produce <a> tag, got: %q", result)
 	}
@@ -511,14 +511,14 @@ func TestMdApplyLinks_unsafeScheme(t *testing.T) {
 }
 
 func TestMdApplyBold_unclosed(t *testing.T) {
-	result := mdApplyBold("unclosed **bold")
+	result := string(renderMarkdown("unclosed **bold"))
 	if strings.Contains(result, "<strong>") {
 		t.Errorf("unclosed bold should not produce <strong>, got: %q", result)
 	}
 }
 
 func TestMdApplyCode_unclosed(t *testing.T) {
-	result := mdApplyCode("unclosed `code")
+	result := string(renderMarkdown("unclosed `code"))
 	if strings.Contains(result, "<code>") {
 		t.Errorf("unclosed code should not produce <code>, got: %q", result)
 	}
@@ -1651,7 +1651,7 @@ func TestRenderMarkdown_unterminatedCodeFence(t *testing.T) {
 
 func TestMdApplyLinks_noMid(t *testing.T) {
 	input := "[no close bracket paren"
-	if got := mdApplyLinks(input); got != input {
+	if got := string(renderMarkdown(input)); got != "<p>"+input+"</p>" {
 		t.Errorf("noMid: got %q, want %q", got, input)
 	}
 }
@@ -1660,7 +1660,7 @@ func TestMdApplyLinks_noMid(t *testing.T) {
 
 func TestMdApplyLinks_noClose(t *testing.T) {
 	input := "[text](url without paren"
-	if got := mdApplyLinks(input); got != input {
+	if got := string(renderMarkdown(input)); got != "<p>"+input+"</p>" {
 		t.Errorf("noClose: got %q, want %q", got, input)
 	}
 }
