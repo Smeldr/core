@@ -61,10 +61,12 @@ type WebhookEventPayload struct {
 // webhookEventData is the content-specific object embedded in the Data field
 // of every [WebhookEventPayload].
 type webhookEventData struct {
-	Type  string `json:"type"`
-	ID    string `json:"id"`
-	Slug  string `json:"slug"`
-	Title string `json:"title,omitempty"`
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	// Address is the item's address (D110), omitted when it has none.
+	Address string `json:"address,omitempty"`
+	Title   string `json:"title,omitempty"`
 }
 
 // WebhookStore manages [WebhookEndpoint] records in the database. Signing
@@ -298,6 +300,7 @@ func buildWebhookPayload(typeName string, item any, sig LifecycleEvent) ([]byte,
 		ID:   n.ID,
 		Slug: n.Slug,
 	}
+	data.Address = addressOf(item)
 	if t, ok := item.(Titled); ok {
 		data.Title = t.ContentTitle()
 	}
@@ -373,9 +376,12 @@ func enqueueWebhookEvent(ctx context.Context, store *WebhookStore, pool *workerP
 // operate on raw id/slug/status columns for a type the registry names only
 // by string.
 type transitionWebhookData struct {
-	Type      string `json:"type"`
-	ID        string `json:"id"`
-	Slug      string `json:"slug"`
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	// Address is the item's address (D110), omitted when it has none or the
+	// caller did not load the item.
+	Address   string `json:"address,omitempty"`
 	FromState string `json:"from_state,omitempty"`
 	ToState   string `json:"to_state"`
 	Reason    string `json:"reason,omitempty"`

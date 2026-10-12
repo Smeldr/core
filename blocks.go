@@ -3,6 +3,7 @@ package smeldr
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 )
@@ -26,6 +27,7 @@ import (
 // imposes no constraint on the shape of Fields.
 type DynamicNode struct {
 	Node
+	RecordAddress
 
 	// TypeName is the block-type discriminator, e.g. "content_block" or
 	// "hero". It selects the field schema and the render template.
@@ -120,7 +122,15 @@ CREATE INDEX IF NOT EXISTS idx_content_edges_parent
 		return err
 	}
 
-	return ensureDynamicSlugIndex(ctx, db)
+	if err := ensureDynamicSlugIndex(ctx, db); err != nil {
+		return err
+	}
+	// D110: a dynamic record type's items carry an address; the counter table
+	// holds each record type's prefix.
+	if _, err := db.ExecContext(ctx, createAddressCountersSQL); err != nil {
+		return fmt.Errorf("smeldr: create smeldr_address_counters: %w", err)
+	}
+	return ensureAddressStorage(ctx, db, "smeldr_dynamic_content", true)
 }
 
 // ensureDynamicSlugIndex creates the partial unique index on

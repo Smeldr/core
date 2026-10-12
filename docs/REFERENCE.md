@@ -4964,6 +4964,17 @@ func CreateOrchestrationTables(db DB) error
 Creates `smeldr_signals`, `smeldr_tasks`, `smeldr_decisions`, `smeldr_amendments`, and `smeldr_goals` tables
 if they do not already exist. Call once at application startup before `RegisterOrchestrationTypes`.
 
+### Item addresses (D110)
+
+Every record carries a system-assigned address: its type's prefix plus a running number (`D110`, `T412`, `INV27`). The address is unique on the instance and never changes.
+
+- **Fields.** `RecordAddress` is embedded in `Signal`, `Task`, `Decision`, `Amendment`, `Goal`, `Run` and `DynamicNode`: `Address` (`address`), `AddressNo` (`address_no`) and `ExternalRef` (`external_ref`, free text for your own numbering, writable). `Address` and `AddressNo` carry `smeldr:"readonly"`: they are never part of create or update input.
+- **Assignment.** The number is taken in the create's own transaction on every create path (MCP and HTTP create of the six types, a dynamic record create, `InsertSignal`). A failed create takes no number; concurrent creates never share one; a number is never reused, even after a delete.
+- **Prefixes.** Core reserves the single letters: Decision `D`, Amendment `A`, Task `T`, Goal `G`, Signal `S`, Run `R`, task_plan `P`; every other single letter is reserved too. A runtime-defined type without a `URLPrefix` is a record type and gets 2 to 4 capital letters: `ContentTypeSchema.AddressPrefix`, or, when empty, a proposal from the name (`invoice` gives `INV`, then `INVO`). A type with a `URLPrefix` is web content and has no address. A prefix is fixed once the type has an item; a redefinition without one keeps it.
+- **Storage.** `CreateOrchestrationTables` and `CreateBlockTables` add the columns, a partial unique index (`address <> ''`, per type on `smeldr_dynamic_content`) and the `smeldr_address_counters` table (one row per type: prefix and last number). On a database with older rows the counter starts above every existing legacy number of the type, so new addresses never collide with ones the migration keeps.
+- **Immutability.** MCP update and PATCH refuse a changed `address` or `address_no`; PUT keeps the stored address.
+- **Events and packets.** Webhook and event-stream payloads carry `address`. A context packet's anchor and item IDs are the address when the record has one.
+
 ### `InsertSignal`
 
 ```go

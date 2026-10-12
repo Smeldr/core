@@ -91,6 +91,7 @@ func (a *App) afterStatusChange(ctx context.Context, t statusTransition) {
 			Type:      strings.ToLower(t.typeName),
 			ID:        t.id,
 			Slug:      t.slug,
+			Address:   addressOf(t.item),
 			FromState: t.from,
 			ToState:   t.to,
 			Reason:    t.reason,

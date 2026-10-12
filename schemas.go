@@ -41,14 +41,20 @@ type SchemaField struct {
 // URLPrefix is the operator-chosen public URL prefix (e.g. "/recipes"). When
 // empty, the type has no public URL and is accessible only via admin routes.
 type ContentTypeSchema struct {
-	ID        string          `db:"id"`
-	TypeName  string          `db:"type_name"`
-	Label     string          `db:"label"`
-	Kind      string          `db:"kind"`       // "block" | "content"; default "block"
-	URLPrefix string          `db:"url_prefix"` // public URL prefix; empty = admin-only
-	Fields    json.RawMessage `db:"fields"`
-	CreatedAt time.Time       `db:"created_at"`
-	UpdatedAt time.Time       `db:"updated_at"`
+	ID        string `db:"id"`
+	TypeName  string `db:"type_name"`
+	Label     string `db:"label"`
+	Kind      string `db:"kind"`       // "block" | "content"; default "block"
+	URLPrefix string `db:"url_prefix"` // public URL prefix; empty = admin-only
+	// AddressPrefix is a record type's address prefix (D110), 2 to 4 capital
+	// letters, or core's reserved letter for a core type such as task_plan. A
+	// type with a URLPrefix is web content and has none. It is kept in the
+	// address registry, not in this table: on define an empty value means
+	// "propose one", and on redefine "keep the current one".
+	AddressPrefix string          `db:"-"`
+	Fields        json.RawMessage `db:"fields"`
+	CreatedAt     time.Time       `db:"created_at"`
+	UpdatedAt     time.Time       `db:"updated_at"`
 }
 
 // ParseFields decodes the stored JSON fields into a slice of [SchemaField].
@@ -348,9 +354,18 @@ func SeedBlockTypeSchemas(db DB) error {
 	return nil
 }
 
+// reservedContentFieldNames are the names a runtime-defined content type may not
+// give a field (D110): the server sets them on every item, beside its fields.
+var reservedContentFieldNames = map[string]bool{
+	"id": true, "slug": true, "status": true,
+	"address": true, "address_no": true, "external_ref": true,
+}
+
 // ValidateSchemaDef checks that a ContentTypeSchema is well-formed before
 // writing it to the database. Returns an error on empty TypeName, a URLPrefix
-// that does not start with "/", unknown field types, or unrecognised Role values.
+// that does not start with "/", unknown field types, or unrecognised Role
+// values, and, for a content type, a field named id, slug, status, address,
+// address_no or external_ref (D110), which the server sets itself.
 func ValidateSchemaDef(schema *ContentTypeSchema) error {
 	if schema.TypeName == "" {
 		return fmt.Errorf("smeldr: schema TypeName is required")
@@ -377,6 +392,9 @@ func ValidateSchemaDef(schema *ContentTypeSchema) error {
 	for _, f := range fields {
 		if f.Name == "" {
 			return fmt.Errorf("smeldr: schema field Name is required")
+		}
+		if schema.Kind == "content" && reservedContentFieldNames[strings.ToLower(f.Name)] {
+			return Err("fields", fmt.Sprintf("%q is a reserved name: the server sets id, slug, status, address, address_no and external_ref itself", f.Name))
 		}
 		if !knownTypes[f.Type] {
 			return fmt.Errorf("smeldr: schema field %q has unknown type %q", f.Name, f.Type)

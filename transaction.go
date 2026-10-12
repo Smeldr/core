@@ -68,6 +68,11 @@ func (m *Module[T]) repoOn(exec DB) Repository[T] {
 // createInTx returns nil.
 func (m *Module[T]) createInTx(ctx Context, item T) error {
 	return runInTx(ctx, m.db, func(exec DB) error {
+		// D110: the address is taken on this transaction, so a create that
+		// rolls back takes no number.
+		if err := m.assignNewAddress(ctx, exec, item); err != nil {
+			return err
+		}
 		if m.saveBefore != nil {
 			if err := m.saveBefore(ctx, exec, nil, item); err != nil {
 				return err
@@ -101,19 +106,31 @@ func InsertSignal(ctx context.Context, db DB, s *Signal) error {
 	if s.UpdatedAt.IsZero() {
 		s.UpdatedAt = now
 	}
-	return runInTx(ctx, db, func(exec DB) error {
-		_, err := exec.ExecContext(ctx,
+	err := runInTx(ctx, db, func(exec DB) error {
+		// D110: the Signal's address is taken on this transaction.
+		address, no, err := allocateAddress(ctx, exec, "Signal")
+		if err != nil {
+			return err
+		}
+		s.Address, s.AddressNo = address, no
+		_, err = exec.ExecContext(ctx,
 			`INSERT INTO smeldr_signals
 				(id, slug, status, created_at, updated_at, sender, receiver, signal_type, message, task_ref, sequence,
-				 subject_type, subject_id, from_state, to_state, required_role)
+				 subject_type, subject_id, from_state, to_state, required_role, address, address_no, external_ref)
 			VALUES
-				($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+				($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
 			s.ID, s.Slug, string(s.Status), s.CreatedAt, s.UpdatedAt, s.Sender, s.Receiver, s.SignalType, s.Message,
 			s.TaskRef, s.Sequence, s.SubjectType, s.SubjectID, s.FromState, s.ToState, s.RequiredOperation,
+			s.Address, s.AddressNo, s.ExternalRef,
 		)
 		if err != nil {
 			return fmt.Errorf("smeldr: InsertSignal: %w", err)
 		}
 		return nil
 	})
+	if err != nil {
+		// Nothing was committed, so the Signal has no address.
+		s.Address, s.AddressNo = "", 0
+	}
+	return err
 }

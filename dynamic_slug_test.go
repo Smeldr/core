@@ -300,7 +300,9 @@ func TestCreateBlockTables_DuplicateScanError(t *testing.T) {
 type failIndexCreateDB struct{ DB }
 
 func (f failIndexCreateDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
-	if strings.Contains(q, "CREATE UNIQUE INDEX") {
+	// Only the slug index: the address index (D110) is not optional and its
+	// failure stops boot (TestEnsureAddressStorage_IndexFailureStopsBoot).
+	if strings.Contains(q, "CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_content_type_slug") {
 		return nil, fmt.Errorf("index refused")
 	}
 	return f.DB.ExecContext(ctx, q, args...)

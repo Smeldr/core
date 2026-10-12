@@ -34,6 +34,7 @@ Rules:
 
 - Always embed `smeldr.Node` — never compose it
 - Use `smeldr:"required"` and `smeldr:"min=N"` for validation
+- `smeldr:"readonly"` marks a field the server sets: it is left out of MCP create and update input and kept in output (D110 uses it for `address` and `address_no`)
 - Use `db:"column_name"` for `SQLRepo` column mapping
 - Avoid SQLite reserved keywords as column names (`order`, `group`, etc.)
   — use `db:"sort_order"` instead
@@ -363,6 +364,11 @@ and changed with `redefine_content_type` (core v1.140.0, mcp v1.56.0): the label
 formats and descriptions, optional-making and new optional fields, never a removal,
 a retype, a tightening or a URL prefix change. The change applies at once, to later
 writes only, in this process (another process sees it after a restart).
+A type without a URL prefix is a record type (D110): each item gets a server-assigned
+address, the type's prefix plus a number (`INV27`), and the type keeps one prefix of
+2 to 4 capital letters (proposed from the name when none is given; fixed once the type
+has items; single letters are reserved for core types). A field may not be named `id`,
+`slug`, `status`, `address`, `address_no` or `external_ref`.
 Optional subsystems are gated by environment variables — the binary compiles and
 runs with only `SECRET` set; every other feature is opt-in.
 

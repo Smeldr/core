@@ -85,6 +85,15 @@ func (a *App) RedefineContentTypeVia(ctx context.Context, surface string, schema
 	if next.Label == "" {
 		next.Label = old.Label
 	}
+	// An absent url_prefix or address prefix keeps the current one: a
+	// redefinition changes fields, never where a type lives or how its records
+	// are addressed (D110).
+	if next.URLPrefix == "" {
+		next.URLPrefix = old.URLPrefix
+	}
+	if next.AddressPrefix == "" {
+		next.AddressPrefix = old.AddressPrefix
+	}
 	if err := ValidateSchemaDef(&next); err != nil {
 		return nil, err
 	}
@@ -96,8 +105,26 @@ func (a *App) RedefineContentTypeVia(ctx context.Context, surface string, schema
 	}
 	next.ID = old.ID
 	next.CreatedAt = old.CreatedAt
-	if err := NewSchemaStore(a.cfg.DB).Save(ctx, &next); err != nil {
-		return nil, fmt.Errorf("smeldr: RedefineContentType save: %w", err)
+	seed, err := dynamicAddressSeed(ctx, a.cfg.DB, &next)
+	if err != nil {
+		return nil, fmt.Errorf("%w: seed the address counter of %s: %s", ErrInternal, next.TypeName, err)
+	}
+	if err := runInTx(ctx, a.cfg.DB, func(exec DB) error {
+		// A changed address prefix is refused once the type has addresses
+		// (registerAddressPrefix); a core type keeps its reserved one.
+		if next.AddressPrefix != old.AddressPrefix || old.AddressPrefix == "" {
+			p, _, err := settleDynamicPrefix(ctx, exec, &next, next.AddressPrefix, seed)
+			if err != nil {
+				return err
+			}
+			next.AddressPrefix = p
+		}
+		if err := NewSchemaStore(exec).Save(ctx, &next); err != nil {
+			return fmt.Errorf("smeldr: RedefineContentType save: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	repo := NewDynamicTypeRepo(a.cfg.DB, next.TypeName, &next)
 	nd := &TypeDescriptor{

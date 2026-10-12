@@ -15,6 +15,7 @@ import (
 // graph. It models the TODO-table rows in ARCHITECT_TODO.md as live Smeldr items.
 type Goal struct {
 	Node
+	RecordAddress
 	// GoalID is the canonical identifier (e.g. "T114").
 	GoalID string `json:"goal_id" db:"goal_id"`
 	// Priority is the scheduling priority. Lower values are higher priority.
@@ -152,6 +153,7 @@ func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID stri
 // / SIGNAL_SITE.md hand-off protocol as a persisted, state-managed record.
 type Signal struct {
 	Node
+	RecordAddress
 	// Sender is the originating agent identifier (e.g. "core", "site").
 	Sender string `json:"sender"`
 	// Receiver is the destination agent identifier (e.g. "architect").
@@ -201,6 +203,7 @@ type Signal struct {
 // through the architect/pilot protocol state machine.
 type Task struct {
 	Node
+	RecordAddress
 	// TaskID is the canonical task identifier (e.g. "T23").
 	TaskID string `json:"task_id" db:"task_id"`
 	// Priority is the scheduling priority. Lower values are higher priority.
@@ -229,6 +232,7 @@ type Task struct {
 // architectural decision with a structured freshness evaluation cycle.
 type Decision struct {
 	Node
+	RecordAddress
 	// DecisionNumber is the canonical identifier (e.g. "D22" or "A183").
 	DecisionNumber string `json:"decision_number" db:"decision_number"`
 	// Title is a short, human-readable display title, independent of
@@ -452,6 +456,7 @@ func authorizeDecisionScopeByID(ctx context.Context, db DB, rs *RoleStore, actor
 // changeset that links a Task to its implementation in code.
 type Amendment struct {
 	Node
+	RecordAddress
 	// AmendmentNumber is the canonical identifier (e.g. "A183").
 	AmendmentNumber string `json:"amendment_number" db:"amendment_number"`
 	// AmendmentType classifies the change (e.g. "feat", "fix", "refactor").
@@ -549,6 +554,7 @@ const (
 // database's post-write Rev back onto the caller's own struct.
 type Run struct {
 	Node
+	RecordAddress
 	// TaskID is the Task this Run performs mechanical work for (e.g. "T145").
 	TaskID string `json:"task_id" db:"task_id"`
 	// Repo is the repository this Run operates on (e.g. "smeldr/core").
@@ -714,7 +720,9 @@ func CreateOrchestrationTables(db DB) error {
 			return err
 		}
 	}
-	return nil
+	// D110: the address columns and indexes, the counter table and the core
+	// prefixes, on fresh and on older databases alike (idempotent).
+	return registerOrchestrationAddresses(context.Background(), db)
 }
 
 // EnsureOrchestrationSignalColumns adds [Signal]'s subject_type/subject_id/
@@ -868,21 +876,21 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 		}
 	}
 	app.Content(NewModule[*Signal]((*Signal)(nil),
-		At("/signals"), Repo(NewSQLRepo[*Signal](db, Table("smeldr_signals"))), MCP(MCPRead, MCPWrite),
+		At("/signals"), Repo(NewSQLRepo[*Signal](db, Table("smeldr_signals"))), MCP(MCPRead, MCPWrite), withAddress(),
 	))
 	app.Content(NewModule[*Task]((*Task)(nil),
-		At("/tasks"), Repo(NewSQLRepo[*Task](db, Table("smeldr_tasks"))), MCP(MCPRead, MCPWrite),
+		At("/tasks"), Repo(NewSQLRepo[*Task](db, Table("smeldr_tasks"))), MCP(MCPRead, MCPWrite), withAddress(),
 		DefaultListOrder("Priority", false), // T262: lower Priority sorts first
 	))
 	app.Content(NewModule[*Decision]((*Decision)(nil),
-		At("/decisions"), Repo(NewSQLRepo[*Decision](db, Table("smeldr_decisions"))), MCP(MCPRead, MCPWrite),
+		At("/decisions"), Repo(NewSQLRepo[*Decision](db, Table("smeldr_decisions"))), MCP(MCPRead, MCPWrite), withAddress(),
 	))
 	app.Content(NewModule[*Amendment]((*Amendment)(nil),
-		At("/amendments"), Repo(NewSQLRepo[*Amendment](db, Table("smeldr_amendments"))), MCP(MCPRead, MCPWrite),
+		At("/amendments"), Repo(NewSQLRepo[*Amendment](db, Table("smeldr_amendments"))), MCP(MCPRead, MCPWrite), withAddress(),
 		amendsSaveHooks(),
 	))
 	app.Content(NewModule[*Goal]((*Goal)(nil),
-		At("/goals"), Repo(NewSQLRepo[*Goal](db, Table("smeldr_goals"))), MCP(MCPRead, MCPWrite),
+		At("/goals"), Repo(NewSQLRepo[*Goal](db, Table("smeldr_goals"))), MCP(MCPRead, MCPWrite), withAddress(),
 		DefaultListOrder("Priority", false), // T262: lower Priority sorts first
 	))
 	// Run gets no entry in the flows slice above — D38 requires no
@@ -892,7 +900,7 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 	// (mcp/tool.go's handleToolsCall → MCPUpdate), so MCPWrite is a real
 	// requirement for the future listener, not a style preference.
 	app.Content(NewModule[*Run]((*Run)(nil),
-		At("/runs"), Repo(NewSQLRepo[*Run](db, Table("smeldr_runs"))), MCP(MCPRead, MCPWrite),
+		At("/runs"), Repo(NewSQLRepo[*Run](db, Table("smeldr_runs"))), MCP(MCPRead, MCPWrite), withAddress(),
 	))
 }
 

@@ -122,10 +122,31 @@ func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fi
 	// the transaction it ran in, so the retry cannot share it.
 	save := func() error {
 		return runInTx(ctx, r.db, func(exec DB) error {
+			// D110: a record type's item takes its address on this
+			// transaction; a rolled-back attempt takes no number.
+			if isAddressedSchema(r.schema) {
+				address, no, err := allocateAddress(ctx, exec, r.typeName)
+				if err != nil {
+					return err
+				}
+				node.Address, node.AddressNo = address, no
+			}
 			return NewDynamicContentRepo(exec).Save(ctx, node)
 		})
 	}
-	if err := save(); err != nil {
+	err = save()
+	if errors.Is(err, errNoAddressPrefix) {
+		// A record type used without App.DefineContentType or a boot load (a
+		// repo built directly) has no prefix yet: register its core or a
+		// proposed one, on the base handle, and try once more.
+		var seed int64
+		if seed, err = dynamicAddressSeed(ctx, r.db, r.schema); err == nil {
+			if _, _, err = settleDynamicPrefix(ctx, r.db, r.schema, "", seed); err == nil {
+				err = save()
+			}
+		}
+	}
+	if err != nil {
 		// Another create took the slug between uniqueSlug and the insert (the
 		// unique (type_name, slug) index refused this one): retry once under
 		// the collision-checked fallback. Any other error is returned.
@@ -233,6 +254,12 @@ func (r *DynamicTypeRepo) List(ctx context.Context, opts ListOptions) ([]map[str
 		m["Status"] = string(node.Status)
 		if !node.PublishedAt.IsZero() {
 			m["PublishedAt"] = node.PublishedAt
+		}
+		if node.Address != "" {
+			m["Address"] = node.Address
+		}
+		if node.ExternalRef != "" {
+			m["ExternalRef"] = node.ExternalRef
 		}
 		out = append(out, m)
 	}
@@ -613,9 +640,23 @@ func (a *App) DefineContentType(ctx context.Context, schema *ContentTypeSchema) 
 	if prefix != "" && a.typeRegistry.LookupByPrefix(prefix) != nil {
 		return nil, fmt.Errorf("smeldr: content type prefix %q already claimed", prefix)
 	}
-	store := NewSchemaStore(a.cfg.DB)
-	if err := store.Save(ctx, schema); err != nil {
-		return nil, fmt.Errorf("smeldr: DefineContentType save: %w", err)
+	// The schema and the type's address prefix (D110) are stored together.
+	seed, err := dynamicAddressSeed(ctx, a.cfg.DB, schema)
+	if err != nil {
+		return nil, fmt.Errorf("%w: seed the address counter of %s: %s", ErrInternal, schema.TypeName, err)
+	}
+	if err := runInTx(ctx, a.cfg.DB, func(exec DB) error {
+		addrPrefix, _, err := settleDynamicPrefix(ctx, exec, schema, schema.AddressPrefix, seed)
+		if err != nil {
+			return err
+		}
+		schema.AddressPrefix = addrPrefix
+		if err := NewSchemaStore(exec).Save(ctx, schema); err != nil {
+			return fmt.Errorf("smeldr: DefineContentType save: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	repo := NewDynamicTypeRepo(a.cfg.DB, schema.TypeName, schema)
 	desc := &TypeDescriptor{
@@ -707,6 +748,7 @@ func (a *App) loadDynamicTypes(ctx context.Context) {
 				"type", schema.TypeName, "prefix", prefix)
 			continue
 		}
+		a.loadAddressPrefix(ctx, schema)
 		repo := NewDynamicTypeRepo(a.cfg.DB, schema.TypeName, schema)
 		desc := &TypeDescriptor{
 			Name:   schema.TypeName,
@@ -718,6 +760,35 @@ func (a *App) loadDynamicTypes(ctx context.Context) {
 		a.typeRegistry.Register(desc)
 		a.handleDynamicRoutes(ctx, schema.TypeName, prefix)
 	}
+}
+
+// loadAddressPrefix gives a record type loaded at boot its address prefix: the
+// registered one, or, for a type defined before addresses existed, its core
+// prefix or a proposed one, registered and seeded now so that its creates work
+// before the migration runs. A proposed prefix is logged. A failure is logged
+// and leaves the type without a prefix, so its creates fail until it is fixed.
+func (a *App) loadAddressPrefix(ctx context.Context, schema *ContentTypeSchema) {
+	if !isAddressedSchema(schema) {
+		return
+	}
+	prefix, err := addressPrefixOf(ctx, a.cfg.DB, schema.TypeName)
+	if err == nil && prefix == "" {
+		var proposed bool
+		var seed int64
+		if seed, err = dynamicAddressSeed(ctx, a.cfg.DB, schema); err == nil {
+			prefix, proposed, err = settleDynamicPrefix(ctx, a.cfg.DB, schema, "", seed)
+		}
+		if err == nil && proposed {
+			slog.InfoContext(ctx, "smeldr: an address prefix was proposed for a record type defined before addresses",
+				"type", schema.TypeName, "prefix", prefix)
+		}
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "smeldr: the record type has no address prefix; its creates will fail",
+			"type", schema.TypeName, "error", err)
+		return
+	}
+	schema.AddressPrefix = prefix
 }
 
 // insertDynamicRoutes writes list and item rows for a dynamic content type into
@@ -1202,6 +1273,14 @@ func nodeToMap(node *DynamicNode) map[string]any {
 	m["UpdatedAt"] = node.UpdatedAt
 	if !node.PublishedAt.IsZero() {
 		m["PublishedAt"] = node.PublishedAt
+	}
+	// D110: a record's address and external reference; web content has none,
+	// so its map is unchanged.
+	if node.Address != "" {
+		m["Address"] = node.Address
+	}
+	if node.ExternalRef != "" {
+		m["ExternalRef"] = node.ExternalRef
 	}
 	return m
 }

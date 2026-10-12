@@ -121,8 +121,32 @@ func packetItemURL(baseURL, typePath, slug string) string {
 }
 
 // packetFieldsFromItem extracts the canonical ID and type-specific fields map
-// from one of the five orchestration struct types.
+// from one of the five orchestration struct types. The canonical ID is the
+// item's address (D110), and every item's fields carry address and
+// external_ref.
 func packetFieldsFromItem(item any) (canonicalID string, fields map[string]any) {
+	canonicalID, fields = packetLegacyFields(item)
+	if fields == nil {
+		return "", nil
+	}
+	a, _ := item.(addressAssignable)
+	if a != nil && a.itemAddress() != "" {
+		canonicalID = a.itemAddress()
+	}
+	// Transitional (D110 Phase 4 removes it): a record created before the
+	// migration has no address yet, so its legacy human ID (or a Signal's slug)
+	// stays its canonical ID until the migration has run on the instance.
+	if a != nil {
+		fields["address"] = a.itemAddress()
+	}
+	if ref, ok := item.(interface{ itemExternalRef() string }); ok {
+		fields["external_ref"] = ref.itemExternalRef()
+	}
+	return canonicalID, fields
+}
+
+// packetLegacyFields is each type's own fields and its legacy canonical ID.
+func packetLegacyFields(item any) (canonicalID string, fields map[string]any) {
 	switch v := item.(type) {
 	case *Goal:
 		return v.GoalID, map[string]any{

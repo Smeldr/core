@@ -513,6 +513,9 @@ type Module[T any] struct {
 	stopCh chan struct{} // closed by Stop() to terminate the cache sweep goroutine
 
 	redirects *RedirectStore // the App's redirect table, consulted only on a public read's 404 path; nil outside an App
+
+	addressed  bool                 // D110: each create allocates the item's address ([withAddress])
+	memAddress memoryAddressCounter // the address counter when the module has no database
 }
 
 // NewModule constructs a [Module] for content type T.
@@ -591,6 +594,8 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 			m.signals[v.signal] = append(m.signals[v.signal], v.handler)
 		case saveHooksOption:
 			m.saveBefore, m.saveAfter, m.saveStatusChanged = v.before, v.after, v.statusChanged
+		case addressOption:
+			m.addressed = true
 		case SitemapConfig:
 			cfg := v
 			m.sitemapCfg = &cfg
@@ -2190,10 +2195,12 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Preserve the original ID and Slug — URL is the source of truth.
+	// Preserve the original ID and Slug (the URL is the source of truth) and
+	// the address (D110), which a full-replace body could otherwise rewrite.
 	f := getNodeFields(elemType)
 	pv.Elem().FieldByIndex(f.id).SetString(nodeIDOf(existing))
 	pv.Elem().FieldByIndex(f.slug).SetString(slug)
+	keepStoredAddress(pv, existing)
 	stampLastActor(ctx, pv, existing)
 
 	item := ptrToT[T](pv, m.proto)
@@ -2533,12 +2540,37 @@ func (m *Module[T]) MCPSchema() []MCPField {
 			}
 			continue
 		}
+		if sf.Anonymous && ft == recordAddressType {
+			// D110: of the embedded address only external_ref is input;
+			// Address and AddressNo are readonly, assigned by the server.
+			for j := 0; j < ft.NumField(); j++ {
+				if af := ft.Field(j); !isReadonlyField(af) {
+					fields = append(fields, mcpStructField(af))
+				}
+			}
+			continue
+		}
 		if sf.Anonymous {
 			continue // skip other embedded types
+		}
+		if isReadonlyField(sf) {
+			continue // assigned by the server, never input
 		}
 		fields = append(fields, mcpStructField(sf))
 	}
 	return fields
+}
+
+// isReadonlyField reports whether sf carries the smeldr:"readonly" tag: the
+// server sets the field, so create and update input never includes it, while
+// output does.
+func isReadonlyField(sf reflect.StructField) bool {
+	for _, part := range strings.Split(sf.Tag.Get("smeldr"), ",") {
+		if strings.TrimSpace(part) == "readonly" {
+			return true
+		}
+	}
+	return false
 }
 
 // withDefaultOrder applies this module's own DefaultListOrder, if any, to
@@ -2880,6 +2912,7 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 	pv.Elem().FieldByIndex(f.id).SetString(nodeIDOf(existing))
 	pv.Elem().FieldByIndex(f.slug).SetString(nodeSlugOf(existing))
 	pv.Elem().FieldByIndex(f.status).Set(reflect.ValueOf(nodeStatusOf(existing)))
+	keepStoredAddress(pv, existing)
 	stampLastActor(ctx, pv, existing)
 
 	item := ptrToT[T](pv, m.proto)
@@ -2921,8 +2954,24 @@ func refuseImmutableKeys(fields map[string]any, existing any) error {
 			field, stored = "slug", nodeSlugOf(existing)
 		case strings.EqualFold(key, "id"):
 			field, stored = "id", nodeIDOf(existing)
+		case strings.EqualFold(key, "address"):
+			field, stored = "address", addressOf(existing)
+		case strings.EqualFold(key, "address_no"), strings.EqualFold(key, "addressno"):
+			field = "address_no"
+			if a, ok := existing.(addressAssignable); ok {
+				if n, ok := v.(float64); ok && int64(n) == a.itemAddressNo() {
+					continue
+				}
+			}
+			return Err("address_no", "is assigned by the server and cannot be changed")
 		default:
 			continue
+		}
+		if field == "address" {
+			if s, ok := v.(string); ok && s == stored {
+				continue
+			}
+			return Err("address", "is assigned by the server and cannot be changed")
 		}
 		if s, ok := v.(string); ok && s == stored {
 			continue

@@ -241,6 +241,8 @@ func parseConstraints(t reflect.Type) []fieldConstraint {
 			case strings.HasPrefix(part, "oneof="):
 				opts := strings.Split(strings.TrimPrefix(part, "oneof="), "|")
 				fc.checkers = append(fc.checkers, makeOneOf(f.Name, opts))
+			case part == "readonly":
+				// Set by the server, never input (D110); no value constraint.
 			default:
 				panic("smeldr: unrecognised tag constraint " + strconv.Quote(part) +
 					" on " + t.Name() + "." + f.Name)
