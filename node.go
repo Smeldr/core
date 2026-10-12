@@ -30,7 +30,8 @@ const (
 	Scheduled Status = "scheduled"
 
 	// Archived content has been retired. Not publicly visible. Does not appear
-	// in sitemaps or feeds. Returns 404 from public endpoints, like Draft.
+	// in sitemaps or feeds. Returns 404 from public endpoints, like Draft,
+	// unless a redirect entry exists for its URL (then 301 or 410).
 	Archived Status = "archived"
 )
 

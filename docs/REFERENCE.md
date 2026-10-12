@@ -2047,20 +2047,30 @@ add redirects on its own; a redirect is always an explicit entry, in code
 | Archived | `404` |
 | Deleted | `404` |
 
-**Where a redirect entry applies.** The redirect store is the fallback
-handler: it answers only a path that no other route matches. So an entry
-works for a path outside every module, for example the old prefix after a
-module moves (`Redirects(From("/posts"), "/articles")`) or a retired page.
-An entry for a path under a live module prefix (such as `/posts/old-slug`
-while `/posts` is mounted) is never reached: the module answers first, with
-`404` for an item that is archived, deleted or never existed. A `410` or
-`301` for an individual item's own URL is therefore not available today.
+**Where a redirect entry applies.** An entry answers any path that would
+otherwise answer `404`: a path outside every module (for example the old
+prefix after a module moves, or a retired page), and an item's own URL
+under a live module prefix when that item is archived, deleted, not yet
+published or never existed. That holds for compiled modules (including
+`SingleInstance`) and for dynamic content types. A prefix entry such as
+`Redirects(From("/posts"), "/articles")` therefore also covers the missing
+and archived items of a module still mounted at `/posts`.
+
+A live item always wins: a Published item, or a draft opened with a valid
+preview token, is served even when an entry exists for its path, so a stray
+entry never hides content. The answer for a hidden item depends only on the
+entry, never on the item: a draft and a slug that never existed answer the
+same `301`, `410` or `404`, so the response does not leak that the draft
+exists. A found item never touches the redirect table (D24); only the `404`
+path pays one lookup.
 
 ### 410 versus 404
 
 `410 Gone` tells search engines the content was *intentionally* removed.
-Google de-indexes `410` pages significantly faster than `404` pages. Use a
-`Gone` entry for a removed path outside any live module prefix.
+Google de-indexes `410` pages significantly faster than `404` pages. When
+you archive or delete a page that was public, add a `Gone` entry for its
+URL (`app.Redirect("/posts/old", "", smeldr.Gone)` or `create_redirect`
+with `code` 410).
 
 ### Manual redirects (code-only)
 

@@ -274,19 +274,33 @@ func (s *RedirectStore) Remove(ctx context.Context, db DB, from string) error {
 //   - No match → 404 Not Found.
 func (s *RedirectStore) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		e, ok := s.Get(r.URL.Path)
-		if !ok {
+		if !s.serveIfMatched(w, r) {
 			WriteError(w, r, ErrNotFound)
-			return
 		}
-		if e.To == "" {
-			WriteError(w, r, ErrGone)
-			return
-		}
-		dest := e.To
-		if e.IsPrefix {
-			dest = e.To + strings.TrimPrefix(r.URL.Path, e.From)
-		}
-		http.Redirect(w, r, dest, int(e.Code))
 	})
+}
+
+// serveIfMatched answers r from the entry matching its path, exact first and
+// then prefix, and reports whether one matched. It writes nothing when none
+// does, so the caller can answer 404 itself. A content module calls it only
+// on its own 404 path, so a found item never touches the store (Decision 24).
+// Safe on a nil store, which matches nothing.
+func (s *RedirectStore) serveIfMatched(w http.ResponseWriter, r *http.Request) bool {
+	if s == nil {
+		return false
+	}
+	e, ok := s.Get(r.URL.Path)
+	if !ok {
+		return false
+	}
+	if e.To == "" {
+		WriteError(w, r, ErrGone)
+		return true
+	}
+	dest := e.To
+	if e.IsPrefix {
+		dest = e.To + strings.TrimPrefix(r.URL.Path, e.From)
+	}
+	http.Redirect(w, r, dest, int(e.Code))
+	return true
 }

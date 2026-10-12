@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Fixed
+
+- **Redirect entries apply to a module's own item URLs (A483).** A redirect entry for an item's URL under a mounted module prefix (e.g. `/posts/old-slug` while `/posts` is mounted) never fired, because the redirect table only handled paths no route matched. An archived or deleted item got a 404 instead of a 410, and moved content got no 301 even though `create_redirect` accepted the entry. When a compiled module's (including `SingleInstance`) or dynamic content type's item route would answer 404, the matching redirect entry (exact, then prefix) is now served as 301 or 410 first. A Published item, or a draft opened with a valid preview token, is still served, and a found item never touches the redirect table. The answer depends only on the entry, so a draft and a slug that never existed answer the same. Behaviour change: a prefix rule such as `Redirects(From("/posts"), "/articles")` now redirects missing and archived items under a still-mounted `/posts` (previously 404).
+
 ### Documentation
 
 - **Node slug immutability and redirect limits documented (A481).** `Node.Slug` godoc said a slug "may be changed; the old URL should redirect", but a slug is set once at creation and an update that changes it is refused. `Node.Archived` said archived items answer 410; archived and deleted items answer 404. REFERENCE "Redirects & content mobility" said Smeldr automatically tracks URLs and answers 301 for renamed slugs or changed module prefixes, and 410 for archived or deleted items. None of that is automatic: every redirect is an explicit entry. Redirect entries are only reached for paths no route matches, so an entry under a live module prefix (e.g. `/posts/old-slug` while `/posts` is mounted) never fires. REFERENCE and AGENTS.md now state this limit; making such entries work is a separate follow-up.

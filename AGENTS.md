@@ -710,7 +710,7 @@ These tools are available when the site has `App.Redirects(db)` called at startu
 - `code` 410 (Gone) requires `to` to be empty
 - `is_prefix: true` makes `from` a path prefix — the unmatched suffix is appended to `to` at request time
 - Changes are in-memory-immediate: no server restart required
-- A rule is reached only for a path no route matches: one under a live module prefix (such as `/posts/old-slug` while `/posts` is mounted) never fires, and the module answers `404`
+- A rule answers any path that would otherwise be `404`, including an item's own URL under a live module prefix (such as `/posts/old-slug` when that item is archived, deleted or never existed); a Published item at the same path is still served
 
 ### Page meta management tools (Admin role required)
 

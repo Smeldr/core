@@ -511,6 +511,8 @@ type Module[T any] struct {
 	slugCheckers      []func(ctx context.Context, slug string) error         // collision checkers wired by App.Route for aggregate routes
 
 	stopCh chan struct{} // closed by Stop() to terminate the cache sweep goroutine
+
+	redirects *RedirectStore // the App's redirect table, consulted only on a public read's 404 path; nil outside an App
 }
 
 // NewModule constructs a [Module] for content type T.
@@ -1930,6 +1932,10 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 
 	slug := r.PathValue("slug")
 	item, err := m.repo.FindBySlug(ctx, slug)
+	if errors.Is(err, ErrNotFound) {
+		m.notFound(w, r)
+		return
+	}
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -1960,7 +1966,7 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 	// Lifecycle enforcement: non-Published → 404 for Guest.
 	// 404 is intentional — do not leak the existence of non-public content.
 	if !m.isVisible(ctx, item) {
-		WriteError(w, r, ErrNotFound)
+		m.notFound(w, r)
 		return
 	}
 
@@ -1970,6 +1976,21 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.writeContentCached(w, r, ct, item)
+}
+
+// setRedirects wires the App's redirect table, which [Module.notFound]
+// consults. Called by [App.Content].
+func (m *Module[T]) setRedirects(s *RedirectStore) { m.redirects = s }
+
+// notFound answers a public read of an item that is missing or not visible:
+// a redirect entry for the path wins (301 or 410), otherwise 404. The answer
+// depends only on the entry, never on whether a hidden item exists, so a
+// draft and a slug that never existed answer alike.
+func (m *Module[T]) notFound(w http.ResponseWriter, r *http.Request) {
+	if m.redirects.serveIfMatched(w, r) {
+		return
+	}
+	WriteError(w, r, ErrNotFound)
 }
 
 // singleInstanceHandler serves GET /{prefix} for modules using [SingleInstance].
@@ -2029,7 +2050,7 @@ func (m *Module[T]) singleInstanceHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if len(items) == 0 {
-		WriteError(w, r, ErrNotFound)
+		m.notFound(w, r)
 		return
 	}
 	item := items[0]

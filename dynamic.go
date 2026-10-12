@@ -771,7 +771,11 @@ func serveDynamicItem(w http.ResponseWriter, r *http.Request, a *App, typeName, 
 	}
 	node, err := repo.GetBySlug(r.Context(), slug)
 	if err != nil || node.Status != Published {
-		WriteError(w, r, ErrNotFound)
+		// Same rule as a compiled module's notFound: a redirect entry for the
+		// path wins, and the answer never depends on a hidden item.
+		if !a.redirectStore.serveIfMatched(w, r) {
+			WriteError(w, r, ErrNotFound)
+		}
 		return
 	}
 	m := make(map[string]any)

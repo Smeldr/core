@@ -575,6 +575,9 @@ func (a *App) Content(v any, opts ...Option) {
 		if sp, ok := r.(stoppable); ok {
 			a.stoppableModules = append(a.stoppableModules, sp)
 		}
+		if rd, ok := r.(interface{ setRedirects(*RedirectStore) }); ok {
+			rd.setRedirects(a.redirectStore)
+		}
 		if sc, ok := r.(statsCollector); ok {
 			a.statsCollectors = append(a.statsCollectors, sc)
 		}
