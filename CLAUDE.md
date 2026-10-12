@@ -533,12 +533,22 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       behaviour change, an internal refactor.
 
 **After tagging any module** (core, mcp, media, social, agent, oauth):
-- [ ] **`example/server/go.mod`** — bump that module's own pin
+- [ ] **Every example module that pins the tagged module** (today
+      `example/server` and `example/blog`): bump that module's pin
       (`go get <module>@<tag> && go mod tidy`) in the same session,
       before ending the release round. This is the ninth recurrence of
-      this exact staleness (T258/T266/T268/mcp-pin-1330/and others) — a
-      standing checklist step closes it structurally rather than relying
-      on catching it by inspection each time.
+      this exact staleness (T258/T266/T268/mcp-pin-1330/and others), so
+      a standing checklist step closes it structurally rather than
+      relying on catching it by inspection each time.
+- [ ] **End the step with checkpins over every example:** from
+      `scripts/checkpins`, run
+      `go run . ../../example/api ../../example/blog ../../example/docs ../../example/server`
+      (with `GOWORK=off`). It must print "all smeldr.dev/* pins current".
+      The check finds the pins itself, so no hand-kept list can go stale.
+      example/blog pinned mcp v1.35.0 from 2026-09-28 to 2026-10-12,
+      while this step named only example/server.
+- [ ] **A red Pin currency run is core's to fix** at the next session
+      start, before other Task work. A red run always has an owner.
 
 **M-number milestone commits — additionally mandatory:**
 - [ ] Module `README.md` updated to reflect shipped behaviour.

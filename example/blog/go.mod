@@ -4,8 +4,8 @@ go 1.26.5
 
 require (
 	modernc.org/sqlite v1.50.1
-	smeldr.dev/core v1.88.1
-	smeldr.dev/mcp v1.35.0
+	smeldr.dev/core v1.143.3
+	smeldr.dev/mcp v1.59.1
 )
 
 require (
@@ -18,7 +18,7 @@ require (
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	smeldr.dev/oauth v0.2.0 // indirect
+	smeldr.dev/oauth v0.6.0 // indirect
 )
 
 replace smeldr.dev/core => ../..
