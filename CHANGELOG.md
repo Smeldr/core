@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.145.0] - 2026-10-12
+
 ### Added
 
 - **A tool policy for `migrate_addresses` (A490, D110 Phase 2, core part).** `seedToolPolicies` seeds `{"migrate_addresses", "administer"}`, so smeldr.dev/mcp's coming `migrate_addresses` tool (it runs `MigrateAddresses` over MCP) is allowed for Admin only. Without the row the tool would be denied for every caller, Admin included, whenever governance is wired, because mcp never derives `administer`. An existing instance gets the row at its next boot; existing rows are left alone. No exported symbol changes.
