@@ -358,6 +358,7 @@ func TestMigrateGovernance_ToolPoliciesSeed(t *testing.T) {
 		{"grant_role", "administer"},
 		{"list_grants", "administer"},
 		{"revoke_grant", "administer"},
+		{"migrate_addresses", "administer"},
 		{"delegate_item", "read"},
 		{"lookup_token_names", "read"},
 		{"schedule_content", "manage"},

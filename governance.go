@@ -322,6 +322,10 @@ func seedToolPolicies(ctx context.Context, db DB) error {
 		{"grant_role", "administer"},
 		{"list_grants", "administer"},
 		{"revoke_grant", "administer"},
+		// Address migration (Admin gate, instance infrastructure, D110).
+		// smeldr.dev/mcp's migrate_addresses runs MigrateAddresses; with no
+		// row it is denied for everyone, Admin included.
+		{"migrate_addresses", "administer"},
 		// Nav tools (Editor gate for write — operational, not CRUDAP)
 		{"list_nav_items", "read"},
 		{"create_nav_item", "manage"},

@@ -4993,6 +4993,8 @@ Gives every record that has no address yet its address, per type in `created_at`
 
 **`smeldr-server migrate-addresses [--apply] [--report=path]`** (example/server) opens the configured database, sets the schema up as boot does, and runs the migration: a dry run unless `--apply` is given. It prints the report as JSON, and with `--report` also writes it to that file. On SQLite it holds the one writer for the whole transaction; see `duration_ms`.
 
+**Over MCP** (an instance reached only through its URL and token, such as a Cloud org), smeldr.dev/mcp's `migrate_addresses` tool runs the same function. Its `smeldr_tool_policies` seed row is `{"migrate_addresses", "administer"}` (A490), so only Admin may call it. Without the row the tool is denied for every caller, Admin included, whenever governance is wired. The row is inserted at the next boot of an existing instance.
+
 ### `InsertSignal`
 
 ```go
