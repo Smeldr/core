@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Documentation
+
+- **Node slug immutability and redirect limits documented (A481).** `Node.Slug` godoc said a slug "may be changed; the old URL should redirect", but a slug is set once at creation and an update that changes it is refused. `Node.Archived` said archived items answer 410; archived and deleted items answer 404. REFERENCE "Redirects & content mobility" said Smeldr automatically tracks URLs and answers 301 for renamed slugs or changed module prefixes, and 410 for archived or deleted items. None of that is automatic: every redirect is an explicit entry. Redirect entries are only reached for paths no route matches, so an entry under a live module prefix (e.g. `/posts/old-slug` while `/posts` is mounted) never fires. REFERENCE and AGENTS.md now state this limit; making such entries work is a separate follow-up.
+
 ---
 
 ## [1.143.2] - 2026-10-11

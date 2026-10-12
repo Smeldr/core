@@ -30,7 +30,7 @@ const (
 	Scheduled Status = "scheduled"
 
 	// Archived content has been retired. Not publicly visible. Does not appear
-	// in sitemaps or feeds. Returns 410 Gone from public endpoints.
+	// in sitemaps or feeds. Returns 404 from public endpoints, like Draft.
 	Archived Status = "archived"
 )
 
@@ -54,7 +54,8 @@ type Node struct {
 
 	// Slug is the URL-safe identifier used in all public URLs. Unique within
 	// a module. Auto-generated from the first required string field if not
-	// set explicitly. May be changed; the old URL should redirect.
+	// set explicitly. Set once at creation and immutable afterwards: an
+	// update that changes it is refused.
 	Slug string
 
 	// Status is the lifecycle state. Smeldr enforces this on every public

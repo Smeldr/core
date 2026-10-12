@@ -2032,25 +2032,35 @@ app.Use(myRateLimiter)
 
 > ✅ **Available** — manual redirects (`app.Redirect`), prefix rewrites (`Redirects(From(...))`), 410 Gone, chain collapse, `/.well-known/redirects.json`, and runtime MCP/CLI management are implemented.
 
-Smeldr automatically tracks every URL a piece of content has ever had.
-Rename a slug, change a prefix, archive a post — inbound links and SEO
-rankings are preserved without any developer effort.
+A slug is set once, when the item is created, and never changes: an update
+that sends a different `slug` is refused. Smeldr does not record old URLs or
+add redirects on its own; a redirect is always an explicit entry, in code
+(`app.Redirect`, `Redirects(From(...))`) or at runtime (`create_redirect`,
+`smeldr-cli redirect create`).
 
-### What happens automatically
+### What a public URL answers
 
-| Event | Previous URL response |
+| Item state | Response at its URL |
 |-------|-----------------------|
-| Slug renamed | `301` → new URL |
-| Module prefix changed | `301` → new prefix + slug |
-| Node archived | `410 Gone` |
-| Node deleted | `410 Gone` |
-| Node drafted / scheduled | `404` (does not leak existence) |
+| Published | `200` |
+| Draft / scheduled | `404` (does not leak existence) |
+| Archived | `404` |
+| Deleted | `404` |
 
-### Why 410 and not 404 for archived content
+**Where a redirect entry applies.** The redirect store is the fallback
+handler: it answers only a path that no other route matches. So an entry
+works for a path outside every module, for example the old prefix after a
+module moves (`Redirects(From("/posts"), "/articles")`) or a retired page.
+An entry for a path under a live module prefix (such as `/posts/old-slug`
+while `/posts` is mounted) is never reached: the module answers first, with
+`404` for an item that is archived, deleted or never existed. A `410` or
+`301` for an individual item's own URL is therefore not available today.
+
+### 410 versus 404
 
 `410 Gone` tells search engines the content was *intentionally* removed.
-Google de-indexes `410` pages significantly faster than `404` pages.
-For a CMS, this is almost always what you want.
+Google de-indexes `410` pages significantly faster than `404` pages. Use a
+`Gone` entry for a removed path outside any live module prefix.
 
 ### Manual redirects (code-only)
 
