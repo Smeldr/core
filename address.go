@@ -41,9 +41,10 @@ var errNoAddressPrefix = errors.New("no address prefix is registered")
 // registry and the counter. prefix is UNIQUE so a prefix names one type on an
 // instance; last_no only ever goes up, so a number is never reused.
 const createAddressCountersSQL = `CREATE TABLE IF NOT EXISTS smeldr_address_counters (
-	type_name TEXT PRIMARY KEY,
-	prefix    TEXT NOT NULL UNIQUE,
-	last_no   BIGINT NOT NULL DEFAULT 0
+	type_name   TEXT PRIMARY KEY,
+	prefix      TEXT NOT NULL UNIQUE,
+	last_no     BIGINT NOT NULL DEFAULT 0,
+	reserved_no BIGINT NOT NULL DEFAULT 0
 )`
 
 // addressColumns are the three columns every addressed table carries.
@@ -119,6 +120,20 @@ func checkAddressPrefix(typeName, prefix string) error {
 // keep). A different prefix replaces the old one only while the type has no
 // address yet; a prefix another type holds is refused.
 func registerAddressPrefix(ctx context.Context, db DB, typeName, prefix string, seed func() (int64, error)) error {
+	return registerAddressPrefixWith(ctx, db, typeName, prefix, seed, false)
+}
+
+// registerReservingAddressPrefix is [registerAddressPrefix] for a type with no
+// legacy human ID (Signal, Run, a dynamic record type): its seed is the count of
+// rows that have no address yet, and the new row also records that count as
+// reserved_no, the numbers 1..reserved_no the migration gives those rows
+// ([MigrateAddresses]). No allocation ever lands in that range, since the
+// counter starts above it.
+func registerReservingAddressPrefix(ctx context.Context, db DB, typeName, prefix string, seed func() (int64, error)) error {
+	return registerAddressPrefixWith(ctx, db, typeName, prefix, seed, true)
+}
+
+func registerAddressPrefixWith(ctx context.Context, db DB, typeName, prefix string, seed func() (int64, error), reserve bool) error {
 	if err := checkAddressPrefix(typeName, prefix); err != nil {
 		return err
 	}
@@ -157,9 +172,13 @@ func registerAddressPrefix(ctx context.Context, db DB, typeName, prefix string, 
 			return fmt.Errorf("%w: seed address counter of %s: %s", ErrInternal, typeName, err)
 		}
 	}
+	reserved := int64(0)
+	if reserve {
+		reserved = start
+	}
 	if _, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_address_counters (type_name, prefix, last_no) VALUES ($1, $2, $3) ON CONFLICT (type_name) DO NOTHING`,
-		typeName, prefix, start); err != nil {
+		`INSERT INTO smeldr_address_counters (type_name, prefix, last_no, reserved_no) VALUES ($1, $2, $3, $4) ON CONFLICT (type_name) DO NOTHING`,
+		typeName, prefix, start, reserved); err != nil {
 		return fmt.Errorf("%w: register address prefix of %s: %s", ErrInternal, typeName, err)
 	}
 	return nil
@@ -289,12 +308,24 @@ func legacyAddressSeed(ctx context.Context, db DB, table, legacy, prefix, where 
 	return top, rows.Err()
 }
 
+// ensureAddressCounters creates smeldr_address_counters, or adds reserved_no
+// to one created before it existed (idempotent).
+func ensureAddressCounters(ctx context.Context, db DB) error {
+	if _, err := db.ExecContext(ctx, createAddressCountersSQL); err != nil {
+		return fmt.Errorf("smeldr: create smeldr_address_counters: %w", err)
+	}
+	if err := EnsureColumn(ctx, db, "smeldr_address_counters", "reserved_no", "BIGINT NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("smeldr: smeldr_address_counters.reserved_no: %w", err)
+	}
+	return nil
+}
+
 // registerOrchestrationAddresses creates the counter table, the address columns
 // and indexes on the six orchestration tables, and registers their core
 // prefixes, seeded from their existing rows.
 func registerOrchestrationAddresses(ctx context.Context, db DB) error {
-	if _, err := db.ExecContext(ctx, createAddressCountersSQL); err != nil {
-		return fmt.Errorf("smeldr: create smeldr_address_counters: %w", err)
+	if err := ensureAddressCounters(ctx, db); err != nil {
+		return err
 	}
 	for _, t := range orchestrationAddressTables {
 		if err := ensureAddressStorage(ctx, db, t.table, false); err != nil {
@@ -302,7 +333,11 @@ func registerOrchestrationAddresses(ctx context.Context, db DB) error {
 		}
 		prefix := coreAddressPrefixes[t.typeName]
 		table, legacy := t.table, t.legacy
-		if err := registerAddressPrefix(ctx, db, t.typeName, prefix, func() (int64, error) {
+		register := registerAddressPrefix
+		if legacy == "" {
+			register = registerReservingAddressPrefix
+		}
+		if err := register(ctx, db, t.typeName, prefix, func() (int64, error) {
 			return legacyAddressSeed(ctx, db, table, legacy, prefix, "")
 		}); err != nil {
 			return err
@@ -449,7 +484,7 @@ func settleDynamicPrefix(ctx context.Context, db DB, s *ContentTypeSchema, asked
 		}
 		proposed = true
 	}
-	if err := registerAddressPrefix(ctx, db, s.TypeName, prefix, func() (int64, error) { return seed, nil }); err != nil {
+	if err := registerReservingAddressPrefix(ctx, db, s.TypeName, prefix, func() (int64, error) { return seed, nil }); err != nil {
 		return "", false, err
 	}
 	return prefix, proposed, nil

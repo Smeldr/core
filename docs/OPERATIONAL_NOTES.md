@@ -4,6 +4,32 @@ Durable tooling and framework gotchas — reference facts, not a diary. See
 `CLAUDE.md` for standing process rules; this file is only for things that
 are true about the tools regardless of what task is in flight.
 
+## Running the D110 address migration (Phase 3, on Peter's yes)
+
+`smeldr-server migrate-addresses` (example/server) runs `MigrateAddresses` on the
+instance's own database. Order on the day:
+1. **Dry run** (the default): `smeldr-server migrate-addresses --report=dry.json`. It runs the
+   whole migration and rolls back, so the report shows exactly what an apply does.
+2. **Read the report together:** the renumbered Decisions and Amendments, the references it
+   rewrites and the ones it leaves alone, and `duration_ms`.
+3. **Back up** the database.
+4. **Apply:** `smeldr-server migrate-addresses --apply --report=apply.json`, and keep the
+   report with the deploy record: a renumbered Decision (for example `D74-DECLINE` to a new
+   address) must be findable later.
+5. A second `--apply` changes nothing (idempotent), which is the check that it finished.
+
+**The write lock.** The migration is one transaction and holds SQLite's single writer for
+its whole length; the running server's writes wait meanwhile, and fail with SQLITE_BUSY
+past their own timeout. Measured 2026-10-12 against a local copy of process.smeldr.dev's
+database from 2026-10-07 (about 2,700 records): 152 ms dry run, 185 ms apply. Stop the
+server for `--apply` unless a dry run on the day shows a similarly short time; devops and
+Peter decide.
+
+**Reach.** The subcommand only reaches an instance that runs example/server on a host we
+operate (process.smeldr.dev). Cloud's org instances are reached only over HTTP/MCP through
+their `InstanceURL` and token, so they need the mcp admin tool (D110 Phase 2) before any of
+them is migrated.
+
 ## Standalone-module integration testing before a core push
 
 For a standalone module (mcp, cli, oauth, media, social, agent) that depends on an

@@ -4977,6 +4977,22 @@ Every record carries a system-assigned address: its type's prefix plus a running
 - **Naming a record.** `ParseAddress(s) (prefix string, no int64, ok bool)` parses an address: 1 to 4 letters and a number with no leading zero, the prefix upper-cased (`d110` is `D`, 110). Every tool and function that takes a record's identifier (MCP get, update and transition, `App.TransitionItemVia`, `DynamicTypeRepo.Resolve`, the packet anchor, `QueryGoalContext`, `amends`) accepts its **address, slug or ID**, in that order. An address is only tried when its prefix is the type's own. Until the D110 cut, the last step finds a record by an old number: its legacy human ID, or its `external_ref` (where a value a caller sent in the legacy field is kept), exact match only. Two records holding that value are an error naming the count, and every such lookup is counted in the deprecation log.
 - **Transition period (until the cut).** The legacy fields `decision_number`, `task_id`, `goal_id` and `amendment_number` are still accepted on create, marked deprecated (`MCPField.Deprecated`, and a description that starts "Deprecated (D110):"). A value sent there is never used as the number: when it differs from the assigned address it is kept in `external_ref` (unless `external_ref` was sent too), and the legacy field holds the address. An MCP create that received one returns its item with a `warnings` array: `{"code": "deprecated_field", "field", "message", "address"}`. The server logs each deprecated input once per token, per field, per day. A bare number in `amends` (`"104"`) is accepted and logged the same way. `RetiredFieldGuidance(field)` returns the error message and data a create gets after the cut.
 
+### `MigrateAddresses` (D110)
+
+```go
+func MigrateAddresses(ctx context.Context, db DB, opts AddressMigrationOptions) (*AddressMigrationReport, error)
+func (a *App) MigrateAddresses(ctx context.Context, opts AddressMigrationOptions) (*AddressMigrationReport, error)
+```
+
+Gives every record that has no address yet its address, per type in `created_at` order, in one transaction. It is idempotent: a record with an address is skipped, so a second run changes nothing. With `DryRun` the same code runs and is rolled back, so the report is exactly what an apply would do and nothing is written.
+
+- **Decision, Amendment, Task, Goal** keep a legacy number that parses with the type's prefix and no other record holds. Every other record (a duplicate, another prefix, free text, empty) gets a number through the counter, above every number already taken, so a record created after the deploy never collides. Its old value goes to `external_ref`, and the legacy field holds the address.
+- **Signal, Run and dynamic record types** number their records from 1 within the range reserved for them when the counter was first seeded (`reserved_no`), skipping any number already in use, then through the counter.
+- **References** to a renumbered record are rewritten only where they name exactly one: `Amendment.amends` (through its live `amends` edge), `Signal.task_ref`, `Signal.subject_id`, `Task.note_ref`. Anything ambiguous, or an `amends` with no edge, is listed in `LeftAlone` and not changed.
+- **The report** (`AddressMigrationReport`) lists per type the prefix, counts kept, renumbered and newly numbered, counts with and without an address before and after, and every renumbered record `{id, old, new}`; then every rewrite and every reference left alone; and `duration_ms`, how long the transaction held the database's writer. Names and addresses only, never body text.
+
+**`smeldr-server migrate-addresses [--apply] [--report=path]`** (example/server) opens the configured database, sets the schema up as boot does, and runs the migration: a dry run unless `--apply` is given. It prints the report as JSON, and with `--report` also writes it to that file. On SQLite it holds the one writer for the whole transaction; see `duration_ms`.
+
 ### `InsertSignal`
 
 ```go

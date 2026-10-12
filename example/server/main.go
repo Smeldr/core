@@ -685,6 +685,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "migrate-addresses" {
+		os.Exit(runMigrateAddresses(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	cfg := parseConfig()
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")

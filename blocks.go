@@ -3,7 +3,6 @@ package smeldr
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strings"
 )
@@ -127,8 +126,8 @@ CREATE INDEX IF NOT EXISTS idx_content_edges_parent
 	}
 	// D110: a dynamic record type's items carry an address; the counter table
 	// holds each record type's prefix.
-	if _, err := db.ExecContext(ctx, createAddressCountersSQL); err != nil {
-		return fmt.Errorf("smeldr: create smeldr_address_counters: %w", err)
+	if err := ensureAddressCounters(ctx, db); err != nil {
+		return err
 	}
 	return ensureAddressStorage(ctx, db, "smeldr_dynamic_content", true)
 }
