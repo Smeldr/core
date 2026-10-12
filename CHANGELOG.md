@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.143.3] - 2026-10-12
+
 ### Fixed
 
 - **Redirect entries apply to a module's own item URLs (A483).** A redirect entry for an item's URL under a mounted module prefix (e.g. `/posts/old-slug` while `/posts` is mounted) never fired, because the redirect table only handled paths no route matched. An archived or deleted item got a 404 instead of a 410, and moved content got no 301 even though `create_redirect` accepted the entry. When a compiled module's (including `SingleInstance`) or dynamic content type's item route would answer 404, the matching redirect entry (exact, then prefix) is now served as 301 or 410 first. A Published item, or a draft opened with a valid preview token, is still served, and a found item never touches the redirect table. The answer depends only on the entry, so a draft and a slug that never existed answer the same. Behaviour change: a prefix rule such as `Redirects(From("/posts"), "/articles")` now redirects missing and archived items under a still-mounted `/posts` (previously 404).
