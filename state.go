@@ -1737,21 +1737,21 @@ func (a *App) ValidTransitions(ctx context.Context, typeName, fromState string) 
 // nil-safe, so a caller with webhooks/streaming unwired passes nil for
 // whichever it lacks.
 func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, typeName, itemID, fromState, toState, requiredOperation string) error {
-	id := NewID()
-	now := time.Now().UTC()
-	message := fmt.Sprintf("%s %s: %s→%s requires operation %q", typeName, itemID, fromState, toState, requiredOperation)
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO smeldr_signals
-			(id, slug, status, created_at, updated_at, sender, receiver, signal_type, message, task_ref, sequence,
-			 subject_type, subject_id, from_state, to_state, required_role)
-		VALUES
-			($1, $2, 'pending', $3, $4, 'system', $5, 'authorization-required', $6, '', 0,
-			 $7, $8, $9, $10, $5)`,
-		id, id, now, now, requiredOperation, message, typeName, itemID, fromState, toState,
-	)
-	if err != nil {
+	s := &Signal{
+		Sender:            "system",
+		Receiver:          requiredOperation,
+		SignalType:        "authorization-required",
+		Message:           fmt.Sprintf("%s %s: %s→%s requires operation %q", typeName, itemID, fromState, toState, requiredOperation),
+		SubjectType:       typeName,
+		SubjectID:         itemID,
+		FromState:         fromState,
+		ToState:           toState,
+		RequiredOperation: requiredOperation,
+	}
+	if err := InsertSignal(ctx, db, s); err != nil {
 		return fmt.Errorf("smeldr: recordAuthorizationRequiredSignal: %w", err)
 	}
+	id := s.ID
 	// Event-stream channel (A302): this Signal's own receiver column is set
 	// to requiredOperation two statements above (the INSERT's $5 placeholder)
 	// — reusing the parameter directly needs no extra query.

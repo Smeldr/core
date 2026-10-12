@@ -21,6 +21,14 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Added
+
+- **Signals can be inserted through `InsertSignal` (A485).** New exported `InsertSignal(ctx context.Context, db DB, s *Signal) error` inserts one Signal into `smeldr_signals` in its own transaction. It fills an empty ID (a new ID), Slug (the ID), Status ("pending"), and CreatedAt/UpdatedAt (now, UTC), and writes them back onto `s`. It announces nothing: the caller dispatches the "signal.created" event after it returns nil (`App.NotifySignalCreated` for a caller outside core). Core's own `authorization-required` and `conflict-detected` Signals now go through it. smeldr.dev/mcp's `create_signal` switches in a later mcp release.
+
+### Changed
+
+- **Creates run in one transaction (D110 Phase 1, A485).** Every create now runs in one transaction: the compiled MCP create and HTTP POST (the type's own pre-save check and the INSERT), dynamic content creates (each slug attempt in its own transaction, because Postgres aborts a transaction after a failed INSERT), and Signals. Events, standing, provenance and the after-save step run only after commit, so nothing is announced for a row that rolled back. A database handle without BeginTx runs the same statements without a transaction, as before. No tool, route, response, schema or event payload changes. One order change: on HTTP POST the slug-collision check now runs before the type's own pre-save check, so a create that fails both returns the collision error.
+
 ---
 
 ## [1.143.3] - 2026-10-12

@@ -2116,15 +2116,18 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// BeforeCreate hooks, then the type's own pre-save check (synchronous —
-	// first error aborts).
-	if err := m.beforeSave(ctx, BeforeCreate, nil, item); err != nil {
+	// BeforeCreate hooks (synchronous: the first error aborts).
+	if err := dispatchBefore(ctx, m.signals[BeforeCreate], item); err != nil {
 		WriteError(w, r, err)
 		return
 	}
 
 	// Slug collision check: if creating directly as Published, ensure no other
 	// module in the same aggregate route already has an item with this slug.
+	// It runs before the transaction, because it reads other modules' repos on
+	// the plain db (a read on the plain db inside the transaction would wait
+	// forever on a one-connection SQLite), so it now comes before the type's
+	// own pre-save check.
 	if nodeStatusOf(item) == Published {
 		if err := m.checkSlugCollision(ctx, nodeSlugOf(item)); err != nil {
 			WriteError(w, r, err)
@@ -2132,7 +2135,8 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := m.repo.Save(ctx, item); err != nil {
+	// The type's own pre-save check and the INSERT, in one transaction.
+	if err := m.createInTx(ctx, item); err != nil {
 		WriteError(w, r, err)
 		return
 	}
@@ -2808,10 +2812,12 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 			return nil, err
 		}
 	}
-	if err := m.beforeSave(ctx, BeforeCreate, nil, item); err != nil {
+	// The public BeforeCreate hooks run before the transaction (they take no
+	// db); the type's own check and the INSERT run inside it (createInTx).
+	if err := dispatchBefore(ctx, m.signals[BeforeCreate], item); err != nil {
 		return nil, err
 	}
-	if err := m.repo.Save(ctx, item); err != nil {
+	if err := m.createInTx(ctx, item); err != nil {
 		return nil, err
 	}
 	if m.syncSaveHook != nil {

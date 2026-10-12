@@ -118,8 +118,14 @@ func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fi
 	}
 	actorID, actorKind := actorFromContext(ctx)
 	node.LastActor = actorID
-	repo := NewDynamicContentRepo(r.db)
-	if err := repo.Save(ctx, node); err != nil {
+	// Each attempt is its own transaction: on Postgres a failed INSERT aborts
+	// the transaction it ran in, so the retry cannot share it.
+	save := func() error {
+		return runInTx(ctx, r.db, func(exec DB) error {
+			return NewDynamicContentRepo(exec).Save(ctx, node)
+		})
+	}
+	if err := save(); err != nil {
 		// Another create took the slug between uniqueSlug and the insert (the
 		// unique (type_name, slug) index refused this one): retry once under
 		// the collision-checked fallback. Any other error is returned.
@@ -127,7 +133,7 @@ func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fi
 			return nil, fmt.Errorf("smeldr: CreateDraft save: %w", err)
 		}
 		node.Slug = r.fallbackSlug(ctx, base, id)
-		if err := repo.Save(ctx, node); err != nil {
+		if err := save(); err != nil {
 			return nil, fmt.Errorf("smeldr: CreateDraft save: %w", err)
 		}
 	}

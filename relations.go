@@ -648,18 +648,16 @@ ON CONFLICT (id) DO UPDATE SET
 func (s *RelationStore) emitConflictDetectedSignal(ctx context.Context, edge RelationEdge) {
 	pairs := [2]struct{ subjectID string }{{edge.TargetID}, {edge.SourceID}}
 	for _, pair := range pairs {
-		id := NewID()
-		now := time.Now().UTC()
-		message := fmt.Sprintf("Decision %s contradicts Decision %s", edge.SourceID, edge.TargetID)
-		_, err := s.db.ExecContext(ctx,
-			`INSERT INTO smeldr_signals
-				(id, slug, status, created_at, updated_at, sender, receiver, signal_type, message, task_ref, sequence,
-				 subject_type, subject_id)
-			VALUES
-				($1, $2, 'pending', $3, $4, 'system', $5, 'conflict-detected', $6, '', 0,
-				 'Decision', $7)`,
-			id, id, now, now, decisionRatifyOperation, message, pair.subjectID,
-		)
+		sig := &Signal{
+			Sender:      "system",
+			Receiver:    decisionRatifyOperation,
+			SignalType:  "conflict-detected",
+			Message:     fmt.Sprintf("Decision %s contradicts Decision %s", edge.SourceID, edge.TargetID),
+			SubjectType: "Decision",
+			SubjectID:   pair.subjectID,
+		}
+		err := InsertSignal(ctx, s.db, sig)
+		id := sig.ID
 		if err != nil {
 			slog.WarnContext(ctx, "smeldr: emitConflictDetectedSignal: insert failed",
 				"edge_id", edge.ID, "subject_id", pair.subjectID, "error", err)

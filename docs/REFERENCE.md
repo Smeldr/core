@@ -1523,6 +1523,8 @@ app.Content(m)
 
 `SQLRepo` uses `$N` positional placeholders (PostgreSQL / pgx compatible) and upserts via `ON CONFLICT (id) DO UPDATE`.
 
+**Creates run in one transaction (D110).** Every create (the compiled MCP create and HTTP POST, dynamic content creates, and Signals) runs its pre-save check and INSERT in one transaction when the database handle supports BeginTx. Events, standing, provenance and the after-save step run only after commit, so nothing is announced for a row that rolled back. Dynamic content creates open one transaction per slug attempt, because Postgres aborts a transaction after a failed INSERT. A database handle without BeginTx runs the same statements without a transaction, as before. A Repository that is not an SQLRepo (MemoryRepo, or your own) is used as is.
+
 ### Schema migration (T246)
 
 `Create*Table` functions (`CreateSiteConfigTable`, `CreateBlockTables`, etc.) use `CREATE TABLE IF NOT EXISTS` — correct for a fresh install, but a no-op against a table that already exists in an older shape. `EnsureColumn` adds one column to an existing table when it is absent:
@@ -4961,6 +4963,27 @@ func CreateOrchestrationTables(db DB) error
 
 Creates `smeldr_signals`, `smeldr_tasks`, `smeldr_decisions`, `smeldr_amendments`, and `smeldr_goals` tables
 if they do not already exist. Call once at application startup before `RegisterOrchestrationTypes`.
+
+### `InsertSignal`
+
+```go
+func InsertSignal(ctx context.Context, db DB, s *Signal) error
+```
+
+Inserts one Signal into `smeldr_signals` in its own transaction. It fills an empty ID (a new ID), Slug (the ID), Status ("pending"), and CreatedAt/UpdatedAt (now, UTC), and writes them back onto `s`. It announces nothing: dispatch the `signal.created` event yourself after it returns nil, through `App.NotifySignalCreated` when calling from outside core. On failure it returns a wrapped error (`smeldr: InsertSignal: ...`) and leaves no row.
+
+```go
+s := &smeldr.Signal{
+    Sender:     "core",
+    Receiver:   "architect",
+    SignalType: "plan-ready",
+    Message:    "plan submitted",
+}
+if err := smeldr.InsertSignal(ctx, db, s); err != nil {
+    return err
+}
+app.NotifySignalCreated(ctx, s.ID, s.Slug)
+```
 
 ### `RegisterOrchestrationTypes`
 
