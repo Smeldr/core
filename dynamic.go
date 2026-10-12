@@ -168,6 +168,29 @@ func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fi
 	return node, nil
 }
 
+// Resolve returns the node ident names, at any status, in the D110 order: its
+// address (when ident carries this record type's prefix), then its slug, then
+// its ID. Returns [ErrNotFound] when none matches.
+func (r *DynamicTypeRepo) Resolve(ctx context.Context, ident string) (*DynamicNode, error) {
+	if r.schema != nil && isAddressedSchema(r.schema) {
+		if addr, ok := addressIdent(ident, r.schema.AddressPrefix); ok {
+			rows, err := Query[*DynamicNode](ctx, r.db,
+				"SELECT * FROM smeldr_dynamic_content WHERE type_name = $1 AND address = $2", r.typeName, addr)
+			if err != nil {
+				return nil, err
+			}
+			if len(rows) > 0 {
+				return rows[0], nil
+			}
+		}
+	}
+	node, err := r.GetBySlug(ctx, ident)
+	if !errors.Is(err, ErrNotFound) {
+		return node, err
+	}
+	return r.GetByID(ctx, ident)
+}
+
 // GetBySlug returns the node with the given slug for this type, at any status.
 // Returns [ErrNotFound] when no matching node exists.
 func (r *DynamicTypeRepo) GetBySlug(ctx context.Context, slug string) (*DynamicNode, error) {

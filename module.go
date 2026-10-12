@@ -2140,10 +2140,18 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// D110 7.1: a legacy human-ID field sent over HTTP is logged as
+	// deprecated use too (the cut waits for an empty log); the response stays
+	// the item, without a warnings key.
+	legacyField, legacySent := m.legacySent(item)
+
 	// The type's own pre-save check and the INSERT, in one transaction.
 	if err := m.createInTx(ctx, item); err != nil {
 		WriteError(w, r, err)
 		return
+	}
+	if legacySent != "" {
+		noteDeprecatedUse(ctx, m.contentTypeName, legacyField)
 	}
 	if m.syncSaveHook != nil {
 		if err := m.syncSaveHook(ctx, m.contentTypeName, nodeIDOf(item), item); err != nil {
@@ -2485,6 +2493,7 @@ func mcpStructField(sf reflect.StructField) MCPField {
 		Type:        mcpGoTypeStr(sf.Type),
 		Format:      sf.Tag.Get("smeldr_format"),
 		Description: sf.Tag.Get("smeldr_description"),
+		Deprecated:  sf.Tag.Get("smeldr_deprecated") == "true",
 	}
 	if tag := sf.Tag.Get("smeldr"); tag != "" {
 		f.Required, f.MinLength, f.MaxLength, f.Enum = mcpParseSmeldrTag(tag)
@@ -2617,12 +2626,26 @@ func (m *Module[T]) MCPList(ctx Context, status ...Status) ([]any, error) {
 // human-facing identifier interchangeably (T253, T214). HTTP handlers
 // deliberately do not use this — a URL path segment is a slug by REST
 // convention, not a candidate for this fallback.
+//
+// D110: an address of this type ("D110", case-insensitive prefix) is tried
+// first, then slug, then ID, then, transitionally until the cut, the legacy
+// human-ID column ([legacyHumanIDColumns]) for a record with no address yet.
 func (m *Module[T]) resolveItem(ctx Context, ident string) (T, error) {
+	var zero T
+	cr, canColumn := any(m.repo).(ColumnLookupRepository[T])
+	if addr, ok := addressIdent(ident, coreAddressPrefixes[m.contentTypeName]); ok && m.addressed && canColumn {
+		item, err := cr.FindByColumn(ctx, "address", addr)
+		if err == nil {
+			return item, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return zero, err
+		}
+	}
 	item, err := m.repo.FindBySlug(ctx, ident)
 	if err == nil {
 		return item, nil
 	}
-	var zero T
 	if !errors.Is(err, ErrNotFound) {
 		return zero, err
 	}
@@ -2633,12 +2656,8 @@ func (m *Module[T]) resolveItem(ctx Context, ident string) (T, error) {
 	if !errors.Is(err, ErrNotFound) {
 		return zero, err
 	}
-	col, ok := humanIDColumns[m.contentTypeName]
-	if !ok {
-		return zero, ErrNotFound
-	}
-	cr, ok := any(m.repo).(ColumnLookupRepository[T])
-	if !ok {
+	col, ok := legacyHumanIDColumns[m.contentTypeName]
+	if !ok || !canColumn {
 		return zero, ErrNotFound
 	}
 	return cr.FindByColumn(ctx, col, ident)
@@ -2849,6 +2868,9 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	if err := dispatchBefore(ctx, m.signals[BeforeCreate], item); err != nil {
 		return nil, err
 	}
+	// D110 7.1: note a value sent in a legacy human-ID field before the create
+	// mirrors the address into it, for the warning in the result.
+	legacyField, legacySent := m.legacySent(item)
 	if err := m.createInTx(ctx, item); err != nil {
 		return nil, err
 	}
@@ -2860,6 +2882,12 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	m.runSaveAfter(ctx, nil, item)
 	m.notifyAfter(ctx, AfterCreate, "", surfaceMCP, "", item)
 	m.invalidateCache()
+	if legacySent != "" {
+		noteDeprecatedUse(ctx, m.contentTypeName, legacyField)
+		return withCreateWarnings(item, []CreateWarning{
+			legacyFieldWarning(legacyField, legacySent, addressOf(item), externalRefOf(item)),
+		}), nil
+	}
 	return item, nil
 }
 

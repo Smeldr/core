@@ -369,6 +369,11 @@ address, the type's prefix plus a number (`INV27`), and the type keeps one prefi
 2 to 4 capital letters (proposed from the name when none is given; fixed once the type
 has items; single letters are reserved for core types). A field may not be named `id`,
 `slug`, `status`, `address`, `address_no` or `external_ref`.
+Every get, update and transition tool takes a record's **address, slug or ID**
+(`D110` and `d110` both work). Do not send `decision_number`, `task_id`, `goal_id` or
+`amendment_number` on create: they are deprecated (D110), the server assigns the
+address, and a create that sends one returns a `warnings` entry. Put your own
+numbering in `external_ref`.
 Optional subsystems are gated by environment variables — the binary compiles and
 runs with only `SECRET` set; every other feature is opt-in.
 

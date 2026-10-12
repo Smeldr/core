@@ -105,7 +105,9 @@ func TestPG_AmendsRelation(t *testing.T) {
 		t.Fatalf("create plain = %d %s", w.Code, w.Body.String())
 	}
 	admin := smeldr.NewTestContext(smeldr.User{ID: "pg-admin", Roles: []smeldr.Role{smeldr.Admin}})
-	rep, err := app.BackfillAmendsEdges(admin, []smeldr.AmendsLink{{AmendmentNumber: "A3", DecisionNumber: "D1"}, {AmendmentNumber: "A2", DecisionNumber: "D2"}}, false)
+	// D110: the server assigns the addresses (the refused first create took no
+	// number), so a2 is A1 and a3 is A2; the numbers sent are kept in external_ref.
+	rep, err := app.BackfillAmendsEdges(admin, []smeldr.AmendsLink{{AmendmentNumber: "A2", DecisionNumber: "D1"}, {AmendmentNumber: "A1", DecisionNumber: "D2"}}, false)
 	if err != nil || rep.Asserted != 1 || rep.AlreadyPresent != 1 {
 		t.Errorf("backfill = %+v, %v, want one asserted and one already present", rep, err)
 	}
@@ -114,7 +116,7 @@ func TestPG_AmendsRelation(t *testing.T) {
 		t.Fatalf("AmendsBackfillCandidates: %v", err)
 	}
 	for _, c := range cands {
-		if c.AmendmentNumber == "A2" || c.AmendmentNumber == "A3" {
+		if c.AmendmentNumber == "A1" || c.AmendmentNumber == "A2" {
 			t.Errorf("candidate %+v listed although it is linked", c)
 		}
 	}

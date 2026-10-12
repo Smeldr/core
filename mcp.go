@@ -65,6 +65,10 @@ type MCPField struct {
 	MinLength   int      // 0 = no constraint
 	MaxLength   int      // 0 = no constraint
 	Enum        []string // nil = no constraint
+	// Deprecated marks an input field that is still accepted but going away
+	// (the smeldr_deprecated:"true" tag; D110's legacy human-ID fields). Its
+	// Description says what happens to a value sent there and when it goes.
+	Deprecated bool
 }
 
 // MCPModule is implemented by any [Module][T] that has been registered with

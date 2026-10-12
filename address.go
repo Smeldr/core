@@ -324,7 +324,7 @@ type RecordAddress struct {
 	// AddressNo is the number alone (110), for numeric order.
 	AddressNo int64 `json:"address_no" db:"address_no" smeldr:"readonly"`
 	// ExternalRef is the caller's own reference for the record, free text.
-	ExternalRef string `json:"external_ref" db:"external_ref"`
+	ExternalRef string `json:"external_ref" db:"external_ref" smeldr_description:"Your own reference or numbering for this record, free text. The address (for example D110) is assigned by the server and returned in the result; do not send one."`
 }
 
 // assignAddress sets the address the server allocated.
@@ -381,16 +381,21 @@ func (m *Module[T]) assignNewAddress(ctx context.Context, exec DB, item T) error
 	if !ok {
 		return nil
 	}
+	var address string
+	var no int64
 	if exec == nil {
-		no := m.memAddress.next()
-		a.assignAddress(coreAddressPrefixes[m.contentTypeName]+strconv.FormatInt(no, 10), no)
-		return nil
-	}
-	address, no, err := allocateAddress(ctx, exec, m.contentTypeName)
-	if err != nil {
-		return err
+		no = m.memAddress.next()
+		address = coreAddressPrefixes[m.contentTypeName] + strconv.FormatInt(no, 10)
+	} else {
+		var err error
+		if address, no, err = allocateAddress(ctx, exec, m.contentTypeName); err != nil {
+			return err
+		}
 	}
 	a.assignAddress(address, no)
+	// The transition period (D110 7.1): a legacy human-ID field mirrors the
+	// address, and a different value sent there moves to external_ref.
+	mirrorLegacyHumanID(any(item), address)
 	return nil
 }
 

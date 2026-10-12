@@ -114,6 +114,7 @@ var anchorTypeTable = map[string]anchorTypeEntry{
 	"amendment": {"smeldr_amendments", "/amendments", "Amendment"},
 	"task":      {"smeldr_tasks", "/tasks", "Task"},
 	"signal":    {"smeldr_signals", "/signals", "Signal"},
+	"run":       {"smeldr_runs", "/runs", "Run"},
 }
 
 func packetItemURL(baseURL, typePath, slug string) string {
@@ -192,6 +193,14 @@ func packetLegacyFields(item any) (canonicalID string, fields map[string]any) {
 			"task_ref":    v.TaskRef,
 			"sequence":    v.Sequence,
 		}
+	case *Run:
+		return v.Slug, map[string]any{
+			"task_id": v.TaskID,
+			"repo":    v.Repo,
+			"machine": v.Machine,
+			"branch":  v.Branch,
+			"outcome": v.Outcome,
+		}
 	default:
 		return "", nil
 	}
@@ -238,6 +247,13 @@ func packetFetchItem(ctx context.Context, db DB, typeName, table, col, val strin
 		}
 		cid, f := packetFieldsFromItem(it)
 		return cid, it.Node, f, nil
+	case "run":
+		it, err := QueryOne[*Run](ctx, db, q, val)
+		if err != nil {
+			return "", Node{}, nil, err
+		}
+		cid, f := packetFieldsFromItem(it)
+		return cid, it.Node, f, nil
 	default:
 		return "", Node{}, nil, ErrBadRequest
 	}
@@ -271,10 +287,15 @@ func BuildContextPacket(
 		return nil, ErrBadRequest
 	}
 
-	anchorCID, anchorNode, anchorFields, err := packetFetchItem(ctx, db, anchorType, entry.table, "slug", anchorSlug)
-	if errors.Is(err, ErrNotFound) {
-		if col, ok := humanIDColumns[entry.relationType]; ok {
-			anchorCID, anchorNode, anchorFields, err = packetFetchItem(ctx, db, anchorType, entry.table, col, anchorSlug)
+	// D110 order: address, slug, ID, then the transitional legacy human ID.
+	var anchorCID string
+	var anchorNode Node
+	var anchorFields map[string]any
+	var err error = ErrNotFound
+	for _, c := range identCandidates(entry.relationType, anchorSlug) {
+		anchorCID, anchorNode, anchorFields, err = packetFetchItem(ctx, db, anchorType, entry.table, c[0], c[1])
+		if !errors.Is(err, ErrNotFound) {
+			break
 		}
 	}
 	if err != nil {

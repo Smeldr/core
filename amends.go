@@ -124,6 +124,9 @@ func amendsBeforeSave(ctx Context, db DB, existing, item any) error {
 		a.Amends = ""
 		return nil
 	}
+	if bareNumberRe.MatchString(want) {
+		noteDeprecatedUse(ctx, "Amendment", "amends (a bare number)")
+	}
 	canon, err := canonicalDecisionNumber(want)
 	if err != nil {
 		return err
@@ -159,22 +162,35 @@ func amendsAfterSave(ctx Context, db DB, rs *RelationStore, existing, item any) 
 	}
 }
 
-var decisionNumberRe = regexp.MustCompile(`^[Dd]?(\d+)$`)
+var bareNumberRe = regexp.MustCompile(`^\d+$`)
 
-// canonicalDecisionNumber returns the "D<n>" form of a Decision number given as
-// "D104", "d104" or "104".
+// canonicalDecisionNumber returns the "D<n>" address form of a Decision given
+// as an address ("D104", "d104", through [ParseAddress]) or, transitionally
+// until the D110 cut, as a bare number ("104").
 func canonicalDecisionNumber(s string) (string, error) {
-	m := decisionNumberRe.FindStringSubmatch(strings.TrimSpace(s))
-	if m == nil {
-		return "", Err("amends", fmt.Sprintf("%q is not a Decision number (use the form D104)", s))
+	s = strings.TrimSpace(s)
+	if addr, ok := addressIdent(s, coreAddressPrefixes["Decision"]); ok {
+		return addr, nil
 	}
-	return "D" + m[1], nil
+	if bareNumberRe.MatchString(s) {
+		return "D" + strings.TrimLeft(s, "0"), nil
+	}
+	return "", Err("amends", fmt.Sprintf("%q is not a Decision address (use the form D104)", s))
 }
 
-// resolveDecisionID finds the one Decision whose number is canon ("D104"),
-// accepting the older bare "104" spelling a Decision row can carry. No match and
-// several matches are both errors naming the number.
+// resolveDecisionID finds the Decision whose address is canon ("D104"). A
+// Decision with no address yet (before the migration) is found, transitionally
+// until the D110 cut, by its legacy decision_number, in the canon or the older
+// bare "104" spelling; there several matches are an error naming the number.
 func resolveDecisionID(ctx context.Context, db DB, canon string) (string, error) {
+	var id string
+	err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_decisions WHERE address = $1`, canon).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("%w: resolve Decision %s: %s", ErrInternal, canon, err)
+	}
 	bare := strings.TrimPrefix(canon, "D")
 	rows, err := db.QueryContext(ctx,
 		`SELECT id FROM smeldr_decisions WHERE decision_number = $1 OR decision_number = $2`, canon, bare)
@@ -341,9 +357,20 @@ func (a *App) BackfillAmendsEdges(ctx context.Context, links []AmendsLink, dryRu
 	return rep, nil
 }
 
-// resolveAmendmentID finds the one Amendment numbered number ("A412").
+// resolveAmendmentID finds the Amendment whose address is number ("A412"),
+// or, transitionally until the D110 cut, the one whose legacy
+// amendment_number it is.
 func resolveAmendmentID(ctx context.Context, db DB, number string) (string, error) {
 	var id string
+	if addr, ok := addressIdent(number, coreAddressPrefixes["Amendment"]); ok {
+		err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_amendments WHERE address = $1`, addr).Scan(&id)
+		if err == nil {
+			return id, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("%w: resolve Amendment %s: %s", ErrInternal, number, err)
+		}
+	}
 	err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_amendments WHERE amendment_number = $1`, strings.TrimSpace(number)).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", Err("amendment", fmt.Sprintf("no Amendment %s exists", number))

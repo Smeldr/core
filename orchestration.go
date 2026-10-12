@@ -5,6 +5,7 @@ package smeldr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -17,7 +18,7 @@ type Goal struct {
 	Node
 	RecordAddress
 	// GoalID is the canonical identifier (e.g. "T114").
-	GoalID string `json:"goal_id" db:"goal_id"`
+	GoalID string `json:"goal_id" db:"goal_id" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
 	// Priority is the scheduling priority. Lower values are higher priority.
 	// A create call that omits this field entirely gets defaultPriority (5),
 	// not 0 — 0 is reserved for a deliberate escalation (see
@@ -62,8 +63,15 @@ func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID stri
 		return nil, ErrInternal
 	}
 
-	goal, err := QueryOne[*Goal](ctx, db,
-		`SELECT * FROM smeldr_goals WHERE goal_id = $1`, goalID)
+	// D110 order: address, slug, ID, then the transitional legacy goal_id.
+	var goal *Goal
+	var err error = ErrNotFound
+	for _, c := range identCandidates("Goal", goalID) {
+		goal, err = QueryOne[*Goal](ctx, db, `SELECT * FROM smeldr_goals WHERE `+quoteIdent(c[0])+` = $1`, c[1])
+		if !errors.Is(err, ErrNotFound) {
+			break
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +213,7 @@ type Task struct {
 	Node
 	RecordAddress
 	// TaskID is the canonical task identifier (e.g. "T23").
-	TaskID string `json:"task_id" db:"task_id"`
+	TaskID string `json:"task_id" db:"task_id" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
 	// Priority is the scheduling priority. Lower values are higher priority.
 	// A create call that omits this field entirely gets defaultPriority (5),
 	// not 0 — 0 is reserved for a deliberate escalation (see
@@ -234,7 +242,7 @@ type Decision struct {
 	Node
 	RecordAddress
 	// DecisionNumber is the canonical identifier (e.g. "D22" or "A183").
-	DecisionNumber string `json:"decision_number" db:"decision_number"`
+	DecisionNumber string `json:"decision_number" db:"decision_number" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
 	// Title is a short, human-readable display title, independent of
 	// Body's own Markdown content — added because scraping Body's first
 	// heading for a title (Cloud's prior approach) produced
@@ -458,7 +466,7 @@ type Amendment struct {
 	Node
 	RecordAddress
 	// AmendmentNumber is the canonical identifier (e.g. "A183").
-	AmendmentNumber string `json:"amendment_number" db:"amendment_number"`
+	AmendmentNumber string `json:"amendment_number" db:"amendment_number" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
 	// AmendmentType classifies the change (e.g. "feat", "fix", "refactor").
 	AmendmentType string `json:"amendment_type" db:"amendment_type"`
 	// Version is the smeldr.dev/core semver shipped with this amendment.
@@ -1074,24 +1082,6 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 		}
 	}
 	return nil
-}
-
-// humanIDColumns maps a compiled type name to its own human-facing
-// identifier column (e.g. "T203"), for types that have one — Task.TaskID,
-// Goal.GoalID, Decision.DecisionNumber, Amendment.AmendmentNumber. Signal
-// has no entry: it carries no canonical sequential identifier. Consulted by
-// [Module.resolveItem] and [App.TransitionItem] as a fallback when a slug
-// lookup misses, so `get_task`/`transition_item`/etc. can resolve "T203" the
-// same way they already resolve a real slug (T253). Explicit, not
-// reflection-derived from a naming convention — matching
-// [anchorTypeTable]'s own shape in context_packet.go — so a future field
-// merely named "...Number" never silently becomes a lookup key nobody
-// intended.
-var humanIDColumns = map[string]string{
-	"Task":      "task_id",
-	"Goal":      "goal_id",
-	"Decision":  "decision_number",
-	"Amendment": "amendment_number",
 }
 
 // channelColumns maps a compiled type name to the column that determines an

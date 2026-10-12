@@ -1395,14 +1395,14 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 		if err != nil {
 			return nil, err
 		}
-		node, err := repo.GetBySlug(ctx, slug)
+		node, err := repo.Resolve(ctx, slug)
 		if err != nil {
 			return nil, err
 		}
 		if err := repo.setStatusVia(ctx, node.ID, Status(toState), reason, surface); err != nil {
 			return nil, err
 		}
-		return map[string]any{"id": node.ID, "slug": slug, "status": toState}, nil
+		return map[string]any{"id": node.ID, "slug": node.Slug, "status": toState}, nil
 	}
 
 	if a.cfg.DB == nil {
@@ -1423,15 +1423,16 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	// own ident — ident can be a human ID (e.g. "T203") rather than a real
 	// slug when the fallback below resolves it (T253); echoing ident back
 	// as "slug" in the response would be wrong in that case.
+	// D110 order: address (of this type), slug, ID, then the transitional
+	// legacy human-ID column.
 	var id, realSlug, currentStatus string
-	err := db.QueryRowContext(ctx,
-		"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE slug = $1", slug,
-	).Scan(&id, &realSlug, &currentStatus)
-	if errors.Is(err, sql.ErrNoRows) {
-		if col, ok := humanIDColumns[typeName]; ok {
-			err = db.QueryRowContext(ctx,
-				"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE "+quoteIdent(col)+" = $1", slug,
-			).Scan(&id, &realSlug, &currentStatus)
+	err := sql.ErrNoRows
+	for _, c := range identCandidates(typeName, slug) {
+		err = db.QueryRowContext(ctx,
+			"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE "+quoteIdent(c[0])+" = $1", c[1],
+		).Scan(&id, &realSlug, &currentStatus)
+		if !errors.Is(err, sql.ErrNoRows) {
+			break
 		}
 	}
 	if errors.Is(err, sql.ErrNoRows) {
