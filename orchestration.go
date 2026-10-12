@@ -72,6 +72,14 @@ func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID stri
 			break
 		}
 	}
+	if errors.Is(err, ErrNotFound) {
+		// The transitional legacy fallback (goal_id or external_ref).
+		legacyID, lerr := legacyLookupID(ctx, db, "Goal", "smeldr_goals", goalID)
+		if lerr != nil {
+			return nil, lerr
+		}
+		goal, err = QueryOne[*Goal](ctx, db, `SELECT * FROM smeldr_goals WHERE id = $1`, legacyID)
+	}
 	if err != nil {
 		return nil, err
 	}

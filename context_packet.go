@@ -298,6 +298,14 @@ func BuildContextPacket(
 			break
 		}
 	}
+	if errors.Is(err, ErrNotFound) {
+		// The transitional legacy fallback (legacy column or external_ref).
+		legacyID, lerr := legacyLookupID(ctx, db, entry.relationType, entry.table, anchorSlug)
+		if lerr != nil {
+			return nil, lerr
+		}
+		anchorCID, anchorNode, anchorFields, err = packetFetchItem(ctx, db, anchorType, entry.table, "id", legacyID)
+	}
 	if err != nil {
 		return nil, err
 	}

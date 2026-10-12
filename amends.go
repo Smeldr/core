@@ -193,7 +193,7 @@ func resolveDecisionID(ctx context.Context, db DB, canon string) (string, error)
 	}
 	bare := strings.TrimPrefix(canon, "D")
 	rows, err := db.QueryContext(ctx,
-		`SELECT id FROM smeldr_decisions WHERE decision_number = $1 OR decision_number = $2`, canon, bare)
+		`SELECT id FROM smeldr_decisions WHERE decision_number = $1 OR decision_number = $2 OR external_ref = $1`, canon, bare)
 	if err != nil {
 		return "", fmt.Errorf("%w: resolve Decision %s: %s", ErrInternal, canon, err)
 	}
@@ -213,6 +213,7 @@ func resolveDecisionID(ctx context.Context, db DB, canon string) (string, error)
 	case 0:
 		return "", Err("amends", fmt.Sprintf("no Decision %s exists", canon))
 	case 1:
+		noteDeprecatedUse(ctx, "Decision", "a lookup by a legacy value")
 		return ids[0], nil
 	}
 	return "", Err("amends", fmt.Sprintf("%s matches %d Decisions: it must name one", canon, len(ids)))
@@ -371,7 +372,7 @@ func resolveAmendmentID(ctx context.Context, db DB, number string) (string, erro
 			return "", fmt.Errorf("%w: resolve Amendment %s: %s", ErrInternal, number, err)
 		}
 	}
-	err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_amendments WHERE amendment_number = $1`, strings.TrimSpace(number)).Scan(&id)
+	err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_amendments WHERE amendment_number = $1 OR external_ref = $1`, strings.TrimSpace(number)).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", Err("amendment", fmt.Sprintf("no Amendment %s exists", number))
 	}
@@ -381,9 +382,10 @@ func resolveAmendmentID(ctx context.Context, db DB, number string) (string, erro
 		return "", fmt.Errorf("%w: resolve Amendment %s: %s", ErrInternal, number, err)
 	}
 	var n int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_amendments WHERE amendment_number = $1`, strings.TrimSpace(number)).Scan(&n); err == nil && n > 1 {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_amendments WHERE amendment_number = $1 OR external_ref = $1`, strings.TrimSpace(number)).Scan(&n); err == nil && n > 1 {
 		return "", Err("amendment", fmt.Sprintf("%s matches %d Amendments: it must name one", number, n))
 	}
+	noteDeprecatedUse(ctx, "Amendment", "a lookup by a legacy value")
 	return id, nil
 }
 

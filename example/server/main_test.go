@@ -267,22 +267,21 @@ func TestServerToggles(t *testing.T) {
 			t.Fatalf("create_goal: ID missing in response: %v", goal)
 		}
 
-		// D110: the server assigns the address; the goal_id sent is kept in
-		// external_ref and goal_id holds the address (the transition period).
-		address, _ := goal["address"].(string)
-		if address == "" || goal["external_ref"] != "T-test" {
-			t.Fatalf("create_goal: address %q external_ref %v, want an address and T-test", address, goal["external_ref"])
-		}
-		// get_goal_context using the address.
+		// get_goal_context using the GoalID string the caller sent. D110: the
+		// transition period keeps that value in external_ref (goal_id holds the
+		// assigned address), and the lookup by it still works.
 		ctx := callTool(t, ts.URL, token, "get_goal_context", map[string]any{
-			"goal_id": address,
+			"goal_id": "T-test",
 		})
 		inner, _ := ctx["goal"].(map[string]any)
 		if inner == nil {
 			t.Fatalf("get_goal_context: 'goal' key missing in response: %v", ctx)
 		}
-		if got, _ := inner["goal_id"].(string); got != address {
-			t.Errorf("get_goal_context: goal.goal_id = %q, want the address %q", got, address)
+		if got, _ := inner["external_ref"].(string); got != "T-test" {
+			t.Errorf("get_goal_context: goal.external_ref = %q, want %q", got, "T-test")
+		}
+		if address, _ := goal["address"].(string); address == "" || inner["goal_id"] != address {
+			t.Errorf("get_goal_context: goal.goal_id = %v, want the assigned address %q", inner["goal_id"], address)
 		}
 	})
 
@@ -337,11 +336,8 @@ func TestServerToggles(t *testing.T) {
 		})
 
 		// get_goal_context must include the linked Decision.
-		// D110: the goal is found by its assigned address (the goal_id sent is
-		// in external_ref).
-		goalAddress, _ := goal["address"].(string)
 		gctx := callTool(t, ts.URL, authorToken, "get_goal_context", map[string]any{
-			"goal_id": goalAddress,
+			"goal_id": "T-rel-test",
 		})
 		linkedDecs, _ := gctx["linked_decisions"].([]any)
 		if len(linkedDecs) == 0 {

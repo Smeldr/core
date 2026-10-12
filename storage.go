@@ -811,6 +811,10 @@ func (r *SQLRepo[T]) FindBySlug(ctx context.Context, slug string) (T, error) {
 		"SELECT * FROM "+r.table+" WHERE "+quoteIdent("slug")+" = $1", slug)
 }
 
+// tableHandle returns the repository's handle and table, for a lookup the
+// repository has no method for (the transitional D110 legacy fallback).
+func (r *SQLRepo[T]) tableHandle() (DB, string) { return r.db, r.table }
+
 // FindByColumn returns the item whose named column equals value, or
 // [ErrNotFound]. column is never caller-supplied — see
 // [ColumnLookupRepository] (T253).

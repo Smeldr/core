@@ -2656,11 +2656,28 @@ func (m *Module[T]) resolveItem(ctx Context, ident string) (T, error) {
 	if !errors.Is(err, ErrNotFound) {
 		return zero, err
 	}
-	col, ok := legacyHumanIDColumns[m.contentTypeName]
-	if !ok || !canColumn {
+	th, ok := any(m.repo).(interface{ tableHandle() (DB, string) })
+	if !ok {
+		// A repository without a table (MemoryRepo, a user's own): the legacy
+		// column, then external_ref, through its own column lookup.
+		col, legacy := legacyHumanIDColumns[m.contentTypeName]
+		if !legacy || !canColumn {
+			return zero, ErrNotFound
+		}
+		for _, c := range []string{col, "external_ref"} {
+			item, err := cr.FindByColumn(ctx, c, ident)
+			if !errors.Is(err, ErrNotFound) {
+				return item, err
+			}
+		}
 		return zero, ErrNotFound
 	}
-	return cr.FindByColumn(ctx, col, ident)
+	db, table := th.tableHandle()
+	id, err := legacyLookupID(ctx, db, m.contentTypeName, table, ident)
+	if err != nil {
+		return zero, err
+	}
+	return m.repo.FindByID(ctx, id)
 }
 
 // MCPGet returns the item with the given slug (or, for a type with a

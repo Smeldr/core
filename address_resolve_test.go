@@ -3,6 +3,7 @@ package smeldr
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -340,5 +341,69 @@ func TestTransitionPeriod_HTTPPostLogsDeprecatedUse(t *testing.T) {
 	}
 	if n := strings.Count(buf.String(), "token=u-http-legacy"); n != 1 {
 		t.Errorf("deprecation log lines for the HTTP caller = %d, want 1:\n%s", n, buf.String())
+	}
+}
+
+// During the transition a caller that created a record with its own legacy
+// value finds it again by that value, which now sits in external_ref: through
+// resolveItem, transition_item, the packet anchor and the goal context. Two
+// records holding the value are an error naming the count; a match is logged.
+func TestLegacyFallback_MatchesExternalRef(t *testing.T) {
+	ctx := context.Background()
+	db := addressDB(t)
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16"), DB: db})
+	RegisterOrchestrationTypes(app, db)
+	_ = app.Handler()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+
+	goals := findModule[*Goal](t, app)
+	created, err := goals.MCPCreate(authorCtx(), map[string]any{"goal_id": "T-own", "Description": "own number"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := created.(map[string]any)
+	if g["external_ref"] != "T-own" || g["goal_id"] != g["address"] {
+		t.Fatalf("created = %v, want T-own in external_ref and goal_id = address", g)
+	}
+	if got, err := goals.resolveItem(authorCtx(), "T-own"); err != nil || got.ID != g["ID"] {
+		t.Errorf("resolveItem(T-own) = %v %v", got, err)
+	}
+	if gc, err := QueryGoalContext(ctx, db, nil, "T-own"); err != nil || gc.Goal.ID != g["ID"] {
+		t.Errorf("QueryGoalContext(T-own) = %v %v", gc, err)
+	}
+	if pkt, err := BuildContextPacket(ctx, db, nil, "https://example.com", "test", "goal", "T-own", 1); err != nil || pkt.Anchor.ID != g["address"] {
+		t.Errorf("packet anchor(T-own) = %v %v", pkt, err)
+	}
+	if _, err := app.TransitionItemVia(authorCtx(), "mcp", "Goal", "T-own", "active", ""); err != nil && errors.Is(err, ErrNotFound) {
+		t.Errorf("transition_item(T-own) not found: %v", err)
+	}
+	if !strings.Contains(buf.String(), "a lookup by a legacy value") {
+		t.Errorf("log = %q, want the legacy lookup noted", buf.String())
+	}
+
+	// A second record with the same external_ref makes the value ambiguous.
+	if _, err := goals.MCPCreate(authorCtx(), map[string]any{"Description": "same ref", "external_ref": "T-own"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goals.resolveItem(authorCtx(), "T-own"); err == nil || !strings.Contains(err.Error(), "matches 2") {
+		t.Errorf("ambiguous lookup: %v, want an error naming 2", err)
+	}
+
+	// amends: an Amendment sent with its own number is found by it for a backfill.
+	ams := findModule[*Amendment](t, app)
+	if _, err := ams.MCPCreate(authorCtx(), map[string]any{"amendment_number": "A900", "Summary": "s"}); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := resolveAmendmentID(ctx, db, "A900"); err != nil || id == "" {
+		t.Errorf("resolveAmendmentID(A900) = %q %v, want found through external_ref", id, err)
+	}
+	if _, err := legacyLookupID(ctx, db, "Signal", "smeldr_signals", "x"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a type with no legacy field: %v, want ErrNotFound", err)
+	}
+	if _, err := legacyLookupID(ctx, failAddressDB{db, "LIMIT 2"}, "Goal", "smeldr_goals", "T-own"); err == nil {
+		t.Error("a failing read: want an error")
 	}
 }

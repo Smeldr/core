@@ -1436,6 +1436,16 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 		}
 	}
 	if errors.Is(err, sql.ErrNoRows) {
+		// The transitional legacy fallback (legacy column or external_ref).
+		legacyID, lerr := legacyLookupID(ctx, db, typeName, quoteIdent(table), slug)
+		if lerr != nil {
+			return nil, lerr
+		}
+		err = db.QueryRowContext(ctx,
+			"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE id = $1", legacyID,
+		).Scan(&id, &realSlug, &currentStatus)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {

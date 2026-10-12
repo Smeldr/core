@@ -61,18 +61,59 @@ var legacyHumanIDColumns = map[string]string{
 }
 
 // identCandidates is the D110 lookup order for ident on a core type's table:
-// address (only when ident carries the type's own prefix), slug, ID, then the
-// transitional legacy column.
+// address (only when ident carries the type's own prefix), slug, then ID. The
+// transitional legacy fallback ([legacyLookupID]) comes after them.
 func identCandidates(typeName, ident string) [][2]string {
 	var c [][2]string
 	if addr, ok := addressIdent(ident, coreAddressPrefixes[typeName]); ok {
 		c = append(c, [2]string{"address", addr})
 	}
-	c = append(c, [2]string{"slug", ident}, [2]string{"id", ident})
-	if col, ok := legacyHumanIDColumns[typeName]; ok {
-		c = append(c, [2]string{col, ident})
+	return append(c, [2]string{"slug", ident}, [2]string{"id", ident})
+}
+
+// legacyLookupID is the transitional last step of the D110 lookup order, for a
+// core type with a legacy human-ID field: the one row of table whose legacy
+// column or external_ref is exactly ident. external_ref is included because
+// during the transition a value a caller sent in the legacy field is kept
+// there, and the caller may look the record up by it again. Several matches
+// are an error naming the count; a match is logged as deprecated use, so it
+// counts towards the cut. Removed at the cut with [legacyHumanIDColumns].
+// ErrNotFound when the type has no legacy field or nothing matches.
+func legacyLookupID(ctx context.Context, db DB, typeName, table, ident string) (string, error) {
+	col, ok := legacyHumanIDColumns[typeName]
+	if !ok || db == nil || strings.TrimSpace(ident) == "" {
+		return "", ErrNotFound
 	}
-	return c
+	where := ` WHERE ` + quoteIdent(col) + ` = $1 OR external_ref = $1`
+	rows, err := db.QueryContext(ctx, `SELECT id FROM `+table+where+` LIMIT 2`, ident)
+	if err != nil {
+		return "", err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return "", err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	switch len(ids) {
+	case 0:
+		return "", ErrNotFound
+	case 1:
+		noteDeprecatedUse(ctx, typeName, "a lookup by a legacy value")
+		return ids[0], nil
+	}
+	var n int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+where, ident).Scan(&n); err != nil {
+		return "", err
+	}
+	return "", Err("id", fmt.Sprintf("%q matches %d %s records by their old number: name one by its address", ident, n, typeName))
 }
 
 // legacyHumanIDField is implemented by the four core types with a legacy
