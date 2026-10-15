@@ -3,6 +3,7 @@ package smeldr
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 )
 
 // ReasonRule says whether a [Capability] takes a reason, and who decides.
@@ -338,4 +339,19 @@ func (a *App) VisibleCapabilities(ctx Context) ([]Capability, error) {
 		}
 	}
 	return out, nil
+}
+
+// capabilityWarnings lists the warning codes each capability's act can return
+// next to its result (the D110 CreateWarning channel): a write that succeeds
+// but should be corrected. Read-only after init.
+var capabilityWarnings = map[capabilityKey][]string{
+	{ResourceItem, VerbCreate}: {"slug_adjusted", "deprecated_field", "title_missing", "title_too_long"},
+	{ResourceItem, VerbUpdate}: {"deprecated_field", "title_missing", "title_too_long"},
+}
+
+// CapabilityWarnings returns the warning codes the act of verb on resource can
+// return with a successful result, in a fixed order; nil when it returns
+// none or the capability is unknown. The slice is a copy. Safe on a nil *App.
+func (a *App) CapabilityWarnings(resource, verb string) []string {
+	return slices.Clone(capabilityWarnings[capabilityKey{resource, verb}])
 }

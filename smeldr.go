@@ -147,6 +147,15 @@ type Config struct {
 	// deliver outbound webhook jobs. Defaults to 10 when zero. Optional —
 	// only used when [App.Webhooks] is called.
 	WebhookWorkers int
+
+	// TitleCutover is when a record's title rule (D112) turns from a warning
+	// into a refusal. Zero, the default, means warnings only: a create or
+	// update of a Decision, Task, Goal or Amendment without a title, or with
+	// one longer than [TitleMaxLength] characters, succeeds with a
+	// title_missing or title_too_long warning. Once the time has passed, the
+	// same write is refused with a validation error carrying [TitleGuidance].
+	// The date belongs to whoever runs the instance. Optional.
+	TitleCutover time.Time
 }
 
 // MustConfig validates cfg and returns it unchanged.
@@ -550,6 +559,9 @@ func (a *App) Content(v any, opts ...Option) {
 		}
 		if tp, ok := r.(templateParser); ok {
 			a.templateModules = append(a.templateModules, tp)
+		}
+		if tc, ok := r.(interface{ setTitleCutover(time.Time) }); ok {
+			tc.setTitleCutover(a.cfg.TitleCutover)
 		}
 		if sn, ok := r.(interface{ setSiteName(string) }); ok {
 			u, _ := url.Parse(a.cfg.BaseURL)

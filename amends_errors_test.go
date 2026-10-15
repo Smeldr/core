@@ -16,7 +16,7 @@ func TestAmendsBeforeSave_EdgesAndErrors(t *testing.T) {
 		t.Errorf("a non-Amendment item: %v", err)
 	}
 	// A value but no database to resolve it with.
-	if err := amendsBeforeSave(ctx, nil, nil, &Amendment{Amends: "D1"}); err == nil || !strings.Contains(err.Error(), "no database") {
+	if err := amendsBeforeSave(ctx, nil, nil, &Amendment{Amends: "D1", AmendmentType: "fix"}); err == nil || !strings.Contains(err.Error(), "no database") {
 		t.Errorf("no database: err = %v", err)
 	}
 	// Already set, and a garbage value arrives: a validation error, not a silent keep.
@@ -25,11 +25,11 @@ func TestAmendsBeforeSave_EdgesAndErrors(t *testing.T) {
 		t.Error("a malformed value over a stored one must be refused")
 	}
 	// A database that fails on the lookup is an internal error, not a "no such Decision".
-	if err := amendsBeforeSave(ctx, &queryFailDB{}, nil, &Amendment{Amends: "D1"}); !errors.Is(err, ErrInternal) {
+	if err := amendsBeforeSave(ctx, &queryFailDB{}, nil, &Amendment{Amends: "D1", AmendmentType: "fix"}); !errors.Is(err, ErrInternal) {
 		t.Errorf("failing lookup: err = %v, want ErrInternal", err)
 	}
 	// Whitespace around an empty value is empty.
-	a := &Amendment{Amends: "  "}
+	a := &Amendment{Amends: "  ", AmendmentType: "fix"}
 	if err := amendsBeforeSave(ctx, nil, nil, a); err != nil || a.Amends != "" {
 		t.Errorf("blank = %q, %v, want it cleared to empty without error", a.Amends, err)
 	}

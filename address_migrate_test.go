@@ -61,11 +61,11 @@ func migrationFixture(t *testing.T) (*sql.DB, *App) {
 
 	// After deploy: records with addresses, and one raw Signal without.
 	dec := findModule[*Decision](t, app)
-	if out, err := dec.MCPCreate(authorCtx(), map[string]any{"Title": "after deploy"}); err != nil || out.(*Decision).Address != "D6" {
+	if out, err := dec.MCPCreate(authorCtx(), map[string]any{"Title": "after deploy"}); err != nil || asItem[*Decision](out).Address != "D6" {
 		t.Fatalf("post-deploy Decision: %v %v, want D6 (above the highest legacy D5)", out, err)
 	}
 	goal := findModule[*Goal](t, app)
-	if out, err := goal.MCPCreate(authorCtx(), map[string]any{"Description": "after deploy"}); err != nil || out.(*Goal).Address != "G1" {
+	if out, err := goal.MCPCreate(authorCtx(), map[string]any{"Description": "after deploy"}); err != nil || asItem[*Goal](out).Address != "G1" {
 		t.Fatalf("post-deploy Goal: %v %v, want G1", out, err)
 	}
 	s := &Signal{Sender: "core", SignalType: "plan-ready"}

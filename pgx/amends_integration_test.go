@@ -75,10 +75,10 @@ func TestPG_AmendsRelation(t *testing.T) {
 		return w
 	}
 
-	if w := do(http.MethodPost, "/amendments", map[string]any{"amendment_number": "A1", "slug": "a1", "amends": "D404"}); w.Code < 400 {
+	if w := do(http.MethodPost, "/amendments", map[string]any{"amendment_number": "A1", "slug": "a1", "amends": "D404", "amendment_type": "fix"}); w.Code < 400 {
 		t.Errorf("create naming a missing Decision = %d, want a refusal", w.Code)
 	}
-	w := do(http.MethodPost, "/amendments", map[string]any{"amendment_number": "A2", "slug": "a2", "amends": "2"})
+	w := do(http.MethodPost, "/amendments", map[string]any{"amendment_number": "A2", "slug": "a2", "amends": "2", "amendment_type": "fix"})
 	if w.Code >= 300 {
 		t.Fatalf("create = %d %s", w.Code, w.Body.String())
 	}
@@ -101,7 +101,7 @@ func TestPG_AmendsRelation(t *testing.T) {
 	}
 
 	// Backfill an Amendment created without amends.
-	if w := do(http.MethodPost, "/amendments", map[string]any{"amendment_number": "A3", "slug": "a3"}); w.Code >= 300 {
+	if w := do(http.MethodPost, "/amendments", map[string]any{"amendment_number": "A3", "slug": "a3", "amendment_type": "fix"}); w.Code >= 300 {
 		t.Fatalf("create plain = %d %s", w.Code, w.Body.String())
 	}
 	admin := smeldr.NewTestContext(smeldr.User{ID: "pg-admin", Roles: []smeldr.Role{smeldr.Admin}})

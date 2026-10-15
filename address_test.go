@@ -47,7 +47,7 @@ func mustCreateDecision(t *testing.T, m *Module[*Decision], fields map[string]an
 	if err != nil {
 		t.Fatalf("MCPCreate: %v", err)
 	}
-	return out.(*Decision)
+	return asItem[*Decision](out)
 }
 
 func TestCheckAddressPrefix(t *testing.T) {
@@ -174,7 +174,7 @@ func TestCompiledCreate_AddressesInOrderAndNoGap(t *testing.T) {
 				t.Errorf("concurrent create: %v", err)
 				return
 			}
-			got <- out.(*Decision).Address
+			got <- asItem[*Decision](out).Address
 		}()
 	}
 	wg.Wait()
@@ -284,7 +284,7 @@ func TestCompiledCreate_MemoryCounter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := out.(*Decision).Address; got != fmt.Sprintf("D%d", i) {
+		if got := asItem[*Decision](out).Address; got != fmt.Sprintf("D%d", i) {
 			t.Errorf("create %d: %q", i, got)
 		}
 	}

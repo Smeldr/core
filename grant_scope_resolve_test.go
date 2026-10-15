@@ -25,7 +25,7 @@ func TestGrant_StaticPatternsResolvedToID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := created.(*Goal)
+	g := asItem[*Goal](created)
 	if err := RegisterScopedReaderRole(ctx, rs); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestGrant_SyntheticRuleTypeKeptAsGiven(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := created.(*Goal)
+	g := asItem[*Goal](created)
 	decision := &Decision{Node: Node{ID: NewID(), Slug: "d-rule"}, DecisionNumber: "D900", Scope: "core", RuleType: "design-system"}
 	if err := NewSQLRepo[*Decision](db, Table("smeldr_decisions")).Save(ctx, decision); err != nil {
 		t.Fatal(err)

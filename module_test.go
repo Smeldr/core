@@ -2101,7 +2101,7 @@ func TestMCPCreate_omittedPriority_defaultsTo5(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MCPCreate: %v", err)
 	}
-	if got := created.(*Task).Priority; got != defaultPriority {
+	if got := asItem[*Task](created).Priority; got != defaultPriority {
 		t.Errorf("Priority = %d, want %d (default)", got, defaultPriority)
 	}
 }
@@ -2119,7 +2119,7 @@ func TestMCPCreate_explicitZeroPriority_honoured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MCPCreate: %v", err)
 	}
-	if got := created.(*Task).Priority; got != 0 {
+	if got := asItem[*Task](created).Priority; got != 0 {
 		t.Errorf("Priority = %d, want 0 (explicit escalation honoured)", got)
 	}
 }
@@ -2417,8 +2417,8 @@ func TestModule_MCPGet_ByHumanID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MCPGet by human ID: %v", err)
 	}
-	if got.(*Task).Slug != "task-t203" {
-		t.Errorf("Slug = %q, want %q", got.(*Task).Slug, "task-t203")
+	if asItem[*Task](got).Slug != "task-t203" {
+		t.Errorf("Slug = %q, want %q", asItem[*Task](got).Slug, "task-t203")
 	}
 }
 
@@ -2437,8 +2437,8 @@ func TestModule_MCPGet_ByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MCPGet by real ID: %v", err)
 	}
-	if got.(*Task).Slug != "task-t203" {
-		t.Errorf("Slug = %q, want %q", got.(*Task).Slug, "task-t203")
+	if asItem[*Task](got).Slug != "task-t203" {
+		t.Errorf("Slug = %q, want %q", asItem[*Task](got).Slug, "task-t203")
 	}
 }
 
@@ -2458,11 +2458,11 @@ func TestModule_MCPUpdate_ByHumanID_PreservesRealSlug(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MCPUpdate by human ID: %v", err)
 	}
-	if got := updated.(*Task).Slug; got != "task-t203" {
+	if got := asItem[*Task](updated).Slug; got != "task-t203" {
 		t.Errorf("Slug = %q, want %q (must not be overwritten with the human-ID ident)", got, "task-t203")
 	}
-	if updated.(*Task).TaskID != "T203" {
-		t.Errorf("TaskID = %q, want %q", updated.(*Task).TaskID, "T203")
+	if asItem[*Task](updated).TaskID != "T203" {
+		t.Errorf("TaskID = %q, want %q", asItem[*Task](updated).TaskID, "T203")
 	}
 }
 

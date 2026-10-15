@@ -61,12 +61,14 @@ func (d Decision) MarshalJSON() ([]byte, error) {
 }
 
 // MarshalJSON encodes the Amendment without PublishedAt and ScheduledAt, which
-// an Amendment's flow can never set (D114).
+// an Amendment's flow can never set (D114), and without the retired pilot
+// (D112).
 func (a Amendment) MarshalJSON() ([]byte, error) {
 	type plain Amendment
 	return json.Marshal(struct {
 		plain
 		omitPublishFields
+		Pilot *string `json:"pilot,omitempty"`
 	}{plain: plain(a)})
 }
 

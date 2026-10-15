@@ -17,6 +17,11 @@ import (
 type Goal struct {
 	Node
 	RecordAddress
+	// Title names the record in one line, at most 120 characters: a short
+	// statement of what it is (D112). A create or update without one, or with
+	// a longer one, gets a title warning, and is refused after
+	// [Config.TitleCutover].
+	Title string `json:"title" db:"title" smeldr_description:"Required (D112): one line, at most 120 characters, a short statement of what the record is. Missing or longer: a warning now, refused after the instance's title cutover."`
 	// GoalID is the canonical identifier (e.g. "T114").
 	GoalID string `json:"goal_id" db:"goal_id" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
 	// Priority is the scheduling priority. Lower values are higher priority.
@@ -244,6 +249,11 @@ func (s *Signal) readSubject() (string, string) { return s.SubjectType, s.Subjec
 type Task struct {
 	Node
 	RecordAddress
+	// Title names the record in one line, at most 120 characters: a short
+	// statement of what it is (D112). A create or update without one, or with
+	// a longer one, gets a title warning, and is refused after
+	// [Config.TitleCutover].
+	Title string `json:"title" db:"title" smeldr_description:"Required (D112): one line, at most 120 characters, a short statement of what the record is. Missing or longer: a warning now, refused after the instance's title cutover."`
 	// TaskID is the canonical task identifier (e.g. "T23").
 	TaskID string `json:"task_id" db:"task_id" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
 	// Priority is the scheduling priority. Lower values are higher priority.
@@ -535,14 +545,21 @@ type Amendment struct {
 	RecordAddress
 	// AmendmentNumber is the canonical identifier (e.g. "A183").
 	AmendmentNumber string `json:"amendment_number" db:"amendment_number" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
-	// AmendmentType classifies the change (e.g. "feat", "fix", "refactor").
-	AmendmentType string `json:"amendment_type" db:"amendment_type"`
+	// AmendmentType classifies the change: one of [AmendmentTypes] (D112). A
+	// create needs one of them, and an update that changes it too; an older
+	// row with another value still updates when the field is not changed.
+	AmendmentType string `json:"amendment_type" db:"amendment_type" smeldr_enum:"feature|fix|docs|chore|test|ci|refactor|release" smeldr_description:"Required on create (D112): one of feature, fix, docs, chore, test, ci, refactor, release."`
 	// Version is the smeldr.dev/core semver shipped with this amendment.
 	Version string `json:"version"`
 	// CommitHash is the git SHA of the squash commit.
 	CommitHash string `json:"commit_hash" db:"commit_hash"`
-	// Pilot identifies the implementing agent (e.g. "corepilot", "sitepilot").
-	Pilot string `json:"pilot"`
+	// Pilot identified the implementing agent.
+	//
+	// Deprecated: retired by D112, since band and actor already say who did
+	// the work. A value sent is not stored, the field is not emitted in JSON,
+	// and an MCP create or update that sends it gets a deprecated_field
+	// warning. The column stays, so older rows keep their value.
+	Pilot string `json:"pilot" smeldr_deprecated:"true" smeldr_description:"Deprecated (D112): retired, not stored. Band and actor say who did the work."`
 	// Summary is a one-line description of what the amendment changes.
 	Summary string `json:"summary"`
 	// Body is the full amendment text in Markdown, including rationale —
@@ -698,6 +715,7 @@ func CreateOrchestrationTables(db DB) error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_tasks (
 			id          TEXT PRIMARY KEY,
+			title       TEXT NOT NULL DEFAULT '',
 			slug        TEXT NOT NULL UNIQUE,
 			status      TEXT NOT NULL DEFAULT 'draft',
 			published_at TIMESTAMPTZ,
@@ -755,6 +773,7 @@ func CreateOrchestrationTables(db DB) error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_goals (
 			id           TEXT PRIMARY KEY,
+			title        TEXT NOT NULL DEFAULT '',
 			slug         TEXT NOT NULL UNIQUE,
 			status       TEXT NOT NULL DEFAULT 'draft',
 			published_at TIMESTAMPTZ,
@@ -875,6 +894,26 @@ func EnsureDecisionTensionColumns(ctx context.Context, db DB) error {
 func EnsureDecisionTitleColumn(ctx context.Context, db DB) error {
 	if err := EnsureColumn(ctx, db, "smeldr_decisions", "title", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("smeldr: EnsureDecisionTitleColumn: %w", err)
+	}
+	return nil
+}
+
+// EnsureTaskGoalTitleColumns adds the title column (D112) to smeldr_tasks
+// and smeldr_goals on databases created before it. Fresh installs have it from
+// [CreateOrchestrationTables]. A table that does not exist is skipped.
+// Idempotent, safe to call on every boot.
+func EnsureTaskGoalTitleColumns(ctx context.Context, db DB) error {
+	for _, table := range []string{"smeldr_tasks", "smeldr_goals"} {
+		exists, err := tableExists(ctx, db, table)
+		if err != nil {
+			return fmt.Errorf("smeldr: EnsureTaskGoalTitleColumns: %s: %w", table, err)
+		}
+		if !exists {
+			continue
+		}
+		if err := EnsureColumn(ctx, db, table, "title", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("smeldr: EnsureTaskGoalTitleColumns: %w", err)
+		}
 	}
 	return nil
 }
@@ -1302,8 +1341,9 @@ func orchSignalFlow() StateFlow {
 // unreachable from "implementing", "commit-reviewing" and "blocked".
 func orchTaskFlow() StateFlow {
 	return StateFlow{
-		Name:     "agent-task",
-		TypeName: "Task",
+		Name:        "agent-task",
+		TypeName:    "Task",
+		Description: "Task lifecycle. done: the work was carried out. resolved: it closed without being carried out (superseded, declined, or found to be already built); a reason is required (D112).",
 		States: []State{
 			{Name: "backlog", IsInitial: true, AwaitsAction: true},
 			{Name: "active", AwaitsAction: true},
@@ -1444,8 +1484,9 @@ func orchAmendmentFlow() StateFlow {
 // reasoning as the Task flow's own "resolved" transitions.
 func orchGoalFlow() StateFlow {
 	return StateFlow{
-		Name:     "goal-lifecycle",
-		TypeName: "Goal",
+		Name:        "goal-lifecycle",
+		TypeName:    "Goal",
+		Description: "Goal lifecycle. done: the work was carried out. resolved: it closed without being carried out (superseded, declined, or found to be already built); a reason is required (D112).",
 		States: []State{
 			{Name: "open", IsInitial: true, AwaitsAction: true},
 			{Name: "in-progress", AwaitsAction: true},

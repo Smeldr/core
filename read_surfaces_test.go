@@ -46,9 +46,9 @@ func newReadSurfaceFixture(t *testing.T) readSurfaceFixture {
 			t.Fatal(err)
 		}
 		if title == "seen" {
-			f.seen = out.(*Task)
+			f.seen = asItem[*Task](out)
 		} else {
-			f.hidden = out.(*Task)
+			f.hidden = asItem[*Task](out)
 		}
 	}
 	if _, err := rs.Grant(ctx, RoleGrant{TokenID: "reader", RoleName: "scoped-reader", ScopeStatic: []string{"Task:" + f.seen.ID}}); err != nil {
@@ -101,7 +101,7 @@ func TestReadSurfaces_WritesOnHiddenAreNotFound(t *testing.T) {
 		}
 	}
 	got, err := f.tasks.MCPGet(f.global, f.hidden.Slug)
-	if err != nil || got.(*Task).Band != "core" || got.(*Task).Status != f.hidden.Status {
+	if err != nil || asItem[*Task](got).Band != "core" || asItem[*Task](got).Status != f.hidden.Status {
 		t.Errorf("hidden Task changed: %+v %v", got, err)
 	}
 }
@@ -179,7 +179,7 @@ func TestReadSurfaces_TrustedReadAndAttachedScope(t *testing.T) {
 
 func TestReadSurfaces_ScopedSlugNeverRevealsAHiddenHolder(t *testing.T) {
 	f := newReadSurfaceFixture(t)
-	out, err := f.tasks.MCPCreate(f.reader, map[string]any{"Description": "mine", "Slug": f.hidden.Slug, "Band": "core"})
+	out, err := f.tasks.MCPCreate(f.reader, map[string]any{"Title": "mine", "Description": "mine", "Slug": f.hidden.Slug, "Band": "core"})
 	if err != nil {
 		t.Fatalf("create with a taken slug: %v", err)
 	}
@@ -205,11 +205,11 @@ func TestReadSurfaces_ScopedSlugNeverRevealsAHiddenHolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s := scoped.(*Decision).Slug; s == "pick-a-vendor-2" || !strings.HasPrefix(s, "pick-a-vendor-") {
+	if s := asItem[*Decision](scoped).Slug; s == "pick-a-vendor-2" || !strings.HasPrefix(s, "pick-a-vendor-") {
 		t.Errorf("scoped automatic slug = %q; want an ID tail", s)
 	}
 	global, err := decisions.MCPCreate(f.global, map[string]any{"Title": "Pick a vendor", "Scope": "core"})
-	if err != nil || global.(*Decision).Slug != "pick-a-vendor-2" {
+	if err != nil || asItem[*Decision](global).Slug != "pick-a-vendor-2" {
 		t.Errorf("global automatic slug = %v %v; want the counter", global, err)
 	}
 }
@@ -377,7 +377,7 @@ func TestReadSurfaces_HiddenAndMissingRunTheSameStatements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ht := hiddenTask.(*Task)
+	ht := asItem[*Task](hiddenTask)
 	if _, err := raw.Exec(`INSERT INTO smeldr_tasks (id, slug, status, created_at, updated_at, task_id) VALUES ('legacy-1', 'legacy-1', 'backlog', datetime('now'), datetime('now'), 'T-OLD1')`); err != nil {
 		t.Fatal(err)
 	}

@@ -98,10 +98,23 @@ func amendmentOf(v any) *Amendment {
 // amendsBeforeSave refuses a write whose Amends does not name exactly one
 // Decision, or that would change an Amends that is already set. An empty Amends
 // is always fine. On success it rewrites Amends to the canonical "D<n>" form.
+// It also enforces amendment_type's closed list and keeps pilot unstored
+// (D112).
 func amendsBeforeSave(ctx Context, db DB, existing, item any) error {
 	a := amendmentOf(item)
 	if a == nil {
 		return nil
+	}
+	// D112: amendment_type is a closed list, checked on create and on a
+	// changed value; pilot is retired, so a sent value is never stored (an
+	// older row keeps the one it has).
+	if err := checkAmendmentType(amendmentOf(existing), a); err != nil {
+		return err
+	}
+	if prev := amendmentOf(existing); prev != nil {
+		a.Pilot = prev.Pilot
+	} else {
+		a.Pilot = ""
 	}
 	want := strings.TrimSpace(a.Amends)
 	if old := amendmentOf(existing); old != nil && old.Amends != "" {

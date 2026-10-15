@@ -75,11 +75,14 @@ func amCtx() Context { return NewTestContext(User{ID: "recorder-1", Roles: []Rol
 
 func (e *amendsEnv) create(t *testing.T, fields map[string]any) (*Amendment, error) {
 	t.Helper()
+	if _, ok := fields["amendment_type"]; !ok {
+		fields["amendment_type"] = "feature" // D112: a create needs a listed type
+	}
 	out, err := e.m.MCPCreate(amCtx(), fields)
 	if err != nil {
 		return nil, err
 	}
-	return out.(*Amendment), nil
+	return asItem[*Amendment](out), nil
 }
 
 func (e *amendsEnv) liveAmends(t *testing.T, amendmentID string) []RelationEdge {
@@ -212,8 +215,8 @@ func TestAmends_WriteOnce(t *testing.T) {
 		t.Errorf("the same Decision spelled 1 must be accepted: %v", err)
 	}
 	got, _ := e.m.MCPGet(amCtx(), a.Slug)
-	if got.(*Amendment).Amends != "D1" {
-		t.Errorf("amends after the attempts = %q, want D1 unchanged", got.(*Amendment).Amends)
+	if asItem[*Amendment](got).Amends != "D1" {
+		t.Errorf("amends after the attempts = %q, want D1 unchanged", asItem[*Amendment](got).Amends)
 	}
 	if n := len(e.liveAmends(t, a.ID)); n != 1 {
 		t.Errorf("%d live edges after the attempts, want exactly 1", n)
@@ -262,7 +265,7 @@ func TestAmends_RejectedAmendmentEndsItsEdge(t *testing.T) {
 			if err != nil {
 				t.Fatalf("get: %v", err)
 			}
-			body := *got.(*Amendment)
+			body := *asItem[*Amendment](got)
 			body.Status = "rejected"
 			b, _ := json.Marshal(body)
 			r := httptest.NewRequest(http.MethodPut, "/amendments/"+a.Slug, bytes.NewReader(b))
@@ -357,8 +360,8 @@ func TestBackfillAmendsEdges(t *testing.T) {
 		t.Fatalf("edges = %+v, want one to dec-1", edges)
 	}
 	got, _ := e.m.MCPGet(ctx, plain.Slug)
-	if got.(*Amendment).Amends != "D1" {
-		t.Errorf("the Amendment's amends = %q, want it filled in", got.(*Amendment).Amends)
+	if asItem[*Amendment](got).Amends != "D1" {
+		t.Errorf("the Amendment's amends = %q, want it filled in", asItem[*Amendment](got).Amends)
 	}
 	var actor string
 	for _, r := range e.prov.Appended() {
@@ -418,10 +421,10 @@ func TestAmends_HTTPPaths(t *testing.T) {
 		return w
 	}
 
-	if w := do(http.MethodPost, "/amendments", map[string]any{"amendment_number": "A930", "slug": "a930", "amends": "D404"}); w.Code < 400 {
+	if w := do(http.MethodPost, "/amendments", map[string]any{"amendment_number": "A930", "slug": "a930", "amends": "D404", "amendment_type": "fix"}); w.Code < 400 {
 		t.Errorf("create naming a missing Decision = %d, want a refusal", w.Code)
 	}
-	w := do(http.MethodPost, "/amendments", map[string]any{"amendment_number": "A931", "slug": "a931", "amends": "D1"})
+	w := do(http.MethodPost, "/amendments", map[string]any{"amendment_number": "A931", "slug": "a931", "amends": "D1", "amendment_type": "fix"})
 	if w.Code >= 300 {
 		t.Fatalf("create = %d %s", w.Code, w.Body.String())
 	}
@@ -447,7 +450,7 @@ func TestAmends_HTTPPaths(t *testing.T) {
 		t.Fatalf("PUT omitting amends = %d %s", w.Code, w.Body.String())
 	}
 	got, _ := e.m.MCPGet(amCtx(), "a931")
-	if got.(*Amendment).Amends != "D1" {
-		t.Errorf("amends after a PUT that omitted it = %q, want D1 kept", got.(*Amendment).Amends)
+	if asItem[*Amendment](got).Amends != "D1" {
+		t.Errorf("amends after a PUT that omitted it = %q, want D1 kept", asItem[*Amendment](got).Amends)
 	}
 }

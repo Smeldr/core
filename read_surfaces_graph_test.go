@@ -42,7 +42,7 @@ func newGraphFixture(t *testing.T) graphFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.far = out.(*Task)
+	f.far = asItem[*Task](out)
 	if _, err := f.rs.Grant(ctx, RoleGrant{TokenID: "reader", RoleName: "scoped-reader", ScopeStatic: []string{"Task:" + f.far.ID}}); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestReadSurfacesGraph_GoalContextHiddenEqualsMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := out.(*Goal)
+	g := asItem[*Goal](out)
 	_, hiddenErr := QueryGoalContext(f.reader, f.db, f.rels, g.Slug)
 	_, missingErr := QueryGoalContext(f.reader, f.db, f.rels, "no-such-goal")
 	if !errors.Is(hiddenErr, ErrNotFound) || hiddenErr.Error() != missingErr.Error() {
@@ -404,7 +404,7 @@ func TestReadSurfacesGraph_GoalContextLeavesHiddenLinksOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := out.(*Goal)
+	g := asItem[*Goal](out)
 	if _, err := f.rs.Grant(context.Background(), RoleGrant{TokenID: "reader", RoleName: "scoped-reader", ScopeStatic: []string{"Goal:" + g.ID}}); err != nil {
 		t.Fatal(err)
 	}
@@ -628,7 +628,7 @@ func TestReadSurfacesGraph_ScopedErrorPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := out.(*Goal)
+	g := asItem[*Goal](out)
 	if _, err := QueryGoalContext(TrustedRead(f.reader), f.db, edges, g.Slug); err == nil {
 		t.Error("goal context on a failing source read: no error")
 	}

@@ -132,7 +132,7 @@ func TestPacketAndGoalContext_ResolveAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := created.(*Goal)
+	g := asItem[*Goal](created)
 	for _, ident := range []string{"G1", "g1", g.Slug, g.ID} {
 		pkt, err := BuildContextPacket(ctx, db, nil, "https://example.com", "test", "goal", ident, 1)
 		if err != nil || pkt.Anchor.ID != "G1" {
@@ -180,7 +180,7 @@ func TestAmends_ResolveByAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 	id, err := resolveDecisionID(ctx, db, "D1")
-	if err != nil || id != d.(*Decision).ID {
+	if err != nil || id != asItem[*Decision](d).ID {
 		t.Errorf("resolveDecisionID(D1) = %q %v", id, err)
 	}
 	if _, err := resolveDecisionID(ctx, db, "D99"); err == nil {
@@ -191,17 +191,17 @@ func TestAmends_ResolveByAddress(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 	defer slog.SetDefault(prev)
 	am := findModule[*Amendment](t, app)
-	a, err := am.MCPCreate(NewTestContext(User{ID: "u-bare", Roles: []Role{Author, Editor}}), map[string]any{"Summary": "s", "Amends": "1"})
+	a, err := am.MCPCreate(NewTestContext(User{ID: "u-bare", Roles: []Role{Author, Editor}}), map[string]any{"Summary": "s", "Amends": "1", "amendment_type": "fix"})
 	if err != nil {
 		t.Fatalf("amends a bare number: %v", err)
 	}
-	if got := a.(*Amendment).Amends; got != "D1" {
+	if got := asItem[*Amendment](a).Amends; got != "D1" {
 		t.Errorf("amends = %q, want D1", got)
 	}
 	if !strings.Contains(buf.String(), "bare number") || !strings.Contains(buf.String(), "u-bare") {
 		t.Errorf("log = %q, want the bare number noted with its token", buf.String())
 	}
-	if got, err := resolveAmendmentID(ctx, db, "a1"); err != nil || got != a.(*Amendment).ID {
+	if got, err := resolveAmendmentID(ctx, db, "a1"); err != nil || got != asItem[*Amendment](a).ID {
 		t.Errorf("resolveAmendmentID(a1) = %q %v", got, err)
 	}
 }
@@ -223,7 +223,7 @@ func TestTransitionPeriod_LegacyFieldsOnCreate(t *testing.T) {
 	if _, isMap := plain.(map[string]any); err != nil || isMap {
 		t.Fatalf("no legacy field: %T %v, want the item unchanged", plain, err)
 	}
-	if got := plain.(*Decision).DecisionNumber; got != "D1" {
+	if got := asItem[*Decision](plain).DecisionNumber; got != "D1" {
 		t.Errorf("legacy column = %q, want the address D1 mirrored", got)
 	}
 
@@ -394,7 +394,7 @@ func TestLegacyFallback_MatchesExternalRef(t *testing.T) {
 
 	// amends: an Amendment sent with its own number is found by it for a backfill.
 	ams := findModule[*Amendment](t, app)
-	if _, err := ams.MCPCreate(authorCtx(), map[string]any{"amendment_number": "A900", "Summary": "s"}); err != nil {
+	if _, err := ams.MCPCreate(authorCtx(), map[string]any{"amendment_number": "A900", "Summary": "s", "amendment_type": "fix"}); err != nil {
 		t.Fatal(err)
 	}
 	if id, err := resolveAmendmentID(ctx, db, "A900"); err != nil || id == "" {

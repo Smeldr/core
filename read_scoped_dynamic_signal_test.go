@@ -255,7 +255,7 @@ func TestSignalSubject_HiddenSubjectHidesTheSignal(t *testing.T) {
 	trusted := TrustedRead(authorCtx()).(Context)
 	seenTask, _ := f.tasks.MCPCreate(trusted, map[string]any{"Description": "seen"})
 	hiddenTask, _ := f.tasks.MCPCreate(trusted, map[string]any{"Description": "hidden"})
-	seen, hidden := seenTask.(*Task), hiddenTask.(*Task)
+	seen, hidden := asItem[*Task](seenTask), asItem[*Task](hiddenTask)
 	f.grant(t, "Task:"+seen.ID, "Signal:*")
 	if _, err := f.app.ReadScope(f.reader); err != nil {
 		t.Fatal(err)
@@ -357,7 +357,7 @@ func TestResolveReadableID(t *testing.T) {
 	trusted := TrustedRead(authorCtx()).(Context)
 	seenTask, _ := f.tasks.MCPCreate(trusted, map[string]any{"Description": "seen"})
 	hiddenTask, _ := f.tasks.MCPCreate(trusted, map[string]any{"Description": "hidden"})
-	seen, hidden := seenTask.(*Task), hiddenTask.(*Task)
+	seen, hidden := asItem[*Task](seenTask), asItem[*Task](hiddenTask)
 	repo, _ := f.app.DynamicContentRepo("invoice")
 	inv, _ := repo.CreateDraft(TrustedRead(context.Background()), map[string]any{"Title": "seen"})
 	f.grant(t, "Task:"+seen.ID, "invoice:"+inv.ID)
@@ -401,7 +401,7 @@ func TestReadScopedDynamicSignal_ErrorPaths(t *testing.T) {
 	ctx := context.Background()
 	trusted := TrustedRead(authorCtx()).(Context)
 	created, _ := f.tasks.MCPCreate(trusted, map[string]any{"Description": "seen"})
-	seen := created.(*Task)
+	seen := asItem[*Task](created)
 	f.grant(t, "Task:"+seen.ID, "Signal:*")
 	about := insertSubjectSignal(t, f.raw, "Task", seen.ID)
 

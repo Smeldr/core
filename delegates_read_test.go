@@ -24,7 +24,7 @@ func TestDelegationRoles_ReadTheirItemAfterBoot(t *testing.T) {
 			trusted := TrustedRead(authorCtx()).(Context)
 			mine, _ := f.tasks.MCPCreate(trusted, map[string]any{"Description": "delegated"})
 			other, _ := f.tasks.MCPCreate(trusted, map[string]any{"Description": "other"})
-			mineID, otherID := mine.(*Task).ID, other.(*Task).ID
+			mineID, otherID := asItem[*Task](mine).ID, asItem[*Task](other).ID
 
 			// The role as it was before: the delegated operation only.
 			if err := f.rs.DefineRole(ctx, RoleDefinition{Name: c.role, Operations: []string{c.oldOp}, ScopeMode: ScopeStatic}); err != nil {
@@ -60,7 +60,7 @@ func TestDelegationRoles_ReadTheirItemAfterBoot(t *testing.T) {
 			if ok, err := f.rs.Authorized(ctx, "delegate", "manage", AuthTarget{TypeName: "Task", ID: mineID}); err != nil || ok {
 				t.Errorf("manage on its item = %v %v; want false (nothing else widens)", ok, err)
 			}
-			if _, err := f.tasks.MCPGet(delegate, mine.(*Task).Slug); err != nil {
+			if _, err := f.tasks.MCPGet(delegate, asItem[*Task](mine).Slug); err != nil {
 				t.Errorf("the delegate cannot read its item: %v", err)
 			}
 		})

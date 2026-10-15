@@ -136,6 +136,9 @@ type ServerConfig struct {
 	OAuthIssuer               string
 	OAuthDBPath               string
 	InstanceName              string
+	// TitleCutover (TITLE_CUTOVER, RFC3339) is when a record's title rule
+	// (D112) turns from a warning into a refusal; empty means warnings only.
+	TitleCutover string
 }
 
 // ServerResult holds the live components returned by [buildApp].
@@ -153,6 +156,7 @@ func parseConfig() ServerConfig {
 	return ServerConfig{
 		Secret:                    requireEnv("SECRET"),
 		BaseURL:                   os.Getenv("BASE_URL"),
+		TitleCutover:              os.Getenv("TITLE_CUTOVER"),
 		Port:                      port,
 		Addr:                      envOr("ADDR", "127.0.0.1:"+port),
 		EnableTokens:              os.Getenv("ENABLE_TOKENS") != "",
@@ -215,11 +219,20 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		tokenStore = smeldr.NewTokenStore(db, cfg.Secret)
 	}
 
+	var titleCutover time.Time
+	if cfg.TitleCutover != "" {
+		t, err := time.Parse(time.RFC3339, cfg.TitleCutover)
+		if err != nil {
+			return ServerResult{}, fmt.Errorf("TITLE_CUTOVER: want an RFC3339 time: %w", err)
+		}
+		titleCutover = t
+	}
 	app := smeldr.New(smeldr.Config{
-		BaseURL:    cfg.BaseURL,
-		Secret:     []byte(cfg.Secret),
-		DB:         db,
-		TokenStore: tokenStore,
+		BaseURL:      cfg.BaseURL,
+		Secret:       []byte(cfg.Secret),
+		DB:           db,
+		TokenStore:   tokenStore,
+		TitleCutover: titleCutover,
 	})
 
 	var roleStore *smeldr.RoleStore
@@ -303,6 +316,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 		if err := smeldr.EnsureDecisionTitleColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure decision title column: %w", err)
+		}
+		if err := smeldr.EnsureTaskGoalTitleColumns(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure task and goal title columns: %w", err)
 		}
 		if err := smeldr.EnsureAmendmentBodyColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure amendment body column: %w", err)
@@ -693,6 +709,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "migrate-addresses" {
 		os.Exit(runMigrateAddresses(os.Args[2:], os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "migrate-record-shape" {
+		os.Exit(runMigrateRecordShape(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	cfg := parseConfig()
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")

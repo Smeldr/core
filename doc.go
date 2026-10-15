@@ -202,6 +202,10 @@
 //     one transition verb. [App.AuthorizeCapability] checks a caller against a
 //     capability under the read rules and grants, and [App.VisibleCapabilities]
 //     lists what a caller may use.
+//   - Record shape (D112): Decision, Task, Goal and Amendment carry a title of
+//     at most [TitleMaxLength] characters, warned about first and refused after
+//     [Config.TitleCutover]; amendment_type is the closed list [AmendmentTypes];
+//     [MigrateRecordShape] brings existing records to that shape.
 //   - Webhooks ([WebhookStore], [WebhookEndpoint], [WebhookEventPayload]) —
 //     outbound delivery on lifecycle events, created with [NewWebhookStore].
 //   - Dynamic content types ([DynamicTypeRepo]) — a schema-driven repository

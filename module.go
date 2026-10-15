@@ -462,6 +462,7 @@ type Module[T any] struct {
 	tplShow          *template.Template // nil until parseTemplates succeeds
 	tplMu            sync.RWMutex       // guards tplList, tplShow reads and swaps
 	siteName         string             // set by App.Content via setSiteName
+	titleCutover     time.Time          // set by App.Content via setTitleCutover (D112)
 	ogDefaults       *OGDefaults        // nil until App.Handler via setSEODefaults
 	appSchema        *AppSchema         // nil until App.Handler via setSEODefaults
 	headAssets       *HeadAssets        // nil until App.Handler via setSEODefaults
@@ -2432,6 +2433,14 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	// D112: the HTTP body carries no warnings (D110), so they are logged;
+	// after the title cutover a missing or long title is refused.
+	titleWarns, err := titleCheck(item, m.titleCutover)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	noteTitleWarnings(ctx, m.contentTypeName, titleWarns)
 	if s := string(nodeStatusOf(item)); s != "" {
 		if err := validateInitialState(ctx, m.db, m.contentTypeName, s); err != nil {
 			WriteError(w, r, err)
@@ -2536,6 +2545,16 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	if err := RunValidation(item); err != nil {
 		WriteError(w, r, err)
 		return
+	}
+	// D112: a full-replace PUT is held to the title rule only when it changes
+	// the title, so an older untitled row still takes other edits.
+	if titleChanged(any(existing), any(item)) {
+		titleWarns, err := titleCheck(item, m.titleCutover)
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		noteTitleWarnings(ctx, m.contentTypeName, titleWarns)
 	}
 
 	// Save previous status for post-save signal dispatch.
@@ -2817,6 +2836,12 @@ func mcpStructField(sf reflect.StructField) MCPField {
 	}
 	if tag := sf.Tag.Get("smeldr"); tag != "" {
 		f.Required, f.MinLength, f.MaxLength, f.Enum = mcpParseSmeldrTag(tag)
+	}
+	// smeldr_enum advertises a closed list in the MCP schema without a
+	// validation tag, so a type can check the list where it chooses (on create
+	// and on a changed value) and older rows still update (D112).
+	if enum := sf.Tag.Get("smeldr_enum"); enum != "" && f.Enum == nil {
+		f.Enum = strings.Split(enum, "|")
 	}
 	return f
 }
@@ -3235,6 +3260,10 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	if err := RunValidation(item); err != nil {
 		return nil, err
 	}
+	titleWarns, err := titleCheck(item, m.titleCutover)
+	if err != nil {
+		return nil, err
+	}
 	if s := string(nodeStatusOf(item)); s != "" {
 		if err := validateInitialState(ctx, m.db, m.contentTypeName, s); err != nil {
 			return nil, err
@@ -3279,10 +3308,20 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 		noteDeprecatedUse(ctx, m.contentTypeName, legacyField)
 		warnings = append(warnings, legacyFieldWarning(legacyField, legacySent, addressOf(item), externalRefOf(item)))
 	}
+	warnings = append(warnings, addressedWarnings(item, titleWarns)...)
+	warnings = append(warnings, addressedWarnings(item, retiredFieldWarnings(item, fields))...)
 	if len(warnings) > 0 {
 		return withCreateWarnings(item, warnings), nil
 	}
 	return item, nil
+}
+
+// addressedWarnings returns ws with each warning's Address set to item's.
+func addressedWarnings(item any, ws []CreateWarning) []CreateWarning {
+	for i := range ws {
+		ws[i].Address = addressOf(item)
+	}
+	return ws
 }
 
 // newSlug returns a new item's slug under the per-item read rules. For a
@@ -3352,7 +3391,14 @@ func idSlug(base, id string, taken func(string) bool) string {
 // Node.ID, Node.Slug, and Node.Status are always restored after the merge —
 // use the dedicated lifecycle methods to change status.
 func (m *Module[T]) MCPUpdate(ctx Context, slug string, fields map[string]any) (any, error) {
-	return m.updateFields(ctx, slug, fields, surfaceMCP)
+	item, warnings, err := m.updateFields(ctx, slug, fields, surfaceMCP)
+	if err != nil {
+		return nil, err
+	}
+	if len(warnings) > 0 {
+		return withCreateWarnings(item, warnings), nil
+	}
+	return item, nil
 }
 
 // updateFields is the shared partial-update merge/identity-restore/save
@@ -3361,20 +3407,20 @@ func (m *Module[T]) MCPUpdate(ctx Context, slug string, fields map[string]any) (
 // as surfaceHTTP (matching updateHandler's own PUT call site) rather than
 // being misreported as surfaceMCP just because it reuses MCPUpdate's own
 // merge logic.
-func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any, surface string) (any, error) {
+func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any, surface string) (any, []CreateWarning, error) {
 	existing, err := m.resolveVisible(ctx, slug)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if isStateLocked(ctx, m.db, m.contentTypeName, string(nodeStatusOf(existing))) {
-		return nil, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
+		return nil, nil, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
 			ErrConflict, m.contentTypeName, nodeIDOf(existing), nodeStatusOf(existing))
 	}
 	// Web content that is not published may take another slug: a draft
 	// reserves no URL, so the publisher chooses one before publishing.
 	slugChangeable := m.draftSlugsShared() && nodeStatusOf(existing) != Published
 	if err := refuseImmutableKeys(fields, existing, slugChangeable); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	newSlug := nodeSlugOf(existing)
 	if slugChangeable {
@@ -3394,10 +3440,10 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 	coerceSliceFields(fields, elemType)
 	data, err := json.Marshal(fields)
 	if err != nil {
-		return nil, ErrBadRequest
+		return nil, nil, ErrBadRequest
 	}
 	if err := json.Unmarshal(data, pv.Interface()); err != nil {
-		return nil, ErrBadRequest
+		return nil, nil, ErrBadRequest
 	}
 
 	// Restore identity and lifecycle so callers cannot overwrite them. The
@@ -3412,23 +3458,34 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 
 	item := ptrToT[T](pv, m.proto)
 	if err := RunValidation(item); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	// D112: the title rule applies to an update that touches the title, so an
+	// edit of an older untitled row is not held to a field it did not change.
+	var warnings []CreateWarning
+	if titleFieldTouched(item, fields) {
+		ws, err := titleCheck(item, m.titleCutover)
+		if err != nil {
+			return nil, nil, err
+		}
+		warnings = ws
 	}
 	if err := m.beforeSave(ctx, BeforeUpdate, any(existing), item); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := m.repo.Save(ctx, item); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if m.syncSaveHook != nil {
 		if err := m.syncSaveHook(ctx, m.contentTypeName, nodeIDOf(item), item); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	m.runSaveAfter(ctx, any(existing), item)
 	m.notifyAfter(ctx, AfterUpdate, string(nodeStatusOf(existing)), surface, "", item)
 	m.invalidateCache()
-	return item, nil
+	warnings = append(warnings, retiredFieldWarnings(item, fields)...)
+	return item, addressedWarnings(item, warnings), nil
 }
 
 // refuseImmutableKeys refuses a partial update that asks to change what
@@ -3509,11 +3566,12 @@ func (m *Module[T]) patchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := m.updateFields(ctx, slug, fields, surfaceHTTP)
+	item, warnings, err := m.updateFields(ctx, slug, fields, surfaceHTTP)
 	if err != nil {
 		WriteError(w, r, err)
 		return
 	}
+	noteTitleWarnings(ctx, m.contentTypeName, warnings)
 	writeJSON(w, http.StatusOK, item)
 }
 

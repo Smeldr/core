@@ -5350,6 +5350,49 @@ Gives every record that has no address yet its address, per type in `created_at`
 
 **Over MCP** (an instance reached only through its URL and token, such as a Cloud org), smeldr.dev/mcp's `migrate_addresses` tool runs the same function. Its `smeldr_tool_policies` seed row is `{"migrate_addresses", "administer"}` (A490), so only Admin may call it. Without the row the tool is denied for every caller, Admin included, whenever governance is wired. The row is inserted at the next boot of an existing instance. From a terminal, smeldr.dev/cli v0.26.0 calls the tool: `smeldr-cli migrate-addresses [--apply] [--report <path>]` (A492).
 
+### Titles and closed vocabularies (A508, D112)
+
+Decision, Task, Goal and Amendment carry a title: one line, at most `TitleMaxLength` (120) characters, counted in characters, a short statement of what the record is. An Amendment's `summary` is its title. Signal has no title. `TitleGuidance` is the exported guidance text: "a title is required: one line of at most 120 characters, a short statement of what the record is (D112)".
+
+Warnings come first. A write without a title, or with one over the limit, succeeds with a warning until the cutover. The codes are `title_missing` and `title_too_long`, in the `warnings` array next to `slug_adjusted` and `deprecated_field`; each names the field (`title`, or `summary` for an Amendment) and the record's address.
+
+The cutover is `Config.TitleCutover`. Its zero value means warnings only, and the error phase starts only when an operator sets the date: the date belongs to whoever runs the instance, and process.smeldr.dev's is set by Peter. After it, the same write is refused with a validation error on the title field whose message includes `TitleGuidance`. example/server reads it from `TITLE_CUTOVER` (RFC3339); a malformed value stops the server from starting.
+
+| Write | Before the cutover | After the cutover |
+|---|---|---|
+| MCP create without a title, or with one over 120 characters | the item, with `title_missing` or `title_too_long` in `warnings` | refused: validation error on the title field |
+| MCP update that touches the title, leaving it missing or too long | the item, with the warning | refused |
+| MCP update that does not touch the title | passes, no warning | passes |
+| HTTP create, or a PUT or PATCH that changes the title, without a valid one | passes; no warnings in the body, logged once per actor, type, code and day | refused |
+| HTTP PUT or PATCH that leaves the title as it is | passes | passes |
+
+The MCP input schema does not mark `title` required and sets no `maxLength`, so a strict client does not refuse the call before the server can warn.
+
+- **Slugs.** New Task and Goal slugs come from the title, as Decision slugs already do. An explicit slug still wins, and existing slugs never change.
+- **`Titled`.** Decision, Task, Goal and Amendment implement `ContentTitle()`, so webhook bodies and signal events carry the title; the context packet's Task and Goal fields include `title`.
+- **`App.CapabilityWarnings(resource, verb) []string`** returns the warning codes an act can return with a successful result. Item create: `slug_adjusted`, `deprecated_field`, `title_missing`, `title_too_long`. Item update: `deprecated_field`, `title_missing`, `title_too_long`. A copy; nil when there are none.
+- **`AmendmentTypes`**: feature, fix, docs, chore, test, ci, refactor, release. A create must use one of them (empty is refused); an update that changes the type must use one; an update that does not change it, or sends it empty, keeps the stored value. An unknown value is a validation error that names the list. The MCP schema advertises the list as `enum` through the `smeldr_enum` struct tag, which is schema only: the type checks the list itself.
+- **`Amendment.Pilot`** is deprecated and not stored; the column stays, the field is not emitted, the MCP schema marks it "Deprecated (D112): ...", and an MCP create or update that sends it gets a `deprecated_field` warning.
+- **`done` and `resolved`.** The Task and Goal flows' `StateFlow.Description` says: done, the work was carried out; resolved, it closed without being carried out (superseded, declined, or found to be already built), and a reason is required. Every transition into `resolved` requires a reason.
+- **Not in this release** (Task `core-dynamic-titles-and-field-limits`): a title field for customer record types at `define_content_type`, dynamic field length limits, task_plan's `summary`, and warnings on `create_content` and `update_content`.
+
+#### `MigrateRecordShape`
+
+```go
+func MigrateRecordShape(ctx context.Context, db DB, opts RecordShapeMigrationOptions) (*RecordShapeMigrationReport, error)
+func (a *App) MigrateRecordShape(ctx context.Context, opts RecordShapeMigrationOptions) (*RecordShapeMigrationReport, error)
+```
+
+One transaction, idempotent; a dry run (`DryRun: true`) runs the same code and rolls back.
+
+- Untitled Tasks and Goals get the first line of their description, untitled Decisions the first line of their body: heading, list and quote marks and emphasis removed, cut at a word boundary at 120 characters, no ellipsis. A record with no usable text is reported in `untitled` and left.
+- Amendment summaries over 120 characters are cut the same way; the full summary is put first in the body unless the body already contains it (`body_kept`), so no text is lost. A merged Amendment is otherwise locked: this migration is the only path that edits it, and the report lists every Amendment it changed, by address.
+- `amendment_type`: `feat` to `feature`, `bugfix` to `fix`, `deploy` to `release`. Any other value outside the list is reported in `unmapped_amendment_types` for a person to map, never guessed ("Level 1" and "Level 2" are a size, not a type).
+- The report, `RecordShapeMigrationReport{dry_run, duration_ms, titles, amendment_types, untitled, unmapped_amendment_types}`, names each change by type, ID, address, field, old and new value.
+- It needs the Task and Goal title column; without it the error names `EnsureTaskGoalTitleColumns`.
+
+**`smeldr-server migrate-record-shape [--apply] [--report=path]`** (example/server): a dry run unless `--apply` is given. On process.smeldr.dev, applying it is devops' job on Peter's yes, after architect has mapped the unmapped types from the dry-run report.
+
 ### `InsertSignal`
 
 ```go

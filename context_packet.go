@@ -154,6 +154,7 @@ func packetLegacyFields(item any) (canonicalID string, fields map[string]any) {
 	case *Goal:
 		return v.GoalID, map[string]any{
 			"goal_id":     v.GoalID,
+			"title":       v.Title,
 			"priority":    v.Priority,
 			"band":        v.Band,
 			"size":        v.Size,
@@ -174,12 +175,12 @@ func packetLegacyFields(item any) (canonicalID string, fields map[string]any) {
 			"amendment_type":   v.AmendmentType,
 			"version":          v.Version,
 			"commit_hash":      v.CommitHash,
-			"pilot":            v.Pilot,
 			"summary":          v.Summary,
 		}
 	case *Task:
 		return v.TaskID, map[string]any{
 			"task_id":     v.TaskID,
+			"title":       v.Title,
 			"priority":    v.Priority,
 			"band":        v.Band,
 			"size":        v.Size,
