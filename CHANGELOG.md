@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.148.0] - 2026-10-15
+
 ### Changed
 
 - **The graph surfaces apply the per-item read rules, step 3b of design item-eecbbe69 (A496).** An item the caller may not read is absent from every graph read, and a hidden item answers exactly like a missing one, running the same statements. `BuildContextPacket` and `GET /packet/{type}/{slug}` report a hidden anchor as not found, and leave out any edge whose far end is hidden before anything is fetched, so that item is not in the packet, not counted in `Omitted`, and not walked through at depth 2. `QueryGoalContext` reports a hidden Goal as not found and leaves out linked Decisions, Tasks and Goals the caller may not read. `RelationStore.MCPGetRelations` and `MCPPreviewImpact` return an edge only when the caller may read both ends. `RelationStore.ListRelations` pages and counts `Total` over only the edges with both ends readable: for a scoped caller every matching row is loaded, filtered, then paged and counted in memory, while a reader of everything keeps the SQL paging unchanged. `Reachability`, `ReachabilityBounded` and `GET /reachability/{type}/{id}` leave a hidden node out of a ring, out of the cap and any cut, and do not walk through it; a hidden anchor reads as one with no relations. `App.ItemProvenance` gives a hidden item the empty history of a missing one (`Total` 0). A failure to load the scope is `ErrInternal`, never an empty result.

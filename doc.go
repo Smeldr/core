@@ -184,6 +184,14 @@
 //     [GovernanceAuditStore], [GovernanceAuditRecord], [StewardshipInbox]) —
 //     role grants and an audit trail over governance actions, created with
 //     [NewRoleStore] and [NewGovernanceAuditStore].
+//   - Per-item read rules ([ReadScope], [App.ReadScope], [LoadReadScope]): under
+//     governance a caller reads only the items its grants name, and an item it
+//     may not read answers exactly like a missing one, on the item surfaces
+//     (get, list, writes, transitions) and the graph surfaces (context packet,
+//     goal context, relations, reachability, provenance, audit). Published web
+//     content stays public; a record type never is. A request loads its scope
+//     once and attaches it with [WithReadScope]; trusted in-process code reads
+//     past the rules only with [TrustedRead].
 //   - Webhooks ([WebhookStore], [WebhookEndpoint], [WebhookEventPayload]) —
 //     outbound delivery on lifecycle events, created with [NewWebhookStore].
 //   - Dynamic content types ([DynamicTypeRepo]) — a schema-driven repository
