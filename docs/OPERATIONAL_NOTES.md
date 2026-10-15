@@ -27,8 +27,9 @@ Peter decide.
 
 **Reach.** The subcommand only reaches an instance that runs example/server on a host we
 operate (process.smeldr.dev). Cloud's org instances are reached only over HTTP/MCP through
-their `InstanceURL` and token, so they need the mcp admin tool (D110 Phase 2) before any of
-them is migrated.
+their `InstanceURL` and token, so they are migrated with mcp's `migrate_addresses` tool (mcp v1.60.0, core v1.145.0), or from a
+terminal with `smeldr-cli migrate-addresses [--apply] [--report <path>]` (cli v0.26.0), in the same
+order: dry run with a report, read it, back up, apply.
 
 ## Standalone-module integration testing before a core push
 
