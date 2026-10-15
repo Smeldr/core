@@ -195,6 +195,11 @@
 //     content stays public; a record type never is. A request loads its scope
 //     once and attaches it with [WithReadScope]; trusted in-process code reads
 //     past the rules only with [TrustedRead].
+//   - The capability registry ([Capability], [App.Capabilities],
+//     [App.CapabilityFor]): every act the MCP, REST and CLI surfaces project, as
+//     a resource, a verb and the one governance operation word that gates it.
+//     Content types are an argument of the item resource, and lifecycle is the
+//     one transition verb.
 //   - Webhooks ([WebhookStore], [WebhookEndpoint], [WebhookEventPayload]) —
 //     outbound delivery on lifecycle events, created with [NewWebhookStore].
 //   - Dynamic content types ([DynamicTypeRepo]) — a schema-driven repository

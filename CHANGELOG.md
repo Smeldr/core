@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Added
+
+- **A capability registry lists every act each surface projects (A499).** `App.Capabilities()` returns a copy, in a fixed order, of every `Capability`: a resource, a verb, the governance operation word that gates it, a `ReasonRule` (`ReasonNotTaken`, `ReasonOptional`, `ReasonRequired` or `ReasonPerFlow`) and whether the verb is custom. `App.CapabilityFor` looks one up by resource and verb and returns false for an unknown pair, without allocating. The resources and the standard verbs are exported constants (`ResourceItem` to `ResourceWebhook`, `VerbGet` to `VerbTransition`). The registry uses today's operation words only. Content types are an argument of the item resource, so a new type adds no capability, and lifecycle is the one `transition` verb, gated on `manage`, with the reason decided by the type's flow (D94, D96). A coverage test fails the build when a built-in MCP tool with a seeded policy has no capability, when a capability names an unknown operation word, or when a tool's operation differs from its capability's without being on the named list of divergences. Nothing reads the registry yet, so no tool, route, schema or behaviour changes.
+
 ---
 
 ## [1.149.0] - 2026-10-15

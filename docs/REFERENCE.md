@@ -1015,6 +1015,114 @@ own docs; this tool requires a `smeldr_tool_policies` seed row
 own row) or every governance-enabled caller is silently forbidden, the same
 gap A298/A311 already closed for `get_sweep_run`/`get_stewardship_inbox`.
 
+### Capabilities (D94, A499)
+
+A capability is one act on one resource. It is the unit that the MCP, REST and CLI surfaces each project (D94). Types are an argument of the `item` resource, so adding a content type never adds a capability.
+
+```go
+type ReasonRule string
+
+const (
+    ReasonNotTaken ReasonRule = "none"     // the act takes no reason
+    ReasonOptional ReasonRule = "optional" // a reason may be given, and it is recorded
+    ReasonRequired ReasonRule = "required" // the act is refused without one
+    ReasonPerFlow  ReasonRule = "flow"     // the type's state flow decides per transition (D96)
+)
+
+type Capability struct {
+    Resource   string     // one of the Resource* constants
+    Verb       string     // a standard verb (Verb* constants) or a custom one
+    Operation  string     // the governance operation word that gates it (D43)
+    ReasonRule ReasonRule
+    Custom     bool       // true when Verb is not a standard verb
+}
+
+const (
+    ResourceItem     = "item"
+    ResourceType     = "type"
+    ResourceRelation = "relation"
+    ResourceSignal   = "signal"
+    ResourceAccess   = "access"
+    ResourceOps      = "ops"
+    ResourceSite     = "site"
+    ResourcePageMeta = "page_meta"
+    ResourceWebhook  = "webhook"
+)
+
+const (
+    VerbGet        = "get"
+    VerbList       = "list"
+    VerbCreate     = "create"
+    VerbUpdate     = "update"
+    VerbDelete     = "delete"
+    VerbTransition = "transition"
+)
+
+func (a *App) Capabilities() []Capability                             // a copy, fixed order; safe on a nil *App
+func (a *App) CapabilityFor(resource, verb string) (Capability, bool) // false for an unknown pair; one map lookup, no allocation; safe on a nil *App
+```
+
+- One governance operation word applies per (resource, verb). The words are the existing ones; no new operation word.
+- The registry is read-only. Nothing reads it yet, and no tool, route or schema changes. It is the base for the capability authorization step (C2) and the opt-in consolidated MCP profile (C3), which come later.
+- `access delegate` and `access withdraw_delegation` are floors. The per-item check runs inside the act, against the actual target.
+- A coverage test checks three things:
+  - every built-in MCP tool in core's seeded tool policies maps to a capability;
+  - every capability names a known operation word;
+  - a tool's seeded operation agrees with its capability's, except two named divergences that the authorization step (C2) resolves: `create_content` and `update_content` are gated on `manage` today, while item `create` and `update` are gated on `create` and `update`; and the per-type `publish_`, `schedule_` and `archive_` tools are gated on `publish` and `archive`, while the one `transition` verb is gated on `manage` (D96). The typed tools keep their seeded rows.
+
+| Resource | Verb | Operation | Reason | Custom |
+|---|---|---|---|---|
+| item | get | read | none | no |
+| item | list | read | none | no |
+| item | create | create | none | no |
+| item | update | update | optional | no |
+| item | delete | delete | none | no |
+| item | transition | manage | flow | no |
+| item | compose | manage | none | yes |
+| type | get | read | none | no |
+| type | list | read | none | no |
+| type | define | define-type | none | yes |
+| type | define_flow | define-flow | none | yes |
+| relation | get | read | none | no |
+| relation | list | read | none | no |
+| relation | assert | create | none | yes |
+| relation | propose | create | none | yes |
+| relation | observe | create | none | yes |
+| relation | withdraw | archive | required | yes |
+| relation | define | define-relation-kind | none | yes |
+| relation | preview_impact | manage | none | yes |
+| signal | get | read | none | no |
+| signal | list | read | none | no |
+| signal | create | create | none | no |
+| access | list | administer | none | no |
+| access | list_roles | read | none | yes |
+| access | lookup_names | read | none | yes |
+| access | create_token | administer | optional | yes |
+| access | revoke_token | administer | optional | yes |
+| access | grant | administer | optional | yes |
+| access | revoke | administer | optional | yes |
+| access | delegate | read | none | yes |
+| access | withdraw_delegation | read | none | yes |
+| ops | get | read | none | no |
+| ops | list | read | none | no |
+| ops | migrate_addresses | administer | none | yes |
+| site | list | read | none | no |
+| site | create | manage | none | no |
+| site | update | manage | none | no |
+| site | delete | manage | none | no |
+| site | preview | publish | none | yes |
+| site | upload | create | none | yes |
+| page_meta | get | administer | none | no |
+| page_meta | list | administer | none | no |
+| page_meta | update | administer | none | no |
+| page_meta | delete | administer | none | no |
+| webhook | list | administer | none | no |
+| webhook | create | administer | none | no |
+| webhook | delete | administer | none | no |
+| webhook | retry | administer | none | yes |
+
+**Planned change (no date promised):** D116 makes a webhook a delivery target of a Subscription. A later Task moves the webhook rows under a `subscription` resource and keeps `webhook` only as long as compatibility needs it (D97). Later Tasks also add `signal answer` and `signal withdraw` (D115) and the `subscription` resource (D116, D117).
+
 ---
 
 ## SEO & structured data

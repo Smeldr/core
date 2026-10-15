@@ -116,6 +116,11 @@ func EnsureRoleGrantExpiresAtColumn(ctx context.Context, db DB) error {
 	return nil
 }
 
+// adminRoleOperations is the built-in admin role's operations JSON: every
+// operation word governance knows. The capability registry's coverage test
+// reads it as the one source of the known set (capability.go).
+const adminRoleOperations = `["create","read","update","publish","archive","delete","manage","administer","define-type","define-flow","define-relation-kind"]`
+
 // seedDefaultRoles inserts the three built-in role templates. Idempotent via
 // ON CONFLICT (name) DO NOTHING on the UNIQUE name column.
 func seedDefaultRoles(ctx context.Context, db DB) error {
@@ -132,10 +137,7 @@ func seedDefaultRoles(ctx context.Context, db DB) error {
 			"editor",
 			`["create","read","update","publish","archive","delete","manage"]`,
 		},
-		{
-			"admin",
-			`["create","read","update","publish","archive","delete","manage","administer","define-type","define-flow","define-relation-kind"]`,
-		},
+		{"admin", adminRoleOperations},
 	}
 	for _, r := range roles {
 		if _, err := db.ExecContext(ctx,
@@ -202,6 +204,255 @@ func migrateAdminRoleRemovesReviewApprove(ctx context.Context, db DB) error {
 	return nil
 }
 
+// toolPolicy is one built-in MCP tool and the operation word that gates it.
+type toolPolicy struct {
+	tool string
+	op   string
+}
+
+// builtInToolPolicies maps each built-in MCP tool to the operation word that
+// controls access; seedToolPolicies inserts it. It is read-only: written once
+// here and never after init. The capability registry's coverage test reads it
+// (capability_test.go).
+//
+// Operation word semantics (governance-model.md §4):
+//
+//	"read"                 — Author, Editor, Admin
+//	"create"               — Author, Editor, Admin
+//	"update"               — Author, Editor, Admin
+//	"publish"              — Author, Editor, Admin
+//	"archive"              — Author, Editor, Admin
+//	"delete"               — Editor, Admin (Author lacks delete; for CRUDAP destructive ops only)
+//	"manage"               — Editor, Admin (operational tools that are not CRUDAP verbs:
+//	                         composition, transition_item, preview_impact, nav CRUD, redirect CRUD,
+//	                         dynamic-content Editor tools)
+//	"administer"           — Admin only (instance-infrastructure: tokens, webhooks, page-meta)
+//	"define-type"          — Admin only (framework schema tools)
+//	"define-flow"          — Admin only (state flow definition)
+//	"define-relation-kind" — Admin only (relation kind definition)
+//
+// "approve" and "review" are reserved for the Plan governance loop (§6) — they must NOT
+// be used as generic Admin-tier gates.
+var builtInToolPolicies = []toolPolicy{
+	// Content lifecycle — module-generated tools (per-type but listed for common built-ins)
+	{"create_post", "create"},
+	{"get_post", "read"},
+	{"update_post", "update"},
+	{"publish_post", "publish"},
+	{"schedule_post", "publish"},
+	{"archive_post", "archive"},
+	{"delete_post", "delete"},
+	{"list_posts", "read"},
+	{"create_story", "create"},
+	{"get_story", "read"},
+	{"update_story", "update"},
+	{"publish_story", "publish"},
+	{"schedule_story", "publish"},
+	{"archive_story", "archive"},
+	{"delete_story", "delete"},
+	{"list_stories", "read"},
+	{"create_essay", "create"},
+	{"get_essay", "read"},
+	{"update_essay", "update"},
+	{"publish_essay", "publish"},
+	{"schedule_essay", "publish"},
+	{"archive_essay", "archive"},
+	{"delete_essay", "delete"},
+	{"list_essays", "read"},
+	{"create_doc_page", "create"},
+	{"get_doc_page", "read"},
+	{"update_doc_page", "update"},
+	{"publish_doc_page", "publish"},
+	{"schedule_doc_page", "publish"},
+	{"archive_doc_page", "archive"},
+	{"delete_doc_page", "delete"},
+	{"list_doc_pages", "read"},
+	// Node tools (Author gate for read, Author gate for write — nodes are public by default)
+	{"create_node", "create"},
+	{"get_node", "read"},
+	{"update_node", "update"},
+	{"publish_node", "publish"},
+	{"archive_node", "archive"},
+	{"list_nodes", "read"},
+	// Dynamic content tools (gate per roleFor in mcp/rolefor.go)
+	{"define_content_type", "define-type"},
+	{"redefine_content_type", "define-type"}, // the same act as defining (governance-model.md section 4)
+	{"create_content", "manage"},             // Editor-gated operational tool
+	{"get_content", "read"},
+	{"list_content", "read"},
+	{"update_content", "manage"},     // Editor-gated operational tool
+	{"set_content_status", "manage"}, // Editor-gated operational tool
+	// schedule_content (core-tool-policy-gaps-schedule-observe-blocks,
+	// 2026-09-29): same "manage" op and Editor floor as set_content_status
+	// above — both are the two ways to move a content item's status/
+	// scheduled_at, roleFor already gates both Editor. deriveToolPolicy
+	// cannot rescue a missing row here: it parses to (op="schedule",
+	// typeSnake="content"), but "content" is never a compiled Module[T]
+	// type name — dynamic content types aren't registered in s.modules —
+	// so this tool fell closed for every caller, Admin included, whenever
+	// governance was wired, until this row existed.
+	{"schedule_content", "manage"},
+	// Schema read tools (Author+)
+	{"get_content_type_schema", "read"},
+	{"list_content_type_schemas", "read"},
+	// Edge / composition tools (Editor gate — operational, not CRUDAP)
+	{"add_section", "manage"},
+	{"reorder_sections", "manage"},
+	{"remove_section", "manage"},
+	{"add_item", "manage"},
+	{"reorder_items", "manage"},
+	{"remove_item", "manage"},
+	// Preview / upload (Editor and Author respectively)
+	{"create_preview_url", "publish"}, // Editor gate per A92/A143
+	{"create_upload_token", "create"}, // Author gate
+	// Redirect tools (Editor gate — operational, not CRUDAP)
+	{"create_redirect", "manage"},
+	{"list_redirects", "read"},
+	{"delete_redirect", "manage"},
+	// Page meta tools (Admin gate — instance infrastructure)
+	{"set_page_meta", "administer"},
+	{"get_page_meta", "administer"},
+	{"delete_page_meta", "administer"},
+	{"list_page_meta", "administer"},
+	// Token management (Admin gate — instance infrastructure)
+	{"create_token", "administer"},
+	{"list_tokens", "administer"},
+	{"revoke_token", "administer"},
+	// Governance grant management (Admin gate — instance infrastructure,
+	// D43/T216). Must ship in the same release as smeldr.dev/mcp's
+	// grant_role/list_grants/revoke_grant tools: authoriseTool denies a
+	// tool with no policy row for everyone, the same as a DB error.
+	{"grant_role", "administer"},
+	{"list_grants", "administer"},
+	{"revoke_grant", "administer"},
+	// Address migration (Admin gate, instance infrastructure, D110).
+	// smeldr.dev/mcp's migrate_addresses runs MigrateAddresses; with no
+	// row it is denied for everyone, Admin included.
+	{"migrate_addresses", "administer"},
+	// Nav tools (Editor gate for write — operational, not CRUDAP)
+	{"list_nav_items", "read"},
+	{"create_nav_item", "manage"},
+	{"update_nav_item", "manage"},
+	{"delete_nav_item", "manage"},
+	// Webhook tools (Admin gate — instance infrastructure)
+	{"create_webhook", "administer"},
+	{"list_webhooks", "administer"},
+	{"delete_webhook", "administer"},
+	{"list_webhook_deliveries", "administer"},
+	{"retry_webhook", "administer"},
+	// State flow tools
+	{"define_state_flow", "define-flow"},
+	{"transition_item", "manage"}, // Editor gate — operational state change
+	{"get_valid_transitions", "read"},
+	{"list_items_by_state", "read"},
+	// Relation tools
+	{"assert_relation", "create"},
+	// withdraw_relation (relation history): ending a relation keeps its
+	// row as history, an archived-class move at the same Author tier as
+	// asserting one, so it is gated on archive, not delete.
+	{"withdraw_relation", "archive"},
+	{"propose_relation", "create"},
+	// observe_relation (core-tool-policy-gaps-schedule-observe-blocks,
+	// 2026-09-29): same Author floor and doc contract as assert_relation/
+	// propose_relation above ("a system directly witnessed" vs. "a human's
+	// direct claim"/"an agent's inference" — all three insert an edge the
+	// same way). deriveToolPolicy cannot rescue a missing row here even in
+	// principle: "observe" is not one of the verbs generated per-type
+	// tools ever carry (create/get/list/update/publish/schedule/archive/
+	// delete), so this tool fell closed for every caller, Admin included,
+	// whenever governance was wired, until this row existed.
+	{"observe_relation", "create"},
+	{"get_relations", "read"},
+	{"list_relations", "read"}, // the whole graph, paged; same operation as get_relations
+	// Walk the live relation graph from one item, bounded (Author+, smeldr.dev/mcp
+	// v1.50.0, B3). Graph structure only, like get_relations.
+	{"get_reachability", "read"},
+	{"preview_impact", "manage"}, // Editor gate — operational read with side-effect preview
+	{"upsert_relation_kind", "define-relation-kind"},
+	{"list_relation_kinds", "read"},
+	// Signal tools (Author+)
+	{"create_signal", "create"},
+	{"list_signals", "read"},
+	// Orchestration discovery tools (Author+). Not module-generated — the
+	// mcp-side verb-derived policy fallback only rescues a missing row for
+	// a tool a real module backs, so these two need a seeded row like any
+	// other framework tool.
+	{"get_goal_context", "read"},
+	{"list_type_tools", "read"},
+	// Sweep run status tool (Author+). Same "not module-generated" reason
+	// as the two rows above — get_sweep_run reads SweepRunStore directly,
+	// no MCPModule backs it.
+	{"get_sweep_run", "read"},
+	// Stewardship inbox tool (Author+, smeldr.dev/mcp v1.35.0+). Same
+	// "not module-generated" reason as the three rows above —
+	// get_stewardship_inbox reads RoleStore.StewardshipInbox directly, no
+	// MCPModule backs it (A310/decision-governance-model.md §5).
+	{"get_stewardship_inbox", "read"},
+	// Check status tool (Author+, smeldr.dev/mcp v1.36.0+). Same
+	// "not module-generated" reason as the four rows above —
+	// get_check_status reads CheckStore.Last directly, no MCPModule
+	// backs it (A312/decision-governance-model.md §4).
+	{"get_check_status", "read"},
+	// Findings list tool (Author+, D51) — kept as pre-provisioning, not
+	// because the tool exists today. Traced 2026-09-29
+	// (core-tool-policy-gaps-schedule-observe-blocks): despite
+	// CHANGELOG.md's [1.90.0] entry, docs/ARCHITECTURE.md,
+	// docs/REFERENCE.md, and skills/smeldr.md all stating list_findings
+	// ships in smeldr.dev/mcp v1.37.0+, no such tool exists anywhere in
+	// that repo today (confirmed by grep — zero matches for
+	// list_findings/FindingStore/isFindingTool/findingToolDefs). Git
+	// history there shows why: a 2026-09-20 merge (62e2d54, "WIP:
+	// list_findings/get_check_status MCP tool... do not drop") started
+	// both; only get_check_status was ever finished and shipped (its own
+	// check_tools.go, A312) — list_findings was never completed. This row
+	// is harmless either way (nothing can call a tool name that doesn't
+	// exist) and is left in place so mcp's real implementation, whenever
+	// it ships, is covered immediately rather than repeating the
+	// get_sweep_run/get_check_status pattern a third time. The doc/
+	// implementation mismatch itself is flagged to the architect as its
+	// own follow-up, not fixed here.
+	{"list_findings", "read"},
+	// Delegate tool (Author+, smeldr.dev/mcp, grants-and-delegate-v1
+	// §3.3, 01a0e3f9-4). Same "not module-generated" reason as the six
+	// rows above — delegate_item reads/writes RoleStore directly, no
+	// MCPModule backs it. Deliberately coarse: this is only the floor
+	// gate (Author+ can attempt the call at all) — the real per-item,
+	// per-operation check is Authorized(), inside the handler, against
+	// the actual target and every operation the named role holds, not
+	// this tool-dispatch-level policy.
+	{"delegate_item", "read"},
+	// Withdraw a delegation (Author+, smeldr.dev/mcp,
+	// workspace-delegate-region-v1.md §0 F3, 01a0e3f9-5). Same "not
+	// module-generated" reason as delegate_item above. Deliberately
+	// coarse: the real check — is the caller this grant's own recorded
+	// creator, and is it actually a time-boxed delegation — is inside
+	// the handler, against the actual grant.
+	{"withdraw_delegation", "read"},
+	// List every role's own definition (Author+, smeldr.dev/mcp,
+	// workspace-delegate-region-v1.md §0 F4, 01a0e3f9-5). Read-only;
+	// same "not module-generated" reason as the rows above.
+	{"list_roles", "read"},
+	// Read one item's standing (Editor+, smeldr.dev/mcp v1.46.0, D100). Same
+	// "not module-generated" reason as the rows above: get_item_standing reads
+	// core's standing table through TypeHasStanding/ItemStandings, no MCPModule
+	// backs it, so without this row it falls closed for every caller.
+	{"get_item_standing", "read"},
+	// Read one item's history (Editor+, smeldr.dev/mcp v1.49.0, D101). Same "not
+	// module-generated" reason as get_item_standing: no MCPModule backs it, so
+	// without this row it falls closed for every caller (the A402 lesson).
+	{"get_item_provenance", "read"},
+	// Batch-resolve JWT User.ID values to token Names (Author+,
+	// smeldr.dev/mcp, mcp-lookup-token-names, Article I
+	// explainability). Same "not module-generated" reason as the
+	// rows above -- lookup_token_names reads TokenStore.
+	// NamesForUserIDs directly, no MCPModule backs it. Deliberately
+	// coarse: reveals only a name for an ID the caller can already
+	// see elsewhere (last_actor, RoleGrant.Grantor, a relation
+	// edge's created_by), nothing list_tokens protects (role,
+	// expiry, revocation).
+	{"lookup_token_names", "read"},
+}
+
 // seedToolPolicies inserts one row per built-in MCP tool, mapping each tool to
 // the operation word that controls access. Idempotent via ON CONFLICT (tool_name)
 // DO NOTHING on the UNIQUE tool_name column.
@@ -210,248 +461,7 @@ func migrateAdminRoleRemovesReviewApprove(ctx context.Context, db DB) error {
 // change on day one. Operators may alter rows later to regrant access.
 func seedToolPolicies(ctx context.Context, db DB) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-
-	// Operation word semantics (governance-model.md §4):
-	//   "read"                 — Author, Editor, Admin
-	//   "create"               — Author, Editor, Admin
-	//   "update"               — Author, Editor, Admin
-	//   "publish"              — Author, Editor, Admin
-	//   "archive"              — Author, Editor, Admin
-	//   "delete"               — Editor, Admin (Author lacks delete; for CRUDAP destructive ops only)
-	//   "manage"               — Editor, Admin (operational tools that are not CRUDAP verbs:
-	//                            composition, transition_item, preview_impact, nav CRUD, redirect CRUD,
-	//                            dynamic-content Editor tools)
-	//   "administer"           — Admin only (instance-infrastructure: tokens, webhooks, page-meta)
-	//   "define-type"          — Admin only (framework schema tools)
-	//   "define-flow"          — Admin only (state flow definition)
-	//   "define-relation-kind" — Admin only (relation kind definition)
-	//
-	// "approve" and "review" are reserved for the Plan governance loop (§6) — they must NOT
-	// be used as generic Admin-tier gates.
-	policies := []struct {
-		tool string
-		op   string
-	}{
-		// Content lifecycle — module-generated tools (per-type but listed for common built-ins)
-		{"create_post", "create"},
-		{"get_post", "read"},
-		{"update_post", "update"},
-		{"publish_post", "publish"},
-		{"schedule_post", "publish"},
-		{"archive_post", "archive"},
-		{"delete_post", "delete"},
-		{"list_posts", "read"},
-		{"create_story", "create"},
-		{"get_story", "read"},
-		{"update_story", "update"},
-		{"publish_story", "publish"},
-		{"schedule_story", "publish"},
-		{"archive_story", "archive"},
-		{"delete_story", "delete"},
-		{"list_stories", "read"},
-		{"create_essay", "create"},
-		{"get_essay", "read"},
-		{"update_essay", "update"},
-		{"publish_essay", "publish"},
-		{"schedule_essay", "publish"},
-		{"archive_essay", "archive"},
-		{"delete_essay", "delete"},
-		{"list_essays", "read"},
-		{"create_doc_page", "create"},
-		{"get_doc_page", "read"},
-		{"update_doc_page", "update"},
-		{"publish_doc_page", "publish"},
-		{"schedule_doc_page", "publish"},
-		{"archive_doc_page", "archive"},
-		{"delete_doc_page", "delete"},
-		{"list_doc_pages", "read"},
-		// Node tools (Author gate for read, Author gate for write — nodes are public by default)
-		{"create_node", "create"},
-		{"get_node", "read"},
-		{"update_node", "update"},
-		{"publish_node", "publish"},
-		{"archive_node", "archive"},
-		{"list_nodes", "read"},
-		// Dynamic content tools (gate per roleFor in mcp/rolefor.go)
-		{"define_content_type", "define-type"},
-		{"redefine_content_type", "define-type"}, // the same act as defining (governance-model.md section 4)
-		{"create_content", "manage"},             // Editor-gated operational tool
-		{"get_content", "read"},
-		{"list_content", "read"},
-		{"update_content", "manage"},     // Editor-gated operational tool
-		{"set_content_status", "manage"}, // Editor-gated operational tool
-		// schedule_content (core-tool-policy-gaps-schedule-observe-blocks,
-		// 2026-09-29): same "manage" op and Editor floor as set_content_status
-		// above — both are the two ways to move a content item's status/
-		// scheduled_at, roleFor already gates both Editor. deriveToolPolicy
-		// cannot rescue a missing row here: it parses to (op="schedule",
-		// typeSnake="content"), but "content" is never a compiled Module[T]
-		// type name — dynamic content types aren't registered in s.modules —
-		// so this tool fell closed for every caller, Admin included, whenever
-		// governance was wired, until this row existed.
-		{"schedule_content", "manage"},
-		// Schema read tools (Author+)
-		{"get_content_type_schema", "read"},
-		{"list_content_type_schemas", "read"},
-		// Edge / composition tools (Editor gate — operational, not CRUDAP)
-		{"add_section", "manage"},
-		{"reorder_sections", "manage"},
-		{"remove_section", "manage"},
-		{"add_item", "manage"},
-		{"reorder_items", "manage"},
-		{"remove_item", "manage"},
-		// Preview / upload (Editor and Author respectively)
-		{"create_preview_url", "publish"}, // Editor gate per A92/A143
-		{"create_upload_token", "create"}, // Author gate
-		// Redirect tools (Editor gate — operational, not CRUDAP)
-		{"create_redirect", "manage"},
-		{"list_redirects", "read"},
-		{"delete_redirect", "manage"},
-		// Page meta tools (Admin gate — instance infrastructure)
-		{"set_page_meta", "administer"},
-		{"get_page_meta", "administer"},
-		{"delete_page_meta", "administer"},
-		{"list_page_meta", "administer"},
-		// Token management (Admin gate — instance infrastructure)
-		{"create_token", "administer"},
-		{"list_tokens", "administer"},
-		{"revoke_token", "administer"},
-		// Governance grant management (Admin gate — instance infrastructure,
-		// D43/T216). Must ship in the same release as smeldr.dev/mcp's
-		// grant_role/list_grants/revoke_grant tools: authoriseTool denies a
-		// tool with no policy row for everyone, the same as a DB error.
-		{"grant_role", "administer"},
-		{"list_grants", "administer"},
-		{"revoke_grant", "administer"},
-		// Address migration (Admin gate, instance infrastructure, D110).
-		// smeldr.dev/mcp's migrate_addresses runs MigrateAddresses; with no
-		// row it is denied for everyone, Admin included.
-		{"migrate_addresses", "administer"},
-		// Nav tools (Editor gate for write — operational, not CRUDAP)
-		{"list_nav_items", "read"},
-		{"create_nav_item", "manage"},
-		{"update_nav_item", "manage"},
-		{"delete_nav_item", "manage"},
-		// Webhook tools (Admin gate — instance infrastructure)
-		{"create_webhook", "administer"},
-		{"list_webhooks", "administer"},
-		{"delete_webhook", "administer"},
-		{"list_webhook_deliveries", "administer"},
-		{"retry_webhook", "administer"},
-		// State flow tools
-		{"define_state_flow", "define-flow"},
-		{"transition_item", "manage"}, // Editor gate — operational state change
-		{"get_valid_transitions", "read"},
-		{"list_items_by_state", "read"},
-		// Relation tools
-		{"assert_relation", "create"},
-		// withdraw_relation (relation history): ending a relation keeps its
-		// row as history, an archived-class move at the same Author tier as
-		// asserting one, so it is gated on archive, not delete.
-		{"withdraw_relation", "archive"},
-		{"propose_relation", "create"},
-		// observe_relation (core-tool-policy-gaps-schedule-observe-blocks,
-		// 2026-09-29): same Author floor and doc contract as assert_relation/
-		// propose_relation above ("a system directly witnessed" vs. "a human's
-		// direct claim"/"an agent's inference" — all three insert an edge the
-		// same way). deriveToolPolicy cannot rescue a missing row here even in
-		// principle: "observe" is not one of the verbs generated per-type
-		// tools ever carry (create/get/list/update/publish/schedule/archive/
-		// delete), so this tool fell closed for every caller, Admin included,
-		// whenever governance was wired, until this row existed.
-		{"observe_relation", "create"},
-		{"get_relations", "read"},
-		{"list_relations", "read"}, // the whole graph, paged; same operation as get_relations
-		// Walk the live relation graph from one item, bounded (Author+, smeldr.dev/mcp
-		// v1.50.0, B3). Graph structure only, like get_relations.
-		{"get_reachability", "read"},
-		{"preview_impact", "manage"}, // Editor gate — operational read with side-effect preview
-		{"upsert_relation_kind", "define-relation-kind"},
-		{"list_relation_kinds", "read"},
-		// Signal tools (Author+)
-		{"create_signal", "create"},
-		{"list_signals", "read"},
-		// Orchestration discovery tools (Author+). Not module-generated — the
-		// mcp-side verb-derived policy fallback only rescues a missing row for
-		// a tool a real module backs, so these two need a seeded row like any
-		// other framework tool.
-		{"get_goal_context", "read"},
-		{"list_type_tools", "read"},
-		// Sweep run status tool (Author+). Same "not module-generated" reason
-		// as the two rows above — get_sweep_run reads SweepRunStore directly,
-		// no MCPModule backs it.
-		{"get_sweep_run", "read"},
-		// Stewardship inbox tool (Author+, smeldr.dev/mcp v1.35.0+). Same
-		// "not module-generated" reason as the three rows above —
-		// get_stewardship_inbox reads RoleStore.StewardshipInbox directly, no
-		// MCPModule backs it (A310/decision-governance-model.md §5).
-		{"get_stewardship_inbox", "read"},
-		// Check status tool (Author+, smeldr.dev/mcp v1.36.0+). Same
-		// "not module-generated" reason as the four rows above —
-		// get_check_status reads CheckStore.Last directly, no MCPModule
-		// backs it (A312/decision-governance-model.md §4).
-		{"get_check_status", "read"},
-		// Findings list tool (Author+, D51) — kept as pre-provisioning, not
-		// because the tool exists today. Traced 2026-09-29
-		// (core-tool-policy-gaps-schedule-observe-blocks): despite
-		// CHANGELOG.md's [1.90.0] entry, docs/ARCHITECTURE.md,
-		// docs/REFERENCE.md, and skills/smeldr.md all stating list_findings
-		// ships in smeldr.dev/mcp v1.37.0+, no such tool exists anywhere in
-		// that repo today (confirmed by grep — zero matches for
-		// list_findings/FindingStore/isFindingTool/findingToolDefs). Git
-		// history there shows why: a 2026-09-20 merge (62e2d54, "WIP:
-		// list_findings/get_check_status MCP tool... do not drop") started
-		// both; only get_check_status was ever finished and shipped (its own
-		// check_tools.go, A312) — list_findings was never completed. This row
-		// is harmless either way (nothing can call a tool name that doesn't
-		// exist) and is left in place so mcp's real implementation, whenever
-		// it ships, is covered immediately rather than repeating the
-		// get_sweep_run/get_check_status pattern a third time. The doc/
-		// implementation mismatch itself is flagged to the architect as its
-		// own follow-up, not fixed here.
-		{"list_findings", "read"},
-		// Delegate tool (Author+, smeldr.dev/mcp, grants-and-delegate-v1
-		// §3.3, 01a0e3f9-4). Same "not module-generated" reason as the six
-		// rows above — delegate_item reads/writes RoleStore directly, no
-		// MCPModule backs it. Deliberately coarse: this is only the floor
-		// gate (Author+ can attempt the call at all) — the real per-item,
-		// per-operation check is Authorized(), inside the handler, against
-		// the actual target and every operation the named role holds, not
-		// this tool-dispatch-level policy.
-		{"delegate_item", "read"},
-		// Withdraw a delegation (Author+, smeldr.dev/mcp,
-		// workspace-delegate-region-v1.md §0 F3, 01a0e3f9-5). Same "not
-		// module-generated" reason as delegate_item above. Deliberately
-		// coarse: the real check — is the caller this grant's own recorded
-		// creator, and is it actually a time-boxed delegation — is inside
-		// the handler, against the actual grant.
-		{"withdraw_delegation", "read"},
-		// List every role's own definition (Author+, smeldr.dev/mcp,
-		// workspace-delegate-region-v1.md §0 F4, 01a0e3f9-5). Read-only;
-		// same "not module-generated" reason as the rows above.
-		{"list_roles", "read"},
-		// Read one item's standing (Editor+, smeldr.dev/mcp v1.46.0, D100). Same
-		// "not module-generated" reason as the rows above: get_item_standing reads
-		// core's standing table through TypeHasStanding/ItemStandings, no MCPModule
-		// backs it, so without this row it falls closed for every caller.
-		{"get_item_standing", "read"},
-		// Read one item's history (Editor+, smeldr.dev/mcp v1.49.0, D101). Same "not
-		// module-generated" reason as get_item_standing: no MCPModule backs it, so
-		// without this row it falls closed for every caller (the A402 lesson).
-		{"get_item_provenance", "read"},
-		// Batch-resolve JWT User.ID values to token Names (Author+,
-		// smeldr.dev/mcp, mcp-lookup-token-names, Article I
-		// explainability). Same "not module-generated" reason as the
-		// rows above -- lookup_token_names reads TokenStore.
-		// NamesForUserIDs directly, no MCPModule backs it. Deliberately
-		// coarse: reveals only a name for an ID the caller can already
-		// see elsewhere (last_actor, RoleGrant.Grantor, a relation
-		// edge's created_by), nothing list_tokens protects (role,
-		// expiry, revocation).
-		{"lookup_token_names", "read"},
-	}
-
-	for _, p := range policies {
+	for _, p := range builtInToolPolicies {
 		if _, err := db.ExecContext(ctx,
 			`INSERT INTO smeldr_tool_policies (id, tool_name, required_op, created_at)
 				VALUES ($1, $2, $3, $4) ON CONFLICT (tool_name) DO NOTHING`,
