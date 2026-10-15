@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.149.0] - 2026-10-15
+
 ### Added
 
 - **`DynamicTypeRepo.ListPage` returns a page and the readable total (A498).** `ListPage` returns the page and the total of items matching the status filter. For a caller who cannot read everything, every matching row is loaded, filtered, and then the page is cut in memory, so neither a short page nor the total reveals a hidden item. A reader of everything keeps the SQL paging plus one COUNT query. `List` is `ListPage` without the total.
