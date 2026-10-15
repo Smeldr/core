@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.152.0] - 2026-10-15
+
 ### Added
 
 - **Callers can ask whether they may perform a capability, through two new `App` methods (A503).** `App.AuthorizeCapability(ctx, resource, verb, target)` returns nil when the caller may perform the capability, and an error otherwise. Without governance, the caller's legacy role must meet the operation's floor: read, create, update, publish and archive need Author; delete and manage need Editor; administer and the define-* operations need Admin. Under governance, a read goes through the caller's read scope. A type the caller cannot read gives `ErrForbidden`. An item the caller cannot read gives `ErrNotFound`, the same as a missing item. A read with no type needs a scope that reads everything, except `signal list` and `relation list`, which filter per item. Any other operation on an item the caller cannot read gives `ErrNotFound`. Otherwise `RoleStore.Authorized` decides. A caller with no token ID never passes. An unknown capability gives `ErrBadRequest`, and a load failure gives `ErrInternal`. `App.VisibleCapabilities(ctx)` returns the capabilities the caller may use on at least one target, in registry order. A load failure returns `ErrInternal` and no list. The capability's operation governs the capability path only: the typed MCP tools keep their seeded tool policies, so `create_content` stays Editor-gated. Nothing calls the two methods yet; the opt-in consolidated MCP profile will. No existing tool, route or behaviour changes.
