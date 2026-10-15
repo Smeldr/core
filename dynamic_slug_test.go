@@ -25,12 +25,13 @@ func newSlugRepo(t *testing.T) (*DynamicTypeRepo, *sql.DB) {
 	return &DynamicTypeRepo{db: db, typeName: "memo"}, db
 }
 
-// insertSlugRow writes a memo row holding slug directly.
+// insertSlugRow writes a published memo row holding slug directly: memo is
+// web content, so only a published item takes a slug.
 func insertSlugRow(t *testing.T, db DB, id, slug string) {
 	t.Helper()
 	now := time.Now().UTC()
 	if _, err := db.ExecContext(context.Background(),
-		`INSERT INTO smeldr_dynamic_content (id, slug, type_name, created_at, updated_at) VALUES ($1, $2, 'memo', $3, $3)`,
+		`INSERT INTO smeldr_dynamic_content (id, slug, type_name, status, created_at, updated_at) VALUES ($1, $2, 'memo', 'published', $3, $3)`,
 		id, slug, now); err != nil {
 		t.Fatalf("insert %s: %v", slug, err)
 	}
@@ -131,7 +132,9 @@ func TestCreateDraft_SlugQueryCount(t *testing.T) {
 		t.Errorf("unsaturated: in=%d single=%d; want 1 and 0", counter.in, counter.single)
 	}
 	repo.db = db
-	for i := 3; i <= slugCandidates; i++ { // item and item-2 are taken already
+	// item is published; the first create's draft holds item-2 but reserves
+	// no URL, so item-2 is published here too.
+	for i := 2; i <= slugCandidates; i++ {
 		insertSlugRow(t, db, NewID(), fmt.Sprintf("item-%d", i))
 	}
 	counter = &countSlugQueriesDB{DB: db}
@@ -177,17 +180,23 @@ func slugArg(args []any) string {
 	return ""
 }
 
-// A create that loses the slug to a concurrent one between the check and the
-// insert is refused by the unique index and retried under the fallback.
-func TestCreateDraft_RaceRetriesWithFallback(t *testing.T) {
+// A draft that loses the slug to a concurrent publish between the check and
+// the insert is not refused: a draft reserves no URL, so it keeps the slug and
+// shares it with the published item until it is published itself
+// (core-drafts-do-not-reserve-a-url).
+func TestCreateDraft_RaceSharesSlugAsDraft(t *testing.T) {
 	repo, db := newSlugRepo(t)
 	repo.db = &raceInsertDB{DB: db, t: t}
 	n, err := repo.CreateDraft(context.Background(), map[string]any{})
 	if err != nil {
 		t.Fatalf("CreateDraft: %v", err)
 	}
-	if want := "item-" + n.ID[len(n.ID)-8:]; n.Slug != want {
-		t.Errorf("slug = %q; want the fallback %q", n.Slug, want)
+	if n.Slug != "item" {
+		t.Errorf("slug = %q; want item, shared with the published one", n.Slug)
+	}
+	var holders int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM smeldr_dynamic_content WHERE slug = 'item'`).Scan(&holders); err != nil || holders != 2 {
+		t.Errorf("holders of item = %d (%v); want 2", holders, err)
 	}
 }
 
@@ -203,29 +212,47 @@ func TestCreateDraft_RaceRetryFails(t *testing.T) {
 func slugIndexExists(t *testing.T, db *sql.DB) bool {
 	t.Helper()
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_dynamic_content_type_slug'`).Scan(&n); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_dynamic_content_type_slug_published'`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n == 1
 }
 
-// The index refuses a second non-empty slug of one type, allows it across
-// types, and allows any number of empty slugs.
+// The index refuses a second published non-empty slug of one type, allows a
+// draft to share it (a draft reserves no URL), allows it across types, and
+// allows any number of empty slugs. The earlier all-status index is gone.
 func TestCreateBlockTables_UniqueSlugIndex(t *testing.T) {
 	_, db := newSlugRepo(t)
 	if !slugIndexExists(t, db) {
 		t.Fatal("unique slug index missing")
+	}
+	var old int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_dynamic_content_type_slug'`).Scan(&old); err != nil || old != 0 {
+		t.Errorf("the all-status index is still there (%d, %v)", old, err)
 	}
 	if err := CreateBlockTables(db); err != nil {
 		t.Fatalf("second CreateBlockTables: %v", err)
 	}
 	insertSlugRow(t, db, "a", "x")
 	now := time.Now().UTC()
-	if _, err := db.Exec(`INSERT INTO smeldr_dynamic_content (id, slug, type_name, created_at, updated_at) VALUES ('b', 'x', 'memo', ?, ?)`, now, now); err == nil {
-		t.Error("a duplicate memo slug was accepted")
+	if _, err := db.Exec(`INSERT INTO smeldr_dynamic_content (id, slug, type_name, status, created_at, updated_at) VALUES ('b', 'x', 'memo', 'published', ?, ?)`, now, now); err == nil {
+		t.Error("a second published memo slug was accepted")
 	}
-	if _, err := db.Exec(`INSERT INTO smeldr_dynamic_content (id, slug, type_name, created_at, updated_at) VALUES ('c', 'x', 'other', ?, ?)`, now, now); err != nil {
+	for _, id := range []string{"b2", "b3"} {
+		if _, err := db.Exec(`INSERT INTO smeldr_dynamic_content (id, slug, type_name, created_at, updated_at) VALUES (?, 'x', 'memo', ?, ?)`, id, now, now); err != nil {
+			t.Errorf("a draft sharing the slug %s: %v", id, err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO smeldr_dynamic_content (id, slug, type_name, status, created_at, updated_at) VALUES ('c', 'x', 'other', 'published', ?, ?)`, now, now); err != nil {
 		t.Errorf("the same slug in another type: %v", err)
+	}
+	// A record type's items (they carry an address) keep one slug per item in
+	// every status.
+	if _, err := db.Exec(`INSERT INTO smeldr_dynamic_content (id, slug, type_name, address, created_at, updated_at) VALUES ('r1', 'rec', 'note', 'NO1', ?, ?)`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO smeldr_dynamic_content (id, slug, type_name, address, created_at, updated_at) VALUES ('r2', 'rec', 'note', 'NO2', ?, ?)`, now, now); err == nil {
+		t.Error("a second draft record with the same slug was accepted")
 	}
 	for _, id := range []string{"d", "e"} {
 		if _, err := db.Exec(`INSERT INTO smeldr_dynamic_content (id, slug, type_name, created_at, updated_at) VALUES (?, '', 'memo', ?, ?)`, id, now, now); err != nil {

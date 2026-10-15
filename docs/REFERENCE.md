@@ -840,7 +840,7 @@ So nothing follows the check. For a caller that cannot read every item, a hidden
 - **The module's HTTP routes:**
   - list, show, single instance, AI doc, and the aggregate dispatch (`findAndServe`, `findAndServeAIDoc`): a scoped reader sees published items plus the drafts it may read;
   - PUT and DELETE answer a hidden item with 404;
-  - a preview token still opens its one draft;
+  - a preview token still opens its one draft (bound to its ID with `App.GeneratePreviewTokenForID`, since drafts may share a slug);
   - sitemaps, feeds and the AI index carry published items only, as before.
 - **`/_content/{type}[/{id}]`:** under governance, gated by read access to at least one item of the type (403 otherwise), filtered per item and paged after filtering. A hidden item is 404. Without governance it is unchanged (Editor).
 - **`App.TransitionItem*`:** an unreadable item is `ErrNotFound`, checked before the transition gate.
@@ -856,7 +856,16 @@ So nothing follows the check. For a caller that cannot read every item, a hidden
 
 **Slugs.**
 - **Records:** for a record type and a caller who cannot read every record, a taken slug never reveals what holds it. A supplied slug that is taken becomes the slug plus the tail of the new ID, and an MCP create returns a `slug_adjusted` warning. A taken automatic slug gets the same tail instead of a counter, because a counter would count records the caller may not read. A reader of everything keeps today's counter.
-- **Web content:** a slug is a public URL, so "slug is already in use" stays. That the slug is taken is an accepted property.
+- **Web content (core v1.154.0, A507): a draft reserves no URL.**
+  - Drafts may share a slug with each other and with a published item. Creating or updating a draft never fails, and its slug never changes, because of a collision.
+  - An automatic slug's counter counts published items only. They are public, so the counter reveals nothing hidden.
+  - Uniqueness is checked when an item is published or scheduled (MCP publish and schedule, HTTP create or update into published, `transition_item`, the scheduler), against published items of the type with another ID. A clash answers 409 `ErrConflict`: `the URL /<prefix>/<slug> is already published; give this item another slug, for example /<prefix>/<slug>-2`. It names only public URLs. The scheduler leaves a clashing item Scheduled and logs it once.
+  - A web-content item that is not published may change its slug: a compiled module through an update with `slug`, a dynamic type through `DynamicTypeRepo.SetSlugVia(ctx, surface, id, slug)`. A published item keeps its URL.
+  - A slug that names more than one item the caller can read answers 409 `the slug "<slug>" names more than one item you can read; use its ID`. Only readable items are counted, so a hidden draft is never revealed. The ID always resolves, on MCP and on the module's HTTP write routes (`PUT`, `PATCH` and `DELETE /<prefix>/<id>`).
+  - `GET /<prefix>/<slug>` serves the published item when one holds the slug, so a draft never shadows a page.
+  - Storage: dynamic types use the index `idx_dynamic_content_type_slug_published` (below). A compiled module's own table should declare `slug TEXT NOT NULL` (no `UNIQUE`) and call `EnsurePublishedSlugIndex` (below). A table that keeps a column-level `UNIQUE` refuses a second draft with the same slug until its owner drops it.
+  - A user-written `Repository[T]` resolves a slug through `FindBySlug` (one holder), so ambiguity is not detected there. `MemoryRepo` and `SQLRepo` list every holder.
+  - Not yet: Rule and AuthorityStub keep one slug per item in every status (their tables have a column-level `UNIQUE`), tracked as `core-rule-and-stub-slugs-without-reservation`.
 - **The legacy lookup** by an old number (until the D110 cut) treats a hidden record as no match, and its "matches N records" error counts only records the caller may read.
 
 **Stated property: list timing.** A list loads its candidates and then filters, so its duration grows with all rows, hidden ones included. That reveals volume, which addresses already reveal, and it is accepted.
@@ -4316,6 +4325,33 @@ token := app.GeneratePreviewToken("/posts", "my-draft")
 previewURL := app.BaseURL() + "/posts/my-draft?preview=" + token
 ```
 
+Drafts of web content may share a slug (core v1.154.0): a slug-only token opens a draft only while the slug names exactly one draft or scheduled item, and otherwise falls through to the normal visibility check.
+
+### `App.GeneratePreviewTokenForID`
+
+```go
+func (a *App) GeneratePreviewTokenForID(prefix, slug, id string) string
+```
+
+The same token bound to one item as well, so it opens that draft or scheduled item even when other drafts share its slug. The URL is unchanged (core v1.154.0, A507):
+
+```go
+token := app.GeneratePreviewTokenForID("/posts", "my-draft", item.ID)
+previewURL := app.BaseURL() + "/posts/my-draft?preview=" + token
+```
+
+### `EnsurePublishedSlugIndex`
+
+```go
+func EnsurePublishedSlugIndex(ctx context.Context, db DB, table string) error
+```
+
+Creates `idx_<table>_slug_published`, a unique index on the slug of published rows of a compiled module's own table, so drafts may share a slug and published items may not (core v1.154.0, A507). It is idempotent and works on SQLite and Postgres. It scans for published duplicates first and refuses with `ErrConflict` naming them. It does not drop a column-level `UNIQUE` on `slug`: declare the column `slug TEXT NOT NULL`, or rebuild the table (SQLite) or drop the constraint (Postgres) first.
+
+```go
+smeldr.EnsurePublishedSlugIndex(ctx, db, "posts")
+```
+
 ### `App.BaseURL`
 
 ```go
@@ -4892,16 +4928,23 @@ plain `context.Context` is a system write with no actor.
 schema's title field (`item` when there is none). The first free one of
 `base`, `base-2` .. `base-100` is taken, read in one query. When all are taken
 the slug is `base-` and the last 8 hex characters of the item's own id (its
-random tail), or `base-` and the whole id if that is taken too. One type never
-holds two items under one non-empty slug: `CreateBlockTables` creates the
-unique index `idx_dynamic_content_type_slug` on `(type_name, slug) WHERE slug
-<> ''`. If duplicates already exist it logs each one (`smeldr: dynamic content
-slug held by more than one item`, with the type, slug and ids), skips the index
-and changes no row; give all but one of each a new slug and the next boot
-creates the index. A failure of the `CREATE INDEX` statement itself is logged
-the same way and boot goes on; only a failure to run the duplicate scan is
-returned. A create that loses its slug to a concurrent one is retried
-once under the fallback.
+random tail), or `base-` and the whole id if that is taken too. For web content
+(a type with a URL prefix) only published items count as taken (core v1.154.0,
+A507): a draft reserves no URL. One type never publishes two items under
+one non-empty slug, and a record type never holds two items under one slug:
+`CreateBlockTables` creates the unique index
+`idx_dynamic_content_type_slug_published` on `(type_name, slug) WHERE slug <> ''
+AND (status = 'published' OR address <> '')` (a record's item carries an
+address, a web-content item does not; despite its name the index covers
+every item of a record type), then drops the earlier all-status index
+`idx_dynamic_content_type_slug`. The new index is created first, so the old one
+is dropped only once the new one exists. Boot logs the outcome once:
+`smeldr: published-only slug index in place`, or `smeldr: published-only slug
+index skipped` with the count and the slugs when published duplicates already
+exist (each is also logged with its type, slug and ids). No row is changed;
+give all but one of each a new slug and the next boot creates the index. A
+failure of the `CREATE INDEX` statement itself is logged the same way and boot
+goes on; only a failure to run the duplicate scan is returned.
 
 **Database migration**
 

@@ -982,7 +982,7 @@ func TestEncodeDecodePreviewToken(t *testing.T) {
 
 	t.Run("valid token returns correct prefix and slug", func(t *testing.T) {
 		token := encodePreviewToken(prefix, slug, secret, time.Hour)
-		gotPrefix, gotSlug, err := decodePreviewToken(token, secret)
+		gotPrefix, gotSlug, _, err := decodePreviewToken(token, secret)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -996,7 +996,7 @@ func TestEncodeDecodePreviewToken(t *testing.T) {
 
 	t.Run("expired token returns error", func(t *testing.T) {
 		token := encodePreviewToken(prefix, slug, secret, -time.Second)
-		_, _, err := decodePreviewToken(token, secret)
+		_, _, _, err := decodePreviewToken(token, secret)
 		if err == nil {
 			t.Fatal("expected error for expired token, got nil")
 		}
@@ -1004,7 +1004,7 @@ func TestEncodeDecodePreviewToken(t *testing.T) {
 
 	t.Run("wrong secret returns error", func(t *testing.T) {
 		token := encodePreviewToken(prefix, slug, secret, time.Hour)
-		_, _, err := decodePreviewToken(token, []byte("different-secret-xxxxxxxxxxxxxxxxxxxxx"))
+		_, _, _, err := decodePreviewToken(token, []byte("different-secret-xxxxxxxxxxxxxxxxxxxxx"))
 		if err == nil {
 			t.Fatal("expected error for wrong secret, got nil")
 		}
@@ -1015,14 +1015,14 @@ func TestEncodeDecodePreviewToken(t *testing.T) {
 		// Flip a character in the payload portion (before the dot)
 		bs := []byte(token)
 		bs[0] ^= 0x01
-		_, _, err := decodePreviewToken(string(bs), secret)
+		_, _, _, err := decodePreviewToken(string(bs), secret)
 		if err == nil {
 			t.Fatal("expected error for tampered token, got nil")
 		}
 	})
 
 	t.Run("malformed token (no dot) returns error", func(t *testing.T) {
-		_, _, err := decodePreviewToken("nodothere", secret)
+		_, _, _, err := decodePreviewToken("nodothere", secret)
 		if err == nil {
 			t.Fatal("expected error for malformed token, got nil")
 		}
@@ -1031,7 +1031,7 @@ func TestEncodeDecodePreviewToken(t *testing.T) {
 	t.Run("cross-module: different prefix in token vs check", func(t *testing.T) {
 		// Token is for "posts" but caller checks "docs" — caller responsibility
 		token := encodePreviewToken("posts", slug, secret, time.Hour)
-		gotPrefix, _, err := decodePreviewToken(token, secret)
+		gotPrefix, _, _, err := decodePreviewToken(token, secret)
 		if err != nil {
 			t.Fatalf("unexpected decode error: %v", err)
 		}
@@ -1213,7 +1213,7 @@ func TestDecodeToken_invalidJSON(t *testing.T) {
 func TestDecodePreviewToken_invalidBase64(t *testing.T) {
 	badPayload := "!invalid!"
 	sig := tokenHMAC(badPayload, testSecret)
-	_, _, err := decodePreviewToken(badPayload+"."+sig, []byte(testSecret))
+	_, _, _, err := decodePreviewToken(badPayload+"."+sig, []byte(testSecret))
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
@@ -1222,7 +1222,7 @@ func TestDecodePreviewToken_invalidBase64(t *testing.T) {
 func TestDecodePreviewToken_fieldsNotThree(t *testing.T) {
 	raw := base64.RawURLEncoding.EncodeToString([]byte("onepart"))
 	sig := tokenHMAC(raw, testSecret)
-	_, _, err := decodePreviewToken(raw+"."+sig, []byte(testSecret))
+	_, _, _, err := decodePreviewToken(raw+"."+sig, []byte(testSecret))
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}

@@ -484,18 +484,43 @@ func fieldNameForColumn(typ reflect.Type, column string) string {
 	return ""
 }
 
-// FindBySlug returns the first item whose Slug field matches slug, or [ErrNotFound].
-func (r *MemoryRepo[T]) FindBySlug(_ context.Context, slug string) (T, error) {
+// FindBySlug returns the item whose Slug field matches slug, or [ErrNotFound].
+// Drafts of web content may share a slug, so a published holder comes first,
+// then the earliest inserted.
+func (r *MemoryRepo[T]) FindBySlug(ctx context.Context, slug string) (T, error) {
+	items, _ := r.findAllBySlug(ctx, slug)
+	if len(items) == 0 {
+		var zero T
+		return zero, ErrNotFound
+	}
+	return items[0], nil
+}
+
+// findAllBySlug implements [slugMatcher]: every holder of slug, published
+// first, then in insertion order.
+func (r *MemoryRepo[T]) findAllBySlug(_ context.Context, slug string) ([]T, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	var published, rest []T
 	for _, id := range r.order {
 		item := r.items[id]
-		if stringField(item, "Slug") == slug {
-			return item, nil
+		if stringField(item, "Slug") != slug {
+			continue
+		}
+		if stringField(item, "Status") == string(Published) {
+			published = append(published, item)
+		} else {
+			rest = append(rest, item)
 		}
 	}
-	var zero T
-	return zero, ErrNotFound
+	return append(published, rest...), nil
+}
+
+// slugMatcher is a repository that lists every holder of a slug, published
+// first. Drafts of web content may share a slug; a repository without it
+// ([Repository] written by a user) resolves one holder through FindBySlug.
+type slugMatcher[T any] interface {
+	findAllBySlug(ctx context.Context, slug string) ([]T, error)
 }
 
 // statusMatch reports whether the Status field of item matches any of the
@@ -819,10 +844,23 @@ func (r *SQLRepo[T]) FindByID(ctx context.Context, id string) (T, error) {
 		"SELECT * FROM "+r.table+" WHERE "+quoteIdent("id")+" = $1", id)
 }
 
-// FindBySlug returns the item with the given slug, or [ErrNotFound].
+// FindBySlug returns the item with the given slug, or [ErrNotFound]. Drafts of
+// web content may share a slug, so a published holder comes first, then the
+// lowest ID.
 func (r *SQLRepo[T]) FindBySlug(ctx context.Context, slug string) (T, error) {
-	return QueryOne[T](ctx, r.db,
-		"SELECT * FROM "+r.table+" WHERE "+quoteIdent("slug")+" = $1", slug)
+	return QueryOne[T](ctx, r.db, r.slugQuery()+" LIMIT 1", slug)
+}
+
+// findAllBySlug implements [slugMatcher]: every holder of slug, published
+// first, then by ID.
+func (r *SQLRepo[T]) findAllBySlug(ctx context.Context, slug string) ([]T, error) {
+	return Query[T](ctx, r.db, r.slugQuery(), slug)
+}
+
+// slugQuery selects the holders of a slug ($1), published first.
+func (r *SQLRepo[T]) slugQuery() string {
+	return "SELECT * FROM " + r.table + " WHERE " + quoteIdent("slug") + " = $1 ORDER BY CASE WHEN " +
+		quoteIdent("status") + " = 'published' THEN 0 ELSE 1 END, " + quoteIdent("id")
 }
 
 // tableHandle returns the repository's handle and table, for a lookup the

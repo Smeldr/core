@@ -21,6 +21,21 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Added
+
+- **`App.GeneratePreviewTokenForID(prefix, slug, id)` (A507).** The preview token is bound to one item as well as its prefix and slug. It opens that draft or scheduled item even when other drafts share its slug. The URL stays `/prefix/slug?preview=token`. `GeneratePreviewToken(prefix, slug)` still works: it opens a draft only while the slug names exactly one draft or scheduled item.
+- **`EnsurePublishedSlugIndex(ctx, db, table)` (A507).** It creates `idx_<table>_slug_published`, a unique index on the slug of published rows of a compiled module's own table. It is idempotent and works on SQLite and Postgres. It scans for published duplicates first and refuses with `ErrConflict` naming them. It does not drop a column-level `UNIQUE` on slug. Declare the column `slug TEXT NOT NULL` instead.
+- **`DynamicTypeRepo.SetSlugVia(ctx, surface, id, slug)` (A507).** It gives a dynamic web-content item another slug while the item is not published. A record type returns `ErrBadRequest`, a published item returns `ErrConflict`, and an invalid slug returns a validation error.
+
+### Changed
+
+- **A draft of web content reserves no URL (A507).** Drafts may share a slug with each other and with a published item. Creating or updating a draft never fails because of a slug collision, and its slug never changes for that reason. An automatic slug's counter counts published items only, which are public, so it no longer reveals a hidden draft. Web content means a type with a public URL prefix and no address. Core record types, and Rule and AuthorityStub (whose tables keep a column-level `UNIQUE`), keep their rule.
+- **Slug uniqueness is checked on publish and schedule, against published items only (A507).** MCP publish and schedule, HTTP create or update into published, `TransitionItemVia`, and the scheduler all check it. A clash returns `ErrConflict` naming the public URL and a free one, for example `the URL /posts/about is already published; give this item another slug, for example /posts/about-2`. The scheduler leaves a clashing item Scheduled and logs it once per item. An unpublished web-content item may take another slug through an update.
+- **A slug that names more than one readable item is ambiguous (A507).** It returns `ErrConflict` and asks for the item's ID. Only readable items are counted, so a hidden draft is never revealed. The ID resolves on MCP and on the module's PUT, PATCH and DELETE routes. `FindBySlug` on `MemoryRepo` and `SQLRepo`, and `DynamicTypeRepo.GetBySlug`, return a published holder first, so `GET /prefix/slug` never shows a draft in place of a page.
+- **The dynamic slug index no longer covers drafts of web content (A507).** `CreateBlockTables` creates `idx_dynamic_content_type_slug_published` over published items and over every item of a record type (one that carries an address), then drops `idx_dynamic_content_type_slug`, the earlier index over every status. Boot logs "published-only slug index in place", or "published-only slug index skipped" along with the published duplicates. No row is changed.
+- **`PUT`, `PATCH` and `DELETE /<prefix>/<x>` of a web-content module also accept the item's ID (A507).** When `x` names no item the caller can see by slug, it is tried as the ID. `PUT` now keeps the item's stored slug; before, it set the slug to the URL segment.
+- Upgrade note for compiled web-content tables: a table that declares `slug TEXT NOT NULL UNIQUE` still refuses a second draft with the same slug. Drop the column constraint and call `EnsurePublishedSlugIndex`. example/blog now does this with a partial index.
+
 ---
 
 ## [1.153.0] - 2026-10-15

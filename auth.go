@@ -159,42 +159,60 @@ func tokenHMAC(payload, secret string) string {
 //
 // Token format: base64url(prefix+":"+slug+":"+expUnix) + "." + tokenHMAC(payload, secret)
 func encodePreviewToken(prefix, slug string, secret []byte, ttl time.Duration) string {
+	return signPreviewPayload(prefix+":"+slug, secret, ttl)
+}
+
+// encodePreviewTokenForID is [encodePreviewToken] bound to one item as well:
+// drafts of web content may share a slug, and the ID says which one opens.
+//
+// Token format: base64url(prefix+":"+slug+":"+id+":"+expUnix) + "." + tokenHMAC(payload, secret)
+func encodePreviewTokenForID(prefix, slug, id string, secret []byte, ttl time.Duration) string {
+	return signPreviewPayload(prefix+":"+slug+":"+id, secret, ttl)
+}
+
+// signPreviewPayload appends the expiry to body and signs it.
+func signPreviewPayload(body string, secret []byte, ttl time.Duration) string {
 	exp := strconv.FormatInt(time.Now().Add(ttl).Unix(), 10)
-	payload := base64.RawURLEncoding.EncodeToString([]byte(prefix + ":" + slug + ":" + exp))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(body + ":" + exp))
 	return payload + "." + tokenHMAC(payload, string(secret))
 }
 
 // decodePreviewToken validates the HMAC signature and expiry of a preview token
-// produced by [encodePreviewToken]. Returns the prefix and slug bound to the
-// token, or [ErrNotFound] if the token is missing, malformed, expired, or the
-// signature does not match. Comparison is constant-time to prevent timing attacks.
-func decodePreviewToken(token string, secret []byte) (prefix, slug string, err error) {
+// produced by [encodePreviewToken] or [encodePreviewTokenForID]. Returns the
+// prefix and slug bound to the token, and the item ID when it binds one (""
+// for a slug-only token), or [ErrNotFound] if the token is missing, malformed,
+// expired, or the signature does not match. Comparison is constant-time to
+// prevent timing attacks.
+func decodePreviewToken(token string, secret []byte) (prefix, slug, id string, err error) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
-		return "", "", ErrNotFound
+		return "", "", "", ErrNotFound
 	}
 	payload, sig := parts[0], parts[1]
 
 	expected := tokenHMAC(payload, string(secret))
 	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
-		return "", "", ErrNotFound
+		return "", "", "", ErrNotFound
 	}
 
 	raw, decErr := base64.RawURLEncoding.DecodeString(payload)
 	if decErr != nil {
-		return "", "", ErrNotFound
+		return "", "", "", ErrNotFound
 	}
-	// payload is "prefix:slug:expUnix" — split on ":" with a max of 3 parts
-	// so slugs or prefixes that happen to contain no colons are handled safely.
-	fields := strings.SplitN(string(raw), ":", 3)
-	if len(fields) != 3 {
-		return "", "", ErrNotFound
+	// payload is "prefix:slug:expUnix" or "prefix:slug:id:expUnix"; none of
+	// prefix, slug and ID holds a colon.
+	fields := strings.Split(string(raw), ":")
+	if len(fields) != 3 && len(fields) != 4 {
+		return "", "", "", ErrNotFound
 	}
-	expUnix, convErr := strconv.ParseInt(fields[2], 10, 64)
+	expUnix, convErr := strconv.ParseInt(fields[len(fields)-1], 10, 64)
 	if convErr != nil || time.Now().Unix() > expUnix {
-		return "", "", ErrNotFound
+		return "", "", "", ErrNotFound
 	}
-	return fields[0], fields[1], nil
+	if len(fields) == 4 {
+		id = fields[2]
+	}
+	return fields[0], fields[1], id, nil
 }
 
 // encodeUploadToken returns a short-lived HMAC-SHA256-signed upload token.

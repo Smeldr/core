@@ -514,8 +514,11 @@ type Module[T any] struct {
 
 	redirects *RedirectStore // the App's redirect table, consulted only on a public read's 404 path; nil outside an App
 
-	addressed  bool                 // D110: each create allocates the item's address ([withAddress])
-	memAddress memoryAddressCounter // the address counter when the module has no database
+	addressed bool // D110: each create allocates the item's address ([withAddress])
+	// slugsReserved keeps one slug per item in every status ([reservedSlugs]),
+	// for a framework record table whose slug column is UNIQUE.
+	slugsReserved bool
+	memAddress    memoryAddressCounter // the address counter when the module has no database
 }
 
 // NewModule constructs a [Module] for content type T.
@@ -596,6 +599,8 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 			m.saveBefore, m.saveAfter, m.saveStatusChanged = v.before, v.after, v.statusChanged
 		case addressOption:
 			m.addressed = true
+		case reservedSlugsOption:
+			m.slugsReserved = true
 		case SitemapConfig:
 			cfg := v
 			m.sitemapCfg = &cfg
@@ -1547,15 +1552,154 @@ func (m *Module[T]) addSlugChecker(fn func(ctx context.Context, slug string) err
 	m.slugCheckers = append(m.slugCheckers, fn)
 }
 
-// checkSlugCollision runs all registered slug checkers. Returns the first error
-// (which names the colliding type and slug), or nil if no collision is found.
-func (m *Module[T]) checkSlugCollision(ctx context.Context, slug string) error {
+// checkSlugCollision is the slug check before item is published or scheduled:
+// first the type's own ([Module.publishedSlugConflict]), then every registered
+// aggregate-route checker. Returns the first error, or nil.
+func (m *Module[T]) checkSlugCollision(ctx context.Context, item T) error {
+	if err := m.publishedSlugConflict(ctx, item); err != nil {
+		return err
+	}
+	slug := nodeSlugOf(item)
 	for _, fn := range m.slugCheckers {
 		if err := fn(ctx, slug); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// slugHolders returns every item holding slug, published first: all of them
+// through a [slugMatcher] repository, else the one FindBySlug returns.
+func (m *Module[T]) slugHolders(ctx context.Context, slug string) ([]T, error) {
+	if sm, ok := any(m.repo).(slugMatcher[T]); ok {
+		return sm.findAllBySlug(ctx, slug)
+	}
+	item, err := m.repo.FindBySlug(ctx, slug)
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []T{item}, nil
+}
+
+// slugPublished reports whether a published item other than id holds slug.
+// Published web content is public, so the answer reveals nothing hidden.
+func (m *Module[T]) slugPublished(ctx context.Context, slug, id string) (bool, error) {
+	holders, err := m.slugHolders(ctx, slug)
+	if err != nil {
+		return false, err
+	}
+	for _, h := range holders {
+		if nodeStatusOf(h) == Published && nodeIDOf(h) != id {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// publishedSlugConflict is the uniqueness check of web content: drafts never
+// reserve a URL, so a slug is checked when item is published or scheduled,
+// against published items of the type only. A record type (an address is its
+// identity) and an empty slug pass. The conflict names the public URL and the
+// next free one.
+func (m *Module[T]) publishedSlugConflict(ctx context.Context, item T) error {
+	slug := nodeSlugOf(item)
+	if !m.draftSlugsShared() || slug == "" {
+		return nil
+	}
+	taken, err := m.slugPublished(ctx, slug, nodeIDOf(item))
+	if err != nil || !taken {
+		return err
+	}
+	var lookupErr error
+	free := UniqueSlug(slug, func(s string) bool {
+		t, err := m.slugPublished(ctx, s, nodeIDOf(item))
+		if err != nil {
+			lookupErr = err
+			return false
+		}
+		return t
+	})
+	if lookupErr != nil {
+		return lookupErr
+	}
+	return slugTakenError(m.prefix, slug, free)
+}
+
+// slugTakenError is the guided conflict for a publish whose URL is already
+// published: it names that public URL and a free one.
+func slugTakenError(prefix, slug, free string) error {
+	prefix = strings.TrimRight(prefix, "/")
+	return fmt.Errorf("%w: the URL %s/%s is already published; give this item another slug, for example %s/%s",
+		ErrConflict, prefix, slug, prefix, free)
+}
+
+// slugGuard is a compiled module's slug rules, for [App.TransitionItemVia],
+// which moves a compiled item by table and not through its module.
+type slugGuard interface {
+	slugGuardTypeName() string
+	// webContent reports whether drafts of the type may share a slug.
+	webContent() bool
+	// slugGuardPrefix is the type's public URL prefix, for the guided error.
+	slugGuardPrefix() string
+}
+
+func (m *Module[T]) slugGuardTypeName() string { return m.contentTypeName }
+func (m *Module[T]) webContent() bool          { return m.draftSlugsShared() }
+func (m *Module[T]) slugGuardPrefix() string   { return m.prefix }
+
+// draftSlugsShared reports whether drafts of this type reserve no URL and may
+// share a slug: web content, so neither a type with an address nor a core
+// record type ([coreAddressPrefixes]), whose table does not keep one slug per
+// item ([reservedSlugs]).
+func (m *Module[T]) draftSlugsShared() bool {
+	_, coreRecord := coreAddressPrefixes[m.contentTypeName]
+	return !m.addressed && !coreRecord && !m.slugsReserved
+}
+
+// reservedSlugsOption is [reservedSlugs].
+type reservedSlugsOption struct{}
+
+func (reservedSlugsOption) isOption() {}
+
+// reservedSlugs keeps today's slug rule for a framework record table whose
+// slug column is UNIQUE in every status (smeldr_rules, smeldr_authority_stubs):
+// its slugs are unique across drafts too, and a draft is never published
+// under a shared slug.
+func reservedSlugs() Option { return reservedSlugsOption{} }
+
+// visibleSlugHolder is the slug step of web content, where drafts may share a
+// slug: one holder the caller may see (visible nil: any) is a hit; more than
+// one is ambiguous, counting only those it may see, so a hidden one is never
+// revealed; none is a miss (hit false), after the same one statement.
+func (m *Module[T]) visibleSlugHolder(ctx context.Context, slug string, visible func(T) bool) (item T, hit bool, err error) {
+	holders, err := m.slugHolders(ctx, slug)
+	if err != nil {
+		return item, false, err
+	}
+	var hits []T
+	for _, h := range holders {
+		if visible == nil || visible(h) {
+			hits = append(hits, h)
+		}
+	}
+	switch len(hits) {
+	case 0:
+		return item, false, nil
+	case 1:
+		return hits[0], true, nil
+	default:
+		return item, false, errAmbiguousSlug(slug)
+	}
+}
+
+// errAmbiguousSlug is the answer when a slug names more than one item the
+// caller can read: only readable items are counted, so a hidden one is never
+// revealed, and the ID always resolves.
+func errAmbiguousSlug(slug string) error {
+	return fmt.Errorf("%w: the slug %q names more than one item you can read; use its ID", ErrConflict, slug)
 }
 
 // moduleURLPrefix returns the URL prefix registered via [At], or "" if none.
@@ -1706,6 +1850,24 @@ func (m *Module[T]) findVisibleBySlug(ctx Context, slug string) (T, error) {
 	s, err := m.httpReadScope(ctx)
 	if err != nil {
 		return zero, err
+	}
+	if m.draftSlugsShared() {
+		// Web content: drafts may share a slug ([Module.visibleSlugHolder]),
+		// so the path segment may name the item by its ID instead, which the
+		// ambiguity error points to.
+		visible := func(it T) bool { return m.visibleTo(s, it) }
+		item, hit, err := m.visibleSlugHolder(ctx, slug, visible)
+		if err != nil || hit {
+			return item, err
+		}
+		item, err = m.repo.FindByID(ctx, slug)
+		if err != nil {
+			return zero, err
+		}
+		if !visible(item) {
+			return zero, ErrNotFound
+		}
+		return item, nil
 	}
 	item, err := m.repo.FindBySlug(ctx, slug)
 	if err != nil {
@@ -1901,6 +2063,17 @@ const (
 // the winner's save.
 func (m *Module[T]) publishDue(ctx Context, item T, now time.Time) dueOutcome {
 	id := nodeIDOf(item)
+	// Its URL may have been published by another item since it was scheduled:
+	// it stays Scheduled, logged once per item until the conflict clears.
+	slugKey := "slug/" + m.contentTypeName + "/" + id
+	if err := m.checkSlugCollision(ctx, item); err != nil {
+		if _, seen := scheduledBlockedLogged.LoadOrStore(slugKey, struct{}{}); !seen {
+			slog.Warn("smeldr: scheduler: scheduled item not published: its URL is taken; it stays scheduled until its slug changes or the URL is free",
+				"type", m.contentTypeName, "id", id, "slug", nodeSlugOf(item), "err", err)
+		}
+		return dueBlocked
+	}
+	scheduledBlockedLogged.Delete(slugKey)
 	plan, err := planConflict(ctx, m.db, m.contentTypeName, string(Published), id)
 	if err != nil {
 		key := m.contentTypeName + "/" + id
@@ -2035,6 +2208,23 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slug := r.PathValue("slug")
+
+	// Preview bypass: a valid HMAC-signed ?preview=<token> grants read access to
+	// Draft and Scheduled content for the lifetime of the token
+	// ([Module.previewItem]). Archived items are explicitly offline and are
+	// never previewable. Failed or missing tokens fall through silently to the
+	// normal visibility check.
+	if item, ok := m.previewItem(ctx, r, slug); ok {
+		ct := m.neg.negotiate(r)
+		if ct == "text/html" {
+			m.renderShowHTML(w, r, ctx, item)
+			return
+		}
+		m.writeContentCached(w, r, ct, item)
+		return
+	}
+
+	// Published first: a draft sharing the slug never shadows the page.
 	item, err := m.repo.FindBySlug(ctx, slug)
 	if errors.Is(err, ErrNotFound) {
 		m.notFound(w, r)
@@ -2043,28 +2233,6 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		WriteError(w, r, err)
 		return
-	}
-
-	// Preview bypass: a valid HMAC-signed ?preview=<token> grants read access to
-	// Draft and Scheduled content for the lifetime of the token. Archived items
-	// are explicitly offline and are never previewable — they fall through to the
-	// normal isVisible → 404 path regardless of token validity.
-	// The token encodes both module prefix and slug, so a token for /posts/foo
-	// cannot be replayed on /docs/foo or on a different slug within the same module.
-	// Failed or missing tokens fall through silently to the normal visibility check.
-	itemStatus := nodeStatusOf(item)
-	if token := r.URL.Query().Get("preview"); token != "" && len(m.secret) > 0 &&
-		(itemStatus == Draft || itemStatus == Scheduled) {
-		if previewPrefix, previewSlug, tokErr := decodePreviewToken(token, m.secret); tokErr == nil &&
-			previewPrefix == m.prefix && previewSlug == slug {
-			ct := m.neg.negotiate(r)
-			if ct == "text/html" {
-				m.renderShowHTML(w, r, ctx, item)
-				return
-			}
-			m.writeContentCached(w, r, ct, item)
-			return
-		}
 	}
 
 	// Lifecycle enforcement: non-Published → 404 for Guest.
@@ -2080,6 +2248,47 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.writeContentCached(w, r, ct, item)
+}
+
+// previewItem is the item a valid ?preview= token opens at slug: a Draft or
+// Scheduled item of this module holding slug, bound to the token's prefix and
+// slug. A token that binds an ID opens that item; a slug-only token opens one
+// only while the slug names exactly one draft or scheduled item, since drafts
+// of web content may share a slug. Anything else is no preview (false), and
+// the caller goes on to its normal visibility check.
+func (m *Module[T]) previewItem(ctx context.Context, r *http.Request, slug string) (T, bool) {
+	var zero T
+	token := r.URL.Query().Get("preview")
+	if token == "" || len(m.secret) == 0 {
+		return zero, false
+	}
+	prefix, tokenSlug, id, err := decodePreviewToken(token, m.secret)
+	if err != nil || prefix != m.prefix || tokenSlug != slug {
+		return zero, false
+	}
+	previewable := func(item T) bool {
+		st := nodeStatusOf(item)
+		return (st == Draft || st == Scheduled) && nodeSlugOf(item) == slug
+	}
+	if id != "" {
+		item, err := m.repo.FindByID(ctx, id)
+		if err != nil || !previewable(item) {
+			return zero, false
+		}
+		return item, true
+	}
+	holders, err := m.slugHolders(ctx, slug)
+	if err != nil {
+		return zero, false
+	}
+	var hit T
+	n := 0
+	for _, h := range holders {
+		if previewable(h) {
+			hit, n = h, n+1
+		}
+	}
+	return hit, n == 1
 }
 
 // setRedirects wires the App's redirect table, which [Module.notFound]
@@ -2121,15 +2330,21 @@ func (m *Module[T]) singleInstanceHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Preview bypass: load the item first, extract its slug, then validate the token.
+	// Preview bypass: load the item first, extract its slug, then validate the
+	// token. A token that binds an ID opens that item.
 	if token := r.URL.Query().Get("preview"); token != "" && len(m.secret) > 0 {
 		all, err := m.repo.FindAll(ctx, ListOptions{})
+		if _, _, id, tokErr := decodePreviewToken(token, m.secret); tokErr == nil && id != "" {
+			if byID, ferr := m.repo.FindByID(ctx, id); ferr == nil {
+				all, err = []T{byID}, nil
+			}
+		}
 		if err == nil && len(all) > 0 {
 			item := all[0]
 			itemStatus := nodeStatusOf(item)
 			if itemStatus == Draft || itemStatus == Scheduled {
 				itemSlug := extractNode(item).Slug
-				if previewPrefix, previewSlug, tokErr := decodePreviewToken(token, m.secret); tokErr == nil &&
+				if previewPrefix, previewSlug, _, tokErr := decodePreviewToken(token, m.secret); tokErr == nil &&
 					previewPrefix == m.prefix && previewSlug == itemSlug {
 					ct := m.neg.negotiate(r)
 					if ct == "text/html" {
@@ -2237,7 +2452,7 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 	// forever on a one-connection SQLite), so it now comes before the type's
 	// own pre-save check.
 	if nodeStatusOf(item) == Published {
-		if err := m.checkSlugCollision(ctx, nodeSlugOf(item)); err != nil {
+		if err := m.checkSlugCollision(ctx, item); err != nil {
 			WriteError(w, r, err)
 			return
 		}
@@ -2306,11 +2521,13 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Preserve the original ID and Slug (the URL is the source of truth) and
-	// the address (D110), which a full-replace body could otherwise rewrite.
+	// Preserve the original ID and Slug (the stored item is the source of
+	// truth: the URL names it by slug, or by ID when drafts share the slug)
+	// and the address (D110), which a full-replace body could otherwise
+	// rewrite.
 	f := getNodeFields(elemType)
 	pv.Elem().FieldByIndex(f.id).SetString(nodeIDOf(existing))
-	pv.Elem().FieldByIndex(f.slug).SetString(slug)
+	pv.Elem().FieldByIndex(f.slug).SetString(nodeSlugOf(existing))
 	keepStoredAddress(pv, existing)
 	stampLastActor(ctx, pv, existing)
 
@@ -2381,7 +2598,7 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	// Slug collision check: if transitioning to Published, ensure no other
 	// module in the same aggregate route already has an item with this slug.
 	if prevStatus != Published && newStatus == Published {
-		if err := m.checkSlugCollision(ctx, nodeSlugOf(item)); err != nil {
+		if err := m.checkSlugCollision(ctx, item); err != nil {
 			WriteError(w, r, err)
 			return
 		}
@@ -2778,13 +2995,19 @@ func (m *Module[T]) resolveItemFor(ctx Context, ident string, s *ReadScope) (T, 
 			return item, nil
 		}
 	}
-	item, err := m.repo.FindBySlug(ctx, ident)
-	if hit, ferr := found(item, err); ferr != nil {
-		return zero, ferr
-	} else if hit {
-		return item, nil
+	if m.draftSlugsShared() {
+		if item, hit, err := m.visibleSlugHolder(ctx, ident, visible); err != nil || hit {
+			return item, err
+		}
+	} else {
+		item, err := m.repo.FindBySlug(ctx, ident)
+		if hit, ferr := found(item, err); ferr != nil {
+			return zero, ferr
+		} else if hit {
+			return item, nil
+		}
 	}
-	item, err = m.repo.FindByID(ctx, ident)
+	item, err := m.repo.FindByID(ctx, ident)
 	if hit, ferr := found(item, err); ferr != nil {
 		return zero, ferr
 	} else if hit {
@@ -3017,6 +3240,13 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 			return nil, err
 		}
 	}
+	// Created straight into Published or Scheduled: the URL is checked now, as
+	// on any publish; a draft reserves none.
+	if st := nodeStatusOf(item); st == Published || st == Scheduled {
+		if err := m.checkSlugCollision(ctx, item); err != nil {
+			return nil, err
+		}
+	}
 	// The public BeforeCreate hooks run before the transaction (they take no
 	// db); the type's own check and the INSERT run inside it (createInTx).
 	if err := dispatchBefore(ctx, m.signals[BeforeCreate], item); err != nil {
@@ -3055,9 +3285,11 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	return item, nil
 }
 
-// newSlug returns a new item's slug under the per-item read rules. A
-// web-content type, and a caller who reads every record of a record type, keep
-// today's rule: a supplied slug is used as given, an automatic one gets a
+// newSlug returns a new item's slug under the per-item read rules. For a
+// web-content type a draft reserves no URL: the counter counts published items
+// only, and a supplied slug is used as given. A caller who reads every record
+// of a record type keeps today's rule: a supplied slug is used as given, an
+// automatic one gets a
 // counter when taken. For a record type and a scoped caller, a taken slug is
 // never answered with a counter (which would count records the caller may not
 // read) or an error naming its holder: it becomes the slug plus the tail of the
@@ -3068,6 +3300,14 @@ func (m *Module[T]) newSlug(ctx Context, supplied, auto, id string) (slug string
 	taken := func(s string) bool {
 		_, err := m.repo.FindBySlug(ctx, s)
 		return err == nil
+	}
+	if m.draftSlugsShared() {
+		// Web content: a draft reserves no URL, so the counter counts
+		// published items only, which are public.
+		taken = func(s string) bool {
+			t, err := m.slugPublished(ctx, s, id)
+			return err == nil && t
+		}
 	}
 	scoped := false
 	if m.addressed {
@@ -3130,8 +3370,19 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 		return nil, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
 			ErrConflict, m.contentTypeName, nodeIDOf(existing), nodeStatusOf(existing))
 	}
-	if err := refuseImmutableKeys(fields, existing); err != nil {
+	// Web content that is not published may take another slug: a draft
+	// reserves no URL, so the publisher chooses one before publishing.
+	slugChangeable := m.draftSlugsShared() && nodeStatusOf(existing) != Published
+	if err := refuseImmutableKeys(fields, existing, slugChangeable); err != nil {
 		return nil, err
+	}
+	newSlug := nodeSlugOf(existing)
+	if slugChangeable {
+		for key, v := range fields {
+			if strings.EqualFold(key, "slug") {
+				newSlug = v.(string) // refuseImmutableKeys checked it
+			}
+		}
 	}
 
 	pv, elemType := m.newItemPtr()
@@ -3154,7 +3405,7 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 	// can differ when ident was a human ID resolved via resolveItem (T253).
 	f := getNodeFields(elemType)
 	pv.Elem().FieldByIndex(f.id).SetString(nodeIDOf(existing))
-	pv.Elem().FieldByIndex(f.slug).SetString(nodeSlugOf(existing))
+	pv.Elem().FieldByIndex(f.slug).SetString(newSlug)
 	pv.Elem().FieldByIndex(f.status).Set(reflect.ValueOf(nodeStatusOf(existing)))
 	keepStoredAddress(pv, existing)
 	stampLastActor(ctx, pv, existing)
@@ -3187,13 +3438,20 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 // caller that sends a whole item back keeps working; a different value, or a
 // value that is not a string, is refused with a [*ValidationError] on that
 // field naming the path that does change it (422 over HTTP, -32602 over MCP),
-// instead of being dropped while the update reports success.
-func refuseImmutableKeys(fields map[string]any, existing any) error {
+// instead of being dropped while the update reports success. When
+// slugChangeable (web content that is not published), the slug may change to
+// any valid slug ([GenerateSlug] of itself).
+func refuseImmutableKeys(fields map[string]any, existing any, slugChangeable bool) error {
 	for key, v := range fields {
 		var field, stored string
 		switch {
 		case strings.EqualFold(key, "status"):
 			field, stored = "status", string(nodeStatusOf(existing))
+		case strings.EqualFold(key, "slug") && slugChangeable:
+			if s, ok := v.(string); !ok || s == "" || GenerateSlug(s) != s {
+				return Err("slug", "must be a slug: lowercase letters, digits and hyphens")
+			}
+			continue
 		case strings.EqualFold(key, "slug"):
 			field, stored = "slug", nodeSlugOf(existing)
 		case strings.EqualFold(key, "id"):
@@ -3270,7 +3528,7 @@ func (m *Module[T]) MCPPublish(ctx Context, slug, reason string) error {
 	// The item's own real slug, never the caller-supplied ident — ident can
 	// be a human ID resolved via resolveItem, which is not itself a slug
 	// and must never be checked as one (T253).
-	if err := m.checkSlugCollision(ctx, nodeSlugOf(item)); err != nil {
+	if err := m.checkSlugCollision(ctx, item); err != nil {
 		return err
 	}
 	prevStatus := nodeStatusOf(item)
@@ -3313,6 +3571,9 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time, reason s
 	}
 	prevStatus := nodeStatusOf(item)
 	if err := validateTransition(ctx, m.db, m.roleStore, m.relationStore, ctx.User().ID, nodeIDOf(item), m.contentTypeName, string(prevStatus), string(Scheduled), reason); err != nil {
+		return err
+	}
+	if err := m.checkSlugCollision(ctx, item); err != nil {
 		return err
 	}
 	plan, err := planConflict(ctx, m.db, m.contentTypeName, string(Scheduled), nodeIDOf(item))
@@ -3401,25 +3662,19 @@ func (m *Module[T]) standaloneEnabled() bool { return m.standalone }
 // Implements [standaloneDispatcher].
 func (m *Module[T]) findAndServe(w http.ResponseWriter, r *http.Request, slug string) bool {
 	ctx := ContextFrom(w, r)
+	// Preview bypass for Draft/Scheduled items (same model as showHandler).
+	if item, ok := m.previewItem(ctx, r, slug); ok {
+		ct := m.neg.negotiate(r)
+		if ct == "text/html" {
+			m.renderShowHTML(w, r, ctx, item)
+			return true
+		}
+		m.writeContentCached(w, r, ct, item)
+		return true
+	}
 	item, err := m.repo.FindBySlug(ctx, slug)
 	if err != nil {
 		return false // slug not in this module
-	}
-
-	// Preview bypass for Draft/Scheduled items (same model as showHandler).
-	itemStatus := nodeStatusOf(item)
-	if token := r.URL.Query().Get("preview"); token != "" && len(m.secret) > 0 &&
-		(itemStatus == Draft || itemStatus == Scheduled) {
-		if previewPrefix, previewSlug, tokErr := decodePreviewToken(token, m.secret); tokErr == nil &&
-			previewPrefix == m.prefix && previewSlug == slug {
-			ct := m.neg.negotiate(r)
-			if ct == "text/html" {
-				m.renderShowHTML(w, r, ctx, item)
-				return true
-			}
-			m.writeContentCached(w, r, ct, item)
-			return true
-		}
 	}
 
 	if ok, err := m.isVisible(ctx, item); err != nil {

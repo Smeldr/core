@@ -506,7 +506,7 @@ without the column is refused).
 For each registered content type, these tools are available:
 
 - `create_{type}` — creates a Draft
-- `update_{type}` — partial update (absent fields preserved). A `status`, `slug` or `id` that differs from the stored value is refused (-32602, the field named; held, version pending): change status with `transition_item` or `publish_`/`schedule_`/`archive_`. Before, the update dropped them and reported success. The item identifier (`slug` or `id` argument) is not a body field.
+- `update_{type}` — partial update (absent fields preserved). A `status`, `slug` or `id` that differs from the stored value is refused (-32602, the field named; held, version pending): change status with `transition_item` or `publish_`/`schedule_`/`archive_`. Before, the update dropped them and reported success. The item identifier (`slug` or `id` argument) is not a body field. Exception (core v1.154.0): web content that is not published may take another `slug`, since a draft reserves no URL; publishing then checks the URL against published items only and, on a clash, names a free one (`... for example /posts/about-2`). Drafts may share a slug: when a slug names more than one item you can read, use the item's ID.
 - `publish_{type}` — transitions to Published
 - `schedule_{type}` — schedules for future publication (RFC3339 datetime)
 - `archive_{type}` — transitions to Archived

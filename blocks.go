@@ -121,34 +121,50 @@ CREATE INDEX IF NOT EXISTS idx_content_edges_parent
 		return err
 	}
 
-	if err := ensureDynamicSlugIndex(ctx, db); err != nil {
-		return err
-	}
 	// D110: a dynamic record type's items carry an address; the counter table
-	// holds each record type's prefix.
+	// holds each record type's prefix. The slug index reads the address
+	// column, so it comes after.
 	if err := ensureAddressCounters(ctx, db); err != nil {
 		return err
 	}
-	return ensureAddressStorage(ctx, db, "smeldr_dynamic_content", true)
+	if err := ensureAddressStorage(ctx, db, "smeldr_dynamic_content", true); err != nil {
+		return err
+	}
+	return ensureDynamicSlugIndex(ctx, db)
 }
 
+// slugIndexRows is the rows the dynamic slug index covers: a record's item
+// (it has an address) in every status, and a web-content item (no address)
+// only when published, since a draft reserves no URL.
+const slugIndexRows = `slug <> '' AND (status = 'published' OR address <> '')`
+
 // ensureDynamicSlugIndex creates the partial unique index on
-// smeldr_dynamic_content (type_name, slug) for non-empty slugs, so one type
-// can never hold two items under one address. Blocks may carry an empty
-// slug, which the index leaves alone.
+// smeldr_dynamic_content (type_name, slug) over [slugIndexRows]: one type can
+// never publish two items under one URL, and a record type never holds two
+// items under one slug. A draft of web content reserves no URL: drafts may
+// share a slug, and so may a draft and a published item. Blocks may carry an
+// empty slug, which the index leaves alone. Despite its name,
+// idx_dynamic_content_type_slug_published also covers every item of a record
+// type, in any status.
 //
-// Duplicates that already exist are never rewritten: when there are any, each
-// is logged (type, slug and the ids holding it) and the index is skipped, so
-// boot goes on. Resolve them (give all but one a new slug) and the next boot
-// creates the index. A failure of the CREATE INDEX statement itself is
-// handled the same way: logged, index skipped, boot goes on. Only a failure
-// to run the duplicate scan is returned.
+// It replaces the earlier index over every status
+// (idx_dynamic_content_type_slug): the new one is created first, and the old
+// one is dropped only once the new one exists. The old index was stricter, so
+// wherever it existed no covered pair can collide.
+//
+// Published duplicates that already exist are never rewritten: when there are
+// any, each is logged (type, slug and the ids holding it) and the index is
+// skipped, so boot goes on. Resolve them (give all but one a new slug) and the
+// next boot creates the index. A failure of the CREATE INDEX statement itself
+// is handled the same way: logged, index skipped, boot goes on. The outcome is
+// logged once per call, so a deploy log shows it. Only a failure to run the
+// duplicate scan is returned.
 func ensureDynamicSlugIndex(ctx context.Context, db DB) error {
 	rows, err := db.QueryContext(ctx, `
 SELECT type_name, slug, id FROM smeldr_dynamic_content
-WHERE slug <> '' AND (type_name, slug) IN (
+WHERE `+slugIndexRows+` AND (type_name, slug) IN (
 	SELECT type_name, slug FROM smeldr_dynamic_content
-	WHERE slug <> '' GROUP BY type_name, slug HAVING COUNT(*) > 1)
+	WHERE `+slugIndexRows+` GROUP BY type_name, slug HAVING COUNT(*) > 1)
 ORDER BY type_name, slug, id`)
 	if err != nil {
 		return err
@@ -174,20 +190,32 @@ ORDER BY type_name, slug, id`)
 		return err
 	}
 	if len(order) > 0 {
+		names := make([]string, 0, len(order))
 		for _, k := range order {
-			slog.WarnContext(ctx, "smeldr: dynamic content slug held by more than one item; unique slug index not created until resolved",
+			slog.WarnContext(ctx, "smeldr: dynamic content slug held by more than one item (published, or of a record type); unique slug index not created until resolved",
 				"type", k.typeName, "slug", k.slug, "ids", strings.Join(ids[k], ","))
+			names = append(names, k.typeName+"/"+k.slug)
 		}
+		slog.WarnContext(ctx, "smeldr: published-only slug index skipped",
+			"published_duplicates", len(order), "slugs", strings.Join(names, ","))
 		return nil
 	}
 	if _, err := db.ExecContext(ctx, `
-CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_content_type_slug
-	ON smeldr_dynamic_content (type_name, slug) WHERE slug <> ''`); err != nil {
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_content_type_slug_published
+	ON smeldr_dynamic_content (type_name, slug) WHERE `+slugIndexRows); err != nil {
 		// A duplicate written between the scan and this statement, or any
 		// other refusal, must not fail boot either: the index is skipped the
-		// same way, and the next boot tries again.
-		slog.WarnContext(ctx, "smeldr: dynamic content unique slug index not created; boot continues without it",
+		// same way (the earlier index, if any, stays), and the next boot tries
+		// again.
+		slog.WarnContext(ctx, "smeldr: published-only slug index skipped: not created; boot continues without it",
 			"error", err)
+		return nil
 	}
+	if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS idx_dynamic_content_type_slug`); err != nil {
+		slog.WarnContext(ctx, "smeldr: published-only slug index in place, but the earlier all-status index could not be dropped; drafts cannot share a slug until it is",
+			"error", err)
+		return nil
+	}
+	slog.InfoContext(ctx, "smeldr: published-only slug index in place")
 	return nil
 }

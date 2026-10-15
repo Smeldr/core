@@ -1415,7 +1415,22 @@ func (a *App) lookupCompiledRecord(ctx context.Context, typeName, ident string, 
 		return nil
 	}
 	err = sql.ErrNoRows
+	webContent := a.slugGuards[typeName] != nil && a.slugGuards[typeName].webContent()
 	for _, c := range identCandidates(typeName, ident) {
+		if c[0] == "slug" && webContent {
+			// Drafts of web content may share a slug: one visible holder is a
+			// hit, more than one is ambiguous (counting visible ones only).
+			var hit bool
+			id, slug, status, hit, err = webContentSlugHolder(ctx, db, table, ident, visible)
+			if err != nil {
+				return "", "", "", "", err
+			}
+			if hit {
+				return table, id, slug, status, nil
+			}
+			err = sql.ErrNoRows
+			continue
+		}
 		err = scan(db.QueryRowContext(ctx,
 			"SELECT "+columns+" FROM "+quoteIdent(table)+" WHERE "+quoteIdent(c[0])+" = $1", c[1]))
 		if err == nil && visible != nil && !visible(id) {
@@ -1443,6 +1458,70 @@ func (a *App) lookupCompiledRecord(ctx context.Context, typeName, ident string, 
 		return "", "", "", "", fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
 	}
 	return table, id, slug, status, nil
+}
+
+// webContentSlugHolder is the slug step of [App.lookupCompiledRecord] for web
+// content, whose drafts may share a slug: every holder is read in one
+// statement, visible (nil: any) filters them, and one is a hit, none a miss,
+// more than one ambiguous ([errAmbiguousSlug]).
+func webContentSlugHolder(ctx context.Context, db DB, table, slug string, visible func(string) bool) (id, realSlug, status string, hit bool, err error) {
+	rows, err := db.QueryContext(ctx,
+		"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE slug = $1", slug)
+	if err != nil {
+		return "", "", "", false, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var rid, rslug, rstatus string
+		if err := rows.Scan(&rid, &rslug, &rstatus); err != nil {
+			return "", "", "", false, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
+		}
+		if visible != nil && !visible(rid) {
+			continue
+		}
+		id, realSlug, status, n = rid, rslug, rstatus, n+1
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", "", false, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
+	}
+	switch n {
+	case 0:
+		return "", "", "", false, nil
+	case 1:
+		return id, realSlug, status, true, nil
+	default:
+		return "", "", "", false, errAmbiguousSlug(slug)
+	}
+}
+
+// tablePublishedSlugConflict is the publish-time slug check of compiled web
+// content moved by table ([App.TransitionItemVia]): a published row of table
+// with another ID holding slug is the guided [ErrConflict], naming that public
+// URL and the next free one (counted over published rows only).
+func tablePublishedSlugConflict(ctx context.Context, db DB, table, prefix, slug, id string) error {
+	if slug == "" {
+		return nil
+	}
+	var lookupErr error
+	published := func(s string) bool {
+		var n int
+		if err := db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM "+quoteIdent(table)+" WHERE slug = $1 AND status = 'published' AND id <> $2",
+			s, id).Scan(&n); err != nil {
+			lookupErr = fmt.Errorf("%w: slug check: %s", ErrInternal, err)
+			return false
+		}
+		return n > 0
+	}
+	if !published(slug) {
+		return lookupErr
+	}
+	free := UniqueSlug(slug, published)
+	if lookupErr != nil {
+		return lookupErr
+	}
+	return slugTakenError(prefix, slug, free)
 }
 
 // ResolveReadableID returns the ID of the item of typeName that ident names
@@ -1585,6 +1664,13 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	// check entirely (core-authorize-decision-scope-transition-item-gap).
 	if err := authorizeDecisionScopeByID(ctx, db, a.governance, actorID, typeName, id, decisionScopeRoles); err != nil {
 		return nil, err
+	}
+	// Web content: a draft reserves no URL, so the slug is checked on the move
+	// into Published or Scheduled, against published items only.
+	if g := a.slugGuards[typeName]; g != nil && g.webContent() && (toState == string(Published) || toState == string(Scheduled)) {
+		if err := tablePublishedSlugConflict(ctx, db, table, g.slugGuardPrefix(), realSlug, id); err != nil {
+			return nil, err
+		}
 	}
 	// The conflict policy decides with reads only, before anything is written;
 	// the winner's own write comes first and the items it supersedes after it,

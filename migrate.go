@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strings"
 )
 
 // CreateStateFlowTables creates the five state-flow tables
@@ -326,6 +327,56 @@ func EnsureColumn(ctx context.Context, db DB, table, column, columnDDL string) e
 		"ALTER TABLE "+quoteIdent(table)+" ADD COLUMN "+quoteIdent(column)+" "+columnDDL,
 	); err != nil && !isDuplicateColumn(err, column) {
 		return fmt.Errorf("smeldr: EnsureColumn: %s.%s: %w", table, column, err)
+	}
+	return nil
+}
+
+// EnsurePublishedSlugIndex creates a unique index on the slug of published
+// rows of table, the web-content table of a compiled module ([At]): a draft
+// reserves no URL, so drafts may share a slug, and only published items must
+// not. Idempotent, safe to call on every startup, and works on SQLite and
+// Postgres alike. table must have slug and status columns, as every [Node]
+// table does.
+//
+// It scans for published duplicates first and refuses with [ErrConflict]
+// naming them, so the index is never half-created. It does not remove a
+// UNIQUE constraint on the slug column itself: a table declared
+// "slug TEXT NOT NULL UNIQUE" keeps refusing a second draft with the same
+// slug until its owner drops that constraint (on SQLite, by rebuilding the
+// table). Declare the column as "slug TEXT NOT NULL" and call this instead:
+//
+//	smeldr.EnsurePublishedSlugIndex(ctx, db, "posts")
+func EnsurePublishedSlugIndex(ctx context.Context, db DB, table string) error {
+	if table == "" {
+		return fmt.Errorf("%w: EnsurePublishedSlugIndex: table is required", ErrBadRequest)
+	}
+	rows, err := db.QueryContext(ctx,
+		"SELECT slug FROM "+quoteIdent(table)+" WHERE slug <> '' AND status = 'published' GROUP BY slug HAVING COUNT(*) > 1 ORDER BY slug")
+	if err != nil {
+		return fmt.Errorf("%w: EnsurePublishedSlugIndex: %s: %s", ErrInternal, table, err)
+	}
+	var dups []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			rows.Close()
+			return fmt.Errorf("%w: EnsurePublishedSlugIndex: %s: %s", ErrInternal, table, err)
+		}
+		dups = append(dups, s)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return fmt.Errorf("%w: EnsurePublishedSlugIndex: %s: %s", ErrInternal, table, err)
+	}
+	if len(dups) > 0 {
+		return fmt.Errorf("%w: EnsurePublishedSlugIndex: %s publishes these slugs more than once: %s; give all but one of each a new slug",
+			ErrConflict, table, strings.Join(dups, ", "))
+	}
+	if _, err := db.ExecContext(ctx,
+		"CREATE UNIQUE INDEX IF NOT EXISTS "+quoteIdent("idx_"+table+"_slug_published")+" ON "+quoteIdent(table)+
+			" (slug) WHERE slug <> '' AND status = 'published'"); err != nil {
+		return fmt.Errorf("%w: EnsurePublishedSlugIndex: %s: %s", ErrInternal, table, err)
 	}
 	return nil
 }

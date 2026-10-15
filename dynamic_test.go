@@ -78,7 +78,8 @@ func TestDynamicTypeRepo_CreateDraft_SlugCollision(t *testing.T) {
 	schema := recipeSchema()
 	repo := smeldr.NewDynamicTypeRepo(db, "recipe", schema)
 
-	_, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Pasta"})
+	// A draft reserves no URL: a second draft shares the slug.
+	node1, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Pasta"})
 	if err != nil {
 		t.Fatalf("first CreateDraft: %v", err)
 	}
@@ -86,8 +87,19 @@ func TestDynamicTypeRepo_CreateDraft_SlugCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second CreateDraft: %v", err)
 	}
-	if node2.Slug != "pasta-2" {
-		t.Errorf("collision slug = %q, want \"pasta-2\"", node2.Slug)
+	if node2.Slug != "pasta" {
+		t.Errorf("second draft slug = %q, want \"pasta\" (shared)", node2.Slug)
+	}
+	// Once one is published, a new item's counter counts it.
+	if err := repo.SetStatus(context.Background(), node1.ID, smeldr.Published); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+	node3, err := repo.CreateDraft(context.Background(), map[string]any{"Title": "Pasta"})
+	if err != nil {
+		t.Fatalf("third CreateDraft: %v", err)
+	}
+	if node3.Slug != "pasta-2" {
+		t.Errorf("collision slug = %q, want \"pasta-2\"", node3.Slug)
 	}
 }
 

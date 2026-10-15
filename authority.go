@@ -121,10 +121,10 @@ func RegisterAuthorityTypes(app *App, db DB) {
 		}
 	}
 	app.Content(NewModule[*Rule]((*Rule)(nil),
-		At("/rules"), Repo(NewSQLRepo[*Rule](db, Table("smeldr_rules"))), MCP(MCPRead, MCPWrite),
+		At("/rules"), Repo(NewSQLRepo[*Rule](db, Table("smeldr_rules"))), MCP(MCPRead, MCPWrite), reservedSlugs(),
 	))
 	app.Content(NewModule[*AuthorityStub]((*AuthorityStub)(nil),
-		At("/authority-stubs"), Repo(NewSQLRepo[*AuthorityStub](db, Table("smeldr_authority_stubs"))), MCP(MCPRead, MCPWrite),
+		At("/authority-stubs"), Repo(NewSQLRepo[*AuthorityStub](db, Table("smeldr_authority_stubs"))), MCP(MCPRead, MCPWrite), reservedSlugs(),
 	))
 }
 

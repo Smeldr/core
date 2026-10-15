@@ -90,7 +90,7 @@ func createSchema(db *sql.DB) error {
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS posts (
 		id           TEXT PRIMARY KEY,
-		slug         TEXT NOT NULL UNIQUE,
+		slug         TEXT NOT NULL,
 		status       TEXT NOT NULL,
 		published_at DATETIME NOT NULL,
 		scheduled_at DATETIME,
@@ -101,6 +101,13 @@ func createSchema(db *sql.DB) error {
 		rev          INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
 		return fmt.Errorf("create posts table: %w", err)
+	}
+	// A draft reserves no URL: only published posts must have distinct slugs,
+	// so drafts may share one. smeldr.EnsurePublishedSlugIndex does the same
+	// with a duplicate scan first, for a table that already holds rows.
+	if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_slug_published
+		ON posts (slug) WHERE slug <> '' AND status = 'published'`); err != nil {
+		return fmt.Errorf("create posts slug index: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS smeldr_tokens (
 		id         TEXT PRIMARY KEY,

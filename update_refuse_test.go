@@ -23,7 +23,9 @@ func TestUpdate_RefusesLifecycleKeys(t *testing.T) {
 		{"Status", func(*testPost) map[string]any { return map[string]any{"Status": "published"} }, "cannot be changed by an update; use transition_item"},
 		{"STATUS", func(*testPost) map[string]any { return map[string]any{"STATUS": "archived"} }, "cannot be changed by an update; use transition_item"},
 		{"status not a string", func(*testPost) map[string]any { return map[string]any{"status": 7} }, "cannot be changed by an update; use transition_item"},
-		{"slug", func(*testPost) map[string]any { return map[string]any{"slug": "other"} }, "slug"},
+		// A draft of web content may change its slug (drafts_slug_test.go), but
+		// only to a slug.
+		{"slug", func(*testPost) map[string]any { return map[string]any{"slug": "Not A Slug"} }, "slug"},
 		{"id", func(*testPost) map[string]any { return map[string]any{"ID": "other"} }, "id"},
 		{"same status", func(p *testPost) map[string]any {
 			return map[string]any{"Status": string(p.Status), "Title": "New"}

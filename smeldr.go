@@ -293,6 +293,7 @@ type App struct {
 	syncHookModules []interface {
 		setSyncSaveHook(func(context.Context, string, string, any) error)
 	}
+	slugGuards map[string]slugGuard // compiled modules by type name, for TransitionItemVia's slug rules
 
 	auditStore      AuditStore // non-nil when App.Audit() was called
 	auditHandlerReg bool       // true once GET /_audit is registered
@@ -657,6 +658,12 @@ func (a *App) Content(v any, opts ...Option) {
 			name := tm.transitionTypeName()
 			a.transitionModules[name] = append(a.transitionModules[name], tm)
 		}
+		if sg, ok := r.(slugGuard); ok {
+			if a.slugGuards == nil {
+				a.slugGuards = map[string]slugGuard{}
+			}
+			a.slugGuards[sg.slugGuardTypeName()] = sg
+		}
 		if sh, ok := r.(interface {
 			setSyncSaveHook(func(context.Context, string, string, any) error)
 		}); ok {
@@ -728,13 +735,29 @@ func (a *App) BaseURL() string { return strings.TrimRight(a.cfg.BaseURL, "/") }
 //	url := app.BaseURL() + "/posts/my-draft?preview=" + token
 //
 // The token binds both prefix and slug so that a token for /posts/foo cannot
-// be replayed on /docs/foo.
+// be replayed on /docs/foo. Drafts of web content may share a slug: such a
+// token opens a draft only while the slug names exactly one draft or scheduled
+// item. Use [App.GeneratePreviewTokenForID] to open one item for certain.
 func (a *App) GeneratePreviewToken(prefix, slug string) string {
-	ttl := a.cfg.PreviewTokenExpiry
-	if ttl == 0 {
-		ttl = 12 * time.Hour
+	return encodePreviewToken(prefix, slug, a.cfg.Secret, a.previewTTL())
+}
+
+// GeneratePreviewTokenForID is [App.GeneratePreviewToken] bound to the item
+// with id as well, so it opens that item even when other drafts share its
+// slug. The URL stays /{prefix}/{slug}?preview=<token>:
+//
+//	token := app.GeneratePreviewTokenForID("/posts", "my-draft", item.ID)
+//	url := app.BaseURL() + "/posts/my-draft?preview=" + token
+func (a *App) GeneratePreviewTokenForID(prefix, slug, id string) string {
+	return encodePreviewTokenForID(prefix, slug, id, a.cfg.Secret, a.previewTTL())
+}
+
+// previewTTL is [Config.PreviewTokenExpiry], 12 hours when unset.
+func (a *App) previewTTL() time.Duration {
+	if a.cfg.PreviewTokenExpiry == 0 {
+		return 12 * time.Hour
 	}
-	return encodePreviewToken(prefix, slug, a.cfg.Secret, ttl)
+	return a.cfg.PreviewTokenExpiry
 }
 
 // GenerateUploadToken returns a short-lived signed token that authorises a

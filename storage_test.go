@@ -607,7 +607,8 @@ func TestSQLRepo_FindBySlug_query(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindBySlug: %v", err)
 	}
-	want := `SELECT * FROM blog_posts WHERE "slug" = $1`
+	// Published first: drafts of web content may share a slug.
+	want := `SELECT * FROM blog_posts WHERE "slug" = $1 ORDER BY CASE WHEN "status" = 'published' THEN 0 ELSE 1 END, "id" LIMIT 1`
 	if q := getLastQuery(); q != want {
 		t.Errorf("query = %q, want %q", q, want)
 	}

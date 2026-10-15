@@ -225,14 +225,36 @@ func (r *DynamicTypeRepo) resolveFor(ctx context.Context, ident string, visible 
 			}
 		}
 	}
-	node, err := r.GetBySlug(ctx, ident)
-	if err == nil && ok(node) {
-		return node, nil
+	if r.webContent() {
+		// Drafts of web content may share a slug: one holder the caller may
+		// see is a hit, more than one is ambiguous (counting only those it may
+		// see), none goes on to the ID, after the same one statement.
+		holders, err := r.slugHolders(ctx, ident)
+		if err != nil {
+			return nil, err
+		}
+		var hits []*DynamicNode
+		for _, h := range holders {
+			if ok(h) {
+				hits = append(hits, h)
+			}
+		}
+		if len(hits) == 1 {
+			return hits[0], nil
+		}
+		if len(hits) > 1 {
+			return nil, errAmbiguousSlug(ident)
+		}
+	} else {
+		node, err := r.GetBySlug(ctx, ident)
+		if err == nil && ok(node) {
+			return node, nil
+		}
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return nil, err
+		}
 	}
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return nil, err
-	}
-	node, err = r.GetByID(ctx, ident)
+	node, err := r.GetByID(ctx, ident)
 	if err == nil && !ok(node) {
 		return nil, ErrNotFound
 	}
@@ -240,15 +262,14 @@ func (r *DynamicTypeRepo) resolveFor(ctx context.Context, ident string, visible 
 }
 
 // GetBySlug returns the node with the given slug for this type, at any status.
-// Returns [ErrNotFound] when no matching node exists.
+// Returns [ErrNotFound] when no matching node exists. Drafts of web content may
+// share a slug, so a published holder comes first, then the lowest ID.
 //
 // It is unfiltered: it applies no per-item read rules and must not serve a
 // request for an item the caller names. A request resolves through
 // [DynamicTypeRepo.Resolve].
 func (r *DynamicTypeRepo) GetBySlug(ctx context.Context, slug string) (*DynamicNode, error) {
-	rows, err := Query[*DynamicNode](ctx, r.db,
-		"SELECT * FROM smeldr_dynamic_content WHERE type_name = $1 AND slug = $2",
-		r.typeName, slug)
+	rows, err := r.slugHolders(ctx, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -256,6 +277,85 @@ func (r *DynamicTypeRepo) GetBySlug(ctx context.Context, slug string) (*DynamicN
 		return nil, ErrNotFound
 	}
 	return rows[0], nil
+}
+
+// slugHolders is every node of this type holding slug, published first, then
+// by ID.
+func (r *DynamicTypeRepo) slugHolders(ctx context.Context, slug string) ([]*DynamicNode, error) {
+	return Query[*DynamicNode](ctx, r.db,
+		"SELECT * FROM smeldr_dynamic_content WHERE type_name = $1 AND slug = $2 ORDER BY CASE WHEN status = 'published' THEN 0 ELSE 1 END, id",
+		r.typeName, slug)
+}
+
+// webContent reports whether the type is web content (it has a public URL
+// prefix, so no address): its drafts reserve no URL and may share a slug.
+func (r *DynamicTypeRepo) webContent() bool {
+	return r.schema == nil || !isAddressedSchema(r.schema)
+}
+
+// publishedSlugConflict is the uniqueness check of dynamic web content, run
+// before node moves into Published or Scheduled: a published node of the type
+// with another ID holding its slug is the guided [ErrConflict], naming that
+// public URL and the next free one. A record type and an empty slug pass.
+func (r *DynamicTypeRepo) publishedSlugConflict(ctx context.Context, node *DynamicNode) error {
+	if !r.webContent() || node.Slug == "" {
+		return nil
+	}
+	var n int
+	if err := r.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM smeldr_dynamic_content WHERE type_name = $1 AND slug = $2 AND status = 'published' AND id <> $3",
+		r.typeName, node.Slug, node.ID).Scan(&n); err != nil {
+		return fmt.Errorf("%w: slug check: %s", ErrInternal, err)
+	}
+	if n == 0 {
+		return nil
+	}
+	return slugTakenError(r.urlPrefix(), node.Slug, r.uniqueSlug(ctx, node.Slug, node.ID))
+}
+
+// SetSlugVia gives the node id another slug while it is not published, so a
+// publisher can choose a free URL: drafts of web content reserve none, so two
+// may share a slug until one is published. The slug must be a slug
+// ([GenerateSlug] of itself). A record type ([ErrBadRequest]: its address is
+// its identity), a published node ([ErrConflict]) and a locked state are
+// refused. The change is recorded like any field update.
+func (r *DynamicTypeRepo) SetSlugVia(ctx context.Context, surface, id, slug string) error {
+	if !r.webContent() {
+		return fmt.Errorf("%w: %s is a record type; its address is its identity and its slug does not change", ErrBadRequest, r.typeName)
+	}
+	if slug == "" || GenerateSlug(slug) != slug {
+		return Err("slug", "must be a slug: lowercase letters, digits and hyphens")
+	}
+	node, err := r.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if node.Status == Published {
+		return fmt.Errorf("%w: a published item keeps its URL; its slug does not change", ErrConflict)
+	}
+	if isStateLocked(ctx, r.db, r.typeName, string(node.Status)) {
+		return fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
+			ErrConflict, r.typeName, id, node.Status)
+	}
+	actorID, actorKind := actorFromContext(ctx)
+	now := time.Now().UTC()
+	if _, err := r.db.ExecContext(ctx,
+		"UPDATE smeldr_dynamic_content SET slug = $1, updated_at = $2, last_actor = $3 WHERE id = $4 AND type_name = $5",
+		slug, now, actorID, id, r.typeName); err != nil {
+		return err
+	}
+	recordStateChange(ctx, r.prov, stateChange{
+		typeName: r.typeName, id: id, from: string(node.Status), to: string(node.Status),
+		verb: "update", surface: surface, actorKind: actorKind, actorID: actorID,
+	})
+	if r.announceEdit != nil {
+		edited := *node
+		edited.Slug = slug
+		edited.UpdatedAt = now
+		edited.LastActor = actorID
+		r.announceEdit(ctx, &edited, r.urlPrefix(), surface)
+	}
+	return nil
 }
 
 // GetByID returns the node with the given ID for this type, at any status.
@@ -503,6 +603,11 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 	if err := validateTransition(ctx, r.db, r.rs, r.relStore, actorID, id, r.typeName, string(node.Status), string(status), reason); err != nil {
 		return err
 	}
+	if status == Published || status == Scheduled {
+		if err := r.publishedSlugConflict(ctx, node); err != nil {
+			return err
+		}
+	}
 	// Reads only: the winner's own write comes first and the items it
 	// supersedes after it, in one transaction where the handle supports one, so
 	// a failed winner leaves every loser untouched (task_plan item-68).
@@ -591,6 +696,9 @@ func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, schedu
 		actorID = sc.User().ID
 	}
 	if err := validateTransition(ctx, r.db, r.rs, r.relStore, actorID, id, r.typeName, string(node.Status), string(Scheduled), ""); err != nil {
+		return err
+	}
+	if err := r.publishedSlugConflict(ctx, node); err != nil {
 		return err
 	}
 	// The conflict policy applies when Scheduled is the flow's ActiveState (rare,
@@ -713,7 +821,7 @@ func (r *DynamicTypeRepo) takenSlugs(ctx context.Context, candidates []string) m
 	}
 	taken := map[string]bool{}
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT slug FROM smeldr_dynamic_content WHERE type_name = $1 AND slug IN ("+strings.Join(ph, ",")+")",
+		"SELECT slug FROM smeldr_dynamic_content WHERE type_name = $1 AND slug IN ("+strings.Join(ph, ",")+")"+r.publishedOnly(),
 		args...)
 	if err != nil {
 		return taken
@@ -730,9 +838,19 @@ func (r *DynamicTypeRepo) takenSlugs(ctx context.Context, candidates []string) m
 
 func (r *DynamicTypeRepo) slugExists(ctx context.Context, slug string) bool {
 	rows, err := Query[*DynamicNode](ctx, r.db,
-		"SELECT id FROM smeldr_dynamic_content WHERE type_name = $1 AND slug = $2",
+		"SELECT id FROM smeldr_dynamic_content WHERE type_name = $1 AND slug = $2"+r.publishedOnly(),
 		r.typeName, slug)
 	return err == nil && len(rows) > 0
+}
+
+// publishedOnly is the clause that makes a slug count as taken only when a
+// published node holds it, for web content (a draft reserves no URL), and ""
+// for a record type, whose every node keeps its slug.
+func (r *DynamicTypeRepo) publishedOnly() string {
+	if r.webContent() {
+		return " AND status = 'published'"
+	}
+	return ""
 }
 
 // — App methods ———————————————————————————————————————————————————————————————
