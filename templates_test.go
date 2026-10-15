@@ -317,7 +317,7 @@ func TestPartials_missingDirErrors(t *testing.T) {
 	m := NewModule((*tdPost)(nil), Repo(repo), At("/test"), Templates(dir))
 	app.Content(m)
 
-	err := app.Run(":0")
+	err := app.Run("127.0.0.1:0")
 	if err == nil {
 		t.Fatal("expected error for missing partials dir, got nil")
 	}

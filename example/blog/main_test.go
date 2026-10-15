@@ -137,7 +137,7 @@ func buildFullTestServer(t *testing.T) (baseURL, authorToken, editorToken, sched
 	)
 
 	app := smeldr.New(smeldr.MustConfig(smeldr.Config{
-		BaseURL:    "http://localhost:19991",
+		BaseURL:    "http://127.0.0.1:19991",
 		Secret:     []byte(testSecret),
 		DB:         db,
 		TokenStore: tokenStore,
@@ -156,8 +156,8 @@ func buildFullTestServer(t *testing.T) (baseURL, authorToken, editorToken, sched
 		t.Fatalf("create editor token: %v", err)
 	}
 
-	baseURL = "http://localhost:19991"
-	go func() { _ = app.Run(":19991") }()
+	baseURL = "http://127.0.0.1:19991"
+	go func() { _ = app.Run("127.0.0.1:19991") }()
 
 	// Poll until the server is ready.
 	client := &http.Client{Timeout: 500 * time.Millisecond}

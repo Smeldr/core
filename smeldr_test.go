@@ -1171,7 +1171,7 @@ func TestApp_Handler_navCodeItems(t *testing.T) {
 func TestApp_Run_loadPartialsError(t *testing.T) {
 	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
 	app.Partials("non-existent-partials-dir-xyz")
-	err := app.Run(":0")
+	err := app.Run("127.0.0.1:0")
 	if err == nil {
 		t.Error("expected error from loadPartials with non-existent dir")
 	}
@@ -1183,7 +1183,7 @@ func TestApp_Run_parseTemplatesError(t *testing.T) {
 	m := newTestModule(mem, Templates("non-existent-dir-xyz"))
 	app := New(Config{BaseURL: "https://example.com", Secret: []byte("testsecret16chars")})
 	app.Content(m)
-	err := app.Run(":0")
+	err := app.Run("127.0.0.1:0")
 	if err == nil {
 		t.Error("expected error from parseTemplates with non-existent template dir")
 	}
