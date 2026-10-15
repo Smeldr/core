@@ -993,7 +993,9 @@ func (s *RoleStore) GetRole(ctx context.Context, name string) (RoleDefinition, e
 // normalizeStaticScope returns patterns with every "type:item" pattern stored
 // as "type:<ID>", the form [RoleStore.Authorized] and [ReadScope] match: the
 // item may be named by its address, slug or ID (D110), and is resolved through
-// the App's resolver. A "type:*" pattern is kept. A pattern that is not
+// the App's resolver. A "type:*" pattern is kept, and so is a pattern of a
+// synthetic type ([syntheticScopeTypes], such as "RuleType:<name>"), which
+// names no record. A pattern that is not
 // "type:item", names an unregistered type, or names no record of its type is
 // refused with an error naming it, so a grant can never silently match
 // nothing. Without a resolver (a RoleStore used without an App) the patterns
@@ -1007,7 +1009,7 @@ func (s *RoleStore) normalizeStaticScope(ctx context.Context, patterns []string)
 			return nil, Err("scope_static", fmt.Sprintf("pattern %q must be \"type:item\" or \"type:*\"", p))
 		}
 		norm := typeName + ":" + ident
-		if ident != "*" && s.resolveID != nil {
+		if ident != "*" && s.resolveID != nil && !syntheticScopeTypes[typeName] {
 			id, err := s.resolveID(ctx, typeName, ident)
 			switch {
 			case errors.Is(err, ErrNotFound):
@@ -1721,14 +1723,26 @@ func (s *RoleStore) RoleGranted(ctx context.Context, tokenID, roleName string, t
 
 // — Rule-type stewardship (decision-governance-model.md §5) ————————————————
 
-// stewardRuleTypePrefix is the synthetic AuthTarget.TypeName used to model a
-// rule-type domain as a static-scope grant — "RuleType:<name>" in a role's
-// own ScopeStatic list. Not a real registered content type; Authorized's own
-// ScopeStatic matching never validates TypeName against the type registry
-// (confirmed by reading its implementation), so this needs no core schema
-// change — stewardship is granted today via the existing define_role/
-// grant_role MCP tools with no code in this file.
-const stewardRuleTypePrefix = "RuleType:"
+// stewardRuleType is the synthetic type name used to model a rule-type domain
+// as a static-scope grant: "RuleType:<name>" in a role's own ScopeStatic list.
+// It is not a registered content type. Stewardship is granted with the
+// existing define_role/grant_role MCP tools; Grant keeps the pattern as given
+// because the type is listed in [syntheticScopeTypes].
+const stewardRuleType = "RuleType"
+
+// stewardRuleTypePrefix is the "RuleType:" pattern prefix, derived from
+// stewardRuleType so the two cannot drift.
+const stewardRuleTypePrefix = stewardRuleType + ":"
+
+// syntheticScopeTypes are the static-scope type names that are not content
+// types: a pattern "type:<name>" of one names a domain, not a record. Grant
+// keeps such a pattern as given, without resolving it through the App
+// (A494's resolution is for records only), and [RoleStore.Authorized] and
+// [ReadScope] match it literally, as any stored pattern. A new synthetic type
+// is added here, and nowhere else.
+var syntheticScopeTypes = map[string]bool{
+	stewardRuleType: true,
+}
 
 // stewardOperation is the operation word a role must hold for one of its
 // static-scope "RuleType:<name>" patterns to count as stewardship, not an

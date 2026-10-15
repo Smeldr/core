@@ -127,3 +127,60 @@ func TestGrant_StaticPatternDynamicType(t *testing.T) {
 		t.Error("an unknown address was accepted")
 	}
 }
+
+// A stewardship pattern names a synthetic type, not a record: on an App with
+// governance, Grant keeps "RuleType:<name>" as given (a regression from A494,
+// which refused it as an unregistered type), resolves the records next to it,
+// and the stewardship inbox matches it.
+func TestGrant_SyntheticRuleTypeKeptAsGiven(t *testing.T) {
+	ctx := context.Background()
+	db := addressDB(t)
+	setupTokensTable(t, db)
+	if err := CreateAuthorityTables(db); err != nil {
+		t.Fatal(err)
+	}
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16"), DB: db})
+	RegisterOrchestrationTypes(app, db)
+	rs := NewRoleStore(db)
+	if err := app.Governance(rs); err != nil {
+		t.Fatal(err)
+	}
+	_ = app.Handler()
+	if err := rs.DefineRole(ctx, RoleDefinition{Name: "rule-steward", Operations: []string{"steward", "read"}, ScopeMode: ScopeStatic}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := findModule[*Goal](t, app).MCPCreate(TrustedRead(authorCtx()).(Context), map[string]any{"Description": "a goal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := created.(*Goal)
+	decision := &Decision{Node: Node{ID: NewID(), Slug: "d-rule"}, DecisionNumber: "D900", Scope: "core", RuleType: "design-system"}
+	if err := NewSQLRepo[*Decision](db, Table("smeldr_decisions")).Save(ctx, decision); err != nil {
+		t.Fatal(err)
+	}
+
+	id, err := rs.Grant(ctx, RoleGrant{TokenID: "steward", RoleName: "rule-steward", ScopeStatic: []string{"RuleType:design-system", "Goal:" + g.Slug}})
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	var stored string
+	if err := db.QueryRowContext(ctx, `SELECT scope_static FROM smeldr_role_grants WHERE id = $1`, id).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if want := `["RuleType:design-system","Goal:` + g.ID + `"]`; stored != want {
+		t.Errorf("stored %s; want %s", stored, want)
+	}
+	if types, err := rs.StewardedRuleTypes(ctx, "steward"); err != nil || len(types) != 1 || types[0] != "design-system" {
+		t.Errorf("StewardedRuleTypes = %v %v; want [design-system]", types, err)
+	}
+	inbox, err := rs.StewardshipInbox(ctx, "steward")
+	if err != nil || len(inbox.Decisions) != 1 || inbox.Decisions[0].ID != decision.ID {
+		t.Errorf("StewardshipInbox = %+v %v; want the design-system Decision", inbox, err)
+	}
+	if ok, err := rs.Authorized(ctx, "steward", "steward", AuthTarget{TypeName: "RuleType", ID: "design-system"}); err != nil || !ok {
+		t.Errorf("Authorized on the stewarded domain = %v %v; want true", ok, err)
+	}
+	if _, err := rs.Grant(ctx, RoleGrant{TokenID: "steward-2", RoleName: "rule-steward", ScopeStatic: []string{"RuleType:"}}); err == nil {
+		t.Error("RuleType: with no name was accepted")
+	}
+}
