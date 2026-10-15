@@ -4,8 +4,8 @@ go 1.26.5
 
 require (
 	modernc.org/sqlite v1.50.1
-	smeldr.dev/core v1.154.0
-	smeldr.dev/mcp v1.61.3
+	smeldr.dev/core v1.155.0
+	smeldr.dev/mcp v1.61.4
 )
 
 require (
