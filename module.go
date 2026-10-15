@@ -1681,12 +1681,21 @@ func (m *Module[T]) httpReadScope(ctx Context) (*ReadScope, error) {
 }
 
 // visibleTo reports whether s may see item: it reads the item, or the item
-// is published web content (a type with no address), which is public.
+// is published web content (a type with no address), which is public. An item
+// about another item (a Signal with a subject) is visible only when s reads
+// its subject too.
 func (m *Module[T]) visibleTo(s *ReadScope, item any) bool {
 	if !m.addressed && nodeStatusOf(item) == Published {
 		return true
 	}
-	return s.Readable(m.contentTypeName, nodeIDOf(item))
+	if !s.Readable(m.contentTypeName, nodeIDOf(item)) {
+		return false
+	}
+	if h, ok := item.(subjectHolder); ok {
+		subjectType, subjectID := h.readSubject()
+		return signalSubjectVisible(s, subjectType, subjectID)
+	}
+	return true
 }
 
 // findVisibleBySlug finds the item with slug for an HTTP write: an item the

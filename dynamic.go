@@ -174,8 +174,37 @@ func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fi
 // Resolve returns the node ident names, at any status, in the D110 order: its
 // address (when ident carries this record type's prefix), then its slug, then
 // its ID. Returns [ErrNotFound] when none matches.
+//
+// Under per-item read rules (the scope attached to ctx, or the caller's own
+// under the governance wired on the repo's database) a node the caller may not
+// see is [ErrNotFound], after the same statements as a node that does not
+// exist. A caller sees a node it may read, and published web content (a type
+// with no address). With governance wired in the process but not on this
+// handle, and no scope attached, it is [ErrInternal]. Trusted Go code uses
+// [TrustedRead].
 func (r *DynamicTypeRepo) Resolve(ctx context.Context, ident string) (*DynamicNode, error) {
-	return r.resolveFor(ctx, ident, nil)
+	visible, err := r.readVisible(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return r.resolveFor(ctx, ident, visible)
+}
+
+// readVisible is the read rule [DynamicTypeRepo.Resolve] and
+// [DynamicTypeRepo.ListPage] apply for the caller in ctx: nil when the caller
+// reads everything, else whether a node is readable or published web content.
+func (r *DynamicTypeRepo) readVisible(ctx context.Context) (func(*DynamicNode) bool, error) {
+	scope, err := packageScope(ctx, r.db)
+	if err != nil {
+		return nil, err
+	}
+	if scope.All() {
+		return nil, nil
+	}
+	addressed := r.schema != nil && isAddressedSchema(r.schema)
+	return func(n *DynamicNode) bool {
+		return (!addressed && n.Status == Published) || scope.Readable(r.typeName, n.ID)
+	}, nil
 }
 
 // resolveFor is [DynamicTypeRepo.Resolve] under a per-item read rule: visible
@@ -212,6 +241,10 @@ func (r *DynamicTypeRepo) resolveFor(ctx context.Context, ident string, visible 
 
 // GetBySlug returns the node with the given slug for this type, at any status.
 // Returns [ErrNotFound] when no matching node exists.
+//
+// It is unfiltered: it applies no per-item read rules and must not serve a
+// request for an item the caller names. A request resolves through
+// [DynamicTypeRepo.Resolve].
 func (r *DynamicTypeRepo) GetBySlug(ctx context.Context, slug string) (*DynamicNode, error) {
 	rows, err := Query[*DynamicNode](ctx, r.db,
 		"SELECT * FROM smeldr_dynamic_content WHERE type_name = $1 AND slug = $2",
@@ -227,6 +260,10 @@ func (r *DynamicTypeRepo) GetBySlug(ctx context.Context, slug string) (*DynamicN
 
 // GetByID returns the node with the given ID for this type, at any status.
 // Returns [ErrNotFound] when no matching node exists.
+//
+// It is unfiltered: it applies no per-item read rules and must not serve a
+// request for an item the caller names. A request resolves through
+// [DynamicTypeRepo.Resolve].
 func (r *DynamicTypeRepo) GetByID(ctx context.Context, id string) (*DynamicNode, error) {
 	rows, err := Query[*DynamicNode](ctx, r.db,
 		"SELECT * FROM smeldr_dynamic_content WHERE id = $1 AND type_name = $2",
@@ -243,8 +280,32 @@ func (r *DynamicTypeRepo) GetByID(ctx context.Context, id string) (*DynamicNode,
 // List returns items for this type as type-erased maps. Each map contains the
 // stored fields merged with node metadata keys (ID, Slug, TypeName, Status,
 // PublishedAt). ListOptions controls status filter, ordering, and pagination.
+// It is [DynamicTypeRepo.ListPage] without the total, and applies the same
+// per-item read rules.
 func (r *DynamicTypeRepo) List(ctx context.Context, opts ListOptions) ([]map[string]any, error) {
-	query := "SELECT * FROM smeldr_dynamic_content WHERE type_name = $1"
+	items, _, err := r.listPage(ctx, opts, false)
+	return items, err
+}
+
+// ListPage is [DynamicTypeRepo.List] with the total: the number of items that
+// match opts' filter (status) across all pages. Under per-item read rules (see
+// [DynamicTypeRepo.Resolve]) the page and the total hold only what the caller
+// may see: for a caller who cannot read everything, every matching row is
+// loaded, filtered, and the page is cut in memory, so neither a short page nor
+// the total reveals a hidden item. A reader of everything keeps the SQL paging,
+// and the total costs one COUNT query.
+func (r *DynamicTypeRepo) ListPage(ctx context.Context, opts ListOptions) ([]map[string]any, int, error) {
+	return r.listPage(ctx, opts, true)
+}
+
+// listPage is the one query behind List and ListPage; withTotal adds the
+// total.
+func (r *DynamicTypeRepo) listPage(ctx context.Context, opts ListOptions, withTotal bool) ([]map[string]any, int, error) {
+	visible, err := r.readVisible(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	where := " WHERE type_name = $1"
 	args := []any{r.typeName}
 	n := 2
 
@@ -255,32 +316,53 @@ func (r *DynamicTypeRepo) List(ctx context.Context, opts ListOptions) ([]map[str
 			args = append(args, string(s))
 			n++
 		}
-		query += " AND status IN (" + strings.Join(placeholders, ", ") + ")"
+		where += " AND status IN (" + strings.Join(placeholders, ", ") + ")"
 	}
 
-	switch opts.OrderBy {
-	case "CreatedAt", "created_at":
+	order := " ORDER BY published_at DESC, created_at DESC"
+	if opts.OrderBy == "CreatedAt" || opts.OrderBy == "created_at" {
+		order = " ORDER BY created_at ASC"
 		if opts.Desc {
-			query += " ORDER BY created_at DESC"
-		} else {
-			query += " ORDER BY created_at ASC"
-		}
-	default:
-		if opts.Desc {
-			query += " ORDER BY published_at DESC, created_at DESC"
-		} else {
-			query += " ORDER BY published_at DESC, created_at DESC"
+			order = " ORDER BY created_at DESC"
 		}
 	}
 
-	if opts.PerPage > 0 {
-		query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", n, n+1)
-		args = append(args, opts.PerPage, opts.Offset())
+	query := "SELECT * FROM smeldr_dynamic_content" + where + order
+	total := 0
+	if visible == nil {
+		// A reader of everything: the page and the total are cut in SQL.
+		if opts.PerPage > 0 {
+			query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", n, n+1)
+		}
+		if withTotal {
+			if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM smeldr_dynamic_content"+where, args...).Scan(&total); err != nil {
+				return nil, 0, err
+			}
+		}
+		if opts.PerPage > 0 {
+			args = append(args, opts.PerPage, opts.Offset())
+		}
 	}
 
 	nodes, err := Query[*DynamicNode](ctx, r.db, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	if visible != nil {
+		// A scoped caller: filter every matching row, then cut the page, so the
+		// total and the page hold only what the caller may see (binding A).
+		kept := nodes[:0]
+		for _, node := range nodes {
+			if visible(node) {
+				kept = append(kept, node)
+			}
+		}
+		total = len(kept)
+		if opts.PerPage > 0 {
+			start := min(opts.Offset(), len(kept))
+			kept = kept[start:min(start+opts.PerPage, len(kept))]
+		}
+		nodes = kept
 	}
 	out := make([]map[string]any, 0, len(nodes))
 	for _, node := range nodes {
@@ -305,7 +387,7 @@ func (r *DynamicTypeRepo) List(ctx context.Context, opts ListOptions) ([]map[str
 		}
 		out = append(out, m)
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // UpdateFields merges patch onto the stored fields for the node with the given
@@ -1008,7 +1090,9 @@ func newAdminListHandler(a *App, auth AuthFunc) http.Handler {
 		if !scope.All() {
 			query.Page, query.PerPage = 0, 0
 		}
-		items, err := repo.List(r.Context(), query)
+		// The scope this route loaded is attached, so the repo does not load it
+		// again; the route then applies its own rule (readable only) below.
+		items, err := repo.List(WithReadScope(r.Context(), scope), query)
 		if err != nil {
 			slog.WarnContext(r.Context(), "smeldr: admin list", "type", desc.Name, "err", err)
 			WriteError(w, r, ErrInternal)
@@ -1212,7 +1296,7 @@ func (a *App) rebuildDynamicSitemap(ctx context.Context, desc *TypeDescriptor) {
 	if err != nil {
 		return
 	}
-	items, err := repo.List(ctx, ListOptions{Status: []Status{Published}})
+	items, err := repo.List(TrustedRead(ctx), ListOptions{Status: []Status{Published}})
 	if err != nil {
 		slog.WarnContext(ctx, "smeldr: rebuildDynamicSitemap", "type", desc.Name, "err", err)
 		return
@@ -1252,7 +1336,7 @@ func (a *App) rebuildDynamicAIIndex(ctx context.Context, desc *TypeDescriptor) {
 	if err != nil {
 		return
 	}
-	items, err := repo.List(ctx, ListOptions{Status: []Status{Published}})
+	items, err := repo.List(TrustedRead(ctx), ListOptions{Status: []Status{Published}})
 	if err != nil {
 		slog.WarnContext(ctx, "smeldr: rebuildDynamicAIIndex", "type", desc.Name, "err", err)
 		return

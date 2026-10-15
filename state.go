@@ -1372,11 +1372,12 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 // which can be an address or an old number (T253). ErrNotFound when nothing
 // matches, ErrInternal for a query failure.
 //
-// visible, when not nil, is the caller's per-item read rule: a row it may not
-// see is treated as a miss and the lookup goes on through its remaining steps,
-// exactly as for an ident that matches nothing, so a hidden and a missing
-// record run the same statements and answer the same ErrNotFound.
-func (a *App) lookupCompiledRecord(ctx context.Context, typeName, ident string, visible func(id string) bool) (table, id, slug, status string, err error) {
+// scope, when not nil and not reading everything, is the caller's per-item read
+// rule: a row it may not read (for a Signal, also a row whose subject it may not
+// read) is treated as a miss and the lookup goes on through its remaining
+// steps, exactly as for an ident that matches nothing, so a hidden and a
+// missing record run the same statements and answer the same ErrNotFound.
+func (a *App) lookupCompiledRecord(ctx context.Context, typeName, ident string, scope *ReadScope) (table, id, slug, status string, err error) {
 	if a.cfg.DB == nil {
 		return "", "", "", "", fmt.Errorf("smeldr: lookupCompiledRecord requires Config.DB")
 	}
@@ -1388,11 +1389,35 @@ func (a *App) lookupCompiledRecord(ctx context.Context, typeName, ident string, 
 		// the dynamic-content branch for a type the registry says is compiled.
 		return "", "", "", "", fmt.Errorf("smeldr: %q is registered as a compiled type but its table could not be found", typeName)
 	}
+	visible := scopeIDFilter(scope, typeName)
+	if scope == nil {
+		visible = nil
+	}
+	// A Signal is visible only when its subject is too: its subject is read in
+	// the same statement, so the rule needs no extra query.
+	subjectOK := subjectRule(scope)
+	withSubject := subjectOK != nil && typeName == "Signal"
+	columns := "id, slug, status"
+	if withSubject {
+		columns += ", subject_type, subject_id"
+	}
+	scan := func(row *sql.Row) error {
+		if !withSubject {
+			return row.Scan(&id, &slug, &status)
+		}
+		var subjectType, subjectID sql.NullString
+		if err := row.Scan(&id, &slug, &status, &subjectType, &subjectID); err != nil {
+			return err
+		}
+		if !subjectOK(subjectType.String, subjectID.String) {
+			return sql.ErrNoRows // a hidden subject hides the Signal: a miss
+		}
+		return nil
+	}
 	err = sql.ErrNoRows
 	for _, c := range identCandidates(typeName, ident) {
-		err = db.QueryRowContext(ctx,
-			"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE "+quoteIdent(c[0])+" = $1", c[1],
-		).Scan(&id, &slug, &status)
+		err = scan(db.QueryRowContext(ctx,
+			"SELECT "+columns+" FROM "+quoteIdent(table)+" WHERE "+quoteIdent(c[0])+" = $1", c[1]))
 		if err == nil && visible != nil && !visible(id) {
 			err = sql.ErrNoRows // hidden: go on as a miss would
 		}
@@ -1402,6 +1427,7 @@ func (a *App) lookupCompiledRecord(ctx context.Context, typeName, ident string, 
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		// The transitional legacy fallback (legacy column or external_ref).
+		// Signals have no legacy column, so the subject rule never reaches it.
 		legacyID, lerr := legacyLookupID(ctx, db, typeName, quoteIdent(table), ident, visible)
 		if lerr != nil {
 			return "", "", "", "", lerr
@@ -1419,6 +1445,43 @@ func (a *App) lookupCompiledRecord(ctx context.Context, typeName, ident string, 
 	return table, id, slug, status, nil
 }
 
+// ResolveReadableID returns the ID of the item of typeName that ident names
+// (its address, slug or ID, then the transitional legacy number), for a
+// runtime-defined or a compiled type, under the caller's read scope (the one
+// attached to ctx, or the caller's own under [App.Governance]). An item the
+// caller may not read (for a Signal, also one whose subject it may not read) is
+// [ErrNotFound], after the same statements as an item that does not exist. A
+// type that is not registered is [ErrBadRequest]; a scope load failure is
+// [ErrInternal]. It is the resolver a surface uses to turn a caller's name for
+// an item into the ID it stores or authorizes against.
+func (a *App) ResolveReadableID(ctx context.Context, typeName, ident string) (string, error) {
+	desc := a.typeRegistry.Lookup(typeName)
+	if desc == nil {
+		return "", fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName)
+	}
+	scope, err := scopeFor(ctx, a.governance)
+	if err != nil {
+		return "", err
+	}
+	if desc.Kind == "content" {
+		repo, err := a.DynamicContentRepo(typeName)
+		if err != nil {
+			return "", err
+		}
+		var visible func(*DynamicNode) bool
+		if f := scopeIDFilter(scope, typeName); f != nil {
+			visible = func(n *DynamicNode) bool { return f(n.ID) }
+		}
+		node, err := repo.resolveFor(ctx, ident, visible)
+		if err != nil {
+			return "", err
+		}
+		return node.ID, nil
+	}
+	_, id, _, _, err := a.lookupCompiledRecord(ctx, typeName, ident, scope)
+	return id, err
+}
+
 // resolveItemID returns the ID of the record of typeName that ident names
 // (its address, slug or ID, then the transitional legacy number), for a
 // runtime-defined or a compiled type. ErrBadRequest when the type is not
@@ -1433,7 +1496,9 @@ func (a *App) resolveItemID(ctx context.Context, typeName, ident string) (string
 		if err != nil {
 			return "", err
 		}
-		node, err := repo.Resolve(ctx, ident)
+		// Unscoped, as for a compiled type: Grant's pattern resolution is an
+		// Admin act (A494).
+		node, err := repo.resolveFor(ctx, ident, nil)
 		if err != nil {
 			return "", err
 		}
@@ -1498,7 +1563,7 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 		return nil, fmt.Errorf("smeldr: TransitionItem requires Config.DB")
 	}
 	db := a.cfg.DB
-	table, id, realSlug, currentStatus, err := a.lookupCompiledRecord(ctx, typeName, slug, scopeIDFilter(scope, typeName))
+	table, id, realSlug, currentStatus, err := a.lookupCompiledRecord(ctx, typeName, slug, scope)
 	if err != nil {
 		return nil, err
 	}

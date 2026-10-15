@@ -4,8 +4,10 @@ package smeldr
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -209,7 +211,7 @@ func packetLegacyFields(item any) (canonicalID string, fields map[string]any) {
 // packetFetchItem fetches one orchestration item from table by col=val.
 // typeName is lowercase ("goal", "decision", etc.).
 // Returns (canonicalID, Node, fields, error).
-func packetFetchItem(ctx context.Context, db DB, typeName, table, col, val string) (string, Node, map[string]any, error) {
+func packetFetchItem(ctx context.Context, db DB, typeName, table, col, val string, subjectOK func(subjectType, subjectID string) bool) (string, Node, map[string]any, error) {
 	q := "SELECT * FROM " + table + " WHERE " + col + " = $1"
 	switch typeName {
 	case "goal":
@@ -245,6 +247,9 @@ func packetFetchItem(ctx context.Context, db DB, typeName, table, col, val strin
 		if err != nil {
 			return "", Node{}, nil, err
 		}
+		if subjectOK != nil && !subjectOK(it.SubjectType, it.SubjectID) {
+			return "", Node{}, nil, ErrNotFound // its subject is hidden: a miss
+		}
 		cid, f := packetFieldsFromItem(it)
 		return cid, it.Node, f, nil
 	case "run":
@@ -257,6 +262,41 @@ func packetFetchItem(ctx context.Context, db DB, typeName, table, col, val strin
 	default:
 		return "", Node{}, nil, ErrBadRequest
 	}
+}
+
+// signalsWithReadableSubject returns which of the Signals ids have a subject
+// subjectOK accepts, in one query. A Signal that is not found is left out.
+func signalsWithReadableSubject(ctx context.Context, db DB, ids []string, subjectOK func(subjectType, subjectID string) bool) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ph := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		ph[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+	rows, err := db.QueryContext(ctx,
+		"SELECT id, subject_type, subject_id FROM smeldr_signals WHERE id IN ("+strings.Join(ph, ",")+")", args...)
+	if err != nil {
+		return nil, fmt.Errorf("%w: context packet: signal subjects: %s", ErrInternal, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var subjectType, subjectID sql.NullString
+		if err := rows.Scan(&id, &subjectType, &subjectID); err != nil {
+			return nil, fmt.Errorf("%w: context packet: signal subjects: %s", ErrInternal, err)
+		}
+		if subjectOK(subjectType.String, subjectID.String) {
+			out[id] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: context packet: signal subjects: %s", ErrInternal, err)
+	}
+	return out, nil
 }
 
 // BuildContextPacket assembles a bounded [ContextPacket] for any of the five
@@ -295,6 +335,8 @@ func BuildContextPacket(
 		return nil, err
 	}
 	visible := scopeIDFilter(scope, entry.relationType)
+	// A Signal is visible only when its subject is too (answer 4).
+	subjectOK := subjectRule(scope)
 
 	// D110 order: address, slug, ID, then the transitional legacy human ID.
 	var anchorCID string
@@ -302,7 +344,7 @@ func BuildContextPacket(
 	var anchorFields map[string]any
 	err = ErrNotFound
 	for _, c := range identCandidates(entry.relationType, anchorSlug) {
-		anchorCID, anchorNode, anchorFields, err = packetFetchItem(ctx, db, anchorType, entry.table, c[0], c[1])
+		anchorCID, anchorNode, anchorFields, err = packetFetchItem(ctx, db, anchorType, entry.table, c[0], c[1], subjectOK)
 		if err == nil && visible != nil && !visible(anchorNode.ID) {
 			err = ErrNotFound // hidden: go on as a miss would
 		}
@@ -316,7 +358,7 @@ func BuildContextPacket(
 		if lerr != nil {
 			return nil, lerr
 		}
-		anchorCID, anchorNode, anchorFields, err = packetFetchItem(ctx, db, anchorType, entry.table, "id", legacyID)
+		anchorCID, anchorNode, anchorFields, err = packetFetchItem(ctx, db, anchorType, entry.table, "id", legacyID, subjectOK)
 	}
 	if err != nil {
 		return nil, err
@@ -418,6 +460,25 @@ func BuildContextPacket(
 		if !ok {
 			continue
 		}
+		if lowerType == "signal" && subjectOK != nil {
+			// Signals whose subject the caller may not read are left out
+			// before the count, so Omitted counts readable Signals only.
+			ids := make([]string, len(refs))
+			for i, ref := range refs {
+				ids[i] = ref.nodeID
+			}
+			readable, err := signalsWithReadableSubject(ctx, db, ids, subjectOK)
+			if err != nil {
+				return nil, err
+			}
+			kept := refs[:0:0]
+			for _, ref := range refs {
+				if readable[ref.nodeID] {
+					kept = append(kept, ref)
+				}
+			}
+			refs = kept
+		}
 		total := len(refs)
 		limit := total
 		if limit > packetPerTypeCap {
@@ -426,7 +487,7 @@ func BuildContextPacket(
 
 		included := 0
 		for _, ref := range refs[:limit] {
-			cid, nd, f, fetchErr := packetFetchItem(ctx, db, lowerType, linkedEntry.table, "id", ref.nodeID)
+			cid, nd, f, fetchErr := packetFetchItem(ctx, db, lowerType, linkedEntry.table, "id", ref.nodeID, subjectOK)
 			if fetchErr != nil {
 				slog.WarnContext(ctx, "smeldr: BuildContextPacket: skipping linked item",
 					"type", lowerType, "id", ref.nodeID, "error", fetchErr)

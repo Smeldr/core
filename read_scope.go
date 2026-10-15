@@ -275,6 +275,31 @@ func scopeIDFilter(s *ReadScope, typeName string) func(id string) bool {
 	return func(id string) bool { return s.Readable(typeName, id) }
 }
 
+// subjectHolder is an item that is about another item: a [Signal] with a
+// subject. Its visibility also needs the subject's (answer 4 of design
+// item-eecbbe69).
+type subjectHolder interface {
+	readSubject() (subjectType, subjectID string)
+}
+
+// signalSubjectVisible reports whether s reads the subject a Signal is about. A
+// Signal with no subject has none to read. A subject named by anything other
+// than its ID (a slug, an address) or of a type that is not an item matches no
+// readable ID, so it is hidden from a caller who cannot read everything:
+// fail-closed.
+func signalSubjectVisible(s *ReadScope, subjectType, subjectID string) bool {
+	return subjectType == "" || s.Readable(subjectType, subjectID)
+}
+
+// subjectRule is the Signal subject clause for s as a lookup rule, or nil when
+// s is nil or reads everything (the lookup then runs as before).
+func subjectRule(s *ReadScope) func(subjectType, subjectID string) bool {
+	if s == nil || s.All() {
+		return nil
+	}
+	return func(subjectType, subjectID string) bool { return signalSubjectVisible(s, subjectType, subjectID) }
+}
+
 // governanceByDB maps a database handle to the RoleStore that [App.Governance]
 // wired on it, or to a nil RoleStore for a handle an App uses without
 // governance, so a package function given only the handle (or a

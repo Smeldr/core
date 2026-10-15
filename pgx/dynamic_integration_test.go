@@ -62,7 +62,9 @@ func titleOf(t *testing.T, n *smeldr.DynamicNode) string {
 func TestPG_DynamicContent_ReadsAndWrites(t *testing.T) {
 	db, _ := isolatedDB(t)
 	_, repo := dynamicApp(t, db, nil)
-	ctx := context.Background()
+	// dynamicApp wires governance: a caller with no user reads nothing, so the
+	// test reads as a trusted in-process caller.
+	ctx := smeldr.TrustedRead(context.Background())
 	const title = "Smørrebrød og kaffe ☕ — «første»"
 
 	node, err := repo.CreateDraft(ctx, map[string]any{"Title": title})

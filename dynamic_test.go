@@ -175,7 +175,7 @@ func TestDynamicTypeRepo_List_Empty(t *testing.T) {
 	db := openDynDB(t)
 	repo := smeldr.NewDynamicTypeRepo(db, "recipe", recipeSchema())
 
-	items, err := repo.List(context.Background(), smeldr.ListOptions{})
+	items, err := repo.List(smeldr.TrustedRead(context.Background()), smeldr.ListOptions{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestDynamicTypeRepo_List_Published(t *testing.T) {
 
 	_ = repo.SetStatus(context.Background(), n1.ID, smeldr.Published)
 
-	items, err := repo.List(context.Background(), smeldr.ListOptions{Status: []smeldr.Status{smeldr.Published}})
+	items, err := repo.List(smeldr.TrustedRead(context.Background()), smeldr.ListOptions{Status: []smeldr.Status{smeldr.Published}})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -210,8 +210,8 @@ func TestDynamicTypeRepo_List_Pagination(t *testing.T) {
 		repo.CreateDraft(context.Background(), map[string]any{"Title": string(rune('A' + i))})
 	}
 
-	page1, _ := repo.List(context.Background(), smeldr.ListOptions{Page: 1, PerPage: 2})
-	page2, _ := repo.List(context.Background(), smeldr.ListOptions{Page: 2, PerPage: 2})
+	page1, _ := repo.List(smeldr.TrustedRead(context.Background()), smeldr.ListOptions{Page: 1, PerPage: 2})
+	page2, _ := repo.List(smeldr.TrustedRead(context.Background()), smeldr.ListOptions{Page: 2, PerPage: 2})
 
 	if len(page1) != 2 {
 		t.Errorf("page1 len = %d, want 2", len(page1))
@@ -228,7 +228,7 @@ func TestDynamicTypeRepo_List_OrderByCreatedAt(t *testing.T) {
 	repo.CreateDraft(context.Background(), map[string]any{"Title": "First"})
 	repo.CreateDraft(context.Background(), map[string]any{"Title": "Second"})
 
-	items, err := repo.List(context.Background(), smeldr.ListOptions{OrderBy: "created_at", Desc: false})
+	items, err := repo.List(smeldr.TrustedRead(context.Background()), smeldr.ListOptions{OrderBy: "created_at", Desc: false})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestDynamicTypeRepo_List_OrderByCreatedAtDesc(t *testing.T) {
 	repo.CreateDraft(context.Background(), map[string]any{"Title": "First"})
 	repo.CreateDraft(context.Background(), map[string]any{"Title": "Second"})
 
-	items, err := repo.List(context.Background(), smeldr.ListOptions{OrderBy: "CreatedAt", Desc: true})
+	items, err := repo.List(smeldr.TrustedRead(context.Background()), smeldr.ListOptions{OrderBy: "CreatedAt", Desc: true})
 	if err != nil {
 		t.Fatalf("List desc: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestDynamicTypeRepo_List_DefaultOrder(t *testing.T) {
 	repo.CreateDraft(context.Background(), map[string]any{"Title": "A"})
 	repo.CreateDraft(context.Background(), map[string]any{"Title": "B"})
 
-	items, err := repo.List(context.Background(), smeldr.ListOptions{Desc: true})
+	items, err := repo.List(smeldr.TrustedRead(context.Background()), smeldr.ListOptions{Desc: true})
 	if err != nil {
 		t.Fatalf("List default order: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestDynamicTypeRepo_List_IsolatedByTypeName(t *testing.T) {
 	r1.CreateDraft(context.Background(), map[string]any{"Title": "Pasta"})
 	r2.CreateDraft(context.Background(), map[string]any{})
 
-	items, _ := r1.List(context.Background(), smeldr.ListOptions{})
+	items, _ := r1.List(smeldr.TrustedRead(context.Background()), smeldr.ListOptions{})
 	if len(items) != 1 {
 		t.Errorf("expected 1 recipe, got %d", len(items))
 	}
@@ -288,7 +288,7 @@ func TestDynamicTypeRepo_List_NodeMetadata(t *testing.T) {
 	repo := smeldr.NewDynamicTypeRepo(db, "recipe", recipeSchema())
 
 	repo.CreateDraft(context.Background(), map[string]any{"Title": "Pasta"})
-	items, _ := repo.List(context.Background(), smeldr.ListOptions{})
+	items, _ := repo.List(smeldr.TrustedRead(context.Background()), smeldr.ListOptions{})
 
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item")

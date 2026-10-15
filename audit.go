@@ -202,7 +202,7 @@ func (a *App) auditSubjectReadable(ctx context.Context, scope *ReadScope, typeNa
 		}
 		_, err = repo.resolveFor(ctx, slug, func(n *DynamicNode) bool { return visible(n.ID) })
 	} else {
-		_, _, _, _, err = a.lookupCompiledRecord(ctx, typeName, slug, visible)
+		_, _, _, _, err = a.lookupCompiledRecord(ctx, typeName, slug, scope)
 	}
 	switch {
 	case err == nil:

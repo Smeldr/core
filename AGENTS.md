@@ -670,6 +670,11 @@ Since core v1.148.0 (A496) the graph surfaces apply them too:
 
 From Go code, these package functions apply the caller's own scope from the user in the context. Under governance a context with no user reads nothing; a trusted job uses `smeldr.TrustedRead(ctx)`. On a database handle no App registered (a wrapper, a transaction), while governance is wired in the process, a call with no attached scope is an internal error: attach one with `smeldr.WithReadScope`.
 
+Since core v1.149.0 (A498):
+- dynamic types follow the same rules in `DynamicTypeRepo.Resolve`, `List` and `ListPage` (page plus readable total);
+- `withdraw_relation` answers a relation with an end the reader may not read as not found;
+- a Signal with a subject is visible only when the reader may read the subject too. Name a Signal's subject by its ID: a slug or an address hides the Signal from scoped readers.
+
 The MCP tools of compiled types and the graph tools already filter through these methods. Still to come: the dynamic-type MCP tools, in a later smeldr.dev/mcp release.
 
 **Delegating a role to someone else, time-boxed** — `delegate_item` (Author+

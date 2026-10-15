@@ -235,6 +235,10 @@ type Signal struct {
 	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
+// readSubject is the item this Signal is about, for the per-item read rule
+// (a Signal is visible only when its subject is too).
+func (s *Signal) readSubject() (string, string) { return s.SubjectType, s.SubjectID }
+
 // Task is an orchestration content type representing a work item moving
 // through the architect/pilot protocol state machine.
 type Task struct {

@@ -21,6 +21,16 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Added
+
+- **`DynamicTypeRepo.ListPage` returns a page and the readable total (A498).** `ListPage` returns the page and the total of items matching the status filter. For a caller who cannot read everything, every matching row is loaded, filtered, and then the page is cut in memory, so neither a short page nor the total reveals a hidden item. A reader of everything keeps the SQL paging plus one COUNT query. `List` is `ListPage` without the total.
+- **`App.ResolveReadableID` resolves a caller's name for an item to its ID under the caller's read scope (A498).** It takes an address, slug, ID or the legacy number. A hidden item, or a Signal whose subject is hidden, is `ErrNotFound`, reached through the same statements as a missing one. An unregistered type is `ErrBadRequest`, and a scope load failure is `ErrInternal`. smeldr.dev/mcp's `create_signal`, `delegate_item` and `create_preview_url` will use it.
+
+### Changed
+
+- **Dynamic types apply the per-item read rules (A498).** `DynamicTypeRepo.Resolve` and `List` apply the caller's read scope: the attached scope, else the caller's own, else everything without governance, else `ErrInternal` on a handle no App registered. A caller sees an item it may read and published web content. A hidden item answers exactly like a missing one. This is a behaviour change: under governance a Go call with no user reads nothing, so trusted code uses `TrustedRead`. `GetBySlug` and `GetByID` stay unfiltered trusted primitives.
+- **`RelationStore.Withdraw` answers a relation with a hidden end as not found (A498).** For a caller who cannot read everything, a relation with an end the caller may not read is `ErrNotFound`, exactly as an unknown ID is, whether live or ended. The check runs in one statement before the "already ended" `ErrConflict`. A reader of everything is unchanged.
+- **A Signal is visible only when its subject is (A498).** A Signal with a subject is visible only when the caller may also read that subject. This applies on the module surfaces (MCP get and list, writes, HTTP), `App.TransitionItem*`, the context packet and `/_audit`. A Signal whose subject is hidden answers exactly like a missing one. A subject held as a slug or an address, or of a type that is not an item, is hidden from a scoped reader (fail-closed). The relation and reachability walks still check a Signal end by its own ID only, a stated property until D113's references become relations.
 ---
 
 ## [1.148.1] - 2026-10-15

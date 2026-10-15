@@ -888,6 +888,35 @@ An App registers its `Config.DB` when it is created, and the handle of the `Rela
 
 **Failures.** A failure to load the scope is `ErrInternal` (500) on every graph surface, never an empty result.
 
+### Per-item read rules on dynamic types, Withdraw and Signals (A498)
+
+```go
+func (r *DynamicTypeRepo) ListPage(ctx context.Context, opts ListOptions) ([]map[string]any, int, error)
+func (a *App) ResolveReadableID(ctx context.Context, typeName, ident string) (string, error)
+```
+
+**Dynamic types.**
+- `DynamicTypeRepo.Resolve`, `List` and the new `ListPage` apply the caller's read scope, the same rule as the package functions above: the attached scope, else the caller's own, else everything without governance, else `ErrInternal` on a handle no App registered.
+- A caller sees an item it may read, and published web content (a type with no address).
+- `Resolve` answers a hidden item exactly like a missing one, after the same statements.
+- `ListPage` returns the page and the total of items matching the status filter. For a caller who cannot read everything, every matching row is loaded and filtered, and the page is cut in memory, so neither a short page nor the total reveals a hidden item. A reader of everything keeps the SQL paging, plus one COUNT query for the total. `List` is `ListPage` without the total.
+- `GetBySlug` and `GetByID` stay unfiltered trusted primitives. A request resolves through `Resolve`.
+- Trusted Go code (a job, a test) reads past the rules with `TrustedRead`. Under governance, a Go call with no user reads nothing.
+
+**`RelationStore.Withdraw`.** For a caller who cannot read everything, a relation with an end the caller may not read is `ErrNotFound`, exactly as an unknown id, whether it is live or has ended. The check is one statement, run before the "already ended" `ErrConflict`, so that conflict only reaches a caller who can read both ends. A reader of everything runs as before.
+
+**Signals.**
+- A Signal with a subject (`subject_type`, `subject_id`) is visible only when the caller may read its subject too.
+- This holds on the module surfaces (MCP get and list, writes, HTTP), `App.TransitionItem*`, the context packet (anchor and linked Signals, with `Omitted` counting readable Signals only) and `/_audit`.
+- A Signal whose subject is hidden answers exactly like a missing one, after the same statements.
+- A subject held as anything other than its ID (a slug, an address), or of a type that is not an item (such as `RelationEdge`), matches nothing readable. It is hidden from a scoped reader: fail-closed.
+- Stated property: the relation and reachability walks check a Signal end by its own ID only, without its subject. Signals are graph nodes only through explicit relations today. The Task that makes D113's references into relations closes this.
+
+**`App.ResolveReadableID`.**
+- It returns the ID of the item that ident names (address, slug, ID, or the legacy number) under the caller's read scope.
+- A hidden item, or a Signal whose subject is hidden, is `ErrNotFound` after the same statements as a missing one. An unregistered type is `ErrBadRequest`, and a scope load failure is `ErrInternal`.
+- It is the resolver a surface uses to turn a caller's name for an item into the ID it stores or authorizes against. smeldr.dev/mcp's `create_signal`, `delegate_item` and `create_preview_url` use it.
+
 `RoleStore.Grant`'s idempotency key includes `ScopeStatic` (workspace-delegate-region-v1
 §0 F2): granting the same `(token, role, anchor)` pair with a *different*
 `ScopeStatic` list creates a separate grant row scoped to that list, rather

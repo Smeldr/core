@@ -188,7 +188,10 @@
 //     governance a caller reads only the items its grants name, and an item it
 //     may not read answers exactly like a missing one, on the item surfaces
 //     (get, list, writes, transitions) and the graph surfaces (context packet,
-//     goal context, relations, reachability, provenance, audit). Published web
+//     goal context, relations, reachability, provenance, audit), and dynamic
+//     types ([DynamicTypeRepo.ListPage]). A Signal about a subject is visible
+//     only when its subject is. [App.ResolveReadableID] turns a caller's name
+//     for an item into its ID under the same rules. Published web
 //     content stays public; a record type never is. A request loads its scope
 //     once and attaches it with [WithReadScope]; trusted in-process code reads
 //     past the rules only with [TrustedRead].

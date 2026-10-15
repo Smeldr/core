@@ -170,10 +170,16 @@ func assertEnding(ctx context.Context, edge RelationEdge) edgeEnding {
 // the same relation again later starts a new row, a new life.
 //
 // reason is required. An unknown id is [ErrNotFound]; a relation that has
-// already ended is [ErrConflict] naming when, never a silent success.
+// already ended is [ErrConflict] naming when, never a silent success. Under
+// per-item read rules (the scope attached to ctx, or the caller's own under the
+// governance wired on the store's database) a relation with an end the caller
+// may not read is [ErrNotFound], exactly as an unknown id, ended or not.
 func (s *RelationStore) Withdraw(ctx context.Context, id, reason string) error {
 	if strings.TrimSpace(reason) == "" {
 		return Err("reason", "is required to withdraw a relation")
+	}
+	if err := s.withdrawVisible(ctx, id); err != nil {
+		return err
 	}
 	ended, err := s.endEdge(ctx, id, endingFromContext(ctx, EdgeEndWithdrawn, reason))
 	if err != nil {
@@ -196,6 +202,34 @@ func (s *RelationStore) Withdraw(ctx context.Context, id, reason string) error {
 		return fmt.Errorf("%w: relation %s could not be withdrawn", ErrConflict, id)
 	}
 	return fmt.Errorf("%w: relation %s already ended at %s", ErrConflict, id, at.UTC().Format(time.RFC3339))
+}
+
+// withdrawVisible is Withdraw's per-item read check. A caller who cannot read
+// everything gets [ErrNotFound] for an edge that does not exist or has an end
+// it may not read, after one statement in both cases and before the "already
+// ended" answer, so a hidden edge, live or ended, cannot be told from a
+// missing one. A reader of everything runs no extra statement.
+func (s *RelationStore) withdrawVisible(ctx context.Context, id string) error {
+	scope, err := packageScope(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	if scope.All() {
+		return nil
+	}
+	var e RelationEdge
+	err = s.db.QueryRowContext(ctx,
+		"SELECT source_type, source_id, target_type, target_id FROM smeldr_relations WHERE id=$1", id).
+		Scan(&e.SourceType, &e.SourceID, &e.TargetType, &e.TargetID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return fmt.Errorf("%w: relation %s", ErrNotFound, id)
+	case err != nil:
+		return fmt.Errorf("%w: withdraw relation %s: %s", ErrInternal, id, err)
+	case !scope.Readable(e.SourceType, e.SourceID) || !scope.Readable(e.TargetType, e.TargetID):
+		return fmt.Errorf("%w: relation %s", ErrNotFound, id)
+	}
+	return nil
 }
 
 // provenanceBySubjects is an optional [ProvenanceStore] capability: the
