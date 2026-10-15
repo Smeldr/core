@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.155.0] - 2026-10-16
+
 ### Added
 
 - **Titles on Decisions, Tasks and Goals (A508).** Task and Goal gain a `Title` field (JSON `title`, column `title TEXT NOT NULL DEFAULT ''`). Decision already had a `Title`, and an Amendment's `summary` is its title. Signal has no title. A title is required and may be at most `TitleMaxLength` (120) characters, counted in characters, not bytes. Decision, Task, Goal and Amendment implement `Titled` (`ContentTitle()`), so webhook bodies and signal events carry the title, and the context packet's fields for Task and Goal include `title`. `EnsureTaskGoalTitleColumns(ctx, db)` adds the column to a database created before this release; it skips a missing table, is idempotent, and example/server calls it at boot.
