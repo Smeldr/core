@@ -675,7 +675,12 @@ Since core v1.149.0 (A498):
 - `withdraw_relation` answers a relation with an end the reader may not read as not found;
 - a Signal with a subject is visible only when the reader may read the subject too. Name a Signal's subject by its ID: a slug or an address hides the Signal from scoped readers.
 
-The MCP tools of compiled types and the graph tools already filter through these methods. Still to come: the dynamic-type MCP tools, in a later smeldr.dev/mcp release.
+Since smeldr.dev/mcp v1.61.0 (A500) every MCP tool applies them:
+- one read scope is loaded per call; a read tool that names a type passes when the reader may read at least one item of it, and is then filtered, so a `scoped-reader` or `domain-reader` grant works over MCP;
+- an item the reader may not read answers -32000 "not found", the same as a missing one, on every tool and on `resources/read` (which used -32001 before);
+- `list_signals`, `list_content` and the `list_*` tools count and page readable items only;
+- `transition_item` needs read on the type, then `manage` on the one item: forbidden only for an item the reader can see;
+- `create_signal` stores a readable subject by its ID; `delegate_item`, `create_preview_url` and the relation writes check the items they name.
 
 **Delegating a role to someone else, time-boxed** — `delegate_item` (Author+
 role, `smeldr.dev/mcp`) lets any token hand off a *subset* of its own

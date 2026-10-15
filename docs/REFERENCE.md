@@ -917,6 +917,10 @@ func (a *App) ResolveReadableID(ctx context.Context, typeName, ident string) (st
 - A hidden item, or a Signal whose subject is hidden, is `ErrNotFound` after the same statements as a missing one. An unregistered type is `ErrBadRequest`, and a scope load failure is `ErrInternal`.
 - It is the resolver a surface uses to turn a caller's name for an item into the ID it stores or authorizes against. smeldr.dev/mcp's `create_signal`, `delegate_item` and `create_preview_url` use it.
 
+**Over MCP (smeldr.dev/mcp v1.61.0, A500).** Every tool applies these rules. Two stated properties:
+- `list_relations` without a `source_type` or `target_type` filter keeps the global gate. A scoped reader passes a type to be gated on that type.
+- `transition_item` needs read on the type, then `manage` on the one item. A delegate whose role holds only `approve` or `review` cannot use it under per-item read rules until `core-delegated-approvers-read-and-transition` ships.
+
 `RoleStore.Grant`'s idempotency key includes `ScopeStatic` (workspace-delegate-region-v1
 §0 F2): granting the same `(token, role, anchor)` pair with a *different*
 `ScopeStatic` list creates a separate grant row scoped to that list, rather
