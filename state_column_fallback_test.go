@@ -152,7 +152,7 @@ func TestSupersede_TableWithoutLastActor_InATransaction(t *testing.T) {
 	}
 	app.typeRegistry.Register(&TypeDescriptor{Name: "ConflictType", Kind: "compiled"})
 
-	if _, err := app.TransitionItem(context.Background(), "ConflictType", "ct-new", "published"); err != nil {
+	if _, err := app.TransitionItem(TrustedRead(context.Background()), "ConflictType", "ct-new", "published"); err != nil {
 		t.Fatalf("TransitionItem on a table without last_actor: %v", err)
 	}
 	for id, want := range map[string]string{"ct-new": "published", "ct-old": "superseded"} {

@@ -81,10 +81,10 @@ func TestTransitionItem_ResolvesAddressAndID(t *testing.T) {
 	registerTypeForTest(app, "Decision")
 	mustCreateDecision(t, m, map[string]any{"Title": "t"})
 	d := mustCreateDecision(t, m, map[string]any{"Title": "u"})
-	if _, err := app.TransitionItemVia(authorCtx(), "mcp", "Decision", "d1", "archived", ""); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(authorCtx()), "mcp", "Decision", "d1", "archived", ""); err != nil {
 		t.Errorf("transition by address: %v", err)
 	}
-	if _, err := app.TransitionItemVia(authorCtx(), "mcp", "Decision", d.ID, "archived", ""); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(authorCtx()), "mcp", "Decision", d.ID, "archived", ""); err != nil {
 		t.Errorf("transition by ID: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestTransitionItem_ResolvesAddressAndID(t *testing.T) {
 	if _, err := repo.Resolve(ctx, "INV99"); err == nil {
 		t.Error("Resolve of a missing address: want ErrNotFound")
 	}
-	out, err := dyn.TransitionItemVia(ctx, "mcp", "invoice", "INV1", "published", "")
+	out, err := dyn.TransitionItemVia(TrustedRead(ctx), "mcp", "invoice", "INV1", "published", "")
 	if err != nil || out["slug"] != node.Slug {
 		t.Errorf("dynamic transition by address = %v %v, want the real slug", out, err)
 	}
@@ -377,7 +377,7 @@ func TestLegacyFallback_MatchesExternalRef(t *testing.T) {
 	if pkt, err := BuildContextPacket(ctx, db, nil, "https://example.com", "test", "goal", "T-own", 1); err != nil || pkt.Anchor.ID != g["address"] {
 		t.Errorf("packet anchor(T-own) = %v %v", pkt, err)
 	}
-	if _, err := app.TransitionItemVia(authorCtx(), "mcp", "Goal", "T-own", "active", ""); err != nil && errors.Is(err, ErrNotFound) {
+	if _, err := app.TransitionItemVia(TrustedRead(authorCtx()), "mcp", "Goal", "T-own", "active", ""); err != nil && errors.Is(err, ErrNotFound) {
 		t.Errorf("transition_item(T-own) not found: %v", err)
 	}
 	if !strings.Contains(buf.String(), "a lookup by a legacy value") {
@@ -400,10 +400,10 @@ func TestLegacyFallback_MatchesExternalRef(t *testing.T) {
 	if id, err := resolveAmendmentID(ctx, db, "A900"); err != nil || id == "" {
 		t.Errorf("resolveAmendmentID(A900) = %q %v, want found through external_ref", id, err)
 	}
-	if _, err := legacyLookupID(ctx, db, "Signal", "smeldr_signals", "x"); !errors.Is(err, ErrNotFound) {
+	if _, err := legacyLookupID(ctx, db, "Signal", "smeldr_signals", "x", nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a type with no legacy field: %v, want ErrNotFound", err)
 	}
-	if _, err := legacyLookupID(ctx, failAddressDB{db, "LIMIT 2"}, "Goal", "smeldr_goals", "T-own"); err == nil {
+	if _, err := legacyLookupID(ctx, failAddressDB{db, "LIMIT 2"}, "Goal", "smeldr_goals", "T-own", nil); err == nil {
 		t.Error("a failing read: want an error")
 	}
 }

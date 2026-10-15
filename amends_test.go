@@ -253,7 +253,7 @@ func TestAmends_RejectedAmendmentEndsItsEdge(t *testing.T) {
 	rejecter := NewTestContext(User{ID: "rejecter-9", Roles: []Role{Editor}})
 	cases := map[string]func(t *testing.T, e *amendsEnv, a *Amendment){
 		"transition_item": func(t *testing.T, e *amendsEnv, a *Amendment) {
-			if _, err := e.app.TransitionItem(rejecter, "Amendment", a.Slug, "rejected"); err != nil {
+			if _, err := e.app.TransitionItem(TrustedRead(rejecter), "Amendment", a.Slug, "rejected"); err != nil {
 				t.Fatalf("reject: %v", err)
 			}
 		},
@@ -280,7 +280,7 @@ func TestAmends_RejectedAmendmentEndsItsEdge(t *testing.T) {
 			e := newAmendsEnv(t, true)
 			e.decision(t, "dec-1", "D1")
 			a, _ := e.create(t, map[string]any{"amendment_number": "A906", "amends": "D1"})
-			if _, err := e.app.TransitionItem(amCtx(), "Amendment", a.Slug, "in-progress"); err != nil {
+			if _, err := e.app.TransitionItem(TrustedRead(amCtx()), "Amendment", a.Slug, "in-progress"); err != nil {
 				t.Fatalf("in-progress: %v", err)
 			}
 			reject(t, e, a)

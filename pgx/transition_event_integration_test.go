@@ -123,7 +123,7 @@ func TestPG_OneRecordAndEventPerTransition(t *testing.T) {
 		},
 		"transition_item": func(t *testing.T) string {
 			seed("ep-ti")
-			if _, err := app.TransitionItem(caller, "EventPost", "ep-ti", string(smeldr.Published)); err != nil {
+			if _, err := app.TransitionItem(smeldr.TrustedRead(caller), "EventPost", "ep-ti", string(smeldr.Published)); err != nil {
 				t.Fatalf("TransitionItem: %v", err)
 			}
 			return "ep-ti"

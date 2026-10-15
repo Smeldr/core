@@ -61,7 +61,7 @@ func TestTransitionItemVia_Supersede_WinnerWriteFails_LosersUntouched(t *testing
 	mustExec(t, db, `CREATE TRIGGER fail_winner BEFORE UPDATE ON smeldr_signals
 		WHEN NEW.id = 'winner' BEGIN SELECT RAISE(ABORT, 'winner write refused'); END`)
 
-	_, err := app.TransitionItemVia(NewTestContext(User{ID: "u1", Roles: []Role{Editor}}), "mcp", "Signal", "winner-slug", "read", "")
+	_, err := app.TransitionItemVia(TrustedRead(NewTestContext(User{ID: "u1", Roles: []Role{Editor}})), "mcp", "Signal", "winner-slug", "read", "")
 	if err == nil {
 		t.Fatal("want the winner's write failure returned")
 	}
@@ -93,7 +93,7 @@ func TestTransitionItemVia_Supersede_CommitFails_AllRolledBack(t *testing.T) {
 	mustExec(t, db, `CREATE TRIGGER fail_commit AFTER UPDATE ON smeldr_signals
 		WHEN NEW.id = 'winner' BEGIN INSERT INTO fk_child (id, sig) VALUES ('c', 'no-such-signal'); END`)
 
-	_, err := app.TransitionItemVia(NewTestContext(User{ID: "u1", Roles: []Role{Editor}}), "mcp", "Signal", "winner-slug", "read", "")
+	_, err := app.TransitionItemVia(TrustedRead(NewTestContext(User{ID: "u1", Roles: []Role{Editor}})), "mcp", "Signal", "winner-slug", "read", "")
 	if !errors.Is(err, ErrInternal) {
 		t.Fatalf("err = %v, want ErrInternal from the failed commit", err)
 	}
@@ -111,7 +111,7 @@ func TestTransitionItemVia_Supersede_CommitFails_AllRolledBack(t *testing.T) {
 // unchanged success path through the transaction.
 func TestTransitionItemVia_Supersede_Success_WinnerAndLosersTogether(t *testing.T) {
 	app, db, store, prov := orderApp(t)
-	if _, err := app.TransitionItemVia(NewTestContext(User{ID: "u1", Roles: []Role{Editor}}), "mcp", "Signal", "winner-slug", "read", ""); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(NewTestContext(User{ID: "u1", Roles: []Role{Editor}})), "mcp", "Signal", "winner-slug", "read", ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	if s := signalStatusOf(t, db, "winner"); s != "read" {
@@ -145,7 +145,7 @@ func TestTransitionItemVia_Supersede_OneLoserFails(t *testing.T) {
 		WHEN NEW.id = 'loser-2' AND NEW.status = 'superseded' BEGIN SELECT RAISE(ABORT, 'loser refused'); END`)
 
 	out := capturedLog(func() {
-		if _, err := app.TransitionItemVia(NewTestContext(User{ID: "u1", Roles: []Role{Editor}}), "mcp", "Signal", "winner-slug", "read", ""); err != nil {
+		if _, err := app.TransitionItemVia(TrustedRead(NewTestContext(User{ID: "u1", Roles: []Role{Editor}})), "mcp", "Signal", "winner-slug", "read", ""); err != nil {
 			t.Fatalf("TransitionItemVia: %v", err)
 		}
 	})
@@ -182,7 +182,7 @@ type plainDB struct{ DB }
 func TestTransitionItemVia_Supersede_BeginFails_NothingWritten(t *testing.T) {
 	app, db, _, prov := orderApp(t)
 	app.cfg.DB = beginFailDB{db}
-	_, err := app.TransitionItemVia(NewTestContext(User{ID: "u1", Roles: []Role{Editor}}), "mcp", "Signal", "winner-slug", "read", "")
+	_, err := app.TransitionItemVia(TrustedRead(NewTestContext(User{ID: "u1", Roles: []Role{Editor}})), "mcp", "Signal", "winner-slug", "read", "")
 	if !errors.Is(err, ErrInternal) {
 		t.Fatalf("err = %v, want ErrInternal", err)
 	}
@@ -201,7 +201,7 @@ func TestTransitionItemVia_Supersede_BeginFails_NothingWritten(t *testing.T) {
 func TestTransitionItemVia_Supersede_NoTransactionSupport(t *testing.T) {
 	app, db, _, _ := orderApp(t)
 	app.cfg.DB = plainDB{db}
-	if _, err := app.TransitionItemVia(NewTestContext(User{ID: "u1", Roles: []Role{Editor}}), "mcp", "Signal", "winner-slug", "read", ""); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(NewTestContext(User{ID: "u1", Roles: []Role{Editor}})), "mcp", "Signal", "winner-slug", "read", ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	if s := signalStatusOf(t, db, "winner"); s != "read" {
@@ -217,7 +217,7 @@ func TestTransitionItemVia_Supersede_NoTransactionSupport(t *testing.T) {
 	app2.cfg.DB = plainDB{db2}
 	mustExec(t, db2, `CREATE TRIGGER fail_winner BEFORE UPDATE ON smeldr_signals
 		WHEN NEW.id = 'winner' BEGIN SELECT RAISE(ABORT, 'winner write refused'); END`)
-	if _, err := app2.TransitionItemVia(NewTestContext(User{ID: "u1", Roles: []Role{Editor}}), "mcp", "Signal", "winner-slug", "read", ""); err == nil {
+	if _, err := app2.TransitionItemVia(TrustedRead(NewTestContext(User{ID: "u1", Roles: []Role{Editor}})), "mcp", "Signal", "winner-slug", "read", ""); err == nil {
 		t.Fatal("want the winner failure returned")
 	}
 	if s := signalStatusOf(t, db2, "loser-1"); s != "read" {

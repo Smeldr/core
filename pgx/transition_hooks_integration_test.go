@@ -51,7 +51,7 @@ func TestPG_TransitionItemFiresModuleAfterHooks(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	caller := smeldr.NewContextWithUser(smeldr.User{ID: "pg-user", Roles: []smeldr.Role{smeldr.Editor}})
-	if _, err := app.TransitionItem(caller, "HookPost", "hp-1", string(smeldr.Published)); err != nil {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(caller), "HookPost", "hp-1", string(smeldr.Published)); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 

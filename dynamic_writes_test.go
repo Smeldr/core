@@ -248,7 +248,7 @@ func TestDynamicWrites_ItemHistory(t *testing.T) {
 	if err := repo.UpdateFieldsVia(ctx, "mcp", node.ID, map[string]any{"Body": "approved"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := app.TransitionItemVia(ctx, "mcp", "recipe", node.Slug, "published", ""); err != nil {
+	if _, err := app.TransitionItemVia(smeldr.TrustedRead(ctx), "mcp", "recipe", node.Slug, "published", ""); err != nil {
 		t.Fatalf("transition: %v", err)
 	}
 	page, err := app.ItemProvenance(ctx, "recipe", node.ID, smeldr.ProvenanceMembers, 0, 0)

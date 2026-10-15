@@ -117,7 +117,7 @@ func TestWriteStanding_Rules(t *testing.T) {
 func TestItemStanding_TypeWithoutStanding(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	insertSignal(t, db, "s1", "s1-slug", "pending")
-	if _, err := app.TransitionItemVia(context.Background(), "mcp", "Signal", "s1-slug", "read", ""); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(context.Background()), "mcp", "Signal", "s1-slug", "read", ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	if s, has := mustStanding(t, db, "Signal", "s1"); has || s != "" {
@@ -144,7 +144,7 @@ func ratifyDecision(t *testing.T, app *App, db *sql.DB, rs *RoleStore, id, slug 
 	if _, err := rs.Grant(context.Background(), RoleGrant{TokenID: tokenID, RoleName: "decision-steward"}); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
-	if _, err := app.TransitionItemVia(NewTestContext(User{ID: tokenID}), "mcp", "Decision", slug, "ratified", "ratified by steward"); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(NewTestContext(User{ID: tokenID})), "mcp", "Decision", slug, "ratified", "ratified by steward"); err != nil {
 		t.Fatalf("ratify: %v", err)
 	}
 }
@@ -161,7 +161,7 @@ func TestTransitionItemVia_Decision_StandingLifecycle(t *testing.T) {
 		t.Fatalf("after ratify: %q (has %v), want holds", s, has)
 	}
 	ctx := NewTestContext(User{ID: "u-any", Roles: []Role{Editor}})
-	if _, err := app.TransitionItemVia(ctx, "mcp", "Decision", "dec-1-slug", "pending-re-evaluation", ""); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(ctx), "mcp", "Decision", "dec-1-slug", "pending-re-evaluation", ""); err != nil {
 		t.Fatalf("pending-re-evaluation: %v", err)
 	}
 	if s, _ := mustStanding(t, db, "Decision", "dec-1"); s != StandingHolds {

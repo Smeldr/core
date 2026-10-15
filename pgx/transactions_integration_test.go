@@ -68,7 +68,7 @@ func TestPG_Supersede_AFailedLoserLeavesNothingHalfDone(t *testing.T) {
 	failUpdatesOf(t, db, "pg_items", "c")
 
 	out := captureLog(func() {
-		_, err := app.TransitionItem(actor, "PgItem", "b", "published")
+		_, err := app.TransitionItem(smeldr.TrustedRead(actor), "PgItem", "b", "published")
 		if !errors.Is(err, smeldr.ErrInternal) {
 			t.Errorf("a refused loser write: err = %v, want ErrInternal (the transaction could not commit)", err)
 		}
@@ -110,7 +110,7 @@ func TestPG_Supersede_TableWithoutLastActor(t *testing.T) {
 	insertItem(t, db, "pg_olds", "a", "published")
 	insertItem(t, db, "pg_olds", "b", "review")
 
-	if _, err := app.TransitionItem(smeldr.NewTestContext(smeldr.User{ID: tokenID}), "PgOld", "b", "published"); err != nil {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(smeldr.NewTestContext(smeldr.User{ID: tokenID})), "PgOld", "b", "published"); err != nil {
 		t.Fatalf("a table without last_actor inside the conflict transaction: %v", err)
 	}
 	for id, want := range map[string]string{"b": "published", "a": "superseded"} {
@@ -261,7 +261,7 @@ func TestPG_Transactions_SmallPools(t *testing.T) {
 			var out string
 			go func() {
 				defer close(done)
-				out = captureLog(func() { _, terr = app.TransitionItem(ctx, "PgItem", "b", "published") })
+				out = captureLog(func() { _, terr = app.TransitionItem(smeldr.TrustedRead(ctx), "PgItem", "b", "published") })
 			}()
 			select {
 			case <-done:

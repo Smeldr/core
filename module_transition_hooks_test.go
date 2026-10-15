@@ -169,7 +169,7 @@ func TestAfterHooks_StatusTransitionsMatchPUT(t *testing.T) {
 	transitionItem := func(t *testing.T, rec *afterRecorder, from, to Status) {
 		app, _, repo := newTransitionHookApp(t, nil, rec.options()...)
 		seed := seedPost(t, repo, "Item", from)
-		if _, err := app.TransitionItem(hookCtx(), "testPost", seed.Slug, string(to)); err != nil {
+		if _, err := app.TransitionItem(TrustedRead(hookCtx()), "testPost", seed.Slug, string(to)); err != nil {
 			t.Fatalf("TransitionItem: %v", err)
 		}
 	}
@@ -220,7 +220,7 @@ func TestAfterHooks_TransitionItemHandlersSeeTheCaller(t *testing.T) {
 			rec := newAfterRecorder()
 			app, _, repo := newTransitionHookApp(t, nil, rec.options()...)
 			seed := seedPost(t, repo, "Item", Draft)
-			if _, err := app.TransitionItem(c.ctx, "testPost", seed.Slug, string(Published)); err != nil {
+			if _, err := app.TransitionItem(TrustedRead(c.ctx), "testPost", seed.Slug, string(Published)); err != nil {
 				t.Fatalf("TransitionItem: %v", err)
 			}
 			rec.wait(2)
@@ -250,7 +250,7 @@ func TestAfterHooks_TransitionItemDoesNotDoubleRecord(t *testing.T) {
 	app.Provenance(NewProvenanceStore(db))
 	app.Handler() // wires the signal bus, as a running App has it
 	seed := seedPost(t, repo, "Item", Draft)
-	if _, err := app.TransitionItem(hookCtx(), "testPost", seed.Slug, string(Published)); err != nil {
+	if _, err := app.TransitionItem(TrustedRead(hookCtx()), "testPost", seed.Slug, string(Published)); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 	if got := rec.wait(2); !reflect.DeepEqual(got, wantFired(AfterUpdate, AfterPublish)) {
@@ -290,7 +290,7 @@ func TestAfterHooks_TransitionItemLoadFailureDoesNotFail(t *testing.T) {
 		return findfailRepo{Repository: r}
 	}, rec.options()...)
 	seed := seedPost(t, repo, "Item", Draft)
-	if _, err := app.TransitionItem(hookCtx(), "testPost", seed.Slug, string(Published)); err != nil {
+	if _, err := app.TransitionItem(TrustedRead(hookCtx()), "testPost", seed.Slug, string(Published)); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 	var status string
@@ -327,7 +327,7 @@ func TestAfterHooks_ModuleWithoutHandlersSkipsLoad(t *testing.T) {
 		return findfailRepo{r, &loads}
 	})
 	seed := seedPost(t, repo, "Item", Draft)
-	if _, err := app.TransitionItem(hookCtx(), "testPost", seed.Slug, string(Published)); err != nil {
+	if _, err := app.TransitionItem(TrustedRead(hookCtx()), "testPost", seed.Slug, string(Published)); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 	if loads != 0 {

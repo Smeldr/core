@@ -1282,7 +1282,7 @@ func TestTransitionItem_authorizeDecisionScope_wired(t *testing.T) {
 	t.Cleanup(func() { delete(decisionScopeRoles, "core") })
 
 	ctx := NewTestContext(User{ID: "tok-no-grant"})
-	_, err := app.TransitionItemWithReason(ctx, "Decision", d.Slug, "ratified", "")
+	_, err := app.TransitionItemWithReason(TrustedRead(ctx), "Decision", d.Slug, "ratified", "")
 	if !errors.Is(err, ErrForbidden) {
 		t.Errorf("TransitionItemWithReason with unmapped role: want ErrForbidden, got %v", err)
 	}

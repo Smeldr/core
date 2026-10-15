@@ -85,7 +85,7 @@ func TestTransitionItemVia_Compiled_RecordsProvenance(t *testing.T) {
 			app, db, _, store := setupProvenanceTransitionApp(t)
 			insertSignal(t, db, "sig-p-1", "sig-p-1-slug", "pending")
 
-			if _, err := app.TransitionItemVia(tc.ctx, tc.surface, "Signal", "sig-p-1-slug", "read", "seen it"); err != nil {
+			if _, err := app.TransitionItemVia(TrustedRead(tc.ctx), tc.surface, "Signal", "sig-p-1-slug", "read", "seen it"); err != nil {
 				t.Fatalf("TransitionItemVia: %v", err)
 			}
 			got := store.Appended()
@@ -117,10 +117,10 @@ func TestTransitionItem_LegacyMethods_RecordEmptySurface(t *testing.T) {
 	insertSignal(t, db, "sig-p-2", "sig-p-2-slug", "pending")
 	insertSignal(t, db, "sig-p-3", "sig-p-3-slug", "pending")
 
-	if _, err := app.TransitionItem(context.Background(), "Signal", "sig-p-2-slug", "read"); err != nil {
+	if _, err := app.TransitionItem(TrustedRead(context.Background()), "Signal", "sig-p-2-slug", "read"); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
-	if _, err := app.TransitionItemWithReason(context.Background(), "Signal", "sig-p-3-slug", "read", "why"); err != nil {
+	if _, err := app.TransitionItemWithReason(TrustedRead(context.Background()), "Signal", "sig-p-3-slug", "read", "why"); err != nil {
 		t.Fatalf("TransitionItemWithReason: %v", err)
 	}
 	got := store.Appended()
@@ -144,7 +144,7 @@ func TestTransitionItemVia_Compiled_TwoColumnFallbackRecords(t *testing.T) {
 	app, db, _, store := setupProvenanceTransitionApp(t)
 	registerReasonGatedFlow(t, app, db)
 
-	if _, err := app.TransitionItemVia(context.Background(), "mcp", "ReasonGatedType", "rg-1-slug", "published", "plan said so"); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(context.Background()), "mcp", "ReasonGatedType", "rg-1-slug", "published", "plan said so"); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	got := store.Appended()
@@ -180,7 +180,7 @@ func TestTransitionItemVia_FailedTransitionsRecordNothing(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := app.TransitionItemVia(tc.ctx, "mcp", tc.typeName, tc.slug, tc.to, tc.reason)
+			_, err := app.TransitionItemVia(TrustedRead(tc.ctx), "mcp", tc.typeName, tc.slug, tc.to, tc.reason)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
 			}
@@ -199,7 +199,7 @@ func TestTransitionItemVia_AppendFailure_StillSucceeds(t *testing.T) {
 	app.Provenance(store)
 	insertSignal(t, db, "sig-p-5", "sig-p-5-slug", "pending")
 
-	result, err := app.TransitionItemVia(context.Background(), "mcp", "Signal", "sig-p-5-slug", "read", "")
+	result, err := app.TransitionItemVia(TrustedRead(context.Background()), "mcp", "Signal", "sig-p-5-slug", "read", "")
 	if err != nil {
 		t.Fatalf("TransitionItemVia with failing store: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestTransitionItemVia_Dynamic_RecordsOnce(t *testing.T) {
 	typeName, slug := defineProvenanceDynamicType(t, app, db, "provdyn")
 
 	ctx := NewTestContext(User{ID: "u-dyn", Roles: []Role{Editor}})
-	if _, err := app.TransitionItemVia(ctx, "mcp", typeName, slug, "published", "go live"); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(ctx), "mcp", typeName, slug, "published", "go live"); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	got := store.Appended()
@@ -239,7 +239,7 @@ func TestDynamicTypeRepo_FailedSetStatus_RecordsNothing(t *testing.T) {
 	app, db, _, store := setupProvenanceTransitionApp(t)
 	typeName, slug := defineProvenanceDynamicType(t, app, db, "provdynfail")
 
-	if _, err := app.TransitionItemVia(context.Background(), "mcp", typeName, slug, "no-such-state", ""); err == nil {
+	if _, err := app.TransitionItemVia(TrustedRead(context.Background()), "mcp", typeName, slug, "no-such-state", ""); err == nil {
 		t.Fatal("transition to an unknown state: want error, got nil")
 	}
 	if got := store.Appended(); len(got) != 0 {
@@ -306,7 +306,7 @@ func TestTransitionItemVia_SubjectProvenance_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	insertTaskWithTaskID(t, db, "task-p-1", "task-p-1-slug", "T9001", "backlog")
-	if _, err := app.TransitionItemVia(NewTestContext(User{ID: "u-task", Roles: []Role{Editor}}), "mcp", "Task", "task-p-1-slug", "active", "claimed"); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(NewTestContext(User{ID: "u-task", Roles: []Role{Editor}})), "mcp", "Task", "task-p-1-slug", "active", "claimed"); err != nil {
 		t.Fatalf("Task transition: %v", err)
 	}
 	entries, err := SubjectProvenance(ctx, db, store, "Task", "task-p-1")
@@ -332,7 +332,7 @@ func TestTransitionItemVia_SubjectProvenance_RoundTrip(t *testing.T) {
 	if _, err := rs.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "decision-steward"}); err != nil {
 		t.Fatalf("Grant decision-steward: %v", err)
 	}
-	if _, err := app.TransitionItemVia(NewTestContext(User{ID: tokenID}), "mcp", "Decision", "dec-p-2-slug", "ratified", "ratified by steward"); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(NewTestContext(User{ID: tokenID})), "mcp", "Decision", "dec-p-2-slug", "ratified", "ratified by steward"); err != nil {
 		t.Fatalf("Decision transition: %v", err)
 	}
 	entries, err = SubjectProvenance(ctx, db, store, "Decision", "dec-p-2")

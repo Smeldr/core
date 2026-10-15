@@ -64,7 +64,7 @@ func TestTransitionEvent_CarriesActor(t *testing.T) {
 			before := len(prov.Appended())
 
 			actor := NewTestContext(User{ID: "actor-1", Roles: tt.roles})
-			if _, err := app.TransitionItemVia(actor, "mcp", "Decision", "dec-e-slug", "pending-re-evaluation", ""); err != nil {
+			if _, err := app.TransitionItemVia(TrustedRead(actor), "mcp", "Decision", "dec-e-slug", "pending-re-evaluation", ""); err != nil {
 				t.Fatalf("TransitionItemVia: %v", err)
 			}
 
@@ -113,7 +113,7 @@ func TestTransitionEvent_NoActorOmitsKeys(t *testing.T) {
 	if _, _, err := store.Create(ctx, "https://8.8.8.8/hook", []string{"signal.transitioned"}); err != nil {
 		t.Fatalf("Create endpoint: %v", err)
 	}
-	if _, err := app.TransitionItemWithReason(ctx, "Signal", "sig-na-slug", "read", ""); err != nil {
+	if _, err := app.TransitionItemWithReason(TrustedRead(ctx), "Signal", "sig-na-slug", "read", ""); err != nil {
 		t.Fatalf("TransitionItemWithReason: %v", err)
 	}
 	endpoints, _ := store.EndpointsForEvent(ctx, "signal.transitioned")

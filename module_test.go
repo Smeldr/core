@@ -2937,68 +2937,72 @@ func govGrantDecisionSteward(t *testing.T, store *RoleStore, tokenID string) {
 	govGrant(t, store, tokenID, "decision-steward")
 }
 
-// canReadDrafts — Branch 1: no RoleStore → legacy HasRole(Author) check.
-func TestModule_canReadDrafts_NoStore_AuthorAllowed(t *testing.T) {
+// readsDrafts reports whether the module's HTTP read scope for ctx reads
+// drafts of the module's type (the per-item successor of canReadDrafts).
+func readsDrafts(t *testing.T, m *Module[*testPost], ctx Context) bool {
+	t.Helper()
+	s, err := m.httpReadScope(ctx)
+	if err != nil {
+		t.Fatalf("httpReadScope: %v", err)
+	}
+	return s.TypeReadable(m.contentTypeName)
+}
+
+// HTTP read scope: no RoleStore → the legacy HasRole(Author) rule.
+func TestModule_httpReadScope_NoStore_AuthorAllowed(t *testing.T) {
 	m := newTestModule(NewMemoryRepo[*testPost]())
-	ctx := NewTestContext(authorUser())
-	if !m.canReadDrafts(ctx) {
-		t.Error("expected canReadDrafts=true for Author without governance")
+	if !readsDrafts(t, m, NewTestContext(authorUser())) {
+		t.Error("an Author without governance does not read drafts")
 	}
 }
 
-func TestModule_canReadDrafts_NoStore_GuestDenied(t *testing.T) {
+func TestModule_httpReadScope_NoStore_GuestDenied(t *testing.T) {
 	m := newTestModule(NewMemoryRepo[*testPost]())
-	ctx := NewTestContext(GuestUser)
-	if m.canReadDrafts(ctx) {
-		t.Error("expected canReadDrafts=false for Guest without governance")
+	if readsDrafts(t, m, NewTestContext(GuestUser)) {
+		t.Error("a Guest without governance reads drafts")
 	}
 }
 
-// canReadDrafts — Branch 2: governance wired, no actor ID → deny.
-func TestModule_canReadDrafts_StoreWired_NoActorID(t *testing.T) {
+// Governance wired, no actor ID → nothing beyond published.
+func TestModule_httpReadScope_StoreWired_NoActorID(t *testing.T) {
 	m, _ := govModule(t)
-	ctx := NewTestContext(GuestUser) // ID == ""
-	if m.canReadDrafts(ctx) {
-		t.Error("expected canReadDrafts=false for unauthenticated user when governance is wired")
+	if readsDrafts(t, m, NewTestContext(GuestUser)) {
+		t.Error("an unauthenticated user reads drafts when governance is wired")
 	}
 }
 
-// canReadDrafts — Branch 3a: governance wired, user has grant → allow.
-func TestModule_canReadDrafts_StoreWired_Authorized(t *testing.T) {
+// Governance wired, a read grant → reads the type.
+func TestModule_httpReadScope_StoreWired_Authorized(t *testing.T) {
 	m, store := govModule(t)
 	const uid = "tok-author-read"
 	govGrant(t, store, uid, "author") // author has "read"
-	ctx := NewTestContext(govTestUser(uid))
-	if !m.canReadDrafts(ctx) {
-		t.Error("expected canReadDrafts=true for user with read grant when governance is wired")
+	if !readsDrafts(t, m, NewTestContext(govTestUser(uid))) {
+		t.Error("a user with a read grant does not read drafts")
 	}
 }
 
-// canReadDrafts — Branch 3b: governance wired, user has no grant → deny.
-func TestModule_canReadDrafts_StoreWired_Denied(t *testing.T) {
+// Governance wired, no grant → nothing beyond published.
+func TestModule_httpReadScope_StoreWired_Denied(t *testing.T) {
 	m, _ := govModule(t)
-	ctx := NewTestContext(govTestUser("no-grants-user"))
-	if m.canReadDrafts(ctx) {
-		t.Error("expected canReadDrafts=false for user with no grants when governance is wired")
+	if readsDrafts(t, m, NewTestContext(govTestUser("no-grants-user"))) {
+		t.Error("a user with no grants reads drafts")
 	}
 }
 
-// canReadDrafts — Branch 3c: governance wired, DB error → fail-closed.
-func TestModule_canReadDrafts_StoreWired_ErrorFailClosed(t *testing.T) {
+// Governance wired, DB error → an internal error, never "not visible"
+// (binding addition D: a fault must not make records vanish).
+func TestModule_httpReadScope_StoreWired_ErrorIsInternal(t *testing.T) {
 	db := setupGovernanceDB(t)
-	// Authorized uses QueryContext for grants — wrap that to simulate a DB error.
 	wrapped := &govQueryFailDB{DB: db, failOn: "FROM smeldr_role_grants"}
 	store := NewRoleStore(wrapped)
 	m := newTestModule(NewMemoryRepo[*testPost]())
 	m.setRoleStore(store)
 	const uid = "tok-fail"
-	// Grant exists in real DB but wrapped DB errors on the lookup.
 	if _, err := NewRoleStore(db).Grant(context.Background(), RoleGrant{TokenID: uid, RoleName: "author"}); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
-	ctx := NewTestContext(govTestUser(uid))
-	if m.canReadDrafts(ctx) {
-		t.Error("expected canReadDrafts=false (fail-closed) when Authorized returns error")
+	if _, err := m.httpReadScope(NewTestContext(govTestUser(uid))); !errors.Is(err, ErrInternal) {
+		t.Errorf("err = %v; want ErrInternal", err)
 	}
 }
 
@@ -3369,8 +3373,8 @@ func TestModule_isVisible_Published_AlwaysVisible(t *testing.T) {
 	// GuestUser has no grants — but published items must still be visible.
 	ctx := NewTestContext(GuestUser)
 	item := &testPost{Node: Node{Status: Published}}
-	if !m.isVisible(ctx, item) {
-		t.Error("expected isVisible=true for published item regardless of governance")
+	if ok, err := m.isVisible(ctx, item); err != nil || !ok {
+		t.Errorf("isVisible = %v, %v; want true for a published item regardless of governance", ok, err)
 	}
 }
 

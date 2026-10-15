@@ -79,13 +79,22 @@ func identCandidates(typeName, ident string) [][2]string {
 // are an error naming the count; a match is logged as deprecated use, so it
 // counts towards the cut. Removed at the cut with [legacyHumanIDColumns].
 // ErrNotFound when the type has no legacy field or nothing matches.
-func legacyLookupID(ctx context.Context, db DB, typeName, table, ident string) (string, error) {
+//
+// visible, when not nil, is the caller's per-item read rule: a row it may not
+// see counts as no match, and the error's count counts only visible rows, so a
+// hidden record is indistinguishable from a missing one. The query then reads
+// every matching row, so it is the same one statement whatever matches.
+func legacyLookupID(ctx context.Context, db DB, typeName, table, ident string, visible func(id string) bool) (string, error) {
 	col, ok := legacyHumanIDColumns[typeName]
 	if !ok || db == nil || strings.TrimSpace(ident) == "" {
 		return "", ErrNotFound
 	}
 	where := ` WHERE ` + quoteIdent(col) + ` = $1 OR external_ref = $1`
-	rows, err := db.QueryContext(ctx, `SELECT id FROM `+table+where+` LIMIT 2`, ident)
+	limit := ` LIMIT 2`
+	if visible != nil {
+		limit = ""
+	}
+	rows, err := db.QueryContext(ctx, `SELECT id FROM `+table+where+limit, ident)
 	if err != nil {
 		return "", err
 	}
@@ -96,7 +105,9 @@ func legacyLookupID(ctx context.Context, db DB, typeName, table, ident string) (
 			rows.Close()
 			return "", err
 		}
-		ids = append(ids, id)
+		if visible == nil || visible(id) {
+			ids = append(ids, id)
+		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -109,9 +120,11 @@ func legacyLookupID(ctx context.Context, db DB, typeName, table, ident string) (
 		noteDeprecatedUse(ctx, typeName, "a lookup by a legacy value")
 		return ids[0], nil
 	}
-	var n int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+where, ident).Scan(&n); err != nil {
-		return "", err
+	n := len(ids)
+	if visible == nil {
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+where, ident).Scan(&n); err != nil {
+			return "", err
+		}
 	}
 	return "", Err("id", fmt.Sprintf("%q matches %d %s records by their old number: name one by its address", ident, n, typeName))
 }

@@ -653,7 +653,7 @@ func TestApp_Check_WiresIntoTransitionItem(t *testing.T) {
 		t.Fatalf("Grant decision-steward: %v", err)
 	}
 
-	if _, err := app.TransitionItem(NewTestContext(User{ID: tokenID}), "Decision", "dec-check-1-slug", "ratified"); err != nil {
+	if _, err := app.TransitionItem(TrustedRead(NewTestContext(User{ID: tokenID})), "Decision", "dec-check-1-slug", "ratified"); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 	_, found, err := store.Last(context.Background(), "Decision", "dec-check-1")

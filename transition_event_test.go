@@ -326,7 +326,7 @@ func TestStatusChange_OneRecordOneEventPerPath(t *testing.T) {
 		return "", surfaceTrigger, ""
 	}
 	transitionItem := func(t *testing.T, e *d107Env, seed *testPost, to Status) (string, string, string) {
-		if _, err := e.app.TransitionItemVia(hookCtx(), "mcp", "testPost", seed.Slug, string(to), "moved"); err != nil {
+		if _, err := e.app.TransitionItemVia(TrustedRead(hookCtx()), "mcp", "testPost", seed.Slug, string(to), "moved"); err != nil {
 			t.Fatalf("TransitionItemVia: %v", err)
 		}
 		return "editor-1", "mcp", "moved"
@@ -390,7 +390,7 @@ func TestStatusChange_DynamicPaths(t *testing.T) {
 		run  run
 	}{
 		{"transition_item", Published, func(t *testing.T, app *App, typeName string, node *DynamicNode) {
-			if _, err := app.TransitionItemVia(hookCtx(), "mcp", typeName, node.Slug, string(Published), "r"); err != nil {
+			if _, err := app.TransitionItemVia(TrustedRead(hookCtx()), "mcp", typeName, node.Slug, string(Published), "r"); err != nil {
 				t.Fatalf("TransitionItemVia: %v", err)
 			}
 		}},
@@ -450,7 +450,7 @@ func TestStatusChange_SupersededItemIsAnnounced(t *testing.T) {
 	}
 	old := e.seed(t, "Old", Published)
 	winner := e.seed(t, "New", Draft)
-	if _, err := e.app.TransitionItemVia(hookCtx(), "mcp", "testPost", winner.Slug, string(Published), ""); err != nil {
+	if _, err := e.app.TransitionItemVia(TrustedRead(hookCtx()), "mcp", "testPost", winner.Slug, string(Published), ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	want := expectation("testPost", old.ID, Published, "superseded", true, false)
@@ -500,7 +500,7 @@ func TestStatusChange_SuppressedStateHasNoMilestones(t *testing.T) {
 		t.Fatalf("RegisterFlow: %v", err)
 	}
 	seed := e.seed(t, "Item", Draft)
-	if _, err := e.app.TransitionItemVia(hookCtx(), "mcp", "testPost", seed.Slug, string(Published), ""); err != nil {
+	if _, err := e.app.TransitionItemVia(TrustedRead(hookCtx()), "mcp", "testPost", seed.Slug, string(Published), ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	e.check(t, expectation("testPost", seed.ID, Draft, Published, false, false))
@@ -512,7 +512,7 @@ func TestStatusChange_FailedRecordStillAnnounced(t *testing.T) {
 	e := newD107Env(t)
 	e.app.provenanceStore = &failingProvenanceStore{}
 	seed := e.seed(t, "Item", Draft)
-	if _, err := e.app.TransitionItemVia(hookCtx(), "mcp", "testPost", seed.Slug, string(Published), ""); err != nil {
+	if _, err := e.app.TransitionItemVia(TrustedRead(hookCtx()), "mcp", "testPost", seed.Slug, string(Published), ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	e.check(t, expectation("testPost", seed.ID, Draft, Published, true, false))
@@ -524,7 +524,7 @@ func TestStatusChange_FailedRecordStillAnnounced(t *testing.T) {
 func TestStatusChange_UnloadableItem(t *testing.T) {
 	e := newD107EnvWrapped(t, func(r Repository[*testPost]) Repository[*testPost] { return findfailRepo{Repository: r} })
 	seed := e.seed(t, "Item", Draft)
-	if _, err := e.app.TransitionItemVia(hookCtx(), "mcp", "testPost", seed.Slug, string(Published), ""); err != nil {
+	if _, err := e.app.TransitionItemVia(TrustedRead(hookCtx()), "mcp", "testPost", seed.Slug, string(Published), ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	want := expectation("testPost", seed.ID, Draft, Published, false, false)
@@ -541,7 +541,7 @@ func TestStatusChange_ListenerPanicIsContained(t *testing.T) {
 	e := newD107Env(t)
 	e.app.signalListeners = append([]func(LifecycleEvent, string, any){func(LifecycleEvent, string, any) { panic("listener") }}, e.app.signalListeners...)
 	seed := e.seed(t, "Item", Draft)
-	if _, err := e.app.TransitionItemVia(hookCtx(), "mcp", "testPost", seed.Slug, string(Published), ""); err != nil {
+	if _, err := e.app.TransitionItemVia(TrustedRead(hookCtx()), "mcp", "testPost", seed.Slug, string(Published), ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	e.check(t, expectation("testPost", seed.ID, Draft, Published, true, false))
@@ -575,7 +575,7 @@ func TestStatusChange_AuditSeesTransitionItem(t *testing.T) {
 	audit := &lockedAuditStore{}
 	e.app.Audit(audit)
 	seed := e.seed(t, "Item", Draft)
-	if _, err := e.app.TransitionItemVia(hookCtx(), "mcp", "testPost", seed.Slug, string(Published), ""); err != nil {
+	if _, err := e.app.TransitionItemVia(TrustedRead(hookCtx()), "mcp", "testPost", seed.Slug, string(Published), ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -619,7 +619,7 @@ func TestStatusChange_HandlersRunWithoutTheConflictLock(t *testing.T) {
 	for _, run := range []func(seed *testPost) error{
 		func(seed *testPost) error { return e.m.MCPPublish(hookCtx(), seed.Slug, "") },
 		func(seed *testPost) error {
-			_, err := e.app.TransitionItemVia(hookCtx(), "mcp", "testPost", seed.Slug, string(Published), "")
+			_, err := e.app.TransitionItemVia(TrustedRead(hookCtx()), "mcp", "testPost", seed.Slug, string(Published), "")
 			return err
 		},
 		func(seed *testPost) error {

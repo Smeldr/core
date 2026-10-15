@@ -1371,7 +1371,12 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 // and status; the slug is read from the row, never assumed to equal ident,
 // which can be an address or an old number (T253). ErrNotFound when nothing
 // matches, ErrInternal for a query failure.
-func (a *App) lookupCompiledRecord(ctx context.Context, typeName, ident string) (table, id, slug, status string, err error) {
+//
+// visible, when not nil, is the caller's per-item read rule: a row it may not
+// see is treated as a miss and the lookup goes on through its remaining steps,
+// exactly as for an ident that matches nothing, so a hidden and a missing
+// record run the same statements and answer the same ErrNotFound.
+func (a *App) lookupCompiledRecord(ctx context.Context, typeName, ident string, visible func(id string) bool) (table, id, slug, status string, err error) {
 	if a.cfg.DB == nil {
 		return "", "", "", "", fmt.Errorf("smeldr: lookupCompiledRecord requires Config.DB")
 	}
@@ -1388,13 +1393,16 @@ func (a *App) lookupCompiledRecord(ctx context.Context, typeName, ident string) 
 		err = db.QueryRowContext(ctx,
 			"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE "+quoteIdent(c[0])+" = $1", c[1],
 		).Scan(&id, &slug, &status)
+		if err == nil && visible != nil && !visible(id) {
+			err = sql.ErrNoRows // hidden: go on as a miss would
+		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			break
 		}
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		// The transitional legacy fallback (legacy column or external_ref).
-		legacyID, lerr := legacyLookupID(ctx, db, typeName, quoteIdent(table), ident)
+		legacyID, lerr := legacyLookupID(ctx, db, typeName, quoteIdent(table), ident, visible)
 		if lerr != nil {
 			return "", "", "", "", lerr
 		}
@@ -1431,7 +1439,7 @@ func (a *App) resolveItemID(ctx context.Context, typeName, ident string) (string
 		}
 		return node.ID, nil
 	}
-	_, id, _, _, err := a.lookupCompiledRecord(ctx, typeName, ident)
+	_, id, _, _, err := a.lookupCompiledRecord(ctx, typeName, ident, nil)
 	return id, err
 }
 
@@ -1460,12 +1468,23 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	if desc == nil {
 		return nil, fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName)
 	}
+	// Per-item read rules: the scope is loaded before the lookup, and an item
+	// the caller may not read is answered as missing, before any transition
+	// check, so forbidden only reaches a caller who can read the item.
+	scope, err := scopeFor(ctx, a.governance)
+	if err != nil {
+		return nil, err
+	}
 	if desc.Kind == "content" {
 		repo, err := a.DynamicContentRepo(typeName)
 		if err != nil {
 			return nil, err
 		}
-		node, err := repo.Resolve(ctx, slug)
+		var visible func(*DynamicNode) bool
+		if f := scopeIDFilter(scope, typeName); f != nil {
+			visible = func(n *DynamicNode) bool { return f(n.ID) }
+		}
+		node, err := repo.resolveFor(ctx, slug, visible)
 		if err != nil {
 			return nil, err
 		}
@@ -1479,9 +1498,12 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 		return nil, fmt.Errorf("smeldr: TransitionItem requires Config.DB")
 	}
 	db := a.cfg.DB
-	table, id, realSlug, currentStatus, err := a.lookupCompiledRecord(ctx, typeName, slug)
+	table, id, realSlug, currentStatus, err := a.lookupCompiledRecord(ctx, typeName, slug, scopeIDFilter(scope, typeName))
 	if err != nil {
 		return nil, err
+	}
+	if !scope.Readable(typeName, id) {
+		return nil, ErrNotFound
 	}
 
 	// One extraction of the actor for validation, the stream self-skip and the

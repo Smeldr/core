@@ -27,16 +27,16 @@ func TestPG_OrchestrationFlows(t *testing.T) {
 	if err := tasks.Save(ctx, &smeldr.Task{Node: smeldr.Node{ID: "t1", Slug: "t1", Status: "backlog"}}); err != nil {
 		t.Fatalf("save task: %v", err)
 	}
-	if _, err := app.TransitionItem(ctx, "Task", "t1", "implementing"); !errors.Is(err, smeldr.ErrConflict) {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "Task", "t1", "implementing"); !errors.Is(err, smeldr.ErrConflict) {
 		t.Errorf("backlog -> implementing is not a door: err = %v, want ErrConflict", err)
 	}
-	if _, err := app.TransitionItem(ctx, "Task", "t1", "active"); err != nil {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "Task", "t1", "active"); err != nil {
 		t.Fatalf("backlog -> active: %v", err)
 	}
-	if _, err := app.TransitionItem(ctx, "Task", "t1", "done"); !errors.Is(err, smeldr.ErrBadRequest) {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "Task", "t1", "done"); !errors.Is(err, smeldr.ErrBadRequest) {
 		t.Errorf("active -> done without a reason: err = %v, want ErrBadRequest", err)
 	}
-	if _, err := app.TransitionItemWithReason(ctx, "Task", "t1", "done", "concluded without a commit"); err != nil {
+	if _, err := app.TransitionItemWithReason(smeldr.TrustedRead(ctx), "Task", "t1", "done", "concluded without a commit"); err != nil {
 		t.Fatalf("active -> done with a reason: %v", err)
 	}
 
@@ -44,7 +44,7 @@ func TestPG_OrchestrationFlows(t *testing.T) {
 	if err := decisions.Save(ctx, &smeldr.Decision{Node: smeldr.Node{ID: "d1", Slug: "d1", Status: "proposed"}}); err != nil {
 		t.Fatalf("save decision: %v", err)
 	}
-	if _, err := app.TransitionItem(smeldr.NewTestContext(smeldr.User{ID: "nobody"}), "Decision", "d1", "ratified"); !errors.Is(err, smeldr.ErrForbidden) {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(smeldr.NewTestContext(smeldr.User{ID: "nobody"})), "Decision", "d1", "ratified"); !errors.Is(err, smeldr.ErrForbidden) {
 		t.Errorf("ratifying without the operation: err = %v, want ErrForbidden", err)
 	}
 	if got := statusOf(t, db, "smeldr_decisions", "d1"); got != "proposed" {
@@ -62,7 +62,7 @@ func TestPG_OrchestrationFlows(t *testing.T) {
 			t.Fatalf("Grant %s: %v", role, err)
 		}
 	}
-	if _, err := app.TransitionItem(smeldr.NewTestContext(smeldr.User{ID: tokenID}), "Decision", "d1", "ratified"); err != nil {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(smeldr.NewTestContext(smeldr.User{ID: tokenID})), "Decision", "d1", "ratified"); err != nil {
 		t.Fatalf("ratifying with the operation: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestPG_LastActorColumnMissing_FailsOpen(t *testing.T) {
 		t.Fatalf("RegisterFlow: %v", err)
 	}
 	insertItem(t, db, "pg_olds", "a", "draft")
-	if _, err := app.TransitionItem(ctx, "PgOld", "a", "review"); err != nil {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "PgOld", "a", "review"); err != nil {
 		t.Fatalf("a table without last_actor must still transition: %v", err)
 	}
 	if got := statusOf(t, db, "pg_olds", "a"); got != "review" {

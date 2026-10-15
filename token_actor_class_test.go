@@ -236,7 +236,7 @@ func TestClassifiedToken_RecordsAgentInProvenance(t *testing.T) {
 	before := len(prov.Appended())
 
 	ctx := NewTestContext(u)
-	if _, err := app.TransitionItemVia(ctx, "mcp", "Decision", "dec-c-slug", "pending-re-evaluation", ""); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(ctx), "mcp", "Decision", "dec-c-slug", "pending-re-evaluation", ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	var rec *ProvenanceRecord

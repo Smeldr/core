@@ -300,7 +300,7 @@ func BuildContextPacket(
 	}
 	if errors.Is(err, ErrNotFound) {
 		// The transitional legacy fallback (legacy column or external_ref).
-		legacyID, lerr := legacyLookupID(ctx, db, entry.relationType, entry.table, anchorSlug)
+		legacyID, lerr := legacyLookupID(ctx, db, entry.relationType, entry.table, anchorSlug, nil)
 		if lerr != nil {
 			return nil, lerr
 		}

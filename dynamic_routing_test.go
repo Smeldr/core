@@ -72,7 +72,7 @@ func publishDynamic(t *testing.T, e *d107Env, typeName, band string) string {
 	if err != nil {
 		t.Fatalf("CreateDraft: %v", err)
 	}
-	if _, err := e.app.TransitionItemVia(hookCtx(), "mcp", typeName, node.Slug, string(Published), ""); err != nil {
+	if _, err := e.app.TransitionItemVia(TrustedRead(hookCtx()), "mcp", typeName, node.Slug, string(Published), ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	e.settle(t, map[string]int{"listen " + string(AfterTransition) + ":" + node.ID: 1})

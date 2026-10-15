@@ -142,7 +142,7 @@ func TestPG_DynamicContent_StateMachine(t *testing.T) {
 	if err != nil || titleOf(t, got) != "edited" || string(got.Status) != "sealed" {
 		t.Errorf("after the refused edit: %v, %v, want title edited, status sealed", got, err)
 	}
-	if _, err := app.TransitionItem(ctx, "memo", node.Slug, "gone"); err != nil {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "memo", node.Slug, "gone"); err != nil {
 		t.Errorf("App.TransitionItem on a dynamic type: %v", err)
 	}
 

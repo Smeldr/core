@@ -154,16 +154,16 @@ func TestPG_StateMachine_RejectsATransitionNotInTheFlow(t *testing.T) {
 	insertItem(t, db, "pg_items", "a", "draft")
 	ctx := context.Background()
 
-	if _, err := app.TransitionItem(ctx, "PgItem", "a", "published"); !errors.Is(err, smeldr.ErrConflict) {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "PgItem", "a", "published"); !errors.Is(err, smeldr.ErrConflict) {
 		t.Errorf("draft -> published is not in the flow: err = %v, want ErrConflict", err)
 	}
 	if got := statusOf(t, db, "pg_items", "a"); got != "draft" {
 		t.Errorf("a refused transition changed the status to %q", got)
 	}
-	if _, err := app.TransitionItem(ctx, "PgItem", "a", "nonsense"); err == nil {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "PgItem", "a", "nonsense"); err == nil {
 		t.Error("a state the flow does not define must be refused")
 	}
-	if _, err := app.TransitionItem(ctx, "PgItem", "a", "review"); err != nil {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "PgItem", "a", "review"); err != nil {
 		t.Fatalf("draft -> review is in the flow: %v", err)
 	}
 	if got := statusOf(t, db, "pg_items", "a"); got != "review" {
@@ -194,13 +194,13 @@ func TestPG_StateMachine_RoleGate(t *testing.T) {
 
 	// The gate is the security side of D103: before, on Postgres, this passed
 	// for anyone, because the flow was stored and never consulted.
-	if _, err := app.TransitionItem(smeldr.NewTestContext(smeldr.User{ID: "nobody"}), "PgItem", "a", "published"); !errors.Is(err, smeldr.ErrForbidden) {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(smeldr.NewTestContext(smeldr.User{ID: "nobody"})), "PgItem", "a", "published"); !errors.Is(err, smeldr.ErrForbidden) {
 		t.Errorf("an actor without the operation: err = %v, want ErrForbidden", err)
 	}
 	if got := statusOf(t, db, "pg_items", "a"); got != "review" {
 		t.Errorf("a forbidden transition changed the status to %q", got)
 	}
-	if _, err := app.TransitionItem(smeldr.NewTestContext(smeldr.User{ID: tokenID}), "PgItem", "a", "published"); err != nil {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(smeldr.NewTestContext(smeldr.User{ID: tokenID})), "PgItem", "a", "published"); err != nil {
 		t.Fatalf("an actor with the operation: %v", err)
 	}
 	if got := statusOf(t, db, "pg_items", "a"); got != "published" {
@@ -219,10 +219,10 @@ func TestPG_StateMachine_RequiredReason(t *testing.T) {
 	insertItem(t, db, "pg_items", "a", "draft")
 	ctx := context.Background()
 
-	if _, err := app.TransitionItem(ctx, "PgItem", "a", "archived"); !errors.Is(err, smeldr.ErrBadRequest) {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "PgItem", "a", "archived"); !errors.Is(err, smeldr.ErrBadRequest) {
 		t.Errorf("no reason: err = %v, want ErrBadRequest", err)
 	}
-	if _, err := app.TransitionItemWithReason(ctx, "PgItem", "a", "archived", "not needed any more"); err != nil {
+	if _, err := app.TransitionItemWithReason(smeldr.TrustedRead(ctx), "PgItem", "a", "archived", "not needed any more"); err != nil {
 		t.Fatalf("with a reason: %v", err)
 	}
 }
@@ -241,7 +241,7 @@ func TestPG_StateMachine_AsyncTriggerQueuesAnEvaluation(t *testing.T) {
 		t.Fatalf("set next_eval_at: %v", err)
 	}
 
-	if _, err := app.TransitionItem(ctx, "PgItem", "a", "review"); err != nil {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "PgItem", "a", "review"); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -280,7 +280,7 @@ func TestPG_StateMachine_ConflictPolicyReject(t *testing.T) {
 	insertItem(t, db, "pg_items", "a", "published")
 	insertItem(t, db, "pg_items", "b", "review")
 
-	if _, err := app.TransitionItem(actor, "PgItem", "b", "published"); !errors.Is(err, smeldr.ErrConflict) {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(actor), "PgItem", "b", "published"); !errors.Is(err, smeldr.ErrConflict) {
 		t.Errorf("a second item into the active state: err = %v, want ErrConflict", err)
 	}
 	if got := statusOf(t, db, "pg_items", "b"); got != "review" {
@@ -314,7 +314,7 @@ func TestPG_StateMachine_ConflictPolicySupersede(t *testing.T) {
 	insertItem(t, db, "pg_items", "a", "published")
 	insertItem(t, db, "pg_items", "b", "review")
 
-	if _, err := app.TransitionItem(smeldr.NewTestContext(smeldr.User{ID: tokenID}), "PgItem", "b", "published"); err != nil {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(smeldr.NewTestContext(smeldr.User{ID: tokenID})), "PgItem", "b", "published"); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 	if got := statusOf(t, db, "pg_items", "b"); got != "published" {
@@ -411,7 +411,7 @@ func TestPG_Boot_OlderStateFlowSchema(t *testing.T) {
 		}
 	}
 	insertItem(t, db, "pg_items", "a", "draft")
-	if _, err := app.TransitionItem(ctx, "PgItem", "a", "published"); !errors.Is(err, smeldr.ErrConflict) {
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "PgItem", "a", "published"); !errors.Is(err, smeldr.ErrConflict) {
 		t.Errorf("the flow must be enforced after the upgrade: err = %v, want ErrConflict", err)
 	}
 }
@@ -590,7 +590,7 @@ func TestPG_RaceChild(t *testing.T) {
 	for i, ty := range types {
 		slot := time.Unix(0, startNs).Add(time.Duration(i) * 400 * time.Millisecond)
 		time.Sleep(time.Until(slot))
-		if _, err := app.TransitionItem(actor, ty, os.Getenv("PG_RACE_ITEM"), "published"); err != nil {
+		if _, err := app.TransitionItem(smeldr.TrustedRead(actor), ty, os.Getenv("PG_RACE_ITEM"), "published"); err != nil {
 			lost++
 		} else {
 			won++

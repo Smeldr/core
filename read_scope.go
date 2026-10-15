@@ -201,3 +201,74 @@ func cutPattern(p string) (typeName, id string, ok bool) {
 	typeName, id, ok = strings.Cut(p, ":")
 	return typeName, id, ok && typeName != "" && id != ""
 }
+
+// readScopeKey is the context key of an attached [ReadScope].
+type readScopeKey struct{}
+
+// scopedContext is a [Context] that carries a [ReadScope].
+type scopedContext struct {
+	Context
+	scope *ReadScope
+}
+
+func (c *scopedContext) Value(key any) any {
+	if key == (readScopeKey{}) {
+		return c.scope
+	}
+	return c.Context.Value(key)
+}
+
+// WithReadScope attaches s to ctx, so every read the request makes uses the
+// one scope loaded for it. When ctx is a [Context], the result is one too: it
+// keeps the user and the request.
+func WithReadScope(ctx context.Context, s *ReadScope) context.Context {
+	if c, ok := ctx.(Context); ok {
+		return &scopedContext{Context: c, scope: s}
+	}
+	return context.WithValue(ctx, readScopeKey{}, s)
+}
+
+// ReadScopeFrom returns the [ReadScope] attached to ctx by [WithReadScope].
+func ReadScopeFrom(ctx context.Context) (*ReadScope, bool) {
+	s, ok := ctx.Value(readScopeKey{}).(*ReadScope)
+	return s, ok && s != nil
+}
+
+// AllReadScope returns a scope that reads everything.
+func AllReadScope() *ReadScope { return &ReadScope{all: true} }
+
+// TrustedRead marks ctx as a trusted in-process read that may see every
+// record: the deliberate way for Go code (a job, a migration, a test) to read
+// past the per-item read rules. Request surfaces never use it.
+func TrustedRead(ctx context.Context) context.Context {
+	return WithReadScope(ctx, AllReadScope())
+}
+
+// scopeFor returns the read scope attached to ctx, or else the caller's own:
+// loaded from rs for the user in ctx when it is a [Context] (no user reads
+// nothing under governance). Without governance (rs nil) the Go and MCP
+// surfaces have no per-item read rules, so the scope reads everything, as
+// before; the public HTTP routes keep their own legacy draft rule.
+func scopeFor(ctx context.Context, rs *RoleStore) (*ReadScope, error) {
+	if s, ok := ReadScopeFrom(ctx); ok {
+		return s, nil
+	}
+	if rs == nil {
+		return AllReadScope(), nil
+	}
+	var u User
+	if c, ok := ctx.(interface{ User() User }); ok {
+		u = c.User()
+	}
+	return LoadReadScope(ctx, rs, u)
+}
+
+// scopeIDFilter is s as a resolver's visibility rule for typeName: nil when s
+// reads everything (the resolver then runs as before), otherwise whether s
+// reads the item with an ID.
+func scopeIDFilter(s *ReadScope, typeName string) func(id string) bool {
+	if s.All() {
+		return nil
+	}
+	return func(id string) bool { return s.Readable(typeName, id) }
+}

@@ -261,7 +261,7 @@ func TestPG_AcquireLock_SmallPoolIsRefusedNotHung(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		out = captureLog(func() { _, terr = app.TransitionItem(ctx, "PgItem", "a", "published") })
+		out = captureLog(func() { _, terr = app.TransitionItem(smeldr.TrustedRead(ctx), "PgItem", "a", "published") })
 	}()
 	select {
 	case <-done:

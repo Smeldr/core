@@ -66,7 +66,7 @@ func TestApp_TransitionItem_Compiled_HappyPath(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	insertSignal(t, db, "sig-1", "sig-1-slug", "pending")
 
-	result, err := app.TransitionItem(context.Background(), "Signal", "sig-1-slug", "read")
+	result, err := app.TransitionItem(TrustedRead(context.Background()), "Signal", "sig-1-slug", "read")
 	if err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestApp_TransitionItem_Compiled_ByHumanID(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	insertTaskWithTaskID(t, db, "task-1", "some-task-slug", "T203", "backlog")
 
-	result, err := app.TransitionItem(context.Background(), "Task", "T203", "active")
+	result, err := app.TransitionItem(TrustedRead(context.Background()), "Task", "T203", "active")
 	if err != nil {
 		t.Fatalf("TransitionItem by human ID: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestApp_TransitionItem_Compiled_ByHumanID_StillResolvesBySlug(t *testing.T)
 	app, db, _ := setupTransitionItemApp(t)
 	insertTaskWithTaskID(t, db, "task-2", "some-task-slug", "T204", "backlog")
 
-	result, err := app.TransitionItem(context.Background(), "Task", "some-task-slug", "active")
+	result, err := app.TransitionItem(TrustedRead(context.Background()), "Task", "some-task-slug", "active")
 	if err != nil {
 		t.Fatalf("TransitionItem by slug: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestApp_TransitionItem_Dynamic_HappyPath(t *testing.T) {
 		t.Fatalf("CreateDraft: %v", err)
 	}
 
-	result, err := app.TransitionItem(context.Background(), desc.Name, node.Slug, "published")
+	result, err := app.TransitionItem(TrustedRead(context.Background()), desc.Name, node.Slug, "published")
 	if err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestApp_TransitionItem_Compiled_RoleGated_Forbidden(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	insertDecision(t, db, "dec-1", "dec-1-slug", "proposed")
 
-	_, err := app.TransitionItem(NewTestContext(User{ID: "author-1"}), "Decision", "dec-1-slug", "ratified")
+	_, err := app.TransitionItem(TrustedRead(NewTestContext(User{ID: "author-1"})), "Decision", "dec-1-slug", "ratified")
 	if !errors.Is(err, ErrForbidden) {
 		t.Errorf("expected ErrForbidden for unauthorized actor, got %v", err)
 	}
@@ -200,7 +200,7 @@ func TestApp_TransitionItem_Compiled_RoleGated_Granted(t *testing.T) {
 		t.Fatalf("Grant decision-steward: %v", err)
 	}
 
-	result, err := app.TransitionItem(NewTestContext(User{ID: tokenID}), "Decision", "dec-2-slug", "ratified")
+	result, err := app.TransitionItem(TrustedRead(NewTestContext(User{ID: tokenID})), "Decision", "dec-2-slug", "ratified")
 	if err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
@@ -222,7 +222,7 @@ func insertDecision(t *testing.T, db *sql.DB, id, slug, status string) {
 
 func TestApp_TransitionItem_UnregisteredType(t *testing.T) {
 	app, _, _ := setupTransitionItemApp(t)
-	_, err := app.TransitionItem(context.Background(), "NoSuchType", "slug", "read")
+	_, err := app.TransitionItem(TrustedRead(context.Background()), "NoSuchType", "slug", "read")
 	if err == nil {
 		t.Fatal("expected error for unregistered type")
 	}
@@ -230,7 +230,7 @@ func TestApp_TransitionItem_UnregisteredType(t *testing.T) {
 
 func TestApp_TransitionItem_NotFound(t *testing.T) {
 	app, _, _ := setupTransitionItemApp(t)
-	_, err := app.TransitionItem(context.Background(), "Signal", "no-such-slug", "read")
+	_, err := app.TransitionItem(TrustedRead(context.Background()), "Signal", "no-such-slug", "read")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
@@ -255,7 +255,7 @@ func TestApp_TransitionItem_Dynamic_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefineContentType: %v", err)
 	}
-	_, err = app.TransitionItem(context.Background(), desc.Name, "no-such-slug", "published")
+	_, err = app.TransitionItem(TrustedRead(context.Background()), desc.Name, "no-such-slug", "published")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound for dynamic-content branch, got %v", err)
 	}
@@ -265,7 +265,7 @@ func TestApp_TransitionItem_SelectQueryFails(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	insertSignal(t, db, "sig-select-fail", "sig-select-fail-slug", "pending")
 	app.cfg.DB = &govQueryRowFailDB{DB: db, failOn: "id, slug, status FROM"}
-	_, err := app.TransitionItem(context.Background(), "Signal", "sig-select-fail-slug", "read")
+	_, err := app.TransitionItem(TrustedRead(context.Background()), "Signal", "sig-select-fail-slug", "read")
 	if !errors.Is(err, ErrInternal) {
 		t.Errorf("expected ErrInternal on the item lookup query failing, got %v", err)
 	}
@@ -274,7 +274,7 @@ func TestApp_TransitionItem_SelectQueryFails(t *testing.T) {
 func TestApp_TransitionItem_InvalidTargetState(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	insertSignal(t, db, "sig-3", "sig-3-slug", "pending")
-	_, err := app.TransitionItem(context.Background(), "Signal", "sig-3-slug", "not-a-real-state")
+	_, err := app.TransitionItem(TrustedRead(context.Background()), "Signal", "sig-3-slug", "not-a-real-state")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("expected ErrConflict for invalid target state, got %v", err)
 	}
@@ -283,7 +283,7 @@ func TestApp_TransitionItem_InvalidTargetState(t *testing.T) {
 func TestApp_TransitionItem_TransitionNotPermitted(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	insertSignal(t, db, "sig-4", "sig-4-slug", "acknowledged") // terminal state
-	_, err := app.TransitionItem(context.Background(), "Signal", "sig-4-slug", "read")
+	_, err := app.TransitionItem(TrustedRead(context.Background()), "Signal", "sig-4-slug", "read")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("expected ErrConflict for a transition not in the flow, got %v", err)
 	}
@@ -295,7 +295,7 @@ func TestApp_TransitionItem_DBNil(t *testing.T) {
 		Secret:  []byte(transitionItemTestSecret),
 	}))
 	app.typeRegistry.Register(&TypeDescriptor{Name: "Ghost", Kind: "compiled"})
-	_, err := app.TransitionItem(context.Background(), "Ghost", "slug", "state")
+	_, err := app.TransitionItem(TrustedRead(context.Background()), "Ghost", "slug", "state")
 	if err == nil {
 		t.Fatal("expected error when Config.DB is nil")
 	}
@@ -308,7 +308,7 @@ func TestApp_TransitionItem_DBNil(t *testing.T) {
 func TestApp_TransitionItem_CompiledTypeTableMissing(t *testing.T) {
 	app, _, _ := setupTransitionItemApp(t)
 	app.typeRegistry.Register(&TypeDescriptor{Name: "Ghost", Kind: "compiled"})
-	_, err := app.TransitionItem(context.Background(), "Ghost", "slug", "state")
+	_, err := app.TransitionItem(TrustedRead(context.Background()), "Ghost", "slug", "state")
 	if err == nil {
 		t.Fatal("expected error for a compiled type with no backing table")
 	}
@@ -318,7 +318,7 @@ func TestApp_TransitionItem_TransitionRowQueryFails(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	insertSignal(t, db, "sig-5", "sig-5-slug", "pending")
 	app.cfg.DB = &govQueryRowFailDB{DB: db, failOn: "FROM smeldr_transitions"}
-	_, err := app.TransitionItem(context.Background(), "Signal", "sig-5-slug", "read")
+	_, err := app.TransitionItem(TrustedRead(context.Background()), "Signal", "sig-5-slug", "read")
 	if !errors.Is(err, ErrInternal) {
 		t.Errorf("expected ErrInternal (D34 fail-closed), got %v", err)
 	}
@@ -328,7 +328,7 @@ func TestApp_TransitionItem_UpdateExecFails(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	insertSignal(t, db, "sig-6", "sig-6-slug", "pending")
 	app.cfg.DB = &conflictExecFailDB{DB: db}
-	_, err := app.TransitionItem(context.Background(), "Signal", "sig-6-slug", "read")
+	_, err := app.TransitionItem(TrustedRead(context.Background()), "Signal", "sig-6-slug", "read")
 	if !errors.Is(err, ErrInternal) {
 		t.Errorf("expected ErrInternal on UPDATE failure, got %v", err)
 	}
@@ -351,7 +351,7 @@ func TestApp_TransitionItem_ConflictPolicyViolated(t *testing.T) {
 	}
 	app.typeRegistry.Register(&TypeDescriptor{Name: "ConflictType", Kind: "compiled"})
 
-	_, err := app.TransitionItem(context.Background(), "ConflictType", "ct-new", "published")
+	_, err := app.TransitionItem(TrustedRead(context.Background()), "ConflictType", "ct-new", "published")
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("expected ErrConflict from ConflictReject policy, got %v", err)
 	}
@@ -397,12 +397,12 @@ func TestApp_TransitionItemWithReason_Compiled_RequiredReason(t *testing.T) {
 
 	// TransitionItem (empty reason via the wrapper) must still fail — proves
 	// the wrapper delegates with "" rather than silently satisfying the gate.
-	if _, err := app.TransitionItem(context.Background(), "ReasonGatedType", "rg-1-slug", "published"); !errors.Is(err, ErrBadRequest) {
+	if _, err := app.TransitionItem(TrustedRead(context.Background()), "ReasonGatedType", "rg-1-slug", "published"); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("TransitionItem (no reason): got %v, want ErrBadRequest", err)
 	}
 
 	// TransitionItemWithReason with a real reason succeeds.
-	result, err := app.TransitionItemWithReason(context.Background(), "ReasonGatedType", "rg-1-slug", "published", "because the plan says so")
+	result, err := app.TransitionItemWithReason(TrustedRead(context.Background()), "ReasonGatedType", "rg-1-slug", "published", "because the plan says so")
 	if err != nil {
 		t.Fatalf("TransitionItemWithReason: %v", err)
 	}
@@ -452,11 +452,11 @@ func TestApp_TransitionItemWithReason_Dynamic_RequiredReason(t *testing.T) {
 		t.Fatalf("CreateDraft: %v", err)
 	}
 
-	if _, err := app.TransitionItem(context.Background(), desc.Name, node.Slug, "published"); !errors.Is(err, ErrBadRequest) {
+	if _, err := app.TransitionItem(TrustedRead(context.Background()), desc.Name, node.Slug, "published"); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("TransitionItem (no reason): got %v, want ErrBadRequest", err)
 	}
 
-	result, err := app.TransitionItemWithReason(context.Background(), desc.Name, node.Slug, "published", "because the plan says so")
+	result, err := app.TransitionItemWithReason(TrustedRead(context.Background()), desc.Name, node.Slug, "published", "because the plan says so")
 	if err != nil {
 		t.Fatalf("TransitionItemWithReason: %v", err)
 	}
@@ -512,7 +512,7 @@ func TestApp_TransitionItemWithReason_FiresTransitionWebhook(t *testing.T) {
 		t.Fatalf("Create webhook endpoint: %v", err)
 	}
 
-	result, err := app.TransitionItemWithReason(ctx, "Signal", "sig-2-slug", "read", "because")
+	result, err := app.TransitionItemWithReason(TrustedRead(ctx), "Signal", "sig-2-slug", "read", "because")
 	if err != nil {
 		t.Fatalf("TransitionItemWithReason: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestApp_TransitionItemWithReason_NoWebhookStore(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	insertSignal(t, db, "sig-3", "sig-3-slug", "pending")
 
-	result, err := app.TransitionItemWithReason(context.Background(), "Signal", "sig-3-slug", "read", "")
+	result, err := app.TransitionItemWithReason(TrustedRead(context.Background()), "Signal", "sig-3-slug", "read", "")
 	if err != nil {
 		t.Fatalf("TransitionItemWithReason: %v", err)
 	}
@@ -592,7 +592,7 @@ func TestApp_TransitionItem_TaskChannelRoutesViaBand(t *testing.T) {
 	}
 	defer app.eventBroadcaster.unsubscribe(cloudCh)
 
-	if _, err := app.TransitionItem(context.Background(), "Task", "task-band-1-slug", "active"); err != nil {
+	if _, err := app.TransitionItem(TrustedRead(context.Background()), "Task", "task-band-1-slug", "active"); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 
@@ -648,7 +648,7 @@ func TestApp_TransitionItem_Signal_OnSignalsTopic(t *testing.T) {
 	}
 	defer app.eventBroadcaster.unsubscribe(allCh)
 
-	result, err := app.TransitionItem(context.Background(), "Signal", "sig-ns-1-slug", "read")
+	result, err := app.TransitionItem(TrustedRead(context.Background()), "Signal", "sig-ns-1-slug", "read")
 	if err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
@@ -728,7 +728,7 @@ func TestApp_TransitionItem_ChannelLookup(t *testing.T) {
 			tc.seed(t, db)
 			counter := &queryRowCountDB{DB: db, match: tc.match}
 			app.cfg.DB = counter
-			if _, err := app.TransitionItem(context.Background(), tc.typeName, tc.slug, tc.to); err != nil {
+			if _, err := app.TransitionItem(TrustedRead(context.Background()), tc.typeName, tc.slug, tc.to); err != nil {
 				t.Fatalf("TransitionItem: %v", err)
 			}
 			if counter.n != tc.want {
@@ -767,7 +767,7 @@ func TestApp_TransitionItem_DecisionChannelRoutesViaScope(t *testing.T) {
 	// proposed -> archived carries no RequiredRole (orchDecisionFlow), so
 	// this exercises channel routing without also needing a governance
 	// grant set up.
-	if _, err := app.TransitionItem(context.Background(), "Decision", "dec-scope-1-slug", "archived"); err != nil {
+	if _, err := app.TransitionItem(TrustedRead(context.Background()), "Decision", "dec-scope-1-slug", "archived"); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 
@@ -813,7 +813,7 @@ func TestApp_TransitionItem_Amendment_OnTopic_WebhookStillEnqueued(t *testing.T)
 	}
 	defer app.eventBroadcaster.unsubscribe(chAll)
 
-	if _, err := app.TransitionItem(ctx, "Amendment", "amend-1-slug", "in-progress"); err != nil {
+	if _, err := app.TransitionItem(TrustedRead(ctx), "Amendment", "amend-1-slug", "in-progress"); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 
@@ -924,7 +924,7 @@ func TestApp_TransitionItemWithReason_PersistsLastActor(t *testing.T) {
 	insertSignal(t, db, "sig-la-1", "sig-la-1-slug", "pending")
 
 	ctx := NewTestContext(User{ID: "tok-core-2"})
-	result, err := app.TransitionItemWithReason(ctx, "Signal", "sig-la-1-slug", "read", "")
+	result, err := app.TransitionItemWithReason(TrustedRead(ctx), "Signal", "sig-la-1-slug", "read", "")
 	if err != nil {
 		t.Fatalf("TransitionItemWithReason: %v", err)
 	}
@@ -951,7 +951,7 @@ func TestApp_TransitionItemWithReason_LastActorEmptyForSystemCaller(t *testing.T
 	app, db, _ := setupTransitionItemApp(t)
 	insertSignal(t, db, "sig-la-2", "sig-la-2-slug", "pending")
 
-	result, err := app.TransitionItemWithReason(context.Background(), "Signal", "sig-la-2-slug", "read", "")
+	result, err := app.TransitionItemWithReason(TrustedRead(context.Background()), "Signal", "sig-la-2-slug", "read", "")
 	if err != nil {
 		t.Fatalf("TransitionItemWithReason: %v", err)
 	}
@@ -981,7 +981,7 @@ func TestApp_TransitionItem_FailsOpenWhenLastActorColumnMissing(t *testing.T) {
 	registerReasonGatedFlow(t, app, db)
 
 	ctx := NewTestContext(User{ID: "tok-core-3"})
-	result, err := app.TransitionItemWithReason(ctx, "ReasonGatedType", "rg-1-slug", "published", "because the plan says so")
+	result, err := app.TransitionItemWithReason(TrustedRead(ctx), "ReasonGatedType", "rg-1-slug", "published", "because the plan says so")
 	if err != nil {
 		t.Fatalf("TransitionItemWithReason: %v", err)
 	}
@@ -1030,7 +1030,7 @@ func TestApp_TransitionItem_Task_ActorsOwnConnectionSkipped_OthersReceive(t *tes
 	defer app.eventBroadcaster.unsubscribe(otherCh)
 
 	ctx := NewTestContext(User{ID: "u-actor", Roles: []Role{Author}})
-	if _, err := app.TransitionItem(ctx, "Task", "task-se-1-slug", "active"); err != nil {
+	if _, err := app.TransitionItem(TrustedRead(ctx), "Task", "task-se-1-slug", "active"); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 
@@ -1065,7 +1065,7 @@ func TestApp_TransitionItem_Task_IncludeOwnReceivesOwnEvent(t *testing.T) {
 	defer app.eventBroadcaster.unsubscribe(ownCh)
 
 	ctx := NewTestContext(User{ID: "u-actor", Roles: []Role{Author}})
-	if _, err := app.TransitionItem(ctx, "Task", "task-se-2-slug", "active"); err != nil {
+	if _, err := app.TransitionItem(TrustedRead(ctx), "Task", "task-se-2-slug", "active"); err != nil {
 		t.Fatalf("TransitionItem: %v", err)
 	}
 	select {

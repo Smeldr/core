@@ -656,7 +656,15 @@ See [docs/REFERENCE.md](docs/REFERENCE.md#decision-steward-role-grants-and-deleg
 - **`scoped-reader`** (static): `grant_role` with `scope_static` patterns such as `["Decision:D12", "Task:*"]`. The item may be named by its address, slug or ID; the grant stores its ID. A pattern that names no record is refused.
 - **`domain-reader`** (dynamic): `scope_anchor_id` set to a Domain's ID reads every item with a live `belongs_to_domain` edge to it. It does not read the Domain itself; grant that with `scoped-reader`.
 
-Core v1.146.0 adds only the read scope behind these roles. The read surfaces apply it in a later release, so until then a scoped reader is filtered nowhere.
+Since core v1.147.0 (A495) the item surfaces apply them:
+- get, list, update, publish, archive, delete, transitions and the `/_content` routes show a scoped reader only what it may read;
+- anything else answers exactly like a missing record;
+- list totals count readable records only;
+- published web content stays public.
+
+The MCP tools of compiled types already filter through these methods. Still to come:
+- the graph surfaces (context packet, goal context, relations, reachability, provenance, audit), in a later core release;
+- the dynamic-type MCP tools, in a later smeldr.dev/mcp release.
 
 **Delegating a role to someone else, time-boxed** — `delegate_item` (Author+
 role, `smeldr.dev/mcp`) lets any token hand off a *subset* of its own

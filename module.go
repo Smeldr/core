@@ -1381,13 +1381,18 @@ func (m *Module[T]) regenerateAI(ctx Context) {
 // Returns the AIDoc format for Published content; 404 for all other statuses.
 func (m *Module[T]) aiDocHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := ContextFrom(w, r)
+	scope, err := m.httpReadScope(ctx) // before the lookup: hidden and missing cost the same
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
 	slug := r.PathValue("slug")
 	item, err := m.repo.FindBySlug(ctx, slug)
 	if err != nil {
 		WriteError(w, r, err)
 		return
 	}
-	if !m.isVisible(ctx, item) {
+	if !m.visibleTo(scope, item) {
 		WriteError(w, r, ErrNotFound)
 		return
 	}
@@ -1618,34 +1623,6 @@ func (m *Module[T]) writeContentCached(w http.ResponseWriter, r *http.Request, c
 
 // — Lifecycle helper ——————————————————————————————————————————————————————
 
-// canReadDrafts reports whether the calling user may see non-published content
-// in this module. When governance is wired it calls [RoleStore.Authorized] with
-// op="read" and fails closed on any error (§5.5). When governance is not wired
-// it falls back to the legacy role-level check [User.HasRole](Author).
-//
-// Three explicit branches — not a single &&-guard — so that "governance wired
-// but no actor ID" (unauthenticated request) is always denied regardless of
-// any future change to [User.HasRole] behaviour for the zero-value User.
-func (m *Module[T]) canReadDrafts(ctx Context) bool {
-	if m.roleStore == nil {
-		// Governance not wired — legacy role-level check.
-		return ctx.User().HasRole(Author)
-	}
-	if ctx.User().ID == "" {
-		// Governance is wired but the request is unauthenticated — no grants possible.
-		return false
-	}
-	// TODO(T49-scope): AuthTarget has no item ID here — the read gate applies at
-	// the content-type level. Static/dynamic scope grants that reference a specific
-	// item ID won't apply until slug→ID resolution is added.
-	ok, err := m.roleStore.Authorized(ctx, ctx.User().ID, "read",
-		AuthTarget{TypeName: m.contentTypeName})
-	if err != nil {
-		return false // fail-closed §5.5
-	}
-	return ok
-}
-
 // checkWriteOp reports whether the calling user may perform op on this module.
 // When governance is wired it calls [RoleStore.Authorized] and fails closed on
 // any error (§5.5). When governance is not wired it falls back to the legacy
@@ -1674,14 +1651,94 @@ func (m *Module[T]) checkWriteOp(ctx Context, op string, legacyRole Role) bool {
 	return ok
 }
 
-// isVisible reports whether item should be visible to the calling user.
-// Published content is always visible. For non-published content the
-// decision delegates to [canReadDrafts].
-func (m *Module[T]) isVisible(ctx Context, item any) bool {
-	if nodeStatusOf(item) == Published {
+// isVisible reports whether item is visible to the calling user under the
+// per-item read rules ([Module.visibleTo]). A failure to load the read scope
+// is returned, never answered as not visible (an internal error, not a
+// not-found).
+func (m *Module[T]) isVisible(ctx Context, item any) (bool, error) {
+	s, err := m.httpReadScope(ctx)
+	if err != nil {
+		return false, err
+	}
+	return m.visibleTo(s, item), nil
+}
+
+// readScope returns the caller's read scope for this module's Go and MCP reads:
+// the one attached to ctx, or the caller's own, loaded from the module's
+// RoleStore ([scopeFor]).
+func (m *Module[T]) readScope(ctx Context) (*ReadScope, error) {
+	return scopeFor(ctx, m.roleStore)
+}
+
+// httpReadScope is [Module.readScope] for the module's own HTTP routes. Without
+// governance they keep today's draft rule: an Author or higher reads every
+// item, anyone else only what is published.
+func (m *Module[T]) httpReadScope(ctx Context) (*ReadScope, error) {
+	if _, attached := ReadScopeFrom(ctx); !attached && m.roleStore == nil {
+		return LoadReadScope(ctx, nil, ctx.User())
+	}
+	return m.readScope(ctx)
+}
+
+// visibleTo reports whether s may see item: it reads the item, or the item
+// is published web content (a type with no address), which is public.
+func (m *Module[T]) visibleTo(s *ReadScope, item any) bool {
+	if !m.addressed && nodeStatusOf(item) == Published {
 		return true
 	}
-	return m.canReadDrafts(ctx)
+	return s.Readable(m.contentTypeName, nodeIDOf(item))
+}
+
+// findVisibleBySlug finds the item with slug for an HTTP write: an item the
+// caller may not read is ErrNotFound, exactly as a missing one, and the read
+// scope is loaded before the lookup.
+func (m *Module[T]) findVisibleBySlug(ctx Context, slug string) (T, error) {
+	var zero T
+	s, err := m.httpReadScope(ctx)
+	if err != nil {
+		return zero, err
+	}
+	item, err := m.repo.FindBySlug(ctx, slug)
+	if err != nil {
+		return zero, err
+	}
+	if !m.visibleTo(s, item) {
+		return zero, ErrNotFound
+	}
+	return item, nil
+}
+
+// filterVisible returns the items s may see, in order ([Module.visibleTo]).
+func (m *Module[T]) filterVisible(s *ReadScope, items []T) []T {
+	out := items[:0:0]
+	for _, item := range items {
+		if m.visibleTo(s, item) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// resolveVisible resolves ident ([Module.resolveItemFor]) and answers an item
+// the caller may not read exactly like a missing one: ErrNotFound. The read
+// scope is loaded before the lookup, and a hidden hit is a miss that walks the
+// remaining lookup steps, so a hidden and a missing item run the same
+// statements. The legacy lookup's "matches N records" counts visible records
+// only.
+func (m *Module[T]) resolveVisible(ctx Context, ident string) (T, error) {
+	var zero T
+	s, err := m.readScope(ctx)
+	if err != nil {
+		return zero, err
+	}
+	item, err := m.resolveItemFor(ctx, ident, s)
+	if err != nil {
+		return zero, err
+	}
+	if !m.visibleTo(s, item) {
+		return zero, ErrNotFound
+	}
+	return item, nil
 }
 
 // — rebuild + debounce helpers ————————————————————————————————————————————
@@ -1915,16 +1972,26 @@ func (m *Module[T]) listHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Lifecycle filter: push status constraint into the repository query.
-	// Guests see only Published; Authors and above (or governance-authorized) see all statuses.
+	// Lifecycle filter under the per-item read rules: a caller who reads every
+	// item of the type sees all statuses, a caller who reads none sees only
+	// Published (pushed into the query), and a scoped reader sees Published
+	// plus the items it may read, filtered before anything is rendered.
+	scope, err := m.httpReadScope(ctx)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
 	var statuses []Status
-	if !m.canReadDrafts(ctx) {
+	if !scope.TypeReadable(m.contentTypeName) {
 		statuses = []Status{Published}
 	}
 	items, err := m.repo.FindAll(ctx, m.withDefaultOrder(ListOptions{Status: statuses}))
 	if err != nil {
 		WriteError(w, r, err)
 		return
+	}
+	if statuses == nil && !scope.All() {
+		items = m.filterVisible(scope, items)
 	}
 
 	ct := m.neg.negotiate(r)
@@ -1951,6 +2018,13 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The read scope is loaded before the lookup, so a hidden and a missing
+	// item cost the same work and answer alike.
+	scope, err := m.httpReadScope(ctx)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
 	slug := r.PathValue("slug")
 	item, err := m.repo.FindBySlug(ctx, slug)
 	if errors.Is(err, ErrNotFound) {
@@ -1986,7 +2060,7 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Lifecycle enforcement: non-Published → 404 for Guest.
 	// 404 is intentional — do not leak the existence of non-public content.
-	if !m.isVisible(ctx, item) {
+	if !m.visibleTo(scope, item) {
 		m.notFound(w, r)
 		return
 	}
@@ -2060,15 +2134,23 @@ func (m *Module[T]) singleInstanceHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Lifecycle filter: Guests see only Published; Authors and above (or governance-authorized) see all statuses.
+	// Lifecycle filter under the per-item read rules, as in listHandler.
+	scope, err := m.httpReadScope(ctx)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
 	var statuses []Status
-	if !m.canReadDrafts(ctx) {
+	if !scope.TypeReadable(m.contentTypeName) {
 		statuses = []Status{Published}
 	}
 	items, err := m.repo.FindAll(ctx, ListOptions{Status: statuses})
 	if err != nil {
 		WriteError(w, r, err)
 		return
+	}
+	if statuses == nil && !scope.All() {
+		items = m.filterVisible(scope, items)
 	}
 	if len(items) == 0 {
 		m.notFound(w, r)
@@ -2107,18 +2189,14 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 	f := getNodeFields(elemType)
 	id := NewID()
 	pv.Elem().FieldByIndex(f.id).SetString(id)
-	if pv.Elem().FieldByIndex(f.slug).String() == "" {
-		slug := autoSlug(pv.Elem())
-		if slug == "" {
-			slug = id[:8]
-		}
-		// Guarantee uniqueness by appending a counter suffix when the slug exists.
-		slug = UniqueSlug(slug, func(s string) bool {
-			_, err := m.repo.FindBySlug(ctx, s)
-			return err == nil
-		})
-		pv.Elem().FieldByIndex(f.slug).SetString(slug)
+	// A unique slug under the per-item read rules ([Module.newSlug]); an
+	// adjusted supplied slug shows in the returned item's own slug.
+	slug, _, err := m.newSlug(ctx, pv.Elem().FieldByIndex(f.slug).String(), autoSlug(pv.Elem()), id)
+	if err != nil {
+		WriteError(w, r, err)
+		return
 	}
+	pv.Elem().FieldByIndex(f.slug).SetString(slug)
 	applyDefaultStatus(ctx, m.db, m.contentTypeName, pv, f)
 	stampLastActor(ctx, pv, nil)
 
@@ -2201,7 +2279,7 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slug := r.PathValue("slug")
-	existing, err := m.repo.FindBySlug(ctx, slug)
+	existing, err := m.findVisibleBySlug(ctx, slug)
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -2374,7 +2452,7 @@ func (m *Module[T]) deleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slug := r.PathValue("slug")
-	existing, err := m.repo.FindBySlug(ctx, slug)
+	existing, err := m.findVisibleBySlug(ctx, slug)
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -2609,8 +2687,9 @@ func (m *Module[T]) withDefaultOrder(opts ListOptions) ListOptions {
 	return opts
 }
 
-// MCPList returns all content items matching the given statuses. If no
-// statuses are provided, items of all statuses are returned. Items are
+// MCPList returns the content items matching the given statuses that the caller
+// may read ([Module.visibleTo]). If no statuses are provided, items of all
+// statuses are returned. Items are
 // sorted per this module's own [DefaultListOrder], if one was set (T262).
 func (m *Module[T]) MCPList(ctx Context, status ...Status) ([]any, error) {
 	opts := ListOptions{}
@@ -2618,9 +2697,18 @@ func (m *Module[T]) MCPList(ctx Context, status ...Status) ([]any, error) {
 		opts.Status = status
 	}
 	opts = m.withDefaultOrder(opts)
+	// The read scope before the query; the result holds only what the caller
+	// may see, so a caller's page and total count readable items only.
+	scope, err := m.readScope(ctx)
+	if err != nil {
+		return nil, err
+	}
 	items, err := m.repo.FindAll(ctx, opts)
 	if err != nil {
 		return nil, err
+	}
+	if !scope.All() {
+		items = m.filterVisible(scope, items)
 	}
 	result := make([]any, len(items))
 	for i, item := range items {
@@ -2647,30 +2735,51 @@ func (m *Module[T]) MCPList(ctx Context, status ...Status) ([]any, error) {
 // first, then slug, then ID, then, transitionally until the cut, the legacy
 // human-ID column ([legacyHumanIDColumns]) for a record with no address yet.
 func (m *Module[T]) resolveItem(ctx Context, ident string) (T, error) {
+	return m.resolveItemFor(ctx, ident, nil)
+}
+
+// resolveItemFor is [Module.resolveItem] under a read scope: nil, or a scope
+// that reads everything, resolves as before; otherwise an item the scope may
+// not see ([Module.visibleTo]) is treated as a miss and
+// the lookup goes on through its remaining steps, exactly as for an ident that
+// matches nothing, so a hidden and a missing item run the same statements and
+// answer the same ErrNotFound.
+func (m *Module[T]) resolveItemFor(ctx Context, ident string, s *ReadScope) (T, error) {
 	var zero T
+	var visible func(T) bool
+	if s != nil && !s.All() {
+		visible = func(item T) bool { return m.visibleTo(s, item) }
+	}
+	// found reports a hit the caller may see.
+	found := func(item T, err error) (bool, error) {
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return false, nil
+			}
+			return false, err
+		}
+		return visible == nil || visible(item), nil
+	}
 	cr, canColumn := any(m.repo).(ColumnLookupRepository[T])
 	if addr, ok := addressIdent(ident, coreAddressPrefixes[m.contentTypeName]); ok && m.addressed && canColumn {
 		item, err := cr.FindByColumn(ctx, "address", addr)
-		if err == nil {
+		if hit, ferr := found(item, err); ferr != nil {
+			return zero, ferr
+		} else if hit {
 			return item, nil
-		}
-		if !errors.Is(err, ErrNotFound) {
-			return zero, err
 		}
 	}
 	item, err := m.repo.FindBySlug(ctx, ident)
-	if err == nil {
+	if hit, ferr := found(item, err); ferr != nil {
+		return zero, ferr
+	} else if hit {
 		return item, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return zero, err
 	}
 	item, err = m.repo.FindByID(ctx, ident)
-	if err == nil {
+	if hit, ferr := found(item, err); ferr != nil {
+		return zero, ferr
+	} else if hit {
 		return item, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return zero, err
 	}
 	th, ok := any(m.repo).(interface{ tableHandle() (DB, string) })
 	if !ok {
@@ -2682,14 +2791,22 @@ func (m *Module[T]) resolveItem(ctx Context, ident string) (T, error) {
 		}
 		for _, c := range []string{col, "external_ref"} {
 			item, err := cr.FindByColumn(ctx, c, ident)
-			if !errors.Is(err, ErrNotFound) {
-				return item, err
+			if hit, ferr := found(item, err); ferr != nil {
+				return zero, ferr
+			} else if hit {
+				return item, nil
 			}
 		}
 		return zero, ErrNotFound
 	}
+	// The legacy step filters by ID before loading a row: only core record
+	// types have a legacy field, and they have no public clause.
+	var visibleID func(string) bool
+	if visible != nil {
+		visibleID = scopeIDFilter(s, m.contentTypeName)
+	}
 	db, table := th.tableHandle()
-	id, err := legacyLookupID(ctx, db, m.contentTypeName, table, ident)
+	id, err := legacyLookupID(ctx, db, m.contentTypeName, table, ident, visibleID)
 	if err != nil {
 		return zero, err
 	}
@@ -2698,10 +2815,10 @@ func (m *Module[T]) resolveItem(ctx Context, ident string) (T, error) {
 
 // MCPGet returns the item with the given slug (or, for a type with a
 // human-facing identifier, that identifier — [Module.resolveItem])
-// regardless of its lifecycle status. The caller is responsible for
-// enforcing visibility rules.
+// regardless of its lifecycle status, when the caller may read it: an item it
+// may not read is ErrNotFound, exactly as a missing one ([Module.resolveVisible]).
 func (m *Module[T]) MCPGet(ctx Context, slug string) (any, error) {
-	item, err := m.resolveItem(ctx, slug)
+	item, err := m.resolveVisible(ctx, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -2871,17 +2988,12 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	f := getNodeFields(elemType)
 	id := NewID()
 	pv.Elem().FieldByIndex(f.id).SetString(id)
-	if pv.Elem().FieldByIndex(f.slug).String() == "" {
-		slug := autoSlug(pv.Elem())
-		if slug == "" {
-			slug = id[:8]
-		}
-		slug = UniqueSlug(slug, func(s string) bool {
-			_, err := m.repo.FindBySlug(ctx, s)
-			return err == nil
-		})
-		pv.Elem().FieldByIndex(f.slug).SetString(slug)
+	supplied := pv.Elem().FieldByIndex(f.slug).String()
+	slug, slugAdjusted, err := m.newSlug(ctx, supplied, autoSlug(pv.Elem()), id)
+	if err != nil {
+		return nil, err
 	}
+	pv.Elem().FieldByIndex(f.slug).SetString(slug)
 	applyDefaultStatus(ctx, m.db, m.contentTypeName, pv, f)
 	applyDefaultPriority(m.contentTypeName, fields, pv)
 	stampLastActor(ctx, pv, nil)
@@ -2915,13 +3027,75 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	m.runSaveAfter(ctx, nil, item)
 	m.notifyAfter(ctx, AfterCreate, "", surfaceMCP, "", item)
 	m.invalidateCache()
+	var warnings []CreateWarning
+	if slugAdjusted {
+		warnings = append(warnings, CreateWarning{
+			Code:    "slug_adjusted",
+			Field:   "slug",
+			Message: fmt.Sprintf("the slug %q is taken, so the server set %q; the address (%s) is the record's identity", supplied, slug, addressOf(item)),
+			Address: addressOf(item),
+		})
+	}
 	if legacySent != "" {
 		noteDeprecatedUse(ctx, m.contentTypeName, legacyField)
-		return withCreateWarnings(item, []CreateWarning{
-			legacyFieldWarning(legacyField, legacySent, addressOf(item), externalRefOf(item)),
-		}), nil
+		warnings = append(warnings, legacyFieldWarning(legacyField, legacySent, addressOf(item), externalRefOf(item)))
+	}
+	if len(warnings) > 0 {
+		return withCreateWarnings(item, warnings), nil
 	}
 	return item, nil
+}
+
+// newSlug returns a new item's slug under the per-item read rules. A
+// web-content type, and a caller who reads every record of a record type, keep
+// today's rule: a supplied slug is used as given, an automatic one gets a
+// counter when taken. For a record type and a scoped caller, a taken slug is
+// never answered with a counter (which would count records the caller may not
+// read) or an error naming its holder: it becomes the slug plus the tail of the
+// new item's own ID, and adjusted reports that a supplied slug was changed
+// (the slug_adjusted warning). auto is used when supplied is empty, and the
+// ID's head when auto is empty too.
+func (m *Module[T]) newSlug(ctx Context, supplied, auto, id string) (slug string, adjusted bool, err error) {
+	taken := func(s string) bool {
+		_, err := m.repo.FindBySlug(ctx, s)
+		return err == nil
+	}
+	scoped := false
+	if m.addressed {
+		s, err := m.readScope(ctx)
+		if err != nil {
+			return "", false, err
+		}
+		scoped = !s.All()
+	}
+	if supplied != "" {
+		if scoped && taken(supplied) {
+			return idSlug(supplied, id, taken), true, nil
+		}
+		return supplied, false, nil
+	}
+	if auto == "" {
+		auto = id[:8]
+	}
+	if scoped {
+		if !taken(auto) {
+			return auto, false, nil
+		}
+		return idSlug(auto, id, taken), false, nil
+	}
+	return UniqueSlug(auto, taken), false, nil
+}
+
+// idSlug is base with the last 8 hex characters of id (random in a UUIDv7),
+// or the whole id in the rare case that is taken too: the ID is the primary
+// key, so the last form cannot collide.
+func idSlug(base, id string, taken func(string) bool) string {
+	if len(id) > 8 {
+		if s := base + "-" + id[len(id)-8:]; !taken(s) {
+			return s
+		}
+	}
+	return base + "-" + id
 }
 
 // MCPUpdate applies a partial update to the item with the given slug. Fields
@@ -2939,7 +3113,7 @@ func (m *Module[T]) MCPUpdate(ctx Context, slug string, fields map[string]any) (
 // being misreported as surfaceMCP just because it reuses MCPUpdate's own
 // merge logic.
 func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any, surface string) (any, error) {
-	existing, err := m.resolveItem(ctx, slug)
+	existing, err := m.resolveVisible(ctx, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -3080,7 +3254,7 @@ func (m *Module[T]) patchHandler(w http.ResponseWriter, r *http.Request) {
 // PublishedAt to now, fires AfterPublish, and triggers derived-content rebuild.
 // reason is threaded into validateTransition's own RequiredReason gate (T237).
 func (m *Module[T]) MCPPublish(ctx Context, slug, reason string) error {
-	item, err := m.resolveItem(ctx, slug)
+	item, err := m.resolveVisible(ctx, slug)
 	if err != nil {
 		return err
 	}
@@ -3124,7 +3298,7 @@ func (m *Module[T]) MCPPublish(ctx Context, slug, reason string) error {
 // the time at which it will be automatically published. reason is threaded
 // into validateTransition's own RequiredReason gate (T237).
 func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time, reason string) error {
-	item, err := m.resolveItem(ctx, slug)
+	item, err := m.resolveVisible(ctx, slug)
 	if err != nil {
 		return err
 	}
@@ -3156,7 +3330,7 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time, reason s
 // AfterArchive, and triggers derived-content rebuild. reason is threaded
 // into validateTransition's own RequiredReason gate (T237).
 func (m *Module[T]) MCPArchive(ctx Context, slug, reason string) error {
-	item, err := m.resolveItem(ctx, slug)
+	item, err := m.resolveVisible(ctx, slug)
 	if err != nil {
 		return err
 	}
@@ -3187,7 +3361,7 @@ func (m *Module[T]) MCPArchive(ctx Context, slug, reason string) error {
 // AfterDelete, and triggers derived-content rebuild. BeforeDelete hooks run
 // first, as on the HTTP DELETE route; an error aborts the delete.
 func (m *Module[T]) MCPDelete(ctx Context, slug string) error {
-	item, err := m.resolveItem(ctx, slug)
+	item, err := m.resolveVisible(ctx, slug)
 	if err != nil {
 		return err
 	}
@@ -3239,7 +3413,10 @@ func (m *Module[T]) findAndServe(w http.ResponseWriter, r *http.Request, slug st
 		}
 	}
 
-	if !m.isVisible(ctx, item) {
+	if ok, err := m.isVisible(ctx, item); err != nil {
+		WriteError(w, r, err) // a scope load failure is an internal error, never a not-found
+		return true
+	} else if !ok {
 		return false
 	}
 	ct := m.neg.negotiate(r)
@@ -3263,7 +3440,10 @@ func (m *Module[T]) findAndServeAIDoc(w http.ResponseWriter, r *http.Request, sl
 	if err != nil {
 		return false
 	}
-	if !m.isVisible(ctx, item) {
+	if ok, err := m.isVisible(ctx, item); err != nil {
+		WriteError(w, r, err)
+		return true
+	} else if !ok {
 		return false
 	}
 	head := m.resolveHead(ctx, item)

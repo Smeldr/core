@@ -65,7 +65,7 @@ func raceTwoWinners(t *testing.T, app *App, db *sql.DB) (errA, errB error) {
 	wg.Add(2)
 	run := func(slug string, out *error) {
 		defer wg.Done()
-		_, *out = app.TransitionItemVia(NewTestContext(User{ID: "u-" + slug, Roles: []Role{Editor}}), "mcp", "Signal", slug, "read", "")
+		_, *out = app.TransitionItemVia(TrustedRead(NewTestContext(User{ID: "u-" + slug, Roles: []Role{Editor}})), "mcp", "Signal", slug, "read", "")
 	}
 	go run("winner-a-slug", &errA)
 	go run("winner-b-slug", &errB)

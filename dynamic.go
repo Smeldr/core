@@ -103,7 +103,10 @@ func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fi
 	}
 	base := titleSlug(r.schema, fields)
 	id := NewID()
-	slug := r.uniqueSlug(ctx, base, id)
+	slug, err := r.newSlug(ctx, base, id)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	node := &DynamicNode{
 		Node: Node{
@@ -172,23 +175,39 @@ func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fi
 // address (when ident carries this record type's prefix), then its slug, then
 // its ID. Returns [ErrNotFound] when none matches.
 func (r *DynamicTypeRepo) Resolve(ctx context.Context, ident string) (*DynamicNode, error) {
+	return r.resolveFor(ctx, ident, nil)
+}
+
+// resolveFor is [DynamicTypeRepo.Resolve] under a per-item read rule: visible
+// nil resolves as before; otherwise a node it rejects is treated as a miss and
+// the lookup goes on through its remaining steps, exactly as for an ident that
+// matches nothing, so a hidden and a missing node run the same statements.
+func (r *DynamicTypeRepo) resolveFor(ctx context.Context, ident string, visible func(*DynamicNode) bool) (*DynamicNode, error) {
+	ok := func(n *DynamicNode) bool { return visible == nil || visible(n) }
 	if r.schema != nil && isAddressedSchema(r.schema) {
-		if addr, ok := addressIdent(ident, r.schema.AddressPrefix); ok {
+		if addr, isAddr := addressIdent(ident, r.schema.AddressPrefix); isAddr {
 			rows, err := Query[*DynamicNode](ctx, r.db,
 				"SELECT * FROM smeldr_dynamic_content WHERE type_name = $1 AND address = $2", r.typeName, addr)
 			if err != nil {
 				return nil, err
 			}
-			if len(rows) > 0 {
+			if len(rows) > 0 && ok(rows[0]) {
 				return rows[0], nil
 			}
 		}
 	}
 	node, err := r.GetBySlug(ctx, ident)
-	if !errors.Is(err, ErrNotFound) {
-		return node, err
+	if err == nil && ok(node) {
+		return node, nil
 	}
-	return r.GetByID(ctx, ident)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	node, err = r.GetByID(ctx, ident)
+	if err == nil && !ok(node) {
+		return nil, ErrNotFound
+	}
+	return node, err
 }
 
 // GetBySlug returns the node with the given slug for this type, at any status.
@@ -963,11 +982,12 @@ func newDefineTypeHandler(a *App, auth AuthFunc) http.Handler {
 func newAdminListHandler(a *App, auth AuthFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
-		if !ok || !HasRole(user.Roles, Editor) {
-			WriteError(w, r, ErrForbidden)
+		typeName := r.PathValue("type")
+		scope, err := a.adminReadScope(r.Context(), user, ok, typeName)
+		if err != nil {
+			WriteError(w, r, err)
 			return
 		}
-		typeName := r.PathValue("type")
 		desc := a.typeRegistry.Lookup(typeName)
 		if desc == nil || desc.Kind != "content" {
 			WriteError(w, r, ErrNotFound)
@@ -982,11 +1002,20 @@ func newAdminListHandler(a *App, auth AuthFunc) http.Handler {
 		if sv := r.URL.Query().Get("status"); sv != "" {
 			opts.Status = []Status{Status(sv)}
 		}
-		items, err := repo.List(r.Context(), opts)
+		// A scoped reader is filtered before paging (binding A): the page is cut
+		// from the readable items, never from a page that hid some.
+		query := opts
+		if !scope.All() {
+			query.Page, query.PerPage = 0, 0
+		}
+		items, err := repo.List(r.Context(), query)
 		if err != nil {
 			slog.WarnContext(r.Context(), "smeldr: admin list", "type", desc.Name, "err", err)
 			WriteError(w, r, ErrInternal)
 			return
+		}
+		if !scope.All() {
+			items = pageMaps(readableMaps(scope, desc.Name, items), opts)
 		}
 		if items == nil {
 			items = []map[string]any{}
@@ -1000,11 +1029,12 @@ func newAdminListHandler(a *App, auth AuthFunc) http.Handler {
 func newAdminGetHandler(a *App, auth AuthFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
-		if !ok || !HasRole(user.Roles, Editor) {
-			WriteError(w, r, ErrForbidden)
+		typeName := r.PathValue("type")
+		scope, err := a.adminReadScope(r.Context(), user, ok, typeName)
+		if err != nil {
+			WriteError(w, r, err)
 			return
 		}
-		typeName := r.PathValue("type")
 		desc := a.typeRegistry.Lookup(typeName)
 		if desc == nil || desc.Kind != "content" {
 			WriteError(w, r, ErrNotFound)
@@ -1017,8 +1047,8 @@ func newAdminGetHandler(a *App, auth AuthFunc) http.Handler {
 		}
 		id := r.PathValue("id")
 		node, err := repo.GetByID(r.Context(), id)
-		if err != nil {
-			WriteError(w, r, ErrNotFound)
+		if err != nil || !scope.Readable(desc.Name, node.ID) {
+			WriteError(w, r, ErrNotFound) // hidden and missing answer alike
 			return
 		}
 		m := nodeToMap(node)
@@ -1306,4 +1336,74 @@ func nodeToMap(node *DynamicNode) map[string]any {
 		m["ExternalRef"] = node.ExternalRef
 	}
 	return m
+}
+
+// adminReadScope is the gate and the read scope of a /_content read of
+// typeName. Without governance it is today's rule: the Editor role, reading
+// every item. Under governance the caller needs read access to at least one
+// item of the type, and is then filtered per item; a scope load failure is an
+// internal error.
+func (a *App) adminReadScope(ctx context.Context, user User, authenticated bool, typeName string) (*ReadScope, error) {
+	if a.governance == nil {
+		if !authenticated || !HasRole(user.Roles, Editor) {
+			return nil, ErrForbidden
+		}
+		return AllReadScope(), nil
+	}
+	if !authenticated {
+		return nil, ErrForbidden
+	}
+	s, err := LoadReadScope(ctx, a.governance, user)
+	if err != nil {
+		return nil, err
+	}
+	if !s.TypeReadable(typeName) {
+		return nil, ErrForbidden
+	}
+	return s, nil
+}
+
+// readableMaps returns the node maps of typeName that s may read, in order.
+func readableMaps(s *ReadScope, typeName string, items []map[string]any) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if id, _ := item["ID"].(string); s.Readable(typeName, id) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// pageMaps cuts the page opts describes from items, in memory.
+func pageMaps(items []map[string]any, opts ListOptions) []map[string]any {
+	if opts.PerPage <= 0 {
+		return items
+	}
+	start := opts.Offset()
+	if start >= len(items) {
+		return []map[string]any{}
+	}
+	return items[start:min(start+opts.PerPage, len(items))]
+}
+
+// newSlug is a new item's slug under the per-item read rules: today's numbered
+// candidates ([DynamicTypeRepo.uniqueSlug]), except for a record type and a
+// caller who cannot read every record, where a taken base gets the tail of the
+// new item's ID instead of a counter, which would count records the caller may
+// not read.
+func (r *DynamicTypeRepo) newSlug(ctx context.Context, base, id string) (string, error) {
+	if !isAddressedSchema(r.schema) || r.rs == nil {
+		return r.uniqueSlug(ctx, base, id), nil
+	}
+	s, err := scopeFor(ctx, r.rs)
+	if err != nil {
+		return "", err
+	}
+	if s.All() {
+		return r.uniqueSlug(ctx, base, id), nil
+	}
+	if !r.slugExists(ctx, base) {
+		return base, nil
+	}
+	return r.fallbackSlug(ctx, base, id), nil
 }

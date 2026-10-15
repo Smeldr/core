@@ -66,7 +66,7 @@ func TestTransitionItemVia_Supersede_AssertsEdge(t *testing.T) {
 	insertSignal(t, db, "winner", "winner-slug", "pending")
 	ctx := NewTestContext(User{ID: "u-trigger", Roles: []Role{Editor}})
 
-	if _, err := app.TransitionItemVia(ctx, "mcp", "Signal", "winner-slug", "read", ""); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(ctx), "mcp", "Signal", "winner-slug", "read", ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestTransitionItemVia_Supersede_PlainContext_EdgeWithoutCreatedBy(t *testin
 	insertSignal(t, db, "loser", "loser-slug", "read")
 	insertSignal(t, db, "winner", "winner-slug", "pending")
 
-	if _, err := app.TransitionItemVia(context.Background(), "", "Signal", "winner-slug", "read", ""); err != nil {
+	if _, err := app.TransitionItemVia(TrustedRead(context.Background()), "", "Signal", "winner-slug", "read", ""); err != nil {
 		t.Fatalf("TransitionItemVia: %v", err)
 	}
 	edges := edgesFrom(t, store, "Signal", "winner")
@@ -251,10 +251,10 @@ func TestSupersede_EdgeSkipped(t *testing.T) {
 			insertSignal(t, db, "w2", "w2-slug", "pending")
 
 			out := capturedLog(func() {
-				if _, err := app.TransitionItemVia(context.Background(), "mcp", "Signal", "w1-slug", "read", ""); err != nil {
+				if _, err := app.TransitionItemVia(TrustedRead(context.Background()), "mcp", "Signal", "w1-slug", "read", ""); err != nil {
 					t.Fatalf("first transition: %v", err)
 				}
-				if _, err := app.TransitionItemVia(context.Background(), "mcp", "Signal", "w2-slug", "read", ""); err != nil {
+				if _, err := app.TransitionItemVia(TrustedRead(context.Background()), "mcp", "Signal", "w2-slug", "read", ""); err != nil {
 					t.Fatalf("second transition: %v", err)
 				}
 			})
@@ -308,7 +308,7 @@ func TestSupersede_NilRelationStore_NoEdgeNoLog(t *testing.T) {
 	insertSignal(t, db, "l1", "l1-slug", "read")
 	insertSignal(t, db, "w1", "w1-slug", "pending")
 	out := capturedLog(func() {
-		if _, err := app.TransitionItemVia(context.Background(), "", "Signal", "w1-slug", "read", ""); err != nil {
+		if _, err := app.TransitionItemVia(TrustedRead(context.Background()), "", "Signal", "w1-slug", "read", ""); err != nil {
 			t.Fatalf("TransitionItemVia: %v", err)
 		}
 	})

@@ -815,7 +815,51 @@ func (s *ReadScope) TypeReadable(typeName string) bool
 
 **Static patterns are stored as IDs.** `RoleStore.Grant` resolves each `type:item` pattern through the App's resolver (address, slug, ID, then the transitional legacy number) and stores `type:<ID>`, the only form `Authorized` and `ReadScope` match. A wildcard `type:*` is kept, and duplicates collapse. A pattern that is not `type:item`, names an unregistered type, or names no record of its type is refused with a validation error naming it. A RoleStore used without an App stores the patterns as given.
 
-This release changes no read surface yet. The surfaces apply the scope in the next steps.
+v1.146.0 changed no read surface. Since v1.147.0 the item surfaces apply the scope (below), and the graph surfaces follow in the next release.
+
+### Per-item read rules on the item surfaces (A495)
+
+**The rule.**
+- A caller sees an item when its read scope reads it, or when the item is published web content (a type without an address, such as a post). Published web content stays public. **A record type (an addressed type) is never public**, not even in a Published status: a guest reads none of its items (D110: web content is the public kind; before v1.147.0 a guest saw a Published record over HTTP).
+- An item the caller may not read is answered **exactly like a missing one**, on every item surface:
+  - the same HTTP 404 and body;
+  - the same `ErrNotFound`;
+  - writes included.
+- A forbidden answer only ever reaches a caller who can read the item.
+
+**The order on every surface:**
+1. the read scope is loaded;
+2. the item is resolved;
+3. visibility is checked;
+4. only then any enrichment.
+
+So nothing follows the check. For a caller that cannot read every item, a hidden hit counts as a miss and the resolver walks its remaining steps (address, slug, ID, then the legacy number) exactly as for an ident that matches nothing. A hidden and a missing item of the same shape therefore run the same statements, with no timing difference between them.
+
+**The surfaces.**
+- **MCP methods on a module:** `MCPGet`, `MCPUpdate`, `MCPPublish`, `MCPSchedule`, `MCPArchive` and `MCPDelete` answer a hidden item as not found. `MCPList` returns only what the caller may see, so a page and a total count readable items only.
+- **The module's HTTP routes:**
+  - list, show, single instance, AI doc, and the aggregate dispatch (`findAndServe`, `findAndServeAIDoc`): a scoped reader sees published items plus the drafts it may read;
+  - PUT and DELETE answer a hidden item with 404;
+  - a preview token still opens its one draft;
+  - sitemaps, feeds and the AI index carry published items only, as before.
+- **`/_content/{type}[/{id}]`:** under governance, gated by read access to at least one item of the type (403 otherwise), filtered per item and paged after filtering. A hidden item is 404. Without governance it is unchanged (Editor).
+- **`App.TransitionItem*`:** an unreadable item is `ErrNotFound`, checked before the transition gate.
+
+**Without governance**, the Go and MCP surfaces have no per-item rules, as before, and the HTTP routes keep the Author draft rule.
+
+**Loading the scope once per request.**
+- `WithReadScope(ctx, s)` attaches a scope, and `ReadScopeFrom(ctx)` returns it. A `Context` passed in stays a `Context`.
+- Without an attached scope, a surface loads the caller's own scope from the user in the context. Under governance, no user reads nothing.
+- **Trusted in-process code** (a job, a migration, a test) reads past the rules only explicitly, with `TrustedRead(ctx)`, which attaches `AllReadScope()`. Request surfaces never use it.
+
+**Failures.** A failure to load the scope is an internal error (500 / `ErrInternal`) on every surface, never a not-found.
+
+**Slugs.**
+- **Records:** for a record type and a caller who cannot read every record, a taken slug never reveals what holds it. A supplied slug that is taken becomes the slug plus the tail of the new ID, and an MCP create returns a `slug_adjusted` warning. A taken automatic slug gets the same tail instead of a counter, because a counter would count records the caller may not read. A reader of everything keeps today's counter.
+- **Web content:** a slug is a public URL, so "slug is already in use" stays. That the slug is taken is an accepted property.
+- **The legacy lookup** by an old number (until the D110 cut) treats a hidden record as no match, and its "matches N records" error counts only records the caller may read.
+
+**Stated property: list timing.** A list loads its candidates and then filters, so its duration grows with all rows, hidden ones included. That reveals volume, which addresses already reveal, and it is accepted.
 
 `RoleStore.Grant`'s idempotency key includes `ScopeStatic` (workspace-delegate-region-v1
 §0 F2): granting the same `(token, role, anchor)` pair with a *different*
