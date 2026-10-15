@@ -679,7 +679,7 @@ Since smeldr.dev/mcp v1.61.0 (A500) every MCP tool applies them:
 - one read scope is loaded per call; a read tool that names a type passes when the reader may read at least one item of it, and is then filtered, so a `scoped-reader` or `domain-reader` grant works over MCP;
 - an item the reader may not read answers -32000 "not found", the same as a missing one, on every tool and on `resources/read` (which used -32001 before);
 - `list_signals`, `list_content` and the `list_*` tools count and page readable items only;
-- `transition_item` needs read on the type, then `manage` on the one item: forbidden only for an item the reader can see;
+- `transition_item` needs read on the type, then, on the one item, `manage` or the operation the requested transition requires (since smeldr.dev/mcp v1.61.1): forbidden only for an item the reader can see;
 - `create_signal` stores a readable subject by its ID; `delegate_item`, `create_preview_url` and the relation writes check the items they name.
 
 **Delegating a role to someone else, time-boxed** — `delegate_item` (Author+

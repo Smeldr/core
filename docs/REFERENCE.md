@@ -919,7 +919,9 @@ func (a *App) ResolveReadableID(ctx context.Context, typeName, ident string) (st
 
 **Over MCP (smeldr.dev/mcp v1.61.0, A500).** Every tool applies these rules. Two stated properties:
 - `list_relations` without a `source_type` or `target_type` filter keeps the global gate. A scoped reader passes a type to be gated on that type.
-- `transition_item` needs read on the type, then `manage` on the one item. A delegate whose role holds only `approve` or `review` cannot use it under per-item read rules until `core-delegated-approvers-read-and-transition` ships.
+- `transition_item` needs read on the type, then, on the one item, `manage` or the operation the requested transition itself requires (since smeldr.dev/mcp v1.61.1, A502). A delegated approver or reviewer, whose role reads its item since core v1.151.0, moves it through the transition it was delegated for; the flow's own check still decides.
+
+**Delegation roles (core v1.151.0, A501).** `item-approver` holds `["approve", "read"]` and `item-reviewer` `["review", "read"]`, both static-scope: a delegate reads the one item it was delegated, and nothing else widens. Stored grants pick this up when the roles are registered at boot, with no migration.
 
 `RoleStore.Grant`'s idempotency key includes `ScopeStatic` (workspace-delegate-region-v1
 §0 F2): granting the same `(token, role, anchor)` pair with a *different*

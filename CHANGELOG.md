@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Changed
+
+- **A delegated approver or reviewer reads the item it was delegated (A501).** `RegisterItemApproverRole` now defines `item-approver` with operations `["approve", "read"]`, and `RegisterItemReviewerRole` defines `item-reviewer` with `["review", "read"]`. Both stay static-scope, so `read` applies only to the one item the grant names; nothing else widens, and neither role gains `manage`. Under the per-item read rules a delegate could not see its own item before. Stored grants need no migration: a grant reads its operations from its role, and the role is redefined at every boot (example/server registers both roles), so existing delegations read their item from the first boot on this version. A delegator using `delegate_item` must now also hold `read` on the target.
+
 ---
 
 ## [1.150.0] - 2026-10-15

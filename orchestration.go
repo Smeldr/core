@@ -404,7 +404,7 @@ func RegisterDecisionStewardRole(ctx context.Context, rs *RoleStore) error {
 }
 
 // RegisterItemApproverRole defines (or updates) the "item-approver" role:
-// Operations: ["approve"], ScopeMode: static (design/workspace-delegate-region-v1.md
+// Operations: ["approve", "read"], ScopeMode: static (design/workspace-delegate-region-v1.md
 // §0 P1, 01a0e3f9-5). Unlike [RegisterDecisionStewardRole]'s global scope,
 // this role's ScopeMode is static so a grant's own ScopeStatic list — the
 // specific "type:id" pair smeldr.dev/mcp's delegate_item tool writes —
@@ -417,22 +417,28 @@ func RegisterDecisionStewardRole(ctx context.Context, rs *RoleStore) error {
 // every Decision, not just that one). Registering a dedicated static-scope
 // role is the fix: delegate_item refuses to hand out any role whose
 // ScopeMode isn't static. Idempotent — safe to call on every boot.
+//
+// The role also reads its item (A501): under the per-item read rules a
+// delegate cannot approve what it cannot see, and read is scoped like approve,
+// to the one item the grant names. Redefining the role at boot updates every
+// stored grant of it, since a grant reads its operations from the role.
 func RegisterItemApproverRole(ctx context.Context, rs *RoleStore) error {
 	return rs.DefineRole(ctx, RoleDefinition{
 		Name:       "item-approver",
-		Operations: []string{"approve"},
+		Operations: []string{"approve", "read"},
 		ScopeMode:  ScopeStatic,
 	})
 }
 
 // RegisterItemReviewerRole defines (or updates) the "item-reviewer" role:
-// Operations: ["review"], ScopeMode: static. See
-// [RegisterItemApproverRole]'s doc comment for why ScopeStatic matters here.
+// Operations: ["review", "read"], ScopeMode: static. See
+// [RegisterItemApproverRole]'s doc comment for why ScopeStatic matters here,
+// and why the role reads its item.
 // Idempotent — safe to call on every boot.
 func RegisterItemReviewerRole(ctx context.Context, rs *RoleStore) error {
 	return rs.DefineRole(ctx, RoleDefinition{
 		Name:       "item-reviewer",
-		Operations: []string{"review"},
+		Operations: []string{"review", "read"},
 		ScopeMode:  ScopeStatic,
 	})
 }
