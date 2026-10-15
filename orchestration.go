@@ -413,6 +413,36 @@ func RegisterItemReviewerRole(ctx context.Context, rs *RoleStore) error {
 	})
 }
 
+// RegisterScopedReaderRole defines (or updates) the "scoped-reader" role:
+// Operations exactly ["read"], ScopeMode static. A grant of it reads the items
+// its ScopeStatic list names ("type:id", or "type:*" for every item of a type)
+// and nothing else, through [ReadScope]. [RoleStore.Grant] accepts an item
+// named by its address, slug or ID and stores the ID. Idempotent: safe to call
+// on every boot.
+func RegisterScopedReaderRole(ctx context.Context, rs *RoleStore) error {
+	return rs.DefineRole(ctx, RoleDefinition{
+		Name:       "scoped-reader",
+		Operations: []string{"read"},
+		ScopeMode:  ScopeStatic,
+	})
+}
+
+// RegisterDomainReaderRole defines (or updates) the "domain-reader" role:
+// Operations exactly ["read"], ScopeMode dynamic over "belongs_to_domain",
+// direction "incoming". A grant anchored on a Domain reads every item with a
+// live, asserted belongs_to_domain edge to it (the same shape as
+// [RegisterDecisionDomainAdminRole]). It does not read the Domain record itself:
+// grant that separately with [RegisterScopedReaderRole]'s role. Idempotent.
+func RegisterDomainReaderRole(ctx context.Context, rs *RoleStore) error {
+	return rs.DefineRole(ctx, RoleDefinition{
+		Name:              "domain-reader",
+		Operations:        []string{"read"},
+		ScopeMode:         ScopeDynamic,
+		ScopeRelationKind: "belongs_to_domain",
+		ScopeDirection:    "incoming",
+	})
+}
+
 // authorizeDecisionScope checks whether actorID holds the role D34 maps from
 // item's Scope field, via scopeRoles. It is layered alongside — not instead
 // of — validateTransition's generic RequiredOperation gate: RequiredOperation

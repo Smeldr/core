@@ -14,7 +14,7 @@ import (
 // MaxOpenConns is set to 1 because SQLite :memory: databases are per-connection
 // — allowing multiple connections would give each its own empty database.
 // The test is skipped if SQLite is unavailable.
-func newSQLiteDB(t *testing.T) *sql.DB {
+func newSQLiteDB(t testing.TB) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {

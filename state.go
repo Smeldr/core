@@ -1365,6 +1365,76 @@ func (a *App) TransitionItemWithReason(ctx context.Context, typeName, slug, toSt
 	return a.TransitionItemVia(ctx, "", typeName, slug, toState, reason)
 }
 
+// lookupCompiledRecord finds the record of the compiled type typeName that
+// ident names, in the D110 order: its address (of this type), slug, ID, then
+// the transitional legacy human-ID column. It returns the row's own id, slug
+// and status; the slug is read from the row, never assumed to equal ident,
+// which can be an address or an old number (T253). ErrNotFound when nothing
+// matches, ErrInternal for a query failure.
+func (a *App) lookupCompiledRecord(ctx context.Context, typeName, ident string) (table, id, slug, status string, err error) {
+	if a.cfg.DB == nil {
+		return "", "", "", "", fmt.Errorf("smeldr: lookupCompiledRecord requires Config.DB")
+	}
+	db := a.cfg.DB
+	table = resolveItemTable(ctx, db, typeName)
+	if table == "smeldr_dynamic_content" {
+		// The registry says compiled but no dedicated table was found: a
+		// partial migration or an absent table. D47's guard: never fall into
+		// the dynamic-content branch for a type the registry says is compiled.
+		return "", "", "", "", fmt.Errorf("smeldr: %q is registered as a compiled type but its table could not be found", typeName)
+	}
+	err = sql.ErrNoRows
+	for _, c := range identCandidates(typeName, ident) {
+		err = db.QueryRowContext(ctx,
+			"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE "+quoteIdent(c[0])+" = $1", c[1],
+		).Scan(&id, &slug, &status)
+		if !errors.Is(err, sql.ErrNoRows) {
+			break
+		}
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		// The transitional legacy fallback (legacy column or external_ref).
+		legacyID, lerr := legacyLookupID(ctx, db, typeName, quoteIdent(table), ident)
+		if lerr != nil {
+			return "", "", "", "", lerr
+		}
+		err = db.QueryRowContext(ctx,
+			"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE id = $1", legacyID,
+		).Scan(&id, &slug, &status)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", "", "", ErrNotFound
+	}
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
+	}
+	return table, id, slug, status, nil
+}
+
+// resolveItemID returns the ID of the record of typeName that ident names
+// (its address, slug or ID, then the transitional legacy number), for a
+// runtime-defined or a compiled type. ErrBadRequest when the type is not
+// registered, ErrNotFound when nothing matches.
+func (a *App) resolveItemID(ctx context.Context, typeName, ident string) (string, error) {
+	desc := a.typeRegistry.Lookup(typeName)
+	if desc == nil {
+		return "", fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName)
+	}
+	if desc.Kind == "content" {
+		repo, err := a.DynamicContentRepo(typeName)
+		if err != nil {
+			return "", err
+		}
+		node, err := repo.Resolve(ctx, ident)
+		if err != nil {
+			return "", err
+		}
+		return node.ID, nil
+	}
+	_, id, _, _, err := a.lookupCompiledRecord(ctx, typeName, ident)
+	return id, err
+}
+
 // TransitionItemVia is [App.TransitionItemWithReason] with the entry point the
 // call came through named, so the [ProvenanceRecord] it writes can say so. surface
 // takes the same values as [SignalEvent.Surface] and [ProvenanceRecord.Surface]
@@ -1409,47 +1479,9 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 		return nil, fmt.Errorf("smeldr: TransitionItem requires Config.DB")
 	}
 	db := a.cfg.DB
-	table := resolveItemTable(ctx, db, typeName)
-	if table == "smeldr_dynamic_content" {
-		// desc.Kind == "compiled" (the only other branch reachable here) but
-		// no dedicated table was found — a partial migration or an
-		// unregistered module's table simply absent. D47's own guard against
-		// this exact ambiguity: do not silently fall into the dynamic-content
-		// branch for a type the registry says is compiled.
-		return nil, fmt.Errorf("smeldr: %q is registered as a compiled type but its table could not be found", typeName)
-	}
-
-	// realSlug is fetched from the row, never assumed to equal the caller's
-	// own ident — ident can be a human ID (e.g. "T203") rather than a real
-	// slug when the fallback below resolves it (T253); echoing ident back
-	// as "slug" in the response would be wrong in that case.
-	// D110 order: address (of this type), slug, ID, then the transitional
-	// legacy human-ID column.
-	var id, realSlug, currentStatus string
-	err := sql.ErrNoRows
-	for _, c := range identCandidates(typeName, slug) {
-		err = db.QueryRowContext(ctx,
-			"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE "+quoteIdent(c[0])+" = $1", c[1],
-		).Scan(&id, &realSlug, &currentStatus)
-		if !errors.Is(err, sql.ErrNoRows) {
-			break
-		}
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		// The transitional legacy fallback (legacy column or external_ref).
-		legacyID, lerr := legacyLookupID(ctx, db, typeName, quoteIdent(table), slug)
-		if lerr != nil {
-			return nil, lerr
-		}
-		err = db.QueryRowContext(ctx,
-			"SELECT id, slug, status FROM "+quoteIdent(table)+" WHERE id = $1", legacyID,
-		).Scan(&id, &realSlug, &currentStatus)
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
+	table, id, realSlug, currentStatus, err := a.lookupCompiledRecord(ctx, typeName, slug)
 	if err != nil {
-		return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
+		return nil, err
 	}
 
 	// One extraction of the actor for validation, the stream self-skip and the

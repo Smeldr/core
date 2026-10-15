@@ -15,7 +15,8 @@ import (
 // ScopeMode controls how a role grant's scope is resolved.
 //
 //   - [ScopeGlobal]: no restriction — the grant applies to every item.
-//   - [ScopeStatic]: an explicit list of "type:slug" or "type:*" patterns.
+//   - [ScopeStatic]: an explicit list of "type:id" or "type:*" patterns. A grant
+//     may name the item by its address or slug: [RoleStore.Grant] stores the ID.
 //   - [ScopeDynamic]: one hop from an anchor item via a named relation kind.
 type ScopeMode string
 
@@ -775,6 +776,10 @@ type RoleStore struct {
 	actorTokenID    string               // "" unless WithAudit called
 	auditStore      GovernanceAuditStore // nil unless WithAudit called
 	provenanceStore ProvenanceStore      // nil unless App.Provenance was also wired (T203)
+	// resolveID resolves a static scope pattern's item (address, slug or ID)
+	// to its ID; set by [App.Governance]. nil for a RoleStore used without an
+	// App, which stores patterns as given.
+	resolveID func(ctx context.Context, typeName, ident string) (string, error)
 }
 
 // NewRoleStore returns a new [RoleStore] backed by db.
@@ -985,6 +990,43 @@ func (s *RoleStore) GetRole(ctx context.Context, name string) (RoleDefinition, e
 	return def, nil
 }
 
+// normalizeStaticScope returns patterns with every "type:item" pattern stored
+// as "type:<ID>", the form [RoleStore.Authorized] and [ReadScope] match: the
+// item may be named by its address, slug or ID (D110), and is resolved through
+// the App's resolver. A "type:*" pattern is kept. A pattern that is not
+// "type:item", names an unregistered type, or names no record of its type is
+// refused with an error naming it, so a grant can never silently match
+// nothing. Without a resolver (a RoleStore used without an App) the patterns
+// are kept as given. Duplicates after resolution are removed, in order.
+func (s *RoleStore) normalizeStaticScope(ctx context.Context, patterns []string) ([]string, error) {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, p := range patterns {
+		typeName, ident, ok := strings.Cut(strings.TrimSpace(p), ":")
+		if !ok || typeName == "" || ident == "" {
+			return nil, Err("scope_static", fmt.Sprintf("pattern %q must be \"type:item\" or \"type:*\"", p))
+		}
+		norm := typeName + ":" + ident
+		if ident != "*" && s.resolveID != nil {
+			id, err := s.resolveID(ctx, typeName, ident)
+			switch {
+			case errors.Is(err, ErrNotFound):
+				return nil, Err("scope_static", fmt.Sprintf("pattern %q names no %s record: name it by its address, slug or ID", p, typeName))
+			case errors.Is(err, ErrBadRequest):
+				return nil, Err("scope_static", fmt.Sprintf("pattern %q names a type that is not registered", p))
+			case err != nil:
+				return nil, fmt.Errorf("smeldr: Grant: resolve scope pattern %q: %w", p, err)
+			}
+			norm = typeName + ":" + id
+		}
+		if !seen[norm] {
+			seen[norm] = true
+			out = append(out, norm)
+		}
+	}
+	return out, nil
+}
+
 // Grant binds a token to a role with concrete scope data and returns the grant ID.
 // If an identical grant already exists (same token, role, anchor, and static scope
 // list) the existing grant ID is returned without inserting a duplicate. The WHERE
@@ -1029,9 +1071,9 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 		return "", fmt.Errorf("smeldr: Grant: lookup role %q: %w", grant.RoleName, err)
 	}
 
-	scopeStatic := grant.ScopeStatic
-	if scopeStatic == nil {
-		scopeStatic = []string{}
+	scopeStatic, err := s.normalizeStaticScope(ctx, grant.ScopeStatic)
+	if err != nil {
+		return "", err
 	}
 	staticJSON, _ := json.Marshal(scopeStatic) // []string marshal never fails
 	var anchorID *string
@@ -1896,6 +1938,7 @@ func (a *App) Governance(store *RoleStore) error {
 	if err := CreateGovernanceAuditTable(a.cfg.DB); err != nil {
 		return fmt.Errorf("smeldr: Governance: %w", err)
 	}
+	store.resolveID = a.resolveItemID
 	a.governance = store
 	a.governanceAudit = NewGovernanceAuditStore(a.cfg.DB)
 	return nil

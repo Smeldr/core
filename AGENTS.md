@@ -652,6 +652,12 @@ generic admin-tier grant, per `design/governance-model.md` §4, as of
 Decisions must hold `decision-steward` via an explicit grant.
 See [docs/REFERENCE.md](docs/REFERENCE.md#decision-steward-role-grants-and-delegate-v1).
 
+**Read access to some records, not all (core v1.146.0, A494).** Two built-in reader roles, ops exactly `["read"]`, registered when `ENABLE_GOVERNANCE` is set:
+- **`scoped-reader`** (static): `grant_role` with `scope_static` patterns such as `["Decision:D12", "Task:*"]`. The item may be named by its address, slug or ID; the grant stores its ID. A pattern that names no record is refused.
+- **`domain-reader`** (dynamic): `scope_anchor_id` set to a Domain's ID reads every item with a live `belongs_to_domain` edge to it. It does not read the Domain itself; grant that with `scoped-reader`.
+
+Core v1.146.0 adds only the read scope behind these roles. The read surfaces apply it in a later release, so until then a scoped reader is filtered nowhere.
+
 **Delegating a role to someone else, time-boxed** — `delegate_item` (Author+
 role, `smeldr.dev/mcp`) lets any token hand off a *subset* of its own
 authority to another token, scoped to one item, for a limited time (default

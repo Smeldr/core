@@ -71,7 +71,7 @@ func (d *govQueryRowFailDB) QueryRowContext(ctx context.Context, q string, args 
 
 // setupTokensTable creates smeldr_tokens with the minimal columns needed for
 // governance migration tests.
-func setupTokensTable(t *testing.T, db *sql.DB) {
+func setupTokensTable(t testing.TB, db *sql.DB) {
 	t.Helper()
 	if _, err := db.ExecContext(context.Background(),
 		`CREATE TABLE IF NOT EXISTS smeldr_tokens (
@@ -707,7 +707,7 @@ func setupGovernanceDB(t *testing.T) *sql.DB {
 }
 
 // setupRelationsTable creates the smeldr_relations table for dynamic-scope tests.
-func setupRelationsTable(t *testing.T, db *sql.DB) {
+func setupRelationsTable(t testing.TB, db *sql.DB) {
 	t.Helper()
 	if _, err := db.ExecContext(context.Background(),
 		`CREATE TABLE IF NOT EXISTS smeldr_relations (

@@ -778,6 +778,45 @@ role's grant never consults its own `ScopeStatic` list at all. `delegate_item`
 refuses to hand out any role whose `ScopeMode` isn't `ScopeStatic`, for
 exactly this reason.
 
+### Read scope (per-item read rules, A494)
+
+```go
+func (a *App) ReadScope(ctx Context) (*ReadScope, error)
+func LoadReadScope(ctx context.Context, rs *RoleStore, user User) (*ReadScope, error)
+func (s *ReadScope) All() bool
+func (s *ReadScope) Readable(typeName, id string) bool
+func (s *ReadScope) TypeReadable(typeName string) bool
+```
+
+`ReadScope` is what one caller may read, loaded once per request and then checked in memory. Its answers equal `RoleStore.Authorized(token, "read", AuthTarget{TypeName, ID})` for every grant shape:
+- a global grant reads everything;
+- a static grant reads its `type:id` and `type:*` patterns;
+- a dynamic grant reads the items one live, asserted hop from its anchor. It does not read the anchor itself.
+
+`LoadReadScope` is the loader behind `App.ReadScope`, for a caller that holds a `RoleStore`.
+- **Without governance:** `All()` is `user.HasRole(Author)`.
+- **No user ID:** an empty scope.
+- `TypeReadable` is the floor a surface checks before it filters per item. A nil scope reads nothing.
+
+**Cost.**
+- A global reader costs one query.
+- A static grant costs nothing beyond that query.
+- A dynamic grant loads its anchor's whole one-hop item set on every load: one query per direction. The cost grows with the anchor's size. Measured on SQLite, a load with one static and one dynamic grant plus 10,000 `Readable` calls takes about 2.5 ms and 0.2 MB with 1,000 items under the anchor, and about 55 ms and 9 MB with 50,000. Pushing the filter into SQL is the named later optimisation.
+
+| `ReadScope` / `LoadReadScope` returns | When |
+|---|---|
+| an `ErrInternal` error, no scope | the grants query, a scan, or an anchor query fails. The failure is logged, and the caller answers an internal error, never not-found. There is no partial scope |
+| a scope, nil | otherwise, including an empty scope |
+
+**Reader roles.**
+- `RegisterScopedReaderRole` defines `scoped-reader` (static).
+- `RegisterDomainReaderRole` defines `domain-reader` (dynamic, `belongs_to_domain`, incoming).
+- Both have ops exactly `["read"]`, are idempotent, and are registered by example/server when governance is enabled. A Domain reader who should see the Domain gets a separate `scoped-reader` grant for it.
+
+**Static patterns are stored as IDs.** `RoleStore.Grant` resolves each `type:item` pattern through the App's resolver (address, slug, ID, then the transitional legacy number) and stores `type:<ID>`, the only form `Authorized` and `ReadScope` match. A wildcard `type:*` is kept, and duplicates collapse. A pattern that is not `type:item`, names an unregistered type, or names no record of its type is refused with a validation error naming it. A RoleStore used without an App stores the patterns as given.
+
+This release changes no read surface yet. The surfaces apply the scope in the next steps.
+
 `RoleStore.Grant`'s idempotency key includes `ScopeStatic` (workspace-delegate-region-v1
 §0 F2): granting the same `(token, role, anchor)` pair with a *different*
 `ScopeStatic` list creates a separate grant row scoped to that list, rather

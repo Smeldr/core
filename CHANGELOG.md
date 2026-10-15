@@ -21,6 +21,14 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Added
+
+- **Adds a per-item read scope, the API the coming per-item read rules will use (A494).** This is step 2 of 5 of design item-eecbbe69. `App.ReadScope(ctx) (*ReadScope, error)` and `LoadReadScope(ctx, rs *RoleStore, user User) (*ReadScope, error)` load what one caller may read once per request. `(*ReadScope).All()`, `Readable(typeName, id)` and `TypeReadable(typeName)` then answer in memory. A nil scope reads nothing. Answers equal `RoleStore.Authorized(token, "read", ...)`: a global grant reads everything (one query), a static grant reads its `type:id` and `type:*` patterns, and a dynamic grant reads the items one live asserted hop from its anchor, not the anchor itself. Without governance, `All()` is `user.HasRole(Author)`, and a user with no ID gets an empty scope. Any load failure returns an `ErrInternal` error and no scope, never a partial one, so callers answer an internal error, never not-found. A dynamic grant loads its anchor's whole item set on every load, so cost grows with the anchor's size (about 2.5 ms with 1,000 items and 55 ms with 50,000 on SQLite). New built-in reader roles with operations exactly `["read"]`: `RegisterScopedReaderRole` (`scoped-reader`, static) and `RegisterDomainReaderRole` (`domain-reader`, dynamic over `belongs_to_domain`, incoming). `example/server` registers both when governance is enabled. No read surface uses the scope yet.
+
+### Changed
+
+- **Static grant patterns are stored by resolved item ID (A494).** `RoleStore.Grant` now stores each static scope pattern `type:item` as `type:<ID>`. The item may be named by its address, slug or ID (or the transitional legacy number), resolved through the App wired by `App.Governance`. Before, a pattern written with a slug or an address was stored as given and never matched, because `Authorized` matches IDs only. `type:*` is kept, and duplicates after resolution collapse. A pattern that is not `type:item`, names an unregistered type, or names no record of its type is now refused with a validation error naming the pattern. A `RoleStore` used without an App stores patterns as given, as before. Existing grants are not rewritten. The `ScopeStatic` doc comment said `type:slug`; it now says `type:id`.
+
 ---
 
 ## [1.145.1] - 2026-10-15

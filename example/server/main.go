@@ -374,6 +374,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.RegisterDecisionDomainAdminRole(context.Background(), roleStore); err != nil {
 			return ServerResult{}, fmt.Errorf("register decision-domain-admin role: %w", err)
 		}
+		if err := smeldr.RegisterDomainReaderRole(context.Background(), roleStore); err != nil {
+			return ServerResult{}, fmt.Errorf("register domain-reader role: %w", err)
+		}
 	}
 
 	if cfg.EnableGovernance {
@@ -385,6 +388,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 		if err := smeldr.RegisterItemReviewerRole(context.Background(), roleStore); err != nil {
 			return ServerResult{}, fmt.Errorf("register item-reviewer role: %w", err)
+		}
+		if err := smeldr.RegisterScopedReaderRole(context.Background(), roleStore); err != nil {
+			return ServerResult{}, fmt.Errorf("register scoped-reader role: %w", err)
 		}
 	}
 
