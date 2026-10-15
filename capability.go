@@ -1,5 +1,10 @@
 package smeldr
 
+import (
+	"fmt"
+	"log/slog"
+)
+
 // ReasonRule says whether a [Capability] takes a reason, and who decides.
 type ReasonRule string
 
@@ -166,4 +171,171 @@ func (a *App) Capabilities() []Capability {
 func (a *App) CapabilityFor(resource, verb string) (Capability, bool) {
 	c, ok := capabilityIndex[capabilityKey{resource, verb}]
 	return c, ok
+}
+
+// legacyOperationFloor is the legacy role each operation word needs when no
+// governance is wired: the floors seedToolPolicies' comment documents.
+var legacyOperationFloor = map[string]Role{
+	"read":                 Author,
+	"create":               Author,
+	"update":               Author,
+	"publish":              Author,
+	"archive":              Author,
+	"delete":               Editor,
+	"manage":               Editor,
+	"administer":           Admin,
+	"define-type":          Admin,
+	"define-flow":          Admin,
+	"define-relation-kind": Admin,
+}
+
+// typelessReadsAny lists the read capabilities that, called with no type,
+// pass when the caller reads at least one item of any type, because their
+// surface filters per item. Every other type-less read needs a scope that
+// reads everything ([ReadScope.All]): the read rules fail toward less access.
+var typelessReadsAny = map[capabilityKey]bool{
+	{ResourceSignal, VerbList}:   true, // list_signals filters Signals by their subject
+	{ResourceRelation, VerbList}: true, // ListRelations keeps edges with both ends readable
+}
+
+// typedReads lists the read capabilities called with an item type (and often
+// an ID), so a caller who reads at least one item of some type can use them:
+// the type's own read rules then decide per call.
+var typedReads = map[capabilityKey]bool{
+	{ResourceItem, VerbGet}:     true,
+	{ResourceItem, VerbList}:    true,
+	{ResourceRelation, VerbGet}: true, // the relations of one item
+}
+
+// AuthorizeCapability reports whether the caller in ctx may perform verb on
+// resource at target: nil when it may. It applies the same rules on every
+// surface (D94, D96):
+//
+//   - an unknown (resource, verb) is an [ErrBadRequest] error;
+//   - without governance, the caller's legacy role must meet the operation's
+//     floor (read, create, update, publish and archive need Author; delete and
+//     manage Editor; administer and define-* Admin), else [ErrForbidden];
+//   - under governance a caller with no token ID is [ErrForbidden];
+//   - a read goes through the caller's read scope (the one attached to ctx,
+//     else the caller's own): with a type and no ID it needs the type to be
+//     readable ([ErrForbidden] otherwise); with an ID, an item the caller may
+//     not read is [ErrNotFound], exactly as a missing one; with no type it needs
+//     a scope that reads everything, except signal list and relation list,
+//     whose surfaces filter per item. Only item get, item list and relation get
+//     use the target's type; any other read ignores it and needs the type-less
+//     rule;
+//   - any other operation on an item the caller may not read is [ErrNotFound];
+//     otherwise [RoleStore.Authorized] decides, and false is [ErrForbidden].
+//
+// A failure to load the scope or the grants is an [ErrInternal] error, never a
+// pass. The state flow's own per-transition gate stays inside
+// [App.TransitionItemVia].
+func (a *App) AuthorizeCapability(ctx Context, resource, verb string, target AuthTarget) error {
+	c, ok := capabilityIndex[capabilityKey{resource, verb}]
+	if !ok {
+		return fmt.Errorf("%w: unknown capability %q %q", ErrBadRequest, resource, verb)
+	}
+	user := ctx.User()
+	if a.governance == nil {
+		if floor, ok := legacyOperationFloor[c.Operation]; ok && user.HasRole(floor) {
+			return nil
+		}
+		return ErrForbidden
+	}
+	if user.ID == "" {
+		return ErrForbidden
+	}
+	needsScope := c.Operation == "read" || (target.TypeName != "" && target.ID != "")
+	var scope *ReadScope
+	if needsScope {
+		s, err := scopeFor(ctx, a.governance)
+		if err != nil {
+			return err
+		}
+		scope = s
+	}
+	if c.Operation == "read" {
+		return authorizeRead(scope, c, target)
+	}
+	if target.TypeName != "" && target.ID != "" && !scope.Readable(target.TypeName, target.ID) {
+		return ErrNotFound
+	}
+	ok, err := a.governance.Authorized(ctx, user.ID, c.Operation, target)
+	if err != nil {
+		slog.ErrorContext(ctx, "smeldr: capability authorization failed", "resource", c.Resource, "verb", c.Verb, "token", user.ID, "error", err)
+		return fmt.Errorf("%w: authorize %s %s: %s", ErrInternal, c.Resource, c.Verb, err)
+	}
+	if !ok {
+		return ErrForbidden
+	}
+	return nil
+}
+
+// authorizeRead is [App.AuthorizeCapability]'s read rule under governance.
+// Only the typed reads ([typedReads]) take the target's type into account; any
+// other read capability ignores it and applies the type-less rule, so passing a
+// type cannot open a read whose surface does not filter by that type.
+func authorizeRead(scope *ReadScope, c Capability, target AuthTarget) error {
+	key := capabilityKey{c.Resource, c.Verb}
+	switch {
+	case target.TypeName == "" || !typedReads[key]:
+		if scope.All() || (typelessReadsAny[key] && scope.readsAny()) {
+			return nil
+		}
+		return ErrForbidden
+	case !scope.TypeReadable(target.TypeName):
+		return ErrForbidden
+	case target.ID != "" && !scope.Readable(target.TypeName, target.ID):
+		return ErrNotFound
+	}
+	return nil
+}
+
+// VisibleCapabilities returns the capabilities the caller in ctx may use on at
+// least one target, in registry order: the set a tool list filters by.
+//
+// Without governance it is every capability whose operation's legacy floor the
+// caller's role meets. Under governance a caller with no token ID sees none; a
+// read capability is visible when the caller's scope reads everything, or
+// reads at least one item and the capability is called with an item type (item
+// get and list, relation get) or filters per item (signal list, relation
+// list); any other capability is visible when one of the caller's unexpired
+// grants holds its operation, in any scope mode. A failure to load the scope or
+// the grants is an [ErrInternal] error and no list: never a full or partial one.
+func (a *App) VisibleCapabilities(ctx Context) ([]Capability, error) {
+	user := ctx.User()
+	out := make([]Capability, 0, len(capabilityTable))
+	if a.governance == nil {
+		for _, c := range capabilityTable {
+			if floor, ok := legacyOperationFloor[c.Operation]; ok && user.HasRole(floor) {
+				out = append(out, c)
+			}
+		}
+		return out, nil
+	}
+	if user.ID == "" {
+		return out, nil
+	}
+	scope, err := scopeFor(ctx, a.governance)
+	if err != nil {
+		return nil, err
+	}
+	ops, err := a.governance.grantedOperations(ctx, user.ID)
+	if err != nil {
+		slog.ErrorContext(ctx, "smeldr: visible capabilities could not be loaded", "token", user.ID, "error", err)
+		return nil, fmt.Errorf("%w: visible capabilities: %s", ErrInternal, err)
+	}
+	for _, c := range capabilityTable {
+		if c.Operation == "read" {
+			key := capabilityKey{c.Resource, c.Verb}
+			if scope.All() || ((typedReads[key] || typelessReadsAny[key]) && scope.readsAny()) {
+				out = append(out, c)
+			}
+			continue
+		}
+		if ops[c.Operation] {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }

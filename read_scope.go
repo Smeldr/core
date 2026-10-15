@@ -50,6 +50,23 @@ func (s *ReadScope) TypeReadable(typeName string) bool {
 	return s.all || s.anyOfTyp[typeName] || len(s.items[typeName]) > 0
 }
 
+// readsAny reports whether the scope reads at least one item of any type. A
+// nil scope reads nothing.
+func (s *ReadScope) readsAny() bool {
+	if s == nil {
+		return false
+	}
+	if s.all || len(s.anyOfTyp) > 0 {
+		return true
+	}
+	for _, ids := range s.items {
+		if len(ids) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // ReadScope loads the read scope of the caller in ctx through the App's
 // RoleStore, or the legacy role check when governance is not wired. See
 // [LoadReadScope].
@@ -90,13 +107,7 @@ func LoadReadScope(ctx context.Context, rs *RoleStore, user User) (*ReadScope, e
 // load fills s from tokenID's grants, mirroring [RoleStore.Authorized] for
 // "read".
 func (s *ReadScope) load(ctx context.Context, rs *RoleStore, tokenID string) error {
-	rows, err := rs.db.QueryContext(ctx,
-		`SELECT g.scope_static, g.scope_anchor_id, r.operations,
-		        r.scope_mode, r.scope_relation_kind, r.scope_direction
-		   FROM smeldr_role_grants g
-		   JOIN smeldr_roles r ON r.id = g.role_id
-		  WHERE g.token_id = $1 AND (g.expires_at IS NULL OR g.expires_at > $2)`,
-		tokenID, time.Now().UTC())
+	rows, err := rs.db.QueryContext(ctx, tokenGrantsQuery, tokenID, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("query grants: %w", err)
 	}

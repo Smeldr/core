@@ -199,7 +199,9 @@
 //     [App.CapabilityFor]): every act the MCP, REST and CLI surfaces project, as
 //     a resource, a verb and the one governance operation word that gates it.
 //     Content types are an argument of the item resource, and lifecycle is the
-//     one transition verb.
+//     one transition verb. [App.AuthorizeCapability] checks a caller against a
+//     capability under the read rules and grants, and [App.VisibleCapabilities]
+//     lists what a caller may use.
 //   - Webhooks ([WebhookStore], [WebhookEndpoint], [WebhookEventPayload]) —
 //     outbound delivery on lifecycle events, created with [NewWebhookStore].
 //   - Dynamic content types ([DynamicTypeRepo]) — a schema-driven repository

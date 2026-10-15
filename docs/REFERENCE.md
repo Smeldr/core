@@ -1129,6 +1129,53 @@ func (a *App) CapabilityFor(resource, verb string) (Capability, bool) // false f
 
 **Planned change (no date promised):** D116 makes a webhook a delivery target of a Subscription. A later Task moves the webhook rows under a `subscription` resource and keeps `webhook` only as long as compatibility needs it (D97). Later Tasks also add `signal answer` and `signal withdraw` (D115) and the `subscription` resource (D116, D117).
 
+#### Authorization by capability (A503)
+
+Two methods on `App` check a caller against a capability and list what the caller may use. Nothing in core or mcp calls them yet. The opt-in consolidated MCP profile (C3) will be the first caller.
+
+```go
+func (a *App) AuthorizeCapability(ctx Context, resource, verb string, target AuthTarget) error
+func (a *App) VisibleCapabilities(ctx Context) ([]Capability, error)
+```
+
+`AuthorizeCapability` checks these rules, in this order:
+
+1. An unknown (resource, verb) pair is `ErrBadRequest`.
+2. Without governance (`App.Governance` not called), the caller's legacy role must meet the floor of the capability's operation, else `ErrForbidden`:
+   - `read`, `create`, `update`, `publish` and `archive` need Author;
+   - `delete` and `manage` need Editor;
+   - `administer`, `define-type`, `define-flow` and `define-relation-kind` need Admin.
+3. Under governance, a caller with no token ID is `ErrForbidden`.
+4. A `read` capability goes through the caller's read scope: the one attached to ctx (`WithReadScope`, `TrustedRead`), or else the caller's own, loaded from its grants. It never asks `RoleStore.Authorized` for "read" with an empty target.
+   - With a type and no ID, the type must be readable (`ReadScope.TypeReadable`), else `ErrForbidden`.
+   - With a type and an ID, a type the caller cannot read is `ErrForbidden`. An item it cannot read inside a readable type is `ErrNotFound`, the same answer as a missing item.
+   - With no type, the caller needs a scope that reads everything (`ReadScope.All`). The exceptions are `signal list` and `relation list`, whose surfaces filter per item: those pass when the caller reads at least one item. This fails toward less access.
+   - Only `item get`, `item list` and `relation get` use the target's type. Any other read capability ignores a type it is given and applies the rule for a read with no type, so passing a type cannot open a read whose surface does not filter by it (`ops get` returns aggregates over every item).
+5. Any other operation: with a type and an ID, an item the caller cannot read is `ErrNotFound` before its grant is checked, so a write never reveals what a read hides. Then `RoleStore.Authorized` decides for the operation and the target; false is `ErrForbidden`.
+
+A failure to load the scope or the grants is `ErrInternal`: never a pass, and never not-found. The state flow's own per-transition gate and reason rule stay inside `App.TransitionItemVia` (D96); `item transition` here is only the tool-level `manage` gate.
+
+The capability's operation governs the capability path, and the typed MCP tools keep their seeded tool policies. So on a capability path a dynamic item create is gated on `create` (Author without governance), where the typed `create_content` tool stays on `manage` (Editor).
+
+`VisibleCapabilities` returns the capabilities the caller may use on at least one target, in registry order, so a tool list built from it is deterministic:
+
+- Without governance: every capability whose operation's legacy floor the caller's role meets.
+- Under governance, with no token ID: none.
+- Under governance, a `read` capability is visible when the scope reads everything, or when it reads at least one item and the capability is called with an item type (`item get`, `item list`, `relation get`) or filters per item (`signal list`, `relation list`). Any other capability is visible when one of the caller's unexpired grants holds its operation, in any scope mode.
+- A failure to load the scope or the grants is `ErrInternal` and no list: never a full or partial one.
+
+Cost: a read with an attached scope runs no query and does not allocate. Otherwise one grant query, plus one per dynamic anchor (as `LoadReadScope`). `VisibleCapabilities` runs one grant query plus the scope. Nothing is cached.
+
+| `AuthorizeCapability` returns | When |
+|---|---|
+| `nil` | allowed |
+| `ErrBadRequest` | unknown resource or verb |
+| `ErrForbidden` | below the legacy floor; no token ID under governance; a read of a type the caller cannot read; no grant for the operation; a type-less read without a scope that reads everything (except `signal list` and `relation list`) |
+| `ErrNotFound` | a read of an item the caller cannot read in a readable type; any other operation on an item the caller cannot read |
+| `ErrInternal` | the scope or the grants could not be loaded |
+
+Over smeldr.dev/mcp these map to -32001 for `ErrForbidden`, -32000 for `ErrNotFound` (since mcp v1.61.0), -32602 for `ErrBadRequest`, and -32603 for `ErrInternal`.
+
 ---
 
 ## SEO & structured data

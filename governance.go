@@ -1522,6 +1522,44 @@ type authorizedGrant struct {
 	relDir     sql.NullString
 }
 
+// tokenGrantsQuery loads a token's unexpired grants with their role's
+// operations and scope. [RoleStore.Authorized], [ReadScope] loading and
+// [RoleStore.grantedOperations] share it, so the three cannot drift.
+const tokenGrantsQuery = `SELECT g.scope_static, g.scope_anchor_id, r.operations,
+        r.scope_mode, r.scope_relation_kind, r.scope_direction
+   FROM smeldr_role_grants g
+   JOIN smeldr_roles r ON r.id = g.role_id
+  WHERE g.token_id = $1 AND (g.expires_at IS NULL OR g.expires_at > $2)`
+
+// grantedOperations returns every operation word the token's unexpired grants
+// hold, in any scope mode. A grant whose operations are malformed is skipped,
+// as [RoleStore.Authorized] skips it.
+func (s *RoleStore) grantedOperations(ctx context.Context, tokenID string) (map[string]bool, error) {
+	rows, err := s.db.QueryContext(ctx, tokenGrantsQuery, tokenID, time.Now().UTC())
+	if err != nil {
+		return nil, fmt.Errorf("smeldr: grantedOperations: query grants: %w", err)
+	}
+	defer rows.Close()
+	ops := map[string]bool{}
+	for rows.Next() {
+		var g authorizedGrant
+		if err := rows.Scan(&g.staticJSON, &g.anchorID, &g.opsJSON, &g.scopeMode, &g.relKind, &g.relDir); err != nil {
+			return nil, fmt.Errorf("smeldr: grantedOperations: scan: %w", err)
+		}
+		var words []string
+		if json.Unmarshal([]byte(g.opsJSON), &words) != nil {
+			continue
+		}
+		for _, w := range words {
+			ops[w] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("smeldr: grantedOperations: rows: %w", err)
+	}
+	return ops, nil
+}
+
 // Authorized reports whether the token identified by tokenID holds a grant that
 // permits the given operation on target. It checks all three scope modes:
 //
@@ -1542,13 +1580,7 @@ type authorizedGrant struct {
 // grants continue to be evaluated, and the error is surfaced only if no other
 // grant authorizes the request.
 func (s *RoleStore) Authorized(ctx context.Context, tokenID, op string, target AuthTarget) (bool, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT g.scope_static, g.scope_anchor_id, r.operations,
-		        r.scope_mode, r.scope_relation_kind, r.scope_direction
-		   FROM smeldr_role_grants g
-		   JOIN smeldr_roles r ON r.id = g.role_id
-		  WHERE g.token_id = $1 AND (g.expires_at IS NULL OR g.expires_at > $2)`,
-		tokenID, time.Now().UTC())
+	rows, err := s.db.QueryContext(ctx, tokenGrantsQuery, tokenID, time.Now().UTC())
 	if err != nil {
 		return false, fmt.Errorf("smeldr: Authorized: query grants: %w", err)
 	}

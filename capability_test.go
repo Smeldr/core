@@ -156,13 +156,14 @@ func toolCapability(tool string) (ref capabilityRef, prefix string, ok bool) {
 }
 
 // operationDivergence lists the built-in tools whose seeded operation differs
-// from their capability's, each with its reason. C2 decides which governs the
-// consolidated path; the seeded row stays authoritative for the typed tool.
+// from their capability's, each with its reason. The seeded row stays
+// authoritative for the typed tool; the capability path uses the capability's
+// operation (C2).
 // A new divergence fails TestCapabilities_ToolOperationAgrees until it is
 // listed here.
 var operationDivergence = map[string]string{
-	"create_content": "dynamic create is Editor-gated (manage) today; D94 puts compiled and dynamic types behind one gate, chosen in C2",
-	"update_content": "dynamic update is Editor-gated (manage) today; D94 puts compiled and dynamic types behind one gate, chosen in C2",
+	"create_content": "typed row kept at manage (Editor); the capability path uses item create's own operation, one gate for every type (D94, C2)",
+	"update_content": "typed row kept at manage (Editor); the capability path uses item update's own operation, one gate for every type (D94, C2)",
 }
 
 // perTypeLifecycleDivergence: the per-type publish_/schedule_/archive_ tools
