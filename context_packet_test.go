@@ -83,7 +83,9 @@ func insertTestEdge(t *testing.T, rs *RelationStore, srcType, srcID, tgtType, tg
 // — error paths ——————————————————————————————————————————————————————————————
 
 func TestBuildContextPacket_errors(t *testing.T) {
-	ctx := context.Background()
+	// Trusted: several cases wrap the handle in a failing DB that no App
+	// registered, which under governance elsewhere in the process fails closed.
+	ctx := TrustedRead(context.Background())
 	const base = "http://localhost"
 	const src = "test"
 

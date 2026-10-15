@@ -62,6 +62,10 @@ type RelationPage struct {
 // Edges with IncludeEnded and an end on record carry it, as from
 // [RelationStore.MCPGetRelations].
 //
+// Under per-item read rules (the scope attached to ctx, or the caller's own
+// under the governance wired on the store's database) the set holds only the
+// edges whose both ends the caller may read, and Total counts that set.
+//
 // A negative Limit or Offset is a [*ValidationError]. A missing relations table
 // is an empty page; any other database failure is [ErrInternal].
 func (s *RelationStore) ListRelations(ctx context.Context, opts RelationListOptions) (RelationPage, error) {
@@ -100,6 +104,14 @@ func (s *RelationStore) ListRelations(ctx context.Context, opts RelationListOpti
 		}
 	}
 
+	scope, err := packageScope(ctx, s.db)
+	if err != nil {
+		return RelationPage{}, err
+	}
+	if !scope.All() {
+		return s.listReadableRelations(ctx, scope, where, args, limit, opts, page)
+	}
+
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM smeldr_relations"+where, args...).Scan(&page.Total); err != nil {
 		if isNoSuchTable(err) {
 			return page, nil
@@ -119,6 +131,38 @@ func (s *RelationStore) ListRelations(ctx context.Context, opts RelationListOpti
 	if err != nil {
 		return RelationPage{}, fmt.Errorf("%w: list relations: %s", ErrInternal, err)
 	}
+	if opts.IncludeEnded {
+		if err := s.fillEdgeEnds(ctx, edges); err != nil {
+			return RelationPage{}, fmt.Errorf("%w: list relations: reading how ended relations ended: %s", ErrInternal, err)
+		}
+	}
+	page.Edges = edges
+	return page, nil
+}
+
+// listReadableRelations is [RelationStore.ListRelations] for a caller that
+// does not read everything: every matching row is loaded and filtered to the
+// edges whose both ends the caller may read, and Total and the page are cut
+// from that filtered set, so neither reveals a hidden item. Its cost grows with
+// the matching rows, not the page.
+func (s *RelationStore) listReadableRelations(ctx context.Context, scope *ReadScope, where string, args []any, limit int, opts RelationListOptions, page RelationPage) (RelationPage, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT "+relationColumns+" FROM smeldr_relations"+where+" ORDER BY created_at, id", args...)
+	if err != nil {
+		if isNoSuchTable(err) {
+			return page, nil
+		}
+		return RelationPage{}, fmt.Errorf("%w: list relations: %s", ErrInternal, err)
+	}
+	edges, err := collectEdges(rows)
+	rows.Close()
+	if err != nil {
+		return RelationPage{}, fmt.Errorf("%w: list relations: %s", ErrInternal, err)
+	}
+	edges = readableEdges(scope, edges)
+	page.Total = len(edges)
+	start := min(opts.Offset, len(edges))
+	edges = edges[start:min(start+limit, len(edges))]
 	if opts.IncludeEnded {
 		if err := s.fillEdgeEnds(ctx, edges); err != nil {
 			return RelationPage{}, fmt.Errorf("%w: list relations: reading how ended relations ended: %s", ErrInternal, err)

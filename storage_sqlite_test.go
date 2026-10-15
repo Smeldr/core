@@ -22,6 +22,10 @@ func newSQLiteDB(t testing.TB) *sql.DB {
 	}
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
+	// A handle used without governance, as an App without governance
+	// registers its own: package functions on it read everything, even
+	// after another test in the process wired governance.
+	registerGovernance(db, nil)
 	return db
 }
 

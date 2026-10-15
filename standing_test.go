@@ -630,7 +630,7 @@ func (d *standingReadFailDB2) QueryContext(ctx context.Context, q string, args .
 func TestBuildContextPacket_Standing(t *testing.T) {
 	app, db, rs := setupTransitionItemApp(t)
 	ratifyDecision(t, app, db, rs, "dec-pk", "dec-pk-slug")
-	pkt, err := BuildContextPacket(context.Background(), db, nil, "https://example.com", "test", "decision", "dec-pk-slug", 1)
+	pkt, err := BuildContextPacket(TrustedRead(context.Background()), db, nil, "https://example.com", "test", "decision", "dec-pk-slug", 1)
 	if err != nil {
 		t.Fatalf("BuildContextPacket: %v", err)
 	}
@@ -638,7 +638,7 @@ func TestBuildContextPacket_Standing(t *testing.T) {
 		t.Errorf("anchor status/standing = %q/%q, want ratified/holds", pkt.Anchor.Status, pkt.Anchor.Standing)
 	}
 	insertSignal(t, db, "sg-pk", "sg-pk-slug", "pending")
-	spkt, err := BuildContextPacket(context.Background(), db, nil, "https://example.com", "test", "signal", "sg-pk-slug", 1)
+	spkt, err := BuildContextPacket(TrustedRead(context.Background()), db, nil, "https://example.com", "test", "signal", "sg-pk-slug", 1)
 	if err != nil {
 		t.Fatalf("BuildContextPacket(signal): %v", err)
 	}

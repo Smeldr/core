@@ -1939,6 +1939,10 @@ func (a *App) Governance(store *RoleStore) error {
 		return fmt.Errorf("smeldr: Governance: %w", err)
 	}
 	store.resolveID = a.resolveItemID
+	registerGovernance(a.cfg.DB, store)
+	if a.relationStore != nil {
+		registerGovernance(a.relationStore.db, store)
+	}
 	a.governance = store
 	a.governanceAudit = NewGovernanceAuditStore(a.cfg.DB)
 	return nil

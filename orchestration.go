@@ -53,8 +53,11 @@ type GoalContext struct {
 // QueryGoalContext assembles context for the goal whose GoalID field matches
 // goalID (e.g. "T114"). It queries both source and target sides of the
 // relation graph and appends each linked Decision, Task, or Goal.
-// Returns [ErrNotFound] when no goal with the given GoalID exists.
-// When rs is nil, returns the goal with empty relation slices (fail-open).
+// Returns [ErrNotFound] when no goal with the given GoalID exists, or the
+// caller may not read it (per-item read rules: the scope attached to ctx, or the
+// caller's own under the governance wired on db). Linked items the caller may
+// not read are left out. When rs is nil, returns the goal with empty relation
+// slices.
 func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID string) (*GoalContext, error) {
 	if goalID == "" {
 		return nil, ErrBadRequest
@@ -63,18 +66,30 @@ func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID stri
 		return nil, ErrInternal
 	}
 
+	// Per-item read rules (core-read-surfaces 3b): the caller's scope, loaded
+	// before the lookup. A hidden Goal is a miss that walks the remaining steps,
+	// exactly as for an ident that matches nothing.
+	scope, err := packageScope(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	visible := scopeIDFilter(scope, "Goal")
+
 	// D110 order: address, slug, ID, then the transitional legacy goal_id.
 	var goal *Goal
-	var err error = ErrNotFound
+	err = ErrNotFound
 	for _, c := range identCandidates("Goal", goalID) {
 		goal, err = QueryOne[*Goal](ctx, db, `SELECT * FROM smeldr_goals WHERE `+quoteIdent(c[0])+` = $1`, c[1])
+		if err == nil && visible != nil && !visible(goal.ID) {
+			err = ErrNotFound // hidden: go on as a miss would
+		}
 		if !errors.Is(err, ErrNotFound) {
 			break
 		}
 	}
 	if errors.Is(err, ErrNotFound) {
 		// The transitional legacy fallback (goal_id or external_ref).
-		legacyID, lerr := legacyLookupID(ctx, db, "Goal", "smeldr_goals", goalID, nil)
+		legacyID, lerr := legacyLookupID(ctx, db, "Goal", "smeldr_goals", goalID, visible)
 		if lerr != nil {
 			return nil, lerr
 		}
@@ -127,6 +142,11 @@ func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID stri
 	}
 
 	for _, ref := range refs {
+		// A linked record the caller may not read is left out before it is
+		// fetched, so nothing about it is loaded or counted.
+		if !scope.Readable(ref.typeName, ref.id) {
+			continue
+		}
 		switch ref.typeName {
 		case "Decision":
 			d, err := QueryOne[*Decision](ctx, db,

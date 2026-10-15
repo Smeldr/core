@@ -178,7 +178,7 @@ func TestValidTransitions_ToAwaitsAction(t *testing.T) {
 func TestBuildContextPacket_AwaitsAction(t *testing.T) {
 	app, db, rs := setupTransitionItemApp(t)
 	ratifyDecision(t, app, db, rs, "dec-aw", "dec-aw-slug")
-	pkt, err := BuildContextPacket(context.Background(), db, nil, "https://example.com", "test", "decision", "dec-aw-slug", 1)
+	pkt, err := BuildContextPacket(TrustedRead(context.Background()), db, nil, "https://example.com", "test", "decision", "dec-aw-slug", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestBuildContextPacket_AwaitsAction(t *testing.T) {
 		t.Errorf("a ratified Decision: awaits_action = %v, want false (closed)", pkt.Anchor.AwaitsAction)
 	}
 	insertSignal(t, db, "sg-aw", "sg-aw-slug", "pending")
-	spkt, err := BuildContextPacket(context.Background(), db, nil, "https://example.com", "test", "signal", "sg-aw-slug", 1)
+	spkt, err := BuildContextPacket(TrustedRead(context.Background()), db, nil, "https://example.com", "test", "signal", "sg-aw-slug", 1)
 	if err != nil {
 		t.Fatal(err)
 	}

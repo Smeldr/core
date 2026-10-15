@@ -287,20 +287,32 @@ func BuildContextPacket(
 		return nil, ErrBadRequest
 	}
 
+	// Per-item read rules (core-read-surfaces 3b): the caller's scope, loaded
+	// before the lookup. A hidden anchor is a miss that walks the remaining
+	// steps, exactly as for an ident that matches nothing.
+	scope, err := packageScope(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	visible := scopeIDFilter(scope, entry.relationType)
+
 	// D110 order: address, slug, ID, then the transitional legacy human ID.
 	var anchorCID string
 	var anchorNode Node
 	var anchorFields map[string]any
-	var err error = ErrNotFound
+	err = ErrNotFound
 	for _, c := range identCandidates(entry.relationType, anchorSlug) {
 		anchorCID, anchorNode, anchorFields, err = packetFetchItem(ctx, db, anchorType, entry.table, c[0], c[1])
+		if err == nil && visible != nil && !visible(anchorNode.ID) {
+			err = ErrNotFound // hidden: go on as a miss would
+		}
 		if !errors.Is(err, ErrNotFound) {
 			break
 		}
 	}
 	if errors.Is(err, ErrNotFound) {
 		// The transitional legacy fallback (legacy column or external_ref).
-		legacyID, lerr := legacyLookupID(ctx, db, entry.relationType, entry.table, anchorSlug, nil)
+		legacyID, lerr := legacyLookupID(ctx, db, entry.relationType, entry.table, anchorSlug, visible)
 		if lerr != nil {
 			return nil, lerr
 		}
@@ -366,7 +378,6 @@ func BuildContextPacket(
 					continue
 				}
 				seenEdges[edge.ID] = true
-				includedEdges = append(includedEdges, edge)
 
 				var refRelType, refNodeID string
 				if edge.SourceType == fi.relType && edge.SourceID == fi.nodeID {
@@ -374,6 +385,14 @@ func BuildContextPacket(
 				} else {
 					refRelType, refNodeID = edge.SourceType, edge.SourceID
 				}
+				// A far end the caller may not read is absent: its edge is
+				// not kept, it is not fetched, counted or walked through, so
+				// no path through it is revealed (binding A: Omitted counts
+				// readable items only).
+				if !scope.Readable(refRelType, refNodeID) {
+					continue
+				}
+				includedEdges = append(includedEdges, edge)
 
 				nodeKey := refRelType + refNodeID
 				if seenNodes[nodeKey] {
@@ -465,8 +484,10 @@ func BuildContextPacket(
 // ContextPacketHandler registers GET /packet/{type}/{slug} on the app's mux.
 // The optional ?depth= query parameter controls traversal depth (1 or 2;
 // defaults to 1). sourceName identifies the instance in the packet's Source field.
-// Requires Editor role via bearer auth — same contract as [App.Audit]'s own
-// GET /_audit and the other raw, non-Module[T] admin/operational routes.
+// Without governance it requires the Editor role via bearer auth, the same
+// contract as [App.Audit]'s own GET /_audit. Under governance it requires read
+// access to at least one item of the anchor's type, and the packet holds only
+// what the caller may read (per-item read rules).
 func (a *App) ContextPacketHandler(rs *RelationStore, sourceName string) {
 	auth := a.cfg.Auth
 	if auth == nil {
@@ -478,11 +499,29 @@ func (a *App) ContextPacketHandler(rs *RelationStore, sourceName string) {
 			WriteError(w, r, ErrUnauth)
 			return
 		}
-		if !user.HasRole(Editor) {
-			WriteError(w, r, ErrForbidden)
-			return
-		}
 		anchorType := r.PathValue("type")
+		// Without governance, the Editor role as before. Under governance the
+		// caller needs read access to at least one item of the anchor's type,
+		// and the packet is built under the caller's own read scope.
+		ctx := r.Context()
+		if a.governance == nil {
+			if !user.HasRole(Editor) {
+				WriteError(w, r, ErrForbidden)
+				return
+			}
+			ctx = TrustedRead(ctx)
+		} else {
+			scope, err := LoadReadScope(ctx, a.governance, user)
+			if err != nil {
+				WriteError(w, r, err)
+				return
+			}
+			if entry, known := anchorTypeTable[anchorType]; known && !scope.TypeReadable(entry.relationType) {
+				WriteError(w, r, ErrForbidden)
+				return
+			}
+			ctx = WithReadScope(ctx, scope)
+		}
 		anchorSlug := r.PathValue("slug")
 		depth := 1
 		if d := r.URL.Query().Get("depth"); d != "" {
@@ -493,7 +532,7 @@ func (a *App) ContextPacketHandler(rs *RelationStore, sourceName string) {
 			}
 			depth = v
 		}
-		pkt, err := BuildContextPacket(r.Context(), a.cfg.DB, rs,
+		pkt, err := BuildContextPacket(ctx, a.cfg.DB, rs,
 			a.cfg.BaseURL, sourceName, anchorType, anchorSlug, depth)
 		if err != nil {
 			WriteError(w, r, err)

@@ -16,7 +16,9 @@ import (
 // flow with a Strict RequiredOperation transition.
 func TestPG_ItemProvenance(t *testing.T) {
 	db, _ := isolatedDB(t)
-	ctx := context.Background()
+	// newPGApp wires governance: a caller with no user reads nothing, so the
+	// test reads as a trusted in-process caller.
+	ctx := smeldr.TrustedRead(context.Background())
 	if err := smeldr.CreateProvenanceTable(db); err != nil {
 		t.Fatalf("CreateProvenanceTable: %v", err)
 	}

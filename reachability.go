@@ -126,6 +126,11 @@ func betterCandidate(a, b reachabilityCandidate) bool {
 // never cause a node to be revisited or double-counted.
 //
 // maxDepth must be between 1 and [MaxReachabilityDepth] inclusive.
+//
+// Under per-item read rules (the scope attached to ctx, or the caller's own
+// under the governance wired on the store's database) the walk sees only the
+// items the caller may read: a hidden item is not in a ring and is not walked
+// through, and a hidden anchor reads as one with no relations.
 func (s *RelationStore) Reachability(ctx context.Context, anchorType, anchorID, kind, direction string, maxDepth int) (*Reachability, error) {
 	return s.reachability(ctx, anchorType, anchorID, kind, direction, maxDepth, 0)
 }
@@ -166,6 +171,16 @@ func (s *RelationStore) reachability(ctx context.Context, anchorType, anchorID, 
 		return nil, ErrBadRequest
 	}
 
+	// Per-item read rules (core-read-surfaces 3b): a node the caller may not
+	// read is not placed in a ring, not counted toward the cap or a cut, and not
+	// walked through. A hidden anchor has no readable neighbours, so it yields
+	// the same empty rings, after the same first query, as a missing one.
+	scope, err := packageScope(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	anchorHidden := !scope.Readable(anchorType, anchorID)
+
 	anchor := reachabilityNode{anchorType, anchorID}
 	result := &Reachability{
 		AnchorType: anchorType,
@@ -191,6 +206,9 @@ func (s *RelationStore) reachability(ctx context.Context, anchorType, anchorID, 
 			}
 			for _, nb := range neighbors {
 				if seenNodes[nb.node] {
+					continue
+				}
+				if anchorHidden || !scope.Readable(nb.node.typ, nb.node.id) {
 					continue
 				}
 				existing, ok := best[nb.node]

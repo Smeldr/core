@@ -188,7 +188,8 @@ func TestReachabilityBounded_QueriesStayWithinTheBound(t *testing.T) {
 	}
 	cdb.queries.Store(0)
 	const maxItems = 25
-	got, err := store.ReachabilityBounded(context.Background(), "item", "a", "", "both", 6, maxItems)
+	// The counting wrapper is a handle no App registered: read as trusted.
+	got, err := store.ReachabilityBounded(TrustedRead(context.Background()), "item", "a", "", "both", 6, maxItems)
 	if err != nil || got.Cut == nil {
 		t.Fatalf("walk = %+v, %v, want a cut", got, err)
 	}

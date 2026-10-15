@@ -792,11 +792,19 @@ func (s *RelationStore) MCPObserveRelation(ctx context.Context,
 // [EdgeEndNotRecorded].
 // direction must be "source", "target", or "both".
 // kind filters by relation kind; empty string returns all kinds.
+// Under per-item read rules (the scope attached to ctx, or the caller's own
+// under the governance wired on the store's database) it returns only the
+// edges whose both ends the caller may read; an item the caller may not read
+// has no edges, the same as a missing one.
 func (s *RelationStore) MCPGetRelations(ctx context.Context, typeName, id, direction, kind string) ([]RelationEdge, error) {
 	switch direction {
 	case "source", "target", "both":
 	default:
 		return nil, fmt.Errorf("smeldr: MCPGetRelations: direction must be source, target, or both; got %q", direction)
+	}
+	scope, err := packageScope(ctx, s.db)
+	if err != nil {
+		return nil, err
 	}
 	var edges []RelationEdge
 	if direction != "target" {
@@ -813,6 +821,9 @@ func (s *RelationStore) MCPGetRelations(ctx context.Context, typeName, id, direc
 		}
 		edges = append(edges, tgt...)
 	}
+	// Filtered before the ended rows are looked up, so a hidden item runs the
+	// same statements as a missing one: both have no edges left.
+	edges = readableEdges(scope, edges)
 	if err := s.fillEdgeEnds(ctx, edges); err != nil {
 		return nil, fmt.Errorf("%w: get relations: reading how ended relations ended: %s", ErrInternal, err)
 	}
@@ -822,9 +833,34 @@ func (s *RelationStore) MCPGetRelations(ctx context.Context, typeName, id, direc
 // MCPPreviewImpact returns which items would receive an AfterRelationCascade
 // signal if the given item changed status — without firing any signals.
 // Returns the source-side dependents found via GetLiveByTarget (an ended
-// relation is not a dependency, so it would not cascade either).
+// relation is not a dependency, so it would not cascade either). Under per-item
+// read rules it returns only the edges whose both ends the caller may read.
 func (s *RelationStore) MCPPreviewImpact(ctx context.Context, typeName, id string) ([]RelationEdge, error) {
-	return s.GetLiveByTarget(ctx, typeName, id, "")
+	scope, err := packageScope(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	edges, err := s.GetLiveByTarget(ctx, typeName, id, "")
+	if err != nil {
+		return nil, err
+	}
+	return readableEdges(scope, edges), nil
+}
+
+// readableEdges keeps the edges whose both ends scope may read: a relation to
+// an item the caller may not read would reveal that the item exists. It
+// filters in place.
+func readableEdges(scope *ReadScope, edges []RelationEdge) []RelationEdge {
+	if scope.All() {
+		return edges
+	}
+	kept := edges[:0]
+	for _, e := range edges {
+		if scope.Readable(e.SourceType, e.SourceID) && scope.Readable(e.TargetType, e.TargetID) {
+			kept = append(kept, e)
+		}
+	}
+	return kept
 }
 
 // MCPUpsertRelationKind registers or updates a relation kind via MCP.
@@ -848,6 +884,9 @@ func (s *RelationStore) MCPListRelationKinds() []RelationKindDef {
 // edges that have ended (invalid_at in the past): it is the history view. Use
 // [RelationStore.GetLiveBySource] for what the item is related to now.
 // If kind is non-empty, only edges with that relation_kind are returned.
+//
+// It is unfiltered: it applies no per-item read rules and must not serve a
+// request. A request reads relations through [RelationStore.MCPGetRelations].
 func (s *RelationStore) GetBySource(ctx context.Context, sourceType, sourceID, kind string) ([]RelationEdge, error) {
 	return s.edgesAt(ctx, "source", sourceType, sourceID, kind, false)
 }
@@ -856,6 +895,9 @@ func (s *RelationStore) GetBySource(ctx context.Context, sourceType, sourceID, k
 // edges that have ended (invalid_at in the past): it is the history view. Use
 // [RelationStore.GetLiveByTarget] for what is related to the item now.
 // If kind is non-empty, only edges with that relation_kind are returned.
+//
+// It is unfiltered: it applies no per-item read rules and must not serve a
+// request. A request reads relations through [RelationStore.MCPGetRelations].
 func (s *RelationStore) GetByTarget(ctx context.Context, targetType, targetID, kind string) ([]RelationEdge, error) {
 	return s.edgesAt(ctx, "target", targetType, targetID, kind, false)
 }
@@ -866,6 +908,10 @@ func (s *RelationStore) GetByTarget(ctx context.Context, targetType, targetID, k
 // neighbourhood of an item (reachability, the cascade, a goal's links, a context
 // packet) through this, not through GetBySource, which also returns relations
 // that have ended. now is taken once per call.
+//
+// It is unfiltered: it applies no per-item read rules and must not serve a
+// request. A request reads the live neighbourhood through
+// [RelationStore.Reachability] or [RelationStore.ReachabilityBounded].
 func (s *RelationStore) GetLiveBySource(ctx context.Context, sourceType, sourceID, kind string) ([]RelationEdge, error) {
 	return s.edgesAt(ctx, "source", sourceType, sourceID, kind, true)
 }
@@ -873,6 +919,10 @@ func (s *RelationStore) GetLiveBySource(ctx context.Context, sourceType, sourceI
 // GetLiveByTarget is [RelationStore.GetByTarget] limited to the edges that are
 // live now (invalid_at is NULL or in the future). See
 // [RelationStore.GetLiveBySource].
+//
+// It is unfiltered: it applies no per-item read rules and must not serve a
+// request. A request reads an item's dependants through
+// [RelationStore.MCPPreviewImpact].
 func (s *RelationStore) GetLiveByTarget(ctx context.Context, targetType, targetID, kind string) ([]RelationEdge, error) {
 	return s.edgesAt(ctx, "target", targetType, targetID, kind, true)
 }

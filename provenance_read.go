@@ -57,6 +57,10 @@ type ProvenancePage struct {
 //
 // Relation events (assert, invalidate) are recorded against the RelationEdge,
 // not the item, and are not part of this read.
+//
+// Under per-item read rules (the scope attached to ctx, or the caller's own
+// under [App.Governance]) an item the caller may not read has an empty
+// history with Total 0, the same answer as a missing item.
 func (a *App) ItemProvenance(ctx context.Context, typeName, itemID string, audience ProvenanceAudience, limit, offset int) (ProvenancePage, error) {
 	if audience != ProvenanceMembers && audience != ProvenanceGated {
 		return ProvenancePage{}, Err("audience", `must be "members" or "gated"`)
@@ -75,9 +79,18 @@ func (a *App) ItemProvenance(ctx context.Context, typeName, itemID string, audie
 	}
 	limit = min(limit, maxProvenanceLimit)
 
+	scope, err := scopeFor(ctx, a.governance)
+	if err != nil {
+		return ProvenancePage{}, err
+	}
 	records, err := a.provenanceStore.List(ctx, ProvenanceFilter{SubjectType: typeName, SubjectID: itemID})
 	if err != nil {
 		return ProvenancePage{}, fmt.Errorf("%w: ItemProvenance: %s", ErrInternal, err)
+	}
+	if !scope.Readable(typeName, itemID) {
+		// Read, then dropped: a hidden item has the empty history of a
+		// missing one, after the same query.
+		records = nil
 	}
 	db := a.cfg.DB
 	page := ProvenancePage{Total: len(records), Entries: []ProvenanceEntry{}}

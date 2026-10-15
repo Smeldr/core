@@ -3,6 +3,7 @@ package smeldr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -142,10 +143,81 @@ func (s *sqlAuditStore) List(ctx context.Context, f AuditFilter) ([]AuditRecord,
 	return out, rows.Err()
 }
 
+// auditFilter narrows the records GET /_audit returns to what the caller may
+// read. Nil returns them all.
+type auditFilter func(ctx context.Context, user User, records []AuditRecord) ([]AuditRecord, error)
+
+// filterAuditRecords is the per-item read rule of GET /_audit under
+// governance: an entry is shown only when a record of its type that the caller
+// may read still holds the entry's slug. An entry names its subject by type and
+// slug at the time of the event, not by ID, so an entry whose subject was
+// deleted or has a new slug is not shown to a scoped caller (fail-closed). The
+// public clause of the item surfaces does not apply: an entry carries the
+// actor, which a public page does not show. Without governance, or for a
+// caller that reads everything, the records are returned unchanged.
+func (a *App) filterAuditRecords(ctx context.Context, user User, records []AuditRecord) ([]AuditRecord, error) {
+	if a.governance == nil {
+		return records, nil
+	}
+	scope, err := LoadReadScope(ctx, a.governance, user)
+	if err != nil {
+		return nil, err
+	}
+	if scope.All() {
+		return records, nil
+	}
+	seen := map[[2]string]bool{}
+	kept := records[:0]
+	for _, r := range records {
+		key := [2]string{r.ContentType, r.Slug}
+		readable, ok := seen[key]
+		if !ok {
+			if readable, err = a.auditSubjectReadable(ctx, scope, r.ContentType, r.Slug); err != nil {
+				return nil, err
+			}
+			seen[key] = readable
+		}
+		if readable {
+			kept = append(kept, r)
+		}
+	}
+	return kept, nil
+}
+
+// auditSubjectReadable reports whether scope reads the record of typeName that
+// slug names now, through the same resolvers (and the same miss-continuation)
+// as the item surfaces. An unregistered type, or no readable record, is false;
+// a lookup failure is an error, never a hidden entry.
+func (a *App) auditSubjectReadable(ctx context.Context, scope *ReadScope, typeName, slug string) (bool, error) {
+	desc := a.typeRegistry.Lookup(typeName)
+	if desc == nil {
+		return false, nil
+	}
+	visible := func(id string) bool { return scope.Readable(typeName, id) }
+	var err error
+	if desc.Kind == "content" {
+		repo, rerr := a.DynamicContentRepo(typeName)
+		if rerr != nil {
+			return false, fmt.Errorf("%w: audit: %s", ErrInternal, rerr)
+		}
+		_, err = repo.resolveFor(ctx, slug, func(n *DynamicNode) bool { return visible(n.ID) })
+	} else {
+		_, _, _, _, err = a.lookupCompiledRecord(ctx, typeName, slug, visible)
+	}
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, ErrNotFound):
+		return false, nil
+	}
+	return false, fmt.Errorf("%w: audit: %s", ErrInternal, err)
+}
+
 // newAuditHandler returns the http.Handler mounted at GET /_audit by [App.Audit].
 // Requires Editor or higher role. Accepts optional query params:
-// from, to (RFC3339), type, actor.
-func newAuditHandler(auth AuthFunc, store AuditStore) http.Handler {
+// from, to (RFC3339), type, actor. filter, when not nil, narrows the records
+// to what the caller may read.
+func newAuditHandler(auth AuthFunc, store AuditStore, filter auditFilter) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok {
@@ -184,7 +256,13 @@ func newAuditHandler(auth AuthFunc, store AuditStore) http.Handler {
 			WriteError(w, r, ErrInternal)
 			return
 		}
-		if records == nil {
+		if filter != nil {
+			if records, err = filter(r.Context(), user, records); err != nil {
+				WriteError(w, r, err)
+				return
+			}
+		}
+		if len(records) == 0 {
 			records = []AuditRecord{}
 		}
 		w.Header().Set("Content-Type", "application/json")

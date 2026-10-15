@@ -368,6 +368,8 @@ func New(cfg Config) *App {
 		typeRegistry:  newContentTypeRegistry(),
 	}
 	if cfg.DB != nil {
+		// Known as a handle without governance until App.Governance wires one.
+		registerGovernance(cfg.DB, nil)
 		if err := migrateLegacyTableNames(context.Background(), cfg.DB); err != nil {
 			slog.Warn("smeldr: legacy table migration failed — rename forge_* tables manually", "error", err)
 		}
@@ -891,6 +893,11 @@ type SyncSaveHook func(ctx context.Context, typeName, id string, item any) error
 
 func (a *App) Relations(store *RelationStore) *App {
 	a.relationStore = store
+	if store != nil {
+		// The store's handle follows the App's read rules, whichever of
+		// Relations and Governance is wired first.
+		registerGovernance(store.db, a.governance)
+	}
 	a.schemaStore = NewSchemaStore(a.cfg.DB)
 	if a.cfg.DB != nil {
 		if err := CreateSchemaTable(a.cfg.DB); err != nil {
@@ -1537,7 +1544,7 @@ func (a *App) Handler() http.Handler {
 		if auditAuth == nil {
 			auditAuth = BearerHMAC(string(a.cfg.Secret))
 		}
-		a.mux.Handle("GET /_audit", newAuditHandler(auditAuth, a.auditStore))
+		a.mux.Handle("GET /_audit", newAuditHandler(auditAuth, a.auditStore, a.filterAuditRecords))
 	}
 	if a.logRing != nil && !a.logsHandlerReg {
 		a.logsHandlerReg = true

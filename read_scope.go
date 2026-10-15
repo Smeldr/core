@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -271,4 +273,80 @@ func scopeIDFilter(s *ReadScope, typeName string) func(id string) bool {
 		return nil
 	}
 	return func(id string) bool { return s.Readable(typeName, id) }
+}
+
+// governanceByDB maps a database handle to the RoleStore that [App.Governance]
+// wired on it, or to a nil RoleStore for a handle an App uses without
+// governance, so a package function given only the handle (or a
+// [RelationStore] on it) knows which read rules apply there.
+var governanceByDB sync.Map
+
+// governanceWired is set once any App in the process wires governance. From
+// then on a handle that is not in governanceByDB, with no scope attached,
+// fails closed instead of reading everything.
+var governanceWired atomic.Bool
+
+// registerGovernance records rs as the governance of db, or db as a handle
+// without governance when rs is nil. A governed handle stays governed: a later
+// registration without governance does not undo it. A handle that cannot be a
+// map key is not recorded; under governance its package functions then need an
+// attached scope.
+func registerGovernance(db DB, rs *RoleStore) {
+	if rs != nil {
+		governanceWired.Store(true)
+	}
+	if db == nil || !comparableKey(db) {
+		return
+	}
+	if rs == nil {
+		governanceByDB.LoadOrStore(db, (*RoleStore)(nil))
+		return
+	}
+	governanceByDB.Store(db, rs)
+}
+
+// governanceFor returns the RoleStore wired on db, and whether db was
+// registered at all (a nil RoleStore with known true is a handle without
+// governance).
+func governanceFor(db DB) (rs *RoleStore, known bool) {
+	if db == nil || !comparableKey(db) {
+		return nil, false
+	}
+	v, known := governanceByDB.Load(db)
+	rs, _ = v.(*RoleStore)
+	return rs, known
+}
+
+// comparableKey reports whether v can be used as a map key without a panic.
+func comparableKey(v any) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	_ = map[any]bool{v: true}
+	return true
+}
+
+// packageScope is the read scope a package function on db applies:
+//   - the one attached to ctx;
+//   - else the caller's own under the governance wired on db (no user reads
+//     nothing);
+//   - else everything, when db is a handle an App uses without governance, or
+//     no App in the process wires governance (legacy mode);
+//   - else an [ErrInternal] error: governance is wired in the process, but not
+//     on this handle (a wrapper, a transaction, an adapter), and no scope is
+//     attached. It never reads everything.
+func packageScope(ctx context.Context, db DB) (*ReadScope, error) {
+	if s, ok := ReadScopeFrom(ctx); ok {
+		return s, nil
+	}
+	rs, known := governanceFor(db)
+	switch {
+	case rs != nil:
+		return scopeFor(ctx, rs)
+	case known || !governanceWired.Load():
+		return AllReadScope(), nil
+	}
+	return nil, fmt.Errorf("%w: no read scope attached: governance is wired in this process but not on this database handle; attach the caller's scope with WithReadScope", ErrInternal)
 }

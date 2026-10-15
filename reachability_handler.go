@@ -28,7 +28,9 @@ import (
 // confidence, no item content), a materially lower bar than
 // [App.ContextPacketHandler]'s own Editor requirement — matching
 // [RelationStore.MCPGetRelations]'s own existing Author+ bar for a
-// structurally identical graph read.
+// structurally identical graph read. Under governance it instead requires read
+// access to at least one item of the anchor's type, and the walk holds only
+// what the caller may read (per-item read rules).
 func (a *App) ReachabilityHandler(rs *RelationStore) {
 	auth := a.cfg.Auth
 	if auth == nil {
@@ -40,11 +42,29 @@ func (a *App) ReachabilityHandler(rs *RelationStore) {
 			WriteError(w, r, ErrUnauth)
 			return
 		}
-		if !user.HasRole(Author) {
-			WriteError(w, r, ErrForbidden)
-			return
-		}
 		anchorType := r.PathValue("type")
+		// Without governance, the Author role as before. Under governance the
+		// caller needs read access to at least one item of the anchor's type,
+		// and the walk runs under the caller's own read scope.
+		ctx := r.Context()
+		if a.governance == nil {
+			if !user.HasRole(Author) {
+				WriteError(w, r, ErrForbidden)
+				return
+			}
+			ctx = TrustedRead(ctx)
+		} else {
+			scope, err := LoadReadScope(ctx, a.governance, user)
+			if err != nil {
+				WriteError(w, r, err)
+				return
+			}
+			if !scope.TypeReadable(anchorType) {
+				WriteError(w, r, ErrForbidden)
+				return
+			}
+			ctx = WithReadScope(ctx, scope)
+		}
 		anchorID := r.PathValue("id")
 		kind := r.URL.Query().Get("kind")
 		direction := r.URL.Query().Get("direction")
@@ -60,7 +80,7 @@ func (a *App) ReachabilityHandler(rs *RelationStore) {
 			}
 			depth = v
 		}
-		result, err := rs.Reachability(r.Context(), anchorType, anchorID, kind, direction, depth)
+		result, err := rs.Reachability(ctx, anchorType, anchorID, kind, direction, depth)
 		if err != nil {
 			WriteError(w, r, err)
 			return

@@ -18,7 +18,9 @@ import (
 // walked), and a cap inside a ring reports its cut with the true leftover count.
 func TestPG_ReachabilityBounded(t *testing.T) {
 	db, _ := isolatedDB(t)
-	ctx := context.Background()
+	// A bare store on a handle no App registered: under governance elsewhere in
+	// the process it fails closed, so the test reads as trusted.
+	ctx := smeldr.TrustedRead(context.Background())
 	if err := smeldr.CreateRelationTables(db); err != nil {
 		t.Fatalf("CreateRelationTables: %v", err)
 	}

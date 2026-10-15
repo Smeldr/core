@@ -815,7 +815,7 @@ func (s *ReadScope) TypeReadable(typeName string) bool
 
 **Static patterns are stored as IDs.** `RoleStore.Grant` resolves each `type:item` pattern through the App's resolver (address, slug, ID, then the transitional legacy number) and stores `type:<ID>`, the only form `Authorized` and `ReadScope` match. A wildcard `type:*` is kept, and duplicates collapse. A pattern that is not `type:item`, names an unregistered type, or names no record of its type is refused with a validation error naming it. A RoleStore used without an App stores the patterns as given.
 
-v1.146.0 changed no read surface. Since v1.147.0 the item surfaces apply the scope (below), and the graph surfaces follow in the next release.
+v1.146.0 changed no read surface. Since v1.147.0 the item surfaces apply the scope, and since v1.148.0 the graph surfaces do too (both below). The event stream and webhooks are a later step.
 
 ### Per-item read rules on the item surfaces (A495)
 
@@ -860,6 +860,33 @@ So nothing follows the check. For a caller that cannot read every item, a hidden
 - **The legacy lookup** by an old number (until the D110 cut) treats a hidden record as no match, and its "matches N records" error counts only records the caller may read.
 
 **Stated property: list timing.** A list loads its candidates and then filters, so its duration grows with all rows, hidden ones included. That reveals volume, which addresses already reveal, and it is accepted.
+
+### Per-item read rules on the graph surfaces (A496)
+
+The graph surfaces apply the same rule as the item surfaces: an item the caller may not read is **absent**, and a hidden item answers exactly like a missing one, with the same statements run.
+
+**Which scope a package function applies.** `QueryGoalContext`, `BuildContextPacket`, the `RelationStore` reads and `Reachability` take a database handle, not an App. They apply:
+1. the scope attached to the context (`WithReadScope`, `TrustedRead`);
+2. otherwise the caller's own scope, loaded from the user in the context, under the governance that `App.Governance` wired on that handle. Under governance, no user reads nothing;
+3. otherwise everything, as before, when the handle is one an App uses without governance, or when no App in the process wires governance (legacy mode);
+4. otherwise an `ErrInternal` error saying no read scope was attached. This is a handle that no App registered (a wrapper, a transaction, an adapter, or one that cannot be a map key) in a process where governance is wired. It never reads everything.
+
+An App registers its `Config.DB` when it is created, and the handle of the `RelationStore` given to `App.Relations` with the App's governance, in either wiring order. A governed handle stays governed when another App without governance opens it. For any other handle, attach the caller's scope with `WithReadScope`, or use `TrustedRead` for trusted in-process code.
+
+**The surfaces.**
+- **`BuildContextPacket` and `GET /packet/{type}/{slug}`:** a hidden anchor is not found. An edge whose far end is hidden is left out before anything is fetched, so the item is not in the packet, not counted in `Omitted`, and not walked through at depth 2.
+- **`QueryGoalContext`:** a hidden Goal is not found. Linked Decisions, Tasks and Goals the caller may not read are left out.
+- **`RelationStore.MCPGetRelations` and `MCPPreviewImpact`:** an edge is returned only when the caller may read both ends. A hidden item has no edges, the same as a missing one.
+- **`RelationStore.ListRelations`:** the page and `Total` cover only edges with both ends readable. For a caller that reads everything, the SQL paging is unchanged. For a scoped caller, every matching row is loaded, filtered, then paged and counted in memory, so its cost grows with the matching rows, not the page.
+- **`Reachability`, `ReachabilityBounded` and `GET /reachability/{type}/{id}`:** a hidden node is not placed in a ring, not counted toward the cap or a cut, and not walked through, so no path through it is revealed. A hidden anchor reads as one with no relations.
+- **`App.ItemProvenance`:** a hidden item has the empty history of a missing one (`Total` 0).
+- **`GET /_audit`:** under governance an entry is shown only when a record of its type that the caller may read still holds the entry's slug. An entry names its subject by type and slug at the time of the event, not by ID, so an entry whose subject was deleted or got a new slug is not shown to a scoped caller. The public clause does not apply, because an entry shows the actor. A reader of everything, or an app without governance, sees every entry as before.
+
+**HTTP gates.** Without governance, `/packet` keeps the Editor role, `/reachability` the Author role, and `/_audit` the Editor role. Under governance, `/packet` and `/reachability` instead require read access to at least one item of the anchor's type (403 otherwise), and the result is built under the caller's own scope. `/_audit` keeps the Editor role and filters.
+
+**Trusted primitives.** `GetBySource`, `GetByTarget`, `GetLiveBySource` and `GetLiveByTarget` stay unfiltered: they are what core's own internals use (the relation cascade, the amends checks, and the walks above, which filter on top of them). A request surface never returns their result directly.
+
+**Failures.** A failure to load the scope is `ErrInternal` (500) on every graph surface, never an empty result.
 
 `RoleStore.Grant`'s idempotency key includes `ScopeStatic` (workspace-delegate-region-v1
 §0 F2): granting the same `(token, role, anchor)` pair with a *different*

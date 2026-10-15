@@ -14,7 +14,9 @@ import (
 // TestPG_ListRelations: paging, a kind filter and the as_of cut on Postgres.
 func TestPG_ListRelations(t *testing.T) {
 	db, _ := isolatedDB(t)
-	ctx := context.Background()
+	// A bare store on a handle no App registered: under governance elsewhere in
+	// the process it fails closed, so the test reads as trusted.
+	ctx := smeldr.TrustedRead(context.Background())
 	if err := smeldr.CreateRelationTables(db); err != nil {
 		t.Fatalf("CreateRelationTables: %v", err)
 	}
