@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.146.0] - 2026-10-15
+
 ### Added
 
 - **Adds a per-item read scope, the API the coming per-item read rules will use (A494).** This is step 2 of 5 of design item-eecbbe69. `App.ReadScope(ctx) (*ReadScope, error)` and `LoadReadScope(ctx, rs *RoleStore, user User) (*ReadScope, error)` load what one caller may read once per request. `(*ReadScope).All()`, `Readable(typeName, id)` and `TypeReadable(typeName)` then answer in memory. A nil scope reads nothing. Answers equal `RoleStore.Authorized(token, "read", ...)`: a global grant reads everything (one query), a static grant reads its `type:id` and `type:*` patterns, and a dynamic grant reads the items one live asserted hop from its anchor, not the anchor itself. Without governance, `All()` is `user.HasRole(Author)`, and a user with no ID gets an empty scope. Any load failure returns an `ErrInternal` error and no scope, never a partial one, so callers answer an internal error, never not-found. A dynamic grant loads its anchor's whole item set on every load, so cost grows with the anchor's size (about 2.5 ms with 1,000 items and 55 ms with 50,000 on SQLite). New built-in reader roles with operations exactly `["read"]`: `RegisterScopedReaderRole` (`scoped-reader`, static) and `RegisterDomainReaderRole` (`domain-reader`, dynamic over `belongs_to_domain`, incoming). `example/server` registers both when governance is enabled. No read surface uses the scope yet.
