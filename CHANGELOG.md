@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.147.0] - 2026-10-15
+
 ### Added
 
 - **The read scope can be attached to a request (A495).** `WithReadScope(ctx, s)` attaches a scope so every read in a request uses the one loaded for it; `ReadScopeFrom(ctx)` returns it; a `Context` passed in stays a `Context`. `TrustedRead(ctx)` (with `AllReadScope()`) is the deliberate way for in-process Go code, a job or a test, to read past the per-item rules. Request surfaces never use it.
