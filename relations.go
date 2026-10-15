@@ -120,6 +120,12 @@ type RelationStore struct {
 	webhookStore     *WebhookStore
 	webhookPool      *workerPool
 	eventBroadcaster *eventBroadcaster
+
+	// resolveEnd turns a caller's name for a relation end (address, slug or
+	// ID) into the item's ID under the caller's read rules. [App.Relations]
+	// sets it to [App.ResolveReadableID]; a store used without an App leaves it
+	// nil and stores ends as given.
+	resolveEnd func(ctx context.Context, typeName, ident string) (string, error)
 }
 
 // setProvenanceStore wires store for provenance recording on future edge
@@ -703,8 +709,39 @@ func (s *RelationStore) recordAssertProvenance(ctx context.Context, edge Relatio
 	})
 }
 
+// resolveEnds resolves both ends of a relation write to item IDs (D113 point 3,
+// design/record-shape-v1.md P5): an end that does not exist, that the caller
+// may not read, or whose type is not registered is [ErrNotFound], one answer
+// for all three. A store without an App returns the ends unchanged.
+func (s *RelationStore) resolveEnds(ctx context.Context, sourceType, sourceID, targetType, targetID string) (string, string, error) {
+	if s.resolveEnd == nil {
+		return sourceID, targetID, nil
+	}
+	src, err := s.resolveRelationEnd(ctx, sourceType, sourceID)
+	if err != nil {
+		return "", "", err
+	}
+	tgt, err := s.resolveRelationEnd(ctx, targetType, targetID)
+	if err != nil {
+		return "", "", err
+	}
+	return src, tgt, nil
+}
+
+// resolveRelationEnd resolves one end; an unregistered type reads as a
+// missing end.
+func (s *RelationStore) resolveRelationEnd(ctx context.Context, typeName, ident string) (string, error) {
+	id, err := s.resolveEnd(ctx, typeName, ident)
+	if errors.Is(err, ErrBadRequest) {
+		return "", ErrNotFound
+	}
+	return id, err
+}
+
 // MCPAssertRelation manually asserts a typed edge between two content items.
-// Returns ErrNotFound when relationKind is not registered. The edge is stored
+// Returns ErrNotFound when relationKind is not registered, or, on a store wired
+// with [App.Relations], when either end does not exist or the caller may not
+// read it; each end may be named by address, slug or ID and is stored by ID. The edge is stored
 // with edge_class="asserted" and the populated RelationEdge is returned.
 func (s *RelationStore) MCPAssertRelation(ctx context.Context,
 	sourceType, sourceID, targetType, targetID, relationKind string,
@@ -713,6 +750,10 @@ func (s *RelationStore) MCPAssertRelation(ctx context.Context,
 ) (RelationEdge, error) {
 	if _, ok := s.GetKind(relationKind); !ok {
 		return RelationEdge{}, ErrNotFound
+	}
+	sourceID, targetID, err := s.resolveEnds(ctx, sourceType, sourceID, targetType, targetID)
+	if err != nil {
+		return RelationEdge{}, err
 	}
 	return s.insertEdge(ctx, RelationEdge{
 		SourceType:   sourceType,
@@ -738,6 +779,10 @@ func (s *RelationStore) MCPProposeRelation(ctx context.Context,
 ) (RelationEdge, error) {
 	if _, ok := s.GetKind(relationKind); !ok {
 		return RelationEdge{}, ErrNotFound
+	}
+	sourceID, targetID, err := s.resolveEnds(ctx, sourceType, sourceID, targetType, targetID)
+	if err != nil {
+		return RelationEdge{}, err
 	}
 	return s.insertEdge(ctx, RelationEdge{
 		SourceType:   sourceType,
@@ -769,6 +814,10 @@ func (s *RelationStore) MCPObserveRelation(ctx context.Context,
 ) (RelationEdge, error) {
 	if _, ok := s.GetKind(relationKind); !ok {
 		return RelationEdge{}, ErrNotFound
+	}
+	sourceID, targetID, err := s.resolveEnds(ctx, sourceType, sourceID, targetType, targetID)
+	if err != nil {
+		return RelationEdge{}, err
 	}
 	return s.insertEdge(ctx, RelationEdge{
 		SourceType:   sourceType,

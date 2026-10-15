@@ -897,6 +897,11 @@ func (a *App) Relations(store *RelationStore) *App {
 		// The store's handle follows the App's read rules, whichever of
 		// Relations and Governance is wired first.
 		registerGovernance(store.db, a.governance)
+		// Relation writes need two real ends, read under the caller's rules.
+		// An App not built by New has no type registry to resolve against.
+		if a.typeRegistry != nil {
+			store.resolveEnd = a.ResolveReadableID
+		}
 	}
 	a.schemaStore = NewSchemaStore(a.cfg.DB)
 	if a.cfg.DB != nil {

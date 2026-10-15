@@ -51,6 +51,20 @@ func (ts timeScanner) Scan(src any) error {
 	return fmt.Errorf("smeldr: cannot scan %T into time.Time", src)
 }
 
+// ParseTimestamp reads any stored time value into a UTC [time.Time]: a
+// time.Time, an int64 of Unix seconds, or a string or []byte in RFC3339Nano,
+// RFC3339 or Go's time.Time.String form (what SQLite drivers write for a
+// TIMESTAMPTZ column). A nil value is the zero time. It is the one parser for
+// every form a store holds, so a surface that reads a time column as text can
+// return it as RFC3339 like every other record (D114 point 4).
+func ParseTimestamp(v any) (time.Time, error) {
+	var t time.Time
+	if err := (timeScanner{dst: &t}).Scan(v); err != nil {
+		return time.Time{}, err
+	}
+	return t.UTC(), nil
+}
+
 // nullTimeScanner wraps a **time.Time scan destination — a nullable
 // *time.Time struct field's own address — the case scanDest's *time.Time
 // branch does not match (T210). NULL sets the destination to nil; any

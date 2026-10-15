@@ -1825,6 +1825,8 @@ app.Content(m)
 
 **Creates run in one transaction (D110).** Every create (the compiled MCP create and HTTP POST, dynamic content creates, and Signals) runs its pre-save check and INSERT in one transaction when the database handle supports BeginTx. Events, standing, provenance and the after-save step run only after commit, so nothing is announced for a row that rolled back. Dynamic content creates open one transaction per slug attempt, because Postgres aborts a transaction after a failed INSERT. A database handle without BeginTx runs the same statements without a transaction, as before. A Repository that is not an SQLRepo (MemoryRepo, or your own) is used as is.
 
+`ParseTimestamp(v any) (time.Time, error)` reads any stored time value into a UTC `time.Time` (A505). It accepts a `time.Time`, an `int64` of Unix seconds, or a `string` or `[]byte` in RFC3339Nano, RFC3339 or Go's `time.Time.String` form, which is what SQLite drivers write for a `TIMESTAMPTZ` column. `nil` returns the zero time. It is the one parser for every stored form, so a surface that reads a time column as text can return it as RFC3339, like every other record (D114 point 4). `smeldr.dev/mcp`'s `list_signals` uses it from its next release.
+
 ### Schema migration (T246)
 
 `Create*Table` functions (`CreateSiteConfigTable`, `CreateBlockTables`, etc.) use `CREATE TABLE IF NOT EXISTS` — correct for a fresh install, but a no-op against a table that already exists in an older shape. `EnsureColumn` adds one column to an existing table when it is absent:
@@ -5607,6 +5609,40 @@ page, err := rs.ListRelations(ctx, smeldr.RelationListOptions{
 - **IDs:** `SourceID` and `TargetID` are returned as stored. Every edge core writes uses the item's `Node.ID`, the `ID` the item list tools return, so an edge joins to an item on (type, `ID`) with no mapping. A context packet's canonical id is a different form. Type names are the registered names (`Decision`, `task_plan`), never folded. An edge asserted with a slug or a wrong type string is returned as stored until the structural sweep ends it.
 - **Errors:** a negative `Limit` or `Offset` is a `ValidationError`. A missing relations table gives an empty page. Any other failure is `ErrInternal`.
 - MCP: `list_relations` (Author, operation `read`). CLI: `smeldr-cli relation list [--all]`.
+
+### Relations need two real ends (A505, D113)
+
+A relation is stored only between two real, readable ends. On a store wired with `App.Relations`, `MCPAssertRelation`, `MCPProposeRelation` and `MCPObserveRelation` check both ends under the caller's read rules before they write. A store used without an App, and core's own Go `RelationStore.Assert`, are unchanged.
+
+An end may be given by address, slug or ID. It is stored by its ID, so an edge given by slug never becomes a dead edge that the structural sweep later invalidates.
+
+The checks run in this order:
+
+1. The relation kind. An unknown kind returns `ErrNotFound` before any end is looked up.
+2. The source end.
+3. The target end.
+4. The kind's type pairs. A type-pair violation between two real ends is still the `type_pairs` validation error.
+
+If the caller's read scope cannot be loaded, the answer is `ErrInternal` and nothing is written.
+
+Ends resolve with `App.ResolveReadableID`: address, slug, ID, then the transitional legacy number. A hidden item and a missing item run the same statements, so the two cannot be told apart. The read rule has no public web-content clause, so a scoped caller cannot relate to published web content it holds no grant for. The rule fails toward less access.
+
+| Answer | When |
+|---|---|
+| the edge, stored by IDs | both ends exist and are readable |
+| `ErrNotFound` | the kind is unknown, or an end is missing, unreadable, or of an unregistered type |
+| validation error `type_pairs` | both ends are real, but the kind does not allow that pair |
+| `ErrInternal` | the caller's read scope could not be loaded |
+
+Over MCP, `assert_relation`, `propose_relation` and `observe_relation` to a missing end answer not found.
+
+### Fields per type (A505, D114)
+
+Seven types do not emit `PublishedAt` and `ScheduledAt` in JSON: `Goal`, `Signal`, `Task`, `Decision`, `Amendment`, `Rule` and `AuthorityStub`. Their state flows have no published or scheduled state, so the fields could never be set. This covers MCP get and list, HTTP JSON, webhook bodies and create results.
+
+`Run` keeps both fields, because it has no flow and they can be set. Every web content type keeps them too. Decoding is unchanged: JSON that still carries the two keys decodes. The Go fields stay on `Node`.
+
+Each of the seven types has a `MarshalJSON` that shadows the two fields. A test fails when a compiled type registered by `RegisterOrchestrationTypes` or `RegisterAuthorityTypes` is not classified, and checks that the fields are dropped exactly when the type's flow has neither a published nor a scheduled state.
 
 ### `RegisterReferenceType`
 

@@ -21,6 +21,15 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Added
+
+- **`ParseTimestamp`, one parser for every stored time value (A505).** `ParseTimestamp(v any) (time.Time, error)` reads any stored time value into a UTC `time.Time`. It accepts a `time.Time`, an `int64` of Unix seconds, or a `string` or `[]byte` in RFC3339Nano, RFC3339 or Go's `time.Time.String` form, which is what SQLite drivers write for a `TIMESTAMPTZ` column. `nil` gives the zero time. It is the one parser for every stored form, so a surface that reads a time column as text can return it as RFC3339, like every other record (D114 point 4). `smeldr.dev/mcp`'s `list_signals` uses it from its next release.
+
+### Changed
+
+- **Relations need two real ends (A505).** On a store wired with `App.Relations`, `RelationStore.MCPAssertRelation`, `MCPProposeRelation` and `MCPObserveRelation` resolve both ends under the caller's read rules before they write. An end that does not exist, that the caller may not read, or whose type is not registered returns `ErrNotFound`, the same answer for all three. Each end may be given by address, slug or ID, and the edge is stored by ID, so an edge given by slug no longer becomes a dead edge that the structural sweep later invalidates. A scoped caller cannot relate to published web content it holds no read grant for. This is a behaviour change under D97 and D113 point 3. A store used without an App, and core's own Go `RelationStore.Assert`, are unchanged. Over MCP, `assert_relation`, `propose_relation` and `observe_relation` to a missing end now answer not found.
+- **Goal, Signal, Task, Decision, Amendment, Rule and AuthorityStub no longer emit `PublishedAt` and `ScheduledAt` (A505).** These types have no published or scheduled state in their flows, so the fields could never be set. The fields are dropped from JSON in MCP get and list, HTTP JSON, webhook bodies and create results (D97, D114 point 2). `Run` keeps both fields, because it has no flow and they can be set. So does every web content type. Decoding is unchanged: JSON that still carries the two keys decodes. The Go fields stay on `Node`. Consumers in mcp, cli, cloud, orchestration, runner, agent and site-dev were checked, and none reads the two fields on these types.
+
 ---
 
 ## [1.152.0] - 2026-10-15
