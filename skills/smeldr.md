@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.153.0 · smeldr.dev/mcp v1.61.3 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.26.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.154.0 · smeldr.dev/mcp v1.61.3 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.26.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -745,6 +745,7 @@ Config: `SMELDR_URL`, `SMELDR_TOKEN`, `SMELDR_MCP_URL` (or `.smeldr-cli.env`; le
 - **Windows MIME** — add `mime.AddExtensionType(".webp", "image/webp")` in main()
 - **Docker volume** — forge_media volume at /app/media; COPY in Dockerfile seeds it on first run
 - **Archived ≠ Draft** — preview tokens bypass Draft/Scheduled only, never Archived
+- **A draft reserves no URL** (core v1.154.0, A507) — drafts of web content may share a slug; publish/schedule refuses a URL another item already published (409 naming a free one, e.g. `/posts/about-2`); an unpublished item may change its `slug`; a slug naming several readable items is 409 "use its ID". Bind a preview to one item with `App.GeneratePreviewTokenForID`. A compiled table should use `slug TEXT NOT NULL` plus `EnsurePublishedSlugIndex`, not a column `UNIQUE`
 - **Timezone database** — `time.LoadLocation` fails on servers without OS tzdata (Alpine, scratch). forge-social embeds `time/tzdata` since v0.4.1 — ensure you are on v0.4.1 or later
 - **X body limit** — X posts are capped at 280 characters. Exceeding the limit returns a terminal `publishError` — the post will never be retried. Truncate before calling `create_scheduled_post` with `platform=x`
 - **Go stdlib CVEs turn CI red on an unrelated commit** — the vuln DB updates independent of any push; `govulncheck` starts failing on whatever commit happens to run next, time-triggered not commit-triggered. Fix is a `toolchain goX.Y.Z` line in `go.mod` (not a `go` line bump — a stdlib patch changes nothing about what the language or a caller needs, only which binary compiles the code; see A259), applied to every repo on the affected Go version, not just the ones with a `govulncheck` CI step — a repo without the step has the same exposure, only less visibility
