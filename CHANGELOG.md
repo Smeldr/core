@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.148.1] - 2026-10-15
+
 ### Fixed
 
 - **Stewardship grants can be created again on an App with governance (A497).** Since v1.146.0 (A494), `RoleStore.Grant` on an App with governance refused the stewardship pattern `RuleType:<name>` with "names a type that is not registered", because `RuleType` is a synthetic type that names a rule-type domain, not a record. So no new stewardship grant could be made, through `grant_role` or from Go. Synthetic types are now listed in one place, and `Grant` keeps their patterns as given, without resolving them. `RuleType` is the only one today. Record patterns next to it are still resolved to IDs. `RoleStore.Authorized`, `ReadScope` and `StewardedRuleTypes` match the stored pattern as before. No exported symbol changes.
