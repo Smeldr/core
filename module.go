@@ -1456,10 +1456,21 @@ func cacheKey(r *http.Request) string {
 	return r.Method + " " + r.URL.RequestURI() + " " + r.Header.Get("Accept")
 }
 
+// cacheable reports whether the response to r may be read from and stored in
+// the module cache: only the anonymous public view is cached. A caller with an
+// identity or a role may see drafts (and, with per-item read rules, a view of
+// its own), and a preview response is a draft, so neither is ever cached. It
+// reads the context only, with no query.
+func cacheable(ctx Context, r *http.Request) bool {
+	u := ctx.User()
+	return u.ID == "" && len(u.Roles) == 0 && !r.URL.Query().Has("preview")
+}
+
 // serveCached returns true if the response was served from the module cache.
-// Sets X-Cache: HIT and writes the cached response to w.
+// Sets X-Cache: HIT and writes the cached response to w. A request that is not
+// [cacheable] is never served from the cache.
 func (m *Module[T]) serveCached(w http.ResponseWriter, r *http.Request) bool {
-	if m.cache == nil {
+	if m.cache == nil || !cacheable(ContextFrom(w, r), r) {
 		return false
 	}
 	key := cacheKey(r)
@@ -1482,7 +1493,7 @@ func (m *Module[T]) serveCached(w http.ResponseWriter, r *http.Request) bool {
 
 // storeCache stores a captured response in the module cache if status is 200.
 func (m *Module[T]) storeCache(r *http.Request, rec *cacheRecorder) {
-	if m.cache == nil || rec.status != http.StatusOK {
+	if m.cache == nil || rec.status != http.StatusOK || !storableResponse(rec.ResponseWriter.Header()) {
 		return
 	}
 	h := make(http.Header)
@@ -1590,6 +1601,11 @@ func writeContent(w http.ResponseWriter, r *http.Request, ct string, v any) {
 // writeContentCached writes a negotiated response through a cacheRecorder if
 // caching is enabled, then stores the response in the module cache on 200.
 func (m *Module[T]) writeContentCached(w http.ResponseWriter, r *http.Request, ct string, v any) {
+	if m.cache != nil && !cacheable(ContextFrom(w, r), r) {
+		w.Header().Set("X-Cache", "BYPASS")
+		writeContent(w, r, ct, v)
+		return
+	}
 	if m.cache != nil {
 		w.Header().Set("X-Cache", "MISS")
 		rec := newCacheRecorder(w)

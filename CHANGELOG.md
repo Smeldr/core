@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Fixed
+
+- **Module and middleware response caches no longer serve identity-scoped responses to other callers (A493).** The module response cache (`Cache(ttl)`) and the `InMemoryCache` middleware keyed responses by method, URL and `Accept` only, with no identity, and the module cache was consulted before the visibility check. A list rendered with drafts for an Author or Editor, a draft shown to a reader with draft rights, or a `?preview=` response could be stored and served to the next anonymous caller on the same URL until the entry expired, and the middleware could replay any authenticated GET, such as `/_content` admin routes, to anyone. The module cache now serves and stores only the guest's view. A caller with an identity or any role, and any request with a `preview` query parameter, bypasses it and gets `X-Cache: BYPASS`. The check reads the request context only and costs no query. `InMemoryCache` cannot see the user, so it bypasses any request with an `Authorization` header, any cookie, or a `preview` parameter (`X-Cache: BYPASS`), and it never stores a response that sets a cookie or whose `Cache-Control` contains `private` or `no-store`. Anonymous requests without cookies are cached as before. No exported symbol changes. First step of the per-item read rules.
+
 ---
 
 ## [1.145.0] - 2026-10-12

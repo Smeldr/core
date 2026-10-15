@@ -488,6 +488,31 @@ func (cr *cacheRecorder) Write(b []byte) (int, error) {
 	return cr.ResponseWriter.Write(b)
 }
 
+// anonymousRequest reports whether r carries no credential the cache middleware
+// must respect: no Authorization header, no cookie and no preview token.
+func anonymousRequest(r *http.Request) bool {
+	return r.Header.Get("Authorization") == "" && r.Header.Get("Cookie") == "" &&
+		!r.URL.Query().Has("preview")
+}
+
+// storableResponse reports whether a response with header h may be cached: a
+// response that sets a cookie, or whose Cache-Control says private or
+// no-store, is personal to its caller and is never stored.
+func storableResponse(h http.Header) bool {
+	if len(h.Values("Set-Cookie")) > 0 {
+		return false
+	}
+	for _, v := range h.Values("Cache-Control") {
+		for _, d := range strings.Split(v, ",") {
+			switch strings.ToLower(strings.TrimSpace(d)) {
+			case "private", "no-store":
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // NewInMemoryCache returns a GET-response caching middleware and a stop function.
 // The stop function terminates the background sweep goroutine; call it in tests
 // via defer or t.Cleanup to avoid goroutine leaks. stop is idempotent.
@@ -527,6 +552,15 @@ func NewInMemoryCache(ttl time.Duration, opts ...Option) (func(http.Handler) htt
 				next.ServeHTTP(w, r)
 				return
 			}
+			// Only anonymous requests are cached. The middleware may run outside
+			// Authenticate and cannot see the user, so any credential the request
+			// could carry bypasses the cache: an Authorization header, any cookie
+			// (a session cookie's name is the app's choice), or a preview token.
+			if !anonymousRequest(r) {
+				w.Header().Set("X-Cache", "BYPASS")
+				next.ServeHTTP(w, r)
+				return
+			}
 
 			key := r.Method + " " + r.URL.RequestURI() + " " + r.Header.Get("Accept")
 
@@ -550,7 +584,7 @@ func NewInMemoryCache(ttl time.Duration, opts ...Option) (func(http.Handler) htt
 			rec := newCacheRecorder(w)
 			next.ServeHTTP(rec, r)
 
-			if rec.status == http.StatusOK {
+			if rec.status == http.StatusOK && storableResponse(rec.ResponseWriter.Header()) {
 				// Snapshot headers at response time (after handler set them).
 				h := make(http.Header)
 				for k, v := range rec.ResponseWriter.Header() {
@@ -575,7 +609,13 @@ func NewInMemoryCache(ttl time.Duration, opts ...Option) (func(http.Handler) htt
 // InMemoryCache returns middleware that caches successful GET responses in an
 // LRU cache. Responses are keyed by method + full URL (including query
 // parameters) + Accept header. Every response receives an X-Cache header
-// (HIT or MISS).
+// (HIT, MISS or BYPASS).
+//
+// Only anonymous requests are cached: a request with an Authorization header,
+// any cookie, or a preview query parameter is neither served from nor stored in
+// the cache (X-Cache: BYPASS), because the middleware cannot see the user. A
+// response that sets a cookie, or whose Cache-Control says private or no-store,
+// is never stored.
 //
 // Default capacity is 1000 entries. Use [CacheMaxEntries] to override.
 // The background sweep goroutine runs for the lifetime of the process.

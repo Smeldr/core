@@ -1583,6 +1583,11 @@ app.Content(&BlogPost{},
 )
 ```
 
+**Only anonymous responses are cached (A493).**
+- **`InMemoryCache`** cannot see the user, so it bypasses any request that carries an `Authorization` header, any cookie, or a `preview` query parameter (`X-Cache: BYPASS`). It never stores a response that sets a cookie or whose `Cache-Control` says `private` or `no-store`.
+- **The module cache, `Cache(ttl)`**, serves and stores only the guest's view: a caller with an identity or a role, and a preview response, get `X-Cache: BYPASS`.
+- Before core v1.145.1, an authenticated or draft response could be stored and served to the next anonymous caller on the same URL.
+
 ### Writing middleware
 
 Standard `http.Handler` wrapping — no Smeldr-specific types required:
