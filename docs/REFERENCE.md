@@ -4243,7 +4243,12 @@ automatically by `New(app)` in `smeldr.dev/mcp`).
 
 Send `resources/subscribe` with `{"uri": "smeldr://posts/my-slug"}` to receive
 `notifications/resources/updated` events over the SSE connection when that
-resource changes. A status change notifies on every path, `transition_item`
+resource changes. Post it to the message URL the `GET /mcp` stream announced
+(`/mcp/message?session_id=<id>`): the subscription belongs to that session.
+Before smeldr.dev/mcp v1.61.2 (A504) a subscribe over HTTP registered
+nothing while answering `{}`. Notifications are not yet filtered by the
+subscriber's read rules (core Task `core-subscriptions-and-stream-read-rules`).
+A status change notifies on every path, `transition_item`
 included (v1.137.0; core's `AfterTransition`, D107): one
 notification for a move between custom states, and one per status event as
 well for a move into or out of `published`, `archived` or `scheduled`.
