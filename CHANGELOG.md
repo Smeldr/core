@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.154.0] - 2026-10-16
+
 ### Added
 
 - **`App.GeneratePreviewTokenForID(prefix, slug, id)` (A507).** The preview token is bound to one item as well as its prefix and slug. It opens that draft or scheduled item even when other drafts share its slug. The URL stays `/prefix/slug?preview=token`. `GeneratePreviewToken(prefix, slug)` still works: it opens a draft only while the slug names exactly one draft or scheduled item.
