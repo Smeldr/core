@@ -31,7 +31,7 @@ Task pipeline and session-start query lives there now, not here.
    protocol's Task pipeline (below): write no code until the architect transitions
    `plan-reviewing → implementing`, but a claim is not a stopping point. Steps 2–7 are
    the reading that builds the plan, and planning continues in the same turn as the
-   claim, through to the submitted `task_plan` record and the `plan-ready` signal.
+   claim, through to the submitted `task_plan` record and the Task in `plan-reviewing`.
 2. Read `DECISIONS.md` — index table only. Body text lives in `decisions/core.md`
    (D1–D22, A19–A65, A88–A95), `decisions/recent.md` (frozen at D67/A304 —
    no Decision/Amendment content after that point; anything newer is live
@@ -161,7 +161,7 @@ behaviour changed" — not "no exported symbol changed."
 **Level 2 — standard amendment or milestone step** (full cycle)
 Requires architect involvement, a live Decision or Amendment record with
 `body` fully populated (see "Recording a new Decision or Amendment" above),
-docs/ARCHITECTURE.md check, and the architect's `commit-approved` before commit.
+docs/ARCHITECTURE.md check, and the architect's approval of the commit before merge.
 Criteria: touches an exported Go symbol, interface, or function signature;
 affects a route or middleware behaviour; has consequences in more than one file.
 
@@ -288,7 +288,7 @@ analysis, and decisions.
 
 **Mark eligible tasks `[Haiku]` in the plan before implementation starts.**
 All `[Haiku]`-marked deliverables must be completed by a Haiku sub-agent and
-reviewed before `commit-ready` is sent. Writing them inline as Sonnet is a
+reviewed before the commit review is requested. Writing them inline as Sonnet is a
 protocol violation.
 
 ### Eligible for Haiku delegation
@@ -366,7 +366,8 @@ Every step — without exception — follows this exact sequence:
   command (`Get-Content`, `Select-String`, `Get-ChildItem`, `git diff`, `git log`,
   `git status`). Just run them. Do not narrate the process. Only surface results
   when they are unexpected (build failure, test failure, format diff). Commits
-  are the only action that requires the architect's `commit-approved` signal.**
+  are the only action that requires the architect's approval (the answer to your
+  `review-requested` request).**
 - Read any file in the workspace automatically — no permission needed.
   Use PowerShell (`Get-Content`, `Select-String`, etc.) or the read_file tool
   to read `DECISIONS.md`, `docs/ARCHITECTURE.md`,
@@ -440,7 +441,7 @@ done.
 - After verification passes, review `docs/ARCHITECTURE.md` and `DECISIONS.md`.
 - Ask: does this implementation reveal a gap, ambiguity, or conflict?
 - If yes: draft a new Decision or Amendment and put it to the architect (in the plan,
-  the commit-ready, or a Signal) rather than deciding it yourself; a Decision is
+  the commit review request, or a `question`) rather than deciding it yourself; a Decision is
   proposed live and ratified by Peter.
 - Check this step's implementation against all previously implemented files: does it
   duplicate logic, diverge from an established pattern, or require a change to another
@@ -556,8 +557,10 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
 
 "No changes needed" is only valid after explicitly reading each file and confirming it already reflects the shipped code. Never assume.
 
-After the gate is clear, put the commit message in the `commit-ready` signal and
-transition the Task `implementing → commit-reviewing`.
+After the gate is clear, put the proposed commit message in the `task_plan` body,
+transition the Task `implementing → commit-reviewing`, and open a `review-requested`
+Signal to architect naming the branch and the commit (embedded protocol, "Plan →
+approval → implementation → commit", step 5).
 
 - Commits require the architect's written approval in the `task_plan` record (see the
   embedded protocol's Task pipeline) — never committed on `commit-reviewing`
@@ -608,7 +611,7 @@ current codebase and recent amendments:
 4. `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md` — does the version line match current versions?
    Are all MCP tools and CLI commands listed? Read it with the Read tool.
 
-Report any staleness findings, in a Signal to the architect or in the commit-ready;
+Report any staleness findings, in the Task's plan or in the commit review request;
 do not stop for them, and do not silently skip this check.
 
 ### Docs and content task workflow
@@ -617,7 +620,7 @@ Every docs or content task follows this sequence:
 
 **1. State the commit scope**
 State what the commit will cover in one sentence, in the Task's plan (or in the
-commit-ready for a no-plan Task). The Task itself is the go: no separate wait.
+commit review request for a no-plan Task). The Task itself is the go: no separate wait.
 
 **2. Repo doc review**
 Read docs/REFERENCE.md, README.md, and docs/FEATURELIST.md.
@@ -684,7 +687,8 @@ These files are for sitepilot to pick up — do not commit them to the core repo
 
 **9. Propose commit message**
 Propose a conventional commit message covering all repo doc changes (steps 2–3) in
-the commit-ready signal. The architect's `commit-approved` is the approval.
+the plan body or the commit review request. The architect's answer to that request,
+naming the commit, is the approval.
 
 **10. After commit**
 Nothing to delete: plans are `task_plan` records (D81), kept as the historical record.
@@ -733,7 +737,8 @@ than one file, it gets a branch, not a judgment call made per instance. Commits 
 the branch are free checkpoints; the branch is never pushed to GitHub unless asked.
 
 **One rule for commit approval:** the architect's written approval in the `task_plan`
-record (or, for a no-plan Task, the `commit-approved` Signal) means squash the branch
+record (or, for a no-plan Task, the answer to the `review-requested` request that
+approves that exact commit) means squash the branch
 to `main` and push now, then close the Task. There is no "commit on the branch only"
 step after approval, and no separate push instruction. Squash after bringing the
 branch up to date, never by soft-resetting onto a `main` that has moved (that stages a
@@ -918,14 +923,14 @@ embedded protocol below is the process.
 
 What was stated here and still holds is kept where it applies: every plan ends with a
 verification block and an architecture and decision review (see "Standard step
-workflow", step 4), and every commit waits for the architect's `commit-approved`.
+workflow", step 4), and every commit waits for the architect's approval of it.
 `Milestone_BACKLOG_TEMPLATE.md` stays as history and is never removed.
 
 ---
 
 # Smeldr Agent Protocol
 
-<!-- common-template-version: 2026-10-16d -->
+<!-- common-template-version: 2026-10-16e -->
 <!-- source: smeldr/architect/AGENT_PROTOCOL.md (canonical) -->
 
 **This file is the canonical common template of D77.** Every role (core, site, cloud,
@@ -1049,13 +1054,12 @@ itself arrives.
    and right before ending a session are the same rule.
 
    **A claim is not a stopping point (2026-10-06).** `priority=0` authorizes the whole
-   run from claim to `plan-ready`, in the same turn and without asking Peter: claim
+   run from claim to a submitted plan, in the same turn and without asking Peter: claim
    (`backlog → active`), move to `waiting-plan`, read the code, write the `task_plan`,
-   submit it, move to `plan-reviewing`, send `plan-ready`. Do not end your turn after the
-   claim to report or to ask for a go; the Task is the go. The only places you stop and
-   wait are:
-   - **architect's review:** after `plan-ready` (until the plan is approved) and after
-     `commit-ready` (until the commit is approved);
+   submit it, move to `plan-reviewing`. Do not end your turn after the claim to report or
+   to ask for a go; the Task is the go. The only places you stop and wait are:
+   - **architect's review:** after the plan is submitted (until it is approved) and after
+     the commit review request (until it is answered);
    - **Peter's own yes:** a release tag, a deploy, or a production, server, DNS or
      credential action, given in your session. A written release plan that Peter approves
      in your session, naming a file and its commit (first: `design/release-preapproval-v1.md`,
@@ -1086,12 +1090,12 @@ itself arrives.
 
    **A no-plan Task that still ends in a commit** (a Task whose description says "no plan
    needed", such as a mechanical protocol re-sync) keeps the commit review but skips the
-   plan. It stays `active` throughout: commit on a feature branch, send `commit-ready`
-   (`receiver: "architect"`), and wait for `commit-approved`. Only then merge, push, and
-   close `active → done` with a reason that cites the approval. Never push to main before
-   `commit-approved`, and never create a pro-forma `task_plan` just to reach
-   `commit-reviewing`. While the Task waits, its state does not show that it is under
-   review; the `commit-ready` Signal is the only marker.
+   plan. It stays `active` throughout: commit on a feature branch, open a commit review
+   request (step 5 of "Plan → approval → implementation → commit"), and wait for
+   architect's answer. Only on an answer that approves that exact commit: merge, push, and
+   close `active → done` with a reason that cites the request (its `S` address). Never push
+   to main before that, and never create a pro-forma `task_plan` just to reach
+   `commit-reviewing`.
 
    Iteration happens **inside** a phase (plan-feedback and commit-feedback rounds in the
    `task_plan` record's `body`, Task stays in its reviewing state), not by moving
@@ -1099,33 +1103,31 @@ itself arrives.
    before doing any plan-grounding work** — reading the Task's own description and
    `NoteRef` to decide whether to claim it is fine before claiming; reading source code,
    tracing implementations, or anything else that is actually plan-building happens after.
-3. **The `task_plan` record is the durable record; a `Signal` is only the fast-path
-   wake-up, never the only path to the answer (D81, 2026-09-25 — same discipline as the
-   old file mechanism, only the storage moved).** A plain `update_content` edit to a
-   `task_plan`'s `body` fires no `transition_item`-driven event by itself, and
-   (independent of that) `task.transitioned` itself is band-routed, so the direction an
-   implementer reads (`plan-reviewing → implementing`) reaches them but the direction
-   architect needs to read (`waiting-plan → plan-reviewing`, `implementing →
-   commit-reviewing`, `commit-reviewing → done`) does not reach architect. Fix, both
-   directions:
-   - **Architect**, editing a `task_plan`'s `body` with plan/commit feedback without an
-     accompanying `transition_item` call, sends a `Signal` in the same action:
-     `plan-feedback` (stays `plan-reviewing`), `commit-approved` (stays
-     `commit-reviewing`), or `commit-feedback` (stays `commit-reviewing`).
-   - **Implementer**, correcting a `task_plan`'s `body` in response to feedback without a
-     `transition_item` call, sends `plan-resubmitted` (`receiver: "architect"`) in the
-     same action; and sends a `Signal` (`receiver: "architect"`, reusing `plan-ready`/
-     `commit-ready`/`task-closed` as `signal_type`) at every transition architect has no
-     other way to see: `waiting-plan → plan-reviewing`, `implementing →
-     commit-reviewing`, `commit-reviewing → done`.
-   - **Regardless of whether a `Signal` arrives**: at session start or resume, for any
-     Task you hold in `plan-reviewing` or `commit-reviewing`, re-read the linked
-     `task_plan` record's current `body` unconditionally (`get_content(type_name:
-     "task_plan", slug: <the record's slug>)`) — do not treat "I'm nominally waiting on
-     the other side" as a reason to skip the check. Secondary check: `list_signals` for
-     your own band's `pending` entries.
-   - (Full incident history behind this rule, from the old file-based mechanism: `<details>`
-     below — the same discipline, D81 changed only where the content lives.)
+3. **The `task_plan` record is the durable record; the event stream is only the wake-up
+   (D81, D116).** Since 2026-10-16e every watcher listens on its token's subscriptions
+   (see "The live event stream"), and they deliver the work cycle's moves directly:
+   - to architect: a `task_plan` moving to `submitted`, a Task moving to `plan-reviewing`
+     or `commit-reviewing`, a Task moving to `done`, `blocked` or `resolved`, a Task
+     created at priority 0, every Signal addressed to architect;
+   - to a role: every Task in its band (created, updated, transitioned), its band's
+     `task_plan`s moving to `approved` or `changes_requested`, every Signal addressed to
+     it, and the answers to its own requests.
+
+   So nobody sends a Signal just to say that a state changed: no `plan-ready`,
+   `plan-resubmitted` or `task-closed` to architect. A plain `update_content` edit to a
+   `task_plan`'s `body` is not an event anyone subscribes to, so a body edit is made
+   visible by a transition or a request: architect's plan answers come with `approved` or
+   `changes_requested`; a commit review is a request (step 5 of "Plan → approval →
+   implementation → commit").
+   - **Regardless of what the stream delivers**: at session start or resume, for any Task
+     you hold in `plan-reviewing` or `commit-reviewing`, re-read the linked `task_plan`
+     record's current `body` (`get_content(type_name: "task_plan", slug: <the record's
+     slug>)`), and your own open requests (`list_signals(sender: <you>)`).
+   - **During the switch**: architect still sends `plan-approved` and `plan-feedback` to
+     roles until every role's watcher is on subscriptions; a role that has switched
+     closes them like any history Signal.
+   - (Full incident history behind this rule, from the old file-based mechanism and the
+     doorbell era: `<details>` below.)
 4. **Approvals live in the `task_plan` record's `body`** (architect answers there,
    always) — a transition's `Reason` cites the approval, it never *is* the authority.
    Peter's own yeses (releases, deploys, ratifications) stay in chat, as ever.
@@ -1245,8 +1247,25 @@ event can arrive twice around a resume, so skip one whose id equals the saved on
 missed: print it, then catch up by hand (pending and open Signals, priority 0 backlog). A
 400 on `?after=` means the saved id is bad: drop it and connect without one.
 `smeldr/architect/scripts/watch-events.ps1` does all of this (cursor file under
-`%LOCALAPPDATA%\smeldr\`); copy its resume part into your own watcher, keeping your own
-`?channel=` value and a cursor file name of your own.
+`%LOCALAPPDATA%\smeldr\`); copy its resume part into your own watcher, with a cursor file
+name of your own.
+
+**Connect without `?channel=` (D116, 2026-10-16e).** A connection with no `?channel=`
+delivers the token's subscriptions: the three defaults every token has (requests
+addressed to me, conditions I can resolve, outcomes of my requests) plus the role
+subscriptions seeded for it (see rule 3 of "The live instance"). That is the watcher's
+URL now: `https://process.smeldr.dev/_events/stream`, with `?after=<id>` when a cursor is
+saved. `list_subscriptions` shows yours. Do not add `?channel=` back: with it the
+connection gets channel routing instead and misses Task transitions and request answers.
+Only a bridge that wants everything (the Discord relay) uses `?channel=all`.
+
+**One watcher per cursor file.** After a restart of the desktop app, the watcher started
+by the old session keeps running: the harness that would have stopped it at 30 minutes is
+gone, so it never expires. Two watchers on one cursor file collide (seen 2026-10-16 on
+architect, devops and core). After any restart, list the watcher processes for your own
+project (`Get-CimInstance Win32_Process -Filter "Name='powershell.exe'"`, match the
+command line) and stop the one your current Monitor does not track, by PID, before arming
+a new one.
 
 **Cloud sessions — use `scripts/watch-events-cloud.sh`, added 2026-09-25 (`2026-09-25b`)
 during architect's own first live cloud pilot, not `watch-events.ps1`/`.sh`.** Neither
@@ -1327,16 +1346,14 @@ exception and still broadcast to every channel.
   `amendments`, `relations`), never on a role channel. A role session on
   `?channel=<band>` is not woken by them; a `?channel=all` or `?channel=<topic>`
   subscriber gets them. `signal.created` still arrives on the receiver's channel. Query
-  `list_amendments` or `list_signals` when you need that state. One consequence today:
-  the answer to your own `question` does not wake a `?channel=<band>` watcher. While you
-  wait on one, re-read it (`get_signal`) whenever you resume; subscriptions will deliver
-  it once the watchers move to them (the second step of the D116 switch).
+  `list_amendments` or `list_signals` when you need that state. This channel routing is
+  what a `?channel=` connection gets; a watcher on subscriptions gets the answers to its
+  own requests through "outcomes of my requests" instead.
 
-Subscriptions (D116, core v1.162.0, live since 2026-10-16) are how a token asks for
-exactly the events it wants; every role token has its role subscriptions seeded. A
-connection with `?channel=` keeps the channel routing above, so the watchers are not on
-subscriptions yet; that move is the second step of the switch and this file will say
-when. Webhooks are delivered as subscriptions too.
+Subscriptions (D116, core v1.162.0, on since 2026-10-16 with `ENABLE_SUBSCRIPTIONS`) are
+how a token asks for exactly the events it wants; every role token has its role
+subscriptions seeded, and watchers connect on them (see "Connect without `?channel=`"
+above). Webhooks are delivered as subscriptions too.
 `task.created`/`task.updated` means an item now exists in or changed within the backlog,
 nothing more — it is not a start signal, do not claim and start work the moment one
 arrives. `task.transitioned` is relevant only when it concerns a Task you are already
@@ -1441,7 +1458,7 @@ Every task that ships code or a durable artifact follows this sequence.
 publishing posts, devlogs, Solved stories, docs) use a lighter, already-working cycle
 instead: present the exact content in chat — title, body, every field, complete, not a
 summary — wait for Peter's explicit approval, only then call the MCP tool that publishes
-it. No `task_plan` record, no `plan-ready`/`commit-ready` signal pair — there is no code and no
+it. No `task_plan` record, no commit review request — there is no code and no
 diff to review, the content itself, read in full, already is the review artifact. A code
 example or technical claim in a devlog/docs draft must be verified against actually-
 shipped source before it's even shown to Peter, not written from memory. This exception
@@ -1457,25 +1474,34 @@ For every other case:
    lines, at most 300 characters. Do not write any code yet.
    Leave the record in `draft` while composing; edit freely via `update_content` before
    submitting.
-2. **`transition_item` the `task_plan` to `submitted`, then signal `plan-ready`** (name
-   the `task_plan`'s `task_ref`/slug in the notes). Wait for a response — do not end your
-   turn assuming approval.
+2. **`transition_item` the `task_plan` to `submitted`, and the Task to `plan-reviewing`.**
+   Architect's subscriptions deliver both; no `plan-ready` Signal. Wait for a response; do
+   not end your turn assuming approval.
 3. **Architect responds by editing the same `task_plan` record's `body`** via
    `update_content` (never in a new `NEXT.md`, never a separate record) and either
-   `transition_item`s it to `changes_requested` plus signals `plan-feedback`, or
-   `transition_item`s it to `approved` plus signals `approved-start`.
+   `transition_item`s it to `changes_requested`, or to `approved` and the Task to
+   `implementing`. Your subscriptions deliver those moves. To answer feedback, correct the
+   body and move the plan back to `submitted`.
 4. **Implement**, following your own repo's domain rules. Read-only commands (build, vet,
-   test, format, git status/diff/log) run autonomously. Signal `implementing` if
-   long-running, a `question` if blocked.
-5. **Verify**, then signal `commit-ready` with the full proposed commit message(s) in the
-   notes. **Do not ask for commit approval in chat — the signal is the request.**
+   test, format, git status/diff/log) run autonomously. A `question` if blocked.
+5. **Verify, then ask for commit review with a request.** Move the Task to
+   `commit-reviewing` (a no-plan Task stays `active`), and create a `review-requested`
+   Signal: `receiver: "architect"`, `task_ref` the Task, `subject_type: "task_plan"` and
+   `subject_id` the plan's address when there is one, and a message naming the branch,
+   the commit and where the proposed commit message is (the plan body). A commit is not a
+   state the records can show, which is why this one step stays a request. **Do not ask
+   for commit approval in chat; the request is the ask.**
 6. **Architect reviews the actual diff on disk** (not the commit message alone) and
-   signals `commit-approved` or `commit-feedback`.
-7. **On `commit-approved`: commit and push immediately.** A feature branch means squash
-   to main and push in the same step, unless your own `CLAUDE.md` states otherwise.
+   answers the request with `answer_signal`: an approval names the exact commit (and, for a
+   Task with a plan, is also written in the plan body, which stays the record); feedback
+   says what to change. Feedback closes that request: fix, then open a new one.
+7. **On an answer that approves your exact commit: merge and push immediately.** A
+   feature branch means squash to main and push in the same step, unless your own
+   `CLAUDE.md` states otherwise.
 8. **Close out:** no plan-file deletion step — the `task_plan` record stays in `approved`
    as the historical record, same as every other orchestration type never gets hard-
-   deleted. Ordinary Task close-out (`commit-reviewing → done`) is the whole of this step.
+   deleted. Ordinary Task close-out (`commit-reviewing → done`, or `active → done` for a
+   no-plan Task) is the whole of this step; architect's subscriptions deliver it.
 
 This is a signal-driven (or Task-state-driven) protocol, not a chat-approval protocol.
 
@@ -1507,11 +1533,18 @@ most 500 characters (D114).
 - **Conditions are the system's.** No role creates one (refused) or answers one; a
   condition resolves when what it describes ends (the Decision leaves `proposed`, the
   blocked transition happens). Act on the subject, not on the Signal.
-- **History types** keep their old flow and are still how the work cycle's doorbells are
-  sent today (see "Plan → approval → implementation → commit"). Each create returns a
-  `deprecated_signal_type` warning; that is expected until the switch to subscriptions,
-  not an error to act on. They are refused only after the instance's signal event
-  cutover, which is set after that switch, and this file will say so first.
+- **History types** keep their old flow. Since 2026-10-16e no role sends one to
+  architect: state changes arrive through subscriptions and a commit review is a
+  `review-requested` request. Architect still sends `plan-approved` and `plan-feedback`
+  until every role's watcher is on subscriptions; close them as before. Each create
+  returns a `deprecated_signal_type` warning. They are refused after the instance's
+  signal event cutover, set when every role has switched, and this file will say so
+  first. `notice` has no replacement: dispatch is a Task, a question is a `question`, and
+  anything else belongs in the Task or plan record.
+- **A session's MCP tool list is fixed when the session starts.** A session started before
+  an mcp release does not have its new tools (`answer_signal`, `withdraw_signal`, the
+  subscription tools). Restart the session or reconnect the `process` connector. Until
+  then `transition_item` to `answered` with the answer as the reason does the same.
 - **`task_ref` names a Task**, by address, slug or ID, and is checked on write (D113). To
   point a Signal at any other record, use `subject_type` and `subject_id`.
 - **`list_signals` without `state`** returns what awaits action: `open` and `pending`
@@ -1560,14 +1593,14 @@ if you need to find yours again.
 file) — not the source files each task's own scope names, which both sessions already
 check for overlap correctly.
 
-**Mandatory re-sync immediately before `commit-ready`, not just at plan time**: read the
+**Mandatory re-sync immediately before the commit review request, not just at plan time**: read the
 numbering index again (it may have moved while you were implementing), `git fetch` and
 check whether `main` moved since your branch was cut, rebase if so, and reconcile shared
 meta-files by hand (your entry alongside the sibling's, never replacing it). **Sequential
-merge order** — whichever session reaches `commit-approved` first merges first; the
+merge order** — whichever session's commit is approved first merges first; the
 other rebases afterward. **Architect broadcasts proactively** the moment one parallel
-session merges — don't wait for the sibling to discover the collision itself at
-`commit-ready`.
+session merges — don't wait for the sibling to discover the collision itself at its
+commit review request.
 
 ---
 

@@ -32,7 +32,7 @@
 # after a shared failure.
 #
 # Ported from smeldr/architect/scripts/watch-events.ps1 (commit 792c2b6),
-# ProjectKey/Channel changed to this project's own. Supersedes
+# ProjectKey changed to this project's own. Supersedes
 # watch-events.sh as the recommended Monitor-arming command (01a0a652) -
 # watch-events.sh is kept in the repo as reference/fallback only.
 
@@ -46,8 +46,12 @@ Add-Type -AssemblyName System.Net.Http
 
 $ConfigFile = 'C:\Users\peter\.claude.json'
 $ProjectKey = 'C:/Users/peter/Documents/Code/Smeldr/core'
-$Channel = 'core'
-$BaseUrl = "https://process.smeldr.dev/_events/stream?channel=$Channel"
+# No ?channel= (AGENT_PROTOCOL 2026-10-16e, D116): the connection delivers this
+# token's subscriptions (list_subscriptions): the three defaults and core's
+# role subscriptions (Tasks in band core created, updated or transitioned,
+# core's task_plans moved to approved or changes_requested, Signals to core).
+# Until 2026-10-16 this was ?channel=core.
+$BaseUrl = "https://process.smeldr.dev/_events/stream"
 
 # Resume (D117, core v1.160.0, live since deploy 2, 2026-10-16), copied from
 # smeldr/architect/scripts/watch-events.ps1: the id of the last event printed
@@ -77,14 +81,21 @@ function Get-LastId {
     return $null
 }
 
+# Written directly, not through a temp file and Move-Item, as in architect's
+# watcher (e58a0dd): two copies on the same cursor file collided on the move.
+# The real fix is one watcher per cursor file; a torn write of this one short
+# line only means one reconnect starts live, since Get-LastId rejects anything
+# that is not an id. One retry covers a brief lock.
 function Set-LastId([string]$id) {
-    try {
-        if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Path $StateDir | Out-Null }
-        $tmp = "$StateFile.tmp"
-        [System.IO.File]::WriteAllText($tmp, $id)
-        Move-Item -Force $tmp $StateFile
-    } catch {
-        [Console]::Error.WriteLine("ERROR: could not save last event id: $_")
+    for ($i = 0; $i -lt 2; $i++) {
+        try {
+            if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Path $StateDir | Out-Null }
+            [System.IO.File]::WriteAllText($StateFile, $id)
+            return
+        } catch {
+            if ($i -eq 1) { [Console]::Error.WriteLine("ERROR: could not save last event id: $_") }
+            Start-Sleep -Milliseconds 200
+        }
     }
 }
 
@@ -112,7 +123,7 @@ while ($true) {
 
     $lastId = Get-LastId
     $Url = $BaseUrl
-    if ($lastId) { $Url = "$BaseUrl&after=$lastId" }
+    if ($lastId) { $Url = "${BaseUrl}?after=$lastId" }
 
     $connectedAt = Get-Date
     $client = [System.Net.Http.HttpClient]::new()
