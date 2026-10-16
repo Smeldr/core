@@ -83,21 +83,42 @@ func (m *Module[T]) createInTx(ctx Context, item T) error {
 }
 
 // InsertSignal inserts s into smeldr_signals in its own transaction. It fills
-// an empty ID (a new ID), Slug (the ID), Status ("pending") and CreatedAt and
-// UpdatedAt (now, UTC), and writes them back onto s.
+// an empty ID (a new ID), Slug (the ID), Status and CreatedAt and UpdatedAt
+// (now, UTC), and writes them back onto s. Status is always the type's
+// initial state (D115): open for a catalog type ([SignalTypes]), pending for a
+// history type.
+//
+// s is checked first with [CheckSignal] and no cutovers (warnings only): a
+// Signal it refuses is not written. Use [InsertSignalWithWarnings] for the
+// warnings and the instance's cutovers.
 //
 // It announces nothing: the caller dispatches the "signal.created" event itself
 // after InsertSignal returns nil, so no event is ever sent for a row that was not
 // committed. [App.NotifySignalCreated] is that dispatch for a caller outside core.
 func InsertSignal(ctx context.Context, db DB, s *Signal) error {
+	_, err := InsertSignalWithWarnings(ctx, db, s, SignalCutovers{})
+	return err
+}
+
+// InsertSignalWithWarnings is [InsertSignal] with the instance's cutovers
+// ([App.SignalCutovers]): it returns the warnings of [CheckSignal] for a
+// Signal it wrote, and the refusal for one it did not.
+func InsertSignalWithWarnings(ctx context.Context, db DB, s *Signal, c SignalCutovers) ([]CreateWarning, error) {
+	warnings, err := CheckSignal(ctx, s, c)
+	if err != nil {
+		return nil, err
+	}
+	s.Status = Status(signalInitialState(s.SignalType))
+	return warnings, insertSignalRow(ctx, db, s)
+}
+
+// insertSignalRow is the write of [InsertSignalWithWarnings].
+func insertSignalRow(ctx context.Context, db DB, s *Signal) error {
 	if s.ID == "" {
 		s.ID = NewID()
 	}
 	if s.Slug == "" {
 		s.Slug = s.ID
-	}
-	if s.Status == "" {
-		s.Status = "pending"
 	}
 	now := time.Now().UTC()
 	if s.CreatedAt.IsZero() {

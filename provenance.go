@@ -246,7 +246,7 @@ type stateChange struct {
 
 // recordStateChange is the one internal writer of state-change provenance:
 // [recordTransitionProvenance], the conflict-supersede side effect,
-// [App.ExpireSignals], [App.DrainEvalQueue] and the [App.Provenance] signal
+// core's Signal resolver, [App.DrainEvalQueue] and the [App.Provenance] signal
 // subscriber all build their record here, so anything that must happen
 // whenever an item's state changes (a later standing writer, D100) has exactly
 // one place to hook. Fail-open and a no-op for a nil store, by way of

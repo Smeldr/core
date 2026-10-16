@@ -1108,6 +1108,8 @@ func (a *App) CapabilityFor(resource, verb string) (Capability, bool) // false f
 | signal | get | read | none | no |
 | signal | list | read | none | no |
 | signal | create | create | none | no |
+| signal | answer | update | required | yes |
+| signal | withdraw | archive | required | yes |
 | access | list | administer | none | no |
 | access | list_roles | read | none | yes |
 | access | lookup_names | read | none | yes |
@@ -3386,7 +3388,7 @@ tool), a runtime-defined type's status change (`set_content_status`,
 and `DrainEvalQueue`. Before, only `App.TransitionItem` fired it, and only on
 a compiled type.
 The payload's `data` object carries `type`, `id`, `slug`, `from_state`,
-`to_state`, and `reason` (when supplied). Since v1.122.0 (A427) it also carries `actor_id` and `actor_kind`: who caused the transition, the same id and kind the provenance record of that transition holds (`actor_kind` is `job`, `agent`, `human` or `unclassified`, D105; see Actor classification under Tokens). Both keys are omitted when no actor is known, and **webhook deliveries carry them exactly like the event stream does**, so an admin who forwards deliveries to an external system decides what to forward. The id is opaque and is the same one `last_actor` already holds; resolve it to a name with `lookup_token_names`. `signal.transitioned` from the expiry sweep carries `job` and `signal-expiry-sweep`. This is a separate delivery path
+`to_state`, and `reason` (when supplied). Since v1.122.0 (A427) it also carries `actor_id` and `actor_kind`: who caused the transition, the same id and kind the provenance record of that transition holds (`actor_kind` is `job`, `agent`, `human` or `unclassified`, D105; see Actor classification under Tokens). Both keys are omitted when no actor is known, and **webhook deliveries carry them exactly like the event stream does**, so an admin who forwards deliveries to an external system decides what to forward. The id is opaque and is the same one `last_actor` already holds; resolve it to a name with `lookup_token_names`. `signal.transitioned` from core's Signal resolver carries `job` and `signal-resolver` (D115). This is a separate delivery path
 from the `App.OnSignal` bus above — the bus's `LifecycleEvent` vocabulary
 (created/updated/published/…) doesn't fit an arbitrary per-flow state name,
 so subscribe to `"{type}.transitioned"` specifically, not the created/
@@ -3535,10 +3537,8 @@ to a webhook event name is delivered to the stream:
   per status change on every path (v1.137.0; D107). From the same
   version `"{type}.updated"` means a content edit only: a status-only `PUT` no
   longer sends it.
-- Signals: `"signal.created"` (new explicit signal), and `"signal.expiry_swept"`
-  (stream only, v1.129.0): one summary per expiry run that expired at least
-  one Signal, `data` `{type: "signal", expired: n, actor_id, actor_kind: "job"}`.
-  Webhooks still get one `signal.transitioned` per expired Signal.
+- Signals: `"signal.created"` (new explicit signal). The `"signal.expiry_swept"`
+  summary (v1.129.0 to v1.158.0) is gone with the expiry sweep (D115).
 - Relations (v1.129.0): `"relation.asserted"` and `"relation.ended"`, also to
   webhook endpoints subscribed to them. `data` is `{type: "relation", id,
   relation_kind, edge_class, source_type, source_id, target_type, target_id,
@@ -3585,8 +3585,8 @@ The JSON payload shape is identical to webhook event payloads — a
   carries as `User().ID`. It covers transitions, creates and updates, and a
   Signal created through `NotifySignalCreated`. Events caused by anyone else
   still arrive, and so do system-originated ones, which have no actor: the
-  `authorization-required` and `conflict-detected` Signals, and the expiry
-  sweep. Suppression is per token, not per connection, so two sessions that
+  condition Signals (`ratification-required`, `authorization-required`,
+  `conflict-detected`) and their resolution by core (D115). Suppression is per token, not per connection, so two sessions that
   share a token do not see each other's events; `?include_own=true` restores
   that. A Signal sent to yourself is suppressed like any other self-caused
   event.
@@ -3600,7 +3600,7 @@ The JSON payload shape is identical to webhook event payloads — a
   |---|---|
   | `relations` | `relation.asserted`, `relation.ended` |
   | `amendments` | every compiled `Amendment` event (`amendment.created`, `.updated`, `.transitioned`) |
-  | `signals` | `signal.transitioned` (a caller moving a Signal), `signal.expiry_swept` |
+  | `signals` | `signal.transitioned` (a caller moving a Signal) |
   | `types` | `content_type.redefined` (a runtime-defined type's schema changed; core v1.140.0) |
 
   `signal.created` still routes on the Signal's receiver: it is the wake-up
@@ -3879,10 +3879,10 @@ name). Before this these paths recorded only `last_actor`.
     event, `After*` signal or async trigger), so a live surface that relies on the event stream does
     not see it change until it re-reads. No built-in flow uses `ConflictSupersede`, so this affects
     customer-defined types only.
-  - **The Signal expiry sweep** (`App.ExpireSignals`). Each expired Signal gets one record: actor
-    kind `"job"`, actor `"signal-expiry-sweep"`, surface `"trigger"`, reason `expired by age: N
-    days`. Bounded per run by the sweep's batch cap. Nothing is written for a Signal the sweep
-    skipped.
+  - **Core's Signal resolver** (D115). Each condition it resolves gets one record: actor kind
+    `"job"`, actor `"signal-resolver"`, surface `"trigger"`, reason the resolution (for example
+    `Task 01a... moved backlog to active`). Nothing is written for a row that had already left
+    `open`. (The retired expiry sweep wrote `"signal-expiry-sweep"` records until v1.158.0.)
 - `ENABLE_PROVENANCE` (the example server's switch for `App.Provenance`) must be set, otherwise
   nothing is recorded at all.
 
@@ -3961,7 +3961,7 @@ type ProvenanceStore interface {
 
 ## Scheduled sweep run records
 
-`App.SweepStructural(ctx) (walked, flagged, skipped int, err error)`, `App.DrainEvalQueue(ctx) (walked, triggered, skipped int, err error)`, and `App.ExpireSignals(ctx, cfg) (walked, expired, skipped int, err error)` run detectors at scheduled intervals to maintain data consistency — structural validation, eval-queue draining, relation invalidation, Signal expiry. Previously, a successful clean run logged one Debug line and persisted nothing, making it indistinguishable from "the sweep never ran". `SweepRunStore` records every scheduled sweep, so staleness can be derived by Go code (e.g. a future alerting task). `SweepRunStore` itself has no HTTP or MCP surface in core (A279) — `Last` and `List` are plain Go methods. `smeldr.dev/mcp` exposes a remote-callable read on top of them: the `get_sweep_run` tool (Author role) wraps `SweepRunStore.Last`, added for exactly the "public read surfaces deferred via future task if needed" case A279 anticipated.
+`App.SweepStructural(ctx) (walked, flagged, skipped int, err error)`, `App.DrainEvalQueue(ctx) (walked, triggered, skipped int, err error)` run detectors at scheduled intervals to maintain data consistency — structural validation, eval-queue draining, relation invalidation. (`App.ExpireSignals` is retired since v1.159.0, D115: it moves nothing.) Previously, a successful clean run logged one Debug line and persisted nothing, making it indistinguishable from "the sweep never ran". `SweepRunStore` records every scheduled sweep, so staleness can be derived by Go code (e.g. a future alerting task). `SweepRunStore` itself has no HTTP or MCP surface in core (A279) — `Last` and `List` are plain Go methods. `smeldr.dev/mcp` exposes a remote-callable read on top of them: the `get_sweep_run` tool (Author role) wraps `SweepRunStore.Last`, added for exactly the "public read surfaces deferred via future task if needed" case A279 anticipated.
 
 `SweepStructural` also stamps a **per-edge** confirmation, distinct from `SweepRunStore`'s per-run aggregate: `RelationEdge.LastConfirmedAt` (A299) is set to the sweep's own `now` for every edge whose source and target were both checked and found alive that run — nil until an edge's first successful sweep, and never touched by `Assert`/`Propose`/`Observe`. It answers "was this specific edge part of the most recent successful walk," which `SweepRunRecord.Walked`'s aggregate count cannot — the field a witness certificate needs for "confirmed by the system, on a schedule," as opposed to any deliberate `ProvenanceRecord` action. Exposed via `smeldr.dev/mcp`'s `get_relations` (`last_confirmed_at`, omitted when nil).
 
@@ -4035,40 +4035,104 @@ type SweepRunStore interface {
 }
 ```
 
-### Signal expiry sweep
+### Signal kinds and states (D115, v1.159.0)
 
-`App.ExpireSignals(ctx, cfg SignalExpiryConfig) (walked, expired, skipped int, err error)` implements the "retraction by time" state `Signal`'s own flow always defined (`pending`/`read` → `expired`) but nothing ever drove — Signals accumulated `pending`/`read` forever with no mechanism to mark an old one stale. Moves eligible rows to `expired`; never deletes one — Signals are Trace history, and orchestration records are never deleted, matching every other detector in this section.
+A Signal is one of two kinds, and its kind decides how it ends. Nothing expires.
+
+- A **condition** is a state of the world that core emits and resolves itself. It is `open` while the condition holds and `resolved` when it ends, with `resolution` saying what ended it. No actor answers or withdraws one, and only core creates one: `InsertSignal` refuses a condition type from any other caller with `ErrForbidden`.
+- A **request** is an ask from one actor to another. It is `open` until it is `answered` (with an answer, and optionally the change it names) or `withdrawn` (with a reason). Core never resolves one.
+
+**The catalog.** `smeldr.SignalTypes() []SignalTypeInfo` returns it in a fixed order, and `smeldr.SignalTypeOf(t) (SignalTypeInfo, bool)` looks up one type. `SignalTypeInfo` is `{Type, Kind, Resolution}`, with `Kind` either `smeldr.SignalCondition` or `smeldr.SignalRequest`.
+
+| Type | Kind | Ends when |
+|---|---|---|
+| `ratification-required` | condition | the Decision leaves `proposed` |
+| `authorization-required` | condition | the subject leaves `from_state` (the blocked transition happened or was abandoned) |
+| `conflict-detected` | condition | the `contradicts` edge ends or a side leaves `ratified`; for a taken URL, the item is published or its slug changes |
+| `downstream-blocked`, `reference-stale`, `premise-flagged` | condition | registered with their rule; no emitter yet, so none can be created |
+| `review-requested` | request | answered or withdrawn |
+| `question` | request | answered or withdrawn |
+
+**History types.** Every other `signal_type` (plan-ready, commit-ready, task-closed, notice, implementing, implementation-question and the rest) is history. A history Signal is still accepted, with a `deprecated_signal_type` warning, until `Config.SignalEventCutover`, and refused with a validation error after it. `implementation-question`'s warning names `question` as its replacement. A history Signal starts in `pending` and keeps `pending → read → acknowledged`. Since D115 neither `pending` nor `read` awaits action.
+
+**The flow** (`signal-protocol`, one flow for both kinds):
+
+| From | To | Rule |
+|---|---|---|
+| `open` (initial, awaits action) | `resolved` | conditions only, by core only: any other caller is `ErrForbidden` |
+| `open` | `answered` | requests only, `RequiredReason` (the answer) |
+| `open` | `withdrawn` | requests only, `RequiredReason` |
+| `pending` | `read` | history |
+| `read` | `acknowledged` | history |
+
+`resolved`, `answered`, `withdrawn`, `acknowledged` and `expired` are terminal. A condition answered or withdrawn, or a request resolved, is `ErrConflict` on every transition path (`transition_item`, the module paths, `App.TransitionItemVia`).
+
+**Answering.**
 
 ```go
-type SignalExpiryConfig struct {
-    MaxAge       time.Duration // <= 0 means DefaultSignalExpiryMaxAge (14 days)
-    ExcludeTypes []string      // merged with, never replacing, DefaultSignalExpiryExcludedTypes
-    BatchCap     int           // 0 means DefaultSignalExpiryBatchCap (200); negative means unlimited
-}
+err := app.AnswerSignal(ctx, "S2851", "yes, approved in the plan body", "Task:01a1...")
+err = app.WithdrawSignal(ctx, "S2852", "asked in the wrong place")
 ```
 
-**Standing conditions never expire by time.** A Signal whose `signal_type` is `authorization-required`, `review-requested`, or `conflict-detected` is always excluded, regardless of `SignalExpiryConfig.ExcludeTypes` — these represent a real open condition that closes only by being answered (ratified, reviewed, the contradiction resolved), never by growing old. `DefaultSignalExpiryExcludedTypes` names all three; a caller's own `ExcludeTypes` can add more but can never remove the mandatory floor. Each expiry stamps `last_actor` as `"signal-expiry-sweep"` and fires `signal.transitioned` on the Signal's own `receiver` channel (A302), exactly as a human-driven transition would — visible in Trace the same way.
+`App.AnswerSignal(ctx, ident, answer, ref string) error` and `App.WithdrawSignal(ctx, ident, reason string) error` take an ID, slug or address. The answer, or the withdrawal reason, is stored in `answer` and is the transition's reason in provenance: answering is one act. `ref` is optional and has the form `Type:ID`.
 
-**Each row's UPDATE is guarded against a concurrent answer.** `ExpireSignals` selects eligible rows, then updates each by id — a real gap in which someone could answer the Signal (`read` → `acknowledged`, terminal) before the update runs. The `UPDATE` is conditioned on `status` still matching what was selected; when it doesn't (zero rows affected), the row is left exactly as the concurrent actor left it, counted as `skipped`, and no `signal.transitioned` event fires for it — a lost race is silent, never a silently-overwritten answer.
+| Returns | When |
+|---|---|
+| nil | an open request, answered or withdrawn with a non-empty text |
+| `ValidationError` (`answer`, `reason` or `answer_ref`) | the text is empty, or the ref is not `Type:ID` |
+| `ErrNotFound` | the Signal is missing, or hidden by the caller's read scope (the same statements run for both) |
+| `ErrConflict` | the Signal is not open, or it is a condition |
+| `ErrForbidden` | the caller lacks `signal answer` (operation `update`) or `signal withdraw` (operation `archive`); under governance, a caller with no `Context` |
 
-Wiring mirrors `SweepStructural`/`DrainEvalQueue` exactly:
+A Signal's `receiver` and `sender` are **routing names, not identities**. They are band or role names, such as `core`, `architect` or `approve`, not token IDs, so core cannot check that the caller is the receiver. Any holder of `signal answer` who can read a request may answer it, until tokens carry a band. A `transition_item` call to `answered` also stores its reason as the answer.
 
-```go
-runStore := smeldr.NewSweepRunStore(db)
-smeldr.CreateSweepRunTable(db)
+**What core emits and resolves.**
+- `authorization-required` is opened by `App.DrainEvalQueue` when a scheduled transition is operation-gated. There is one open condition per blocked transition.
+- `ratification-required` is opened when a Decision is created in `proposed` or enters it. There is one open condition per Decision, with receiver `approve`.
+- `conflict-detected` is opened in two cases:
+  - on a `contradicts` edge, as two rows, each naming the other Decision. Asserting the edge again while the condition is open adds no rows;
+  - when the scheduler cannot publish a scheduled item because its URL is taken. There is one condition per item, with the item as subject, receiver `manage`, and `from_state` `scheduled`. On an instance without Signals, the scheduler logs this once instead.
+- **Resolution:** every committed status change runs one indexed lookup of the open Signals about its subject (`idx_smeldr_signals_open_subject`, on `(subject_type, subject_id) WHERE status = 'open'`) and resolves what the change ended. An edge that ends (withdrawn, invalidated or superseded) resolves its contradiction. A slug change resolves the taken-URL condition.
+  - Each resolution stamps `last_actor` `signal-resolver` and writes a provenance record with actor kind `job` and surface `trigger`. It also sends `signal.transitioned` to webhooks.
+  - The resolver fails open: an error is logged and never fails the change.
 
-expiryFn := func(ctx context.Context) (int, int, int, error) {
-    walked, expired, skipped, err := app.ExpireSignals(ctx, smeldr.SignalExpiryConfig{})
-    _ = runStore.Append(ctx, smeldr.SweepRunRecord{
-        ID: smeldr.NewID(), Detector: "signal-expiry", RanAt: time.Now().UTC(),
-        Walked: walked, Flagged: expired, Skipped: skipped,
-        ActorKind: "job", ActorID: "signal-expiry-sweep",
-    })
-    return walked, expired, skipped, err
-}
-```
+**Message limit (D114).** A message longer than `SignalMessageMaxLength` (500 characters) gets a `message_too_long` warning until `Config.SignalMessageCutover`, and is refused after it. Put the detail in the item the Signal names.
 
-`example/server` wires this behind `ENABLE_SIGNAL_EXPIRY_SWEEP` (default schedule: daily at 03:00 UTC), `SIGNAL_EXPIRY_MAX_AGE_DAYS`, and `SIGNAL_EXPIRY_BATCH_CAP` — `ExcludeTypes` beyond the mandatory three is Go-API-only, not exposed as an env var.
+**Checking without writing.** `smeldr.CheckSignal(ctx, s, cutovers) ([]CreateWarning, error)` applies all of the above:
+
+| Returns | When |
+|---|---|
+| warnings | a history type before `cutovers.Event`, or a message longer than 500 before `cutovers.Message` |
+| `ValidationError` (`signal_type`) | an empty type, or a history type after the cutover |
+| `ValidationError` (`message`) | a message longer than 500 after the cutover |
+| `ErrForbidden` | a condition type created by anyone but core |
+
+`App.SignalCutovers()` returns the instance's two dates as a `SignalCutovers{Message, Event}`.
+
+**Surfacing old Signals.** `App.OpenSignalsOlderThan(ctx, age time.Duration, limit int) ([]Signal, error)` returns the open Signals created at least `age` ago, oldest first, under the caller's read scope:
+- a Signal the caller may not read, or whose subject it may not read, is left out;
+- `age` of 0 or less means `DefaultOpenSignalAge` (14 days);
+- `limit` of 0 or less means 50, and more than 500 is 500.
+
+**Columns.** `resolution`, `answer` and `answer_ref` are added by `EnsureOrchestrationSignalColumns`, which also creates the open-subject index.
+
+**Migration.** `smeldr.MigrateSignalKinds(ctx, db, SignalMigrationOptions{Apply bool}) (*SignalMigrationReport, error)` (also `App.MigrateSignalKinds`) runs in one transaction and is idempotent. Without `Apply` it is a dry run that rolls back.
+- **Conditions:** `authorization-required` and `conflict-detected` in `pending`, `read` or `expired` become `open`. An expired condition is noted.
+- **Requests:** `review-requested` and `question`:
+  - in `pending` or `read` become `open`;
+  - in `acknowledged` become `answered`, with answer "migrated: acknowledged before answers were recorded";
+  - in `expired` become `withdrawn`, with "migrated: expired before answers were recorded".
+- **`implementation-question`** becomes `question` by the same rules.
+- **History types** stay as they are and are counted in `history`, by type and status.
+- **Proposed Decisions:** each Decision in `proposed` without an open `ratification-required` gets one, listed in `opened`.
+
+Each change is reported as `{id, address, type, old, new, subject, note}`, with `old` and `new` written as `type/status`.
+
+**`smeldr-server migrate-signal-kinds [--apply] [--report=path]`** (example/server) is a dry run unless `--apply` is given. On process.smeldr.dev, devops applies it in deploy 2, on Peter's yes.
+
+### Signal expiry sweep (retired, D115)
+
+`App.ExpireSignals` stays exported (D97) but moves nothing: it logs once per process that the sweep is retired and returns zeros. `SignalExpiryConfig`, `DefaultSignalExpiryMaxAge`, `DefaultSignalExpiryBatchCap` and `DefaultSignalExpiryExcludedTypes` are kept for the API and read by nothing. The `signal.expiry_swept` stream event is gone. `example/server` no longer schedules the sweep: `ENABLE_SIGNAL_EXPIRY_SWEEP` only logs at boot that it does nothing, and `SIGNAL_EXPIRY_SWEEP_SCHEDULE`, `SIGNAL_EXPIRY_MAX_AGE_DAYS` and `SIGNAL_EXPIRY_BATCH_CAP` are not read. Use `App.OpenSignalsOlderThan` to find old open Signals.
 
 ---
 
@@ -5179,7 +5243,7 @@ Optional field on `StateFlow`. When `ActiveState` is set and an item transitions
 - `ConflictReject` — returns `ErrConflict` if any item of the same type is already in `ActiveState`.
 - `ConflictSupersede` — transitions the other items in `ActiveState` to `"superseded"` when an item enters it (since v1.112.1 the entering item's own write comes first, see below).
   Since v1.111.0 each superseded item also gets a `supersedes` relation edge from the winner (by item ID, with the triggering actor as `created_by`), **but only when** the instance wired `App.Relations` **and** a `supersedes` relation kind that permits `Type -> Type` is registered. `RegisterOrchestrationRelationKinds` registers that kind for `Decision -> Decision` only, so a customer-defined type needs its own: `UpsertKind` a `supersedes` kind (`Mode: "asserted"`, `Directional: true`) whose `TypePairs` is empty (every pair) or lists your type, registered after `RegisterOrchestrationRelationKinds` and keeping its `Decision -> Decision` pair, since a kind has one definition. Otherwise items are still superseded and recorded, without an edge, and one Info line per type per process says so. `RelationStore.TraceLineage` from a superseded item then reaches its replacement.
-  **Order and atomicity (v1.112.1).** The other items are looked up first, with reads only (and `ConflictReject`'s `ErrConflict` is returned then, before anything is written); then the entering item's own write; then the items it supersedes; then their provenance, standing and `supersedes` edge, recorded only for the items that really moved. A failed write of the entering item therefore leaves every other item untouched and nothing recorded. For `App.TransitionItemVia` and a runtime-defined type the entering item's write and the losers' writes run in **one transaction** when the database handle supports `BeginTx` (a `*sql.DB` does), so they succeed or fail together; on a handle without `BeginTx` the same writes run in the same order without atomicity. `smeldr.dev/core/pgx` provides `BeginTx` from adapter v0.3.0; through v0.2.x it did not, so on Postgres through that adapter these writes ran statement by statement (this was read from the code, not measured). The `Module` lifecycle methods (`MCPPublish`, `MCPSchedule`, `MCPArchive`) write the entering item through the module's own repository, which cannot join that transaction, so they are not atomic: if the second write fails (or the process dies between the two) the type is left with **more than one item in its active state**, never none, and a failed loser write is logged at Error. A failed write of one superseded item is skipped and not recorded (fail-open, as always); on Postgres a failed statement aborts the surrounding transaction, so there the whole transition fails and nothing is left half done (proved on postgres:16 in the pgx suite, with a loser write refused by a server trigger), on SQLite it is skipped. Both leave the data consistent. The one statement core expects to fail sometimes inside this transaction, the `last_actor` fail-open of a table that predates the column, runs under a `SAVEPOINT` so it cannot abort a Postgres transaction (v1.119.1; before it, such a table gave an internal error "current transaction is aborted" on a transition on Postgres through a handle with `BeginTx`, since v1.118.0). An item already in the active state is never selected as its own loser. **Enforced paths (v1.116.0).** Every status writer in core either applies the policy or cannot reach the active state. It applies on: `App.TransitionItemVia` (and so the `transition_item` tool), `DynamicTypeRepo.SetStatus` (and so `POST /_content/{type}/{id}/status`) and `DynamicTypeRepo.ScheduleContent`, `Module.MCPPublish`, `MCPSchedule` and `MCPArchive`, **`Module`'s HTTP PUT when it changes status** (a rejected PUT is **HTTP 409**, nothing saved; under supersede the losers follow the save), **the scheduler's publish** (a rejected scheduled item stays `scheduled` and is retried every tick, so it can sit past its scheduled time with no end while another item holds the active state: that is the intended meaning, not a stuck scheduler; one Warn is logged per item, saying so) and **`App.DrainEvalQueue`** (a rejected drained transition is skipped, logged, and its queue row deleted as for any other blocked transition). It cannot reach the active state on: the create paths (`createHandler`, `MCPCreate`), because `validateInitialState` only admits the flow's initial state; `MCPUpdate`/`updateFields`, which keep the existing status; and `App.ExpireSignals`, whose target state is `expired`. **Behaviour change in v1.116.0:** a PUT or a scheduled publication that used to succeed for a type with a policy can now be a 409 or a wait.
+  **Order and atomicity (v1.112.1).** The other items are looked up first, with reads only (and `ConflictReject`'s `ErrConflict` is returned then, before anything is written); then the entering item's own write; then the items it supersedes; then their provenance, standing and `supersedes` edge, recorded only for the items that really moved. A failed write of the entering item therefore leaves every other item untouched and nothing recorded. For `App.TransitionItemVia` and a runtime-defined type the entering item's write and the losers' writes run in **one transaction** when the database handle supports `BeginTx` (a `*sql.DB` does), so they succeed or fail together; on a handle without `BeginTx` the same writes run in the same order without atomicity. `smeldr.dev/core/pgx` provides `BeginTx` from adapter v0.3.0; through v0.2.x it did not, so on Postgres through that adapter these writes ran statement by statement (this was read from the code, not measured). The `Module` lifecycle methods (`MCPPublish`, `MCPSchedule`, `MCPArchive`) write the entering item through the module's own repository, which cannot join that transaction, so they are not atomic: if the second write fails (or the process dies between the two) the type is left with **more than one item in its active state**, never none, and a failed loser write is logged at Error. A failed write of one superseded item is skipped and not recorded (fail-open, as always); on Postgres a failed statement aborts the surrounding transaction, so there the whole transition fails and nothing is left half done (proved on postgres:16 in the pgx suite, with a loser write refused by a server trigger), on SQLite it is skipped. Both leave the data consistent. The one statement core expects to fail sometimes inside this transaction, the `last_actor` fail-open of a table that predates the column, runs under a `SAVEPOINT` so it cannot abort a Postgres transaction (v1.119.1; before it, such a table gave an internal error "current transaction is aborted" on a transition on Postgres through a handle with `BeginTx`, since v1.118.0). An item already in the active state is never selected as its own loser. **Enforced paths (v1.116.0).** Every status writer in core either applies the policy or cannot reach the active state. It applies on: `App.TransitionItemVia` (and so the `transition_item` tool), `DynamicTypeRepo.SetStatus` (and so `POST /_content/{type}/{id}/status`) and `DynamicTypeRepo.ScheduleContent`, `Module.MCPPublish`, `MCPSchedule` and `MCPArchive`, **`Module`'s HTTP PUT when it changes status** (a rejected PUT is **HTTP 409**, nothing saved; under supersede the losers follow the save), **the scheduler's publish** (a rejected scheduled item stays `scheduled` and is retried every tick, so it can sit past its scheduled time with no end while another item holds the active state: that is the intended meaning, not a stuck scheduler; one Warn is logged per item, saying so) and **`App.DrainEvalQueue`** (a rejected drained transition is skipped, logged, and its queue row deleted as for any other blocked transition). It cannot reach the active state on: the create paths (`createHandler`, `MCPCreate`), because `validateInitialState` only admits the flow's initial state; and `MCPUpdate`/`updateFields`, which keep the existing status. **Behaviour change in v1.116.0:** a PUT or a scheduled publication that used to succeed for a type with a policy can now be a 409 or a wait.
 
   **Concurrent winners (v1.115.1).** Transitions of one type into its `ActiveState` are serialised within the process: the policy's reads, the entering item's write and the losers' writes happen under one per-type lock, so two simultaneous winners cannot both pass the reads before either writes (before, both became active under `ConflictSupersede` and both passed the check under `ConflictReject`). The second winner sees the first one committed: it is rejected under `ConflictReject`, and supersedes it under `ConflictSupersede`. The lock covers `App.TransitionItemVia`, `DynamicTypeRepo.SetStatus` and the three `Module` lifecycle methods. A nested transition of the same type made under the context the call hands on (a hook, say) is not blocked by its own caller. If the lock cannot be had within 10 seconds the transition goes ahead unlocked and an Error is logged, in keeping with both policies being fail-open; a cancelled context while waiting is an `ErrInternal`. **Limits:** this lock is in-process; the cross-process lock a Postgres handle adds on top of it (v1.119.0) is described under State flows. Before v1.118.0 the policy was enforced on SQLite only.
 
@@ -5232,7 +5296,7 @@ smeldr.State{Name: "ratified", Locked: true, Standing: smeldr.StandingHolds}
 - leaving a state that holds for an untagged state stores `ceased`;
 - any other move changes nothing, so an item that never held stays `none` (a Decision archived straight from `proposed` is `none`, never `ceased`) and a ceased item stays `ceased`.
 
-An item with no row is `none`. Every path that changes state writes it: `App.TransitionItemVia`, `DynamicTypeRepo` status changes and creation, the Module lifecycle paths (HTTP and MCP, through `notifyAfter`), the conflict-supersede side effect (an automatically superseded Decision becomes `ceased`), the Signal expiry sweep and `DrainEvalQueue`. The write is synchronous and fail-open: a failure is logged and never fails the state change that was already made, and `App.CheckStandingDrift` is the backstop. It is written whether or not provenance is wired.
+An item with no row is `none`. Every path that changes state writes it: `App.TransitionItemVia`, `DynamicTypeRepo` status changes and creation, the Module lifecycle paths (HTTP and MCP, through `notifyAfter`), the conflict-supersede side effect (an automatically superseded Decision becomes `ceased`), core's Signal resolver (D115) and `DrainEvalQueue`. The write is synchronous and fail-open: a failure is logged and never fails the state change that was already made, and `App.CheckStandingDrift` is the backstop. It is written whether or not provenance is wired.
 
 **Events.** Every change of standing is also recorded as a provenance event, verb `"standing-began"` or `"standing-ended"`, carrying the transition's own actor, surface, reason and from/to states, when `App.Provenance` is wired. `SubjectProvenance` returns them like any other entry and gates them exactly like the transition (the actor is shown only for a transition that required an operation under `Strict` enforcement), so ratifying a Decision now reads as two entries.
 
@@ -5271,7 +5335,7 @@ smeldr.State{Name: "blocked", AwaitsAction: true}
 | Task | backlog, active, waiting-plan, plan-reviewing, implementing, commit-reviewing, blocked | done, deferred, resolved |
 | Amendment | scoped, in-progress, commit-ready, committed | merged, rejected |
 | Goal | open, in-progress, parked | done, resolved |
-| Signal | pending, read | acknowledged, expired |
+| Signal | open | resolved, answered, withdrawn; history: pending, read, acknowledged, expired (D115) |
 
 Every other state is closed, including Rule and AuthorityStub and the default flow, which declare none: **declared closed by omission**. A state without the declaration, and a status the flow does not name, count as closed, so nothing unknown is shown as waiting.
 
@@ -5446,7 +5510,7 @@ One transaction, idempotent; a dry run (`DryRun: true`) runs the same code and r
 func InsertSignal(ctx context.Context, db DB, s *Signal) error
 ```
 
-Inserts one Signal into `smeldr_signals` in its own transaction. It fills an empty ID (a new ID), Slug (the ID), Status ("pending"), and CreatedAt/UpdatedAt (now, UTC), and writes them back onto `s`. It announces nothing: dispatch the `signal.created` event yourself after it returns nil, through `App.NotifySignalCreated` when calling from outside core. On failure it returns a wrapped error (`smeldr: InsertSignal: ...`) and leaves no row.
+Inserts one Signal into `smeldr_signals` in its own transaction. It fills an empty ID (a new ID), Slug (the ID) and CreatedAt/UpdatedAt (now, UTC), sets Status to the type's initial state (`open` for a catalog type, `pending` for a history type, D115), and writes them back onto `s`. It first runs `CheckSignal` with no cutovers: a condition type from a caller other than core is refused with `ErrForbidden`, and an empty `signal_type` with a validation error. `InsertSignalWithWarnings(ctx, db, s, app.SignalCutovers()) ([]CreateWarning, error)` is the same with the instance's cutovers, and returns the warnings (`deprecated_signal_type`, `message_too_long`). It announces nothing: dispatch the `signal.created` event yourself after it returns nil, through `App.NotifySignalCreated` when calling from outside core. On failure it returns a wrapped error (`smeldr: InsertSignal: ...`) and leaves no row.
 
 ```go
 s := &smeldr.Signal{
@@ -5480,7 +5544,7 @@ smeldr.RegisterOrchestrationTypes(app, db)
 
 | Type | Table | State flow | Key fields |
 |------|-------|------------|------------|
-| `Signal` | `smeldr_signals` | signal-protocol (4 states) | sender, receiver, signal_type, message, task_ref, sequence, subject_type, subject_id, from_state, to_state, required_role |
+| `Signal` | `smeldr_signals` | signal-protocol (8 states, D115) | sender, receiver, signal_type, message, task_ref, sequence, subject_type, subject_id, from_state, to_state, required_role, resolution, answer, answer_ref |
 | `Task` | `smeldr_tasks` | agent-task (10 states) | task_id, priority, band, size, description, note_ref |
 | `Decision` | `smeldr_decisions` | governance-decision (5 states) | decision_number, title, scope, body, next_eval_at, eval_note |
 | `Amendment` | `smeldr_amendments` | amendment-lifecycle (6 states) | amendment_number, amendment_type, version, commit_hash, pilot, summary, body, amends |

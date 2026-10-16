@@ -60,6 +60,8 @@ func migrationFixture(t *testing.T) (*sql.DB, *App) {
 	_ = app.Handler()
 
 	// After deploy: records with addresses, and one raw Signal without.
+	// The fixture counts Signal addresses: no condition Signals (D115) here.
+	app.signalConditions = false
 	dec := findModule[*Decision](t, app)
 	if out, err := dec.MCPCreate(authorCtx(), map[string]any{"Title": "after deploy"}); err != nil || asItem[*Decision](out).Address != "D6" {
 		t.Fatalf("post-deploy Decision: %v %v, want D6 (above the highest legacy D5)", out, err)
@@ -309,7 +311,7 @@ func TestMigrateAddresses_DeletedPreDeployRowLetsRawRowTakeReservedSlot(t *testi
 		t.Fatal(err)
 	}
 	mustExecMig(t, db, `DELETE FROM smeldr_signals WHERE id = 'old-1'`)
-	s := &Signal{Sender: "core"}
+	s := &Signal{Sender: "core", SignalType: "notice"}
 	if err := InsertSignal(ctx, db, s); err != nil || s.Address != "S3" {
 		t.Fatalf("post-deploy Signal = %q %v, want S3", s.Address, err)
 	}

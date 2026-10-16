@@ -325,7 +325,7 @@ func TestInsertSignal(t *testing.T) {
 	if _, err := db.Exec(`CREATE TRIGGER sig_refuse BEFORE INSERT ON smeldr_signals BEGIN SELECT RAISE(ABORT, 'no'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if err := InsertSignal(ctx, db, &Signal{Sender: "core"}); err == nil || !strings.Contains(err.Error(), "InsertSignal") {
+	if err := InsertSignal(ctx, db, &Signal{Sender: "core", SignalType: "notice"}); err == nil || !strings.Contains(err.Error(), "InsertSignal") {
 		t.Errorf("refused insert: err %v, want an InsertSignal error", err)
 	}
 	_ = db.QueryRow(`SELECT COUNT(*) FROM smeldr_signals`).Scan(&n)

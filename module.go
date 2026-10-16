@@ -463,6 +463,7 @@ type Module[T any] struct {
 	tplMu            sync.RWMutex       // guards tplList, tplShow reads and swaps
 	siteName         string             // set by App.Content via setSiteName
 	titleCutover     time.Time          // set by App.Content via setTitleCutover (D112)
+	signalSink       signalSink         // the App, set by App.Content via setSignalSink (D115); nil without one
 	ogDefaults       *OGDefaults        // nil until App.Handler via setSEODefaults
 	appSchema        *AppSchema         // nil until App.Handler via setSEODefaults
 	headAssets       *HeadAssets        // nil until App.Handler via setSEODefaults
@@ -1036,6 +1037,10 @@ func (m *Module[T]) hasTransitionHandlers() bool {
 // paths.
 func (m *Module[T]) notifyAfter(ctx Context, sig LifecycleEvent, prevState, surface, reason string, item any) {
 	m.applyStanding(ctx, sig, prevState, surface, reason, item)
+	if sig == AfterCreate && m.signalSink != nil {
+		// D115: the conditions a new item starts in (a proposed Decision).
+		m.signalSink.signalItemCreated(ctx, m.contentTypeName, nodeIDOf(item), string(nodeStatusOf(item)))
+	}
 	if suppressesSignals(ctx, m.db, m.contentTypeName, string(nodeStatusOf(item))) {
 		return
 	}
@@ -2048,9 +2053,14 @@ const (
 func (m *Module[T]) publishDue(ctx Context, item T, now time.Time) dueOutcome {
 	id := nodeIDOf(item)
 	// Its URL may have been published by another item since it was scheduled:
-	// it stays Scheduled, logged once per item until the conflict clears.
+	// it stays Scheduled, and one open conflict-detected Signal says so (D115)
+	// until it publishes or its slug changes. Without Signals it is logged
+	// once per item until the conflict clears.
 	slugKey := "slug/" + m.contentTypeName + "/" + id
 	if err := m.checkSlugCollision(ctx, item); err != nil {
+		if m.signalSink != nil && m.signalSink.signalSlugBlocked(ctx.Request().Context(), m.contentTypeName, id, nodeSlugOf(item)) {
+			return dueBlocked
+		}
 		if _, seen := scheduledBlockedLogged.LoadOrStore(slugKey, struct{}{}); !seen {
 			slog.Warn("smeldr: scheduler: scheduled item not published: its URL is taken; it stays scheduled until its slug changes or the URL is free",
 				"type", m.contentTypeName, "id", id, "slug", nodeSlugOf(item), "err", err)
@@ -2420,6 +2430,11 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 	// after the title cutover a missing or long title is refused.
 	titleWarns, err := titleCheck(item, m.titleCutover)
 	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	// D115: the HTTP body carries no Signal warnings either.
+	if _, err := m.signalCreateCheck(ctx, item); err != nil {
 		WriteError(w, r, err)
 		return
 	}
@@ -3247,6 +3262,11 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	signalWarns, err := m.signalCreateCheck(ctx, item)
+	if err != nil {
+		return nil, err
+	}
+	titleWarns = append(titleWarns, signalWarns...)
 	if s := string(nodeStatusOf(item)); s != "" {
 		if err := validateInitialState(ctx, m.db, m.contentTypeName, s); err != nil {
 			return nil, err
@@ -3465,6 +3485,10 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 		}
 	}
 	m.runSaveAfter(ctx, any(existing), item)
+	if newSlug != nodeSlugOf(existing) && m.signalSink != nil {
+		// D115: a new slug ends the taken-URL condition of the old one.
+		m.signalSink.signalSlugChanged(ctx, m.contentTypeName, nodeIDOf(item))
+	}
 	m.notifyAfter(ctx, AfterUpdate, string(nodeStatusOf(existing)), surface, "", item)
 	m.invalidateCache()
 	warnings = append(warnings, retiredFieldWarnings(item, fields)...)

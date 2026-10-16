@@ -119,6 +119,11 @@ func (s *RelationStore) recordEdgeEnd(ctx context.Context, edge RelationEdge, e 
 		ActorID:     e.actorID,
 		Reason:      e.reason,
 	})
+	// D115: the contradiction this edge stated has ended.
+	if edge.RelationKind == "contradicts" {
+		s.signalResolver().resolveContradiction(ctx, edge.SourceID, edge.TargetID,
+			fmt.Sprintf("the contradicts relation %s ended: %s", edge.ID, e.cause))
+	}
 }
 
 // endEdge ends the live row id now and records how. It reports whether a live

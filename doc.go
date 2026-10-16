@@ -167,10 +167,11 @@
 //     enforcement against a subject, run with [RunAuthorityCheck].
 //   - Structural sweeps ([SweepRunStore], [SweepRunRecord]) — recorded runs
 //     of a structural-deviation detector, created with [NewSweepRunStore].
-//     [App.ExpireSignals] is one such detector: it moves aging, unanswered
-//     Signals to an "expired" state on a schedule, exempting a
-//     configurable set of standing-condition signal types via
-//     [SignalExpiryConfig].
+//   - Signal kinds ([SignalTypes], [SignalTypeOf]): a Signal is a
+//     condition core opens and resolves itself, or a request one actor
+//     answers ([App.AnswerSignal]) or withdraws ([App.WithdrawSignal]).
+//     Nothing expires: [App.ExpireSignals] is retired (D115), and
+//     [App.OpenSignalsOlderThan] surfaces old open Signals instead.
 //   - Findings ([Finding], [FindingStore]) — thin, detector-owned records of
 //     a structural or governance condition, created with [NewFindingStore]
 //     and wired into a sweep via [App.Findings]; written only by detectors,

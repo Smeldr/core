@@ -156,6 +156,19 @@ type Config struct {
 	// same write is refused with a validation error carrying [TitleGuidance].
 	// The date belongs to whoever runs the instance. Optional.
 	TitleCutover time.Time
+
+	// SignalMessageCutover is when a Signal message longer than
+	// [SignalMessageMaxLength] characters turns from a message_too_long
+	// warning into a refusal (D114). Zero, the default, means warnings only.
+	// Optional.
+	SignalMessageCutover time.Time
+
+	// SignalEventCutover is when a history signal_type (one not in
+	// [SignalTypes], such as plan-ready or notice) turns from a
+	// deprecated_signal_type warning into a refusal (D115). Zero, the default,
+	// means warnings only. Set it once subscriptions carry those events.
+	// Optional.
+	SignalEventCutover time.Time
 }
 
 // MustConfig validates cfg and returns it unchanged.
@@ -295,6 +308,10 @@ type App struct {
 	navTreeModules         []interface{ setNavTree(*NavTree) } // modules that receive the navTree after startup
 
 	pageMetaStore *PageMetaStore // non-nil when App.PageMeta() was called; injected into templateModules at Handler() time
+
+	// signalConditions is set by [RegisterOrchestrationTypes]: smeldr_signals
+	// exists, so core emits and resolves its condition Signals (D115).
+	signalConditions bool
 
 	relationStore   *RelationStore // non-nil when App.Relations() was called
 	schemaStore     *SchemaStore   // non-nil when App.Relations() was called; used by syncSaveHook
@@ -562,6 +579,9 @@ func (a *App) Content(v any, opts ...Option) {
 		}
 		if tc, ok := r.(interface{ setTitleCutover(time.Time) }); ok {
 			tc.setTitleCutover(a.cfg.TitleCutover)
+		}
+		if sc, ok := r.(interface{ setSignalSink(signalSink) }); ok {
+			sc.setSignalSink(a)
 		}
 		if sn, ok := r.(interface{ setSiteName(string) }); ok {
 			u, _ := url.Parse(a.cfg.BaseURL)

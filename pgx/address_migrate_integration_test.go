@@ -40,7 +40,7 @@ func TestPG_MigrateAddresses(t *testing.T) {
 	if err := smeldr.CreateOrchestrationTables(db); err != nil {
 		t.Fatal(err)
 	}
-	s := &smeldr.Signal{Sender: "core"}
+	s := &smeldr.Signal{Sender: "core", SignalType: "notice"}
 	if err := smeldr.InsertSignal(ctx, db, s); err != nil || s.Address != "S3" {
 		t.Fatalf("post-deploy Signal = %q %v, want S3", s.Address, err)
 	}

@@ -90,20 +90,20 @@ func TestSignalFlow_definition(t *testing.T) {
 	if f.TypeName != "Signal" {
 		t.Errorf("TypeName = %q, want %q", f.TypeName, "Signal")
 	}
-	wantStates := []string{"pending", "read", "acknowledged", "expired"}
+	wantStates := []string{"open", "resolved", "answered", "withdrawn", "pending", "read", "acknowledged", "expired"}
 	if got := stateNames(f); got != join(wantStates) {
 		t.Errorf("states = %s, want %s", got, join(wantStates))
 	}
-	wantInitial := "pending"
+	wantInitial := "open"
 	if got := initialState(f); got != wantInitial {
 		t.Errorf("initial = %q, want %q", got, wantInitial)
 	}
-	wantTerminals := []string{"acknowledged", "expired"}
+	wantTerminals := []string{"resolved", "answered", "withdrawn", "acknowledged", "expired"}
 	if got := terminalStates(f); got != join(wantTerminals) {
 		t.Errorf("terminals = %s, want %s", got, join(wantTerminals))
 	}
-	if len(f.Transitions) != 4 {
-		t.Errorf("transitions count = %d, want 4", len(f.Transitions))
+	if len(f.Transitions) != 5 {
+		t.Errorf("transitions count = %d, want 5", len(f.Transitions))
 	}
 }
 

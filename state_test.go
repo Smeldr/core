@@ -4799,8 +4799,8 @@ func TestRecordAuthorizationRequiredSignal_Success(t *testing.T) {
 	).Scan(&sender, &receiver, &signalType, &status); err != nil {
 		t.Fatalf("SELECT smeldr_signals: %v", err)
 	}
-	if sender != "system" || receiver != "reviewer" || signalType != "authorization-required" || status != "pending" {
-		t.Errorf("Signal fields = (%q,%q,%q,%q), want (system,reviewer,authorization-required,pending)",
+	if sender != "system" || receiver != "reviewer" || signalType != "authorization-required" || status != "open" {
+		t.Errorf("Signal fields = (%q,%q,%q,%q), want (system,reviewer,authorization-required,open)",
 			sender, receiver, signalType, status)
 	}
 	var subjectType, subjectID, fromState, toState, requiredRole string

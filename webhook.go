@@ -470,16 +470,11 @@ func dispatchEventToFrom(ctx context.Context, store *WebhookStore, pool *workerP
 }
 
 // eventSignalTransitioned is the event name [App.TransitionItemWithReason] and
-// [App.ExpireSignals] give a Signal state transition. On the event stream a
+// core's Signal resolver give a Signal state transition. On the event stream a
 // caller's transition is published on the [eventStreamChannelSignals] topic
-// (core v1.129.0; before, the stream did not carry it); the expiry sweep sends
-// it to webhooks only and puts one [eventSignalExpirySwept] on the stream.
+// (core v1.129.0; before, the stream did not carry it); the resolver sends it
+// to webhooks only (D115).
 const eventSignalTransitioned = "signal.transitioned"
-
-// eventSignalExpirySwept is the stream-only summary [App.ExpireSignals] sends
-// once per run that expired at least one Signal: a re-read hint, on the
-// [eventStreamChannelSignals] topic.
-const eventSignalExpirySwept = "signal.expiry_swept"
 
 // Relation events, on the [eventStreamChannelRelations] topic and to webhook
 // endpoints subscribed to them.
@@ -511,14 +506,6 @@ type relationEventData struct {
 	Reason    string `json:"reason,omitempty"`
 	ActorID   string `json:"actor_id,omitempty"`
 	ActorKind string `json:"actor_kind,omitempty"`
-}
-
-// signalExpirySweptData is the data object of [eventSignalExpirySwept].
-type signalExpirySweptData struct {
-	Type      string `json:"type"` // always "signal"
-	Expired   int    `json:"expired"`
-	ActorID   string `json:"actor_id"`
-	ActorKind string `json:"actor_kind"`
 }
 
 // NotifySignalCreated broadcasts a "signal.created" webhook/event-stream

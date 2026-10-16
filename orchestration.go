@@ -232,6 +232,16 @@ type Signal struct {
 	// avoid a second, live-system-breaking change beyond what D64 itself
 	// scoped.
 	RequiredOperation string `json:"required_role" db:"required_role"`
+	// Resolution says what ended a condition (D115): set by core's resolver
+	// when the Signal moves open to resolved. Empty otherwise.
+	Resolution string `json:"resolution,omitempty" db:"resolution"`
+	// Answer is a request's written answer, or the reason it was withdrawn
+	// (D115): set when the Signal moves open to answered or withdrawn, and the
+	// same text is the transition's reason in provenance. Empty otherwise.
+	Answer string `json:"answer,omitempty" db:"answer"`
+	// AnswerRef names the change an answer points at, as "Type:ID" (for
+	// example "Task:01a1..."). Optional, set with Answer.
+	AnswerRef string `json:"answer_ref,omitempty" db:"answer_ref"`
 	// LastActor is the actor ID of this item's most recent writer (D78;
 	// Option A, 2026-10-08): whoever created it, last changed its content or
 	// last moved it. Set by the server, never from a request body. Empty when
@@ -711,8 +721,12 @@ func CreateOrchestrationTables(db DB) error {
 			from_state    TEXT NOT NULL DEFAULT '',
 			to_state      TEXT NOT NULL DEFAULT '',
 			required_role TEXT NOT NULL DEFAULT '',
+			resolution    TEXT NOT NULL DEFAULT '',
+			answer        TEXT NOT NULL DEFAULT '',
+			answer_ref    TEXT NOT NULL DEFAULT '',
 			last_actor    TEXT NOT NULL DEFAULT ''
 		)`,
+		signalOpenSubjectIndex,
 		`CREATE TABLE IF NOT EXISTS smeldr_tasks (
 			id          TEXT PRIMARY KEY,
 			title       TEXT NOT NULL DEFAULT '',
@@ -820,9 +834,15 @@ func CreateOrchestrationTables(db DB) error {
 	return registerCoreAddresses(context.Background(), db, orchestrationAddressTypes...)
 }
 
+// signalOpenSubjectIndex serves core's Signal resolver (D115): the open
+// Signals of one subject, read on every status change, in one indexed lookup.
+const signalOpenSubjectIndex = `CREATE INDEX IF NOT EXISTS idx_smeldr_signals_open_subject
+	ON smeldr_signals (subject_type, subject_id) WHERE status = 'open'`
+
 // EnsureOrchestrationSignalColumns adds [Signal]'s subject_type/subject_id/
-// from_state/to_state/required_role columns to smeldr_signals on
-// pre-existing SQLite databases that predate A296. Fresh installs already
+// from_state/to_state/required_role columns (A296) and its resolution/answer/
+// answer_ref columns and open-subject index (D115) to smeldr_signals on
+// pre-existing databases that predate them. Fresh installs already
 // have these columns via [CreateOrchestrationTables]'s own CREATE TABLE
 // statement; this only upgrades a database created before A296. Idempotent
 // — safe to call on every boot. Uses [EnsureColumn] directly (T246's own
@@ -835,11 +855,17 @@ func EnsureOrchestrationSignalColumns(ctx context.Context, db DB) error {
 		{"from_state", "TEXT NOT NULL DEFAULT ''"},
 		{"to_state", "TEXT NOT NULL DEFAULT ''"},
 		{"required_role", "TEXT NOT NULL DEFAULT ''"},
+		{"resolution", "TEXT NOT NULL DEFAULT ''"},
+		{"answer", "TEXT NOT NULL DEFAULT ''"},
+		{"answer_ref", "TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, c := range cols {
 		if err := EnsureColumn(ctx, db, "smeldr_signals", c[0], c[1]); err != nil {
 			return fmt.Errorf("smeldr: EnsureOrchestrationSignalColumns: %w", err)
 		}
+	}
+	if _, err := db.ExecContext(ctx, signalOpenSubjectIndex); err != nil {
+		return fmt.Errorf("smeldr: EnsureOrchestrationSignalColumns: index: %w", err)
 	}
 	return nil
 }
@@ -990,6 +1016,7 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 				"flow", f.Name, "error", err)
 		}
 	}
+	app.signalConditions = true
 	app.Content(NewModule[*Signal]((*Signal)(nil),
 		At("/signals"), Repo(NewSQLRepo[*Signal](db, Table("smeldr_signals"))), MCP(MCPRead, MCPWrite), withAddress(),
 	))
@@ -1265,23 +1292,36 @@ func channelValueFromItem(typeName string, item any) string {
 	}
 }
 
-// orchSignalFlow returns the state flow for [Signal] records.
-// A signal starts as pending, is acknowledged or expires from any non-terminal state.
+// orchSignalFlow returns the state flow for [Signal] records (D115).
+//
+// A catalog Signal ([SignalTypes]) starts open. A condition is resolved by
+// core alone, when the condition ends; a request is answered or withdrawn,
+// each with a reason. [validateSignalTransition] holds the rules by kind.
+//
+// pending, read, acknowledged and expired are history. A history type still
+// starts pending until [Config.SignalEventCutover] and keeps pending to read
+// to acknowledged; none of them awaits action, and nothing reaches expired.
 func orchSignalFlow() StateFlow {
 	return StateFlow{
-		Name:     "signal-protocol",
-		TypeName: "Signal",
+		Name:        "signal-protocol",
+		TypeName:    "Signal",
+		Description: "A Signal is a condition (open until core resolves it) or a request (open until it is answered or withdrawn). pending, read, acknowledged and expired are history.",
 		States: []State{
-			{Name: "pending", IsInitial: true, AwaitsAction: true},
-			{Name: "read", AwaitsAction: true},
+			{Name: signalOpen, IsInitial: true, AwaitsAction: true},
+			{Name: signalResolved, IsTerminal: true},
+			{Name: signalAnswered, IsTerminal: true},
+			{Name: signalWithdrawn, IsTerminal: true},
+			{Name: signalPending},
+			{Name: "read"},
 			{Name: "acknowledged", IsTerminal: true},
 			{Name: "expired", IsTerminal: true},
 		},
 		Transitions: []Transition{
-			{From: "pending", To: "read"},
+			{From: signalOpen, To: signalResolved},
+			{From: signalOpen, To: signalAnswered, RequiredReason: true},
+			{From: signalOpen, To: signalWithdrawn, RequiredReason: true},
+			{From: signalPending, To: "read"},
 			{From: "read", To: "acknowledged"},
-			{From: "pending", To: "expired"},
-			{From: "read", To: "expired"},
 		},
 	}
 }

@@ -17,7 +17,7 @@ var d109Open = map[string][]string{
 	"Task":      {"backlog", "active", "waiting-plan", "plan-reviewing", "implementing", "commit-reviewing", "blocked"},
 	"Amendment": {"scoped", "in-progress", "commit-ready", "committed"},
 	"Goal":      {"open", "in-progress", "parked"},
-	"Signal":    {"pending", "read"},
+	"Signal":    {"open"},
 }
 
 // d109Closed names every closed state, so a state added to a flow later fails
@@ -27,7 +27,7 @@ var d109Closed = map[string][]string{
 	"Task":      {"done", "deferred", "resolved"},
 	"Amendment": {"merged", "rejected"},
 	"Goal":      {"done", "resolved"},
-	"Signal":    {"acknowledged", "expired"},
+	"Signal":    {"resolved", "answered", "withdrawn", "pending", "read", "acknowledged", "expired"},
 }
 
 // TestOrchestrationFlows_AwaitsActionPerD109 pins D109's table state by state,
@@ -185,13 +185,13 @@ func TestBuildContextPacket_AwaitsAction(t *testing.T) {
 	if pkt.Anchor.AwaitsAction == nil || *pkt.Anchor.AwaitsAction {
 		t.Errorf("a ratified Decision: awaits_action = %v, want false (closed)", pkt.Anchor.AwaitsAction)
 	}
-	insertSignal(t, db, "sg-aw", "sg-aw-slug", "pending")
+	insertSignal(t, db, "sg-aw", "sg-aw-slug", "open")
 	spkt, err := BuildContextPacket(TrustedRead(context.Background()), db, nil, "https://example.com", "test", "signal", "sg-aw-slug", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if spkt.Anchor.AwaitsAction == nil || !*spkt.Anchor.AwaitsAction {
-		t.Errorf("a pending Signal: awaits_action = %v, want true (open)", spkt.Anchor.AwaitsAction)
+		t.Errorf("an open Signal: awaits_action = %v, want true (open)", spkt.Anchor.AwaitsAction)
 	}
 
 	p := packetAwaits{}

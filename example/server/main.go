@@ -49,13 +49,12 @@
 //	                      ENABLE_ORCHESTRATION; App.DrainEvalQueue on a cron
 //	                      schedule, recorded via SweepRunStore, T211/A258)
 //	EVAL_QUEUE_DRAIN_SCHEDULE  5-field cron expression for the drain (default: "*/5 * * * *")
-//	ENABLE_SIGNAL_EXPIRY_SWEEP  wire a scheduled Signal expiry sweep (requires
-//	                      ENABLE_ORCHESTRATION; App.ExpireSignals on a cron schedule,
-//	                      recorded via SweepRunStore)
-//	SIGNAL_EXPIRY_SWEEP_SCHEDULE  5-field cron expression for the sweep (default: "0 3 * * *", daily)
-//	SIGNAL_EXPIRY_MAX_AGE_DAYS  age in days after which a pending/read Signal is
-//	                      eligible for expiry (default: 14)
-//	SIGNAL_EXPIRY_BATCH_CAP  max Signals expired per run (default: 200)
+//	ENABLE_SIGNAL_EXPIRY_SWEEP  retired (D115): nothing expires; when set, boot logs that
+//	                      it does nothing
+//	SIGNAL_MESSAGE_CUTOVER  RFC3339 time after which a Signal message over 500
+//	                      characters is refused (default: warnings only, D114)
+//	SIGNAL_EVENT_CUTOVER  RFC3339 time after which a history signal_type is refused
+//	                      (default: warnings only, D115)
 //	ENABLE_STANDING_DRIFT_CHECK  wire a scheduled standing drift check (report-only: compares
 //	                             each item's stored standing with its state's tag, records a Finding
 //	                             per mismatch; requires ENABLE_ORCHESTRATION; default off)
@@ -77,6 +76,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -94,51 +94,53 @@ import (
 // ServerConfig holds all configuration derived from environment variables.
 // Construct it via [parseConfig] for production use, or set fields directly in tests.
 type ServerConfig struct {
-	Secret                    string
-	BaseURL                   string
-	Port                      string
-	Addr                      string
-	EnableTokens              bool
-	EnableGovernance          bool
-	EnableRelations           bool
-	EnableDynamicContent      bool
-	EnableBlocks              bool
-	EnableOrchestration       bool
-	EnableAuthority           bool
-	EnableCheck               bool
-	EnableRedirects           bool
-	EnablePageMeta            bool
-	EnableSchemaTools         bool
-	EnableMedia               bool
-	MediaBackend              string
-	EnableSocial              bool
-	MastodonClientID          string
-	MastodonClientSecret      string
-	MastodonInstanceURL       string
-	EnableWebhooks            bool
-	EnableEventStream         bool
-	EnableStructuralSweep     bool
-	StructuralSweepSchedule   string
-	EnableEvalQueueDrain      bool
-	EvalQueueDrainSchedule    string
-	EnableSignalExpirySweep   bool
-	EnableStandingDriftCheck  bool
-	StandingDriftSchedule     string
-	SignalExpirySweepSchedule string
-	SignalExpiryMaxAgeDays    int
-	SignalExpiryBatchCap      int
-	EnableContextPacket       bool
-	EnableReachability        bool
-	EnableProvenance          bool
-	EnableAgents              bool
-	AgentMCPURL               string
-	AgentMCPToken             string
-	OAuthIssuer               string
-	OAuthDBPath               string
-	InstanceName              string
+	Secret                   string
+	BaseURL                  string
+	Port                     string
+	Addr                     string
+	EnableTokens             bool
+	EnableGovernance         bool
+	EnableRelations          bool
+	EnableDynamicContent     bool
+	EnableBlocks             bool
+	EnableOrchestration      bool
+	EnableAuthority          bool
+	EnableCheck              bool
+	EnableRedirects          bool
+	EnablePageMeta           bool
+	EnableSchemaTools        bool
+	EnableMedia              bool
+	MediaBackend             string
+	EnableSocial             bool
+	MastodonClientID         string
+	MastodonClientSecret     string
+	MastodonInstanceURL      string
+	EnableWebhooks           bool
+	EnableEventStream        bool
+	EnableStructuralSweep    bool
+	StructuralSweepSchedule  string
+	EnableEvalQueueDrain     bool
+	EvalQueueDrainSchedule   string
+	EnableSignalExpirySweep  bool
+	EnableStandingDriftCheck bool
+	StandingDriftSchedule    string
+	EnableContextPacket      bool
+	EnableReachability       bool
+	EnableProvenance         bool
+	EnableAgents             bool
+	AgentMCPURL              string
+	AgentMCPToken            string
+	OAuthIssuer              string
+	OAuthDBPath              string
+	InstanceName             string
 	// TitleCutover (TITLE_CUTOVER, RFC3339) is when a record's title rule
 	// (D112) turns from a warning into a refusal; empty means warnings only.
 	TitleCutover string
+	// SignalMessageCutover (SIGNAL_MESSAGE_CUTOVER) and SignalEventCutover
+	// (SIGNAL_EVENT_CUTOVER), both RFC3339, are the Signal cutovers (D114,
+	// D115); empty means warnings only.
+	SignalMessageCutover string
+	SignalEventCutover   string
 }
 
 // ServerResult holds the live components returned by [buildApp].
@@ -154,49 +156,48 @@ type ServerResult struct {
 func parseConfig() ServerConfig {
 	port := envOr("PORT", "8080")
 	return ServerConfig{
-		Secret:                    requireEnv("SECRET"),
-		BaseURL:                   os.Getenv("BASE_URL"),
-		TitleCutover:              os.Getenv("TITLE_CUTOVER"),
-		Port:                      port,
-		Addr:                      envOr("ADDR", "127.0.0.1:"+port),
-		EnableTokens:              os.Getenv("ENABLE_TOKENS") != "",
-		EnableGovernance:          os.Getenv("ENABLE_GOVERNANCE") != "",
-		EnableRelations:           os.Getenv("ENABLE_RELATIONS") != "",
-		EnableDynamicContent:      os.Getenv("ENABLE_DYNAMIC_CONTENT") != "",
-		EnableBlocks:              os.Getenv("ENABLE_BLOCKS") != "",
-		EnableOrchestration:       os.Getenv("ENABLE_ORCHESTRATION") != "",
-		EnableAuthority:           os.Getenv("ENABLE_AUTHORITY") != "",
-		EnableCheck:               os.Getenv("ENABLE_CHECK") != "",
-		EnableRedirects:           os.Getenv("ENABLE_REDIRECTS") != "",
-		EnablePageMeta:            os.Getenv("ENABLE_PAGE_META") != "",
-		EnableSchemaTools:         os.Getenv("ENABLE_SCHEMA_TOOLS") != "",
-		EnableMedia:               os.Getenv("ENABLE_MEDIA") != "",
-		MediaBackend:              envOr("MEDIA_STORE_BACKEND", "local"),
-		EnableSocial:              os.Getenv("ENABLE_SOCIAL") != "",
-		MastodonClientID:          os.Getenv("MASTODON_CLIENT_ID"),
-		MastodonClientSecret:      os.Getenv("MASTODON_CLIENT_SECRET"),
-		MastodonInstanceURL:       os.Getenv("MASTODON_INSTANCE_URL"),
-		EnableWebhooks:            os.Getenv("ENABLE_WEBHOOKS") != "",
-		EnableEventStream:         os.Getenv("ENABLE_EVENT_STREAM") != "",
-		EnableStructuralSweep:     os.Getenv("ENABLE_STRUCTURAL_SWEEP") != "",
-		StructuralSweepSchedule:   envOr("STRUCTURAL_SWEEP_SCHEDULE", "0 * * * *"),
-		EnableEvalQueueDrain:      os.Getenv("ENABLE_EVAL_QUEUE_DRAIN") != "",
-		EvalQueueDrainSchedule:    envOr("EVAL_QUEUE_DRAIN_SCHEDULE", "*/5 * * * *"),
-		EnableSignalExpirySweep:   os.Getenv("ENABLE_SIGNAL_EXPIRY_SWEEP") != "",
-		EnableStandingDriftCheck:  os.Getenv("ENABLE_STANDING_DRIFT_CHECK") != "",
-		StandingDriftSchedule:     envOr("STANDING_DRIFT_CHECK_SCHEDULE", "30 3 * * *"),
-		SignalExpirySweepSchedule: envOr("SIGNAL_EXPIRY_SWEEP_SCHEDULE", "0 3 * * *"),
-		SignalExpiryMaxAgeDays:    envIntOr("SIGNAL_EXPIRY_MAX_AGE_DAYS", 0),
-		SignalExpiryBatchCap:      envIntOr("SIGNAL_EXPIRY_BATCH_CAP", 0),
-		EnableContextPacket:       os.Getenv("ENABLE_CONTEXT_PACKET") != "",
-		EnableReachability:        os.Getenv("ENABLE_REACHABILITY") != "",
-		EnableProvenance:          os.Getenv("ENABLE_PROVENANCE") != "",
-		EnableAgents:              os.Getenv("ENABLE_AGENTS") != "",
-		AgentMCPURL:               envOr("AGENT_MCP_URL", "http://127.0.0.1:"+port+"/mcp/message"),
-		AgentMCPToken:             os.Getenv("AGENT_MCP_TOKEN"),
-		OAuthIssuer:               os.Getenv("OAUTH_ISSUER"),
-		OAuthDBPath:               envOr("OAUTH_DB_PATH", "./oauth.db"),
-		InstanceName:              envOr("INSTANCE_NAME", "smeldr-dogfood"),
+		Secret:                   requireEnv("SECRET"),
+		BaseURL:                  os.Getenv("BASE_URL"),
+		TitleCutover:             os.Getenv("TITLE_CUTOVER"),
+		SignalMessageCutover:     os.Getenv("SIGNAL_MESSAGE_CUTOVER"),
+		SignalEventCutover:       os.Getenv("SIGNAL_EVENT_CUTOVER"),
+		Port:                     port,
+		Addr:                     envOr("ADDR", "127.0.0.1:"+port),
+		EnableTokens:             os.Getenv("ENABLE_TOKENS") != "",
+		EnableGovernance:         os.Getenv("ENABLE_GOVERNANCE") != "",
+		EnableRelations:          os.Getenv("ENABLE_RELATIONS") != "",
+		EnableDynamicContent:     os.Getenv("ENABLE_DYNAMIC_CONTENT") != "",
+		EnableBlocks:             os.Getenv("ENABLE_BLOCKS") != "",
+		EnableOrchestration:      os.Getenv("ENABLE_ORCHESTRATION") != "",
+		EnableAuthority:          os.Getenv("ENABLE_AUTHORITY") != "",
+		EnableCheck:              os.Getenv("ENABLE_CHECK") != "",
+		EnableRedirects:          os.Getenv("ENABLE_REDIRECTS") != "",
+		EnablePageMeta:           os.Getenv("ENABLE_PAGE_META") != "",
+		EnableSchemaTools:        os.Getenv("ENABLE_SCHEMA_TOOLS") != "",
+		EnableMedia:              os.Getenv("ENABLE_MEDIA") != "",
+		MediaBackend:             envOr("MEDIA_STORE_BACKEND", "local"),
+		EnableSocial:             os.Getenv("ENABLE_SOCIAL") != "",
+		MastodonClientID:         os.Getenv("MASTODON_CLIENT_ID"),
+		MastodonClientSecret:     os.Getenv("MASTODON_CLIENT_SECRET"),
+		MastodonInstanceURL:      os.Getenv("MASTODON_INSTANCE_URL"),
+		EnableWebhooks:           os.Getenv("ENABLE_WEBHOOKS") != "",
+		EnableEventStream:        os.Getenv("ENABLE_EVENT_STREAM") != "",
+		EnableStructuralSweep:    os.Getenv("ENABLE_STRUCTURAL_SWEEP") != "",
+		StructuralSweepSchedule:  envOr("STRUCTURAL_SWEEP_SCHEDULE", "0 * * * *"),
+		EnableEvalQueueDrain:     os.Getenv("ENABLE_EVAL_QUEUE_DRAIN") != "",
+		EvalQueueDrainSchedule:   envOr("EVAL_QUEUE_DRAIN_SCHEDULE", "*/5 * * * *"),
+		EnableSignalExpirySweep:  os.Getenv("ENABLE_SIGNAL_EXPIRY_SWEEP") != "",
+		EnableStandingDriftCheck: os.Getenv("ENABLE_STANDING_DRIFT_CHECK") != "",
+		StandingDriftSchedule:    envOr("STANDING_DRIFT_CHECK_SCHEDULE", "30 3 * * *"),
+		EnableContextPacket:      os.Getenv("ENABLE_CONTEXT_PACKET") != "",
+		EnableReachability:       os.Getenv("ENABLE_REACHABILITY") != "",
+		EnableProvenance:         os.Getenv("ENABLE_PROVENANCE") != "",
+		EnableAgents:             os.Getenv("ENABLE_AGENTS") != "",
+		AgentMCPURL:              envOr("AGENT_MCP_URL", "http://127.0.0.1:"+port+"/mcp/message"),
+		AgentMCPToken:            os.Getenv("AGENT_MCP_TOKEN"),
+		OAuthIssuer:              os.Getenv("OAUTH_ISSUER"),
+		OAuthDBPath:              envOr("OAUTH_DB_PATH", "./oauth.db"),
+		InstanceName:             envOr("INSTANCE_NAME", "smeldr-dogfood"),
 	}
 }
 
@@ -219,20 +220,26 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		tokenStore = smeldr.NewTokenStore(db, cfg.Secret)
 	}
 
-	var titleCutover time.Time
-	if cfg.TitleCutover != "" {
-		t, err := time.Parse(time.RFC3339, cfg.TitleCutover)
-		if err != nil {
-			return ServerResult{}, fmt.Errorf("TITLE_CUTOVER: want an RFC3339 time: %w", err)
-		}
-		titleCutover = t
+	titleCutover, err := parseCutover("TITLE_CUTOVER", cfg.TitleCutover)
+	if err != nil {
+		return ServerResult{}, err
+	}
+	signalMessageCutover, err := parseCutover("SIGNAL_MESSAGE_CUTOVER", cfg.SignalMessageCutover)
+	if err != nil {
+		return ServerResult{}, err
+	}
+	signalEventCutover, err := parseCutover("SIGNAL_EVENT_CUTOVER", cfg.SignalEventCutover)
+	if err != nil {
+		return ServerResult{}, err
 	}
 	app := smeldr.New(smeldr.Config{
-		BaseURL:      cfg.BaseURL,
-		Secret:       []byte(cfg.Secret),
-		DB:           db,
-		TokenStore:   tokenStore,
-		TitleCutover: titleCutover,
+		BaseURL:              cfg.BaseURL,
+		Secret:               []byte(cfg.Secret),
+		DB:                   db,
+		TokenStore:           tokenStore,
+		TitleCutover:         titleCutover,
+		SignalMessageCutover: signalMessageCutover,
+		SignalEventCutover:   signalEventCutover,
 	})
 
 	var roleStore *smeldr.RoleStore
@@ -565,42 +572,8 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.EnableSignalExpirySweep {
-		if !cfg.EnableOrchestration {
-			return ServerResult{}, fmt.Errorf("ENABLE_SIGNAL_EXPIRY_SWEEP requires ENABLE_ORCHESTRATION")
-		}
-		runStore := smeldr.NewSweepRunStore(db)
-		if err := smeldr.CreateSweepRunTable(db); err != nil {
-			return ServerResult{}, fmt.Errorf("create sweep run table: %w", err)
-		}
-		schedule := cfg.SignalExpirySweepSchedule
-		if schedule == "" {
-			schedule = "0 3 * * *"
-		}
-		expiryCfg := smeldr.SignalExpiryConfig{BatchCap: cfg.SignalExpiryBatchCap}
-		if cfg.SignalExpiryMaxAgeDays > 0 {
-			expiryCfg.MaxAge = time.Duration(cfg.SignalExpiryMaxAgeDays) * 24 * time.Hour
-		}
-		// Wrapping closure records each run via SweepRunStore, same pattern as
-		// SweepStructural/DrainEvalQueue's own sweepFn/drainFn above.
-		expiryFn := func(ctx context.Context) (int, int, int, error) {
-			walked, expired, skipped, sweepErr := app.ExpireSignals(ctx, expiryCfg)
-			errStr := ""
-			if sweepErr != nil {
-				errStr = sweepErr.Error()
-			}
-			_ = runStore.Append(ctx, smeldr.SweepRunRecord{
-				ID: smeldr.NewID(), Detector: "signal-expiry", RanAt: time.Now().UTC(),
-				Interval: schedule, Walked: walked, Flagged: expired, Skipped: skipped, Err: errStr,
-				ActorKind: "job", ActorID: "signal-expiry-sweep",
-			})
-			return walked, expired, skipped, sweepErr
-		}
-		expirySweep, err := agent.NewSweepScheduler(schedule, "UTC", expiryFn)
-		if err != nil {
-			return ServerResult{}, fmt.Errorf("signal expiry sweep scheduler: %w", err)
-		}
-		expirySweep.Start()
-		stopFuncs = append(stopFuncs, expirySweep.Stop)
+		// D115: nothing expires. The variable is read only to say so.
+		slog.Info("smeldr-server: ENABLE_SIGNAL_EXPIRY_SWEEP is retired (D115): nothing expires, and the variable does nothing")
 	}
 
 	if cfg.EnableStandingDriftCheck {
@@ -712,6 +685,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "migrate-record-shape" {
 		os.Exit(runMigrateRecordShape(os.Args[2:], os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "migrate-signal-kinds" {
+		os.Exit(runMigrateSignalKinds(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	cfg := parseConfig()
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")

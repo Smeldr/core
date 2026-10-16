@@ -645,6 +645,13 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, rels *Relatio
 			ErrInternal, fromStatus, toStatus, gateErr)
 	}
 
+	// D115: a Signal's kind decides which of its edges it may take.
+	if typeName == "Signal" {
+		if err := validateSignalTransition(ctx, db, itemID, fromStatus, toStatus); err != nil {
+			return err
+		}
+	}
+
 	// ── FAIL-CLOSED: required_reason ─────────────────────────────────────────
 	// Unconditional — does not depend on governance or actorID, since "did the
 	// caller supply a reason" is a fact about the call itself, not an identity.
@@ -1964,16 +1971,21 @@ func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *Webhoo
 		ToState:           toState,
 		RequiredOperation: requiredOperation,
 	}
-	if err := InsertSignal(ctx, db, s); err != nil {
+	// One open condition per blocked transition (D115): a drain that meets
+	// the same gate again does not add a second.
+	r := signalResolver{db: db, webhooks: store, pool: pool, broadcaster: broadcaster}
+	open, err := r.openFor(ctx, typeName, itemID)
+	if err != nil {
 		return fmt.Errorf("smeldr: recordAuthorizationRequiredSignal: %w", err)
 	}
-	id := s.ID
-	// Event-stream channel (A302): this Signal's own receiver column is set
-	// to requiredOperation two statements above (the INSERT's $5 placeholder)
-	// — reusing the parameter directly needs no extra query.
-	dispatchTransitionWebhook(ctx, store, pool, broadcaster, requiredOperation, "signal.created", transitionWebhookData{
-		Type: "signal", ID: id, Slug: id, ToState: "pending",
-	})
+	for _, o := range open {
+		if o.signalType == "authorization-required" && o.fromState == fromState {
+			return nil
+		}
+	}
+	if err := r.emit(ctx, s); err != nil {
+		return fmt.Errorf("smeldr: recordAuthorizationRequiredSignal: %w", err)
+	}
 	return nil
 }
 

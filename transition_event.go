@@ -43,7 +43,9 @@ type statusTransition struct {
 
 // afterStatusChange records and announces one committed status change, the
 // same way on every path (D107):
-//  1. one provenance record and one standing write ([applyStateChange]);
+//  1. one provenance record and one standing write ([applyStateChange]),
+//     then the condition Signals the change ends or starts
+//     ([App.resolveSignalsFor], D115);
 //  2. one canonical "<type>.transitioned" event, to the event stream and to
 //     webhook endpoints subscribed to it;
 //  3. the named milestones ([statusSignals]) once each on the App's bus
@@ -74,6 +76,8 @@ func (a *App) afterStatusChange(ctx context.Context, t statusTransition) {
 		actorKind: actorKind,
 		actorID:   actorID,
 	})
+	// The conditions this change ends or starts (D115), fail-open.
+	a.resolveSignalsFor(ctx, t)
 
 	busy := a.hasBusWork()
 	if busy && t.item == nil {

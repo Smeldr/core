@@ -652,27 +652,39 @@ ON CONFLICT (id) DO UPDATE SET
 // logged, never returned, since a failed structural-Signal emission must
 // never fail the relation assertion itself.
 func (s *RelationStore) emitConflictDetectedSignal(ctx context.Context, edge RelationEdge) {
+	r := s.signalResolver()
+	// The resolver finds these rows again by this message (contradictsMessage).
+	message := contradictsMessage(edge.SourceID, edge.TargetID)
+	// D115: one open condition per contradiction. An edge asserted again while
+	// its rows are open adds none.
+	open, err := r.selectOpen(ctx, "signal_type = 'conflict-detected' AND subject_type = 'Decision' AND message = $1", message)
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: emitConflictDetectedSignal: lookup failed", "edge_id", edge.ID, "error", err)
+		return
+	}
+	if len(open) > 0 {
+		return
+	}
 	pairs := [2]struct{ subjectID string }{{edge.TargetID}, {edge.SourceID}}
 	for _, pair := range pairs {
 		sig := &Signal{
 			Sender:      "system",
 			Receiver:    decisionRatifyOperation,
 			SignalType:  "conflict-detected",
-			Message:     fmt.Sprintf("Decision %s contradicts Decision %s", edge.SourceID, edge.TargetID),
+			Message:     message,
 			SubjectType: "Decision",
 			SubjectID:   pair.subjectID,
 		}
-		err := InsertSignal(ctx, s.db, sig)
-		id := sig.ID
-		if err != nil {
+		if err := r.emit(ctx, sig); err != nil {
 			slog.WarnContext(ctx, "smeldr: emitConflictDetectedSignal: insert failed",
 				"edge_id", edge.ID, "subject_id", pair.subjectID, "error", err)
-			continue
 		}
-		dispatchTransitionWebhook(ctx, s.webhookStore, s.webhookPool, s.eventBroadcaster, decisionRatifyOperation, "signal.created", transitionWebhookData{
-			Type: "signal", ID: id, Slug: id, ToState: "pending",
-		})
 	}
+}
+
+// signalResolver returns the store's Signal resolver (D115).
+func (s *RelationStore) signalResolver() signalResolver {
+	return signalResolver{db: s.db, provenance: s.provenanceStore, webhooks: s.webhookStore, pool: s.webhookPool, broadcaster: s.eventBroadcaster}
 }
 
 // recordAssertProvenance records a ProvenanceRecord for a successfully asserted

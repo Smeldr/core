@@ -113,6 +113,8 @@ var capabilityTable = []Capability{
 	{ResourceSignal, VerbGet, "read", ReasonNotTaken, false},
 	{ResourceSignal, VerbList, "read", ReasonNotTaken, false},
 	{ResourceSignal, VerbCreate, "create", ReasonNotTaken, false},
+	{ResourceSignal, "answer", "update", ReasonRequired, true},
+	{ResourceSignal, "withdraw", "archive", ReasonRequired, true},
 
 	{ResourceAccess, VerbList, "administer", ReasonNotTaken, false},
 	{ResourceAccess, "list_roles", "read", ReasonNotTaken, true},
