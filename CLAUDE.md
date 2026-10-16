@@ -923,7 +923,7 @@ workflow", step 4), and every commit waits for the architect's `commit-approved`
 
 # Smeldr Agent Protocol
 
-<!-- common-template-version: 2026-10-06a -->
+<!-- common-template-version: 2026-10-16b -->
 <!-- source: smeldr/architect/AGENT_PROTOCOL.md (canonical) -->
 
 **This file is the canonical source D77 calls `Template-Smeldr-Common-Agent.md`.** Not
@@ -1057,7 +1057,10 @@ itself arrives.
    - **architect's review:** after `plan-ready` (until the plan is approved) and after
      `commit-ready` (until the commit is approved);
    - **Peter's own yes:** a release tag, a deploy, or a production, server, DNS or
-     credential action, given in your session;
+     credential action, given in your session. A written release plan that Peter approves
+     in your session, naming a file and its commit (first: `design/release-preapproval-v1.md`,
+     2026-10-15), counts as that yes for the releases it lists, under its conditions.
+     Deploys, server, DNS and credential actions are never covered by a release plan;
    - **a real blocker:** something the Task cannot proceed without (missing access, a
      contradiction in the Task, a decision only Peter or architect can make). Say what it
      is in an `implementation-question` Signal, or move the Task to `blocked` with the
@@ -1302,10 +1305,13 @@ exception and still broadcast to every channel.
   you claim, transition or create something, expect no stream line for it; your own tool
   call's result is the confirmation. Opt back in with `?include_own=true` only if your
   role genuinely needs it.
-- **`signal.transitioned`.** Moving a Signal `pending → read → acknowledged` produces no
-  stream event. `signal.created` still arrives as before.
-- **`amendment.*`.** No Amendment event reaches the stream at all, created or
-  transitioned. Query `list_amendments` when you need them.
+- **Topic channels (core v1.129.0, A435).** `signal.transitioned` (a caller moving a
+  Signal), the expiry sweep's one-per-run `signal.expiry_swept`, every `amendment.*`
+  event, and the new `relation.asserted`/`relation.ended` are published on topic channels
+  (`signals`, `amendments`, `relations`), never on a role channel. A role session on
+  `?channel=<band>` is not woken by them; a `?channel=all` or `?channel=<topic>`
+  subscriber gets them. `signal.created` still arrives on the receiver's channel. Query
+  `list_amendments` or `list_signals` when you need that state.
 
 Outbound webhooks are unaffected: they still receive all of these. A per-item
 subscription model that lets a role ask for some of them back is a separate, open design
@@ -1636,6 +1642,43 @@ elsewhere, not duplicates.
   after your own repo's changes are actually merged to `main` — not merely
   plan-approved, not merely committed to a feature branch. "Verified complete" means
   merged.
+
+---
+
+## Record titles and closed lists (D112)
+
+**In force on process.smeldr.dev since 2026-10-16 07:32:40 UTC** (the title cut date,
+T274; the instance runs core v1.158.0 since the same morning).
+
+- **Every Decision, Task and Goal you create gets a `title`:** one line of at most 120
+  characters saying what the record is. An Amendment's `summary` is its title, under the
+  same limit. Put the detail in the description or body, not in the title.
+- **A create without a title, or with one over 120 characters, is refused** on
+  process.smeldr.dev, with a validation error that names the field. Nothing is written.
+  Send the title even if your client's tool list does not show the field; the server
+  accepts it. On an instance with no cut date set, the same create only warns
+  (`title_missing`, `title_too_long`).
+- **Slugs:** an explicit `slug` still wins. Without one, a new Task or Goal slug is made
+  from its title.
+- **`amendment_type` is one of** feature, fix, docs, chore, test, ci, refactor, release.
+  Any other value is refused. Use `feature`, not `feat`.
+- **`pilot` is retired.** Do not send it. It is ignored, with a `deprecated_field`
+  warning.
+- **Signal and task_plan have no title.**
+- **A task_plan has a `summary`** (since 2026-10-16, D114): at most 300 characters, the
+  plan in a few lines, next to the full `body`. Write it with every new plan and update
+  it with each revision. It is optional on the type, so older plans stay valid, but
+  architect reads it first. A summary over 300 characters is refused on
+  process.smeldr.dev (`field_too_long`), since the title cut date covers field limits too.
+- **A Signal message is at most 500 characters** (D114). A longer one gets a
+  `message_too_long` warning, and is refused once the instance sets its Signal cut date.
+  Put the detail in the record the Signal names (the task_plan body, the Task), not in
+  the message.
+- **Old numbers after the address migration (2026-10-16, T277).** Every Decision, Task,
+  Goal and Amendment now has an address. A record whose old number was not a clean
+  address of its type got a new one, and the old value is kept in `external_ref`.
+  Examples: cloud's C26 to C51 are D118 to D135, and the two former A455 Amendments are
+  A517 (cloud) and A518 (core). Read by the new address.
 
 ---
 
