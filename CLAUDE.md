@@ -63,16 +63,15 @@ and `decisions/recent.md` stop accepting new Decision/Amendment entries at
 this point; the content already there (through D67/A304) stays exactly as
 is, permanently, for historical reading. No backfill, no new hand-written
 entries for either type from here forward. `decisions/nondecisions.md` is
-NOT covered by this freeze — D67 does not name it, and no live Non-Decision
-content type exists yet, so Non-Decisions keep using the process below
-unchanged until a future decision addresses that gap.
+frozen too: a decline is a live Decision (D89), recorded with
+`create_decision` like any other, so the file is a read-only archive.
 
 DECISIONS.md is the index. Body text lives in separate files by topic:
 
 | File | Contents | Add new entries? |
 |------|----------|-----------------|
 | `decisions/recent.md` | Rolling working file (~20KB limit) | **No — frozen at D67/A304. Decisions/Amendments are recorded live now, see below** |
-| `decisions/nondecisions.md` | Non-Decisions only | **Yes — Non-Decisions go here directly (unaffected by the D67 freeze)** |
+| `decisions/nondecisions.md` | Non-Decisions only | No: frozen archive; a decline is a live Decision (D89) |
 | `decisions/core.md` | Archive: D1–D22, A19–A65, A88–A95 | No — archive only |
 | `decisions/phase2-archive.md` | Superseded archive (was phase2.md; content now in topic files) | No — archive only |
 | `decisions/auth.md` | Archive: D25, A66, D26, A83 | No — archive only |
@@ -88,14 +87,11 @@ DECISIONS.md is the index. Body text lives in separate files by topic:
 dispatch to include the archiving instruction as an explicit prerequisite step
 in the Task's own Description (see T254 for the applied pattern).
 The architect decides groupings and topic file names. Never archive autonomously.
-Non-Decisions are exempt — they go to `nondecisions.md` directly and do not count
-toward the rolling window.
 
 **core-implementer owns all writes to `decisions/` and `DECISIONS.md`.**
 These files must be edited locally via git — never via GitHub MCP API calls.
 The files are too large for `create_or_update_file` and `push_files` silently
-truncates them. (This still applies to `decisions/nondecisions.md`, which the
-D67 freeze does not cover.)
+truncates them.
 
 ## Recording a new Decision or Amendment (live, D67)
 
@@ -106,22 +102,18 @@ live `process.smeldr.dev` MCP tools instead: `create_decision` /
 live item is (`get_decision`, `list_decisions`, `get_amendment`,
 `list_amendments`).
 
-**Number assignment — dual-source, not `grep` alone.** The frozen
-`DECISIONS.md` index's own highest number is a permanent floor (currently
-A304) — it will never grow again, but `list_amendments`/`list_decisions`
-alone will silently under-count immediately after the freeze, since most
-Amendments shipped between 2026-08-13 and the freeze were never recorded
-live (only six pre-freeze live records exist at all: A253–A256, S197,
-OPS-2026-08-11). The next number is
-`max(DECISIONS.md's own frozen index max, list_amendments/list_decisions'
-own live max) + 1`. Check both, every time — the live list alone is not
-sufficient until enough time has passed that its own max exceeds the
-frozen floor.
+**The server assigns the number (D110).** Send no `decision_number` or
+`amendment_number`: the create returns the record's address (`D118`,
+`A521`), and that address is the number to cite in commits, CHANGELOG and
+ARCHITECTURE. Put your own reference, if any, in `external_ref`. Old
+numbers from before the address migration live in `external_ref`; read a
+record by its address. A placeholder (`A@@AMEND@@`) in a commit is filled
+with the address the create returned.
 
 **Decision — create at `proposed`, stop there.** A real Decision is
 proposed by whoever is recording it and ratified separately by Peter
 (`proposed → ratified`, `RequiredRole: "admin", Strict: true` — D34/D40).
-Call `create_decision` with `decision_number`, `scope`, `body` (the full
+Call `create_decision` with `title` (one line, at most 120 characters, D112), `scope`, `body` (the full
 markdown rationale — this is now the *only* place the rationale lives, so
 write the same depth of detail `decisions/recent.md` used to hold, not a
 shorter version). Leave it at its natural initial state, `proposed`. Never
@@ -131,9 +123,11 @@ unchanged from before D67.
 **Amendment — create, then drive straight through to `merged`.** Unlike a
 Decision, an Amendment records work that is already fully shipped by the
 time it's recorded (the commit is already pushed). Call `create_amendment`
-with `amendment_number`, `amendment_type`, `version`, `commit_hash`,
-`pilot`, `summary` (a genuine one-line summary now — the detail goes in
-`body`), and `body` (the full markdown rationale, same depth as a
+with `amendment_type` (one of feature, fix, docs, chore, test, ci, refactor,
+release), `version`, `commit_hash`, `summary` (the title: one line, at most
+120 characters; the detail goes in `body`), `task_ref` (the Task it ships,
+by address or slug; A521, once process.smeldr.dev runs core v1.161.0 or
+later, which then asserts `ships_as` itself), and `body` (the full markdown rationale, same depth as a
 `decisions/recent.md` Amendment entry used to carry — do not leave this
 thinner than the git-file convention it replaces). Then call
 `transition_item` (type `Amendment`) through the full chain in the same
@@ -144,10 +138,8 @@ was left there by mistake (nobody had ever been instructed to advance
 them), and it means the record looks like in-flight work that never
 finished, which is misleading for something that already shipped.
 
-**When adding a Non-Decision:**
-1. Edit `decisions/nondecisions.md` locally (append to end)
-2. Add the index row to `DECISIONS.md`
-3. Commit both in the same commit
+**When declining something:** record it as a live Decision (D89) with
+`create_decision`; `decisions/nondecisions.md` takes no new entries.
 
 ## Change classification
 
@@ -184,7 +176,7 @@ When in doubt: Level 2.
   **an HTTP response in an error path. The single pipeline rule is non-negotiable.**
 - `smeldr.Context` is an interface, not a struct (Decision 21)
 - `smeldr.DB` is an interface, not `*sql.DB` (Decision 22)
-- Go 1.26.4 minimum — do not use features introduced after 1.26.4
+- Go version: the one `go.mod` names (`go 1.26.5` today); read it there, do not assume, and use no feature newer than it
 - Coverage gate: a commit that drops test coverage below 96.0% must not be merged.
   Verify before every commit:
   `go test -coverprofile=coverage.out ./... ; go tool cover -func=coverage.out | Select-String "total:"`
@@ -427,14 +419,13 @@ An Amendment must never leave `example_test.go` in a failing state.
 Every commit that implements an Amendment must, in the same action, produce
 one complete live Amendment record — no step below is optional:
 
-1. **`create_amendment`** with `amendment_number`, `amendment_type`,
-   `version`, `commit_hash`, `pilot`, `summary` (a genuine one-liner), and
-   `body` (the full markdown rationale — this is now the only place it
-   lives; write the same depth `decisions/recent.md` used to hold).
-2. **Number checked against both sources** — `DECISIONS.md`'s own frozen
-   index max (a permanent floor, currently A304) and
-   `list_amendments`'s own live max — see "Recording a new Decision or
-   Amendment" above.
+1. **`create_amendment`** with `amendment_type` (closed list), `version`,
+   `commit_hash`, `summary` (the title, at most 120 characters), `task_ref`
+   (once the instance runs core v1.161.0+), and `body` (the full markdown
+   rationale: this is now the only place it lives; write the same depth
+   `decisions/recent.md` used to hold).
+2. **No number sent:** the server assigns the address (D110); cite the one
+   the create returns.
 3. **Driven through to `merged`** — `transition_item` (type `Amendment`)
    `scoped → in-progress → commit-ready → committed → merged`, since the
    work this record represents is already shipped by the time it's
@@ -506,7 +497,7 @@ All items must be resolved. Do not propose a commit until the gate is clear.**
       pkg.go.dev had nothing authored to show for any of them. Create one if
       none exists; this checklist entry is what makes that discipline
       enforced at commit time, not only read at session start.
-- [ ] If this commit implements an Amendment: the live record exists (`create_amendment`) with `body` fully populated, the number was checked against both the frozen `DECISIONS.md` index and `list_amendments`, and it is transitioned through to `merged`. Verify with `get_amendment`.
+- [ ] If this commit implements an Amendment: the live record exists (`create_amendment`) with `body` fully populated, the address the server assigned is the one cited in the commit, and it is transitioned through to `merged`. Verify with `get_amendment`.
 - [ ] **If this commit adds a column to an existing table via an `Ensure*Column`-style
       migration:** the new `Ensure*` function's call site is also added to
       `example/server/main.go`'s boot path in the *same* commit — not left for later. A
@@ -712,13 +703,10 @@ direct-commit work with no feature branch, push follows the commit in the same s
 **Tag/release is a separate, later act — never bundled into this step.** "Commit
 approval" and "push follows the commit" above cover exactly one thing: getting the
 code change itself onto `main` on GitHub. It does **not** authorize tagging or
-releasing, even when the commit changes `README.md`'s version line. Tag/release
-requires its own separate step, gated on its own explicit `release-approved` signal
-(sent by the architect, never inferred from `commit-approved`) — which itself only
-fires after Peter's own direct words in chat approve *that specific version* (see
-"Release tagging" below), never inferred from the commit-approval that just landed,
-and never satisfied by an earlier version's approval. If in doubt, stop after the
-push and ask.
+releasing, even when the commit changes `README.md`'s version line. A release needs
+Peter's yes for that version, given in core's own session, or a written release plan
+he approved there that covers it (see "Release tagging" below). The architect never
+relays a yes. If in doubt, stop after the push and ask Peter.
 
 The plan for a docs task is a `task_plan` record like any other (D81).
 
@@ -735,32 +723,34 @@ smeldr.dev/cli commands ship in the same release — not as a follow-up.
 ---
 
 ## Branching and commit timestamps
-All milestone work — and, per Level 2 classification (see "Change classification"
-above), all Amendment-scoped work, not only a classic `Milestone{N}_BACKLOG.md` step —
-happens on a local feature branch. A direct commit to `main` with no feature branch is
-reserved for Level 0/1 work only (cosmetic changes, micro-amendments with no
-cross-file consequences). If a change touches an exported symbol, an interface, or a
+All Level 2 work (see "Change classification" above) happens on a local branch named
+`<kind>/<slug>`, where kind is the commit type (`feature`, `fix`, `docs`, `chore`) and
+slug names the Task (`feature/core-references-are-relations`,
+`docs/protocol-cleanup-2026-10-16c`). A direct commit to `main` with no branch is for
+Level 0/1 work only. If a change touches an exported symbol, an interface, or a
 function signature, affects route/middleware behaviour, or has consequences in more
-than one file, it gets a feature branch — full stop, not a judgment call made per
-instance. Commits on the branch are free checkpoints — their timestamps do not matter
-and the branch is never pushed to GitHub unless explicitly requested.
-Branch naming: feature/m{N}-{slug} — e.g. feature/m11-webhooks.
-When the architect's written approval appears in the `task_plan` record and you transition
-`commit-reviewing → done`, squash the branch to main.
-"Commit approved" means commit on the feature branch only — never auto-squash to main:
-    git checkout main
-    git merge --squash feature/m{N}-{slug}
+than one file, it gets a branch, not a judgment call made per instance. Commits on
+the branch are free checkpoints; the branch is never pushed to GitHub unless asked.
+
+**One rule for commit approval:** the architect's written approval in the `task_plan`
+record (or, for a no-plan Task, the `commit-approved` Signal) means squash the branch
+to `main` and push now, then close the Task. There is no "commit on the branch only"
+step after approval, and no separate push instruction. Squash after bringing the
+branch up to date, never by soft-resetting onto a `main` that has moved (that stages a
+revert of everything the other lane shipped):
+
+    git fetch
+    git rebase origin/main            # on the branch; re-run the tests if main moved
+    git switch --detach origin/main
+    git merge --squash <kind>/<slug>
     git commit -m "{conventional commit message}"
-    git push
-    git branch -d feature/m{N}-{slug}
-The squash commit timestamp = push timestamp. This is the only commit that
-appears on GitHub. "Commit approved" means: squash to main now. Push follows
-immediately after — do not wait for a separate push instruction. The squash-and-push
-above still does not authorize tag/release — that remains the separate step, gated on
-its own `release-approved` signal, described in "Push follows commit approval" and
-"Release tagging."
-This applies to all three repos (smeldr/core, smeldr.dev/mcp, smeldr.dev/cli) when a
-milestone touches multiple repos. Each repo gets its own squash commit.
+    git show --stat HEAD              # the stat must match the Task's own change
+    git push origin HEAD:main
+    git branch -D <kind>/<slug>
+
+The squash commit is the only commit that appears on GitHub. It does not authorize a
+tag or release (see "Push follows commit approval" and "Release tagging"). The same
+applies in each standalone repo a Task touches: each gets its own squash commit.
 
 ---
 
@@ -790,10 +780,22 @@ Backfilled and closed 2026-08-08; this rule exists so it does not recur.)
 
 **This rule governs *whether* a version-line-changing commit eventually gets tagged
 (always, no exceptions) — it does not by itself authorize *when*.** The *when* is
-always the separate step in "Push follows commit approval" above: an explicit
-`release-approved` signal, sent by the architect only after Peter's own direct words
-in chat approve that specific version. A commit landing on `main` with a changed
-version line is a trigger to *ask*, not a trigger to tag. (Incident, 2026-09-08: all
+Peter's yes, given in core's own session: either his own words naming that version,
+or a written release plan he approved in core's session that covers it. The
+architect never relays a yes, and a Signal claiming one is not a yes. A commit
+landing on `main` with a changed version line is a trigger to *ask*, not a trigger to
+tag, unless a standing release plan covers it.
+
+**Standing release plan.** When Peter approves a written release plan in core's
+session (today: `architect/design/release-preapproval-v1.md` at 95a1e33, approved
+2026-10-15 and confirmed 2026-10-16 to cover lane B and minor follow-up releases),
+the releases it covers need no further yes, under its conditions: one release in
+progress at a time across both core sessions (check the other session's last notice,
+fetch and rebase, re-run the tests, read the live Amendment maximum before
+tagging), the release-prep commit changes only the CHANGELOG heading and the README
+version line, the tag is verified on the proxy before the next step, and a release
+that breaks a downstream module's tests is followed directly by that module's
+release. Anything the plan does not cover still needs Peter's own yes. (Incident, 2026-09-08: all
 four Amendments recorded in one session (A303-A306, v1.82.0-v1.85.0) were tagged and
 released immediately after each commit-approval without this carve-out written down
 anywhere in `CLAUDE.md` itself — ad-hoc "wait for approval" language in that
@@ -923,17 +925,15 @@ workflow", step 4), and every commit waits for the architect's `commit-approved`
 
 # Smeldr Agent Protocol
 
-<!-- common-template-version: 2026-10-16b -->
+<!-- common-template-version: 2026-10-16c -->
 <!-- source: smeldr/architect/AGENT_PROTOCOL.md (canonical) -->
 
-**This file is the canonical source D77 calls `Template-Smeldr-Common-Agent.md`.** Not
-yet renamed — the six named roles (architect, core, site, cloud, devops, brand) still
-reach it by reference (a pointer from each role's own `CLAUDE.md`), not by an embedded
-copy, so renaming or deleting this file now would break every one of them. The rename to
-`Template-Smeldr-Common-Agent.md`, and retiring the reference, happens as part of each
-role's own migration Task (D77, §6 point 3 of `design/agent-provisioning-and-scaling-v1.md`) —
-until then, this file's own content is the version every agent's embedded copy should
-match, tracked by the marker above and by `agents/REGISTRY.md`.
+**This file is the canonical common template of D77.** Every role (core, site, cloud,
+devops, brand, orch) carries an embedded copy of it at the end of its own `CLAUDE.md`;
+the D77 rollout is complete. The file keeps its name (the planned rename to
+`Template-Smeldr-Common-Agent.md` is dropped as unneeded). The marker above is the
+version every embedded copy should match, tracked in `agents/REGISTRY.md`. When this file
+changes, architect sends each role a re-sync Task.
 
 **The embedded copy is never hand-edited, in any agent's own file — verbatim or not at
 all.** Found live 2026-09-23, one migration cycle in: `orch`'s own embedded copy had an
@@ -964,8 +964,8 @@ rather than silently picking one.
 | Role | Repo(s) | Owns |
 |------|---------|------|
 | core-implementer | `smeldr/core` (+ standalone modules mcp/cli/oauth/media/social/agent/runner) | Framework, MCP server, CLI, standalone Go modules |
-| site-implementer | `smeldr/site-dev` | smeldr.dev, deploy, content publishing |
-| brand-expert | `smeldr/brand` | Brand, tone, messaging, content planning and drafts |
+| site-implementer | `smeldr/site-dev` | smeldr.dev: templates, layout, deploy (never publishes content) |
+| brand-expert | `smeldr/brand` | Brand, tone, messaging, content planning and drafts; publishes approved content on smeldr.dev |
 | cloud-implementer | `smeldr/cloud`, `smeldr/mail` | Smeldr Cloud (`cloud.smeldr.io`, `demo.smeldr.io`, `smeldr.io` marketing/CMS — one owner, decided 2026-07-24). `smeldr/mail` (private) is the transactional-email module, reached via absolute paths from the same session, no separate `CLAUDE.md` |
 | devops-implementer | `smeldr/ops`, `smeldr/cloud-ops` | Deploy mechanics, hosting, monitoring, backup |
 | orch | `smeldr/orchestration` | The Orchestration addon — a personal tool, provisioned agent (D77), not one of the six named roles |
@@ -1337,11 +1337,12 @@ return an honestly-empty result and lie quietly (`list_signals` fails open). Bef
 trusting any `list_*` result touching orchestration data, confirm the connector is
 `process`.
 
-**If the stream is unavailable** — unreachable at session start, the Monitor's process
-exits mid-session, or goes silent well past a heartbeat gap — fall back to polling
-`list_tasks`/`list_signals` filtered to your own band on a short interval. Full fallback
-detail: `design/agent-event-signaling.md`. Desktop pings remain retired regardless of
-stream health — never revive them as an outage fallback.
+**If the stream is unavailable** (unreachable at session start, the Monitor's process
+exits mid-session, or it goes silent well past a heartbeat gap): re-arm it once, check
+your pending Signals and priority 0 backlog by hand, and if it still does not connect,
+stop and tell Peter. **Never fall back to polling as a silent default**; Peter has ruled
+that out. Desktop pings remain retired regardless of stream health; never revive them as
+an outage fallback.
 
 If `watch-events.ps1` itself ever stops reconnecting after a dropped connection, that is
 the script's own bug, not the stream — it is expected to loop and retry automatically.
@@ -1430,8 +1431,9 @@ before starting, the Task's own scope substituting for a `task_plan` record, is 
 For every other case:
 
 1. **Plan.** `create_content(type_name="task_plan", fields={task_ref, band, body,
-   revision: 1})` — the full implementation plan, including open questions, goes in
-   `body` (free-form markdown, same shape as the old file). Do not write any code yet.
+   revision: 1, summary})`: the full implementation plan, including open questions, goes in
+   `body` (free-form markdown, same shape as the old file); `summary` is the plan in a few
+   lines, at most 300 characters. Do not write any code yet.
    Leave the record in `draft` while composing; edit freely via `update_content` before
    submitting.
 2. **`transition_item` the `task_plan` to `submitted`, then signal `plan-ready`** (name
@@ -1458,11 +1460,16 @@ This is a signal-driven (or Task-state-driven) protocol, not a chat-approval pro
 
 ---
 
-## Signal protocol (brand-expert, discussion mode only)
+## Signal protocol
 
-All six roles use Task-state transitions for ordinary dispatch — no signal files, no
-`Signal` records needed for that. Brand-expert additionally runs a discussion-mode
-layer on top, for design-review conversations specifically (not dispatch): the real
+Every role uses `Signal` records as the doorbells of the work cycle (`plan-ready`,
+`commit-ready`, `task-closed`, `implementation-question`, `notice` to architect;
+`plan-approved`, `plan-feedback`, `commit-approved`, `commit-feedback`, `answer` from
+architect), see "Plan → approval → implementation → commit". A Signal is never dispatch
+and never approval: dispatch is a Task, approval is written in the `task_plan` body.
+
+**Brand's discussion mode.** Brand-expert additionally runs a discussion-mode layer, for
+design-review conversations specifically (not dispatch): the real
 `Signal` content type (`create_signal`/`list_signals`/`transition_item`, state flow
 `pending → read → acknowledged/expired`), not a flat file. `signal_type` values:
 `turn-posted`, `synthesis-proposed`, `synthesis-agreed`, `session-closing`.
@@ -1510,16 +1517,6 @@ its own `task_ref`, so two concurrent same-role sessions each get their own reco
 naturally — there is no shared file path to collide on anymore. Query
 `list_items_by_state(type_name: "task_plan", state: ...)` filtered to your own `task_ref`
 if you need to find yours again.
-
-**Task-scoped signal files**, named for the task, not the role: `SIGNAL_CORE_M1.md`, etc.
-The shared defaults stay free for whichever session needs them next — check they're
-actually idle before reusing. **Whenever a signal file is task-scoped, name the exact
-path in a real `Signal` to architect in the same round as writing it** — a task-scoped
-file's path can't be guessed the way the shared default can. The task-scoped signal file
-is deleted by the architect once the task closes (it's a shared channel neither party's
-own commit touches). Note: this predates the D50 migration and may itself be stale for
-the four migrated roles, which no longer use signal files at all — not verified as part
-of D81, flagged here for a separate check.
 
 **The real collision surface is the shared meta-files every task touches by convention**
 (`README.md`, `CHANGELOG.md`, `DECISIONS.md`, `decisions/recent.md`, the session-context
@@ -1682,13 +1679,27 @@ T274; the instance runs core v1.158.0 since the same morning).
 
 ---
 
-## Amendment numbering — one shared `A`-number sequence, not a per-repo prefix
+## Amendment numbering: the server assigns the address (D110)
 
-One shared sequence, read live before assigning: `list_amendments`, filtered to
-`^A\d+$`, take the max, `+1` — never guess, never invent a new prefix or date-string ID.
-A repo's own historical numbers (core's `A1`-`A345`-era entries, site's one-off `S197`,
-devops's `OPS-2026-08-11`) stay exactly as they are, permanently — this only governs what
-a *new* live Amendment gets numbered.
+Every new Amendment gets its address (`A519`, ...) from the server when it is created, in
+one shared sequence for every band. **Send no number.** `amendment_number` is deprecated;
+a value sent there is not used as the address. If you keep your own numbering, send it as
+`external_ref`. The address is in the create result: use that one in commit messages,
+plans and Signals.
+
+Old per-repo series (core's `A1`-`A345` era, site's `S197`, devops's `OPS-2026-08-11`,
+cloud's `C1`-`C83`) were migrated on 2026-10-16 (T277): records whose old number was not
+a clean address got a new one, with the old value in `external_ref`.
+
+<details>
+<summary>Superseded 2026-10-16 by D110 addresses: read the live max + 1</summary>
+
+From 2026-09-22 to 2026-10-16 each band read `list_amendments`, filtered to `^A\d+$`,
+took the max and added 1. Because bands shared the sequence, a number read in a plan
+could be taken by another band before merge (found several times); server-assigned
+addresses remove the race.
+
+</details>
 
 <details>
 <summary>Superseded 2026-09-22 — kept as dated history</summary>
@@ -1708,10 +1719,11 @@ tracked as its own Task.
 Every role's significant decisions are proposed live on the instance, not written only to
 a per-repo `DECISIONS.md` — Smeldr is its own dogfood customer, so there's no real
 distinction between "our own architecture decisions" and "the product's Decision content
-type." One shared `D`-number sequence, not a per-repo prefix: read the live max
-(`list_decisions`, filtered to `^D\d+$`, `+1`) before creating one.
+type." The server assigns the Decision's address (`D118`, ...) in one shared sequence
+(D110): send no `decision_number`; your own numbering, if any, goes in `external_ref`.
 
-**How:** `create_decision` (`decision_number` — `D`-prefixed, `scope`, `body`). Leave it
+**How:** `create_decision` with a `title` (at most 120 characters, D112), `scope` and
+`body`; then `assert_relation` `belongs_to_domain` to its Domain (raw IDs). Leave it
 `proposed` — **never self-ratify**; Peter ratifies in chat or via
 `smeldr-cli transition <Type> <slug> --to ratified`. If your own repo hasn't migrated to
 live-only recording yet, that migration is its own Task.

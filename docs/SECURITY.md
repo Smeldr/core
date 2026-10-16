@@ -3,12 +3,12 @@
 ## Supported versions
 
 Only the latest stable release receives security fixes.
-Security-critical patches are released as patch versions (e.g. v1.22.1)
+Security-critical patches are released as patch versions (e.g. v1.161.1)
 and tagged immediately.
 
 | Version | Supported |
 |---------|-----------|
-| Latest stable (v1.22.x) | ✅ |
+| Latest stable (v1.161.x) | ✅ |
 | Older versions | ✗ |
 
 ## Reporting a vulnerability
