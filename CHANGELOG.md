@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.157.0] - 2026-10-16
+
 ### Added
 
 - **Runtime-defined fields take a `max_length`, and record types get title and length warnings (A512).** `SchemaField.MaxLength` (JSON `max_length`) sets the most characters a string field of a runtime-defined type should hold; zero means no limit. `ValidateSchemaDef` refuses it on a non-string field, refuses a negative value, and refuses a value above 120 on the field with role `title`. Record types (runtime-defined types with no URL prefix) follow the title rule on their `title`-role field: a create with no title warns `title_missing`, and a title longer than 120 characters, or than its own smaller `max_length`, warns `title_too_long`. Any field with a declared `max_length` that a write makes longer warns `field_too_long`. A create checks every field; an update checks only the fields it sets, so an older item is not held to a field the update did not change. Web content types are not held to the title rule, but a declared `max_length` applies to any type.
