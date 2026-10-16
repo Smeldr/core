@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.164.0] - 2026-10-16
+
 ### Changed
 
 - **Signal and relation events carry addresses (T872, A529).** `signal.created` and `signal.transitioned` carry the Signal's `address` on every path (`NotifySignalCreated`, which mcp's `create_signal` calls, now reads it with the receiver; conditions core resolves read it with the open row). `relation.asserted` and `relation.ended` carry `source_address` and `target_address`, each omitted when that end has none. `NotifySignalCreated`'s signature is unchanged, so mcp needs no change. Delivery's read check is unchanged.
