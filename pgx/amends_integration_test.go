@@ -43,6 +43,10 @@ func TestPG_AmendsRelation(t *testing.T) {
 	if err := smeldr.EnsureAmendmentAmendsColumn(ctx, db); err != nil {
 		t.Fatalf("EnsureAmendmentAmendsColumn (second call): %v", err)
 	}
+	// D113: the boot path also ensures the reference columns on an old table.
+	if err := smeldr.EnsureReferenceColumns(ctx, db); err != nil {
+		t.Fatalf("EnsureReferenceColumns: %v", err)
+	}
 	rs, err := smeldr.NewRelationStore(db)
 	if err != nil {
 		t.Fatalf("NewRelationStore: %v", err)

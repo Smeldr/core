@@ -111,7 +111,10 @@
 //
 // Relations between items keep their history: one row is one life of a
 // relation, an end is never a delete, and every end records its cause and
-// actor ([RelationStore.Withdraw], [EdgeEnd]).
+// actor ([RelationStore.Withdraw], [EdgeEnd]). References between records
+// (a Task's Implements, an Amendment's TaskRef, a Signal's subject, a
+// [SchemaField] with References) are checked on write and become edges the
+// system writes in the record's own transaction (D113, [MigrateReferences]).
 //
 // # Markdown
 //

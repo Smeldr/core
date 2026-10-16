@@ -94,6 +94,9 @@ func (a *App) RedefineContentTypeVia(ctx context.Context, surface string, schema
 	if next.AddressPrefix == "" {
 		next.AddressPrefix = old.AddressPrefix
 	}
+	if err := a.checkSchemaReferences(&next); err != nil {
+		return nil, err
+	}
 	if err := ValidateSchemaDef(&next); err != nil {
 		return nil, err
 	}

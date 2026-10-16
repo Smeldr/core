@@ -36,6 +36,10 @@ type DynamicTypeRepo struct {
 	// when title and length warnings turn into refusals (D112). Zero, the
 	// default, is warnings only.
 	titleCutover time.Time
+	// refApp resolves and relates the type's reference fields
+	// ([SchemaField.References], D113); set by [App.DynamicContentRepo]. Nil
+	// for a repository built without an App, which stores references as given.
+	refApp *App
 }
 
 // NewDynamicTypeRepo returns a DynamicTypeRepo bound to the given type name.
@@ -117,6 +121,11 @@ func (r *DynamicTypeRepo) CreateDraftWithWarnings(ctx context.Context, surface s
 	if err != nil {
 		return nil, nil, err
 	}
+	// D113: reference fields name readable records, in their stored form.
+	refs, err := r.prepareReferences(ctx, nil, fields)
+	if err != nil {
+		return nil, nil, err
+	}
 	raw, err := json.Marshal(fields)
 	if err != nil {
 		return nil, nil, fmt.Errorf("smeldr: CreateDraft marshal: %w", err)
@@ -154,6 +163,9 @@ func (r *DynamicTypeRepo) CreateDraftWithWarnings(ctx context.Context, surface s
 				}
 				node.Address, node.AddressNo = address, no
 			}
+			if err := r.writeReferenceEdges(ctx, exec, node.ID, refs); err != nil {
+				return err
+			}
 			return NewDynamicContentRepo(exec).Save(ctx, node)
 		})
 	}
@@ -188,6 +200,7 @@ func (r *DynamicTypeRepo) CreateDraftWithWarnings(ctx context.Context, surface s
 	writeStanding(ctx, r.db, r.prov, created)
 	created.verb = "create"
 	recordStateChange(ctx, r.prov, created)
+	r.announceReferenceEdges(ctx, node.ID, refs)
 	for i := range warnings {
 		warnings[i].Address = node.Address
 	}
@@ -561,6 +574,12 @@ func (r *DynamicTypeRepo) UpdateFieldsWithWarnings(ctx context.Context, surface,
 			return nil, fmt.Errorf("smeldr: UpdateFields unmarshal existing: %w", err)
 		}
 	}
+	// D113: reference fields the patch sets name readable records; a field
+	// already set is write-once.
+	refs, err := r.prepareReferences(ctx, existing, patch)
+	if err != nil {
+		return nil, err
+	}
 	for k, v := range patch {
 		existing[k] = v
 	}
@@ -580,11 +599,19 @@ func (r *DynamicTypeRepo) UpdateFieldsWithWarnings(ctx context.Context, surface,
 	}
 	actorID, actorKind := actorFromContext(ctx)
 	now := time.Now().UTC()
-	if _, err = r.db.ExecContext(ctx,
-		"UPDATE smeldr_dynamic_content SET fields = $1, updated_at = $2, last_actor = $3 WHERE id = $4 AND type_name = $5",
-		json.RawMessage(merged), now, actorID, id, r.typeName); err != nil {
+	// The fields and any new reference edges commit together.
+	if err = runInTx(ctx, r.db, func(exec DB) error {
+		if err := r.writeReferenceEdges(ctx, exec, id, refs); err != nil {
+			return err
+		}
+		_, err := exec.ExecContext(ctx,
+			"UPDATE smeldr_dynamic_content SET fields = $1, updated_at = $2, last_actor = $3 WHERE id = $4 AND type_name = $5",
+			json.RawMessage(merged), now, actorID, id, r.typeName)
+		return err
+	}); err != nil {
 		return nil, err
 	}
+	r.announceReferenceEdges(ctx, id, refs)
 	recordStateChange(ctx, r.prov, stateChange{
 		typeName: r.typeName, id: id, from: string(node.Status), to: string(node.Status),
 		verb: "update", surface: surface, actorKind: actorKind, actorID: actorID,
@@ -919,6 +946,9 @@ func (a *App) DefineContentType(ctx context.Context, schema *ContentTypeSchema) 
 	if err := ValidateSchemaDef(schema); err != nil {
 		return nil, err
 	}
+	if err := a.checkSchemaReferences(schema); err != nil {
+		return nil, err
+	}
 	// D112: a record type declares its title field; refused after the title
 	// cutover, logged before it (a redefinition is never refused for it).
 	titleFieldWarns, err := warningsCheck(TitleFieldWarnings(schema), a.cfg.TitleCutover)
@@ -1013,6 +1043,7 @@ func (a *App) DynamicContentRepo(typeName string) (*DynamicTypeRepo, error) {
 	repo.announce = a.afterStatusChange
 	repo.announceEdit = a.afterContentEdit
 	repo.titleCutover = a.cfg.TitleCutover
+	repo.refApp = a
 	return repo, nil
 }
 

@@ -917,8 +917,8 @@ func (a *App) ResolveReadableID(ctx context.Context, typeName, ident string) (st
 - A Signal with a subject (`subject_type`, `subject_id`) is visible only when the caller may read its subject too.
 - This holds on the module surfaces (MCP get and list, writes, HTTP), `App.TransitionItem*`, the context packet (anchor and linked Signals, with `Omitted` counting readable Signals only) and `/_audit`.
 - A Signal whose subject is hidden answers exactly like a missing one, after the same statements.
-- A subject held as anything other than its ID (a slug, an address), or of a type that is not an item (such as `RelationEdge`), matches nothing readable. It is hidden from a scoped reader: fail-closed.
-- Stated property: the relation and reachability walks check a Signal end by its own ID only, without its subject. Signals are graph nodes only through explicit relations today. The Task that makes D113's references into relations closes this.
+- Since v1.161.0 (D113) every write stores a Signal's subject as its ID, so the rule sees it. A subject stored before that as anything other than its ID (a slug, an address), or of a type that is not an item (such as `RelationEdge`), matches nothing readable and is hidden from a scoped reader (fail-closed) until `MigrateReferences` rewrites it.
+- The relation walks (`get_relations`, `list_relations`, `preview_impact`) and `get_reachability` show an edge with a Signal end only when the caller can read the Signal and its subject (D113), the same rule as the context packet.
 
 **`App.ResolveReadableID`.**
 - It returns the ID of the item that ident names (address, slug, ID, or the legacy number) under the caller's read scope.
@@ -5548,13 +5548,32 @@ One transaction, idempotent; a dry run (`DryRun: true`) runs the same code and r
 
 **`smeldr-server migrate-record-shape [--apply] [--report=path] [--type-map=path.json]`** (example/server): a dry run unless `--apply` is given. `--type-map` takes a JSON object such as `{"A493": "fix", "A490": "feature"}`. A file that cannot be read or is not valid JSON exits 1 with the reason; core checks the entries the same way as the Go API. On process.smeldr.dev, applying it is devops' job on Peter's yes, after architect has mapped the unmapped types from the dry-run report, with that mapping passed with `--type-map`.
 
+#### `MigrateReferences`
+
+```go
+func MigrateReferences(ctx context.Context, db DB, opts ReferenceMigrationOptions) (*ReferenceMigrationReport, error)
+func (a *App) MigrateReferences(ctx context.Context, opts ReferenceMigrationOptions) (*ReferenceMigrationReport, error)
+```
+
+One transaction, idempotent (an edge already there is reported as `present`); a dry run (`DryRun: true`) runs the same code and rolls back. It turns the references existing records carry as text into the edges D113 asserts on write, and reports what it cannot resolve instead of guessing.
+
+- **Signal.** The subject becomes an `about` edge, and a `subject_id` stored as a slug or address is rewritten to the subject's ID (`rewritten`). A `task_ref` that names a Task becomes an `about` edge.
+- **Task `note_ref`.** A value that as a whole names a Decision becomes `implements`, a Goal `derives_from`. One naming a Task is reported only (a Task in a note is not a dependency). Free text is reported and never parsed.
+- **Amendment.** An `amends` without a live edge becomes an `amends` edge, and a `task_ref` becomes `ships_as` from the Task.
+- **Runtime-defined fields** declared with `references`, and those named in `RefFields` (`{"task_plan.task_ref": "Task"}`, for a field its schema does not declare yet).
+- Resolution is by address, slug, ID and legacy number, without a read scope: it is an operator's migration.
+- The report, `ReferenceMigrationReport{dry_run, duration_ms, created, present, rewritten, unresolved}`: each edge names its source, field, kind and target; each unresolved value names the record, the field, the value and the reason.
+- It needs `smeldr_relations` (`ErrBadRequest` otherwise). A malformed `RefFields` entry is `ErrBadRequest` before anything runs.
+
+**`smeldr-server migrate-references [--apply] [--report=path] [--ref-field=type.field=Type]`** (example/server): a dry run unless `--apply` is given; `--ref-field` may be repeated. On process.smeldr.dev it runs after `migrate-signal-kinds`, and applying it is devops' job on Peter's yes.
+
 ### `InsertSignal`
 
 ```go
 func InsertSignal(ctx context.Context, db DB, s *Signal) error
 ```
 
-Inserts one Signal into `smeldr_signals` in its own transaction. It fills an empty ID (a new ID), Slug (the ID) and CreatedAt/UpdatedAt (now, UTC), sets Status to the type's initial state (`open` for a catalog type, `pending` for a history type, D115), and writes them back onto `s`. It first runs `CheckSignal` with no cutovers: a condition type from a caller other than core is refused with `ErrForbidden`, and an empty `signal_type` with a validation error. `InsertSignalWithWarnings(ctx, db, s, app.SignalCutovers()) ([]CreateWarning, error)` is the same with the instance's cutovers, and returns the warnings (`deprecated_signal_type`, `message_too_long`). It announces nothing: dispatch the `signal.created` event yourself after it returns nil, through `App.NotifySignalCreated` when calling from outside core. On failure it returns a wrapped error (`smeldr: InsertSignal: ...`) and leaves no row.
+Inserts one Signal into `smeldr_signals` in its own transaction. It fills an empty ID (a new ID), Slug (the ID) and CreatedAt/UpdatedAt (now, UTC), sets Status to the type's initial state (`open` for a catalog type, `pending` for a history type, D115), and writes them back onto `s`. It first runs `CheckSignal` with no cutovers: a condition type from a caller other than core is refused with `ErrForbidden`, and an empty `signal_type` with a validation error. `InsertSignalWithWarnings(ctx, db, s, app.SignalCutovers()) ([]CreateWarning, error)` is the same with the instance's cutovers, and returns the warnings (`deprecated_signal_type`, `message_too_long`). It announces nothing: dispatch the `signal.created` event yourself after it returns nil, through `App.NotifySignalCreated` when calling from outside core. On failure it returns a wrapped error (`smeldr: InsertSignal: ...`) and leaves no row. Since v1.161.0 it checks the subject and `task_ref` and writes their `about` edges in its transaction (see "References between records").
 
 ```go
 s := &smeldr.Signal{
@@ -5589,9 +5608,9 @@ smeldr.RegisterOrchestrationTypes(app, db)
 | Type | Table | State flow | Key fields |
 |------|-------|------------|------------|
 | `Signal` | `smeldr_signals` | signal-protocol (8 states, D115) | sender, receiver, signal_type, message, task_ref, sequence, subject_type, subject_id, from_state, to_state, required_role, resolution, answer, answer_ref |
-| `Task` | `smeldr_tasks` | agent-task (10 states) | task_id, priority, band, size, description, note_ref |
+| `Task` | `smeldr_tasks` | agent-task (10 states) | task_id, priority, band, size, description, note_ref, implements |
 | `Decision` | `smeldr_decisions` | governance-decision (5 states) | decision_number, title, scope, body, next_eval_at, eval_note |
-| `Amendment` | `smeldr_amendments` | amendment-lifecycle (6 states) | amendment_number, amendment_type, version, commit_hash, pilot, summary, body, amends |
+| `Amendment` | `smeldr_amendments` | amendment-lifecycle (6 states) | amendment_number, amendment_type, version, commit_hash, pilot, summary, body, amends, task_ref |
 | `Goal` | `smeldr_goals` | goal-lifecycle (4 states) | goal_id, priority, band, size, description |
 
 All five types embed `Node` and receive auto-generated MCP tools (`create_*`, `get_*`,
@@ -5769,6 +5788,9 @@ safe to call on every boot; `UpsertKind` updates in place if a kind is already r
 | `belongs_to_domain` | directional | Decision→domain | asserted |
 | `belongs_to_area` | directional | Decision→area | asserted |
 | `in_set` | directional | (open — no `TypePairs`) | asserted |
+| `implements` | directional | Task→Decision | asserted |
+| `about` | directional | (open, no `TypePairs`; the source is a Signal) | asserted |
+| `refers_to` | directional | (open, no `TypePairs`) | asserted |
 
 `contradicts` is the vehicle for a Decision-to-Decision Asserted-provenance condition — it
 has no `ReverseLabel`, since "contradicts" reads the same statement from either endpoint,
@@ -5782,6 +5804,34 @@ showing what grounds it changes. `TypePairs` is scoped to Decision→Decision on
 narrow-by-default precedent as `addresses`. Who asserts either edge, and when, is left to
 the same `assert_relation` convention already used for every other kind here — no new core
 machinery.
+
+`implements`, `about` and `refers_to` (D113, A521) are asserted by the system from reference
+fields, never by hand: a Task's `implements` naming a Decision, a Signal's subject, `task_ref`
+and `answer_ref`, and a runtime-defined reference field. See "References between records" below.
+
+### References between records (D113, A521)
+
+A reference field names another record. Core checks the name when the record is written and writes the relation edge for it in the same transaction, so the trace is complete by construction.
+
+| Record | Field | Names | Edge |
+|---|---|---|---|
+| Task | `implements` | a Decision or a Goal | `implements` to a Decision, `derives_from` to a Goal |
+| Amendment | `task_ref` | a Task | `ships_as` from the Task to the Amendment |
+| Signal | `subject_type` + `subject_id` | a record of that type | `about`, attributes `{"field":"subject_id"}` |
+| Signal | `task_ref` | a Task | `about`, attributes `{"field":"task_ref"}` |
+| Signal | `answer_ref` (`App.AnswerSignal`) | a record, as `Type:name` | `about`, attributes `{"field":"answer_ref"}` |
+| runtime-defined type | a string field with `references` | the type it names | `refers_to`, attributes `{"field":"<name>"}` |
+
+- **Resolution.** Before the write's transaction, each reference is resolved by address, slug, ID or legacy number, under the writer's read scope, on every write path: HTTP POST, PUT and PATCH, MCP create and update, `InsertSignal`, and the create and update of a runtime-defined type.
+- **One refusal for missing and hidden.** A record the writer cannot read gets the same answer as a missing one: a validation error on the field that says how to name the record, for example `implements: no Decision or Goal "D999" you can read; name the one this Task implements by address (D113, G12), slug or ID`. A Signal's `task_ref` says what to send instead: `no Task "A185" you can read; send a Task's address (T273), slug or ID in task_ref, and name any other record in subject_type and subject_id`. An unregistered `subject_type` is refused on `subject_type`, and half a subject (type without ID, or the reverse) is refused too.
+- **Stored form.** The target's address, or its ID when it has none. A Signal's `subject_id` is stored as the subject's ID, so the read rule sees it, and `answer_ref` as `Type:ID`.
+- **Write-once.** Sending the same target again, by any of its names, changes nothing. A different target, or an empty value, is refused ("is write-once"). Correct a wrong reference with the relation tools and, if needed, a new record.
+- **Same transaction.** The edge row is written in the record's own transaction: if it cannot be written, the record is not written either. Provenance and the relation event follow after the commit. Each edge carries `created_by_job: "references"`, with the writer in `created_by`. An `answer_ref` edge is written with the stored answer, after the answer's transition.
+- **Without a relation store** (`App.Relations` not called), references are checked and stored, and no edge is written. A Module or a dynamic repository built without an App checks nothing and writes no edge, as before.
+- **`InsertSignal`.** A caller with an identity (a `smeldr.Context`, or a scope attached with `WithReadScope`) is held to its read scope; a plain internal context is not, but its names must resolve. Core's own emitters keep their subject as given (an ID, possibly of a type with no table) and still get the edge. Inside a transaction the caller holds, core's own Signals are kept without an edge (`MigrateReferences` adds it) and anyone else's references are refused (`ErrBadRequest`).
+- **`SchemaField.References`** (`references`) names the type a string field refers to. It is refused on a field that is not a string, and when it names a type that is neither registered nor the type being defined. A redefinition may add it to an existing field, which is how task_plan's `task_ref` becomes a reference.
+- **Database.** `smeldr_tasks.implements` and `smeldr_amendments.task_ref` come with `CreateOrchestrationTables`; an existing database needs `EnsureReferenceColumns(ctx, db)` before the first Task or Amendment write (the example server calls it at boot).
+- **Existing records** keep their text references until `MigrateReferences` turns them into edges.
 
 
 ### The `amends` relation and `Amendment.Amends` (A431, D102, v1.125.0)

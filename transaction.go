@@ -114,12 +114,18 @@ func InsertSignalWithWarnings(ctx context.Context, db DB, s *Signal, c SignalCut
 	if err != nil {
 		return nil, err
 	}
+	// D113: the subject and task_ref must name records the caller can read;
+	// they are stored canonically and related in the insert's transaction.
+	plan, err := prepareSignalReferences(ctx, db, s)
+	if err != nil {
+		return nil, err
+	}
 	s.Status = Status(signalInitialState(s.SignalType))
-	return warnings, insertSignalRow(ctx, db, s)
+	return warnings, insertSignalRow(ctx, db, s, plan)
 }
 
 // insertSignalRow is the write of [InsertSignalWithWarnings].
-func insertSignalRow(ctx context.Context, db DB, s *Signal) error {
+func insertSignalRow(ctx context.Context, db DB, s *Signal, plan signalReferencePlan) error {
 	if s.ID == "" {
 		s.ID = NewID()
 	}
@@ -153,7 +159,7 @@ func insertSignalRow(ctx context.Context, db DB, s *Signal) error {
 		if err != nil {
 			return fmt.Errorf("smeldr: InsertSignal: %w", err)
 		}
-		return nil
+		return writeSignalReferenceEdges(ctx, exec, plan, s)
 	})
 	if err != nil {
 		// Nothing was committed, so the Signal has no address.

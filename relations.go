@@ -491,27 +491,11 @@ func canonicalizeNonDirectional(kind RelationKindDef, edge RelationEdge) Relatio
 	return edge
 }
 
-// insertEdge persists edge to smeldr_relations, generating an ID and timestamps
-// as needed. Returns the populated edge with all fields set. Called by Assert,
-// MCPAssertRelation, MCPProposeRelation, and MCPObserveRelation.
-//
-// When edge's own relation kind is registered, edge is checked against the
-// kind's own TypePairs and canonicalized if the kind is non-directional
-// (D61, items 1 and 3) before anything is written. An unregistered kind is
-// left unvalidated here — every real caller already checks GetKind itself
-// and returns its own error first; this is defense in depth, not the
-// primary gate.
-//
-// A fresh edge (edge.ID == "") reuses an existing row's ID when a live row
-// (invalid_at NULL or in the future) already matches (source, target, kind,
-// edge_class) exactly, rather than creating a duplicate (D61, item 3's dedup
-// half). One row is one life of a relation: a tuple whose rows have all ended
-// gets a new row with a new ID, and the ended rows stay as history (relation
-// history, design/relation-history-v1.md). An explicit edge.ID from the caller
-// is never overridden, preserving the existing update-by-id contract, but an
-// explicit ID of a row that has ended is refused ([ErrConflict]) rather than
-// revived.
-func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (RelationEdge, error) {
+// writeEdgeRow is the row half of [RelationStore.insertEdge]: it reuses a live
+// identical row or inserts a new one, on db, and reports whether the row is new.
+// It writes nothing else (no provenance, no event), so a create can call it on
+// its own transaction and announce the edge after the commit (D113).
+func writeEdgeRow(ctx context.Context, db DB, edge RelationEdge) (RelationEdge, bool, error) {
 	now := time.Now().UTC()
 
 	// 01a0e3bc-8: record the human/agent caller, same smeldrCtxAccessor
@@ -528,29 +512,22 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 		}
 	}
 
-	if kind, ok := s.GetKind(edge.RelationKind); ok {
-		if err := validateTypePairs(kind, edge); err != nil {
-			return RelationEdge{}, err
-		}
-		edge = canonicalizeNonDirectional(kind, edge)
-	}
-
 	if edge.ID != "" {
 		var endedAt *time.Time
-		err := s.db.QueryRowContext(ctx, "SELECT invalid_at FROM smeldr_relations WHERE id=$1", edge.ID).
+		err := db.QueryRowContext(ctx, "SELECT invalid_at FROM smeldr_relations WHERE id=$1", edge.ID).
 			Scan(nullTimeScanner{dst: &endedAt})
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return RelationEdge{}, err
+			return RelationEdge{}, false, err
 		}
 		if err == nil && endedAt != nil && !endedAt.After(now) {
-			return RelationEdge{}, fmt.Errorf("%w: relation %s ended at %s; assert it again without an id to start a new row",
+			return RelationEdge{}, false, fmt.Errorf("%w: relation %s ended at %s; assert it again without an id to start a new row",
 				ErrConflict, edge.ID, endedAt.UTC().Format(time.RFC3339))
 		}
 	}
 	newRow := edge.ID == ""
 	if edge.ID != "" {
 		var one int
-		if err := s.db.QueryRowContext(ctx, "SELECT 1 FROM smeldr_relations WHERE id=$1", edge.ID).Scan(&one); errors.Is(err, sql.ErrNoRows) {
+		if err := db.QueryRowContext(ctx, "SELECT 1 FROM smeldr_relations WHERE id=$1", edge.ID).Scan(&one); errors.Is(err, sql.ErrNoRows) {
 			newRow = true
 		}
 	}
@@ -566,7 +543,7 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 		// deferring — a refinement within D61's own intent (dedup the same
 		// fact asserted twice), not a reversal of it (A297).
 		var existingID string
-		lookupErr := s.db.QueryRowContext(ctx,
+		lookupErr := db.QueryRowContext(ctx,
 			`SELECT id FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 `+
 				`AND target_type=$3 AND target_id=$4 AND relation_kind=$5 AND edge_class=$6 `+
 				`AND (invalid_at IS NULL OR invalid_at > $7)`,
@@ -580,7 +557,7 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 		case errors.Is(lookupErr, sql.ErrNoRows):
 			edge.ID = NewID()
 		default:
-			return RelationEdge{}, lookupErr
+			return RelationEdge{}, false, lookupErr
 		}
 	}
 	if edge.CreatedAt.IsZero() {
@@ -591,7 +568,7 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 		edge.Attributes = json.RawMessage("{}")
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, `
 INSERT INTO smeldr_relations (`+relationInsertColumns+`)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 ON CONFLICT (id) DO UPDATE SET
@@ -616,15 +593,54 @@ ON CONFLICT (id) DO UPDATE SET
 		edge.CreatedAt, edge.UpdatedAt,
 	)
 	if err != nil {
+		return RelationEdge{}, false, err
+	}
+	return edge, newRow, nil
+}
+
+// insertEdge persists edge to smeldr_relations, generating an ID and timestamps
+// as needed. Returns the populated edge with all fields set. Called by Assert,
+// MCPAssertRelation, MCPProposeRelation, and MCPObserveRelation.
+//
+// When edge's own relation kind is registered, edge is checked against the
+// kind's own TypePairs and canonicalized if the kind is non-directional
+// (D61, items 1 and 3) before anything is written. An unregistered kind is
+// left unvalidated here — every real caller already checks GetKind itself
+// and returns its own error first; this is defense in depth, not the
+// primary gate.
+//
+// A fresh edge (edge.ID == "") reuses an existing row's ID when a live row
+// (invalid_at NULL or in the future) already matches (source, target, kind,
+// edge_class) exactly, rather than creating a duplicate (D61, item 3's dedup
+// half). One row is one life of a relation: a tuple whose rows have all ended
+// gets a new row with a new ID, and the ended rows stay as history (relation
+// history, design/relation-history-v1.md). An explicit edge.ID from the caller
+// is never overridden, preserving the existing update-by-id contract, but an
+// explicit ID of a row that has ended is refused ([ErrConflict]) rather than
+// revived.
+func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (RelationEdge, error) {
+	if kind, ok := s.GetKind(edge.RelationKind); ok {
+		if err := validateTypePairs(kind, edge); err != nil {
+			return RelationEdge{}, err
+		}
+		edge = canonicalizeNonDirectional(kind, edge)
+	}
+	edge, newRow, err := writeEdgeRow(ctx, s.db, edge)
+	if err != nil {
 		return RelationEdge{}, err
 	}
+	s.announceEdge(ctx, edge, newRow)
+	return edge, nil
+}
 
+// announceEdge records the assert provenance of an edge already written and
+// sends its relation event (and, for contradicts, the conflict condition).
+func (s *RelationStore) announceEdge(ctx context.Context, edge RelationEdge, newRow bool) {
 	s.recordAssertProvenance(ctx, edge)
 	s.emitRelationEvent(ctx, eventRelationAsserted, edge, &newRow, assertEnding(ctx, edge))
 	if edge.RelationKind == "contradicts" {
 		s.emitConflictDetectedSignal(ctx, edge)
 	}
-	return edge, nil
 }
 
 // emitConflictDetectedSignal fires D85's conflict-detected structural Signal
@@ -884,7 +900,9 @@ func (s *RelationStore) MCPGetRelations(ctx context.Context, typeName, id, direc
 	}
 	// Filtered before the ended rows are looked up, so a hidden item runs the
 	// same statements as a missing one: both have no edges left.
-	edges = readableEdges(scope, edges)
+	if edges, err = readableEdgesOn(ctx, s.db, scope, edges); err != nil {
+		return nil, err
+	}
 	if err := s.fillEdgeEnds(ctx, edges); err != nil {
 		return nil, fmt.Errorf("%w: get relations: reading how ended relations ended: %s", ErrInternal, err)
 	}
@@ -905,23 +923,46 @@ func (s *RelationStore) MCPPreviewImpact(ctx context.Context, typeName, id strin
 	if err != nil {
 		return nil, err
 	}
-	return readableEdges(scope, edges), nil
+	return readableEdgesOn(ctx, s.db, scope, edges)
 }
 
-// readableEdges keeps the edges whose both ends scope may read: a relation to
-// an item the caller may not read would reveal that the item exists. It
-// filters in place.
-func readableEdges(scope *ReadScope, edges []RelationEdge) []RelationEdge {
+// readableEdgesOn keeps the edges whose both ends scope may read: a relation
+// to an item the caller may not read would reveal that the item exists. A
+// Signal end is readable only when its subject is too (D113), read in one
+// statement for all the Signal ends. A scope that reads everything keeps them
+// all, with no query.
+func readableEdgesOn(ctx context.Context, db DB, scope *ReadScope, edges []RelationEdge) ([]RelationEdge, error) {
 	if scope.All() {
-		return edges
+		return edges, nil
+	}
+	ends := newEndReader(ctx, db, scope)
+	var signals []string
+	for _, e := range edges {
+		if e.SourceType == "Signal" {
+			signals = append(signals, e.SourceID)
+		}
+		if e.TargetType == "Signal" {
+			signals = append(signals, e.TargetID)
+		}
+	}
+	if err := ends.prime(signals); err != nil {
+		return nil, err
 	}
 	kept := edges[:0]
 	for _, e := range edges {
-		if scope.Readable(e.SourceType, e.SourceID) && scope.Readable(e.TargetType, e.TargetID) {
+		src, err := ends.readable(e.SourceType, e.SourceID)
+		if err != nil {
+			return nil, err
+		}
+		tgt, err := ends.readable(e.TargetType, e.TargetID)
+		if err != nil {
+			return nil, err
+		}
+		if src && tgt {
 			kept = append(kept, e)
 		}
 	}
-	return kept
+	return kept, nil
 }
 
 // MCPUpsertRelationKind registers or updates a relation kind via MCP.

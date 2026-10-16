@@ -279,7 +279,15 @@ type Task struct {
 	// Description is the full task specification in Markdown.
 	Description string `json:"description" smeldr_format:"markdown"`
 	// NoteRef is an optional cross-reference to a design note or decision.
+	// It is free text and is not checked; name a Decision or Goal the Task
+	// implements in Implements.
 	NoteRef string `json:"note_ref" db:"note_ref"`
+	// Implements is the Decision or Goal this Task carries out, by address,
+	// slug or ID, or empty (D113). It must name one the writer can read, it is
+	// stored as that record's address, and it is write-once. The system
+	// asserts the edge in the same transaction: "implements" to a Decision,
+	// "derives_from" to a Goal.
+	Implements string `json:"implements,omitempty" db:"implements"`
 	// LastActor is the actor ID of this item's most recent writer (D78;
 	// Option A, 2026-10-08): whoever created it, last changed its content or
 	// last moved it. Set by the server, never from a request body. Empty when
@@ -586,6 +594,11 @@ type Amendment struct {
 	// get_relations, is what queries use. Amendments written before this field
 	// have none until an administrator maps them ([App.BackfillAmendsEdges]).
 	Amends string `json:"amends,omitempty" db:"amends"`
+	// TaskRef is the Task this Amendment ships, by address, slug or ID, or
+	// empty (D113). It must name a Task the writer can read, it is stored as
+	// the Task's address, and it is write-once. The system asserts the
+	// "ships_as" edge from the Task in the same transaction.
+	TaskRef string `json:"task_ref,omitempty" db:"task_ref"`
 	// LastActor is the actor ID of this item's most recent writer (D78;
 	// Option A, 2026-10-08): whoever created it, last changed its content or
 	// last moved it. Set by the server, never from a request body. Empty when
@@ -743,6 +756,7 @@ func CreateOrchestrationTables(db DB) error {
 			size        TEXT NOT NULL DEFAULT '',
 			description TEXT NOT NULL DEFAULT '',
 			note_ref    TEXT NOT NULL DEFAULT '',
+			implements  TEXT NOT NULL DEFAULT '',
 			last_actor  TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_decisions (
@@ -783,6 +797,7 @@ func CreateOrchestrationTables(db DB) error {
 			summary          TEXT NOT NULL DEFAULT '',
 			body             TEXT NOT NULL DEFAULT '',
 			amends           TEXT NOT NULL DEFAULT '',
+			task_ref         TEXT NOT NULL DEFAULT '',
 			last_actor       TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_goals (
@@ -1017,11 +1032,16 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 		}
 	}
 	app.signalConditions = true
+	// D113: reference fields are resolved, stored canonically and related by
+	// the system on every write path.
+	amends := amendsSaveHooks().(saveHooksOption)
 	app.Content(NewModule[*Signal]((*Signal)(nil),
 		At("/signals"), Repo(NewSQLRepo[*Signal](db, Table("smeldr_signals"))), MCP(MCPRead, MCPWrite), withAddress(),
+		app.referenceSaveHooks(signalReferences(), nil),
 	))
 	app.Content(NewModule[*Task]((*Task)(nil),
 		At("/tasks"), Repo(NewSQLRepo[*Task](db, Table("smeldr_tasks"))), MCP(MCPRead, MCPWrite), withAddress(),
+		app.referenceSaveHooks(taskReferences(), nil),
 		DefaultListOrder("Priority", false), // T262: lower Priority sorts first
 	))
 	app.Content(NewModule[*Decision]((*Decision)(nil),
@@ -1029,7 +1049,7 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 	))
 	app.Content(NewModule[*Amendment]((*Amendment)(nil),
 		At("/amendments"), Repo(NewSQLRepo[*Amendment](db, Table("smeldr_amendments"))), MCP(MCPRead, MCPWrite), withAddress(),
-		amendsSaveHooks(),
+		app.referenceSaveHooks(amendmentReferences(), &amends),
 	))
 	app.Content(NewModule[*Goal]((*Goal)(nil),
 		At("/goals"), Repo(NewSQLRepo[*Goal](db, Table("smeldr_goals"))), MCP(MCPRead, MCPWrite), withAddress(),
@@ -1053,8 +1073,10 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 // (Goal→{Goal,Task,Decision,Amendment,Signal}), contradicts
 // (Decision↔Decision, symmetric), investigates (Task→Decision), addresses
 // (Decision→Decision, a decline-Decision asserting back to the original it
-// declines), and grounded_in (Decision→Decision, a Decision's own
-// evidentiary basis — the Re-ground intention).
+// declines), grounded_in (Decision→Decision, a Decision's own
+// evidentiary basis — the Re-ground intention), and the three kinds the
+// system asserts for reference fields (D113): implements (Task→Decision),
+// about (Signal→any) and refers_to (a runtime-defined record→any).
 // Idempotent — safe to call on every boot; UpsertKind updates in place if a
 // kind with the same type_name is already registered.
 func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStore) error {
@@ -1195,6 +1217,35 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			// types core cannot enumerate ahead of time.
 			TypeName:    "in_set",
 			Label:       "In Set",
+			Mode:        "asserted",
+			Directional: true,
+		},
+		{
+			// D113: a Task carries out a Decision. Asserted by the system from
+			// Task.Implements when it names a Decision (a Goal is derives_from).
+			TypeName:     "implements",
+			Label:        "Implements",
+			ReverseLabel: "Implemented By",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Task","target_type":"Decision"}]`),
+		},
+		{
+			// D113: a Signal is about a record: its subject, its task_ref or
+			// its answer_ref (the field is in the edge's attributes). The
+			// source is always a Signal and the target any type, so TypePairs
+			// stays empty and the system asserts it only from those fields.
+			TypeName:    "about",
+			Label:       "About",
+			Mode:        "asserted",
+			Directional: true,
+		},
+		{
+			// D113: a runtime-defined record's reference field
+			// (SchemaField.References) names another record. Any pair; the
+			// field is in the edge's attributes.
+			TypeName:    "refers_to",
+			Label:       "Refers To",
 			Mode:        "asserted",
 			Directional: true,
 		},

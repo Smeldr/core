@@ -159,7 +159,9 @@ func (s *RelationStore) listReadableRelations(ctx context.Context, scope *ReadSc
 	if err != nil {
 		return RelationPage{}, fmt.Errorf("%w: list relations: %s", ErrInternal, err)
 	}
-	edges = readableEdges(scope, edges)
+	if edges, err = readableEdgesOn(ctx, s.db, scope, edges); err != nil {
+		return RelationPage{}, err
+	}
 	page.Total = len(edges)
 	start := min(opts.Offset, len(edges))
 	edges = edges[start:min(start+limit, len(edges))]

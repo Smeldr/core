@@ -67,7 +67,12 @@ func TestPG_DynamicListPageAndSignalSubject(t *testing.T) {
 		t.Errorf("trusted total = %d %v; want 5", total, err)
 	}
 
-	about := &smeldr.Signal{Sender: "core", SignalType: "note", SubjectType: "Task", SubjectID: smeldr.NewID()}
+	// D113: the subject must exist; this Task is one the reader cannot read.
+	hiddenTask := smeldr.NewID()
+	if err := smeldr.NewSQLRepo[*smeldr.Task](db, smeldr.Table("smeldr_tasks")).Save(ctx, &smeldr.Task{Node: smeldr.Node{ID: hiddenTask, Slug: hiddenTask, Status: "backlog"}}); err != nil {
+		t.Fatal(err)
+	}
+	about := &smeldr.Signal{Sender: "core", SignalType: "note", SubjectType: "Task", SubjectID: hiddenTask}
 	plain := &smeldr.Signal{Sender: "core", SignalType: "note"}
 	for _, s := range []*smeldr.Signal{about, plain} {
 		if err := smeldr.InsertSignal(ctx, db, s); err != nil {

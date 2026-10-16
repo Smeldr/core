@@ -340,6 +340,10 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.EnsureAmendmentAmendsColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure amendment amends column: %w", err)
 		}
+		// D113: Task.implements and Amendment.task_ref.
+		if err := smeldr.EnsureReferenceColumns(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure reference columns: %w", err)
+		}
 		if err := smeldr.EnsureStateLockedColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure state locked column: %w", err)
 		}
@@ -708,6 +712,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "migrate-signal-kinds" {
 		os.Exit(runMigrateSignalKinds(os.Args[2:], os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "migrate-references" {
+		os.Exit(runMigrateReferences(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	cfg := parseConfig()
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")

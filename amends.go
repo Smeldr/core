@@ -19,8 +19,12 @@ import (
 // [Module.beforeSave], right after the public [BeforeCreate]/[BeforeUpdate]
 // hooks. existing is nil on a create.
 type saveHooksOption struct {
-	before func(ctx Context, db DB, existing, item any) error
-	after  func(ctx Context, db DB, rs *RelationStore, existing, item any)
+	// prepare runs before the write's transaction, after the public Before
+	// hooks, on every content write path. It may read on any handle and may
+	// rewrite item (references are stored in their canonical form there, D113).
+	prepare func(ctx Context, existing, item any) error
+	before  func(ctx Context, db DB, existing, item any) error
+	after   func(ctx Context, db DB, rs *RelationStore, existing, item any)
 	// statusChanged runs synchronously after a committed status change of
 	// item from one state to another, on every transition path (HTTP PUT, the
 	// MCP publish/schedule/archive tools, the scheduler, transition_item).

@@ -21,6 +21,14 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Added
+
+- **References between records are relations the system creates and checks (D113, A521).** Task gains `implements` (the Decision or Goal it carries out) and Amendment gains `task_ref` (the Task it ships); a Signal's subject, `task_ref` and `answer_ref` are references too, and a runtime-defined string field becomes one with `SchemaField.References`. Core resolves each under the writer's read scope, stores it canonically, keeps it write-once, and writes its edge (`implements`, `derives_from`, `ships_as`, and the new kinds `about` and `refers_to`) in the record's own transaction. `EnsureReferenceColumns` adds the two new columns to existing databases. `MigrateReferences`, also `smeldr-server migrate-references`, turns existing text references into edges and reports the rest.
+
+### Changed
+
+- **A write that names a record now checks it, and a Signal's subject is stored as its ID (D113, A521).** A reference to a record the writer cannot read is refused exactly like one to a missing record, with a validation error on the field that says how to name it; before, Signal `subject_id`, `task_ref` and `answer_ref` were stored unchecked. A Signal subject named by slug or address is now stored as the ID, so its readers see it. `InsertSignal` holds a caller with an identity to its read scope. The relation walks and `get_reachability` show an edge with a Signal end only when the caller can read the Signal and its subject.
+
 ---
 
 ## [1.160.0] - 2026-10-16

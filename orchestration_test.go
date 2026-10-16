@@ -1321,6 +1321,10 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 		"belongs_to_domain": {"Belongs To Domain", "Domain Of", `[{"source_type":"Decision","target_type":"domain"}]`, true},
 		"belongs_to_area":   {"Belongs To Area", "Area Of", `[{"source_type":"Decision","target_type":"area"}]`, true},
 		"in_set":            {"In Set", "", `[]`, true},
+		// D113: the kinds the system asserts for reference fields.
+		"implements": {"Implements", "Implemented By", `[{"source_type":"Task","target_type":"Decision"}]`, true},
+		"about":      {"About", "", `[]`, true},
+		"refers_to":  {"Refers To", "", `[]`, true},
 	}
 
 	kinds := store.ListKinds()

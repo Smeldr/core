@@ -313,9 +313,12 @@ type App struct {
 	// exists, so core emits and resolves its condition Signals (D115).
 	signalConditions bool
 
-	relationStore   *RelationStore // non-nil when App.Relations() was called
-	schemaStore     *SchemaStore   // non-nil when App.Relations() was called; used by syncSaveHook
-	syncSaveHook    SyncSaveHook   // non-nil when App.Relations() was called; fired synchronously after save
+	relationStore *RelationStore // non-nil when App.Relations() was called
+	// referenceTables keeps the table facts of reference targets (D113), read
+	// on the base handle before a write's transaction ([App.referenceTable]).
+	referenceTables sync.Map
+	schemaStore     *SchemaStore // non-nil when App.Relations() was called; used by syncSaveHook
+	syncSaveHook    SyncSaveHook // non-nil when App.Relations() was called; fired synchronously after save
 	syncHookModules []interface {
 		setSyncSaveHook(func(context.Context, string, string, any) error)
 	}

@@ -59,6 +59,10 @@ func TestPG_SignalKinds(t *testing.T) {
 
 	// The migrated question is answered; the Decision's condition resolves
 	// when it leaves proposed.
+	// D113: answer_ref names an existing record.
+	if err := smeldr.NewSQLRepo[*smeldr.Task](db, smeldr.Table("smeldr_tasks")).Save(ctx, &smeldr.Task{Node: smeldr.Node{ID: "t1", Slug: "t1", Status: "backlog"}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := app.AnswerSignal(ctx, "s-iq", "yes", "Task:t1"); err != nil {
 		t.Fatalf("AnswerSignal: %v", err)
 	}

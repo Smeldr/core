@@ -179,7 +179,13 @@ func (s *RelationStore) reachability(ctx context.Context, anchorType, anchorID, 
 	if err != nil {
 		return nil, err
 	}
-	anchorHidden := !scope.Readable(anchorType, anchorID)
+	// A Signal node is readable only with its subject (D113).
+	ends := newEndReader(ctx, s.db, scope)
+	anchorReadable, err := ends.readable(anchorType, anchorID)
+	if err != nil {
+		return nil, err
+	}
+	anchorHidden := !anchorReadable
 
 	anchor := reachabilityNode{anchorType, anchorID}
 	result := &Reachability{
@@ -208,7 +214,12 @@ func (s *RelationStore) reachability(ctx context.Context, anchorType, anchorID, 
 				if seenNodes[nb.node] {
 					continue
 				}
-				if anchorHidden || !scope.Readable(nb.node.typ, nb.node.id) {
+				if anchorHidden {
+					continue
+				}
+				if ok, err := ends.readable(nb.node.typ, nb.node.id); err != nil {
+					return nil, err
+				} else if !ok {
 					continue
 				}
 				existing, ok := best[nb.node]

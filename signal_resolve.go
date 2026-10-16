@@ -3,6 +3,7 @@ package smeldr
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -428,13 +429,46 @@ func (a *App) closeSignalRequest(ctx context.Context, ident, to, verb, field, te
 	if status != signalOpen {
 		return fmt.Errorf("%w: the Signal is %s, not open", ErrConflict, status)
 	}
+	// D113: answer_ref names a record the caller can read; it is stored as
+	// "Type:ID" and becomes an about edge from the Signal.
+	var target referenceTarget
+	if ref != "" {
+		typeName, ident, _ := strings.Cut(ref, ":")
+		if target, err = a.resolveReference(ctx, []string{typeName}, ident); err != nil {
+			f := referenceField{name: "answer_ref", refusal: func(v string) string {
+				return fmt.Sprintf("no %s %q you can read; name the change as Type:address, Type:slug or Type:ID", typeName, v)
+			}}
+			return f.refuse(ident, []string{typeName}, err)
+		}
+		ref = target.Type + ":" + target.ID
+	}
 	if _, err := a.TransitionItemVia(ctx, "", "Signal", id, to, text); err != nil {
 		return err
 	}
-	if _, err := a.cfg.DB.ExecContext(ctx,
-		`UPDATE smeldr_signals SET answer = $1, answer_ref = $2 WHERE id = $3`, text, ref, id); err != nil {
+	var edge RelationEdge
+	var wrote bool
+	err = runInTx(ctx, a.cfg.DB, func(exec DB) error {
+		if _, err := exec.ExecContext(ctx,
+			`UPDATE smeldr_signals SET answer = $1, answer_ref = $2 WHERE id = $3`, text, ref, id); err != nil {
+			return err
+		}
+		if ref == "" || a.relationStore == nil {
+			return nil
+		}
+		job := referencesJob
+		edge = RelationEdge{SourceType: "Signal", SourceID: id, TargetType: target.Type, TargetID: target.ID,
+			RelationKind: "about", EdgeClass: "asserted", CreatedByJob: &job, Attributes: json.RawMessage(`{"field":"answer_ref"}`)}
+		var err error
+		edge, wrote, err = writeEdgeRow(ctx, exec, edge)
+		return err
+	})
+	if err != nil {
 		// The transition has committed, with the text as its reason.
 		slog.WarnContext(ctx, "smeldr: signal answer not stored", "id", id, "error", err)
+		return nil
+	}
+	if edge.ID != "" {
+		a.relationStore.announceEdge(ctx, edge, wrote)
 	}
 	return nil
 }

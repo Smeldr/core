@@ -96,7 +96,11 @@ func TestAnswerSignal(t *testing.T) {
 	prov := &fakeProvenanceStore{}
 	app.Provenance(prov)
 	q := newSignal(t, db, "question")
-	if err := app.AnswerSignal(ctx, q, "yes, ship it", "Task:01abc"); err != nil {
+	// D113: answer_ref names a record the caller can read, stored as Type:ID.
+	if err := NewSQLRepo[*Task](db, Table("smeldr_tasks")).Save(ctx, &Task{Node: Node{ID: "01abc", Slug: "ship-it", Status: "backlog"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.AnswerSignal(ctx, q, "yes, ship it", "Task:ship-it"); err != nil {
 		t.Fatalf("AnswerSignal: %v", err)
 	}
 	status, _, _, answer, ref := signalRow(t, db, q)

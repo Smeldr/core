@@ -287,8 +287,13 @@ func TestSignalSubject_HiddenSubjectHidesTheSignal(t *testing.T) {
 	if _, err := signals.MCPGet(f.reader, aboutSeen.Slug); err != nil {
 		t.Errorf("a Signal about a readable Task: %v", err)
 	}
-	if _, err := signals.MCPGet(f.reader, bySlug.Slug); !errors.Is(err, ErrNotFound) {
-		t.Errorf("a subject held as a slug: %v; want not found (fail-closed)", err)
+	// D113: a subject named by its slug is stored as its ID, so the read rule
+	// sees it (before, a slug subject was hidden fail-closed).
+	if bySlug.SubjectID != seen.ID {
+		t.Errorf("a subject named by slug is stored as %q; want the ID %q", bySlug.SubjectID, seen.ID)
+	}
+	if _, err := signals.MCPGet(f.reader, bySlug.Slug); err != nil {
+		t.Errorf("a subject named by slug: %v; want it readable", err)
 	}
 
 	// MCPList: only the Signals whose subject is readable, or that have none.
@@ -300,8 +305,8 @@ func TestSignalSubject_HiddenSubjectHidesTheSignal(t *testing.T) {
 	for _, it := range items {
 		got[it.(*Signal).ID] = true
 	}
-	if len(got) != 2 || !got[aboutSeen.ID] || !got[plain.ID] {
-		t.Errorf("reader list = %v; want the Signal about the readable Task and the plain one", got)
+	if len(got) != 3 || !got[aboutSeen.ID] || !got[bySlug.ID] || !got[plain.ID] {
+		t.Errorf("reader list = %v; want the two Signals about the readable Task and the plain one", got)
 	}
 	if all, err := signals.MCPList(f.global); err != nil || len(all) != 4 {
 		t.Errorf("global list = %d %v; want 4", len(all), err)

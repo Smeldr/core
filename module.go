@@ -499,6 +499,7 @@ type Module[T any] struct {
 	afterHook         func(Context, LifecycleEvent, afterHookMeta, any)      // nil until wired by App; called async on delivery signals
 	statusAnnouncer   func(context.Context, statusTransition)                // App.afterStatusChange, set by App.Content; nil for a module used without an App
 	syncSaveHook      func(context.Context, string, string, any) error       // nil until wired by App.Relations; called sync after save (dynamic types only: never for a compiled type, RecomputeAsserted would delete its other asserted edges)
+	savePrepare       func(Context, any, any) error                          // nil unless the type has a step before the write's transaction (D113 references)
 	saveBefore        func(Context, DB, any, any) error                      // nil unless the type has an internal pre-save check (existing is nil on create); an error aborts the write
 	saveAfter         func(Context, DB, *RelationStore, any, any)            // nil unless the type has an internal post-save step, fail-open (existing is nil on create)
 	saveStatusChanged func(Context, DB, *RelationStore, any, string, string) // nil unless the type has an internal step after a committed status change, fail-open
@@ -595,7 +596,7 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 		case signalOption:
 			m.signals[v.signal] = append(m.signals[v.signal], v.handler)
 		case saveHooksOption:
-			m.saveBefore, m.saveAfter, m.saveStatusChanged = v.before, v.after, v.statusChanged
+			m.savePrepare, m.saveBefore, m.saveAfter, m.saveStatusChanged = v.prepare, v.before, v.after, v.statusChanged
 		case addressOption:
 			m.addressed = true
 		case SitemapConfig:
@@ -929,10 +930,23 @@ func (m *Module[T]) beforeSave(ctx Context, sig LifecycleEvent, existing, item a
 	if err := dispatchBefore(ctx, m.signals[sig], item); err != nil {
 		return err
 	}
+	if err := m.prepareSave(ctx, existing, item); err != nil {
+		return err
+	}
 	if m.saveBefore == nil {
 		return nil
 	}
 	return m.saveBefore(ctx, m.db, existing, item)
+}
+
+// prepareSave runs the type's own step before the write's transaction
+// ([saveHooksOption] prepare), if it has one. Creates call it after the
+// BeforeCreate hooks, updates through [Module.beforeSave].
+func (m *Module[T]) prepareSave(ctx Context, existing, item any) error {
+	if m.savePrepare == nil {
+		return nil
+	}
+	return m.savePrepare(ctx, existing, item)
 }
 
 // statusSignals returns the status events a change from one state to another
@@ -2446,8 +2460,13 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// BeforeCreate hooks (synchronous: the first error aborts).
+	// BeforeCreate hooks (synchronous: the first error aborts), then the type's
+	// own step before the transaction.
 	if err := dispatchBefore(ctx, m.signals[BeforeCreate], item); err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	if err := m.prepareSave(ctx, nil, item); err != nil {
 		WriteError(w, r, err)
 		return
 	}
@@ -3282,6 +3301,9 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	// The public BeforeCreate hooks run before the transaction (they take no
 	// db); the type's own check and the INSERT run inside it (createInTx).
 	if err := dispatchBefore(ctx, m.signals[BeforeCreate], item); err != nil {
+		return nil, err
+	}
+	if err := m.prepareSave(ctx, nil, item); err != nil {
 		return nil, err
 	}
 	// D110 7.1: note a value sent in a legacy human-ID field before the create

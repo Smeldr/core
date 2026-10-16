@@ -36,6 +36,15 @@ type SchemaField struct {
 	// [Config.TitleCutover]. Zero means no limit. On the title role the limit is
 	// [TitleMaxLength] at most, and a larger value is refused at define.
 	MaxLength int `json:"max_length,omitempty"`
+	// References makes a string field a reference to a record of the named
+	// type (D113), for example "Task". A write that sets it must name a record
+	// of that type the writer can read, by address, slug or ID; the value is
+	// stored as the record's address (its ID when it has none), it is
+	// write-once, and the system asserts a "refers_to" edge from the item to
+	// the record, with the field's name in the edge's attributes, in the same
+	// transaction as the write. The type must be registered, or be the type
+	// being defined.
+	References string `json:"references,omitempty"`
 }
 
 // ContentTypeSchema holds the declared field definitions for one content type.
@@ -412,6 +421,9 @@ func ValidateSchemaDef(schema *ContentTypeSchema) error {
 		}
 		if f.MaxLength > 0 && f.Type != "string" {
 			return Err("fields", fmt.Sprintf("%q has max_length but type %q: a limit applies to a string field", f.Name, f.Type))
+		}
+		if f.References != "" && f.Type != "string" {
+			return Err("fields", fmt.Sprintf("%q references %s but has type %q: a reference is a string field", f.Name, f.References, f.Type))
 		}
 		if f.Role == "title" && f.MaxLength > TitleMaxLength {
 			return Err("fields", fmt.Sprintf("%q is the title and has max_length %d: a title is at most %d characters (D112)", f.Name, f.MaxLength, TitleMaxLength))
