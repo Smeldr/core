@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.156.0] - 2026-10-16
+
 ### Changed
 
 - **`Rule` and `AuthorityStub` are core records with a D110 address (A510).** Both now embed `RecordAddress`, so their JSON carries `address`, `address_no` and `external_ref`. A Rule's address is `U<n>` and an AuthorityStub's `B<n>`; `R` and `S` were taken. Every get, update and transition accepts the address next to the slug and the ID. A scoped caller whose supplied slug is taken gets the slug plus the tail of the new ID and the `slug_adjusted` warning, as for the other core records.
