@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,9 @@ var coreAddressPrefixes = map[string]string{
 	"Signal":    "S",
 	"Run":       "R",
 	"task_plan": "P",
+	// Authority records (authority.go): R and S are taken, so rUle and stuB.
+	"Rule":          "U",
+	"AuthorityStub": "B",
 }
 
 var addressPrefixRe = regexp.MustCompile(`^[A-Z]{1,4}$`)
@@ -54,16 +58,29 @@ var addressColumns = [][2]string{
 	{"external_ref", "TEXT NOT NULL DEFAULT ''"},
 }
 
-// orchestrationAddressTables maps each core orchestration type to its table and
-// the legacy human-ID column the counter is seeded from ("" when it has none).
-var orchestrationAddressTables = []struct{ typeName, table, legacy string }{
+// coreAddressTables maps each compiled core record type to its table and the
+// legacy human-ID column the counter is seeded from ("" when it has none): the
+// six orchestration types and the two authority types. A table that does not
+// exist (the authority tables without ENABLE_AUTHORITY) is skipped by every
+// reader of this list.
+var coreAddressTables = []struct{ typeName, table, legacy string }{
 	{"Signal", "smeldr_signals", ""},
 	{"Task", "smeldr_tasks", "task_id"},
 	{"Decision", "smeldr_decisions", "decision_number"},
 	{"Amendment", "smeldr_amendments", "amendment_number"},
 	{"Goal", "smeldr_goals", "goal_id"},
 	{"Run", "smeldr_runs", ""},
+	{"Rule", "smeldr_rules", ""},
+	{"AuthorityStub", "smeldr_authority_stubs", ""},
 }
+
+// orchestrationAddressTypes are the types [CreateOrchestrationTables] gives
+// address storage; [CreateAuthorityTables] does the same for
+// authorityAddressTypes.
+var (
+	orchestrationAddressTypes = []string{"Signal", "Task", "Decision", "Amendment", "Goal", "Run"}
+	authorityAddressTypes     = []string{"Rule", "AuthorityStub"}
+)
 
 // ensureAddressStorage adds the address columns to table (idempotent) and the
 // partial unique index over its addresses. scopeByType makes the index
@@ -320,14 +337,18 @@ func ensureAddressCounters(ctx context.Context, db DB) error {
 	return nil
 }
 
-// registerOrchestrationAddresses creates the counter table, the address columns
-// and indexes on the six orchestration tables, and registers their core
-// prefixes, seeded from their existing rows.
-func registerOrchestrationAddresses(ctx context.Context, db DB) error {
+// registerCoreAddresses creates the counter table, the address columns and
+// indexes on the tables of the named core record types ([coreAddressTables]),
+// and registers their core prefixes, seeded from their existing rows. The
+// tables must exist.
+func registerCoreAddresses(ctx context.Context, db DB, types ...string) error {
 	if err := ensureAddressCounters(ctx, db); err != nil {
 		return err
 	}
-	for _, t := range orchestrationAddressTables {
+	for _, t := range coreAddressTables {
+		if !slices.Contains(types, t.typeName) {
+			continue
+		}
 		if err := ensureAddressStorage(ctx, db, t.table, false); err != nil {
 			return err
 		}

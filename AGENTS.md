@@ -917,7 +917,7 @@ automatically, same as every orchestration type above.
 | `Rule` | `smeldr_rules` | `draft` | A fully modeled, governing rule |
 | `AuthorityStub` | `smeldr_authority_stubs` | `stub` | A cheap pointer into a source document, not yet fully modeled |
 
-Each type embeds `Node` and receives the standard auto-generated MCP tools (`create_rule`, `get_rule`, `list_rules`, `update_rule`, `publish_rule`, `archive_rule`, `delete_rule`, and the equivalent for `authority_stub`).
+Each type embeds `Node` and, since core v1.156.0, `RecordAddress`: a Rule's address is `U<n>` and a stub's `B<n>` (D110), its identity, accepted by every get, update and transition tool next to the slug and ID; existing rows are numbered by `migrate-addresses`. Each receives the standard auto-generated MCP tools (`create_rule`, `get_rule`, `list_rules`, `update_rule`, `publish_rule`, `archive_rule`, `delete_rule`, and the equivalent for `authority_stub`).
 
 **`Rule` does not use `publish_rule`/`archive_rule` to reach its real states.** `Rule`'s own flow is `draft` → `active` → `retired` — none of those are the built-in `Published`/`Archived` states, so use `transition_item` (type `Rule`) to move a Rule through its real lifecycle, the same pattern `Decision` already requires for `ratified`/`superseded`.
 

@@ -581,12 +581,12 @@ func TestAddressRegistry_DatabaseErrors(t *testing.T) {
 		{"propose", "SELECT type_name FROM smeldr_address_counters", func(d DB) error { _, err := proposeAddressPrefix(ctx, d, "invoice"); return err }},
 		{"lookup", "SELECT prefix FROM smeldr_address_counters", func(d DB) error { _, err := addressPrefixOf(ctx, d, "Decision"); return err }},
 		{"allocate", "UPDATE smeldr_address_counters", func(d DB) error { _, _, err := allocateAddress(ctx, d, "Decision"); return err }},
-		{"counter table", "CREATE TABLE IF NOT EXISTS smeldr_address_counters", func(d DB) error { return registerOrchestrationAddresses(ctx, d) }},
+		{"counter table", "CREATE TABLE IF NOT EXISTS smeldr_address_counters", func(d DB) error { return registerCoreAddresses(ctx, d, orchestrationAddressTypes...) }},
 		{"seed", "SELECT task_id", func(d DB) error {
 			if _, err := db.Exec(`DELETE FROM smeldr_address_counters WHERE type_name = 'Task'`); err != nil {
 				return nil
 			}
-			return registerOrchestrationAddresses(ctx, d)
+			return registerCoreAddresses(ctx, d, orchestrationAddressTypes...)
 		}},
 		{"duplicate scan", "HAVING COUNT", func(d DB) error { return ensureAddressStorage(ctx, d, "smeldr_tasks", false) }},
 	}

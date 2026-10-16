@@ -18,6 +18,8 @@ import (
 // through the same ceremony — see [ruleFlow]'s own doc comment.
 type Rule struct {
 	Node
+	// RecordAddress is the Rule's address (D110, prefix U): its identity.
+	RecordAddress
 	// Surface names the functional unit this Rule's own execution touches
 	// (e.g. "core", "cloud", "site", "ops" — decision-governance §3's own
 	// vocabulary). Free-text for now: the organization-configurable
@@ -46,6 +48,8 @@ type Rule struct {
 // only when a real check actually needs the full node.
 type AuthorityStub struct {
 	Node
+	// RecordAddress is the stub's address (D110, prefix B): its identity.
+	RecordAddress
 	// SourceRef points at the source document this stub references (a repo
 	// path, a design doc anchor, a URL). Required — a stub with no source
 	// is not a pointer to anything.
@@ -63,8 +67,11 @@ type AuthorityStub struct {
 }
 
 // CreateAuthorityTables creates the two Authority-mechanism content tables
-// (smeldr_rules, smeldr_authority_stubs) if they do not already exist. Call
-// once at application startup, alongside [CreateOrchestrationTables].
+// (smeldr_rules, smeldr_authority_stubs) if they do not already exist, and
+// gives both their D110 address storage: the address columns and unique
+// index, and the core prefixes U (Rule) and B (AuthorityStub), seeded with the
+// rows that have no address yet, which [MigrateAddresses] numbers. Idempotent.
+// Call once at application startup, alongside [CreateOrchestrationTables].
 func CreateAuthorityTables(db DB) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS smeldr_rules (
@@ -101,7 +108,7 @@ func CreateAuthorityTables(db DB) error {
 			return err
 		}
 	}
-	return nil
+	return registerCoreAddresses(context.Background(), db, authorityAddressTypes...)
 }
 
 // RegisterAuthorityTypes registers the two Authority-mechanism content
@@ -121,10 +128,10 @@ func RegisterAuthorityTypes(app *App, db DB) {
 		}
 	}
 	app.Content(NewModule[*Rule]((*Rule)(nil),
-		At("/rules"), Repo(NewSQLRepo[*Rule](db, Table("smeldr_rules"))), MCP(MCPRead, MCPWrite), reservedSlugs(),
+		At("/rules"), Repo(NewSQLRepo[*Rule](db, Table("smeldr_rules"))), MCP(MCPRead, MCPWrite), withAddress(),
 	))
 	app.Content(NewModule[*AuthorityStub]((*AuthorityStub)(nil),
-		At("/authority-stubs"), Repo(NewSQLRepo[*AuthorityStub](db, Table("smeldr_authority_stubs"))), MCP(MCPRead, MCPWrite), reservedSlugs(),
+		At("/authority-stubs"), Repo(NewSQLRepo[*AuthorityStub](db, Table("smeldr_authority_stubs"))), MCP(MCPRead, MCPWrite), withAddress(),
 	))
 }
 

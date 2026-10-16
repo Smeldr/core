@@ -222,9 +222,9 @@ func TestDraftSlugs_RecordTypesKeepTheirRule(t *testing.T) {
 	if m.draftSlugsShared() {
 		t.Error("a core record type shares draft slugs")
 	}
-	r := NewModule((*Rule)(nil), Repo(NewMemoryRepo[*Rule]()), At("/rules"), reservedSlugs())
+	r := NewModule((*Rule)(nil), Repo(NewMemoryRepo[*Rule]()), At("/rules"), withAddress())
 	if r.draftSlugsShared() {
-		t.Error("a reservedSlugs module shares draft slugs")
+		t.Error("an addressed Rule shares draft slugs")
 	}
 	if err := r.publishedSlugConflict(context.Background(), &Rule{Node: Node{ID: "x", Slug: "s"}}); err != nil {
 		t.Errorf("record publish check = %v; want none", err)

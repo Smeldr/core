@@ -21,6 +21,12 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Changed
+
+- **`Rule` and `AuthorityStub` are core records with a D110 address (A510).** Both now embed `RecordAddress`, so their JSON carries `address`, `address_no` and `external_ref`. A Rule's address is `U<n>` and an AuthorityStub's `B<n>`; `R` and `S` were taken. Every get, update and transition accepts the address next to the slug and the ID. A scoped caller whose supplied slug is taken gets the slug plus the tail of the new ID and the `slug_adjusted` warning, as for the other core records.
+- **`CreateAuthorityTables` adds the address storage (A510).** It adds the `address`, `address_no` and `external_ref` columns and the unique index on the address to `smeldr_rules` and `smeldr_authority_stubs`, and registers the prefixes `U` and `B`. It is idempotent. A duplicate address stops boot. Existing rows keep an empty address until `MigrateAddresses` (the `migrate-addresses` command or the mcp tool) numbers them from 1 in `created_at` order. Creates after the upgrade are numbered above them.
+- **The temporary all-status slug rule for the two types is gone (A510).** v1.154.0 kept their slugs unique in every status through an internal option. They now keep that rule as records, by their address. Their slug column stays `UNIQUE`, as the other core record tables do.
+
 ---
 
 ## [1.155.0] - 2026-10-16

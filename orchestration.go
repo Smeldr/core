@@ -817,7 +817,7 @@ func CreateOrchestrationTables(db DB) error {
 	}
 	// D110: the address columns and indexes, the counter table and the core
 	// prefixes, on fresh and on older databases alike (idempotent).
-	return registerOrchestrationAddresses(context.Background(), db)
+	return registerCoreAddresses(context.Background(), db, orchestrationAddressTypes...)
 }
 
 // EnsureOrchestrationSignalColumns adds [Signal]'s subject_type/subject_id/

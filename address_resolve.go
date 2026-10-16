@@ -275,7 +275,7 @@ func lookupAddressByID(ctx context.Context, db DB, typeName, id string, dynamic 
 		return ""
 	}
 	table := ""
-	for _, t := range orchestrationAddressTables {
+	for _, t := range coreAddressTables {
 		if t.typeName == typeName {
 			table = t.table
 		}

@@ -150,11 +150,11 @@ func (a *App) MigrateAddresses(ctx context.Context, opts AddressMigrationOptions
 	return MigrateAddresses(ctx, a.cfg.DB, opts)
 }
 
-// migrationTypes lists the existing orchestration tables, then each dynamic
+// migrationTypes lists the existing core record tables, then each dynamic
 // record type (no url_prefix), read on the base handle.
 func migrationTypes(ctx context.Context, db DB) ([]migrationType, error) {
 	var out []migrationType
-	for _, t := range orchestrationAddressTables {
+	for _, t := range coreAddressTables {
 		ok, err := tableExists(ctx, db, t.table)
 		if err != nil {
 			return nil, fmt.Errorf("%w: MigrateAddresses: %s", ErrInternal, err)

@@ -515,11 +515,8 @@ type Module[T any] struct {
 
 	redirects *RedirectStore // the App's redirect table, consulted only on a public read's 404 path; nil outside an App
 
-	addressed bool // D110: each create allocates the item's address ([withAddress])
-	// slugsReserved keeps one slug per item in every status ([reservedSlugs]),
-	// for a framework record table whose slug column is UNIQUE.
-	slugsReserved bool
-	memAddress    memoryAddressCounter // the address counter when the module has no database
+	addressed  bool                 // D110: each create allocates the item's address ([withAddress])
+	memAddress memoryAddressCounter // the address counter when the module has no database
 }
 
 // NewModule constructs a [Module] for content type T.
@@ -600,8 +597,6 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 			m.saveBefore, m.saveAfter, m.saveStatusChanged = v.before, v.after, v.statusChanged
 		case addressOption:
 			m.addressed = true
-		case reservedSlugsOption:
-			m.slugsReserved = true
 		case SitemapConfig:
 			cfg := v
 			m.sitemapCfg = &cfg
@@ -1653,23 +1648,11 @@ func (m *Module[T]) slugGuardPrefix() string   { return m.prefix }
 
 // draftSlugsShared reports whether drafts of this type reserve no URL and may
 // share a slug: web content, so neither a type with an address nor a core
-// record type ([coreAddressPrefixes]), whose table does not keep one slug per
-// item ([reservedSlugs]).
+// record type ([coreAddressPrefixes]).
 func (m *Module[T]) draftSlugsShared() bool {
 	_, coreRecord := coreAddressPrefixes[m.contentTypeName]
-	return !m.addressed && !coreRecord && !m.slugsReserved
+	return !m.addressed && !coreRecord
 }
-
-// reservedSlugsOption is [reservedSlugs].
-type reservedSlugsOption struct{}
-
-func (reservedSlugsOption) isOption() {}
-
-// reservedSlugs keeps today's slug rule for a framework record table whose
-// slug column is UNIQUE in every status (smeldr_rules, smeldr_authority_stubs):
-// its slugs are unique across drafts too, and a draft is never published
-// under a shared slug.
-func reservedSlugs() Option { return reservedSlugsOption{} }
 
 // visibleSlugHolder is the slug step of web content, where drafts may share a
 // slug: one holder the caller may see (visible nil: any) is a hit; more than

@@ -59,7 +59,7 @@ func TestOrchestrationJSON_NoPublishFields(t *testing.T) {
 				t.Errorf("%s JSON lost %s: %v", name, kept, keys)
 			}
 		}
-		if _, ok := keys["address"]; !ok && name != "Rule" && name != "AuthorityStub" {
+		if _, ok := keys["address"]; !ok {
 			t.Errorf("%s JSON lost address: %v", name, keys)
 		}
 	}
