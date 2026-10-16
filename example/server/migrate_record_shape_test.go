@@ -71,6 +71,59 @@ func TestRunMigrateRecordShape(t *testing.T) {
 		t.Errorf("report file = %s, %v", b, err)
 	}
 
+	// --type-map: the architect's D112 mapping (T273) as fixture data. A
+	// missing file, bad JSON and an entry for no Amendment each exit 1.
+	db, err = sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, a := range [][2]string{{"A493", "Level 1"}, {"A490", "Level 2"}} {
+		if _, err := db.Exec(`INSERT INTO smeldr_amendments (id, slug, status, created_at, updated_at, address, amendment_type) VALUES ($1, $1, 'merged', $2, $2, $1, $3)`, a[0], now, a[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	typeOf := func(id string) string {
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var v string
+		if err := db.QueryRow(`SELECT amendment_type FROM smeldr_amendments WHERE id = $1`, id).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	badJSON := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(badJSON, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(dir, "missing.json"), badJSON, filepath.Join("testdata", "record_shape_type_map.json")} {
+		errOut.Reset()
+		if code := runMigrateRecordShape([]string{"--apply", "--type-map=" + path}, &out, &errOut); code != 1 || errOut.Len() == 0 {
+			t.Errorf("--type-map=%s exit %d (%s); want 1 with a reason", path, code, errOut.String())
+		}
+	}
+	if got := typeOf("A493"); got != "Level 1" {
+		t.Errorf("a refused map wrote %q", got)
+	}
+	small := filepath.Join(dir, "types.json")
+	if err := os.WriteFile(small, []byte(`{"A493": "fix", "490": "feature"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := runMigrateRecordShape([]string{"--apply", "--type-map=" + small}, &out, &errOut); code != 0 {
+		t.Fatalf("--type-map apply exit %d: %s", code, errOut.String())
+	}
+	if typeOf("A493") != "fix" || typeOf("A490") != "feature" {
+		t.Errorf("types after apply = %q, %q", typeOf("A493"), typeOf("A490"))
+	}
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil || len(rep.AmendmentTypes) != 2 || rep.AmendmentTypes[0].Source != "type_map" {
+		t.Errorf("type-map report = %s, %v", out.String(), err)
+	}
+
 	if code := runMigrateRecordShape([]string{"--nope"}, &out, &errOut); code != 2 {
 		t.Errorf("bad flag exit %d; want 2", code)
 	}

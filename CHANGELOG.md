@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Added
+
+- **`migrate-record-shape` takes a person's mapping for Amendment types the built-in rules cannot map (A514).** `RecordShapeMigrationOptions.AmendmentTypeMap` (`map[string]string`) maps an Amendment, by address or number, to a type on the `AmendmentTypes` list. The map applies only to Amendments whose stored type is not on that list, and it wins over the built-in rules. Every entry is checked before anything is written, and one bad entry refuses the whole run with an `ErrBadRequest` that lists every problem. `RecordShapeChange` gains `Source` (JSON `source`, omitted when empty), set to `rule` or `type_map`. `smeldr-server migrate-record-shape` takes `--type-map=path.json`. This exists because 14 Amendments on process.smeldr.dev carry "Level 1" or "Level 2" as their type, and merged Amendments can only be changed by the migration.
+
 ---
 
 ## [1.157.0] - 2026-10-16

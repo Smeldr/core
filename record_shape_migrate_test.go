@@ -221,6 +221,7 @@ func TestMigrateRecordShape_ProbeAndScanFailures(t *testing.T) {
 		{"address column probe", queryHookDB{match: `"smeldr_tasks"."address"`, fail: true}},
 		{"title scan", queryHookDB{match: "FROM smeldr_tasks WHERE TRIM(title)", replace: "SELECT 1"}},
 		{"amendment scan", queryHookDB{match: "FROM smeldr_amendments ORDER BY", replace: "SELECT 1"}},
+		{"amendment read", queryHookDB{match: "FROM smeldr_amendments ORDER BY", fail: true}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -286,5 +287,144 @@ func TestEnsureTaskGoalTitleColumns_Errors(t *testing.T) {
 	}
 	if err := EnsureTaskGoalTitleColumns(context.Background(), db); err != nil {
 		t.Errorf("second run: %v", err)
+	}
+}
+
+// addressRecordShape seeds the record-shape rows and gives the Amendments
+// addresses, plus one "Level 1" row, as on a D110 database.
+func addressRecordShape(t *testing.T, db DB) {
+	t.Helper()
+	seedRecordShape(t, db)
+	if err := NewSQLRepo[*Amendment](db, Table("smeldr_amendments")).Save(context.Background(),
+		&Amendment{Node: Node{ID: "a-6", Slug: "a-6", Status: "merged"}, AmendmentType: "Level 1", Summary: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	for id, address := range map[string]string{"a-1": "A491", "a-2": "A490", "a-3": "A492", "a-4": "A493", "a-5": "A494", "a-6": "A497"} {
+		if _, err := db.ExecContext(context.Background(), `UPDATE smeldr_amendments SET address = $1 WHERE id = $2`, address, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// AmendmentTypeMap maps the rows the rules cannot, by address or number, and
+// wins over a rule; the report says which rows the map decided.
+func TestMigrateRecordShape_TypeMap(t *testing.T) {
+	db := addressDB(t)
+	addressRecordShape(t, db)
+	typeMap := map[string]string{"A490": "feature", "497": "fix", "A491": "refactor"}
+	rep, err := MigrateRecordShape(context.Background(), db, RecordShapeMigrationOptions{AmendmentTypeMap: typeMap})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.UnmappedAmendmentTypes) != 0 {
+		t.Errorf("unmapped = %+v", rep.UnmappedAmendmentTypes)
+	}
+	sources := map[string]string{}
+	for _, c := range rep.AmendmentTypes {
+		sources[c.Address] = c.New + "/" + c.Source
+	}
+	want := map[string]string{"A490": "feature/type_map", "A497": "fix/type_map", "A491": "refactor/type_map", "A493": "fix/rule", "A494": "release/rule"}
+	for address, w := range want {
+		if sources[address] != w {
+			t.Errorf("%s = %q; want %q (all %v)", address, sources[address], w, sources)
+		}
+	}
+	for id, w := range map[string]string{"a-1": "refactor", "a-2": "feature", "a-6": "fix", "a-4": "fix"} {
+		if got := recordShapeColumn(t, db, "smeldr_amendments", "amendment_type", id); got != w {
+			t.Errorf("%s type = %q; want %q", id, got, w)
+		}
+	}
+	// A second run without the map changes no type; with it, it is refused.
+	if rep, err := MigrateRecordShape(context.Background(), db, RecordShapeMigrationOptions{}); err != nil || len(rep.AmendmentTypes) != 0 {
+		t.Errorf("second run: %+v %v", rep, err)
+	}
+	if _, err := MigrateRecordShape(context.Background(), db, RecordShapeMigrationOptions{AmendmentTypeMap: typeMap}); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("second run with the map: %v; want ErrBadRequest", err)
+	}
+}
+
+func TestMigrateRecordShape_TypeMapDryRun(t *testing.T) {
+	db := addressDB(t)
+	addressRecordShape(t, db)
+	rep, err := MigrateRecordShape(context.Background(), db, RecordShapeMigrationOptions{DryRun: true, AmendmentTypeMap: map[string]string{"A490": "chore"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range rep.AmendmentTypes {
+		found = found || (c.Address == "A490" && c.New == "chore" && c.Source == "type_map")
+	}
+	if !found || len(rep.UnmappedAmendmentTypes) != 1 {
+		t.Errorf("dry-run report = %+v", rep)
+	}
+	if got := recordShapeColumn(t, db, "smeldr_amendments", "amendment_type", "a-2"); got != "Level 2" {
+		t.Errorf("a dry run wrote %q", got)
+	}
+}
+
+// One bad entry refuses the whole run before anything is written, and every
+// problem is named.
+func TestMigrateRecordShape_TypeMapRefused(t *testing.T) {
+	cases := []struct {
+		name    string
+		typeMap map[string]string
+		want    []string
+	}{
+		{"value not a type", map[string]string{"A490": "bug"}, []string{`A490: "bug" is not a type (feature, fix`}},
+		{"no such Amendment", map[string]string{"A999": "fix"}, []string{"A999: no such Amendment"}},
+		{"not an address", map[string]string{"x1": "fix", "A": "fix", "": "fix"}, []string{"x1: not an Amendment address or number", "A: not an Amendment"}},
+		{"already valid", map[string]string{"A492": "feature"}, []string{"A492: already has type fix"}},
+		{"named twice", map[string]string{"A490": "fix", "490": "fix"}, []string{"A490: names A490 twice"}},
+		{"several problems", map[string]string{"A490": "bug", "A999": "fix", "A497": "fix"}, []string{`A490: "bug"`, "A999: no such Amendment"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			db := addressDB(t)
+			addressRecordShape(t, db)
+			_, err := MigrateRecordShape(context.Background(), db, RecordShapeMigrationOptions{AmendmentTypeMap: c.typeMap})
+			if !errors.Is(err, ErrBadRequest) {
+				t.Fatalf("%v; want ErrBadRequest", err)
+			}
+			for _, w := range c.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("%v; want it to name %q", err, w)
+				}
+			}
+			// Nothing written: no title, no summary cut, no type mapped.
+			if got := recordShapeColumn(t, db, "smeldr_tasks", "title", "t-1"); got != "" {
+				t.Errorf("title written: %q", got)
+			}
+			if got := recordShapeColumn(t, db, "smeldr_amendments", "amendment_type", "a-1"); got != "feat" {
+				t.Errorf("type written: %q", got)
+			}
+			if got := recordShapeColumn(t, db, "smeldr_amendments", "amendment_type", "a-6"); got != "Level 1" {
+				t.Errorf("type written: %q", got)
+			}
+		})
+	}
+	// A map with no Amendments table to apply it to is refused too.
+	if _, err := MigrateRecordShape(context.Background(), newSQLiteDB(t), RecordShapeMigrationOptions{AmendmentTypeMap: map[string]string{"A1": "fix"}}); !errors.Is(err, ErrBadRequest) || !strings.Contains(err.Error(), "no smeldr_amendments table") {
+		t.Errorf("no amendments table: %v", err)
+	}
+}
+
+// A database from before addresses (D110) matches a key on amendment_number.
+func TestMigrateRecordShape_TypeMapWithoutAddress(t *testing.T) {
+	db := newSQLiteDB(t)
+	if _, err := db.Exec(`CREATE TABLE smeldr_amendments (id TEXT PRIMARY KEY, amendment_number TEXT NOT NULL DEFAULT '', amendment_type TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '', body TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO smeldr_amendments (id, amendment_number, amendment_type) VALUES ('x', 'A12', 'Level 2'), ('y', 'A13', 'Level 1'), ('z', 'A13', 'Level 1')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MigrateRecordShape(context.Background(), db, RecordShapeMigrationOptions{AmendmentTypeMap: map[string]string{"A13": "fix"}}); !errors.Is(err, ErrBadRequest) || !strings.Contains(err.Error(), "A13: matches 2 Amendments") {
+		t.Errorf("shared number: %v", err)
+	}
+	rep, err := MigrateRecordShape(context.Background(), db, RecordShapeMigrationOptions{AmendmentTypeMap: map[string]string{"12": "docs"}})
+	if err != nil || len(rep.AmendmentTypes) != 1 || rep.AmendmentTypes[0].Source != "type_map" {
+		t.Fatalf("by number: %+v %v", rep, err)
+	}
+	if got := recordShapeColumn(t, db, "smeldr_amendments", "amendment_type", "x"); got != "docs" {
+		t.Errorf("type = %q", got)
 	}
 }

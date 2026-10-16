@@ -5424,11 +5424,21 @@ One transaction, idempotent; a dry run (`DryRun: true`) runs the same code and r
 
 - Untitled Tasks and Goals get the first line of their description, untitled Decisions the first line of their body: heading, list and quote marks and emphasis removed, cut at a word boundary at 120 characters, no ellipsis. A record with no usable text is reported in `untitled` and left.
 - Amendment summaries over 120 characters are cut the same way; the full summary is put first in the body unless the body already contains it (`body_kept`), so no text is lost. A merged Amendment is otherwise locked: this migration is the only path that edits it, and the report lists every Amendment it changed, by address.
-- `amendment_type`: `feat` to `feature`, `bugfix` to `fix`, `deploy` to `release`. Any other value outside the list is reported in `unmapped_amendment_types` for a person to map, never guessed ("Level 1" and "Level 2" are a size, not a type).
-- The report, `RecordShapeMigrationReport{dry_run, duration_ms, titles, amendment_types, untitled, unmapped_amendment_types}`, names each change by type, ID, address, field, old and new value.
+- `amendment_type`: `feat` to `feature`, `bugfix` to `fix`, `deploy` to `release`. An entry in `AmendmentTypeMap` (see below) takes precedence over these rules. Any other value outside the list is reported in `unmapped_amendment_types` for a person to map, never guessed ("Level 1" and "Level 2" are a size, not a type).
+- `AmendmentTypeMap map[string]string` on `RecordShapeMigrationOptions`: maps an Amendment to a type on the `AmendmentTypes` list (feature, fix, docs, chore, test, ci, refactor, release). A key is an Amendment address (`"A493"`) or number (`"493"`). Where the table has an address column, the key matches by address; otherwise it matches by amendment_number. The map applies only to an Amendment whose stored `amendment_type` is not on the list, and it wins over the built-in rules. Every entry is checked against the Amendments read, before anything is written. One bad entry refuses the whole run with an `ErrBadRequest` that lists every problem, sorted by key:
+  - a value not on the list;
+  - a key that is not `A<digits>` or `<digits>`;
+  - a key that names no Amendment;
+  - a key that matches more than one Amendment;
+  - two keys that name the same Amendment;
+  - an Amendment that already has a valid type;
+  - a map given when there is no `smeldr_amendments` table.
+
+  After an apply, running again with the same map is refused, because each Amendment it names now has a valid type. Run again without the map; that run changes nothing.
+- The report, `RecordShapeMigrationReport{dry_run, duration_ms, titles, amendment_types, untitled, unmapped_amendment_types}`, names each change by type, ID, address, field, old and new value. An `amendment_type` change also carries `source`: `"rule"` or `"type_map"`.
 - It needs the Task and Goal title column; without it the error names `EnsureTaskGoalTitleColumns`.
 
-**`smeldr-server migrate-record-shape [--apply] [--report=path]`** (example/server): a dry run unless `--apply` is given. On process.smeldr.dev, applying it is devops' job on Peter's yes, after architect has mapped the unmapped types from the dry-run report.
+**`smeldr-server migrate-record-shape [--apply] [--report=path] [--type-map=path.json]`** (example/server): a dry run unless `--apply` is given. `--type-map` takes a JSON object such as `{"A493": "fix", "A490": "feature"}`. A file that cannot be read or is not valid JSON exits 1 with the reason; core checks the entries the same way as the Go API. On process.smeldr.dev, applying it is devops' job on Peter's yes, after architect has mapped the unmapped types from the dry-run report, with that mapping passed with `--type-map`.
 
 ### `InsertSignal`
 
