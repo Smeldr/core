@@ -238,7 +238,7 @@ func liveEdge(ctx context.Context, db DB, edge RelationEdge) (RelationEdge, erro
 		`SELECT id, created_at FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 `+
 			`AND target_type=$3 AND target_id=$4 AND relation_kind=$5 AND edge_class=$6 AND invalid_at IS NULL`,
 		edge.SourceType, edge.SourceID, edge.TargetType, edge.TargetID, edge.RelationKind, edge.EdgeClass,
-	).Scan(&edge.ID, &edge.CreatedAt)
+	).Scan(&edge.ID, scanDest(&edge.CreatedAt))
 	if errors.Is(err, sql.ErrNoRows) {
 		return edge, ErrNotFound
 	}
@@ -605,6 +605,38 @@ func writeSignalReferenceEdges(ctx context.Context, exec DB, plan signalReferenc
 		}
 	}
 	return nil
+}
+
+// announceSignalReferenceEdges records provenance and sends relation.asserted
+// (new_row true) for the about edges [InsertSignalWithWarnings] wrote for the
+// Signal signalID, after its commit (T875). A Signal created through the
+// Signal module announces through its save hooks instead; this serves the
+// raw inserts: [App.NotifySignalCreated] (mcp's create_signal) and core's own
+// conditions. Fail-open, logged at Warn: the Signal has committed.
+func announceSignalReferenceEdges(ctx context.Context, rs *RelationStore, signalID string) {
+	if rs == nil || signalID == "" {
+		return
+	}
+	rows, err := rs.db.QueryContext(ctx,
+		"SELECT "+relationColumns+" FROM smeldr_relations WHERE source_type = 'Signal' AND source_id = $1 AND created_by_job = $2 AND invalid_at IS NULL",
+		signalID, referencesJob)
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: references: a Signal's about edges were written but not announced", "signal", signalID, "error", err)
+		return
+	}
+	var edges []RelationEdge
+	for rows.Next() {
+		e, err := scanEdge(rows)
+		if err != nil {
+			slog.WarnContext(ctx, "smeldr: references: a Signal's about edges were written but not announced", "signal", signalID, "error", err)
+			break
+		}
+		edges = append(edges, e)
+	}
+	_ = rows.Close()
+	for _, e := range edges {
+		rs.announceEdge(ctx, e, true)
+	}
 }
 
 // EnsureReferenceColumns adds the reference columns D113 introduced to

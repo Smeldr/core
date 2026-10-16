@@ -225,6 +225,8 @@ func openRatificationConditions(ctx context.Context, exec DB, rep *SignalMigrati
 	}
 	for _, id := range ids {
 		s := ratificationSignal(id)
+		// A one-off migration: its Signals and their about edges are not
+		// announced (no signal.created, no relation.asserted; T875).
 		if _, err := InsertSignalWithWarnings(withSignalSystem(ctx), exec, s, SignalCutovers{}); err != nil {
 			return fmt.Errorf("%w: MigrateSignalKinds: %s", ErrInternal, err)
 		}

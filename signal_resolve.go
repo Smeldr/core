@@ -47,11 +47,14 @@ type signalResolver struct {
 	webhooks    *WebhookStore
 	pool        *workerPool
 	broadcaster *eventBroadcaster
+	// relations announces the about edge of a condition it emits (T875); nil
+	// sends no relation event.
+	relations *RelationStore
 }
 
 // signalResolver returns the App's resolver.
 func (a *App) signalResolver() signalResolver {
-	return signalResolver{db: a.cfg.DB, provenance: a.provenanceStore, webhooks: a.webhookStore, pool: a.webhookPool, broadcaster: a.eventBroadcaster}
+	return signalResolver{db: a.cfg.DB, provenance: a.provenanceStore, webhooks: a.webhookStore, pool: a.webhookPool, broadcaster: a.eventBroadcaster, relations: a.relationStore}
 }
 
 // selectOpen reads the open Signals matching where (an SQL condition over
@@ -121,6 +124,7 @@ func (r signalResolver) emit(ctx context.Context, s *Signal) error {
 		typeName: "Signal", aboutType: s.SubjectType, aboutID: s.SubjectID,
 		fields: map[string]string{"receiver": s.Receiver, "sender": s.Sender, "signal_type": s.SignalType},
 	})
+	announceSignalReferenceEdges(ctx, r.relations, s.ID)
 	return nil
 }
 

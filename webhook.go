@@ -593,6 +593,9 @@ func (a *App) NotifySignalCreated(ctx context.Context, id, slug string) {
 		typeName: "Signal", aboutType: subjectType, aboutID: subjectID,
 		fields: map[string]string{"receiver": channel, "sender": sender, "signal_type": signalType},
 	})
+	// The Signal's about edges, written in its insert, are announced after
+	// the signal.created event (T875).
+	announceSignalReferenceEdges(ctx, a.relationStore, id)
 }
 
 // validateWebhookURL validates rawURL for SSRF safety. Returns a

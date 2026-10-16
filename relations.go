@@ -703,7 +703,7 @@ func (s *RelationStore) emitConflictDetectedSignal(ctx context.Context, edge Rel
 
 // signalResolver returns the store's Signal resolver (D115).
 func (s *RelationStore) signalResolver() signalResolver {
-	return signalResolver{db: s.db, provenance: s.provenanceStore, webhooks: s.webhookStore, pool: s.webhookPool, broadcaster: s.eventBroadcaster}
+	return signalResolver{db: s.db, provenance: s.provenanceStore, webhooks: s.webhookStore, pool: s.webhookPool, broadcaster: s.eventBroadcaster, relations: s}
 }
 
 // recordAssertProvenance records a ProvenanceRecord for a successfully asserted

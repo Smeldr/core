@@ -1960,6 +1960,12 @@ func (a *App) ValidTransitions(ctx context.Context, typeName, fromState string) 
 // nil-safe, so a caller with webhooks/streaming unwired passes nil for
 // whichever it lacks.
 func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *WebhookStore, pool *workerPool, broadcaster *eventBroadcaster, typeName, itemID, fromState, toState, requiredOperation string) error {
+	return recordAuthorizationRequiredSignalVia(ctx, signalResolver{db: db, webhooks: store, pool: pool, broadcaster: broadcaster}, typeName, itemID, fromState, toState, requiredOperation)
+}
+
+// recordAuthorizationRequiredSignalVia is [recordAuthorizationRequiredSignal]
+// on r, whose relation store (when set) announces the Signal's about edge.
+func recordAuthorizationRequiredSignalVia(ctx context.Context, r signalResolver, typeName, itemID, fromState, toState, requiredOperation string) error {
 	s := &Signal{
 		Sender:            "system",
 		Receiver:          requiredOperation,
@@ -1973,7 +1979,6 @@ func recordAuthorizationRequiredSignal(ctx context.Context, db DB, store *Webhoo
 	}
 	// One open condition per blocked transition (D115): a drain that meets
 	// the same gate again does not add a second.
-	r := signalResolver{db: db, webhooks: store, pool: pool, broadcaster: broadcaster}
 	open, err := r.openFor(ctx, typeName, itemID)
 	if err != nil {
 		return fmt.Errorf("smeldr: recordAuthorizationRequiredSignal: %w", err)
@@ -2063,7 +2068,8 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 			// Automation may never cross an operation-gated boundary itself —
 			// the authority half of T211. Emit the loud-failure Signal
 			// instead of applying the transition.
-			if sigErr := recordAuthorizationRequiredSignal(ctx, db, a.webhookStore, a.webhookPool, a.eventBroadcaster, r.typeName, r.itemID, fromState, r.toState, requiredOperation); sigErr != nil {
+			resolver := signalResolver{db: db, webhooks: a.webhookStore, pool: a.webhookPool, broadcaster: a.eventBroadcaster, relations: a.relationStore}
+			if sigErr := recordAuthorizationRequiredSignalVia(ctx, resolver, r.typeName, r.itemID, fromState, r.toState, requiredOperation); sigErr != nil {
 				slog.WarnContext(ctx, "smeldr: DrainEvalQueue: authorization-required signal failed",
 					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "required_operation", requiredOperation, "error", sigErr)
 			}
