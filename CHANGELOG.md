@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.163.0] - 2026-10-16
+
 ### Added
 
 - **Seeding a role's subscriptions reports what it left out (T859, A526).** `App.SeedRoleSubscriptionsReport` and `SeedRoleSubscriptionsReportTrusted` return a `RoleSeedReport`: `Created`, and `LeftOut`, the role subscriptions not created because their type is not defined on the instance (`RoleSubscriptionSkip`, name and type). `SeedRoleSubscriptions` and `SeedRoleSubscriptionsTrusted` keep their signatures and return the created list. The left-out case is now logged at Warn, not Info.
