@@ -523,6 +523,12 @@ type slugMatcher[T any] interface {
 	findAllBySlug(ctx context.Context, slug string) ([]T, error)
 }
 
+// Both repositories match slugs; a rename breaks the build, not the lookup.
+var (
+	_ slugMatcher[*Node] = (*MemoryRepo[*Node])(nil)
+	_ slugMatcher[*Node] = (*SQLRepo[*Node])(nil)
+)
+
 // statusMatch reports whether the Status field of item matches any of the
 // given statuses. Returns true when statuses is empty (no filter applied).
 func statusMatch[T any](item T, statuses []Status) bool {
@@ -853,6 +859,8 @@ func (r *SQLRepo[T]) FindBySlug(ctx context.Context, slug string) (T, error) {
 
 // findAllBySlug implements [slugMatcher]: every holder of slug, published
 // first, then by ID.
+//
+//lint:ignore U1000 called through the slugMatcher interface (module.go); staticcheck does not follow generic interface assertions
 func (r *SQLRepo[T]) findAllBySlug(ctx context.Context, slug string) ([]T, error) {
 	return Query[T](ctx, r.db, r.slugQuery(), slug)
 }

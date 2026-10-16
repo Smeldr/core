@@ -41,8 +41,14 @@ type txRebinder[T any] interface {
 	onDB(db DB) Repository[T]
 }
 
+// SQLRepo is rebound into the create transaction (A485); without this method
+// creates would quietly stop being atomic, so a rename breaks the build.
+var _ txRebinder[*Node] = (*SQLRepo[*Node])(nil)
+
 // onDB returns a copy of r that runs every query on db. The table and type are
 // shared; r itself is unchanged.
+//
+//lint:ignore U1000 called through the txRebinder interface (repoOn); staticcheck does not follow generic interface assertions
 func (r *SQLRepo[T]) onDB(db DB) Repository[T] {
 	cp := *r
 	cp.db = db
