@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.159.0] - 2026-10-16
+
 ### Added
 
 - **Signals are split into conditions and requests (A519, D115).** `SignalKind` has two values, `SignalCondition` and `SignalRequest`. `SignalTypeInfo{Type, Kind, Resolution}` describes each catalog type, `SignalTypes()` returns a copy of the catalog, and `SignalTypeOf(t)` looks one type up. Conditions are `ratification-required`, `authorization-required`, `conflict-detected`, `downstream-blocked`, `reference-stale` and `premise-flagged`, and the last three have no emitter yet. Requests are `review-requested` and `question`.
