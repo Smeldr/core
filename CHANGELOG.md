@@ -18,6 +18,14 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **Seeding a role's subscriptions reports what it left out (T859, A@@AMEND@@).** `App.SeedRoleSubscriptionsReport` and `SeedRoleSubscriptionsReportTrusted` return a `RoleSeedReport`: `Created`, and `LeftOut`, the role subscriptions not created because their type is not defined on the instance (`RoleSubscriptionSkip`, name and type). `SeedRoleSubscriptions` and `SeedRoleSubscriptionsTrusted` keep their signatures and return the created list. The left-out case is now logged at Warn, not Info.
+
+### Fixed
+
+- **`smeldr-server seed-role-subscriptions` left out every task_plan subscription (T859, A@@AMEND@@).** The subcommand built its app without loading the runtime-defined types, so `task_plan` was not in its registry: on process.smeldr.dev it created 16 of 23 role subscriptions. Every subcommand that boots the app now does it through `buildCommandApp`, which loads them as the running server does. The subcommand prints `{"created": [...], "left_out": [{"name", "type"}]}` instead of the bare created list, and one stderr line per left-out subscription.
+
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 

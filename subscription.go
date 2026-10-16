@@ -700,9 +700,41 @@ func roleSubscriptions(d RoleDefaults) []SubscriptionSpec {
 // SeedRoleSubscriptions gives owner its role subscriptions (design 3.4) and
 // its universal defaults. It is idempotent: a role subscription whose name the
 // owner already has is left as it is. It returns the subscriptions it
-// created. The caller needs administer ([ErrForbidden]); a [RoleDefaults] with
-// no band and not Architect is [ErrBadRequest].
+// created; [App.SeedRoleSubscriptionsReport] also names the ones it left out.
+// The caller needs administer ([ErrForbidden]); a [RoleDefaults] with no band
+// and not Architect is [ErrBadRequest].
 func (a *App) SeedRoleSubscriptions(ctx context.Context, owner string, d RoleDefaults) ([]Subscription, error) {
+	rep, err := a.SeedRoleSubscriptionsReport(ctx, owner, d)
+	if rep == nil {
+		return nil, err
+	}
+	return rep.Created, err
+}
+
+// RoleSeedReport is what seeding a role's subscriptions did.
+type RoleSeedReport struct {
+	// Created are the subscriptions this run created.
+	Created []Subscription `json:"created"`
+	// LeftOut are the role subscriptions this run did not create because
+	// their type is not defined on this instance.
+	LeftOut []RoleSubscriptionSkip `json:"left_out"`
+}
+
+// RoleSubscriptionSkip is a role subscription that was not created because
+// its type is not defined on this instance.
+type RoleSubscriptionSkip struct {
+	// Name is the role subscription's name.
+	Name string `json:"name"`
+	// Type is the type its filter names that is not defined here.
+	Type string `json:"type"`
+}
+
+// SeedRoleSubscriptionsReport is [App.SeedRoleSubscriptions] returning a
+// [RoleSeedReport]: the subscriptions it created and the role subscriptions
+// it left out because their type (task_plan is runtime-defined) is not
+// defined here. A role subscription the owner already has is in neither list.
+// On a create failure the report holds what was created before it.
+func (a *App) SeedRoleSubscriptionsReport(ctx context.Context, owner string, d RoleDefaults) (*RoleSeedReport, error) {
 	if d.Band == "" && !d.Architect {
 		return nil, fmt.Errorf("%w: role defaults need a band or Architect", ErrBadRequest)
 	}
@@ -730,25 +762,24 @@ func (a *App) SeedRoleSubscriptions(ctx context.Context, owner string, d RoleDef
 	for _, s := range existing {
 		have[s.Name] = true
 	}
-	var created []Subscription
+	rep := &RoleSeedReport{Created: []Subscription{}, LeftOut: []RoleSubscriptionSkip{}}
 	for _, spec := range roleSubscriptions(d) {
 		if have[spec.Name] {
 			continue
 		}
-		// A role subscription on a type this instance does not define (task_plan
-		// is runtime-defined) is left out, and said once.
 		if missing := a.unregisteredType(spec.Filter.Types); missing != "" {
-			slog.InfoContext(ctx, "smeldr: role subscription left out: its type is not defined here", "subscription", spec.Name, "type", missing)
+			slog.WarnContext(ctx, "smeldr: role subscription left out: its type is not defined here", "subscription", spec.Name, "type", missing)
+			rep.LeftOut = append(rep.LeftOut, RoleSubscriptionSkip{Name: spec.Name, Type: missing})
 			continue
 		}
 		spec.Owner = owner
 		s, err := a.CreateSubscription(ctx, spec)
 		if err != nil {
-			return created, err
+			return rep, err
 		}
-		created = append(created, *s)
+		rep.Created = append(rep.Created, *s)
 	}
-	return created, nil
+	return rep, nil
 }
 
 // unregisteredType returns the first of types the registry does not know.
@@ -771,4 +802,12 @@ type trustedOperatorKey struct{}
 // call it from a request surface.
 func (a *App) SeedRoleSubscriptionsTrusted(ctx context.Context, owner string, d RoleDefaults) ([]Subscription, error) {
 	return a.SeedRoleSubscriptions(context.WithValue(ctx, trustedOperatorKey{}, true), owner, d)
+}
+
+// SeedRoleSubscriptionsReportTrusted is [App.SeedRoleSubscriptionsReport] for
+// the operator's own tooling on the server, acting with administer without a
+// token, like [App.SeedRoleSubscriptionsTrusted]. Never call it from a
+// request surface.
+func (a *App) SeedRoleSubscriptionsReportTrusted(ctx context.Context, owner string, d RoleDefaults) (*RoleSeedReport, error) {
+	return a.SeedRoleSubscriptionsReport(context.WithValue(ctx, trustedOperatorKey{}, true), owner, d)
 }

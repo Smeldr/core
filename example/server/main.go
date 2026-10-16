@@ -212,6 +212,21 @@ func parseConfig() ServerConfig {
 	}
 }
 
+// buildCommandApp is buildApp for a subcommand: it also calls Handler, which
+// loads the runtime-defined types (task_plan and the rest) into the registry.
+// buildApp's own early Handler call runs before ServeDynamicContent, so
+// without this a subcommand sees fewer types than the running server, whose
+// Run calls Handler again (T859: seed-role-subscriptions left out every
+// task_plan subscription). Handler is idempotent.
+func buildCommandApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
+	result, err := buildApp(cfg, db)
+	if err != nil {
+		return result, err
+	}
+	_ = result.App.Handler()
+	return result, nil
+}
+
 // buildApp wires all enabled subsystems and returns the live server components.
 // It does not call app.Run — that remains the caller's responsibility.
 // All subsystem failures return an error instead of calling log.Fatalf.

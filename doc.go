@@ -221,7 +221,8 @@
 //     [SubscriptionFilter]): an owner's standing request for events, filtered
 //     at delivery and on replay, delivered on the stream (?subscription=) or
 //     to a webhook endpoint. Every token has three defaults, and
-//     [App.SeedRoleSubscriptions] adds a role's. A delivery is bounded by the
+//     [App.SeedRoleSubscriptions] adds a role's ([App.SeedRoleSubscriptionsReport]
+//     also names the ones left out). A delivery is bounded by the
 //     owner's read scope, reloaded when grants or anchored relations change;
 //     a revoked token's connections close. [App.CanRead] answers the same
 //     question for one item, and [MigrateWebhookSubscriptions] gives existing

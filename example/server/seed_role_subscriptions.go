@@ -13,9 +13,11 @@ import (
 
 // runSeedRoleSubscriptions is the `smeldr-server seed-role-subscriptions`
 // subcommand (D116): it gives one role token its role subscriptions and its
-// universal defaults, and prints the subscriptions it created as JSON. It is
-// idempotent: run again, it creates nothing. It returns the process exit
-// code.
+// universal defaults, and prints a JSON report: {"created": [...],
+// "left_out": [{"name", "type"}]}. A role subscription whose type is not
+// defined on this instance is left out, named in the report and on stderr.
+// It is idempotent: run again, it creates nothing and leaves nothing out. It
+// returns the process exit code.
 //
 //	smeldr-server seed-role-subscriptions --owner=<token user id> --band=core
 //	smeldr-server seed-role-subscriptions --owner=<token user id> --architect
@@ -41,7 +43,7 @@ func runSeedRoleSubscriptions(args []string, stdout, stderr io.Writer) int {
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
-	result, err := buildApp(cfg, db)
+	result, err := buildCommandApp(cfg, db)
 	if err != nil {
 		fmt.Fprintf(stderr, "seed-role-subscriptions: %v\n", err)
 		return 1
@@ -51,12 +53,15 @@ func runSeedRoleSubscriptions(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "seed-role-subscriptions: %v\n", err)
 		return 1
 	}
-	created, err := result.App.SeedRoleSubscriptionsTrusted(context.Background(), *owner, smeldr.RoleDefaults{Band: *band, Architect: *architect})
+	rep, err := result.App.SeedRoleSubscriptionsReportTrusted(context.Background(), *owner, smeldr.RoleDefaults{Band: *band, Architect: *architect})
 	if err != nil {
 		fmt.Fprintf(stderr, "seed-role-subscriptions: %v\n", err)
 		return 1
 	}
-	out, _ := json.MarshalIndent(created, "", "  ")
+	for _, skip := range rep.LeftOut {
+		fmt.Fprintf(stderr, "seed-role-subscriptions: left out %q: type %s is not defined here\n", skip.Name, skip.Type)
+	}
+	out, _ := json.MarshalIndent(rep, "", "  ")
 	if _, err := fmt.Fprintln(stdout, string(out)); err != nil {
 		return 1
 	}

@@ -43,7 +43,7 @@ func runMigrateSignalKinds(args []string, stdout, stderr io.Writer) int {
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
-	result, err := buildApp(cfg, db)
+	result, err := buildCommandApp(cfg, db)
 	if err != nil {
 		fmt.Fprintf(stderr, "migrate-signal-kinds: %v\n", err)
 		return 1

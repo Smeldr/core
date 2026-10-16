@@ -241,6 +241,61 @@ func TestSubscription_SeedRoleDefaults(t *testing.T) {
 	}
 }
 
+// The report names the role subscriptions left out because their type is not
+// defined here; once the type is registered they are created, and a rerun
+// reports nothing. The trusted variant needs no token.
+func TestSubscription_SeedRoleReport(t *testing.T) {
+	app, _ := subscriptionApp(t)
+	adm := asUser("adm", Admin)
+	rep, err := app.SeedRoleSubscriptionsReport(adm, "core-token", RoleDefaults{Band: "core"})
+	if err != nil || len(rep.Created) != 2 || len(rep.LeftOut) != 1 {
+		t.Fatalf("report = %+v, %v; want 2 created and 1 left out", rep, err)
+	}
+	if got := rep.LeftOut[0]; got != (RoleSubscriptionSkip{Name: "Plan reviews in band core", Type: "task_plan"}) {
+		t.Errorf("left out = %+v", got)
+	}
+	app.typeRegistry.Register(&TypeDescriptor{Name: "task_plan", Kind: "content"})
+	rep, err = app.SeedRoleSubscriptionsReport(adm, "core-token", RoleDefaults{Band: "core"})
+	if err != nil || len(rep.Created) != 1 || rep.Created[0].Name != "Plan reviews in band core" || len(rep.LeftOut) != 0 {
+		t.Errorf("with task_plan = %+v, %v; want the plan subscription created", rep, err)
+	}
+	rep, err = app.SeedRoleSubscriptionsReportTrusted(context.Background(), "core-token", RoleDefaults{Band: "core"})
+	if err != nil || len(rep.Created) != 0 || len(rep.LeftOut) != 0 {
+		t.Errorf("rerun = %+v, %v; want nothing", rep, err)
+	}
+	rep, err = app.SeedRoleSubscriptionsReportTrusted(context.Background(), "arch-token", RoleDefaults{Architect: true})
+	if err != nil || len(rep.Created) != 5 {
+		t.Errorf("architect with task_plan = %+v, %v; want 5", rep, err)
+	}
+}
+
+// Every store failure while seeding is returned; a create failure keeps what
+// was created before it.
+func TestSubscription_SeedRoleReportStoreFailures(t *testing.T) {
+	app, db := subscriptionApp(t)
+	adm := asUser("adm", Admin)
+	app.cfg.DB = failAddressDB{db, "INSERT INTO smeldr_subscriptions"}
+	if _, err := app.SeedRoleSubscriptionsReport(adm, "fresh", RoleDefaults{Band: "core"}); !errors.Is(err, ErrInternal) {
+		t.Errorf("defaults failure: %v", err)
+	}
+	app.cfg.DB = db
+	if err := app.ensureDefaultSubscriptions(context.Background(), "seeded"); err != nil {
+		t.Fatal(err)
+	}
+	app.cfg.DB = failAddressDB{db, "WHERE owner = $1 ORDER BY"}
+	if _, err := app.SeedRoleSubscriptionsReport(adm, "seeded", RoleDefaults{Band: "core"}); !errors.Is(err, ErrInternal) {
+		t.Errorf("list failure: %v", err)
+	}
+	app.cfg.DB = failAddressDB{db, "INSERT INTO smeldr_subscriptions"}
+	rep, err := app.SeedRoleSubscriptionsReport(adm, "seeded", RoleDefaults{Band: "core"})
+	if err == nil || rep == nil || len(rep.Created) != 0 {
+		t.Errorf("create failure = %+v, %v; want an error and an empty report", rep, err)
+	}
+	if created, err := app.SeedRoleSubscriptions(adm, "seeded", RoleDefaults{Band: "core"}); err == nil || len(created) != 0 {
+		t.Errorf("create failure through SeedRoleSubscriptions = %v, %v", created, err)
+	}
+}
+
 func TestCompiledSubscription_Matches(t *testing.T) {
 	names := set{"u1": true, "core": true, "approve": true}
 	task := eventMeta{event: "task.transitioned", subjectType: "Task", subjectID: "t1", fromState: "backlog", toState: "active",

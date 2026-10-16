@@ -42,14 +42,12 @@ func runMigrateAddresses(args []string, stdout, stderr io.Writer) int {
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
-	result, err := buildApp(cfg, db)
+	result, err := buildCommandApp(cfg, db)
 	if err != nil {
 		fmt.Fprintf(stderr, "migrate-addresses: %v\n", err)
 		return 1
 	}
 	defer result.StopAll()
-	// Handler registers every loaded record type's address prefix.
-	_ = result.App.Handler()
 
 	rep, err := result.App.MigrateAddresses(context.Background(), smeldr.AddressMigrationOptions{DryRun: !*apply})
 	if err != nil {

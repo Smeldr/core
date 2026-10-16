@@ -3727,11 +3727,11 @@ app.DeleteSubscription(ctx, "N3")
   - `outcomes_of_my_requests`: my requests answered or withdrawn.
 
   They cannot be deleted (`ErrConflict`) and can be paused; their filter is fixed.
-- **Role.** `App.SeedRoleSubscriptions(ctx, owner, RoleDefaults{Band, Architect})` needs `administer` and is idempotent. A subscription whose type the instance does not define (such as `task_plan`) is left out. It creates:
+- **Role.** `App.SeedRoleSubscriptions(ctx, owner, RoleDefaults{Band, Architect})` needs `administer` and is idempotent. A subscription whose type the instance does not define (such as `task_plan`) is left out. `App.SeedRoleSubscriptionsReport` (and `SeedRoleSubscriptionsReportTrusted`) returns a `RoleSeedReport` with `Created` and `LeftOut` (`RoleSubscriptionSkip{Name, Type}`); a subscription the owner already has is in neither. It creates:
   - for a band: Tasks in the band (created, transitioned), task_plans in the band moved to approved or changes_requested, and Signals to the band;
   - for architect: task_plans submitted, Tasks to plan-reviewing or commit-reviewing, Decisions proposed or ratified, Tasks created at priority 0, and Signals to architect.
 
-  The operator runs `smeldr-server seed-role-subscriptions --owner=<token user id> --band=core` (or `--architect`).
+  The operator runs `smeldr-server seed-role-subscriptions --owner=<token user id> --band=core` (or `--architect`). It prints `{"created": [...], "left_out": [{"name": ..., "type": ...}]}` and one stderr line per left-out subscription; a rerun prints two empty lists. Since v1.163.0 every `smeldr-server` subcommand loads the runtime-defined types first, as the running server does; before, `task_plan` was missing and its subscriptions were left out.
 
 **On the stream.**
 - `?subscription=<address>` delivers that subscription. It must be the caller's, or the caller must hold `administer`; otherwise it is 404. It resumes from its cursor when no `?after=` is given. The cursor is saved every 10 s and when the connection ends.
