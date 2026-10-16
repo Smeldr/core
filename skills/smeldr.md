@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.161.0 · smeldr.dev/mcp v1.63.1 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.26.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.162.0 · smeldr.dev/mcp v1.63.1 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.26.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -313,6 +313,21 @@ reverse-proxy idle timeouts.
   role is a broadcast. Further topics: `relations`, `amendments`, `signals`,
   `types` (`content_type.redefined`, core v1.140.0). An older core reads a
   list as one channel name.
+- **Subscriptions** (core v1.162.0, D116; `app.Subscriptions()`, example/server
+  `ENABLE_SUBSCRIPTIONS`): a `Subscription` record (address `N<n>`) is an
+  owner's filter (types, events, event names, from/to states, items,
+  `related_to`, routing fields such as band or priority, Signal kinds,
+  `addressed_to_me`, `sent_by_me`), matched at delivery and on replay.
+  - `?subscription=N<n>` delivers one and resumes from its saved cursor.
+  - **A connection with no `?channel=` now gets its token's subscriptions,
+    not everything.** Pass `?channel=all` for everything you may read.
+  - Every token has three defaults (requests to me, conditions I can
+    resolve, outcomes of my requests); `seed-role-subscriptions` adds a
+    role's.
+  - The read scope reloads on open connections when grants or anchored
+    relations change (and every 60 s); a revoked token's connections close.
+  - Webhook endpoints deliver through their own subscription;
+    `migrate-webhook-subscriptions` backfills existing ones.
 - Route is absent (404) unless `EventStream` was called. No MCP tool by
   design, same reasoning as `/_logs` — this exists for exactly the
   situation where an agent has only this one HTTP connection to lean on.
