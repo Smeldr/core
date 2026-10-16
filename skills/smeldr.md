@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.164.0 · smeldr.dev/mcp v1.64.0 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.27.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.165.0 · smeldr.dev/mcp v1.64.1 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.27.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -335,6 +335,14 @@ reverse-proxy idle timeouts.
   - Since v1.164.0 every `signal.created`/`signal.transitioned` carries the
     Signal's `address`, and relation events carry `source_address` and
     `target_address` (omitted when an end has none).
+  - Since core v1.165.0 an edge a reference field writes at create (a
+    Signal's `about`, Task `implements`, Amendment `ships_as`, a runtime
+    type's `refers_to`) sends `relation.asserted` (new_row true). Before, a
+    raw Signal insert sent none, and on SQLite none of them did.
+  - Since mcp v1.64.1 the relation tools (`get_relations`,
+    `get_reachability`, `assert_relation`, `propose_relation`,
+    `observe_relation`, `preview_impact`) take an address, slug or ID. An
+    unknown or hidden item is not found, never an empty list.
   - The read scope reloads on open connections when grants or anchored
     relations change (and every 60 s); a revoked token's connections close.
   - Webhook endpoints deliver through their own subscription;
