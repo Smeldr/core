@@ -790,6 +790,10 @@ type RoleStore struct {
 	// to its ID; set by [App.Governance]. nil for a RoleStore used without an
 	// App, which stores patterns as given.
 	resolveID func(ctx context.Context, typeName, ident string) (string, error)
+	// onGrantChange is told the token whose grants changed (empty: unknown,
+	// so every token), after the change commits; set by [App.Governance] so
+	// cached read scopes reload (D116). Nil does nothing.
+	onGrantChange func(tokenID string)
 }
 
 // NewRoleStore returns a new [RoleStore] backed by db.
@@ -1176,6 +1180,9 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 		return "", fmt.Errorf("smeldr: Grant: commit: %w", err)
 	}
 	s.recordGrantProvenance(ctx, grantID, "assert", reason)
+	if s.onGrantChange != nil {
+		s.onGrantChange(grant.TokenID)
+	}
 	return grantID, nil
 }
 
@@ -1290,6 +1297,9 @@ func (s *RoleStore) RevokeWithReason(ctx context.Context, grantID, reason string
 		return fmt.Errorf("smeldr: Revoke: commit: %w", err)
 	}
 	s.recordGrantProvenance(ctx, grantID, "invalidate", reason)
+	if s.onGrantChange != nil {
+		s.onGrantChange("")
+	}
 	return nil
 }
 

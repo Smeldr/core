@@ -83,6 +83,12 @@ type webhookEventData struct {
 type WebhookStore struct {
 	db     DB
 	appKey [32]byte
+	// deliverable, onCreate and onDelete connect endpoints to their
+	// subscriptions (D116); set by [App.Subscriptions] wiring. Nil keeps
+	// endpoints filtered by event name only.
+	deliverable func(ctx context.Context, endpointID string, meta eventMeta) bool
+	onCreate    func(ctx context.Context, ep WebhookEndpoint)
+	onDelete    func(ctx context.Context, endpointID string)
 }
 
 // NewWebhookStore creates a [WebhookStore] backed by db. appSecret is the
@@ -174,6 +180,9 @@ func (s *WebhookStore) Create(ctx context.Context, targetURL string, events []st
 	if err != nil {
 		return WebhookEndpoint{}, "", err
 	}
+	if s.onCreate != nil {
+		s.onCreate(ctx, ep)
+	}
 	return ep, secretPlain, nil
 }
 
@@ -206,6 +215,9 @@ func (s *WebhookStore) Delete(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
 		`DELETE FROM smeldr_webhook_endpoints WHERE id = $1`, id,
 	)
+	if err == nil && s.onDelete != nil {
+		s.onDelete(ctx, id)
+	}
 	return err
 }
 
@@ -332,7 +344,10 @@ func webhookDispatch(ctx context.Context, ev SignalEvent, sig LifecycleEvent, st
 		slog.WarnContext(ctx, "webhook payload build failed", "error", err, "signal", sig, "type", ev.Type)
 		return nil
 	}
-	enqueueWebhookEvent(ctx, store, pool, eventName, payload)
+	meta := eventMeta{id: envelopeID(payload), event: eventName, actorID: ev.ActorID, subjectType: ev.Type, subjectID: ev.NodeID,
+		toState: string(nodeStatusOf(ev.raw)), fields: compiledEventFields(ev.raw)}
+	meta.signalType = meta.fields["signal_type"]
+	enqueueWebhookEvent(ctx, store, pool, meta, payload)
 	return nil
 }
 
@@ -344,7 +359,8 @@ func webhookDispatch(ctx context.Context, ev SignalEvent, sig LifecycleEvent, st
 // paths, because [buildWebhookPayload] requires a typed Go item that neither
 // caller of the transition path has in hand. Errors during endpoint lookup
 // or enqueue are logged but not returned — delivery is always best-effort.
-func enqueueWebhookEvent(ctx context.Context, store *WebhookStore, pool *workerPool, eventName string, payload []byte) {
+func enqueueWebhookEvent(ctx context.Context, store *WebhookStore, pool *workerPool, meta eventMeta, payload []byte) {
+	eventName := meta.event
 	endpoints, err := store.EndpointsForEvent(ctx, eventName)
 	if err != nil {
 		slog.WarnContext(ctx, "webhook endpoints lookup failed", "error", err, "event", eventName)
@@ -352,6 +368,11 @@ func enqueueWebhookEvent(ctx context.Context, store *WebhookStore, pool *workerP
 	}
 	now := time.Now().UTC()
 	for _, ep := range endpoints {
+		// D116: an endpoint is the delivery of a subscription, which filters
+		// and is bounded by its owner'"'"'s read scope.
+		if store.deliverable != nil && !store.deliverable(ctx, ep.ID, meta) {
+			continue
+		}
 		job := OutboundJob{
 			ID:          NewID(),
 			EndpointID:  ep.ID,
@@ -397,6 +418,8 @@ type transitionWebhookData struct {
 	// check (Type is lower case); aboutType and aboutID name a Signal's
 	// subject. None of them is part of the payload.
 	typeName, aboutType, aboutID string
+	// fields are the item's routing values, for subscription filters (D116).
+	fields map[string]string
 }
 
 // dispatchTransitionWebhook builds the payload for a state-flow transition
@@ -468,12 +491,15 @@ func dispatchEventToFrom(ctx context.Context, store *WebhookStore, pool *workerP
 		slog.WarnContext(ctx, "smeldr: transition webhook payload marshal failed", "error", err, "event", eventName)
 		return
 	}
+	meta := eventMeta{id: id, event: eventName, channels: channels, actorID: actorID}
+	meta.subjectType, meta.subjectID, meta.otherType, meta.otherID = eventSubject(data)
+	if d, ok := data.(transitionWebhookData); ok {
+		meta.fromState, meta.toState, meta.fields, meta.signalType = d.FromState, d.ToState, d.fields, d.fields["signal_type"]
+	}
 	if webhooksConfigured {
-		enqueueWebhookEvent(ctx, store, pool, eventName, payload)
+		enqueueWebhookEvent(ctx, store, pool, meta, payload)
 	}
 	if streamed {
-		meta := eventMeta{id: id, event: eventName, channels: channels, actorID: actorID}
-		meta.subjectType, meta.subjectID, meta.otherType, meta.otherID = eventSubject(data)
 		broadcaster.publishEvent(meta, payload)
 	}
 }
@@ -540,10 +566,11 @@ func (a *App) NotifySignalCreated(ctx context.Context, id, slug string) {
 	// The status (D115: open or pending) and the subject (for the stream's
 	// read check) come from the row in the same lookup.
 	channel, status, subjectType, subjectID := "", "pending", "", ""
+	var sender, signalType string
 	if a.cfg.DB != nil {
 		if err := a.cfg.DB.QueryRowContext(ctx,
-			"SELECT receiver, status, subject_type, subject_id FROM smeldr_signals WHERE id = $1", id,
-		).Scan(&channel, &status, &subjectType, &subjectID); err != nil {
+			"SELECT receiver, status, subject_type, subject_id, sender, signal_type FROM smeldr_signals WHERE id = $1", id,
+		).Scan(&channel, &status, &subjectType, &subjectID, &sender, &signalType); err != nil {
 			slog.WarnContext(ctx, "smeldr: NotifySignalCreated: receiver lookup failed, broadcasting instead", "id", id, "error", err)
 			channel, status = "", "pending"
 		}
@@ -559,6 +586,7 @@ func (a *App) NotifySignalCreated(ctx context.Context, id, slug string) {
 	dispatchTransitionWebhookFrom(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, actorID, channel, "signal.created", transitionWebhookData{
 		Type: "signal", ID: id, Slug: slug, ToState: status,
 		typeName: "Signal", aboutType: subjectType, aboutID: subjectID,
+		fields: map[string]string{"receiver": channel, "sender": sender, "signal_type": signalType},
 	})
 }
 

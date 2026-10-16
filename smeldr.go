@@ -361,6 +361,9 @@ type App struct {
 
 	eventBroadcaster      *eventBroadcaster // non-nil when App.EventStream() was called; backs GET /_events/stream
 	eventLogOpts          *EventLogOptions  // non-nil when App.EventLog() was called; the log starts at Handler()
+	subscriptionsOn       bool              // set by App.Subscriptions(); the table is created at Handler()
+	scopes                scopeCache        // cached read scopes of stream and webhook owners (D116)
+	webhookSubs           webhookSubCache   // compiled webhook endpoint subscriptions (D116)
 	eventStreamHandlerReg bool              // true once GET /_events/stream is registered
 
 	routeReg []routeEntry // in-memory route registry; populated by App.Route and app.Content
@@ -1343,6 +1346,7 @@ func (a *App) dispatchBus(ctx context.Context, ev SignalEvent, sig LifecycleEven
 			a.eventBroadcaster.publishEvent(eventMeta{
 				id: envelopeID(payload), event: event, channels: a.eventChannels(ev.Type, ev.raw),
 				actorID: ev.ActorID, subjectType: ev.Type, subjectID: ev.NodeID,
+				toState: string(nodeStatusOf(ev.raw)), fields: a.eventFields(ev.Type, ev.raw),
 			}, payload)
 		}
 	}
@@ -1623,6 +1627,10 @@ func (a *App) Handler() http.Handler {
 		}
 		a.mux.Handle("GET /_logs", newLogsHandler(logsAuth, a.logRing))
 	}
+	// D116: cached read scopes reload on grant, revocation and relation
+	// changes, and webhook endpoints deliver through their subscriptions.
+	a.wireScopeHooks()
+	a.wireWebhookSubscriptions()
 	if a.eventBroadcaster != nil && !a.eventStreamHandlerReg {
 		a.eventStreamHandlerReg = true
 		esAuth := a.cfg.Auth
@@ -1631,7 +1639,11 @@ func (a *App) Handler() http.Handler {
 		}
 		a.eventBroadcaster.canon = a.canonicalTypeName
 		a.startEventLog()
-		a.mux.Handle("GET /_events/stream", newEventStreamHandlerScoped(esAuth, a.eventBroadcaster, a.streamScope))
+		var revoked func(context.Context, string) (bool, error)
+		if a.tokenStore != nil {
+			revoked = a.tokenStore.IsRevoked
+		}
+		a.mux.Handle("GET /_events/stream", newEventStreamHandlerWith(esAuth, a.eventBroadcaster, a.streamScope, a.subscriptionSource(), revoked))
 	}
 	// A66: probe smeldr_tokens table at startup when a TokenStore is configured.
 	// A83: auto-create a bootstrap admin token when smeldr_tokens is empty.

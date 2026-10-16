@@ -23,6 +23,7 @@ func TestEventLogToggle(t *testing.T) {
 	cfg.EnableEventStream = true
 	cfg.EventLogRetentionDays = 7
 	cfg.EnableWebhooks = true
+	cfg.EnableSubscriptions = true
 	ts := buildTestServer(t, cfg)
 	var n int
 	if err := ts.db.QueryRow(`SELECT COUNT(*) FROM smeldr_events`).Scan(&n); err != nil {

@@ -117,6 +117,9 @@ type RelationStore struct {
 	// provenanceStore's own wiring. All three are individually nil-safe
 	// (dispatchTransitionWebhook's own contract), unlike provenanceStore,
 	// so setSignalDeps is wired unconditionally rather than gated.
+	// onRelationChange is told both ends of a relation that began or ended,
+	// so cached read scopes anchored there reload (D116). Nil does nothing.
+	onRelationChange func(sourceID, targetID string)
 	webhookStore     *WebhookStore
 	webhookPool      *workerPool
 	eventBroadcaster *eventBroadcaster

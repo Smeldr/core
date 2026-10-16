@@ -45,6 +45,9 @@ const (
 	ResourcePageMeta = "page_meta"
 	// ResourceWebhook is an outbound webhook and its deliveries.
 	ResourceWebhook = "webhook"
+	// ResourceSubscription is a subscription record (D116): what an owner is
+	// delivered, on the stream or to a webhook endpoint.
+	ResourceSubscription = "subscription"
 )
 
 // The standard verbs (D94, D96). Every other verb on a [Capability] is a
@@ -148,6 +151,23 @@ var capabilityTable = []Capability{
 	{ResourceWebhook, VerbCreate, "administer", ReasonNotTaken, false},
 	{ResourceWebhook, VerbDelete, "administer", ReasonNotTaken, false},
 	{ResourceWebhook, "retry", "administer", ReasonNotTaken, true},
+
+	// Subscriptions (D116). get, list, create, update and delete are floors
+	// for one's own: another owner's needs administer, checked inside the act.
+	{ResourceSubscription, VerbGet, "read", ReasonNotTaken, false},
+	{ResourceSubscription, VerbList, "read", ReasonNotTaken, false},
+	{ResourceSubscription, VerbCreate, "create", ReasonNotTaken, false},
+	{ResourceSubscription, VerbUpdate, "update", ReasonNotTaken, false},
+	{ResourceSubscription, VerbDelete, "delete", ReasonNotTaken, false},
+	{ResourceSubscription, "seed_role_defaults", "administer", ReasonNotTaken, true},
+	{ResourceSubscription, "migrate_webhooks", "administer", ReasonNotTaken, true},
+	// The webhook rows under subscription (D116, section 4): a webhook
+	// endpoint is a delivery target. The webhook resource rows above stay
+	// while mcp's webhook tools map to them (D97).
+	{ResourceSubscription, "webhook_create", "administer", ReasonNotTaken, true},
+	{ResourceSubscription, "webhook_list", "administer", ReasonNotTaken, true},
+	{ResourceSubscription, "webhook_delete", "administer", ReasonNotTaken, true},
+	{ResourceSubscription, "webhook_retry", "administer", ReasonNotTaken, true},
 }
 
 // capabilityIndex is capabilityTable keyed by (resource, verb), built once at
@@ -197,8 +217,10 @@ var legacyOperationFloor = map[string]Role{
 // surface filters per item. Every other type-less read needs a scope that
 // reads everything ([ReadScope.All]): the read rules fail toward less access.
 var typelessReadsAny = map[capabilityKey]bool{
-	{ResourceSignal, VerbList}:   true, // list_signals filters Signals by their subject
-	{ResourceRelation, VerbList}: true, // ListRelations keeps edges with both ends readable
+	{ResourceSignal, VerbList}:       true, // list_signals filters Signals by their subject
+	{ResourceRelation, VerbList}:     true, // ListRelations keeps edges with both ends readable
+	{ResourceSubscription, VerbGet}:  true, // the owner rule is inside the act
+	{ResourceSubscription, VerbList}: true, // the list is the owner's own
 }
 
 // typedReads lists the read capabilities called with an item type (and often
@@ -223,8 +245,8 @@ var typedReads = map[capabilityKey]bool{
 //     else the caller's own): with a type and no ID it needs the type to be
 //     readable ([ErrForbidden] otherwise); with an ID, an item the caller may
 //     not read is [ErrNotFound], exactly as a missing one; with no type it needs
-//     a scope that reads everything, except signal list and relation list,
-//     whose surfaces filter per item. Only item get, item list and relation get
+//     a scope that reads everything, except signal list, relation list and
+//     subscription get and list, whose surfaces filter per item or owner. Only item get, item list and relation get
 //     use the target's type; any other read ignores it and needs the type-less
 //     rule;
 //   - any other operation on an item the caller may not read is [ErrNotFound];
@@ -301,8 +323,8 @@ func authorizeRead(scope *ReadScope, c Capability, target AuthTarget) error {
 // caller's role meets. Under governance a caller with no token ID sees none; a
 // read capability is visible when the caller's scope reads everything, or
 // reads at least one item and the capability is called with an item type (item
-// get and list, relation get) or filters per item (signal list, relation
-// list); any other capability is visible when one of the caller's unexpired
+// get and list, relation get) or filters per item or owner (signal list,
+// relation list, subscription get and list); any other capability is visible when one of the caller's unexpired
 // grants holds its operation, in any scope mode. A failure to load the scope or
 // the grants is an [ErrInternal] error and no list: never a full or partial one.
 func (a *App) VisibleCapabilities(ctx Context) ([]Capability, error) {

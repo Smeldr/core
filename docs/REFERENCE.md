@@ -3675,6 +3675,94 @@ The JSON payload shape is identical to webhook event payloads — a
 
 - **Retention.** The writer deletes events older than the retention once an hour.
 
+### Subscriptions (D116, v1.162.0)
+
+A `Subscription` is an owner's standing request for events. It has:
+- a filter;
+- a delivery: the event stream, or a webhook endpoint;
+- a cursor: the last envelope delivered.
+
+It is a core record with a D110 address (prefix `N`), in `smeldr_subscriptions`. `CreateSubscriptionTables(db)` creates the table and its address storage. `App.Subscriptions()` turns subscriptions on for the stream; it needs `Config.DB` and `App.EventStream`. example/server turns them on with `ENABLE_SUBSCRIPTIONS`.
+
+**The owner rule.** A subscription belongs to one token, its `Owner` (a User.ID). The owner reads and changes it, and so does a holder of `administer`. To anyone else it is `ErrNotFound`, the same as a missing one. A subscription has no generic `create_content` or REST surface; it goes through these:
+
+```go
+s, err := app.CreateSubscription(ctx, smeldr.SubscriptionSpec{
+    Name:   "core tasks",
+    Filter: smeldr.SubscriptionFilter{Types: []string{"Task"}, Events: []string{"transitioned"}, Fields: map[string][]string{"band": {"core"}}},
+})
+app.GetSubscription(ctx, "N3")
+app.ListSubscriptions(ctx, "")                         // the caller's own, defaults included
+app.UpdateSubscription(ctx, "N3", smeldr.SubscriptionUpdate{Paused: &yes})
+app.DeleteSubscription(ctx, "N3")
+```
+
+- `SubscriptionSpec.Owner` set to another token needs `administer`, as does a `webhook:<endpoint id>` delivery.
+- An owner holds at most `MaxSubscriptionsPerOwner` (100) subscriptions.
+- An item list holds at most `MaxSubscriptionItems` (1,000) entries.
+
+**The filter** (`SubscriptionFilter`) is a conjunction: every dimension narrows, and an empty one means any.
+
+| Dimension | Matches |
+|---|---|
+| `Types` | the event's item type (a relation event matches when either end's type is listed) |
+| `Events` | created, updated, transitioned, published, unpublished, scheduled, archived, deleted, relation.asserted, relation.ended |
+| `EventNames` | full event names, such as `task.transitioned` (a webhook endpoint's subscription uses these) |
+| `FromStates`, `ToStates` | a transition's states (`ToStates` also the state a created item starts in) |
+| `Items` | `"Type:ident"` pairs, saved as `"Type:ID"` |
+| `RelatedTo` | the items one live, asserted hop from an anchor (`{Anchor: "Type:ident", Kind, Direction}`), by the same query a dynamic grant uses |
+| `Fields` | routing values: `band` (Task, Goal), `scope` (Decision), `receiver` and `sender` (Signal), `priority` (Task, as `"0"`), a runtime-defined type's channel field |
+| `SignalKinds` | `condition` or `request` (a history Signal type matches neither) |
+| `AddressedToMe` | a Signal whose receiver is one of the owner's routing names |
+| `SentByMe` | a Signal whose sender is one of the owner's routing names |
+
+- **Routing names.** These are the owner's User.ID, every operation it holds, and the `receiver` values its subscriptions name; a role subscription names its band. Receiver and sender are routing names, not identities: tokens carry no band.
+- **Items and anchors** are resolved under the owner's read scope. One the owner cannot read is `ErrNotFound`.
+- **Matching runs at delivery**, on the event's logged metadata (`from_state`, `to_state`, `signal_type` and `fields` are columns of `smeldr_events`). A replay therefore filters exactly as live delivery does.
+
+**Defaults.**
+- **Universal.** Every token has three, created on first use (a list, or a stream connection). Creating them twice is impossible: a unique index on (owner, default_kind) refuses the second row.
+  - `requests_to_me`: requests addressed to me;
+  - `conditions_i_can_resolve`: conditions addressed to me, or to an operation I hold;
+  - `outcomes_of_my_requests`: my requests answered or withdrawn.
+
+  They cannot be deleted (`ErrConflict`) and can be paused; their filter is fixed.
+- **Role.** `App.SeedRoleSubscriptions(ctx, owner, RoleDefaults{Band, Architect})` needs `administer` and is idempotent. A subscription whose type the instance does not define (such as `task_plan`) is left out. It creates:
+  - for a band: Tasks in the band (created, transitioned), task_plans in the band moved to approved or changes_requested, and Signals to the band;
+  - for architect: task_plans submitted, Tasks to plan-reviewing or commit-reviewing, Decisions proposed or ratified, Tasks created at priority 0, and Signals to architect.
+
+  The operator runs `smeldr-server seed-role-subscriptions --owner=<token user id> --band=core` (or `--architect`).
+
+**On the stream.**
+- `?subscription=<address>` delivers that subscription. It must be the caller's, or the caller must hold `administer`; otherwise it is 404. It resumes from its cursor when no `?after=` is given. The cursor is saved every 10 s and when the connection ends.
+- A connection with neither `?subscription=` nor `?channel=` delivers every active subscription of its token, the defaults included. Before v1.162.0 such a connection received everything.
+- `?channel=` routes as before (D97), under the read ceiling.
+- `?subscription=` with `?channel=` is 400, and so is `?subscription=` without subscriptions on.
+- A change to the owner's subscriptions recompiles its open connections.
+- `include_own` is per subscription.
+
+**The read scope reloads.** Every connection and every webhook delivery reads its owner's scope from one cache in the App. A cached scope is dropped, and the owner's open connections load it again:
+- when a grant of the owner's is made or revoked (`RoleStore.Grant`, `RevokeWithReason`, and delegation, which goes through them);
+- when a relation begins or ends at an anchor of one of the owner's dynamic grants;
+- after 60 seconds, which also covers a grant or edge that expired without an event.
+
+A connection whose scope or subscriptions cannot be loaded again is closed (fail closed); the client reconnects.
+
+**A revoked token's connections close.** A revocation through the App's `TokenStore` closes them at once. A connection also checks its token every 60 seconds with `TokenStore.IsRevoked(ctx, fingerprint)`, so a revocation made another way closes it then. A token with no store row is checked by its signature alone.
+
+**`App.CanRead(ctx, user, typeName, id) (bool, error)`** answers whether user may read the item, by the same read rules as every read surface, through the same cache. Without governance an Author or higher reads everything. It returns `ErrInternal` when the scope cannot be loaded.
+
+**Webhooks are deliveries of a subscription.** With `App.Webhooks` and `App.Subscriptions` both on:
+- A new endpoint gets one subscription, delivery `webhook:<endpoint id>`, owned by `legacy-admin` (which reads everything), with `EventNames` set to the endpoint's events. Deleting the endpoint deletes it.
+- An event is delivered to the endpoint only when that subscription is not paused, its filter matches, and its owner may read what the event reveals. A failure to read the subscription or the owner's scope skips the delivery and is logged (fail closed); the change itself never fails.
+- An endpoint without a subscription is delivered every event it names, as before.
+- `MigrateWebhookSubscriptions(ctx, db, WebhookMigrationOptions{Apply})` gives every endpoint without a subscription its own, in one transaction. It is idempotent and a dry run unless `Apply`. It returns a `WebhookMigrationReport` (`applied`, `duration_ms`, `created`: endpoint ID, target URL, events and the new subscription's address). Without `smeldr_webhook_endpoints` there is nothing to migrate. The operator runs `smeldr-server migrate-webhook-subscriptions [--apply] [--report=<file>]`.
+
+**Capabilities:**
+- `subscription get` and `subscription list` (operation `read`), and `create`, `update` and `delete` (`create` / `update` / `delete`). These are floors for one's own; another owner's needs `administer`, checked in the act.
+- `seed_role_defaults` and `migrate_webhooks` (`administer`).
+- `webhook_create`, `webhook_list`, `webhook_delete` and `webhook_retry` (`administer`). The `webhook` resource rows stay while mcp's webhook tools map to them.
+
 ### Example
 
 Client connecting with curl, subscribed to the full, unfiltered stream:

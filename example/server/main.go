@@ -44,6 +44,8 @@
 //	ENABLE_EVENT_LOG      keep a durable event log behind the stream (requires
 //	                      ENABLE_EVENT_STREAM; ?after=<event id> resumes, D117)
 //	EVENT_LOG_RETENTION_DAYS  days the event log keeps an event (default: 30)
+//	ENABLE_SUBSCRIPTIONS  subscription records on the event stream (D116): a connection
+//	                      without ?channel= delivers its token's subscriptions
 //	ENABLE_STRUCTURAL_SWEEP  wire a scheduled relation-staleness sweep (requires
 //	                      ENABLE_RELATIONS; App.SweepStructural on a cron schedule,
 //	                      recorded via SweepRunStore)
@@ -122,6 +124,7 @@ type ServerConfig struct {
 	EnableEventStream        bool
 	EnableEventLog           bool
 	EventLogRetentionDays    int
+	EnableSubscriptions      bool
 	EnableStructuralSweep    bool
 	StructuralSweepSchedule  string
 	EnableEvalQueueDrain     bool
@@ -189,6 +192,7 @@ func parseConfig() ServerConfig {
 		EnableEventStream:        os.Getenv("ENABLE_EVENT_STREAM") != "",
 		EnableEventLog:           os.Getenv("ENABLE_EVENT_LOG") != "",
 		EventLogRetentionDays:    envIntOr("EVENT_LOG_RETENTION_DAYS", 0),
+		EnableSubscriptions:      os.Getenv("ENABLE_SUBSCRIPTIONS") != "",
 		EnableStructuralSweep:    os.Getenv("ENABLE_STRUCTURAL_SWEEP") != "",
 		StructuralSweepSchedule:  envOr("STRUCTURAL_SWEEP_SCHEDULE", "0 * * * *"),
 		EnableEvalQueueDrain:     os.Getenv("ENABLE_EVAL_QUEUE_DRAIN") != "",
@@ -499,6 +503,13 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 		app.EventLog(smeldr.EventLogOptions{Retention: time.Duration(cfg.EventLogRetentionDays) * 24 * time.Hour})
 	}
+	if cfg.EnableSubscriptions {
+		// D116: the table is created at boot, as for every Create* table.
+		if err := smeldr.CreateSubscriptionTables(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create subscriptions: %w", err)
+		}
+		app.Subscriptions()
+	}
 
 	if cfg.EnableStructuralSweep {
 		if !cfg.EnableRelations {
@@ -715,6 +726,12 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "migrate-references" {
 		os.Exit(runMigrateReferences(os.Args[2:], os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "migrate-webhook-subscriptions" {
+		os.Exit(runMigrateWebhookSubscriptions(os.Args[2:], os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "seed-role-subscriptions" {
+		os.Exit(runSeedRoleSubscriptions(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	cfg := parseConfig()
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")

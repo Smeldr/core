@@ -33,6 +33,8 @@ var coreAddressPrefixes = map[string]string{
 	// Authority records (authority.go): R and S are taken, so rUle and stuB.
 	"Rule":          "U",
 	"AuthorityStub": "B",
+	// Subscriptions (subscription.go, D116): S is Signal, so N for notify.
+	"Subscription": "N",
 }
 
 var addressPrefixRe = regexp.MustCompile(`^[A-Z]{1,4}$`)
@@ -72,6 +74,7 @@ var coreAddressTables = []struct{ typeName, table, legacy string }{
 	{"Run", "smeldr_runs", ""},
 	{"Rule", "smeldr_rules", ""},
 	{"AuthorityStub", "smeldr_authority_stubs", ""},
+	{"Subscription", "smeldr_subscriptions", ""},
 }
 
 // orchestrationAddressTypes are the types [CreateOrchestrationTables] gives
@@ -80,6 +83,7 @@ var coreAddressTables = []struct{ typeName, table, legacy string }{
 var (
 	orchestrationAddressTypes = []string{"Signal", "Task", "Decision", "Amendment", "Goal", "Run"}
 	authorityAddressTypes     = []string{"Rule", "AuthorityStub"}
+	subscriptionAddressTypes  = []string{"Subscription"}
 )
 
 // ensureAddressStorage adds the address columns to table (idempotent) and the

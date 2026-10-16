@@ -143,6 +143,9 @@ func (s *RelationStore) endEdge(ctx context.Context, id string, e edgeEnding) (b
 // endpoints subscribed to it, skipping the causing actor's own stream
 // connection. newRow is set on relation.asserted only.
 func (s *RelationStore) emitRelationEvent(ctx context.Context, eventName string, edge RelationEdge, newRow *bool, e edgeEnding) {
+	if s.onRelationChange != nil {
+		s.onRelationChange(edge.SourceID, edge.TargetID)
+	}
 	if s.eventBroadcaster == nil && (s.webhookStore == nil || s.webhookPool == nil) {
 		return
 	}

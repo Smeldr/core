@@ -185,6 +185,8 @@ var readDecisions = map[capabilityKey]string{
 	{ResourceAccess, "delegate"}:            "all: the floor of a delegation is kept global until C3 decides",
 	{ResourceAccess, "withdraw_delegation"}: "all: the floor of withdrawing is kept global until C3 decides",
 	{ResourceSite, VerbList}:                "all: navigation and redirects are site infrastructure",
+	{ResourceSubscription, VerbGet}:         "reads any: a subscription is read by its owner or a holder of administer, checked in the act",
+	{ResourceSubscription, VerbList}:        "reads any: the list is the owner's own, checked in the act",
 }
 
 func TestCapabilities_ReadDecisions(t *testing.T) {
@@ -214,8 +216,9 @@ func TestCapabilities_ReadDecisions(t *testing.T) {
 			t.Errorf("typedReads %s %s is not a read capability", key.resource, key.verb)
 		}
 	}
-	if len(typelessReadsAny) != 2 || !typelessReadsAny[capabilityKey{ResourceSignal, VerbList}] || !typelessReadsAny[capabilityKey{ResourceRelation, VerbList}] {
-		t.Errorf("typelessReadsAny = %v; want exactly signal list and relation list", typelessReadsAny)
+	if len(typelessReadsAny) != 4 || !typelessReadsAny[capabilityKey{ResourceSignal, VerbList}] || !typelessReadsAny[capabilityKey{ResourceRelation, VerbList}] ||
+		!typelessReadsAny[capabilityKey{ResourceSubscription, VerbGet}] || !typelessReadsAny[capabilityKey{ResourceSubscription, VerbList}] {
+		t.Errorf("typelessReadsAny = %v; want exactly signal list, relation list and subscription get and list", typelessReadsAny)
 	}
 }
 
@@ -357,7 +360,7 @@ func TestVisibleCapabilities_PerItemReader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"item get", "item list", "relation get", "relation list", "signal list"}
+	want := []string{"item get", "item list", "relation get", "relation list", "signal list", "subscription get", "subscription list"}
 	if !slices.Equal(capabilityNames(got), want) {
 		t.Errorf("per-item reader sees %v; want %v", capabilityNames(got), want)
 	}

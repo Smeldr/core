@@ -1915,6 +1915,28 @@ past that mark. `newEventStreamHandler` refreshes its own deadline via
 `2 × eventStreamHeartbeat`), scoped to this one route rather than disabling
 `Config.WriteTimeout` server-wide or standing up a second listener.
 
+**Subscriptions (D116, v1.162.0)** — `subscription.go` holds the record
+(`Subscription`, prefix N, `smeldr_subscriptions`) and its owner rule;
+`subscription_match.go` compiles a connection's subscriptions into one
+`connSubscriptions` matcher, evaluated per event on the logged meta
+(`from_state`, `to_state`, `signal_type`, `fields` are `smeldr_events`
+columns, so replay matches the same way). An `eventStreamSub` carries its
+`subs`, a `recompile` channel and its bearer `fingerprint`. A connection
+reloads its scope and recompiles on the recompile signal and on a
+`scopeCacheTTL` (60 s) backstop, which also asks `TokenStore.IsRevoked`;
+either failing closes the connection. `subscription_scope.go` holds the
+App's one `scopeCache` (per owner: the `ReadScope`, its dynamic-grant
+anchors, the load time), dropped by three unexported hooks the App wires in
+`Handler`: `RoleStore.onGrantChange`, `RelationStore.onRelationChange`
+(either end an anchor) and `TokenStore.onRevoke` (which also closes the
+token's connections at once). `App.CanRead` reads through the same cache.
+`subscription_webhook.go` makes a webhook endpoint a delivery of a
+subscription (`webhook:<id>`, owner `legacy-admin`): `WebhookStore` gains
+unexported `deliverable`, `onCreate` and `onDelete` hooks, and
+`enqueueWebhookEvent` skips an endpoint whose subscription is paused, does
+not match, or whose owner cannot read the event; an endpoint without one
+delivers as before. `MigrateWebhookSubscriptions` backfills.
+
 ---
 
 ## Scheduler *(Milestone 8)*

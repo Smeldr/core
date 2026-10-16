@@ -217,6 +217,15 @@
 //     logged in one order before it is delivered and kept 30 days, a
 //     connection resumes with ?after=<event id>, and delivery is checked
 //     against the reader's scope (D117).
+//   - Subscriptions (D116, [App.Subscriptions], [Subscription],
+//     [SubscriptionFilter]): an owner's standing request for events, filtered
+//     at delivery and on replay, delivered on the stream (?subscription=) or
+//     to a webhook endpoint. Every token has three defaults, and
+//     [App.SeedRoleSubscriptions] adds a role's. A delivery is bounded by the
+//     owner's read scope, reloaded when grants or anchored relations change;
+//     a revoked token's connections close. [App.CanRead] answers the same
+//     question for one item, and [MigrateWebhookSubscriptions] gives existing
+//     webhook endpoints their subscriptions.
 //   - Dynamic content types ([DynamicTypeRepo]) — a schema-driven repository
 //     for content types registered at runtime (e.g. via MCP) rather than
 //     compiled in, created with [NewDynamicTypeRepo].

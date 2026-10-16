@@ -454,6 +454,10 @@ type TokenStore struct {
 	db              DB
 	secret          string
 	provenanceStore ProvenanceStore // nil unless App.Provenance was also wired (T203)
+	// onRevoke is told the fingerprint of a revoked token, after the
+	// revocation is written; set by the App so its stream connections close
+	// (D116). Nil does nothing.
+	onRevoke func(fingerprint string)
 }
 
 // NewTokenStore creates a [TokenStore] backed by db using secret as the HMAC
@@ -912,6 +916,9 @@ func (ts *TokenStore) RevokeWithReason(ctx context.Context, id, reason string) e
 		return ErrInternal
 	}
 	ts.recordTokenAct(ctx, id, "invalidate", reason, mintActorStore)
+	if ts.onRevoke != nil {
+		ts.onRevoke(id)
+	}
 	return nil
 }
 

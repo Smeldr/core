@@ -105,6 +105,7 @@ func (a *App) afterStatusChange(ctx context.Context, t statusTransition) {
 			typeName:  t.typeName,
 			aboutType: aboutType,
 			aboutID:   aboutID,
+			fields:    a.eventFields(t.typeName, t.item),
 		})
 
 	if !busy || t.item == nil {

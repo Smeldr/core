@@ -68,6 +68,14 @@ type LoggedEvent struct {
 	OtherID   string `json:"other_id"`
 	// CreatedAt is when the event was logged.
 	CreatedAt time.Time `json:"created_at"`
+	// FromState, ToState, SignalType and Fields are what subscription filters
+	// match (D116): a transition's states, a Signal's type, and the routing
+	// values (band, scope, receiver, sender, priority, a dynamic type's channel
+	// field).
+	FromState  string            `json:"from_state,omitempty"`
+	ToState    string            `json:"to_state,omitempty"`
+	SignalType string            `json:"signal_type,omitempty"`
+	Fields     map[string]string `json:"fields,omitempty"`
 	// Payload is the envelope exactly as delivered.
 	Payload json.RawMessage `json:"payload"`
 }
@@ -101,6 +109,13 @@ type eventMeta struct {
 	subjectID   string
 	otherType   string
 	otherID     string
+	// fromState and toState are a transition's states (toState also the
+	// state a created item starts in); signalType a Signal's type; fields its
+	// routing values (band, scope, receiver, sender, priority, a dynamic
+	// type's channel field), which subscription filters match (D116).
+	fromState, toState string
+	signalType         string
+	fields             map[string]string
 }
 
 // streamEvent is one event on its way to the log and the connections.
@@ -148,6 +163,18 @@ func CreateEventLogTable(db DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_smeldr_events_created_at ON smeldr_events (created_at)`,
 	} {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			return fmt.Errorf("smeldr: CreateEventLogTable: %w", err)
+		}
+	}
+	// D116: what subscription filters match, so a replay filters as live
+	// delivery does. Added to a table created by v1.160.0.
+	for _, c := range [][2]string{
+		{"from_state", "TEXT NOT NULL DEFAULT ''"},
+		{"to_state", "TEXT NOT NULL DEFAULT ''"},
+		{"signal_type", "TEXT NOT NULL DEFAULT ''"},
+		{"fields", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := EnsureColumn(context.Background(), db, "smeldr_events", c[0], c[1]); err != nil {
 			return fmt.Errorf("smeldr: CreateEventLogTable: %w", err)
 		}
 	}
@@ -290,10 +317,12 @@ func (l *eventLog) insert(ctx context.Context, batch []streamEvent) error {
 		batch[i].seq = next
 		ev := batch[i]
 		if _, err := exec.ExecContext(ctx,
-			`INSERT INTO smeldr_events (seq, id, event, channels, actor_id, subject_type, subject_id, other_type, other_id, created_at, payload)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			`INSERT INTO smeldr_events (seq, id, event, channels, actor_id, subject_type, subject_id, other_type, other_id, created_at, payload,
+			  from_state, to_state, signal_type, fields)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 			ev.seq, ev.meta.id, ev.meta.event, strings.Join(ev.meta.channels, ","), ev.meta.actorID,
-			ev.meta.subjectType, ev.meta.subjectID, ev.meta.otherType, ev.meta.otherID, ev.at, string(ev.payload)); err != nil {
+			ev.meta.subjectType, ev.meta.subjectID, ev.meta.otherType, ev.meta.otherID, ev.at, string(ev.payload),
+			ev.meta.fromState, ev.meta.toState, ev.meta.signalType, encodeEventFields(ev.meta.fields)); err != nil {
 			for j := range batch {
 				batch[j].seq = 0
 			}
@@ -370,7 +399,8 @@ func (l *eventLog) cursor(ctx context.Context, afterID string) (EventPage, int64
 // after reads up to limit events with seq above after, in order.
 func (l *eventLog) after(ctx context.Context, after int64, limit int) ([]LoggedEvent, error) {
 	rows, err := l.db.QueryContext(ctx,
-		`SELECT seq, id, event, channels, actor_id, subject_type, subject_id, other_type, other_id, created_at, payload
+		`SELECT seq, id, event, channels, actor_id, subject_type, subject_id, other_type, other_id, created_at, payload,
+		  from_state, to_state, signal_type, fields
 		 FROM smeldr_events WHERE seq > $1 ORDER BY seq ASC LIMIT $2`, after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("%w: event log: %s", ErrInternal, err)
@@ -379,12 +409,13 @@ func (l *eventLog) after(ctx context.Context, after int64, limit int) ([]LoggedE
 	var out []LoggedEvent
 	for rows.Next() {
 		var e LoggedEvent
-		var channels, payload string
+		var channels, payload, fields string
 		var at any
 		if err := rows.Scan(&e.Seq, &e.ID, &e.Event, &channels, &e.ActorID, &e.SubjectType, &e.SubjectID,
-			&e.OtherType, &e.OtherID, &at, &payload); err != nil {
+			&e.OtherType, &e.OtherID, &at, &payload, &e.FromState, &e.ToState, &e.SignalType, &fields); err != nil {
 			return nil, fmt.Errorf("%w: event log: %s", ErrInternal, err)
 		}
+		e.Fields = decodeEventFields(fields)
 		if t, err := ParseTimestamp(at); err == nil {
 			e.CreatedAt = t
 		}
@@ -403,7 +434,8 @@ func (l *eventLog) after(ctx context.Context, after int64, limit int) ([]LoggedE
 // meta returns the event's routing and subject, for a delivery check.
 func (e LoggedEvent) meta() eventMeta {
 	return eventMeta{id: e.ID, event: e.Event, channels: e.Channels, actorID: e.ActorID,
-		subjectType: e.SubjectType, subjectID: e.SubjectID, otherType: e.OtherType, otherID: e.OtherID}
+		subjectType: e.SubjectType, subjectID: e.SubjectID, otherType: e.OtherType, otherID: e.OtherID,
+		fromState: e.FromState, toState: e.ToState, signalType: e.SignalType, fields: e.Fields}
 }
 
 // eventReadable reports whether scope reads every item meta reveals. A nil
@@ -595,7 +627,7 @@ func (a *App) streamScope(ctx context.Context, user User) (*ReadScope, error) {
 	if a.governance == nil {
 		return nil, nil
 	}
-	return LoadReadScope(ctx, a.governance, user)
+	return a.cachedScope(ctx, user.ID)
 }
 
 // canonicalTypeName maps an event's type name, which payloads carry in lower
@@ -671,4 +703,23 @@ func (a *App) openEventContinuation(cursor string) (seq int64, ok bool, err erro
 		return 0, false, bad
 	}
 	return int64(binary.BigEndian.Uint64(plain)), true, nil
+}
+
+// encodeEventFields stores routing values as JSON (” for none).
+func encodeEventFields(f map[string]string) string {
+	if len(f) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(f)
+	return string(b)
+}
+
+// decodeEventFields reads what encodeEventFields stored.
+func decodeEventFields(s string) map[string]string {
+	if s == "" {
+		return nil
+	}
+	var f map[string]string
+	_ = json.Unmarshal([]byte(s), &f)
+	return f
 }

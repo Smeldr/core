@@ -520,7 +520,7 @@ func TestEnqueueWebhookEvent_success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	enqueueWebhookEvent(ctx, store, pool, "task.transitioned", []byte(`{"event":"task.transitioned"}`))
+	enqueueWebhookEvent(ctx, store, pool, eventMeta{event: "task.transitioned"}, []byte(`{"event":"task.transitioned"}`))
 	endpoints, err := store.EndpointsForEvent(ctx, "task.transitioned")
 	if err != nil {
 		t.Fatalf("EndpointsForEvent: %v", err)
@@ -544,7 +544,7 @@ func TestEnqueueWebhookEvent_lookupError(t *testing.T) {
 	store := NewWebhookStore(&errQueryDB{}, []byte("k"))
 	pool := newWorkerPool(&errExecDB{}, store, realClock{}, 1)
 	// EndpointsForEvent fails — function logs and returns, no panic.
-	enqueueWebhookEvent(context.Background(), store, pool, "task.transitioned", []byte(`{}`))
+	enqueueWebhookEvent(context.Background(), store, pool, eventMeta{event: "task.transitioned"}, []byte(`{}`))
 }
 
 func TestEnqueueWebhookEvent_enqueueError(t *testing.T) {
@@ -560,7 +560,7 @@ func TestEnqueueWebhookEvent_enqueueError(t *testing.T) {
 	// Pool uses errExecDB → Enqueue always fails (INSERT into smeldr_outbound_jobs errors).
 	pool := newWorkerPool(&errExecDB{}, store, realClock{}, 1)
 	// Enqueue error is logged, not returned — no panic.
-	enqueueWebhookEvent(ctx, store, pool, "task.transitioned", []byte(`{}`))
+	enqueueWebhookEvent(ctx, store, pool, eventMeta{event: "task.transitioned"}, []byte(`{}`))
 }
 
 func TestDispatchTransitionWebhook_nilStore(t *testing.T) {

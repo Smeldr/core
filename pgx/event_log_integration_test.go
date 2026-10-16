@@ -68,6 +68,11 @@ func TestPG_EventLog(t *testing.T) {
 	if e := page.Events[0]; e.SubjectType != "Task" || e.Event != "task.transitioned" || e.CreatedAt.IsZero() {
 		t.Errorf("first event = %+v", e)
 	}
+	// D116: the meta a subscription filter matches on is logged, so a replay
+	// filters the same way.
+	if e := page.Events[0]; e.FromState != "backlog" || e.ToState != "active" || e.Fields["band"] != "core" {
+		t.Errorf("logged filter meta = from %q to %q fields %v", e.FromState, e.ToState, e.Fields)
+	}
 	rest, err := app.EventsAfter(ctx, page.Events[0].ID, 0)
 	if err != nil || len(rest.Events) != len(page.Events)-1 {
 		t.Errorf("after the first = %d events, %v", len(rest.Events), err)

@@ -329,6 +329,16 @@ not see that token's own writes: silence is not proof that nothing changed. A `{
 arrives every 25s while idle.
 Without the event log, delivery is at most once: a dropped connection misses the gap. With `App.EventLog` (example/server `ENABLE_EVENT_LOG`, core v1.160.0, D117), reconnect with `?after=<last event id>`. The events you missed come first, in order, then a `{"type":"caught_up"}` line, then live events. Delivery is then at least once, so deduplicate by `id`. A `{"type":"skipped"}` line means your cursor was older than the 30-day retention. A connection whose buffer fills is closed, not thinned, so reconnect with `?after=`. Under governance, events about items your token cannot read are not delivered.
 
+**Subscriptions (core v1.162.0, D116; example/server `ENABLE_SUBSCRIPTIONS`).**
+- **What a connection gets.** A connection with no `?channel=` delivers your token's subscriptions. `?subscription=N<n>` delivers one of them and resumes from its saved cursor. `?channel=` still routes as before.
+- **Defaults.** Every token has three defaults: requests addressed to it, conditions it can resolve, and the outcomes of requests it sent. A role token also gets role subscriptions, seeded by the operator with `seed-role-subscriptions`.
+- **The filter** narrows by type, event kind, from and to states, items, `related_to` an anchor, routing fields (band, scope, receiver, sender, priority), Signal kind, `addressed_to_me` and `sent_by_me`. It is matched at delivery and on replay.
+- **Who can see one.** A subscription is visible only to its owner and to holders of `administer`.
+- **Grants and revocation apply to open connections.** A grant or a revocation takes effect on your open connections at once, and an expired grant within a minute. A revoked token's connections are closed.
+- **Webhooks.** Each webhook endpoint delivers through its own subscription, so a paused subscription stops it.
+
+See [docs/REFERENCE.md](docs/REFERENCE.md#subscriptions-d116-v11620).
+
 **Channel subscription (v1.81.0+, A302; extended v1.89.2+, 01a0a683):**
 `?channel=<name>` subscribes to one channel only — a `Task`/`Goal`'s own
 `Band`, a `Decision`'s own `Scope`, or a `Signal`'s own `Receiver`, matched

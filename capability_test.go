@@ -235,6 +235,7 @@ func TestCapabilities_TableInvariants(t *testing.T) {
 		ResourceItem: true, ResourceType: true, ResourceRelation: true,
 		ResourceSignal: true, ResourceAccess: true, ResourceOps: true,
 		ResourceSite: true, ResourcePageMeta: true, ResourceWebhook: true,
+		ResourceSubscription: true,
 	}
 	standard := map[string]bool{
 		VerbGet: true, VerbList: true, VerbCreate: true,

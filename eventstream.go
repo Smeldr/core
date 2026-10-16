@@ -100,6 +100,14 @@ type eventStreamSub struct {
 	// scope is the owner's read scope, loaded at connect: an event about an
 	// item it may not read is not delivered ([eventReadable]). Nil reads all.
 	scope *ReadScope
+	// subs, when set, are the owner's compiled subscriptions (D116): they
+	// replace the channel and include_own rules. recompile is signalled when
+	// the owner's subscriptions change.
+	subs      *connSubscriptions
+	recompile chan struct{}
+	// fingerprint is the stored fingerprint of the connection's token, so a
+	// revocation closes it.
+	fingerprint string
 }
 
 // eventBroadcaster fans a payload out to connected subscribers — either to
@@ -251,6 +259,9 @@ func (b *eventBroadcaster) publishEvent(meta eventMeta, payload []byte) {
 	if meta.event == "" {
 		meta.event = envelopeEvent(payload)
 	}
+	if meta.signalType == "" && meta.fields != nil {
+		meta.signalType = meta.fields["signal_type"]
+	}
 	ev := streamEvent{payload: payload, meta: meta, at: time.Now().UTC()}
 	if b.log != nil {
 		b.log.enqueue(ev)
@@ -288,6 +299,9 @@ func (b *eventBroadcaster) fanout(ev streamEvent) {
 // one of its channels (an event with none is a broadcast), not caused by its
 // own token unless it asked for its own events, and readable by its scope.
 func (s eventStreamSub) deliverable(meta eventMeta) bool {
+	if s.subs != nil {
+		return s.subs.match(meta) && eventReadable(s.scope, meta)
+	}
 	if len(meta.channels) > 0 && !s.wants(meta.channels) {
 		return false
 	}
@@ -396,6 +410,30 @@ const eventStreamReplayPage = 500
 // scope, loaded at connect by loadScope and checked on every delivery, live
 // and replayed.
 func newEventStreamHandlerScoped(auth AuthFunc, b *eventBroadcaster, loadScope streamScopeLoader) http.Handler {
+	return newEventStreamHandlerWith(auth, b, loadScope, nil, nil)
+}
+
+// subscriptionCursorEvery is how often a connection on a named subscription
+// saves its cursor while events flow; it is also saved when the connection
+// ends.
+var subscriptionCursorEvery = 10 * time.Second
+
+// newEventStreamHandlerWith is [newEventStreamHandlerScoped] with the App's
+// subscriptions (D116). With src set:
+//   - ?subscription=<address> delivers that subscription (the caller's, or any
+//     with administer; a missing or hidden one is 404) and resumes from its
+//     cursor when no ?after= is given;
+//   - a connection with neither ?subscription= nor ?channel= delivers every
+//     active subscription of its owner, the universal defaults included;
+//   - ?channel= keeps today's routing (D97), under the read ceiling.
+//
+// ?subscription= with ?channel= is 400. Without src, ?subscription= is 400.
+//
+// revoked, when set, reports whether the connection's token was revoked: it is
+// asked every scopeCacheTTL, and a revoked token's connection is closed (a
+// revocation through the App closes it at once). The connection's read scope
+// is reloaded on the same tick and whenever its owner's grants change.
+func newEventStreamHandlerWith(auth AuthFunc, b *eventBroadcaster, loadScope streamScopeLoader, src streamSubscriptions, revoked func(context.Context, string) (bool, error)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok {
@@ -419,7 +457,16 @@ func newEventStreamHandlerScoped(auth AuthFunc, b *eventBroadcaster, loadScope s
 			channel = eventStreamChannelAll
 		}
 		includeOwn := q.Get("include_own") == "true"
-		resume := q.Has("after")
+		ident := q.Get("subscription")
+		if ident != "" && q.Has("channel") {
+			WriteError(w, r, fmt.Errorf("%w: ?subscription= and ?channel= cannot be combined", ErrBadRequest))
+			return
+		}
+		if ident != "" && src == nil {
+			WriteError(w, r, fmt.Errorf("%w: this instance keeps no subscriptions", ErrBadRequest))
+			return
+		}
+		after, resume := q.Get("after"), q.Has("after")
 		if resume && b.log == nil {
 			WriteError(w, r, fmt.Errorf("%w: ?after= needs the event log, which this instance does not keep", ErrBadRequest))
 			return
@@ -433,12 +480,39 @@ func newEventStreamHandlerScoped(auth AuthFunc, b *eventBroadcaster, loadScope s
 			}
 			scope = s
 		}
+		var subs *connSubscriptions
+		var named *Subscription
+		if src != nil && (ident != "" || !q.Has("channel")) {
+			cs, n, err := src.compile(r.Context(), user, ident)
+			if err != nil {
+				WriteError(w, r, err)
+				return
+			}
+			subs, named = cs, n
+			if named != nil && !resume && named.Cursor != "" && b.log != nil {
+				after, resume = named.Cursor, true
+			}
+		}
 
 		// subscribe before any header is written — headers cannot be
 		// unwritten, so a 429 rejection (T271) has to happen before the
 		// status line commits to 200. On a resume it also comes before the
 		// replay, so an event published meanwhile is buffered, not lost.
-		ch, err := b.subscribeScoped(user.ID, channel, includeOwn, scope)
+		// A subscription owned by another token (read with administer) is
+		// delivered under its owner's read scope.
+		scopeUser := user
+		if subs != nil && subs.owner != user.ID && loadScope != nil {
+			scopeUser = User{ID: subs.owner}
+			s, err := loadScope(r.Context(), scopeUser)
+			if err != nil {
+				WriteError(w, r, err)
+				return
+			}
+			scope = s
+		}
+		fingerprint := bearerFingerprint(r)
+		sub := eventStreamSub{tokenID: user.ID, channels: parseChannels(channel), includeOwn: includeOwn, scope: scope, subs: subs}
+		ch, recompile, err := b.subscribeConn(user.ID, channel, includeOwn, scope, subs, fingerprint)
 		if err != nil {
 			WriteError(w, r, err)
 			return
@@ -449,7 +523,7 @@ func newEventStreamHandlerScoped(auth AuthFunc, b *eventBroadcaster, loadScope s
 		var since int64
 		if resume {
 			since = b.log.last.Load()
-			first, err = b.log.page(r.Context(), q.Get("after"), eventStreamReplayPage)
+			first, err = b.log.page(r.Context(), after, eventStreamReplayPage)
 			if err != nil {
 				WriteError(w, r, err)
 				return
@@ -463,6 +537,21 @@ func newEventStreamHandlerScoped(auth AuthFunc, b *eventBroadcaster, loadScope s
 		w.WriteHeader(http.StatusOK)
 		fl.Flush()
 
+		// The cursor of a named subscription: the last envelope delivered,
+		// saved every subscriptionCursorEvery and when the connection ends.
+		last, saved := "", ""
+		saveCursor := func() {
+			if named == nil || last == "" || last == saved {
+				return
+			}
+			if err := src.saveCursor(context.WithoutCancel(r.Context()), named.ID, last); err != nil {
+				slog.WarnContext(r.Context(), "smeldr: event stream: subscription cursor not saved", "subscription", named.Address, "error", err)
+				return
+			}
+			saved = last
+		}
+		defer saveCursor()
+
 		write := func(line []byte) bool {
 			// Config.WriteTimeout is a fixed deadline set once when this
 			// connection's headers were read, never reset by an
@@ -474,10 +563,18 @@ func newEventStreamHandlerScoped(auth AuthFunc, b *eventBroadcaster, loadScope s
 			if err := rc.SetWriteDeadline(time.Now().Add(2 * eventStreamHeartbeat)); err != nil {
 				slog.WarnContext(r.Context(), "smeldr: event stream: SetWriteDeadline unsupported", "error", err)
 			}
-			if _, err := w.Write(append(line, '\n')); err != nil {
+			// line is shared with every connection that gets the event:
+			// never append to it, which would write into its backing array.
+			if _, err := w.Write(line); err != nil {
+				return false
+			}
+			if _, err := w.Write(newline); err != nil {
 				return false
 			}
 			fl.Flush()
+			if id := envelopeID(line); id != "" {
+				last = id
+			}
 			return true
 		}
 
@@ -487,7 +584,7 @@ func newEventStreamHandlerScoped(auth AuthFunc, b *eventBroadcaster, loadScope s
 		var seen map[string]bool
 		if resume {
 			var ok bool
-			seen, ok = replayStream(r.Context(), b, first, since, q.Get("after"), eventStreamSub{tokenID: user.ID, channels: parseChannels(channel), includeOwn: includeOwn, scope: scope}, write)
+			seen, ok = replayStream(r.Context(), b, first, since, after, sub, write)
 			if !ok {
 				return
 			}
@@ -495,6 +592,31 @@ func newEventStreamHandlerScoped(auth AuthFunc, b *eventBroadcaster, loadScope s
 
 		ticker := time.NewTicker(eventStreamHeartbeat)
 		defer ticker.Stop()
+		cursorTick := time.NewTicker(subscriptionCursorEvery)
+		defer cursorTick.Stop()
+		backstop := time.NewTicker(scopeCacheTTL)
+		defer backstop.Stop()
+		// reload loads the read scope again and recompiles the subscriptions;
+		// false closes the connection (fail closed), and the client reconnects.
+		reload := func() bool {
+			if loadScope != nil {
+				s, err := loadScope(r.Context(), scopeUser)
+				if err != nil {
+					slog.WarnContext(r.Context(), "smeldr: event stream: read scope not reloaded; closing so the client reconnects", "error", err)
+					return false
+				}
+				b.setScope(ch, s)
+			}
+			if src != nil && subs != nil {
+				cs, _, err := src.compile(r.Context(), user, ident)
+				if err != nil {
+					slog.WarnContext(r.Context(), "smeldr: event stream: subscriptions not recompiled; closing so the client reconnects", "error", err)
+					return false
+				}
+				b.setSubs(ch, cs)
+			}
+			return true
+		}
 
 		for {
 			select {
@@ -502,6 +624,22 @@ func newEventStreamHandlerScoped(auth AuthFunc, b *eventBroadcaster, loadScope s
 				return
 			case <-b.closing:
 				return
+			case <-recompile:
+				if !reload() {
+					return
+				}
+			case <-backstop.C:
+				if revoked != nil && fingerprint != "" {
+					gone, err := revoked(r.Context(), fingerprint)
+					if err != nil || gone {
+						return
+					}
+				}
+				if !reload() {
+					return
+				}
+			case <-cursorTick.C:
+				saveCursor()
 			case payload, ok := <-ch:
 				if !ok {
 					return
@@ -569,4 +707,116 @@ func replayStream(ctx context.Context, b *eventBroadcaster, page EventPage, sinc
 		return nil, false
 	}
 	return seen, true
+}
+
+// subscribeSubs is [eventBroadcaster.subscribeScoped] for a connection that
+// delivers its owner's subscriptions (D116).
+func (b *eventBroadcaster) subscribeSubs(tokenID string, subs *connSubscriptions, scope *ReadScope) (chan []byte, chan struct{}, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.byToken[tokenID] >= eventStreamMaxSubscribersPerToken {
+		return nil, nil, ErrTooManyRequests
+	}
+	ch := make(chan []byte, eventStreamSubscriberBuffer)
+	recompile := make(chan struct{}, 1)
+	b.subs[ch] = eventStreamSub{tokenID: tokenID, scope: scope, subs: subs, recompile: recompile}
+	b.byToken[tokenID]++
+	return ch, recompile, nil
+}
+
+// setSubs replaces the compiled subscriptions of the connection ch.
+func (b *eventBroadcaster) setSubs(ch chan []byte, subs *connSubscriptions) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if sub, ok := b.subs[ch]; ok {
+		sub.subs = subs
+		b.subs[ch] = sub
+	}
+}
+
+// recompileOwner signals every subscription connection of owner to compile
+// its subscriptions again.
+func (b *eventBroadcaster) recompileOwner(owner string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, sub := range b.subs {
+		if sub.recompile == nil || sub.subs == nil || sub.subs.owner != owner {
+			continue
+		}
+		select {
+		case sub.recompile <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// newline ends each streamed line.
+var newline = []byte{'\n'}
+
+// subscribeConn registers a stream connection with everything it is
+// delivered by: its channels or subscriptions, its read scope and its token
+// fingerprint (for closing it on revocation). reload is signalled when its
+// owner's grants or subscriptions change.
+func (b *eventBroadcaster) subscribeConn(tokenID, channel string, includeOwn bool, scope *ReadScope, subs *connSubscriptions, fingerprint string) (chan []byte, chan struct{}, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.byToken[tokenID] >= eventStreamMaxSubscribersPerToken {
+		return nil, nil, ErrTooManyRequests
+	}
+	ch := make(chan []byte, eventStreamSubscriberBuffer)
+	reload := make(chan struct{}, 1)
+	b.subs[ch] = eventStreamSub{tokenID: tokenID, channels: parseChannels(channel), includeOwn: includeOwn,
+		scope: scope, subs: subs, recompile: reload, fingerprint: fingerprint}
+	b.byToken[tokenID]++
+	return ch, reload, nil
+}
+
+// setScope replaces the read scope of the connection ch.
+func (b *eventBroadcaster) setScope(ch chan []byte, scope *ReadScope) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if sub, ok := b.subs[ch]; ok {
+		sub.scope = scope
+		b.subs[ch] = sub
+	}
+}
+
+// reloadToken signals the connections of token (every connection when empty)
+// to reload their scope and subscriptions.
+func (b *eventBroadcaster) reloadToken(token string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, sub := range b.subs {
+		if sub.recompile == nil {
+			continue
+		}
+		if token != "" && sub.tokenID != token && (sub.subs == nil || sub.subs.owner != token) {
+			continue
+		}
+		select {
+		case sub.recompile <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// closeFingerprint closes every connection opened with the token whose
+// stored fingerprint is fp: a revoked token stops receiving at once.
+func (b *eventBroadcaster) closeFingerprint(fp string) {
+	if fp == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for ch, sub := range b.subs {
+		if sub.fingerprint != fp {
+			continue
+		}
+		delete(b.subs, ch)
+		b.byToken[sub.tokenID]--
+		if b.byToken[sub.tokenID] <= 0 {
+			delete(b.byToken, sub.tokenID)
+		}
+		close(ch)
+	}
 }
