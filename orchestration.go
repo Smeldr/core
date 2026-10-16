@@ -1082,11 +1082,12 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStore) error {
 	kinds := []RelationKindDef{
 		{
-			TypeName:    "derives_from",
-			Label:       "Derives From",
-			Mode:        "asserted",
-			Directional: true,
-			TypePairs:   json.RawMessage(`[{"source_type":"Task","target_type":"Goal"}]`),
+			TypeName:     "derives_from",
+			Label:        "Derives From",
+			ReverseLabel: "Source Of",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Task","target_type":"Goal"}]`),
 		},
 		{
 			TypeName:    "depends_on",
@@ -1096,11 +1097,12 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			TypePairs:   json.RawMessage(`[{"source_type":"Task","target_type":"Task"}]`),
 		},
 		{
-			TypeName:    "ships_as",
-			Label:       "Ships As",
-			Mode:        "asserted",
-			Directional: true,
-			TypePairs:   json.RawMessage(`[{"source_type":"Task","target_type":"Amendment"}]`),
+			TypeName:     "ships_as",
+			Label:        "Ships As",
+			ReverseLabel: "Shipped By",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Task","target_type":"Amendment"}]`),
 		},
 		{
 			// D102: an Amendment amends the Decision it changes. Asserted when
@@ -1235,19 +1237,21 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			// its answer_ref (the field is in the edge's attributes). The
 			// source is always a Signal and the target any type, so TypePairs
 			// stays empty and the system asserts it only from those fields.
-			TypeName:    "about",
-			Label:       "About",
-			Mode:        "asserted",
-			Directional: true,
+			TypeName:     "about",
+			Label:        "About",
+			ReverseLabel: "Subject Of",
+			Mode:         "asserted",
+			Directional:  true,
 		},
 		{
 			// D113: a runtime-defined record's reference field
 			// (SchemaField.References) names another record. Any pair; the
 			// field is in the edge's attributes.
-			TypeName:    "refers_to",
-			Label:       "Refers To",
-			Mode:        "asserted",
-			Directional: true,
+			TypeName:     "refers_to",
+			Label:        "Refers To",
+			ReverseLabel: "Referred To By",
+			Mode:         "asserted",
+			Directional:  true,
 		},
 	}
 	for _, k := range kinds {

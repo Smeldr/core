@@ -1304,9 +1304,9 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 		typePairs    string
 		directional  bool
 	}{
-		"derives_from": {"Derives From", "", `[{"source_type":"Task","target_type":"Goal"}]`, true},
+		"derives_from": {"Derives From", "Source Of", `[{"source_type":"Task","target_type":"Goal"}]`, true},
 		"depends_on":   {"Depends On", "", `[{"source_type":"Task","target_type":"Task"}]`, true},
-		"ships_as":     {"Ships As", "", `[{"source_type":"Task","target_type":"Amendment"}]`, true},
+		"ships_as":     {"Ships As", "Shipped By", `[{"source_type":"Task","target_type":"Amendment"}]`, true},
 		"amends":       {"Amends", "Amended By", `[{"source_type":"Amendment","target_type":"Decision"}]`, true},
 		"supersedes":   {"Supersedes", "Superseded By", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
 		"contains": {"Contains", "Part Of", `[{"source_type":"Goal","target_type":"Goal"},` +
@@ -1323,8 +1323,8 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 		"in_set":            {"In Set", "", `[]`, true},
 		// D113: the kinds the system asserts for reference fields.
 		"implements": {"Implements", "Implemented By", `[{"source_type":"Task","target_type":"Decision"}]`, true},
-		"about":      {"About", "", `[]`, true},
-		"refers_to":  {"Refers To", "", `[]`, true},
+		"about":      {"About", "Subject Of", `[]`, true},
+		"refers_to":  {"Refers To", "Referred To By", `[]`, true},
 	}
 
 	kinds := store.ListKinds()
@@ -1363,6 +1363,27 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 	}
 	if got := len(store.ListKinds()); got != len(want) {
 		t.Errorf("after second call: got %d kinds, want %d", got, len(want))
+	}
+}
+
+// An instance that registered these kinds before they had reverse labels gets
+// them on its next boot: registering upserts the labels in place (T870).
+func TestRegisterOrchestrationRelationKinds_UpdatesExistingLabels(t *testing.T) {
+	store := setupRelationStore(t)
+	ctx := context.Background()
+	for _, name := range []string{"derives_from", "ships_as", "about", "refers_to"} {
+		if err := store.UpsertKind(ctx, RelationKindDef{TypeName: name, Label: "old", Mode: "asserted", Directional: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RegisterOrchestrationRelationKinds(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"derives_from": "Source Of", "ships_as": "Shipped By", "about": "Subject Of", "refers_to": "Referred To By"}
+	for _, k := range store.ListKinds() {
+		if w, ok := want[k.TypeName]; ok && k.ReverseLabel != w {
+			t.Errorf("%s: ReverseLabel = %q after re-register, want %q", k.TypeName, k.ReverseLabel, w)
+		}
 	}
 }
 

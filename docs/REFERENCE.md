@@ -5861,24 +5861,24 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 Registers the relation kinds that connect the orchestration types. Idempotent —
 safe to call on every boot; `UpsertKind` updates in place if a kind is already registered.
 
-| Kind | Direction | Type pairs | Mode |
-|------|-----------|------------|------|
-| `derives_from` | directional | Task→Goal | asserted |
-| `depends_on` | directional | Task→Task | asserted |
-| `ships_as` | directional | Task→Amendment | asserted |
-| `amends` | directional | Amendment→Decision | asserted |
-| `supersedes` | directional | Decision→Decision | asserted |
-| `contains` | directional | Goal→{Goal,Task,Decision,Amendment,Signal} | asserted |
-| `contradicts` | symmetric (`Directional: false`) | Decision↔Decision | asserted |
-| `investigates` | directional | Task→Decision | asserted |
-| `addresses` | directional | Decision→Decision | asserted |
-| `grounded_in` | directional | Decision→Decision | asserted |
-| `belongs_to_domain` | directional | Decision→domain | asserted |
-| `belongs_to_area` | directional | Decision→area | asserted |
-| `in_set` | directional | (open — no `TypePairs`) | asserted |
-| `implements` | directional | Task→Decision | asserted |
-| `about` | directional | (open, no `TypePairs`; the source is a Signal) | asserted |
-| `refers_to` | directional | (open, no `TypePairs`) | asserted |
+| Kind | Direction | Type pairs | Mode | Label / reverse label |
+|------|-----------|------------|------|-----------------------|
+| `derives_from` | directional | Task→Goal | asserted | Derives From / Source Of |
+| `depends_on` | directional | Task→Task | asserted | Depends On / (none) |
+| `ships_as` | directional | Task→Amendment | asserted | Ships As / Shipped By |
+| `amends` | directional | Amendment→Decision | asserted | Amends / Amended By |
+| `supersedes` | directional | Decision→Decision | asserted | Supersedes / Superseded By |
+| `contains` | directional | Goal→{Goal,Task,Decision,Amendment,Signal} | asserted | Contains / Part Of |
+| `contradicts` | symmetric (`Directional: false`) | Decision↔Decision | asserted | Contradicts / (none) |
+| `investigates` | directional | Task→Decision | asserted | Investigates / Investigated By |
+| `addresses` | directional | Decision→Decision | asserted | Addresses / Addressed By |
+| `grounded_in` | directional | Decision→Decision | asserted | Grounded In / Grounds |
+| `belongs_to_domain` | directional | Decision→domain | asserted | Belongs To Domain / Domain Of |
+| `belongs_to_area` | directional | Decision→area | asserted | Belongs To Area / Area Of |
+| `in_set` | directional | (open — no `TypePairs`) | asserted | In Set / (none) |
+| `implements` | directional | Task→Decision | asserted | Implements / Implemented By |
+| `about` | directional | (open, no `TypePairs`; the source is a Signal) | asserted | About / Subject Of |
+| `refers_to` | directional | (open, no `TypePairs`) | asserted | Refers To / Referred To By |
 
 `contradicts` is the vehicle for a Decision-to-Decision Asserted-provenance condition — it
 has no `ReverseLabel`, since "contradicts" reads the same statement from either endpoint,
@@ -5892,6 +5892,10 @@ showing what grounds it changes. `TypePairs` is scoped to Decision→Decision on
 narrow-by-default precedent as `addresses`. Who asserts either edge, and when, is left to
 the same `assert_relation` convention already used for every other kind here — no new core
 machinery.
+
+The reverse label names the edge from the target's end (a Goal is "Source Of" its Tasks, an
+Amendment is "Shipped By" its Task). Registering on boot upserts the labels, so an instance
+that registered a kind before its reverse label existed gets it on its next boot (T870).
 
 `implements`, `about` and `refers_to` (D113, A521) are asserted by the system from reference
 fields, never by hand: a Task's `implements` naming a Decision, a Signal's subject, `task_ref`

@@ -20,6 +20,7 @@ cross-referenced below by their Amendment ID.
 
 ### Changed
 
+- **Four relation kinds get a reverse label (T870, A@@AMEND@@).** `derives_from` "Source Of", `ships_as` "Shipped By", `about` "Subject Of", `refers_to` "Referred To By", so an edge read from its target has a name, as `implements` "Implemented By" already did. `RegisterOrchestrationRelationKinds` upserts labels on boot, so an existing instance gets them on its next start; nothing to run by hand.
 - **Role subscriptions follow a Task's priority and its close (T865, A@@AMEND@@).** "Tasks in band X" also delivers `updated`, so a priority set to 0 on an existing Task reaches the band. `--architect` gets a new "Tasks done, blocked or resolved" (Task, `transitioned` to done, blocked or resolved). Seeding stays idempotent by name: an existing subscription keeps its filter on a re-seed; change it with `update_subscription`.
 
 ---
