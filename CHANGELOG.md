@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Changed
+
+- **Role subscriptions follow a Task's priority and its close (T865, A@@AMEND@@).** "Tasks in band X" also delivers `updated`, so a priority set to 0 on an existing Task reaches the band. `--architect` gets a new "Tasks done, blocked or resolved" (Task, `transitioned` to done, blocked or resolved). Seeding stays idempotent by name: an existing subscription keeps its filter on a re-seed; change it with `update_subscription`.
+
 ---
 
 ## [1.163.0] - 2026-10-16

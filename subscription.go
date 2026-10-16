@@ -669,8 +669,8 @@ type RoleDefaults struct {
 	// its task_plans' reviews and the Signals addressed to it.
 	Band string
 	// Architect adds the architect's reviews: plans submitted, Tasks in plan
-	// or commit review, Decisions proposed or ratified, and Tasks created with
-	// priority 0, in every band.
+	// or commit review, Tasks done, blocked or resolved, Decisions proposed or
+	// ratified, and Tasks created with priority 0, in every band.
 	Architect bool
 }
 
@@ -680,7 +680,7 @@ func roleSubscriptions(d RoleDefaults) []SubscriptionSpec {
 	if d.Band != "" {
 		band := []string{d.Band}
 		out = append(out,
-			SubscriptionSpec{Name: "Tasks in band " + d.Band, Filter: SubscriptionFilter{Types: []string{"Task"}, Events: []string{"created", "transitioned"}, Fields: map[string][]string{"band": band}}},
+			SubscriptionSpec{Name: "Tasks in band " + d.Band, Filter: SubscriptionFilter{Types: []string{"Task"}, Events: []string{"created", "updated", "transitioned"}, Fields: map[string][]string{"band": band}}},
 			SubscriptionSpec{Name: "Plan reviews in band " + d.Band, Filter: SubscriptionFilter{Types: []string{"task_plan"}, Events: []string{"transitioned"}, ToStates: []string{"approved", "changes_requested"}, Fields: map[string][]string{"band": band}}},
 			SubscriptionSpec{Name: "Signals to " + d.Band, Filter: SubscriptionFilter{Types: []string{"Signal"}, Events: []string{"created"}, Fields: map[string][]string{"receiver": band}}},
 		)
@@ -689,6 +689,7 @@ func roleSubscriptions(d RoleDefaults) []SubscriptionSpec {
 		out = append(out,
 			SubscriptionSpec{Name: "Plans submitted", Filter: SubscriptionFilter{Types: []string{"task_plan"}, Events: []string{"transitioned"}, ToStates: []string{"submitted"}}},
 			SubscriptionSpec{Name: "Tasks in review", Filter: SubscriptionFilter{Types: []string{"Task"}, Events: []string{"transitioned"}, ToStates: []string{"plan-reviewing", "commit-reviewing"}}},
+			SubscriptionSpec{Name: "Tasks done, blocked or resolved", Filter: SubscriptionFilter{Types: []string{"Task"}, Events: []string{"transitioned"}, ToStates: []string{"done", "blocked", "resolved"}}},
 			SubscriptionSpec{Name: "Decisions proposed or ratified", Filter: SubscriptionFilter{Types: []string{"Decision"}, Events: []string{"created", "transitioned"}, ToStates: []string{"proposed", "ratified"}}},
 			SubscriptionSpec{Name: "Tasks created at priority 0", Filter: SubscriptionFilter{Types: []string{"Task"}, Events: []string{"created"}, Fields: map[string][]string{"priority": {"0"}}}},
 			SubscriptionSpec{Name: "Signals to architect", Filter: SubscriptionFilter{Types: []string{"Signal"}, Events: []string{"created"}, Fields: map[string][]string{"receiver": {"architect"}}}},
@@ -698,8 +699,10 @@ func roleSubscriptions(d RoleDefaults) []SubscriptionSpec {
 }
 
 // SeedRoleSubscriptions gives owner its role subscriptions (design 3.4) and
-// its universal defaults. It is idempotent: a role subscription whose name the
-// owner already has is left as it is. It returns the subscriptions it
+// its universal defaults. It is idempotent by name: a role subscription whose
+// name the owner already has is left as it is, even when its filter is older
+// than the one seeded now; an operator changes an existing one with
+// [App.UpdateSubscription] (MCP update_subscription). It returns the subscriptions it
 // created; [App.SeedRoleSubscriptionsReport] also names the ones it left out.
 // The caller needs administer ([ErrForbidden]); a [RoleDefaults] with no band
 // and not Architect is [ErrBadRequest].

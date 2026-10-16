@@ -92,7 +92,7 @@ func TestRunSeedRoleSubscriptions_RuntimeTaskPlan(t *testing.T) {
 		t.Errorf("band seed = %s, left out %+v", got, rep.LeftOut)
 	}
 	rep, _ = runSeed(t, "--owner=arch-token", "--architect")
-	if len(rep.Created) != 5 || !strings.Contains(names(rep.Created), "Plans submitted") {
+	if len(rep.Created) != 6 || !strings.Contains(names(rep.Created), "Plans submitted") {
 		t.Errorf("architect seed = %s", names(rep.Created))
 	}
 	rep, stderr := runSeed(t, "--owner=core-token", "--band=core")

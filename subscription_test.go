@@ -227,7 +227,7 @@ func TestSubscription_SeedRoleDefaults(t *testing.T) {
 		t.Errorf("second seed = %d, %v; want none (idempotent)", len(again), err)
 	}
 	arch, err := app.SeedRoleSubscriptions(adm, "arch-token", RoleDefaults{Architect: true})
-	if err != nil || len(arch) != 4 {
+	if err != nil || len(arch) != 5 {
 		t.Errorf("architect seed = %d, %v", len(arch), err)
 	}
 	if _, err := app.SeedRoleSubscriptions(asUser("u1", Author), "x", RoleDefaults{Band: "core"}); !errors.Is(err, ErrForbidden) {
@@ -264,8 +264,53 @@ func TestSubscription_SeedRoleReport(t *testing.T) {
 		t.Errorf("rerun = %+v, %v; want nothing", rep, err)
 	}
 	rep, err = app.SeedRoleSubscriptionsReportTrusted(context.Background(), "arch-token", RoleDefaults{Architect: true})
-	if err != nil || len(rep.Created) != 5 {
-		t.Errorf("architect with task_plan = %+v, %v; want 5", rep, err)
+	if err != nil || len(rep.Created) != 6 {
+		t.Errorf("architect with task_plan = %+v, %v; want 6", rep, err)
+	}
+}
+
+// Tasks in band delivers updated too (a priority set to 0 later); the
+// architect gets Tasks that close. A re-seed leaves an existing subscription
+// of the same name alone, whatever its filter (T865).
+func TestSubscription_SeedRoleShape(t *testing.T) {
+	app, _ := subscriptionApp(t)
+	adm := asUser("adm", Admin)
+	byName := func(subs []Subscription) map[string]Subscription {
+		m := map[string]Subscription{}
+		for _, s := range subs {
+			m[s.Name] = s
+		}
+		return m
+	}
+	band, err := app.SeedRoleSubscriptions(adm, "core-token", RoleDefaults{Band: "core"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := byName(band)["Tasks in band core"].Filter.Events; strings.Join(got, ",") != "created,updated,transitioned" {
+		t.Errorf("Tasks in band events = %v", got)
+	}
+	arch, err := app.SeedRoleSubscriptions(adm, "arch-token", RoleDefaults{Architect: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, ok := byName(arch)["Tasks done, blocked or resolved"]
+	if !ok || strings.Join(closed.Filter.Types, ",") != "Task" || strings.Join(closed.Filter.Events, ",") != "transitioned" ||
+		strings.Join(closed.Filter.ToStates, ",") != "done,blocked,resolved" {
+		t.Errorf("closed subscription = %+v, %v", closed.Filter, ok)
+	}
+	// An owner with the old shape keeps it on a re-seed.
+	old, err := app.CreateSubscription(adm, SubscriptionSpec{Owner: "old-token", Name: "Tasks in band core",
+		Filter: SubscriptionFilter{Types: []string{"Task"}, Events: []string{"created", "transitioned"}, Fields: map[string][]string{"band": {"core"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := app.SeedRoleSubscriptions(adm, "old-token", RoleDefaults{Band: "core"})
+	if err != nil || byName(again)["Tasks in band core"].ID != "" {
+		t.Fatalf("re-seed = %v, %v; want the existing one untouched", again, err)
+	}
+	got, err := app.GetSubscription(adm, old.ID)
+	if err != nil || strings.Join(got.Filter.Events, ",") != "created,transitioned" {
+		t.Errorf("existing after re-seed = %v, %v", got.Filter.Events, err)
 	}
 }
 
