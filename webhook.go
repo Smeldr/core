@@ -533,6 +533,10 @@ type relationEventData struct {
 	SourceID     string `json:"source_id"`
 	TargetType   string `json:"target_type"`
 	TargetID     string `json:"target_id"`
+	// SourceAddress and TargetAddress are the ends' addresses (D110), each
+	// omitted when that end has none or it could not be read (T872).
+	SourceAddress string `json:"source_address,omitempty"`
+	TargetAddress string `json:"target_address,omitempty"`
 	// NewRow, on relation.asserted only: true when the assert began a new
 	// life (a new row), false when it touched a live one again.
 	NewRow *bool `json:"new_row,omitempty"`
@@ -565,14 +569,15 @@ type relationEventData struct {
 func (a *App) NotifySignalCreated(ctx context.Context, id, slug string) {
 	// The status (D115: open or pending) and the subject (for the stream's
 	// read check) come from the row in the same lookup.
+	// The address (D110, T872) comes from the same lookup.
 	channel, status, subjectType, subjectID := "", "pending", "", ""
-	var sender, signalType string
+	var sender, signalType, address string
 	if a.cfg.DB != nil {
 		if err := a.cfg.DB.QueryRowContext(ctx,
-			"SELECT receiver, status, subject_type, subject_id, sender, signal_type FROM smeldr_signals WHERE id = $1", id,
-		).Scan(&channel, &status, &subjectType, &subjectID, &sender, &signalType); err != nil {
+			"SELECT receiver, status, subject_type, subject_id, sender, signal_type, address FROM smeldr_signals WHERE id = $1", id,
+		).Scan(&channel, &status, &subjectType, &subjectID, &sender, &signalType, &address); err != nil {
 			slog.WarnContext(ctx, "smeldr: NotifySignalCreated: receiver lookup failed, broadcasting instead", "id", id, "error", err)
-			channel, status = "", "pending"
+			channel, status, address = "", "pending", ""
 		}
 	}
 	// The creator's own stream connection (same token) is skipped, like any
@@ -584,7 +589,7 @@ func (a *App) NotifySignalCreated(ctx context.Context, id, slug string) {
 		actorID = uc.User().ID
 	}
 	dispatchTransitionWebhookFrom(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, actorID, channel, "signal.created", transitionWebhookData{
-		Type: "signal", ID: id, Slug: slug, ToState: status,
+		Type: "signal", ID: id, Slug: slug, Address: address, ToState: status,
 		typeName: "Signal", aboutType: subjectType, aboutID: subjectID,
 		fields: map[string]string{"receiver": channel, "sender": sender, "signal_type": signalType},
 	})

@@ -3537,12 +3537,19 @@ to a webhook event name is delivered to the stream:
   per status change on every path (v1.137.0; D107). From the same
   version `"{type}.updated"` means a content edit only: a status-only `PUT` no
   longer sends it.
-- Signals: `"signal.created"` (new explicit signal). The `"signal.expiry_swept"`
+- Signals: `"signal.created"` (new explicit signal). Every `signal.created` and
+  `signal.transitioned` carries the Signal's `address` (`S3011`), as Task events do,
+  whichever path created or moved it: mcp's `create_signal` (through
+  `NotifySignalCreated`), a condition core emits or resolves, a transition (T872). The `"signal.expiry_swept"`
   summary (v1.129.0 to v1.158.0) is gone with the expiry sweep (D115).
 - Relations (v1.129.0): `"relation.asserted"` and `"relation.ended"`, also to
   webhook endpoints subscribed to them. `data` is `{type: "relation", id,
-  relation_kind, edge_class, source_type, source_id, target_type, target_id,
-  actor_id, actor_kind}`, enough to re-read both ends. `relation.asserted`
+  relation_kind, edge_class, source_type, source_id, source_address, target_type,
+  target_id, target_address, actor_id, actor_kind}`, enough to re-read both ends.
+  `source_address` and `target_address` (T872) are each omitted when that end has no
+  address (a compiled application type). The read check on delivery is unchanged: a
+  subscriber gets the event only when it may read both ends, so an address is never
+  shown to someone who cannot read its record. `relation.asserted`
   adds `new_row` (true when the assert began a new life of the relation,
   false when it touched a live one again). `relation.ended` adds `cause`
   (`withdrawn`, `swept`, `recomputed`, `amendment-rejected`, `purged`) and

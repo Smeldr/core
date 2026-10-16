@@ -34,7 +34,7 @@ func (m *Module[T]) setSignalSink(s signalSink) { m.signalSink = s }
 
 // openSignal is one open Signal row, as the resolver reads it.
 type openSignal struct {
-	id, slug, signalType, receiver, fromState, message string
+	id, slug, address, signalType, receiver, fromState, message string
 }
 
 // signalResolver resolves and emits condition Signals on one handle. It is
@@ -58,7 +58,7 @@ func (a *App) signalResolver() signalResolver {
 // smeldr_signals, its placeholders numbered from $1).
 func (r signalResolver) selectOpen(ctx context.Context, where string, args ...any) ([]openSignal, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, slug, signal_type, receiver, from_state, message FROM smeldr_signals
+		`SELECT id, slug, address, signal_type, receiver, from_state, message FROM smeldr_signals
 		 WHERE status = 'open' AND `+where, args...)
 	if err != nil {
 		return nil, err
@@ -67,7 +67,7 @@ func (r signalResolver) selectOpen(ctx context.Context, where string, args ...an
 	var out []openSignal
 	for rows.Next() {
 		var s openSignal
-		if err := rows.Scan(&s.id, &s.slug, &s.signalType, &s.receiver, &s.fromState, &s.message); err != nil {
+		if err := rows.Scan(&s.id, &s.slug, &s.address, &s.signalType, &s.receiver, &s.fromState, &s.message); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -104,7 +104,7 @@ func (r signalResolver) resolve(ctx context.Context, sigs []openSignal, resoluti
 		})
 		dispatchTransitionWebhook(ctx, r.webhooks, r.pool, nil, s.receiver, eventSignalTransitioned,
 			transitionWebhookData{
-				Type: "signal", ID: s.id, Slug: s.slug, FromState: signalOpen, ToState: signalResolved,
+				Type: "signal", ID: s.id, Slug: s.slug, Address: s.address, FromState: signalOpen, ToState: signalResolved,
 				Reason: resolution, ActorID: signalResolverActor, ActorKind: "job",
 			})
 	}

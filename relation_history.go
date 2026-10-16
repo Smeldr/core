@@ -152,7 +152,11 @@ func (s *RelationStore) emitRelationEvent(ctx context.Context, eventName string,
 	data := relationEventData{
 		Type: "relation", ID: edge.ID, RelationKind: edge.RelationKind, EdgeClass: edge.EdgeClass,
 		SourceType: edge.SourceType, SourceID: edge.SourceID, TargetType: edge.TargetType, TargetID: edge.TargetID,
-		NewRow: newRow, Cause: e.cause, Reason: e.reason, ActorID: e.actorID, ActorKind: e.actorKind,
+		// The ends' addresses (T872): a core type's table, else the dynamic
+		// content table; an end with none (a compiled app type) is omitted.
+		SourceAddress: lookupAddressByID(ctx, s.db, edge.SourceType, edge.SourceID, true),
+		TargetAddress: lookupAddressByID(ctx, s.db, edge.TargetType, edge.TargetID, true),
+		NewRow:        newRow, Cause: e.cause, Reason: e.reason, ActorID: e.actorID, ActorKind: e.actorKind,
 	}
 	// The stream skips the causing token's own connection; a job actor is not
 	// a token, so it skips nobody.

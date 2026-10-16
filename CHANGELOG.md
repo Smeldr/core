@@ -20,6 +20,8 @@ cross-referenced below by their Amendment ID.
 
 ### Changed
 
+- **Signal and relation events carry addresses (T872, A@@AMEND@@).** `signal.created` and `signal.transitioned` carry the Signal's `address` on every path (`NotifySignalCreated`, which mcp's `create_signal` calls, now reads it with the receiver; conditions core resolves read it with the open row). `relation.asserted` and `relation.ended` carry `source_address` and `target_address`, each omitted when that end has none. `NotifySignalCreated`'s signature is unchanged, so mcp needs no change. Delivery's read check is unchanged.
+
 - **Four relation kinds get a reverse label (T870, A@@AMEND@@).** `derives_from` "Source Of", `ships_as` "Shipped By", `about` "Subject Of", `refers_to` "Referred To By", so an edge read from its target has a name, as `implements` "Implemented By" already did. `RegisterOrchestrationRelationKinds` upserts labels on boot, so an existing instance gets them on its next start; nothing to run by hand.
 - **Role subscriptions follow a Task's priority and its close (T865, A@@AMEND@@).** "Tasks in band X" also delivers `updated`, so a priority set to 0 on an existing Task reaches the band. `--architect` gets a new "Tasks done, blocked or resolved" (Task, `transitioned` to done, blocked or resolved). Seeding stays idempotent by name: an existing subscription keeps its filter on a re-seed; change it with `update_subscription`.
 
