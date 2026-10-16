@@ -4377,9 +4377,11 @@ Admin-only MCP tool that generates a preview URL.
 
 Parameters:
 - `prefix` (string, required) — module prefix including the leading slash, e.g. `"/posts"`
-- `slug` (string, required) — content slug, e.g. `"my-draft-post"`
+- `slug` (string, required) — the item: its slug, ID or address, e.g. `"my-draft-post"`. When drafts share a slug, give the ID.
 
-Returns the full preview URL as a string.
+Returns the full preview URL as a string, with the item's own slug. Since smeldr.dev/mcp v1.62.0 (A511) the item is resolved under the caller's read scope (a missing or hidden item answers not found) and the token binds its ID (`App.GeneratePreviewTokenForID`), so it opens exactly that draft. A prefix with no compiled module keeps a slug-only token.
+
+**Changing a draft's slug over MCP** (smeldr.dev/mcp v1.62.0): `update_<type>` of compiled web content and `update_content` accept `new_slug` while the item is not published; `slug`/`id` keep naming the item. `update_content` needs `fields`, `new_slug` or both. This is how to take the free slug a publish conflict names.
 
 ### smeldr.dev/cli: `forge preview`
 
