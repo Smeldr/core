@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.159.0 · smeldr.dev/mcp v1.63.0 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.26.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.160.0 · smeldr.dev/mcp v1.63.0 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.26.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -289,8 +289,20 @@ reverse-proxy idle timeouts.
 - **Independent of `app.Webhooks(...)`** — works whether or not outbound
   webhook delivery is also configured; the two are separate consumers of
   the same event data, either or both.
-- **At-most-once** — no replay/backfill on reconnect. A dropped connection
-  misses whatever fired in the gap.
+- **At-most-once without the event log**: a dropped connection misses
+  whatever fired in the gap.
+- **Durable event log** (core v1.160.0, D117): `app.EventLog(smeldr.EventLogOptions{})`
+  (example/server `ENABLE_EVENT_LOG`) keeps every event for 30 days. To resume:
+  - reconnect with `?after=<last event id>`;
+  - the missed events arrive first, in order, then `{"type":"caught_up"}`, then live events;
+  - `{"type":"skipped"}` means the cursor was older than the retention;
+  - delivery is then at least once: deduplicate by `id`.
+
+  From Go, `app.EventsAfter(ctx, after, limit)` pages with `Next` until
+  `More` is false. `app.UnloggedEvents()` counts events that could not be
+  logged. A connection whose buffer (256) fills is closed: reconnect with
+  `?after=`. Under governance, events about items the token cannot read
+  are not delivered.
 - **Channels:** `?channel=<name>` receives the events routed to that channel
   plus true broadcasts; `all` (or no parameter) receives everything. Since
   core v1.138.0 (A453) `?channel=` takes a comma-separated list, e.g.
