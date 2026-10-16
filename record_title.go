@@ -71,14 +71,7 @@ func titleWarnings(item any) []CreateWarning {
 // the future) it returns the warnings; after it, a title warning is a
 // [ValidationError] on the title field with [TitleGuidance].
 func titleCheck(item any, cutover time.Time) ([]CreateWarning, error) {
-	ws := titleWarnings(item)
-	if len(ws) == 0 {
-		return nil, nil
-	}
-	if !cutover.IsZero() && time.Now().After(cutover) {
-		return nil, Err(ws[0].Field, ws[0].Message)
-	}
-	return ws, nil
+	return warningsCheck(titleWarnings(item), cutover)
 }
 
 // titleFieldTouched reports whether a partial update's fields name item's

@@ -32,6 +32,10 @@ type DynamicTypeRepo struct {
 	// announceEdit announces a committed content edit ([App.afterContentEdit]);
 	// set by [App.DynamicContentRepo], nil (no event) without an App.
 	announceEdit func(ctx context.Context, node *DynamicNode, prefix, surface string)
+	// titleCutover is [Config.TitleCutover], set by [App.DynamicContentRepo]:
+	// when title and length warnings turn into refusals (D112). Zero, the
+	// default, is warnings only.
+	titleCutover time.Time
 }
 
 // NewDynamicTypeRepo returns a DynamicTypeRepo bound to the given type name.
@@ -94,18 +98,34 @@ func (r *DynamicTypeRepo) CreateDraft(ctx context.Context, fields map[string]any
 // caller and surface when provenance is wired ([DynamicTypeRepo.WithProvenance]).
 // The record is fail-open and written only after the item is saved.
 func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fields map[string]any) (*DynamicNode, error) {
+	node, warnings, err := r.CreateDraftWithWarnings(ctx, surface, fields)
+	noteTitleWarnings(ctx, r.typeName, warnings)
+	return node, err
+}
+
+// CreateDraftWithWarnings is [DynamicTypeRepo.CreateDraftVia] that also
+// returns the write's warnings (D112, D114): title_missing or title_too_long
+// for a record type's title-role field, field_too_long for a field longer
+// than its declared MaxLength, each naming the field and the item's address.
+// After [Config.TitleCutover] the same condition is a [ValidationError] and
+// nothing is written.
+func (r *DynamicTypeRepo) CreateDraftWithWarnings(ctx context.Context, surface string, fields map[string]any) (*DynamicNode, []CreateWarning, error) {
 	if ve := ValidateFields(r.schema, fields); ve != nil {
-		return nil, ve
+		return nil, nil, ve
+	}
+	warnings, err := warningsCheck(dynamicFieldWarnings(r.schema, fields, func(string) bool { return true }), r.titleCutover)
+	if err != nil {
+		return nil, nil, err
 	}
 	raw, err := json.Marshal(fields)
 	if err != nil {
-		return nil, fmt.Errorf("smeldr: CreateDraft marshal: %w", err)
+		return nil, nil, fmt.Errorf("smeldr: CreateDraft marshal: %w", err)
 	}
 	base := titleSlug(r.schema, fields)
 	id := NewID()
 	slug, err := r.newSlug(ctx, base, id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	now := time.Now().UTC()
 	node := &DynamicNode{
@@ -154,11 +174,11 @@ func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fi
 		// unique (type_name, slug) index refused this one): retry once under
 		// the collision-checked fallback. Any other error is returned.
 		if !r.slugExists(ctx, slug) {
-			return nil, fmt.Errorf("smeldr: CreateDraft save: %w", err)
+			return nil, nil, fmt.Errorf("smeldr: CreateDraft save: %w", err)
 		}
 		node.Slug = r.fallbackSlug(ctx, base, id)
 		if err := save(); err != nil {
-			return nil, fmt.Errorf("smeldr: CreateDraft save: %w", err)
+			return nil, nil, fmt.Errorf("smeldr: CreateDraft save: %w", err)
 		}
 	}
 	created := stateChange{
@@ -168,7 +188,10 @@ func (r *DynamicTypeRepo) CreateDraftVia(ctx context.Context, surface string, fi
 	writeStanding(ctx, r.db, r.prov, created)
 	created.verb = "create"
 	recordStateChange(ctx, r.prov, created)
-	return node, nil
+	for i := range warnings {
+		warnings[i].Address = node.Address
+	}
+	return node, warnings, nil
 }
 
 // Resolve returns the node ident names, at any status, in the D110 order: its
@@ -510,36 +533,57 @@ func (r *DynamicTypeRepo) UpdateFields(ctx context.Context, id string, patch map
 // App side as [AfterUpdate] ([App.afterContentEdit]): the bus, the event
 // stream as "<type>.updated" and the signal listeners.
 func (r *DynamicTypeRepo) UpdateFieldsVia(ctx context.Context, surface, id string, patch map[string]any) error {
+	warnings, err := r.UpdateFieldsWithWarnings(ctx, surface, id, patch)
+	noteTitleWarnings(ctx, r.typeName, warnings)
+	return err
+}
+
+// UpdateFieldsWithWarnings is [DynamicTypeRepo.UpdateFieldsVia] that also
+// returns the write's warnings (D112, D114), for the fields the patch sets
+// only: an update is not held to a field it did not change. After
+// [Config.TitleCutover] the same condition is a [ValidationError] and nothing
+// is written.
+func (r *DynamicTypeRepo) UpdateFieldsWithWarnings(ctx context.Context, surface, id string, patch map[string]any) ([]CreateWarning, error) {
 	if ve := ValidatePartialFields(r.schema, patch); ve != nil {
-		return ve
+		return nil, ve
 	}
 	node, err := r.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if isStateLocked(ctx, r.db, r.typeName, string(node.Status)) {
-		return fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
+		return nil, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
 			ErrConflict, r.typeName, id, node.Status)
 	}
 	existing := make(map[string]any)
 	if len(node.Fields) > 0 {
 		if err := json.Unmarshal(node.Fields, &existing); err != nil {
-			return fmt.Errorf("smeldr: UpdateFields unmarshal existing: %w", err)
+			return nil, fmt.Errorf("smeldr: UpdateFields unmarshal existing: %w", err)
 		}
 	}
 	for k, v := range patch {
 		existing[k] = v
 	}
+	warnings, err := warningsCheck(dynamicFieldWarnings(r.schema, existing, func(name string) bool {
+		_, ok := patch[name]
+		return ok
+	}), r.titleCutover)
+	if err != nil {
+		return nil, err
+	}
+	for i := range warnings {
+		warnings[i].Address = node.Address
+	}
 	merged, err := json.Marshal(existing)
 	if err != nil {
-		return fmt.Errorf("smeldr: UpdateFields marshal: %w", err)
+		return nil, fmt.Errorf("smeldr: UpdateFields marshal: %w", err)
 	}
 	actorID, actorKind := actorFromContext(ctx)
 	now := time.Now().UTC()
 	if _, err = r.db.ExecContext(ctx,
 		"UPDATE smeldr_dynamic_content SET fields = $1, updated_at = $2, last_actor = $3 WHERE id = $4 AND type_name = $5",
 		json.RawMessage(merged), now, actorID, id, r.typeName); err != nil {
-		return err
+		return nil, err
 	}
 	recordStateChange(ctx, r.prov, stateChange{
 		typeName: r.typeName, id: id, from: string(node.Status), to: string(node.Status),
@@ -552,7 +596,7 @@ func (r *DynamicTypeRepo) UpdateFieldsVia(ctx context.Context, surface, id strin
 		edited.LastActor = actorID
 		r.announceEdit(ctx, &edited, r.urlPrefix(), surface)
 	}
-	return nil
+	return warnings, nil
 }
 
 // SetStatus transitions the node to the given status. When transitioning to
@@ -875,6 +919,13 @@ func (a *App) DefineContentType(ctx context.Context, schema *ContentTypeSchema) 
 	if err := ValidateSchemaDef(schema); err != nil {
 		return nil, err
 	}
+	// D112: a record type declares its title field; refused after the title
+	// cutover, logged before it (a redefinition is never refused for it).
+	titleFieldWarns, err := warningsCheck(TitleFieldWarnings(schema), a.cfg.TitleCutover)
+	if err != nil {
+		return nil, err
+	}
+	noteTitleWarnings(ctx, schema.TypeName, titleFieldWarns)
 	if a.typeRegistry.Lookup(schema.TypeName) != nil {
 		return nil, fmt.Errorf("smeldr: content type %q already registered", schema.TypeName)
 	}
@@ -961,6 +1012,7 @@ func (a *App) DynamicContentRepo(typeName string) (*DynamicTypeRepo, error) {
 	}
 	repo.announce = a.afterStatusChange
 	repo.announceEdit = a.afterContentEdit
+	repo.titleCutover = a.cfg.TitleCutover
 	return repo, nil
 }
 
@@ -1288,8 +1340,11 @@ func newCreateContentHandler(a *App, auth AuthFunc) http.Handler {
 		r = r.WithContext(context.WithValue(r.Context(), userContextKey, user))
 		node, err := repo.CreateDraftVia(ContextFrom(w, r), surfaceHTTP, fields)
 		if err != nil {
+			// WriteError answers a validation error (an unknown field, or a
+			// title refused after the cutover, D112) as such, and anything
+			// else as an internal error without its detail.
 			slog.WarnContext(r.Context(), "smeldr: create_content", "type", desc.Name, "err", err)
-			WriteError(w, r, ErrInternal)
+			WriteError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
@@ -1325,12 +1380,12 @@ func newUpdateContentHandler(a *App, auth AuthFunc) http.Handler {
 		}
 		r = r.WithContext(context.WithValue(r.Context(), userContextKey, user))
 		if err := repo.UpdateFieldsVia(ContextFrom(w, r), surfaceHTTP, id, patch); err != nil {
-			if err == ErrNotFound {
-				WriteError(w, r, ErrNotFound)
-			} else {
+			if !errors.Is(err, ErrNotFound) {
 				slog.WarnContext(r.Context(), "smeldr: update_content", "id", id, "err", err)
-				WriteError(w, r, ErrInternal)
 			}
+			// A validation error (an unknown field, or a title or length
+			// refused after the cutover, D112) is answered as such.
+			WriteError(w, r, err)
 			return
 		}
 		node, err := repo.GetByID(r.Context(), id)

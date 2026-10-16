@@ -21,6 +21,17 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Added
+
+- **Runtime-defined fields take a `max_length`, and record types get title and length warnings (A512).** `SchemaField.MaxLength` (JSON `max_length`) sets the most characters a string field of a runtime-defined type should hold; zero means no limit. `ValidateSchemaDef` refuses it on a non-string field, refuses a negative value, and refuses a value above 120 on the field with role `title`. Record types (runtime-defined types with no URL prefix) follow the title rule on their `title`-role field: a create with no title warns `title_missing`, and a title longer than 120 characters, or than its own smaller `max_length`, warns `title_too_long`. Any field with a declared `max_length` that a write makes longer warns `field_too_long`. A create checks every field; an update checks only the fields it sets, so an older item is not held to a field the update did not change. Web content types are not held to the title rule, but a declared `max_length` applies to any type.
+- **Title and length warnings become refusals after `Config.TitleCutover` (A512).** After the cut date the same conditions are refused with a validation error naming the field (the title message carries `TitleGuidance`), and nothing is written. Zero, the default, means warnings only; one cut date applies to every title rule.
+- **`CreateDraftWithWarnings` and `UpdateFieldsWithWarnings` return the warnings (A512).** New `DynamicTypeRepo` methods return a write's warnings, each naming the field and the item's address. `CreateDraftVia` and `UpdateFieldsVia` call them, apply the same refusal, and log the warnings once per actor, type, code and day instead of returning them. `App.DynamicContentRepo` gives the repo the App's `TitleCutover`. Existing signatures are unchanged.
+- **`TitleFieldWarnings` flags record types with no title field (A512).** `TitleFieldWarnings(schema)` returns `title_field_missing` for a record type that declares no string field with role `title`, nil otherwise. `App.DefineContentType` refuses such a record type after the cutover and logs the warning before it; a redefinition is never refused for it, so existing types such as task_plan keep working. `App.CapabilityWarnings` lists `field_too_long` for item create and update and `title_field_missing` for type define.
+
+### Fixed
+
+- **The dynamic admin routes answer a validation error with 422 (A512).** `POST /_content/{type}` and `PATCH /_content/{type}/{id}` answered every error other than not-found as 500, including an unknown field or a wrong type. They now pass the error to the one error pipeline, so a validation error (and a refusal after the cutover) is 422 naming the field. The body still carries no warnings.
+
 ---
 
 ## [1.156.0] - 2026-10-16

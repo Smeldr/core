@@ -4973,6 +4973,42 @@ source. Cloud rendering is outside core scope (A156).
 
 ---
 
+### Titles and field limits on runtime-defined types (A512, D112, D114)
+
+A runtime-defined record type (no URL prefix) declares one string field with role `title`. Web content types (with a URL prefix) are not held to the title rule.
+
+- `SchemaField.MaxLength` (`max_length`) caps a string field in characters; zero means no limit. It is refused on a non-string field, on a negative value, and on a `title`-role field above 120.
+- A create with no title warns `title_missing`; a title over 120 characters, or over its own `max_length`, warns `title_too_long`.
+- Any field a write makes longer than its `max_length` warns `field_too_long`, on any type. A create checks every field; an update checks only the fields it sets.
+- A record type with no string field of role `title` warns `title_field_missing` (`TitleFieldWarnings`).
+- `Config.TitleCutover` is the one cut date for all of these. Zero means warnings only; from the cut date on, each condition is refused with a validation error naming the field, and nothing is written.
+
+| Write | Before the cutover | After the cutover |
+|---|---|---|
+| create a record with no title | written, `title_missing` | refused |
+| a title over 120 characters (or its `max_length`) | written, `title_too_long` | refused |
+| a field longer than its `max_length` (create, or an update that sets it) | written, `field_too_long` | refused |
+| define a record type with no title field | defined, `title_field_missing` logged | refused by `App.DefineContentType` |
+| redefine a record type with no title field | redefined | redefined (never refused for it) |
+
+```go
+func (r *DynamicTypeRepo) CreateDraftWithWarnings(ctx context.Context, surface string, fields map[string]any) (*DynamicNode, []CreateWarning, error)
+func (r *DynamicTypeRepo) UpdateFieldsWithWarnings(ctx context.Context, surface, id string, patch map[string]any) ([]CreateWarning, error)
+func TitleFieldWarnings(schema *ContentTypeSchema) []CreateWarning
+```
+
+Each warning names the field and the item's address. `CreateDraftVia` and `UpdateFieldsVia` apply the same refusal and log the warnings once per actor, type, code and day. Over MCP, smeldr.dev/mcp's `create_content` and `update_content` return the warnings (D110 shape), and `define_content_type`/`redefine_content_type` add `title_field_missing`. The admin routes `POST /_content/{type}` and `PATCH /_content/{type}/{id}` answer a validation error as 422.
+
+#### Adding task_plan's summary
+
+task_plan gets a `summary` (at most 300 characters, D114) with no core code: add it on an instance with `redefine_content_type`, passing the full existing field list with the new, optional field appended, so existing plans stay valid:
+
+```json
+{"type_name": "task_plan", "fields": [...the existing fields..., {"name": "summary", "type": "string", "role": "summary", "max_length": 300}], "reason": "D114: task_plan summary"}
+```
+
+On process.smeldr.dev, architect makes this call after the deploy that carries this release, on Peter's yes.
+
 ## State flows
 
 Custom state machines for content types. Defined in `state.go`.

@@ -31,6 +31,11 @@ type SchemaField struct {
 	// Relation is a placeholder for T06 edge-backed semantic links between types.
 	// Set to "edge" when this field points to another content type reactively.
 	Relation string `json:"relation,omitempty"`
+	// MaxLength is the most characters a string field should hold (D112,
+	// D114): a longer value gets a field_too_long warning, and is refused after
+	// [Config.TitleCutover]. Zero means no limit. On the title role the limit is
+	// [TitleMaxLength] at most, and a larger value is refused at define.
+	MaxLength int `json:"max_length,omitempty"`
 }
 
 // ContentTypeSchema holds the declared field definitions for one content type.
@@ -401,6 +406,15 @@ func ValidateSchemaDef(schema *ContentTypeSchema) error {
 		}
 		if !knownRoles[f.Role] {
 			return fmt.Errorf("smeldr: schema field %q has unknown role %q (valid: title, description, og_image, body, summary, channel)", f.Name, f.Role)
+		}
+		if f.MaxLength < 0 {
+			return Err("fields", fmt.Sprintf("%q has max_length %d: a limit is a positive number of characters", f.Name, f.MaxLength))
+		}
+		if f.MaxLength > 0 && f.Type != "string" {
+			return Err("fields", fmt.Sprintf("%q has max_length but type %q: a limit applies to a string field", f.Name, f.Type))
+		}
+		if f.Role == "title" && f.MaxLength > TitleMaxLength {
+			return Err("fields", fmt.Sprintf("%q is the title and has max_length %d: a title is at most %d characters (D112)", f.Name, f.MaxLength, TitleMaxLength))
 		}
 		if f.Role == "channel" {
 			if f.Type != "string" {

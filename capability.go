@@ -345,8 +345,9 @@ func (a *App) VisibleCapabilities(ctx Context) ([]Capability, error) {
 // next to its result (the D110 CreateWarning channel): a write that succeeds
 // but should be corrected. Read-only after init.
 var capabilityWarnings = map[capabilityKey][]string{
-	{ResourceItem, VerbCreate}: {"slug_adjusted", "deprecated_field", "title_missing", "title_too_long"},
-	{ResourceItem, VerbUpdate}: {"deprecated_field", "title_missing", "title_too_long"},
+	{ResourceItem, VerbCreate}: {"slug_adjusted", "deprecated_field", "title_missing", "title_too_long", "field_too_long"},
+	{ResourceItem, VerbUpdate}: {"deprecated_field", "title_missing", "title_too_long", "field_too_long"},
+	{ResourceType, "define"}:   {"title_field_missing"},
 }
 
 // CapabilityWarnings returns the warning codes the act of verb on resource can
