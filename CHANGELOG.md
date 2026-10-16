@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.161.0] - 2026-10-16
+
 ### Added
 
 - **References between records are relations the system creates and checks (D113, A521).** Task gains `implements` (the Decision or Goal it carries out) and Amendment gains `task_ref` (the Task it ships); a Signal's subject, `task_ref` and `answer_ref` are references too, and a runtime-defined string field becomes one with `SchemaField.References`. Core resolves each under the writer's read scope, stores it canonically, keeps it write-once, and writes its edge (`implements`, `derives_from`, `ships_as`, and the new kinds `about` and `refers_to`) in the record's own transaction. `EnsureReferenceColumns` adds the two new columns to existing databases. `MigrateReferences`, also `smeldr-server migrate-references`, turns existing text references into edges and reports the rest.
