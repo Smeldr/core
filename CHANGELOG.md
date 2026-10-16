@@ -21,6 +21,21 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+### Added
+
+- **`App.EventLog(EventLogOptions{Retention})` makes the event stream durable (A520, D117).** Every streamed event is written to the new table `smeldr_events` and kept for the retention period, `DefaultEventLogRetention` (30 days) when zero. It is opt-in and needs `Config.DB` and `App.EventStream`; `App.Handler` creates the table and starts one writer goroutine. `CreateEventLogTable(db)` is exported. One writer assigns each event a `seq`, inserts a batch in one transaction, and delivers it only after the commit, so a resuming client never sees an event the log lacks. One process writes the log. In example/server, `ENABLE_EVENT_LOG` (which needs `ENABLE_EVENT_STREAM`) and `EVENT_LOG_RETENTION_DAYS` control it, and events past retention are deleted hourly.
+- **Streams resume from a cursor with `GET /_events/stream?after=<event id>` (A520, D117).** The stream writes the logged events after that envelope ID in order, applying the connection's channel, `include_own` and read rules, then one `{"type":"caught_up","cursor":"<id>"}` line, then live events with nothing lost in between. A cursor the log does not hold starts at the oldest kept event, after a `{"type":"skipped","after":...,"resumed_from":...}` line. `?after=` without the log returns 400, and a failed first page returns 500. Delivery with a cursor is at least once, so deduplicate by `id`.
+- **`App.EventsAfter(ctx, afterID, limit)` reads the log from Go (A520, D117).** It returns an `EventPage` with `Events []LoggedEvent`, `Skipped`, `Oldest`, `Next` and `More`, in log order. The limit defaults to 500 and is capped at 1000. It reads past events the caller may not read (up to 10 x limit rows per call); page with `Next` until `More` is false. `Next` never names a hidden event: after hidden events it is an opaque continuation sealed with the instance secret. `LoggedEvent` carries `Seq`, `ID`, `Event`, `Channels`, `ActorID`, `SubjectType`, `SubjectID`, `OtherType`, `OtherID`, `CreatedAt` and `Payload`. Under governance it returns only events the caller may read, and it returns `ErrBadRequest` when the log is not wired.
+- **`App.UnloggedEvents()` counts events delivered live but never logged (A520, D117).** An event is counted when its insert fails or when the writer queue of 1024 is full. Such events cannot be replayed, so a non-zero count is a gap in the at-least-once promise. A Warn names the reason at most once a minute.
+- **`OutboundJob.EventID` links each webhook job to its event-log row (A520, D117).** It is stored in the new column `event_id`, added by `EnsureOutboundJobEventIDColumn`. A table without the column still accepts jobs. example/server calls the function at boot when webhooks are on.
+
+### Changed
+
+- **A stream connection whose buffer fills is closed instead of silently losing events (A520, D117).** This is a behaviour change. The connection is closed with a Warn naming its token, and the buffer grew from 32 to 256 events. A client reconnects, with `?after=` when the log is on.
+- **The stream applies per-item read rules under governance (A520, D117).** This is a behaviour change. Each event, live or replayed, is checked against the connection's read scope, which is loaded at connect, before delivery. An event about an item the token cannot read is not delivered, a relation event needs both ends readable, and a Signal event needs the Signal and its subject. Events about no item are delivered. Before this change the stream applied no per-item read rule.
+- **A content-lifecycle event has one envelope ID across the stream, the log and the webhook outbox (A520, D117).** Previously webhooks and the stream issued two different IDs for the same event.
+- **`NotifySignalCreated` sends the Signal's real state on `signal.created` (A520, D117).** The event now carries `open` or `pending`, the Signal's actual state. It always said `pending` before.
+
 ---
 
 ## [1.159.0] - 2026-10-16

@@ -61,7 +61,8 @@ type OutboundDelivery interface {
 //	    next_retry_at TIMESTAMPTZ NOT NULL,
 //	    created_at    TIMESTAMPTZ NOT NULL,
 //	    expires_at    TIMESTAMPTZ NOT NULL,
-//	    status        TEXT    NOT NULL DEFAULT 'pending'
+//	    status        TEXT    NOT NULL DEFAULT 'pending',
+//	    event_id      TEXT    NOT NULL DEFAULT ''
 //	);
 type OutboundJob struct {
 	ID          string
@@ -75,6 +76,9 @@ type OutboundJob struct {
 	CreatedAt   time.Time
 	ExpiresAt   time.Time
 	Status      string
+	// EventID is the envelope ID of the event the job delivers: its row in the
+	// event log ([App.EventLog], D117). Empty for a job enqueued by hand.
+	EventID string
 }
 
 // DeliveryLog is a record of one delivery attempt for an [OutboundJob].
@@ -181,15 +185,37 @@ func (p *workerPool) Enqueue(ctx context.Context, job OutboundJob) error {
 		return fmt.Errorf("smeldr: webhook: target_url must use https scheme")
 	}
 
-	_, err = p.db.ExecContext(ctx, `
+	// D117: the job names its event-log row by the envelope ID. A table from
+	// before the event_id column takes the job without it.
+	return execWithColumnFallback(ctx, p.db, "event_id", `
+		INSERT INTO smeldr_outbound_jobs
+			(id, endpoint_id, target_url, secret_enc, payload, event, attempts, next_retry_at, created_at, expires_at, status, event_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		[]any{job.ID, job.EndpointID, job.TargetURL, job.SecretEnc,
+			job.Payload, job.Event, job.Attempts,
+			job.NextRetryAt, job.CreatedAt, job.ExpiresAt, job.Status, job.EventID},
+		`
 		INSERT INTO smeldr_outbound_jobs
 			(id, endpoint_id, target_url, secret_enc, payload, event, attempts, next_retry_at, created_at, expires_at, status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		job.ID, job.EndpointID, job.TargetURL, job.SecretEnc,
-		job.Payload, job.Event, job.Attempts,
-		job.NextRetryAt, job.CreatedAt, job.ExpiresAt, job.Status,
+		[]any{job.ID, job.EndpointID, job.TargetURL, job.SecretEnc,
+			job.Payload, job.Event, job.Attempts,
+			job.NextRetryAt, job.CreatedAt, job.ExpiresAt, job.Status},
 	)
-	return err
+}
+
+// EnsureOutboundJobEventIDColumn adds smeldr_outbound_jobs.event_id (D117), the
+// envelope ID that names a job's row in the event log, to a table created
+// before it. A database without the table is left alone. Idempotent.
+func EnsureOutboundJobEventIDColumn(ctx context.Context, db DB) error {
+	ok, err := tableExists(ctx, db, "smeldr_outbound_jobs")
+	if err != nil || !ok {
+		return err
+	}
+	if err := EnsureColumn(ctx, db, "smeldr_outbound_jobs", "event_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("smeldr: EnsureOutboundJobEventIDColumn: %w", err)
+	}
+	return nil
 }
 
 // runWorker is the main loop for one worker goroutine.

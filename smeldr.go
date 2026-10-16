@@ -357,6 +357,7 @@ type App struct {
 	transitionModules map[string][]transitionHookModule // by type name; App.TransitionItemVia fires their After handlers
 
 	eventBroadcaster      *eventBroadcaster // non-nil when App.EventStream() was called; backs GET /_events/stream
+	eventLogOpts          *EventLogOptions  // non-nil when App.EventLog() was called; the log starts at Handler()
 	eventStreamHandlerReg bool              // true once GET /_events/stream is registered
 
 	routeReg []routeEntry // in-memory route registry; populated by App.Route and app.Content
@@ -876,9 +877,10 @@ func (a *App) Webhooks(store *WebhookStore) *App {
 // Requires the Author role over bearer auth (or Config.Auth, if set) — same
 // contract as GET /_logs and GET /_audit.
 //
-// Delivery is at-most-once and client-side-filtered: a dropped connection
-// misses whatever fired in the gap (no replay), and every subscriber
-// receives every event regardless of type — the listener filters for what
+// Without [App.EventLog] delivery is at-most-once: a dropped connection
+// misses whatever fired in the gap (no replay). With it, a connection resumes
+// with ?after=<event id> and delivery is at least once (D117). A subscriber
+// receives every event on its channels regardless of type — the listener filters for what
 // it cares about. Independent of [App.Webhooks]: broadcasting works whether
 // or not outbound webhook delivery is also configured.
 //
@@ -1333,8 +1335,12 @@ func (a *App) dispatchBus(ctx context.Context, ev SignalEvent, sig LifecycleEven
 	if a.eventBroadcaster != nil {
 		// ev.ActorID, the caller's User.ID, makes the stream skip that
 		// caller's own connection.
-		if payload, err := buildWebhookPayload(ev.Type, ev.raw, sig); err == nil {
-			a.eventBroadcaster.publishToFrom(ev.ActorID, a.eventChannels(ev.Type, ev.raw), payload)
+		if payload, err := ev.envelopeFor(sig); err == nil {
+			event, _ := buildEventName(ev.Type, sig)
+			a.eventBroadcaster.publishEvent(eventMeta{
+				id: envelopeID(payload), event: event, channels: a.eventChannels(ev.Type, ev.raw),
+				actorID: ev.ActorID, subjectType: ev.Type, subjectID: ev.NodeID,
+			}, payload)
 		}
 	}
 	a.busMu.RLock()
@@ -1620,7 +1626,9 @@ func (a *App) Handler() http.Handler {
 		if esAuth == nil {
 			esAuth = BearerHMAC(string(a.cfg.Secret))
 		}
-		a.mux.Handle("GET /_events/stream", newEventStreamHandler(esAuth, a.eventBroadcaster))
+		a.eventBroadcaster.canon = a.canonicalTypeName
+		a.startEventLog()
+		a.mux.Handle("GET /_events/stream", newEventStreamHandlerScoped(esAuth, a.eventBroadcaster, a.streamScope))
 	}
 	// A66: probe smeldr_tokens table at startup when a TokenStore is configured.
 	// A83: auto-create a bootstrap admin token when smeldr_tokens is empty.

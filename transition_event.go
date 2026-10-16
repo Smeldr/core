@@ -89,6 +89,7 @@ func (a *App) afterStatusChange(ctx context.Context, t statusTransition) {
 	if !t.channelSet {
 		t.channels = a.transitionChannels(t.typeName, t.item)
 	}
+	aboutType, aboutID := a.signalSubjectForStream(ctx, t)
 	dispatchEventToFrom(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, actorID, t.channels,
 		strings.ToLower(t.typeName)+".transitioned",
 		transitionWebhookData{
@@ -101,6 +102,9 @@ func (a *App) afterStatusChange(ctx context.Context, t statusTransition) {
 			Reason:    t.reason,
 			ActorID:   actorID,
 			ActorKind: actorKind,
+			typeName:  t.typeName,
+			aboutType: aboutType,
+			aboutID:   aboutID,
 		})
 
 	if !busy || t.item == nil {
@@ -377,4 +381,22 @@ func contentChanged(before, after any) bool {
 		}
 	}
 	return false
+}
+
+// signalSubjectForStream returns a Signal's subject for the stream's read
+// check (a Signal is readable only with its subject), read only when the
+// stream is wired and the transition is a Signal's. Empty otherwise, or when
+// the lookup fails (logged): then an unreadable placeholder, so a scoped
+// reader does not get the event (the read rules fail toward less access).
+func (a *App) signalSubjectForStream(ctx context.Context, t statusTransition) (string, string) {
+	if t.typeName != "Signal" || a.eventBroadcaster == nil || a.cfg.DB == nil {
+		return "", ""
+	}
+	var subjectType, subjectID string
+	if err := a.cfg.DB.QueryRowContext(ctx, `SELECT subject_type, subject_id FROM smeldr_signals WHERE id = $1`, t.id).
+		Scan(&subjectType, &subjectID); err != nil {
+		slog.WarnContext(ctx, "smeldr: stream: Signal subject not read", "id", t.id, "error", err)
+		return "Signal", ""
+	}
+	return subjectType, subjectID
 }

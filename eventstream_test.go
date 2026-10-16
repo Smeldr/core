@@ -167,7 +167,7 @@ func TestEventBroadcaster_BroadcastReachesEveryChannel(t *testing.T) {
 	}
 }
 
-func TestEventBroadcaster_FullBufferDropsWithoutBlocking(t *testing.T) {
+func TestEventBroadcaster_FullBufferClosesWithoutBlocking(t *testing.T) {
 	// Deliberately single-goroutine and lockstep, not a background drainer
 	// racing the broadcast loop: an earlier version drained `fast` from a
 	// separate goroutine, which is exactly the kind of race that passes on
@@ -207,15 +207,26 @@ func TestEventBroadcaster_FullBufferDropsWithoutBlocking(t *testing.T) {
 		t.Fatalf("broadcast took %v for %d calls despite a full subscriber buffer — looks blocked", elapsed, n)
 	}
 
+	// D117: a full connection is closed, not thinned: its buffered events
+	// drain, then the channel reports closed and the subscriber is gone.
 	if got := len(slow); got != eventStreamSubscriberBuffer {
-		t.Errorf("slow subscriber buffer len = %d, want %d (full, overflow dropped)", got, eventStreamSubscriberBuffer)
+		t.Errorf("slow subscriber buffer len = %d, want %d", got, eventStreamSubscriberBuffer)
+	}
+	for range eventStreamSubscriberBuffer {
+		<-slow
+	}
+	if _, open := <-slow; open {
+		t.Error("the full subscriber's channel is still open, want closed")
+	}
+	if got := b.tokenCount("u-slow"); got != 0 {
+		t.Errorf("u-slow still holds %d connections, want 0", got)
 	}
 }
 
-// TestEventBroadcaster_PublishFullBufferDropsWithoutBlocking mirrors
-// TestEventBroadcaster_FullBufferDropsWithoutBlocking for publish's own
-// drop-without-blocking branch (same non-blocking select as broadcast, A302).
-func TestEventBroadcaster_PublishFullBufferDropsWithoutBlocking(t *testing.T) {
+// TestEventBroadcaster_PublishFullBufferClosesWithoutBlocking mirrors
+// TestEventBroadcaster_FullBufferClosesWithoutBlocking for publish's own
+// close-without-blocking branch (same non-blocking select as broadcast, A302).
+func TestEventBroadcaster_PublishFullBufferClosesWithoutBlocking(t *testing.T) {
 	b := newEventBroadcaster()
 
 	slow, err := b.subscribe("u-slow", "core") // deliberately never drained
@@ -245,8 +256,19 @@ func TestEventBroadcaster_PublishFullBufferDropsWithoutBlocking(t *testing.T) {
 		t.Fatalf("publish took %v for %d calls despite a full subscriber buffer — looks blocked", elapsed, n)
 	}
 
+	// D117: a full connection is closed, not thinned: its buffered events
+	// drain, then the channel reports closed and the subscriber is gone.
 	if got := len(slow); got != eventStreamSubscriberBuffer {
-		t.Errorf("slow subscriber buffer len = %d, want %d (full, overflow dropped)", got, eventStreamSubscriberBuffer)
+		t.Errorf("slow subscriber buffer len = %d, want %d", got, eventStreamSubscriberBuffer)
+	}
+	for range eventStreamSubscriberBuffer {
+		<-slow
+	}
+	if _, open := <-slow; open {
+		t.Error("the full subscriber's channel is still open, want closed")
+	}
+	if got := b.tokenCount("u-slow"); got != 0 {
+		t.Errorf("u-slow still holds %d connections, want 0", got)
 	}
 }
 

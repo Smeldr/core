@@ -209,6 +209,11 @@
 //     [MigrateRecordShape] brings existing records to that shape.
 //   - Webhooks ([WebhookStore], [WebhookEndpoint], [WebhookEventPayload]) —
 //     outbound delivery on lifecycle events, created with [NewWebhookStore].
+//   - The event stream ([App.EventStream]) and its durable log
+//     ([App.EventLog], [App.EventsAfter], [LoggedEvent]): every event is
+//     logged in one order before it is delivered and kept 30 days, a
+//     connection resumes with ?after=<event id>, and delivery is checked
+//     against the reader's scope (D117).
 //   - Dynamic content types ([DynamicTypeRepo]) — a schema-driven repository
 //     for content types registered at runtime (e.g. via MCP) rather than
 //     compiled in, created with [NewDynamicTypeRepo].

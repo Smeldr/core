@@ -3626,10 +3626,54 @@ The JSON payload shape is identical to webhook event payloads — a
   the list means everything. An older core reads the whole list as one channel
   name and delivers nothing to it, so switch a watcher to a list only after the
   server runs a version with this.
-- **Client buffer:** A subscriber whose local event buffer fills (32 events,
-  not configurable in this version) has further events silently dropped for
-  that subscriber only (logged server-side at Warn level) rather than blocking
-  event delivery to other connected subscribers.
+- **Client buffer:** each connection buffers 256 events. A connection whose
+  buffer fills is **closed** (v1.160.0, D117), logged at Warn with its token,
+  and never blocks the others. Before v1.160.0 the buffer held 32 and events
+  past it were dropped silently. A closed client reconnects; with the event log
+  it resumes with `?after=` and loses nothing the log kept.
+- **Read rules at delivery (v1.160.0):** under governance, a connection loads
+  its token's read scope when it connects, and every event, live or replayed,
+  is checked against it at delivery, never at publish:
+  - an event about an item the scope cannot read is not delivered;
+  - a relation event needs both ends readable;
+  - a Signal event needs the Signal and its subject readable;
+  - an event about no item (`content_type.redefined`) is delivered.
+
+  Reloading the scope during a long connection comes with subscriptions (D116).
+
+### Durable event log and cursor (D117, v1.160.0)
+
+`App.EventLog(smeldr.EventLogOptions{Retention: 0})` keeps every streamed event in `smeldr_events` for the retention (`DefaultEventLogRetention`, 30 days, when zero). It needs `Config.DB` and `App.EventStream`. `App.Handler` creates the table and starts the writer; `CreateEventLogTable(db)` creates it yourself. It is opt-in: without it, the stream stays in memory and live only. example/server turns it on with `ENABLE_EVENT_LOG` (which needs `ENABLE_EVENT_STREAM`), and `EVENT_LOG_RETENTION_DAYS` sets the retention.
+
+- **One writer, one order.** One goroutine assigns each event a `seq`, inserts a batch in one transaction, and only then delivers it. A client resuming with a cursor therefore never has seen an event the log lacks. A second process writing the same database is not supported.
+- **One envelope.** Every event has one envelope ID in the log, on the stream and in the webhook outbox. Before v1.160.0 a content-lifecycle event had two different IDs, one for webhooks and one for the stream. `OutboundJob.EventID` (column `event_id`, added by `EnsureOutboundJobEventIDColumn`) names the job's log row. A table without the column still takes jobs.
+- **Resume.** `GET /_events/stream?after=<event id>` works like this:
+  1. It writes every logged event after that envelope ID, in order, with the connection's `channel`, `include_own` and read rules applied.
+  2. It writes one `{"type":"caught_up","cursor":"<last id>"}` line.
+  3. It then delivers live events. No event published during the replay is lost.
+
+  A cursor the log does not hold, because it is older than the retention or unknown, starts at the oldest kept event after a `{"type":"skipped","after":"<id>","resumed_from":"<oldest id>"}` line. Listeners already ignore `ping`, and should ignore these lines the same way unless they use them.
+  - `?after=` without the log is 400.
+  - A failure reading the first page is 500.
+  - A later failure closes the connection.
+- **At least once.** With a cursor, delivery is at least once: an event can come twice around a reconnect or the replay boundary, so deduplicate by `id`, as for webhooks.
+  - **The promise has one gap.** An event whose insert failed, or that arrived while the writer's queue (1024) was full, is still delivered live but is not logged, so it cannot be replayed.
+  - `App.UnloggedEvents()` counts those events since the process started, and a Warn names the reason at most once a minute. A non-zero count is a gap in the at-least-once promise.
+- **From Go.** `App.EventsAfter(ctx, afterID, limit) (EventPage, error)` reads the log after a cursor, in order. `limit` defaults to 500 and is capped at 1000. `EventPage` has `Events []LoggedEvent`, `Skipped`, `Oldest`, `Next` and `More`. `afterID` is an envelope ID or a page's `Next`, and an empty `afterID` starts at the oldest kept event.
+  - Under governance it returns only events the caller in `ctx` may read, by the same rule the stream applies.
+  - The read goes on past hidden events until it has `limit` readable ones, the log ends, or it has read 10 x `limit` rows.
+  - **Paging:** pass `Next` back as `afterID` until `More` is false.
+  - `Next` is the ID of the last event returned, or, when the read ended on hidden events, an opaque continuation (it starts with `~`, is sealed with the instance secret, and names no event and no count). So a page can be empty with `More` true when the scan bound was reached first; `More` false means the log ended.
+  - A continuation this instance did not issue is `ErrBadRequest`. A continuation is bound to the instance secret: rotating `SECRET` turns open continuations into `ErrBadRequest`, and their holders resume from an envelope ID or from the start.
+
+| `EventsAfter` returns | When |
+|---|---|
+| a page | events after the cursor, in order |
+| a page with `Skipped` | the cursor is not in the log |
+| `ErrBadRequest` | the log is not wired |
+| `ErrInternal` | a query failure |
+
+- **Retention.** The writer deletes events older than the retention once an hour.
 
 ### Example
 

@@ -1,6 +1,9 @@
 package smeldr
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -10,7 +13,7 @@ import (
 
 // eventStreamSubscriberBuffer is the per-subscriber channel capacity used by
 // [eventBroadcaster.subscribe].
-const eventStreamSubscriberBuffer = 32
+const eventStreamSubscriberBuffer = 256
 
 // eventStreamMaxSubscribersPerToken bounds how many concurrent
 // GET /_events/stream connections a single token may hold open at once.
@@ -94,15 +97,18 @@ type eventStreamSub struct {
 	// (GET /_events/stream?include_own=true). The default, false, drops them:
 	// see [eventBroadcaster.broadcastFrom].
 	includeOwn bool
+	// scope is the owner's read scope, loaded at connect: an event about an
+	// item it may not read is not delivered ([eventReadable]). Nil reads all.
+	scope *ReadScope
 }
 
 // eventBroadcaster fans a payload out to connected subscribers — either to
 // every one of them ([eventBroadcaster.broadcast], "reaches every channel")
 // or to only those subscribed to one channel plus any wildcard
 // ([eventStreamChannelAll]) subscriber ([eventBroadcaster.publish]).
-// In-memory only — no persistence, no replay; a subscriber that connects
-// after a send simply never sees it (at-most-once, per
-// design/agent-event-signaling.md's own lean).
+// Without a log it is in memory only and at most once; with [App.EventLog]
+// every event is written before it is fanned out, so a connection can resume
+// with a cursor (D117).
 type eventBroadcaster struct {
 	mu      sync.Mutex
 	subs    map[chan []byte]eventStreamSub
@@ -110,6 +116,13 @@ type eventBroadcaster struct {
 
 	closing     chan struct{} // closed by shutdown; every stream handler returns on it
 	closingOnce sync.Once
+
+	// log, when set by [App.EventLog], makes delivery durable: every event is
+	// written before it is fanned out ([eventLog]).
+	log *eventLog
+	// canon maps an event's lower-case type name to its registered name, for
+	// the read check. Nil keeps the name as given.
+	canon func(string) string
 }
 
 // newEventBroadcaster returns an empty [eventBroadcaster].
@@ -125,6 +138,9 @@ func newEventBroadcaster() *eventBroadcaster {
 // server shutdown does not wait for stream clients to disconnect. Safe to
 // call more than once.
 func (b *eventBroadcaster) shutdown() {
+	if b.log != nil {
+		b.log.shutdown()
+	}
 	b.closingOnce.Do(func() { close(b.closing) })
 }
 
@@ -142,13 +158,19 @@ func (b *eventBroadcaster) subscribe(tokenID, channel string) (chan []byte, erro
 // when true the connection also receives events its own token caused, which
 // the default drops (see [eventBroadcaster.broadcastFrom]).
 func (b *eventBroadcaster) subscribeOpts(tokenID, channel string, includeOwn bool) (chan []byte, error) {
+	return b.subscribeScoped(tokenID, channel, includeOwn, nil)
+}
+
+// subscribeScoped is [eventBroadcaster.subscribeOpts] with the owner's read
+// scope, checked on every delivery (nil reads all).
+func (b *eventBroadcaster) subscribeScoped(tokenID, channel string, includeOwn bool, scope *ReadScope) (chan []byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.byToken[tokenID] >= eventStreamMaxSubscribersPerToken {
 		return nil, ErrTooManyRequests
 	}
 	ch := make(chan []byte, eventStreamSubscriberBuffer)
-	b.subs[ch] = eventStreamSub{tokenID: tokenID, channels: parseChannels(channel), includeOwn: includeOwn}
+	b.subs[ch] = eventStreamSub{tokenID: tokenID, channels: parseChannels(channel), includeOwn: includeOwn, scope: scope}
 	b.byToken[tokenID]++
 	return ch, nil
 }
@@ -190,18 +212,7 @@ func (b *eventBroadcaster) broadcast(payload []byte) {
 // User.ID, the same value [eventBroadcaster.subscribe] is keyed on and the
 // request context's User().ID carries.
 func (b *eventBroadcaster) broadcastFrom(origin string, payload []byte) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for ch, sub := range b.subs {
-		if origin != "" && !sub.includeOwn && sub.tokenID == origin {
-			continue
-		}
-		select {
-		case ch <- payload:
-		default:
-			slog.Warn("smeldr: event stream subscriber buffer full, dropping event")
-		}
-	}
+	b.publishEvent(eventMeta{id: envelopeID(payload), actorID: origin}, payload)
 }
 
 // publish sends payload to every subscriber listening on channel, plus
@@ -223,25 +234,67 @@ func (b *eventBroadcaster) publishFrom(origin, channel string, payload []byte) {
 // subscriber, however many of its channels match. No channels at all is a
 // broadcast ([eventBroadcaster.broadcastFrom]).
 func (b *eventBroadcaster) publishToFrom(origin string, channels []string, payload []byte) {
-	if len(channels) == 0 {
-		b.broadcastFrom(origin, payload)
+	b.publishEvent(eventMeta{id: envelopeID(payload), actorID: origin, channels: channels}, payload)
+}
+
+// publishEvent hands one event to the log, which writes it and then fans it
+// out, or, without a log, fans it out at once ([eventBroadcaster.fanout]).
+func (b *eventBroadcaster) publishEvent(meta eventMeta, payload []byte) {
+	if b.canon != nil {
+		if meta.subjectType != "" {
+			meta.subjectType = b.canon(meta.subjectType)
+		}
+		if meta.otherType != "" {
+			meta.otherType = b.canon(meta.otherType)
+		}
+	}
+	if meta.event == "" {
+		meta.event = envelopeEvent(payload)
+	}
+	ev := streamEvent{payload: payload, meta: meta, at: time.Now().UTC()}
+	if b.log != nil {
+		b.log.enqueue(ev)
 		return
 	}
+	b.fanout(ev)
+}
+
+// fanout delivers ev to every connection it is deliverable to
+// ([eventStreamSub.deliverable]). It never blocks: a connection whose buffer
+// is full is closed, not thinned, so its client reconnects (with ?after=, when
+// the log is wired) and loses nothing the log kept.
+func (b *eventBroadcaster) fanout(ev streamEvent) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for ch, sub := range b.subs {
-		if !sub.wants(channels) {
-			continue
-		}
-		if origin != "" && !sub.includeOwn && sub.tokenID == origin {
+		if !sub.deliverable(ev.meta) {
 			continue
 		}
 		select {
-		case ch <- payload:
+		case ch <- ev.payload:
 		default:
-			slog.Warn("smeldr: event stream subscriber buffer full, dropping event")
+			slog.Warn("smeldr: event stream: a connection's buffer is full; it is closed so its client reconnects", "token", sub.tokenID)
+			delete(b.subs, ch)
+			b.byToken[sub.tokenID]--
+			if b.byToken[sub.tokenID] <= 0 {
+				delete(b.byToken, sub.tokenID)
+			}
+			close(ch)
 		}
 	}
+}
+
+// deliverable reports whether an event with meta goes to this connection: on
+// one of its channels (an event with none is a broadcast), not caused by its
+// own token unless it asked for its own events, and readable by its scope.
+func (s eventStreamSub) deliverable(meta eventMeta) bool {
+	if len(meta.channels) > 0 && !s.wants(meta.channels) {
+		return false
+	}
+	if meta.actorID != "" && !s.includeOwn && s.tokenID == meta.actorID {
+		return false
+	}
+	return eventReadable(s.scope, meta)
 }
 
 // wants reports whether the subscriber listens on any of channels, or on
@@ -298,10 +351,8 @@ var eventStreamHeartbeat = 25 * time.Second
 // for [eventStreamChannelAll]: this is the same access every Author-role
 // token already had, not a new grant. A periodic {"type":"ping"} line is
 // sent on eventStreamHeartbeat to keep the connection alive through
-// idle-timing reverse proxies. Delivery is at-most-once: a dropped
-// connection misses whatever fired while it was gone, and reconnecting
-// starts fresh — no replay/backfill in this first cut
-// (design/agent-event-signaling.md, open question 1).
+// idle-timing reverse proxies. Without the event log delivery is
+// at most once: a dropped connection misses whatever fired while it was gone.
 //
 // A malformed/missing token yields 401; wrong role 403; a token already
 // holding eventStreamMaxSubscribersPerToken concurrent connections 429
@@ -319,7 +370,32 @@ var eventStreamHeartbeat = 25 * time.Second
 // keyed on the authenticated user's ID, the same value a request context
 // carries as User().ID, which is what the self-skip in
 // [eventBroadcaster.broadcastFrom] compares.
+//
+// With the event log wired ([App.EventLog]), ?after=<event id> resumes a
+// connection: the events after that envelope ID are written first, in log
+// order, then live events, with no event lost between the two (an event may
+// come twice: deduplicate by id). A {"type":"skipped","after":...,
+// "resumed_from":...} line says the cursor was no longer kept and the replay
+// starts at the oldest kept event; one {"type":"caught_up","cursor":...} line
+// marks the start of live delivery. ?after= without the log is 400; a failure
+// reading the first page is 500. A connection whose buffer fills is closed:
+// reconnect with ?after= the last id seen.
 func newEventStreamHandler(auth AuthFunc, b *eventBroadcaster) http.Handler {
+	return newEventStreamHandlerScoped(auth, b, nil)
+}
+
+// streamScopeLoader loads the read scope of a stream connection's owner; nil
+// (no governance) reads everything.
+type streamScopeLoader func(ctx context.Context, user User) (*ReadScope, error)
+
+// eventStreamReplayPage is how many logged events a resuming connection reads
+// at a time.
+const eventStreamReplayPage = 500
+
+// newEventStreamHandlerScoped is [newEventStreamHandler] with the owner's read
+// scope, loaded at connect by loadScope and checked on every delivery, live
+// and replayed.
+func newEventStreamHandlerScoped(auth AuthFunc, b *eventBroadcaster, loadScope streamScopeLoader) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok {
@@ -337,20 +413,48 @@ func newEventStreamHandler(auth AuthFunc, b *eventBroadcaster) http.Handler {
 		}
 		rc := http.NewResponseController(w)
 
-		channel := r.URL.Query().Get("channel")
+		q := r.URL.Query()
+		channel := q.Get("channel")
 		if channel == "" {
 			channel = eventStreamChannelAll
+		}
+		includeOwn := q.Get("include_own") == "true"
+		resume := q.Has("after")
+		if resume && b.log == nil {
+			WriteError(w, r, fmt.Errorf("%w: ?after= needs the event log, which this instance does not keep", ErrBadRequest))
+			return
+		}
+		var scope *ReadScope
+		if loadScope != nil {
+			s, err := loadScope(r.Context(), user)
+			if err != nil {
+				WriteError(w, r, err)
+				return
+			}
+			scope = s
 		}
 
 		// subscribe before any header is written — headers cannot be
 		// unwritten, so a 429 rejection (T271) has to happen before the
-		// status line commits to 200.
-		ch, err := b.subscribeOpts(user.ID, channel, r.URL.Query().Get("include_own") == "true")
+		// status line commits to 200. On a resume it also comes before the
+		// replay, so an event published meanwhile is buffered, not lost.
+		ch, err := b.subscribeScoped(user.ID, channel, includeOwn, scope)
 		if err != nil {
 			WriteError(w, r, err)
 			return
 		}
 		defer b.unsubscribe(ch)
+
+		var first EventPage
+		var since int64
+		if resume {
+			since = b.log.last.Load()
+			first, err = b.log.page(r.Context(), q.Get("after"), eventStreamReplayPage)
+			if err != nil {
+				WriteError(w, r, err)
+				return
+			}
+		}
 
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -358,6 +462,36 @@ func newEventStreamHandler(auth AuthFunc, b *eventBroadcaster) http.Handler {
 		w.Header().Set("X-Accel-Buffering", "no") // nginx: disable proxy buffering on this route
 		w.WriteHeader(http.StatusOK)
 		fl.Flush()
+
+		write := func(line []byte) bool {
+			// Config.WriteTimeout is a fixed deadline set once when this
+			// connection's headers were read, never reset by an
+			// intermediate Flush() — wrong for a deliberately long-lived
+			// stream. Refreshing it here (rather than disabling it once)
+			// still bounds a genuinely wedged write, matching T271's own
+			// bounded-resource reasoning applied to connection duration
+			// instead of connection count.
+			if err := rc.SetWriteDeadline(time.Now().Add(2 * eventStreamHeartbeat)); err != nil {
+				slog.WarnContext(r.Context(), "smeldr: event stream: SetWriteDeadline unsupported", "error", err)
+			}
+			if _, err := w.Write(append(line, '\n')); err != nil {
+				return false
+			}
+			fl.Flush()
+			return true
+		}
+
+		// seen holds the replayed events that may also arrive live: those
+		// logged from just before this connection subscribed. A live event in
+		// it is skipped once.
+		var seen map[string]bool
+		if resume {
+			var ok bool
+			seen, ok = replayStream(r.Context(), b, first, since, q.Get("after"), eventStreamSub{tokenID: user.ID, channels: parseChannels(channel), includeOwn: includeOwn, scope: scope}, write)
+			if !ok {
+				return
+			}
+		}
 
 		ticker := time.NewTicker(eventStreamHeartbeat)
 		defer ticker.Stop()
@@ -372,29 +506,67 @@ func newEventStreamHandler(auth AuthFunc, b *eventBroadcaster) http.Handler {
 				if !ok {
 					return
 				}
-				// Config.WriteTimeout is a fixed deadline set once when this
-				// connection's headers were read, never reset by an
-				// intermediate Flush() — wrong for a deliberately long-lived
-				// stream. Refreshing it here (rather than disabling it once)
-				// still bounds a genuinely wedged write, matching T271's own
-				// bounded-resource reasoning applied to connection duration
-				// instead of connection count.
-				if err := rc.SetWriteDeadline(time.Now().Add(2 * eventStreamHeartbeat)); err != nil {
-					slog.WarnContext(r.Context(), "smeldr: event stream: SetWriteDeadline unsupported", "error", err)
+				if len(seen) > 0 {
+					if id := envelopeID(payload); seen[id] {
+						delete(seen, id)
+						continue
+					}
 				}
-				if _, err := w.Write(append(payload, '\n')); err != nil {
+				if !write(payload) {
 					return
 				}
-				fl.Flush()
 			case <-ticker.C:
-				if err := rc.SetWriteDeadline(time.Now().Add(2 * eventStreamHeartbeat)); err != nil {
-					slog.WarnContext(r.Context(), "smeldr: event stream: SetWriteDeadline unsupported", "error", err)
-				}
-				if _, err := w.Write([]byte(`{"type":"ping"}` + "\n")); err != nil {
+				if !write([]byte(`{"type":"ping"}`)) {
 					return
 				}
-				fl.Flush()
 			}
 		}
 	})
+}
+
+// replayStream writes the logged events after the cursor, page by page,
+// that sub would have received, then the caught_up line. since is the log's
+// last seq when the connection subscribed: a replayed event logged from one
+// batch before it may also arrive live, so its ID is returned in seen. It
+// reports false when the connection must close (a write or a later page
+// failed).
+func replayStream(ctx context.Context, b *eventBroadcaster, page EventPage, since int64, after string, sub eventStreamSub, write func([]byte) bool) (map[string]bool, bool) {
+	seen := map[string]bool{}
+	if page.Skipped {
+		line, _ := json.Marshal(map[string]string{"type": "skipped", "after": after, "resumed_from": page.Oldest})
+		if !write(line) {
+			return nil, false
+		}
+	}
+	cursor := after
+	for {
+		var lastSeq int64
+		for _, e := range page.Events {
+			lastSeq = e.Seq
+			if !sub.deliverable(e.meta()) {
+				continue
+			}
+			if !write(e.Payload) {
+				return nil, false
+			}
+			cursor = e.ID
+			if e.Seq > since-eventLogBatch {
+				seen[e.ID] = true
+			}
+		}
+		if len(page.Events) < eventStreamReplayPage {
+			break
+		}
+		events, err := b.log.after(ctx, lastSeq, eventStreamReplayPage)
+		if err != nil {
+			slog.WarnContext(ctx, "smeldr: event stream: replay failed; closing so the client resumes", "error", err)
+			return nil, false
+		}
+		page = EventPage{Events: events}
+	}
+	line, _ := json.Marshal(map[string]string{"type": "caught_up", "cursor": cursor})
+	if !write(line) {
+		return nil, false
+	}
+	return seen, true
 }

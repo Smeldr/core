@@ -327,7 +327,7 @@ func webhookDispatch(ctx context.Context, ev SignalEvent, sig LifecycleEvent, st
 	if !ok {
 		return nil
 	}
-	payload, err := buildWebhookPayload(ev.Type, ev.raw, sig)
+	payload, err := ev.envelopeFor(sig)
 	if err != nil {
 		slog.WarnContext(ctx, "webhook payload build failed", "error", err, "signal", sig, "type", ev.Type)
 		return nil
@@ -363,6 +363,7 @@ func enqueueWebhookEvent(ctx context.Context, store *WebhookStore, pool *workerP
 			CreatedAt:   now,
 			ExpiresAt:   now.Add(24 * time.Hour),
 			Status:      "pending",
+			EventID:     envelopeID(payload),
 		}
 		if err := pool.Enqueue(ctx, job); err != nil {
 			slog.WarnContext(ctx, "webhook enqueue failed", "error", err, "endpoint", ep.ID)
@@ -391,6 +392,11 @@ type transitionWebhookData struct {
 	// deliveries carry them like the event stream does.
 	ActorID   string `json:"actor_id,omitempty"`
 	ActorKind string `json:"actor_kind,omitempty"`
+
+	// typeName is the registered type name, for the event log and the read
+	// check (Type is lower case); aboutType and aboutID name a Signal's
+	// subject. None of them is part of the payload.
+	typeName, aboutType, aboutID string
 }
 
 // dispatchTransitionWebhook builds the payload for a state-flow transition
@@ -451,8 +457,9 @@ func dispatchEventToFrom(ctx context.Context, store *WebhookStore, pool *workerP
 		slog.WarnContext(ctx, "smeldr: transition webhook payload build failed", "error", err, "event", eventName)
 		return
 	}
+	id := NewID()
 	payload, err := json.Marshal(WebhookEventPayload{
-		ID:        NewID(),
+		ID:        id,
 		Event:     eventName,
 		Timestamp: time.Now().UTC(),
 		Data:      dataJSON,
@@ -465,7 +472,9 @@ func dispatchEventToFrom(ctx context.Context, store *WebhookStore, pool *workerP
 		enqueueWebhookEvent(ctx, store, pool, eventName, payload)
 	}
 	if streamed {
-		broadcaster.publishToFrom(actorID, channels, payload)
+		meta := eventMeta{id: id, event: eventName, channels: channels, actorID: actorID}
+		meta.subjectType, meta.subjectID, meta.otherType, meta.otherID = eventSubject(data)
+		broadcaster.publishEvent(meta, payload)
 	}
 }
 
@@ -528,13 +537,15 @@ type relationEventData struct {
 // a.cfg.DB being nil), degrades to a true broadcast rather than failing the
 // call — channel routing is best-effort, never a reason to drop the event.
 func (a *App) NotifySignalCreated(ctx context.Context, id, slug string) {
-	channel := ""
+	// The status (D115: open or pending) and the subject (for the stream's
+	// read check) come from the row in the same lookup.
+	channel, status, subjectType, subjectID := "", "pending", "", ""
 	if a.cfg.DB != nil {
 		if err := a.cfg.DB.QueryRowContext(ctx,
-			"SELECT receiver FROM smeldr_signals WHERE id = $1", id,
-		).Scan(&channel); err != nil {
+			"SELECT receiver, status, subject_type, subject_id FROM smeldr_signals WHERE id = $1", id,
+		).Scan(&channel, &status, &subjectType, &subjectID); err != nil {
 			slog.WarnContext(ctx, "smeldr: NotifySignalCreated: receiver lookup failed, broadcasting instead", "id", id, "error", err)
-			channel = ""
+			channel, status = "", "pending"
 		}
 	}
 	// The creator's own stream connection (same token) is skipped, like any
@@ -546,7 +557,8 @@ func (a *App) NotifySignalCreated(ctx context.Context, id, slug string) {
 		actorID = uc.User().ID
 	}
 	dispatchTransitionWebhookFrom(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, actorID, channel, "signal.created", transitionWebhookData{
-		Type: "signal", ID: id, Slug: slug, ToState: "pending",
+		Type: "signal", ID: id, Slug: slug, ToState: status,
+		typeName: "Signal", aboutType: subjectType, aboutID: subjectID,
 	})
 }
 

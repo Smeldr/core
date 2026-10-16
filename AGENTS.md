@@ -327,7 +327,7 @@ on `User.ID`); `?include_own=true` opts back in, and system-originated events
 are never suppressed. A consumer holding the stream with a service token does
 not see that token's own writes: silence is not proof that nothing changed. A `{"type":"ping"}` line
 arrives every 25s while idle.
-At-most-once delivery — no replay on reconnect.
+Without the event log, delivery is at most once: a dropped connection misses the gap. With `App.EventLog` (example/server `ENABLE_EVENT_LOG`, core v1.160.0, D117), reconnect with `?after=<last event id>`. The events you missed come first, in order, then a `{"type":"caught_up"}` line, then live events. Delivery is then at least once, so deduplicate by `id`. A `{"type":"skipped"}` line means your cursor was older than the 30-day retention. A connection whose buffer fills is closed, not thinned, so reconnect with `?after=`. Under governance, events about items your token cannot read are not delivered.
 
 **Channel subscription (v1.81.0+, A302; extended v1.89.2+, 01a0a683):**
 `?channel=<name>` subscribes to one channel only — a `Task`/`Goal`'s own

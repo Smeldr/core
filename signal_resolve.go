@@ -117,6 +117,7 @@ func (r signalResolver) emit(ctx context.Context, s *Signal) error {
 	}
 	dispatchTransitionWebhook(ctx, r.webhooks, r.pool, r.broadcaster, s.Receiver, "signal.created", transitionWebhookData{
 		Type: "signal", ID: s.ID, Slug: s.Slug, Address: s.Address, ToState: string(s.Status),
+		typeName: "Signal", aboutType: s.SubjectType, aboutID: s.SubjectID,
 	})
 	return nil
 }

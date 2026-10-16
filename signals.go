@@ -339,6 +339,11 @@ type SignalEvent struct {
 	// delivery handler to build the full payload. Not exposed to external
 	// OnSignal subscribers.
 	raw any
+
+	// envelope builds the event's one webhook envelope once, so the stream, the
+	// event log and the webhook outbox share its ID (D117). Nil for an event
+	// not built by [buildSignalEvent].
+	envelope *lifecycleEnvelope
 }
 
 // afterHookMeta carries module-level metadata from notifyAfter to the App's
@@ -403,5 +408,26 @@ func buildSignalEvent(ctx Context, _ LifecycleEvent, meta afterHookMeta, item an
 		Reason:        meta.Reason,
 		recorded:      meta.Recorded,
 		raw:           item,
+		envelope:      &lifecycleEnvelope{},
 	}
+}
+
+// lifecycleEnvelope is a lifecycle event's webhook envelope, built at most
+// once and shared by every sink of the event.
+type lifecycleEnvelope struct {
+	once    sync.Once
+	payload []byte
+	err     error
+}
+
+// envelopeFor returns ev's envelope for sig, building it on first use. An
+// event without a shared envelope builds a fresh one.
+func (ev SignalEvent) envelopeFor(sig LifecycleEvent) ([]byte, error) {
+	if ev.envelope == nil {
+		return buildWebhookPayload(ev.Type, ev.raw, sig)
+	}
+	ev.envelope.once.Do(func() {
+		ev.envelope.payload, ev.envelope.err = buildWebhookPayload(ev.Type, ev.raw, sig)
+	})
+	return ev.envelope.payload, ev.envelope.err
 }
