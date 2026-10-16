@@ -21,6 +21,10 @@ cross-referenced below by their Amendment ID.
 Changes planned for v2 and beyond are tracked in [BACKLOG.md](BACKLOG.md)
 under Milestone 10 and the v2+ Roadmap section.
 
+---
+
+## [1.160.0] - 2026-10-16
+
 ### Added
 
 - **`App.EventLog(EventLogOptions{Retention})` makes the event stream durable (A520, D117).** Every streamed event is written to the new table `smeldr_events` and kept for the retention period, `DefaultEventLogRetention` (30 days) when zero. It is opt-in and needs `Config.DB` and `App.EventStream`; `App.Handler` creates the table and starts one writer goroutine. `CreateEventLogTable(db)` is exported. One writer assigns each event a `seq`, inserts a batch in one transaction, and delivers it only after the commit, so a resuming client never sees an event the log lacks. One process writes the log. In example/server, `ENABLE_EVENT_LOG` (which needs `ENABLE_EVENT_STREAM`) and `EVENT_LOG_RETENTION_DAYS` control it, and events past retention are deleted hourly.
