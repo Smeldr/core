@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.165.0] - 2026-10-16
+
 ### Fixed
 
 - **Reference edges written at create send `relation.asserted` (T875, A530).** A Signal's `about` edges from its subject and `task_ref` were written in its insert without an event; `NotifySignalCreated` (mcp's `create_signal`) and the conditions core emits now announce them after the commit (provenance and `relation.asserted`, `new_row` true, with the T872 addresses). The Task, Amendment and runtime-type paths already announced, but on SQLite reading the edge back failed (`created_at` scanned as a string into a time), so they announced nothing there either; fixed. A failed announce is logged at Warn.
