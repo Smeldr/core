@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.162.0 · smeldr.dev/mcp v1.64.0 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.26.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.162.0 · smeldr.dev/mcp v1.64.0 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.27.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -532,6 +532,7 @@ Tools are named from the type in lower_snake_case.
   - `create_signal` returns the real `status` and a `warnings` array.
   - Subscriptions (D116): `list_subscriptions`, `get_subscription`, `create_subscription` (`name`, `filter`, `include_own`, `paused`), `update_subscription` (`paused` true/false pauses and resumes), `delete_subscription` (not the defaults). Listed when the instance keeps subscriptions.
   - A resource-subscription session belongs to the token that first subscribes it, and is notified only while that token is not revoked and may read the item.
+  - cli v0.27.0 (A525) has the same as `subscription ...` and `signal answer|withdraw`, plus `watch --subscription <address>`. Gotcha: `watch` replaces the PowerShell watch scripts only at the protocol switch (`architect-protocol-switch-to-subscriptions`), after deploy 2. Until then keep `scripts/watch-events.ps1`.
 
 Block system (T32, enabled with `mcp.WithBlocks()`; blocks addressed by ID, not slug):
 
@@ -742,6 +743,10 @@ smeldr-cli transition <type_name> <slug> --to <state> --reason "<text>"  # when 
 # Relation (smeldr-cli v0.22.0+, needs mcp v1.51.0+ on the server): end a relation on purpose, keeping its row
 smeldr-cli relation withdraw <edge-id> --reason "<text>"       # Author
 smeldr-cli relation list [--kind K] [--source-type T] [--target-type T] [--include-ended] [--as-of RFC3339] [--limit N] [--offset N] [--all] [--json]   # Author; --all pages the whole graph at one as_of (cli v0.25.0)
+smeldr-cli subscription list|get|create|update|pause|resume|delete [args]   # Author; your event subscriptions (D116, cli v0.27.0, mcp v1.64.0)
+smeldr-cli signal answer <address> --text <answer> [--ref Type:ident]       # Author; close an open request (D115)
+smeldr-cli signal withdraw <address> --reason <text>                        # Author
+smeldr-cli watch --subscription <address> [--after <id>]                    # Author; one JSON line per event; reconnects with ?after= after a drop or a clean close, dedupes by id; exit 1 on 400/401/403/404
 
 # Standing (D100, smeldr-cli v0.18.0+, needs mcp v1.46.0+ on the server): holds, ceased, none, or "no standing for this type"
 # (rarely also a failed flow lookup on the server). "<type> get/list" read REST and do not show standing.
