@@ -126,8 +126,8 @@ time it's recorded (the commit is already pushed). Call `create_amendment`
 with `amendment_type` (one of feature, fix, docs, chore, test, ci, refactor,
 release), `version`, `commit_hash`, `summary` (the title: one line, at most
 120 characters; the detail goes in `body`), `task_ref` (the Task it ships,
-by address or slug; A521, once process.smeldr.dev runs core v1.161.0 or
-later, which then asserts `ships_as` itself), and `body` (the full markdown rationale, same depth as a
+by address or slug; the server records `ships_as` from it, D113, so never
+assert that edge by hand), and `body` (the full markdown rationale, same depth as a
 `decisions/recent.md` Amendment entry used to carry — do not leave this
 thinner than the git-file convention it replaces). Then call
 `transition_item` (type `Amendment`) through the full chain in the same
@@ -421,7 +421,7 @@ one complete live Amendment record — no step below is optional:
 
 1. **`create_amendment`** with `amendment_type` (closed list), `version`,
    `commit_hash`, `summary` (the title, at most 120 characters), `task_ref`
-   (once the instance runs core v1.161.0+), and `body` (the full markdown
+   (the Task it ships; the server records `ships_as` from it), and `body` (the full markdown
    rationale: this is now the only place it lives; write the same depth
    `decisions/recent.md` used to hold).
 2. **No number sent:** the server assigns the address (D110); cite the one
@@ -925,7 +925,7 @@ workflow", step 4), and every commit waits for the architect's `commit-approved`
 
 # Smeldr Agent Protocol
 
-<!-- common-template-version: 2026-10-16c -->
+<!-- common-template-version: 2026-10-16d -->
 <!-- source: smeldr/architect/AGENT_PROTOCOL.md (canonical) -->
 
 **This file is the canonical common template of D77.** Every role (core, site, cloud,
@@ -1063,7 +1063,7 @@ itself arrives.
      Deploys, server, DNS and credential actions are never covered by a release plan;
    - **a real blocker:** something the Task cannot proceed without (missing access, a
      contradiction in the Task, a decision only Peter or architect can make). Say what it
-     is in an `implementation-question` Signal, or move the Task to `blocked` with the
+     is in a `question` Signal (see "Signal protocol"), or move the Task to `blocked` with the
      reason.
 
    A plan's open questions are not a blocker: write them into the `task_plan` and submit
@@ -1132,11 +1132,15 @@ itself arrives.
 5. Before proceeding past `active`, verify the Task's `depends_on` edges point at `done`
    tasks. If one does not, stop and say so — never guess.
 6. **Relations are part of the record**: architect asserts `derives_from` (Task → Goal)
-   at dispatch and `ships_as` (Task → Amendment, thin Amendment item created at close).
-   Implementers do not assert edges yet.
-7. The `Signal` type still exists for system-emitted notifications (D42's
-   automation-stopped-at-a-gate class) — if one is addressed to your role, read it,
-   acknowledge it via its own flow, act through the normal channels.
+   at dispatch. `ships_as` (Task → Amendment) follows from the Amendment itself: give
+   `create_amendment` the Task's address in `task_ref` and the server records the edge
+   (D113, core v1.161.0, live since 2026-10-16); nobody asserts it by hand. A reference
+   field is checked when it is written: a `task_ref` that names no Task you can read is
+   refused, with a message that says what to send instead.
+7. The system also emits Signals: conditions such as `authorization-required` (D42's
+   automation-stopped-at-a-gate class). If one is addressed to your role, act on its
+   subject through the normal channels; the condition resolves itself when the subject
+   moves (see "Signal protocol").
 
 **Task vs. Goal (D88, supersedes D57).** A `Task` is the work item for every role and
 every kind of work. Work that ends in a repo change takes the full plan/commit path above.
@@ -1232,6 +1236,18 @@ point `PROJECT_KEY` at your own project's absolute path (forward-slash form), sa
 with an unfiltered copy, then commit the real one. Every session after that: just start it
 and leave it running.
 
+**Resume with `?after=` (D117, core v1.160.0, live since 2026-10-16).** The instance keeps
+an event log, so a watcher that reconnects loses nothing: it saves the envelope `id` of
+the last event it printed and connects with `&after=<id>`. The server first replays every
+event after that id, then sends one `{"type":"caught_up"}` line, then live events. An
+event can arrive twice around a resume, so skip one whose id equals the saved one. A
+`{"type":"skipped"}` line means the saved id is no longer in the log and some events were
+missed: print it, then catch up by hand (pending and open Signals, priority 0 backlog). A
+400 on `?after=` means the saved id is bad: drop it and connect without one.
+`smeldr/architect/scripts/watch-events.ps1` does all of this (cursor file under
+`%LOCALAPPDATA%\smeldr\`); copy its resume part into your own watcher, keeping your own
+`?channel=` value and a cursor file name of your own.
+
 **Cloud sessions — use `scripts/watch-events-cloud.sh`, added 2026-09-25 (`2026-09-25b`)
 during architect's own first live cloud pilot, not `watch-events.ps1`/`.sh`.** Neither
 local script ports: `.ps1` needs `powershell.exe`, unavailable on the cloud environment's
@@ -1306,16 +1322,21 @@ exception and still broadcast to every channel.
   call's result is the confirmation. Opt back in with `?include_own=true` only if your
   role genuinely needs it.
 - **Topic channels (core v1.129.0, A435).** `signal.transitioned` (a caller moving a
-  Signal), the expiry sweep's one-per-run `signal.expiry_swept`, every `amendment.*`
-  event, and the new `relation.asserted`/`relation.ended` are published on topic channels
-  (`signals`, `amendments`, `relations`), never on a role channel. A role session on
+  Signal, an answer or a withdrawal included), every `amendment.*` event, and
+  `relation.asserted`/`relation.ended` are published on topic channels (`signals`,
+  `amendments`, `relations`), never on a role channel. A role session on
   `?channel=<band>` is not woken by them; a `?channel=all` or `?channel=<topic>`
   subscriber gets them. `signal.created` still arrives on the receiver's channel. Query
-  `list_amendments` or `list_signals` when you need that state.
+  `list_amendments` or `list_signals` when you need that state. One consequence today:
+  the answer to your own `question` does not wake a `?channel=<band>` watcher. While you
+  wait on one, re-read it (`get_signal`) whenever you resume; subscriptions will deliver
+  it once the watchers move to them (the second step of the D116 switch).
 
-Outbound webhooks are unaffected: they still receive all of these. A per-item
-subscription model that lets a role ask for some of them back is a separate, open design
-item, not built.
+Subscriptions (D116, core v1.162.0, live since 2026-10-16) are how a token asks for
+exactly the events it wants; every role token has its role subscriptions seeded. A
+connection with `?channel=` keeps the channel routing above, so the watchers are not on
+subscriptions yet; that move is the second step of the switch and this file will say
+when. Webhooks are delivered as subscriptions too.
 `task.created`/`task.updated` means an item now exists in or changed within the backlog,
 nothing more — it is not a start signal, do not claim and start work the moment one
 arrives. `task.transitioned` is relevant only when it concerns a Task you are already
@@ -1445,7 +1466,7 @@ For every other case:
    `transition_item`s it to `approved` plus signals `approved-start`.
 4. **Implement**, following your own repo's domain rules. Read-only commands (build, vet,
    test, format, git status/diff/log) run autonomously. Signal `implementing` if
-   long-running, `implementation-question` if blocked.
+   long-running, a `question` if blocked.
 5. **Verify**, then signal `commit-ready` with the full proposed commit message(s) in the
    notes. **Do not ask for commit approval in chat — the signal is the request.**
 6. **Architect reviews the actual diff on disk** (not the commit message alone) and
@@ -1462,41 +1483,57 @@ This is a signal-driven (or Task-state-driven) protocol, not a chat-approval pro
 
 ## Signal protocol
 
-Every role uses `Signal` records as the doorbells of the work cycle (`plan-ready`,
-`commit-ready`, `task-closed`, `implementation-question`, `notice` to architect;
-`plan-approved`, `plan-feedback`, `commit-approved`, `commit-feedback`, `answer` from
-architect), see "Plan → approval → implementation → commit". A Signal is never dispatch
-and never approval: dispatch is a Task, approval is written in the `task_plan` body.
+A Signal is a doorbell: it names the record that holds the content (the `task_plan`, the
+Task, the Decision) and never carries the content itself. It is never dispatch and never
+approval: dispatch is a Task, approval is written in the `task_plan` body. `message` is at
+most 500 characters (D114).
 
-**Brand's discussion mode.** Brand-expert additionally runs a discussion-mode layer, for
-design-review conversations specifically (not dispatch): the real
-`Signal` content type (`create_signal`/`list_signals`/`transition_item`, state flow
-`pending → read → acknowledged/expired`), not a flat file. `signal_type` values:
-`turn-posted`, `synthesis-proposed`, `synthesis-agreed`, `session-closing`.
-`sender`/`receiver`: `architect`/`brand`. Discussion content itself lives in
-`smeldr/common/reviews/<slug>/discussion.md` (append-only) — the `Signal` is only the
+**Two kinds of Signal, and history (D115, core v1.159.0, live since 2026-10-16).**
+
+| Kind | `signal_type` | Starts | Ends |
+|---|---|---|---|
+| request | `question`, `review-requested` | `open` | `answered` (by the receiver, with `answer_signal`) or `withdrawn` (by the asker, with `withdraw_signal`) |
+| condition | `ratification-required`, `authorization-required`, `conflict-detected` (and three with no emitter yet) | `open` | `resolved`, by the system, when the condition ends |
+| history | every other type: `plan-ready`, `plan-resubmitted`, `commit-ready`, `task-closed`, `notice`, `plan-approved`/`approved-start`, `plan-feedback`, `commit-approved`, `commit-feedback`, `answer`, brand's discussion types | `pending` | `read`, then `acknowledged` |
+
+- **Ask with `question`.** It replaces `implementation-question` (still accepted, with a
+  `deprecated_signal_type` warning). Put the question itself in the record it concerns
+  where one exists (a plan question goes in the `task_plan` body) and name that record.
+- **Answer with `answer_signal`**, not with a new Signal: the request moves to `answered`
+  with your answer stored on it, and `answer_ref` names the change the answer made (for
+  example `Task:T42`). The asker reads the answer on the request itself (`get_signal`).
+  **Withdraw** your own request with `withdraw_signal` and a reason when it no longer
+  applies.
+- **Conditions are the system's.** No role creates one (refused) or answers one; a
+  condition resolves when what it describes ends (the Decision leaves `proposed`, the
+  blocked transition happens). Act on the subject, not on the Signal.
+- **History types** keep their old flow and are still how the work cycle's doorbells are
+  sent today (see "Plan → approval → implementation → commit"). Each create returns a
+  `deprecated_signal_type` warning; that is expected until the switch to subscriptions,
+  not an error to act on. They are refused only after the instance's signal event
+  cutover, which is set after that switch, and this file will say so first.
+- **`task_ref` names a Task**, by address, slug or ID, and is checked on write (D113). To
+  point a Signal at any other record, use `subject_type` and `subject_id`.
+- **`list_signals` without `state`** returns what awaits action: `open` and `pending`
+  together. Nothing expires any more: the expiry sweep is retired (`ENABLE_SIGNAL_EXPIRY_SWEEP`
+  removed in deploy 2), so what you do not close stays open.
+
+**Close what you handle, throughout the session, not only at session start.**
+- History Signals: `pending → read` when you have seen it, `read → acknowledged` once you
+  have acted on it. A direct `pending → acknowledged` is not a legal transition.
+- Requests addressed to you: answer them (`answer_signal`), never a bare ack.
+- Your own requests that no longer apply: withdraw them.
+
+Why: an open or pending Signal must keep meaning "waiting on you". Found 2026-09-28:
+architect had 609 Signals sitting at `pending`, most of them long handled, so a real new
+one was indistinguishable from the backlog.
+
+**Brand's discussion mode.** Brand-expert additionally runs a discussion-mode layer for
+design-review conversations (not dispatch), with the history types `turn-posted`,
+`synthesis-proposed`, `synthesis-agreed`, `session-closing`, `sender`/`receiver`
+`architect`/`brand`. Discussion content itself lives in
+`smeldr/common/reviews/<slug>/discussion.md` (append-only); the Signal is only the
 doorbell.
-
-Arm `GET /_events/stream` the same way every other role does (see above), filtered
-client-side for `signal.created` events where `receiver` is `brand`.
-
-**Every role, not just brand: close every `Signal` addressed to you, throughout the
-session, not only at session start.**
-- `pending → read` when you have seen it.
-- `read → acknowledged` once you have acted on it. A direct `pending → acknowledged` is
-  not a legal transition; go through `read`.
-- Standing-condition Signals (`authorization-required`, `review-requested`,
-  `conflict-detected`) close by being answered, never by a bare ack: answering the
-  condition is what closes them.
-- Anything left `pending`/`read` for 14 days is moved to `expired` by core's scheduled
-  Signal expiry sweep (A374, `ENABLE_SIGNAL_EXPIRY_SWEEP`), except the standing-condition
-  types above, which never expire. The sweep is a backstop for what nobody closed, not a
-  substitute for closing your own.
-
-Why: `pending` must keep meaning "waiting on you". Found 2026-09-28: architect had 609
-Signals sitting at `pending`, most of them long handled, so a real new one was
-indistinguishable from the backlog. Not retroactive for other roles' old Signals; the
-expiry sweep clears those.
 
 **Brand reviews frontend plans, parallel not blocking (2026-09-03).** Any role's plan
 that touches UI gets posted as a turn in the relevant `discussion.md` thread plus a

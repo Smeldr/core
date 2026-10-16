@@ -47,7 +47,46 @@ Add-Type -AssemblyName System.Net.Http
 $ConfigFile = 'C:\Users\peter\.claude.json'
 $ProjectKey = 'C:/Users/peter/Documents/Code/Smeldr/core'
 $Channel = 'core'
-$Url = "https://process.smeldr.dev/_events/stream?channel=$Channel"
+$BaseUrl = "https://process.smeldr.dev/_events/stream?channel=$Channel"
+
+# Resume (D117, core v1.160.0, live since deploy 2, 2026-10-16), copied from
+# smeldr/architect/scripts/watch-events.ps1: the id of the last event printed
+# is kept in a file outside the repo, and every reconnect sends ?after=<id>,
+# so events that happened while the Monitor was down are replayed instead of
+# lost. The server may send an event twice around a resume (dedupe by id); a
+# {"type":"skipped"} line means the cursor was no longer kept and some events
+# were missed (printed, so the gap is visible); {"type":"caught_up"} marks the
+# start of live delivery (filtered like pings). A 400 on ?after= means the
+# cursor is bad: the file is dropped and the next connect starts live.
+#
+# One cursor file per lane, so core-a and core-b never share one: the lane is
+# the checkout this script runs from (core is core-a, the core-b worktree is
+# core-b).
+$Lane = Split-Path -Leaf (Split-Path -Parent $PSScriptRoot)
+if ($Lane -eq 'core') { $Lane = 'core-a' }
+$StateDir = Join-Path $env:LOCALAPPDATA 'smeldr'
+$StateFile = Join-Path $StateDir "$Lane-events-last-id"
+
+function Get-LastId {
+    try {
+        if (Test-Path $StateFile) {
+            $v = (Get-Content -Raw $StateFile).Trim()
+            if ($v -match '^[0-9a-zA-Z-]+$') { return $v }
+        }
+    } catch {}
+    return $null
+}
+
+function Set-LastId([string]$id) {
+    try {
+        if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Path $StateDir | Out-Null }
+        $tmp = "$StateFile.tmp"
+        [System.IO.File]::WriteAllText($tmp, $id)
+        Move-Item -Force $tmp $StateFile
+    } catch {
+        [Console]::Error.WriteLine("ERROR: could not save last event id: $_")
+    }
+}
 
 function Get-ProcessToken {
     $cfg = Get-Content -Raw $ConfigFile | ConvertFrom-Json
@@ -71,6 +110,10 @@ while ($true) {
         continue
     }
 
+    $lastId = Get-LastId
+    $Url = $BaseUrl
+    if ($lastId) { $Url = "$BaseUrl&after=$lastId" }
+
     $connectedAt = Get-Date
     $client = [System.Net.Http.HttpClient]::new()
     $client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
@@ -81,6 +124,9 @@ while ($true) {
         $response = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
         if (-not $response.IsSuccessStatusCode) {
             [Console]::Error.WriteLine("ERROR: HTTP $([int]$response.StatusCode) from $Url")
+            if ($lastId -and [int]$response.StatusCode -eq 400) {
+                Remove-Item -Force -ErrorAction SilentlyContinue $StateFile
+            }
         } else {
             $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
             $reader = [System.IO.StreamReader]::new($stream)
@@ -88,7 +134,15 @@ while ($true) {
                 while (-not $reader.EndOfStream) {
                     $line = $reader.ReadLine()
                     if ($null -eq $line) { break }
-                    if ($line -notmatch '"type":"ping"') {
+                    if ($line -match '"type":"(ping|caught_up)"') { continue }
+                    if ($line -match '^\{"id":"([^"]+)"') {
+                        $id = $Matches[1]
+                        if ($id -eq $lastId) { continue }
+                        [Console]::Out.WriteLine($line)
+                        [Console]::Out.Flush()
+                        $lastId = $id
+                        Set-LastId $id
+                    } else {
                         [Console]::Out.WriteLine($line)
                         [Console]::Out.Flush()
                     }
