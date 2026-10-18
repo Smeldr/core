@@ -45,6 +45,10 @@ type SchemaField struct {
 	// transaction as the write. The type must be registered, or be the type
 	// being defined.
 	References string `json:"references,omitempty"`
+	// Search makes the field searchable by [App.Search] (T885). When no field
+	// of a schema sets it, the string fields with a title, description, body
+	// or summary role, or the markdown format, are searchable.
+	Search bool `json:"search,omitempty"`
 }
 
 // ContentTypeSchema holds the declared field definitions for one content type.

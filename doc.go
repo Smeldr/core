@@ -210,6 +210,12 @@
 //     one transition verb. [App.AuthorizeCapability] checks a caller against a
 //     capability under the read rules and grants, and [App.VisibleCapabilities]
 //     lists what a caller may use.
+//   - Search ([App.Search], [SearchQuery], [SearchResult]): a plain,
+//     case-insensitive text search across every record type the caller may
+//     read, filtered by type, state and place (unplaced included), with the
+//     read rules applied before anything is returned or counted. A compiled
+//     type marks searchable fields with smeldr_search:"text", a runtime type
+//     with [SchemaField.Search].
 //   - Record shape (D112): Decision, Task, Goal and Amendment carry a title of
 //     at most [TitleMaxLength] characters, warned about first and refused after
 //     [Config.TitleCutover]; amendment_type is the closed list [AmendmentTypes];

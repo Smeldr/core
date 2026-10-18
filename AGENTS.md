@@ -86,6 +86,8 @@ Supported `smeldr_format` values:
 
 These tags are hints only. Smeldr performs no validation based on them.
 
+Tag a string field `smeldr_search:"text"` to make it searchable by `App.Search` and the MCP `search` tool (T885). Untagged fields are not searched; a type with no tagged field still answers a search that only filters by type, state or place. A runtime type sets `search: true` on schema fields instead, or, with none set, its title, description, body and summary roles and markdown fields are searched.
+
 To show a markdown body outside a site template, use `smeldr.RenderMarkdown(body)` (escapes everything, raw HTML included; bounded against hostile input; headings render as one `<h3 class="md-h">` step) and `smeldr.StripMarkdown(body)` for a plain-text preview. The `markdown`/`smeldr_markdown` template funcs pass a line starting with `<` through as raw HTML, for trusted site authors only (core v1.143.0, A465).
 
 ### Extending a framework-provided table
@@ -471,6 +473,8 @@ the modules:
 
 - **MCPRead** — list and read published content
 - **MCPWrite** — create, update, publish, schedule, archive, delete content
+
+- **search** - find records across every type you may read: `query` (2 to 200 characters, plain text, case-insensitive), `types`, `states`, `place` (`none` for records without a Domain or Area). Records you may not read never appear and never count. Author role.
 
 Admin-role agents also have access to token management tools (see below).
 

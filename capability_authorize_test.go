@@ -172,6 +172,7 @@ func TestAuthorizeCapability_TypelessRead(t *testing.T) {
 var readDecisions = map[capabilityKey]string{
 	{ResourceItem, VerbGet}:                 "typed: the item's type and ID decide",
 	{ResourceItem, VerbList}:                "typed: the type's floor, then filtered per item",
+	{ResourceItem, "search"}:                "reads any: App.Search filters every hit by the read rules",
 	{ResourceRelation, VerbGet}:             "typed: the relations of one item, filtered by both ends",
 	{ResourceRelation, VerbList}:            "reads any: ListRelations keeps edges with both ends readable",
 	{ResourceSignal, VerbList}:              "reads any: list_signals filters Signals by their subject",
@@ -216,9 +217,9 @@ func TestCapabilities_ReadDecisions(t *testing.T) {
 			t.Errorf("typedReads %s %s is not a read capability", key.resource, key.verb)
 		}
 	}
-	if len(typelessReadsAny) != 4 || !typelessReadsAny[capabilityKey{ResourceSignal, VerbList}] || !typelessReadsAny[capabilityKey{ResourceRelation, VerbList}] ||
+	if len(typelessReadsAny) != 5 || !typelessReadsAny[capabilityKey{ResourceItem, "search"}] || !typelessReadsAny[capabilityKey{ResourceSignal, VerbList}] || !typelessReadsAny[capabilityKey{ResourceRelation, VerbList}] ||
 		!typelessReadsAny[capabilityKey{ResourceSubscription, VerbGet}] || !typelessReadsAny[capabilityKey{ResourceSubscription, VerbList}] {
-		t.Errorf("typelessReadsAny = %v; want exactly signal list, relation list and subscription get and list", typelessReadsAny)
+		t.Errorf("typelessReadsAny = %v; want exactly item search, signal list, relation list and subscription get and list", typelessReadsAny)
 	}
 }
 
@@ -360,7 +361,7 @@ func TestVisibleCapabilities_PerItemReader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"item get", "item list", "relation get", "relation list", "signal list", "subscription get", "subscription list"}
+	want := []string{"item get", "item list", "item search", "relation get", "relation list", "signal list", "subscription get", "subscription list"}
 	if !slices.Equal(capabilityNames(got), want) {
 		t.Errorf("per-item reader sees %v; want %v", capabilityNames(got), want)
 	}

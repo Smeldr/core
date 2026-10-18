@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **General search across every record type (T885, A537).** `App.Search` (`SearchQuery`, `SearchResult`, `SearchHit`) runs a case-insensitive substring match over every compiled and runtime-defined type the caller may read, the same on SQLite and Postgres. A compiled type marks searchable fields with the `smeldr_search:"text"` tag; a runtime type sets `SchemaField.Search` (JSON `search`), or, when none does, its title, description, body, summary and markdown fields are searched. Filters: types, states and place (`none` for the import inbox, or a Domain or Area). Hidden records are neither hits nor counted in the total. Capability: `item search` (operation `read`).
+
 ---
 
 ## [1.166.0] - 2026-10-18

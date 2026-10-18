@@ -177,6 +177,7 @@ Opt-in: an app that never calls `App.Governance(store)` sees no governance behav
   time too, not only on transition (v1.97.0); `RelationEdge` gained `CreatedBy` (v1.97.0)
   and MCP responses for `get_relations`/`assert_relation`/`propose_relation`/
   `observe_relation` now include it (smeldr.dev/mcp v1.42.1)
+- General search: `App.Search` (T885, core v1.167.0) finds text across every record type the caller may read, with read rules applied before counting; MCP `search` (smeldr.dev/mcp v1.65.0) and `smeldr-cli search` (smeldr.dev/cli v0.28.0)
 
 ## Navigation — Stable
 

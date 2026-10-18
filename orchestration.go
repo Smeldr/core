@@ -21,7 +21,7 @@ type Goal struct {
 	// statement of what it is (D112). A create or update without one, or with
 	// a longer one, gets a title warning, and is refused after
 	// [Config.TitleCutover].
-	Title string `json:"title" db:"title" smeldr_description:"Required (D112): one line, at most 120 characters, a short statement of what the record is. Missing or longer: a warning now, refused after the instance's title cutover."`
+	Title string `json:"title" db:"title" smeldr_search:"text" smeldr_description:"Required (D112): one line, at most 120 characters, a short statement of what the record is. Missing or longer: a warning now, refused after the instance's title cutover."`
 	// GoalID is the canonical identifier (e.g. "T114").
 	GoalID string `json:"goal_id" db:"goal_id" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
 	// Priority is the scheduling priority. Lower values are higher priority.
@@ -35,7 +35,7 @@ type Goal struct {
 	// Size is the effort estimate (e.g. "S", "M", "L", "XL").
 	Size string `json:"size"`
 	// Description is the full goal specification in Markdown.
-	Description string `json:"description" smeldr_format:"markdown"`
+	Description string `json:"description" smeldr_format:"markdown" smeldr_search:"text"`
 	// LastActor is the actor ID of this item's most recent writer (D78;
 	// Option A, 2026-10-08): whoever created it, last changed its content or
 	// last moved it. Set by the server, never from a request body. Empty when
@@ -207,7 +207,7 @@ type Signal struct {
 	// SignalType is the protocol signal name (e.g. "plan-ready", "commit-ready").
 	SignalType string `json:"signal_type" db:"signal_type"`
 	// Message is the free-text body of the signal.
-	Message string `json:"message"`
+	Message string `json:"message" smeldr_search:"text"`
 	// TaskRef is the optional task or amendment identifier this signal relates to.
 	TaskRef string `json:"task_ref" db:"task_ref"`
 	// Sequence is the per-task monotonic counter that orders signals in a conversation.
@@ -239,11 +239,11 @@ type Signal struct {
 	RequiredOperation string `json:"required_role" db:"required_role"`
 	// Resolution says what ended a condition (D115): set by core's resolver
 	// when the Signal moves open to resolved. Empty otherwise.
-	Resolution string `json:"resolution,omitempty" db:"resolution"`
+	Resolution string `json:"resolution,omitempty" db:"resolution" smeldr_search:"text"`
 	// Answer is a request's written answer, or the reason it was withdrawn
 	// (D115): set when the Signal moves open to answered or withdrawn, and the
 	// same text is the transition's reason in provenance. Empty otherwise.
-	Answer string `json:"answer,omitempty" db:"answer"`
+	Answer string `json:"answer,omitempty" db:"answer" smeldr_search:"text"`
 	// AnswerRef names the change an answer points at, as "Type:ID" (for
 	// example "Task:01a1..."). Optional, set with Answer.
 	AnswerRef string `json:"answer_ref,omitempty" db:"answer_ref"`
@@ -268,7 +268,7 @@ type Task struct {
 	// statement of what it is (D112). A create or update without one, or with
 	// a longer one, gets a title warning, and is refused after
 	// [Config.TitleCutover].
-	Title string `json:"title" db:"title" smeldr_description:"Required (D112): one line, at most 120 characters, a short statement of what the record is. Missing or longer: a warning now, refused after the instance's title cutover."`
+	Title string `json:"title" db:"title" smeldr_search:"text" smeldr_description:"Required (D112): one line, at most 120 characters, a short statement of what the record is. Missing or longer: a warning now, refused after the instance's title cutover."`
 	// TaskID is the canonical task identifier (e.g. "T23").
 	TaskID string `json:"task_id" db:"task_id" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
 	// Priority is the scheduling priority. Lower values are higher priority.
@@ -282,7 +282,7 @@ type Task struct {
 	// Size is the effort estimate (e.g. "S", "M", "L", "XL").
 	Size string `json:"size"`
 	// Description is the full task specification in Markdown.
-	Description string `json:"description" smeldr_format:"markdown"`
+	Description string `json:"description" smeldr_format:"markdown" smeldr_search:"text"`
 	// NoteRef is an optional cross-reference to a design note or decision.
 	// It is free text and is not checked; name a Decision or Goal the Task
 	// implements in Implements.
@@ -315,15 +315,15 @@ type Decision struct {
 	// generic heading (e.g. two Decisions both starting "## Context").
 	// Empty is valid on old rows until migrated; never auto-derived from
 	// Body by core itself.
-	Title string `json:"title" db:"title"`
+	Title string `json:"title" db:"title" smeldr_search:"text"`
 	// Scope categorises the decision (e.g. "core", "agent", "cross-cutting").
 	// This IS decision-governance-model design §3's own "affected surface"
 	// classification property — no separate Surface field exists; Scope
 	// already fills that role (decisionScopeRoles/D34, channelColumns/A302
 	// both key off it).
-	Scope string `json:"scope"`
+	Scope string `json:"scope" smeldr_search:"text"`
 	// Body is the full decision text in Markdown, including rationale.
-	Body string `json:"body" smeldr_format:"markdown"`
+	Body string `json:"body" smeldr_format:"markdown" smeldr_search:"text"`
 	// NextEvalAt is the scheduled re-evaluation date. Zero means no scheduled review.
 	NextEvalAt time.Time `json:"next_eval_at" db:"next_eval_at"`
 	// EvalNote records the outcome of the most recent evaluation pass.
@@ -584,12 +584,12 @@ type Amendment struct {
 	// warning. The column stays, so older rows keep their value.
 	Pilot string `json:"pilot" smeldr_deprecated:"true" smeldr_description:"Deprecated (D112): retired, not stored. Band and actor say who did the work."`
 	// Summary is a one-line description of what the amendment changes.
-	Summary string `json:"summary"`
+	Summary string `json:"summary" smeldr_search:"text"`
 	// Body is the full amendment text in Markdown, including rationale —
 	// mirrors Decision.Body exactly. Added for D67 (live recording becomes
 	// primary for new work): Summary alone cannot carry what
 	// decisions/recent.md's own Amendment bodies held before the freeze.
-	Body string `json:"body" smeldr_format:"markdown"`
+	Body string `json:"body" smeldr_format:"markdown" smeldr_search:"text"`
 	// Amends is the number of the Decision this Amendment changes (e.g. "D104"),
 	// or empty when it amends none. It is declared when the Amendment is created
 	// and is write-once: set at creation, or later only while empty; a different

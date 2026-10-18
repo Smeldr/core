@@ -294,6 +294,7 @@ type App struct {
 	rebuilderModules       []rebuilder                         // modules with derived content (sitemap, feed, AI)
 	stoppableModules       []stoppable                         // modules with background goroutines to stop at shutdown
 	mcpModules             []MCPModule                         // modules registered with smeldr.MCP(...)
+	searchModules          []searchableModule                  // compiled modules App.Search covers, first per type name
 	standaloneModules      []standaloneDispatcher              // Standalone() modules; for top-level /{slug} dispatch
 	standaloneReg          bool                                // true once GET /{slug} and GET /{slug}/aidoc are registered
 	typeRegistry           *ContentTypeRegistry                // content-type registry; always non-nil after New()
@@ -625,6 +626,9 @@ func (a *App) Content(v any, opts ...Option) {
 		}
 		if mm, ok := r.(MCPModule); ok && len(mm.MCPMeta().Operations) > 0 {
 			a.mcpModules = append(a.mcpModules, mm)
+		}
+		if sm, ok := r.(searchableModule); ok {
+			a.addSearchModule(sm)
 		}
 		if mm, ok := r.(MCPModule); ok {
 			if meta := mm.MCPMeta(); meta.TypeName != "" {

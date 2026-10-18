@@ -45,7 +45,12 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
 
 $ConfigFile = 'C:\Users\peter\.claude.json'
-$ProjectKey = 'C:/Users/peter/Documents/Code/Smeldr/core'
+# The project key is the checkout this script runs from (forward-slash form),
+# so each lane reads its own token: core reads core-a's, the core-b worktree
+# reads core-b's (T885). Until 2026-10-18 it was fixed to .../Smeldr/core, and
+# core-b's watcher connected as core-a.
+$CheckoutRoot = Split-Path -Parent $PSScriptRoot
+$ProjectKey = $CheckoutRoot -replace '\\', '/'
 # No ?channel= (AGENT_PROTOCOL 2026-10-16e, D116): the connection delivers this
 # token's subscriptions (list_subscriptions): the three defaults and core's
 # role subscriptions (Tasks in band core created, updated or transitioned,
@@ -66,7 +71,7 @@ $BaseUrl = "https://process.smeldr.dev/_events/stream"
 # One cursor file per lane, so core-a and core-b never share one: the lane is
 # the checkout this script runs from (core is core-a, the core-b worktree is
 # core-b).
-$Lane = Split-Path -Leaf (Split-Path -Parent $PSScriptRoot)
+$Lane = Split-Path -Leaf $CheckoutRoot
 if ($Lane -eq 'core') { $Lane = 'core-a' }
 $StateDir = Join-Path $env:LOCALAPPDATA 'smeldr'
 $StateFile = Join-Path $StateDir "$Lane-events-last-id"

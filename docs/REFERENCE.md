@@ -180,6 +180,7 @@ type DocPage struct {
 | `db:"column_name"` | SQLRepo column mapping — omit to use lowercased field name |
 | `smeldr_format:"markdown"` | Machine-readable format hint; currently `"markdown"` and `"html"` are supported |
 | `smeldr_description:"..."` | Free-text authoring guidance — appears as the field's `description` in the MCP JSON Schema tool definition |
+| `smeldr_search:"text"` | Marks a string field that `App.Search` matches (case-insensitive substring), see [Search](#search-t885) |
 
 Validation via `smeldr` tags cannot be bypassed — an AI agent calling a write tool
 faces the same `required` and `min` rules as a direct HTTP POST.
@@ -1089,6 +1090,7 @@ func (a *App) CapabilityFor(resource, verb string) (Capability, bool) // false f
 |---|---|---|---|---|
 | item | get | read | none | no |
 | item | list | read | none | no |
+| item | search | read | none | yes |
 | item | create | create | none | no |
 | item | update | update | optional | no |
 | item | delete | delete | none | no |
@@ -1188,6 +1190,75 @@ Cost: a read with an attached scope runs no query and does not allocate. Otherwi
 Over smeldr.dev/mcp these map to -32001 for `ErrForbidden`, -32000 for `ErrNotFound` (since mcp v1.61.0), -32602 for `ErrBadRequest`, and -32603 for `ErrInternal`.
 
 ---
+
+### Search (T885)
+
+`App.Search` finds records and content items by text across every record type the caller may read. It is a plain case-insensitive substring match over each type's searchable fields. There is no semantic search and no full-text index, and the results are the same on SQLite and Postgres. Read rules apply before anything is returned or counted: a record the caller cannot read is not a hit and does not change `Total`, and a Signal whose subject is hidden is hidden too. Hits are sorted newest first (`UpdatedAt`) and paged after the read filter.
+
+```go
+res, err := app.Search(ctx, smeldr.SearchQuery{
+    Text:  "release plan",
+    Types: []string{"Decision"},
+    Place: smeldr.SearchPlaceNone,
+})
+if err != nil {
+    return err
+}
+for _, hit := range res.Hits {
+    fmt.Println(hit.Type, hit.Address, hit.Title, hit.Snippet)
+}
+```
+
+```go
+type SearchQuery struct {
+    Text   string   // substring to match; optional when a filter is set
+    Types  []string // record type names; empty means every type
+    States []string // state names
+    Place  string   // "" any place; SearchPlaceNone for the unplaced inbox; or a Domain/Area by address, slug or ID
+    Limit  int      // default SearchDefaultLimit (50), max SearchMaxLimit (500)
+    Offset int
+}
+
+type SearchHit struct {
+    Type, ID, Slug, Address, Title, State, Field, Snippet string
+    UpdatedAt time.Time
+}
+
+type SearchResult struct {
+    Hits  []SearchHit
+    Total int
+}
+```
+
+Constants: `SearchTextMinLength = 2`, `SearchTextMaxLength = 200`, `SearchDefaultLimit = 50`, `SearchMaxLimit = 500`, `SearchPlaceNone = "none"`.
+
+- `Place: ""` matches any place. `Place: SearchPlaceNone` matches only records with no live asserted `belongs_to_domain` or `belongs_to_area` edge, the inbox of unplaced records (for example imported Decisions).
+- A place the caller cannot read answers `ErrNotFound`, the same as a missing one.
+
+**Searchable fields.** A type decides which of its fields are searched:
+
+| Where | How to mark it | Default when unmarked |
+|---|---|---|
+| Compiled type (Go struct) | `smeldr_search:"text"` on a string field | Only tagged fields are searched. Core tags Task and Goal title and description, Decision title, scope and body, Amendment summary and body, and Signal message, answer and resolution. |
+| Runtime-defined type | `"search": true` on a schema field (`SchemaField.Search`) | If no field sets it, the string fields with role `title`, `description`, `body` or `summary`, or format `markdown`, are searched. So a `task_plan` body and summary are searchable with no change. |
+
+**Errors:**
+
+| Error | When |
+|---|---|
+| `ErrBadRequest` | no text and no filter; text under 2 or over 200 runes; negative `Limit` or `Offset`; a type that is not a registered record type |
+| `ErrNotFound` | `Place` is missing or unreadable |
+| `ErrInternal` | the read scope or the query failed; never a partial result |
+
+**Capability:** `item search` (operation `read`). A caller who reads at least one item of any type may use it, and each hit is filtered by the read rules.
+
+**MCP tool `search`** (smeldr.dev/mcp v1.65.0, author role). Arguments: `query`, `types` (array), `states` (array), `place`, `limit`, `offset`. The result has `hits`, `count` and `total`. Each hit carries `awaits_action`; `standing` is set for types with standing; `state_since` and `state_reason` are set for Task and Goal.
+
+**CLI** (smeldr.dev/cli v0.28.0):
+
+```
+smeldr-cli search [<text>] [--type t]... [--state s]... [--place p|none] [--limit n] [--offset n] [--json]
+```
 
 ## SEO & structured data
 

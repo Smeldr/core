@@ -98,6 +98,7 @@ var capabilityTable = []Capability{
 	{ResourceItem, VerbDelete, "delete", ReasonNotTaken, false},
 	{ResourceItem, VerbTransition, "manage", ReasonPerFlow, false},
 	{ResourceItem, "compose", "manage", ReasonNotTaken, true},
+	{ResourceItem, "search", "read", ReasonNotTaken, true},
 
 	{ResourceType, VerbGet, "read", ReasonNotTaken, false},
 	{ResourceType, VerbList, "read", ReasonNotTaken, false},
@@ -218,6 +219,7 @@ var legacyOperationFloor = map[string]Role{
 // reads everything ([ReadScope.All]): the read rules fail toward less access.
 var typelessReadsAny = map[capabilityKey]bool{
 	{ResourceSignal, VerbList}:       true, // list_signals filters Signals by their subject
+	{ResourceItem, "search"}:         true, // App.Search filters every hit by the read rules
 	{ResourceRelation, VerbList}:     true, // ListRelations keeps edges with both ends readable
 	{ResourceSubscription, VerbGet}:  true, // the owner rule is inside the act
 	{ResourceSubscription, VerbList}: true, // the list is the owner's own
@@ -245,8 +247,9 @@ var typedReads = map[capabilityKey]bool{
 //     else the caller's own): with a type and no ID it needs the type to be
 //     readable ([ErrForbidden] otherwise); with an ID, an item the caller may
 //     not read is [ErrNotFound], exactly as a missing one; with no type it needs
-//     a scope that reads everything, except signal list, relation list and
-//     subscription get and list, whose surfaces filter per item or owner. Only item get, item list and relation get
+//     a scope that reads everything, except item search, signal list,
+//     relation list and subscription get and list, whose surfaces filter per
+//     item or owner. Only item get, item list and relation get
 //     use the target's type; any other read ignores it and needs the type-less
 //     rule;
 //   - any other operation on an item the caller may not read is [ErrNotFound];
