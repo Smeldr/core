@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.166.0 · smeldr.dev/mcp v1.64.2 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.27.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.167.0 · smeldr.dev/mcp v1.65.0 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.28.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -514,6 +514,7 @@ Tools are named from the type in lower_snake_case.
 | `assert_relation` / `propose_relation` / `observe_relation` / `get_relations` | Author+ | Relation graph: assert/propose/observe edges (edge_class=asserted/inferred/observed), query by source/target/both. Response includes `created_by` (the human/agent actor's ID, when set — v1.42.1) alongside the existing `created_by_job` (the system/job that wrote the edge, when applicable). Gate: `app.Relations(store)` called. Since v1.117.0 reachability, the cascade, goal context and the context packet read live edges only (GetLiveBySource/GetLiveByTarget); get_relations still returns ended edges. Since core v1.128.0 / mcp v1.51.0 (A434, relation history) one row is one life of a relation: re-asserting a live relation updates it, re-asserting an ended one starts a new row; get_relations returns every row in creation order and each ended row carries `ended: {cause, at, reason, actor_kind, actor_id}`, cause one of withdrawn, swept, recomputed, amendment-rejected, purged, or not-recorded (ended before causes were recorded). |
 | `withdraw_relation` | Author | End a live relation on purpose: params `id` (from get_relations), `reason` (required). The row stays as history, ended, with you and the reason on record (cause withdrawn); an already ended relation is refused. Gated on the `archive` operation. There is no delete tool for relations. mcp v1.51.0 (A434); cli: `relation withdraw <id> --reason <text>` (v0.22.0). |
 | `list_relations` | Author | Every relation on the instance, paged, for a whole-graph snapshot (core v1.142.0, mcp v1.58.0, A464). Params `kind`, `source_type`, `target_type`, `include_ended`, `as_of` (RFC3339), `limit` (default 50, max 500), `offset`. Returns `{edges, total, count, limit, offset, as_of}` in the get_relations edge shape, ordered created_at then id. Omit `as_of` on page 1, pass the returned one back on every next page so pages describe one moment; then follow the relations topic from as_of (add on relation.asserted, drop on relation.ended). `source_id`/`target_id` are the items' raw ID, as the list tools return it (not a context packet id). Live by default (invalid_at absent or after as_of). cli: `relation list [--all]`. |
+| `search` | Author | Find records across every type you may read (core v1.167.0, mcp v1.65.0, A537/A538). Params `query` (2 to 200 characters, plain text, case-insensitive; optional when a filter is set), `types` (array), `states` (array), `place` (`none` = no Domain or Area, the import inbox; or a Domain/Area by address, slug or ID), `limit` (default 50, max 500), `offset`. Returns `{hits, count, total}`, newest first; each hit has type, id, slug, address, title, state, field, snippet, updated_at, awaits_action, standing (types with standing), state_since (Task, Goal). Hidden records never appear and never change `total`. Searchable: compiled fields tagged `smeldr_search:"text"`; runtime fields with `search: true`, else title/description/body/summary roles and markdown fields. No semantic search. cli: `search`. |
 | `preview_impact` | Editor+ | Return dependents of a target item without firing signals. Gate: `app.Relations(store)` called. |
 | `upsert_relation_kind` | Admin | Register or update a relation kind. Gate: `app.Relations(store)` called. |
 | `list_relation_kinds` | Author+ | List all registered relation kinds. Includes `reverse_label` when the kind has one set (01a0c43f/v1.40.0). Gate: `app.Relations(store)` called. |
@@ -778,6 +779,9 @@ smeldr-cli watch --subscription <address> [--after <id>]                    # Au
 # Standing (D100, smeldr-cli v0.18.0+, needs mcp v1.46.0+ on the server): holds, ceased, none, or "no standing for this type"
 # (rarely also a failed flow lookup on the server). "<type> get/list" read REST and do not show standing.
 smeldr-cli standing Decision <slug> [--json]                   # Editor
+
+# Search (T885, smeldr-cli v0.28.0+, needs mcp v1.65.0+ on the server): every type you may read
+smeldr-cli search "release plan" [--type Decision] [--state proposed] [--place none|<DOM/ARE>] [--limit n] [--offset n] [--json]   # Author
 
 # Block system (T32, smeldr-cli v0.10.0+) — Fields keys are case-sensitive PascalCase
 smeldr-cli block node create --type hero --field Headline="Welcome"   # Author
