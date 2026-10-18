@@ -2000,8 +2000,12 @@ func TestRegisterOrchestrationRelationKinds_UpsertError(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error when UpsertKind fails, got nil")
 	}
-	if !strings.Contains(err.Error(), `"derives_from"`) {
-		t.Errorf("error = %q, want it to name the failing kind %q", err.Error(), "derives_from")
+	// Governance registers first (T881), so amends is the first kind to fail.
+	if !strings.Contains(err.Error(), `"amends"`) {
+		t.Errorf("error = %q, want it to name the failing kind %q", err.Error(), "amends")
+	}
+	if err := RegisterOrchestrationAddOnRelationKinds(context.Background(), store); err == nil || !strings.Contains(err.Error(), `"derives_from"`) {
+		t.Errorf("add-on error = %v, want it to name derives_from", err)
 	}
 }
 

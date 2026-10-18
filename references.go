@@ -80,6 +80,30 @@ func signalTaskRefRefusal(v string) string {
 	return fmt.Sprintf("no Task %q you can read; send a Task's address (T273), slug or ID in task_ref, and name any other record in subject_type and subject_id", v)
 }
 
+// orchestrationAddOnTypes are the record types of the Orchestration add-on
+// ([RegisterOrchestrationAddOn]); core governance does not need them (T881).
+var orchestrationAddOnTypes = map[string]bool{"Task": true, "Goal": true, "Run": true}
+
+// addOnNotRunMessage is the refusal of a reference to an add-on type on an
+// instance that does not run the add-on.
+func addOnNotRunMessage(typeName string) string {
+	return fmt.Sprintf("names a %s, and %ss belong to the Orchestration add-on, which this instance does not run; leave it empty", typeName, typeName)
+}
+
+// addOnRefusal is the refusal for a reference field whose every target type
+// is an add-on type this App has not registered, or "" when one is usable.
+func (a *App) addOnRefusal(types []string) string {
+	for _, t := range types {
+		if !orchestrationAddOnTypes[t] || (a.typeRegistry != nil && a.typeRegistry.Lookup(t) != nil) {
+			return ""
+		}
+	}
+	if len(types) == 0 {
+		return ""
+	}
+	return addOnNotRunMessage(types[0])
+}
+
 // signalReferences are [Signal]'s reference fields: its subject and its Task.
 func signalReferences() []referenceField {
 	signal := func(item any) *Signal { return item.(*Signal) }
@@ -199,6 +223,9 @@ func (a *App) prepareReferences(ctx context.Context, fields []referenceField, ex
 		}
 		if v == old {
 			continue
+		}
+		if msg := a.addOnRefusal(f.targets(item)); msg != "" {
+			return Err(f.name, msg)
 		}
 		t, err := a.resolveReference(ctx, f.targets(item), v)
 		if err != nil {
@@ -558,6 +585,12 @@ func prepareSignalReferences(ctx context.Context, db DB, s *Signal) (signalRefer
 			continue
 		}
 		types := f.targets(s)
+		// A task_ref on an instance without the add-on (no Task table): the
+		// same refusal the Signal module gives (T881). This path has no App,
+		// so the table stands in for the registration.
+		if rt := plan.tables[types[0]]; orchestrationAddOnTypes[types[0]] && (rt.name == "" || rt.dynamic) {
+			return plan, Err(f.name, addOnNotRunMessage(types[0]))
+		}
 		id, address, err := plan.tables[types[0]].lookup(ctx, db, *p)
 		if err == nil && scope != nil && !scope.All() && !scope.Readable(types[0], id) {
 			err = ErrNotFound // hidden answers as missing

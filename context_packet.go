@@ -324,6 +324,11 @@ func BuildContextPacket(
 	if !ok || anchorSlug == "" {
 		return nil, ErrBadRequest
 	}
+	// An anchor of a type this instance does not keep (Task, Goal or Run
+	// without the Orchestration add-on, T881) is a bad request.
+	if err := requireRecordTable(ctx, db, entry.table, entry.relationType); err != nil {
+		return nil, err
+	}
 	if depth < 1 || depth > 2 {
 		return nil, ErrBadRequest
 	}

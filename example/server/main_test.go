@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -684,4 +685,38 @@ func TestServerToggles(t *testing.T) {
 			rows.Close()
 		}
 	})
+}
+
+// ENABLE_GOVERNANCE_RECORDS alone wires core governance without the
+// Orchestration add-on (T881); ENABLE_ORCHESTRATION wires both.
+func TestBuildApp_GovernanceRecordsOnly(t *testing.T) {
+	for _, tc := range []struct {
+		env      string
+		wantTask bool
+	}{{"ENABLE_GOVERNANCE_RECORDS", false}, {"ENABLE_ORCHESTRATION", true}} {
+		t.Run(tc.env, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("SECRET", "test-secret-that-is-at-least-32-bytes")
+			t.Setenv("BASE_URL", "https://cms.example.com")
+			t.Setenv("ENABLE_RELATIONS", "1")
+			t.Setenv(tc.env, "1")
+			db, err := sql.Open("sqlite", filepath.Join(dir, "smeldr.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			res, err := buildApp(parseConfig(), db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer res.StopAll()
+			reg := res.App.TypeRegistry()
+			if reg.Lookup("Decision") == nil || reg.Lookup("Signal") == nil {
+				t.Error("governance records not registered")
+			}
+			if got := reg.Lookup("Task") != nil; got != tc.wantTask {
+				t.Errorf("Task registered = %v, want %v", got, tc.wantTask)
+			}
+		})
+	}
 }

@@ -18,6 +18,14 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **Core governance and the Orchestration add-on register separately (T881, A535).** `CreateGovernanceTables`, `RegisterGovernanceTypes` and `RegisterGovernanceRelationKinds` set up Signal, Decision and Amendment with their flows, addresses and relation kinds; `CreateOrchestrationAddOnTables`, `RegisterOrchestrationAddOn` and `RegisterOrchestrationAddOnRelationKinds` set up Task, Goal and Run. `CreateOrchestrationTables`, `RegisterOrchestrationTypes` and `RegisterOrchestrationRelationKinds` call both and keep working as before. The example server gains `ENABLE_GOVERNANCE_RECORDS` (core governance only); `ENABLE_ORCHESTRATION` keeps meaning both, and `ENABLE_CHECK`, `ENABLE_EVAL_QUEUE_DRAIN` and `ENABLE_STANDING_DRIFT_CHECK` now need governance records, not the add-on.
+
+### Changed
+
+- **An instance without the add-on refuses what needs it with a clear answer (T881, A535).** A Signal or Amendment `task_ref` is a validation error naming the add-on (the Signal module and `InsertSignal` alike, where the raw insert used to answer differently depending on whether a Task table existed); `QueryGoalContext` and a context packet on a task, goal or run anchor are a bad request instead of a SQL error.
+
 ---
 
 ## [1.165.0] - 2026-10-16

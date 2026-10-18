@@ -134,7 +134,11 @@
 //   - Orchestration types ([Decision], [Task], [Goal], [Signal], [Amendment],
 //     [Run]) — a project's own ledger of decisions, work items, goals, and
 //     inter-agent signals. Register with [RegisterOrchestrationTypes]; create
-//     the backing tables with [CreateOrchestrationTables].
+//     the backing tables with [CreateOrchestrationTables]. Core governance
+//     ([Signal], [Decision], [Amendment]) has its own calls,
+//     [CreateGovernanceTables] and [RegisterGovernanceTypes]; the
+//     Orchestration add-on ([Task], [Goal], [Run]) has
+//     [CreateOrchestrationAddOnTables] and [RegisterOrchestrationAddOn].
 //   - Custom state flows ([StateFlow], [State], [Transition],
 //     [TransitionTrigger]) — a data-driven state machine registered per
 //     content type via [App.RegisterFlow], for lifecycles beyond the built-in

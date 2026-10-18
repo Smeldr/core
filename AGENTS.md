@@ -840,7 +840,11 @@ These tools are available when `App.Config().DB` is non-nil (any app with a data
 
 Six built-in types for the architect/pilot protocol and headless
 automation (M3, D38). Call `RegisterOrchestrationTypes(app, db)` at
-startup — after `CreateOrchestrationTables(db)` — to activate them. All
+startup, after `CreateOrchestrationTables(db)`, to activate them. They are two
+products (T881): core governance (Signal, Decision, Amendment:
+`CreateGovernanceTables` + `RegisterGovernanceTypes`) and the Orchestration add-on
+(Task, Goal, Run: `CreateOrchestrationAddOnTables` + `RegisterOrchestrationAddOn`);
+the combined calls do both. All
 six types are registered with `MCP(MCPRead, MCPWrite)`, so MCP tools are
 generated automatically.
 

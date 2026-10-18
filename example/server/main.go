@@ -23,12 +23,17 @@
 //	ENABLE_RELATIONS      wire the relation graph store
 //	ENABLE_DYNAMIC_CONTENT wire the runtime content type system and schema store
 //	ENABLE_BLOCKS         wire the block/composition system MCP tools
-//	ENABLE_ORCHESTRATION  wire orchestration types (Signal, Task, Decision, Amendment, Goal)
+//	ENABLE_GOVERNANCE_RECORDS wire core governance records (Signal, Decision,
+//	                      Amendment, their flows and relation kinds) without the
+//	                      Orchestration add-on. Records, not access: roles and
+//	                      grants are ENABLE_GOVERNANCE.
+//	ENABLE_ORCHESTRATION  wire core governance records and the Orchestration add-on
+//	                      (Task, Goal, Run); implies ENABLE_GOVERNANCE_RECORDS
 //	ENABLE_AUTHORITY      wire the Authority mechanism (Rule, AuthorityStub — decision-
 //	                      governance-model.md §4). Independent of ENABLE_ORCHESTRATION.
 //	ENABLE_CHECK          wire the Check precondition on Decision ratification
 //	                      (App.Check; decision-governance-model.md §4). Requires
-//	                      ENABLE_AUTHORITY and ENABLE_ORCHESTRATION (Check targets
+//	                      ENABLE_AUTHORITY and governance records (Check targets
 //	                      Decision specifically and queries the Authority graph).
 //	INSTANCE_NAME         source name embedded in Context Packet responses (default: smeldr-dogfood)
 //	ENABLE_REDIRECTS      wire database-backed redirect management
@@ -51,7 +56,7 @@
 //	                      recorded via SweepRunStore)
 //	STRUCTURAL_SWEEP_SCHEDULE  5-field cron expression for the sweep (default: "0 * * * *", hourly)
 //	ENABLE_EVAL_QUEUE_DRAIN  wire a scheduled smeldr_eval_queue drain (requires
-//	                      ENABLE_ORCHESTRATION; App.DrainEvalQueue on a cron
+//	                      governance records; App.DrainEvalQueue on a cron
 //	                      schedule, recorded via SweepRunStore, T211/A258)
 //	EVAL_QUEUE_DRAIN_SCHEDULE  5-field cron expression for the drain (default: "*/5 * * * *")
 //	ENABLE_SIGNAL_EXPIRY_SWEEP  retired (D115): nothing expires; when set, boot logs that
@@ -62,10 +67,10 @@
 //	                      (default: warnings only, D115)
 //	ENABLE_STANDING_DRIFT_CHECK  wire a scheduled standing drift check (report-only: compares
 //	                             each item's stored standing with its state's tag, records a Finding
-//	                             per mismatch; requires ENABLE_ORCHESTRATION; default off)
+//	                             per mismatch; requires governance records; default off)
 //	STANDING_DRIFT_CHECK_SCHEDULE  5-field cron expression for the check (default: "30 3 * * *", daily)
 //	ENABLE_CONTEXT_PACKET wire GET /packet/{type}/{slug} (Editor role required; requires
-//	                      ENABLE_RELATIONS and ENABLE_ORCHESTRATION, T159)
+//	                      ENABLE_RELATIONS and governance records, T159)
 //	ENABLE_REACHABILITY   wire GET /reachability/{type}/{id} (Author role required; requires
 //	                      ENABLE_RELATIONS only — not orchestration-specific, A293)
 //	ENABLE_PROVENANCE     wire transition-provenance recording (App.Provenance)
@@ -109,6 +114,7 @@ type ServerConfig struct {
 	EnableDynamicContent     bool
 	EnableBlocks             bool
 	EnableOrchestration      bool
+	EnableGovernanceRecords  bool
 	EnableAuthority          bool
 	EnableCheck              bool
 	EnableRedirects          bool
@@ -177,6 +183,7 @@ func parseConfig() ServerConfig {
 		EnableDynamicContent:     os.Getenv("ENABLE_DYNAMIC_CONTENT") != "",
 		EnableBlocks:             os.Getenv("ENABLE_BLOCKS") != "",
 		EnableOrchestration:      os.Getenv("ENABLE_ORCHESTRATION") != "",
+		EnableGovernanceRecords:  os.Getenv("ENABLE_GOVERNANCE_RECORDS") != "",
 		EnableAuthority:          os.Getenv("ENABLE_AUTHORITY") != "",
 		EnableCheck:              os.Getenv("ENABLE_CHECK") != "",
 		EnableRedirects:          os.Getenv("ENABLE_REDIRECTS") != "",
@@ -210,6 +217,12 @@ func parseConfig() ServerConfig {
 		OAuthDBPath:              envOr("OAUTH_DB_PATH", "./oauth.db"),
 		InstanceName:             envOr("INSTANCE_NAME", "smeldr-dogfood"),
 	}
+}
+
+// governanceRecords reports whether core governance records are wired:
+// ENABLE_GOVERNANCE_RECORDS, or ENABLE_ORCHESTRATION, which implies it (T881).
+func (c ServerConfig) governanceRecords() bool {
+	return c.EnableGovernanceRecords || c.EnableOrchestration
 }
 
 // buildCommandApp is buildApp for a subcommand: it also calls Handler, which
@@ -329,9 +342,14 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 	}
 
-	if cfg.EnableOrchestration {
-		if err := smeldr.CreateOrchestrationTables(db); err != nil {
-			return ServerResult{}, fmt.Errorf("create orchestration tables: %w", err)
+	if cfg.governanceRecords() {
+		if err := smeldr.CreateGovernanceTables(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create governance tables: %w", err)
+		}
+		if cfg.EnableOrchestration {
+			if err := smeldr.CreateOrchestrationAddOnTables(db); err != nil {
+				return ServerResult{}, fmt.Errorf("create orchestration add-on tables: %w", err)
+			}
 		}
 		// Additive migration for a pre-A296 database — CreateOrchestrationTables's
 		// own CREATE TABLE already has these columns for a fresh install.
@@ -374,7 +392,10 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.EnsureStateAwaitsActionColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure state awaits_action column: %w", err)
 		}
-		smeldr.RegisterOrchestrationTypes(app, db)
+		smeldr.RegisterGovernanceTypes(app, db)
+		if cfg.EnableOrchestration {
+			smeldr.RegisterOrchestrationAddOn(app, db)
+		}
 		// D100: store a standing for the items that existed before their type's
 		// flow tagged a state, once per type (idempotent), now that the flows are
 		// registered.
@@ -405,8 +426,8 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.EnableCheck {
-		if !cfg.EnableAuthority || !cfg.EnableOrchestration {
-			return ServerResult{}, fmt.Errorf("ENABLE_CHECK requires ENABLE_AUTHORITY and ENABLE_ORCHESTRATION")
+		if !cfg.EnableAuthority || !cfg.governanceRecords() {
+			return ServerResult{}, fmt.Errorf("ENABLE_CHECK requires ENABLE_AUTHORITY and ENABLE_GOVERNANCE_RECORDS (or ENABLE_ORCHESTRATION)")
 		}
 		if err := smeldr.CreateCheckTable(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create check table: %w", err)
@@ -414,16 +435,21 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		app.Check(smeldr.NewCheckStore(db))
 	}
 
-	if cfg.EnableRelations && cfg.EnableOrchestration {
-		if err := smeldr.RegisterOrchestrationRelationKinds(context.Background(), rs); err != nil {
-			return ServerResult{}, fmt.Errorf("register orchestration relation kinds: %w", err)
+	if cfg.EnableRelations && cfg.governanceRecords() {
+		if err := smeldr.RegisterGovernanceRelationKinds(context.Background(), rs); err != nil {
+			return ServerResult{}, fmt.Errorf("register governance relation kinds: %w", err)
+		}
+		if cfg.EnableOrchestration {
+			if err := smeldr.RegisterOrchestrationAddOnRelationKinds(context.Background(), rs); err != nil {
+				return ServerResult{}, fmt.Errorf("register orchestration add-on relation kinds: %w", err)
+			}
 		}
 		if cfg.EnableContextPacket {
 			app.ContextPacketHandler(rs, cfg.InstanceName)
 		}
 	}
 
-	if cfg.EnableRelations && cfg.EnableOrchestration && cfg.EnableGovernance {
+	if cfg.EnableRelations && cfg.governanceRecords() && cfg.EnableGovernance {
 		if err := smeldr.RegisterDecisionDomainAdminRole(context.Background(), roleStore); err != nil {
 			return ServerResult{}, fmt.Errorf("register decision-domain-admin role: %w", err)
 		}
@@ -577,8 +603,8 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.EnableEvalQueueDrain {
-		if !cfg.EnableOrchestration {
-			return ServerResult{}, fmt.Errorf("ENABLE_EVAL_QUEUE_DRAIN requires ENABLE_ORCHESTRATION")
+		if !cfg.governanceRecords() {
+			return ServerResult{}, fmt.Errorf("ENABLE_EVAL_QUEUE_DRAIN requires ENABLE_GOVERNANCE_RECORDS (or ENABLE_ORCHESTRATION)")
 		}
 		runStore := smeldr.NewSweepRunStore(db)
 		if err := smeldr.CreateSweepRunTable(db); err != nil {
@@ -627,8 +653,8 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.EnableStandingDriftCheck {
-		if !cfg.EnableOrchestration {
-			return ServerResult{}, fmt.Errorf("ENABLE_STANDING_DRIFT_CHECK requires ENABLE_ORCHESTRATION")
+		if !cfg.governanceRecords() {
+			return ServerResult{}, fmt.Errorf("ENABLE_STANDING_DRIFT_CHECK requires ENABLE_GOVERNANCE_RECORDS (or ENABLE_ORCHESTRATION)")
 		}
 		runStore := smeldr.NewSweepRunStore(db)
 		if err := smeldr.CreateSweepRunTable(db); err != nil {

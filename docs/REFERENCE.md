@@ -5560,6 +5560,22 @@ func CreateOrchestrationTables(db DB) error
 Creates `smeldr_signals`, `smeldr_tasks`, `smeldr_decisions`, `smeldr_amendments`, `smeldr_goals` and `smeldr_runs` tables
 if they do not already exist. Call once at application startup before `RegisterOrchestrationTypes`.
 
+**Core governance and the Orchestration add-on (T881).** The six types are two products: core governance (`Signal`, `Decision`, `Amendment`) and the Orchestration add-on (`Task`, `Goal`, `Run`; `task_plan` is runtime-defined on the instance). Each half has its own calls, and the combined ones call both:
+
+| | Core governance | Orchestration add-on | Both (unchanged) |
+|---|---|---|---|
+| Tables, addresses | `CreateGovernanceTables` (S, D, A) | `CreateOrchestrationAddOnTables` (T, G, R) | `CreateOrchestrationTables` |
+| Types, flows | `RegisterGovernanceTypes` | `RegisterOrchestrationAddOn` | `RegisterOrchestrationTypes` |
+| Relation kinds | `RegisterGovernanceRelationKinds`: amends, supersedes, contradicts, addresses, grounded_in, belongs_to_domain, belongs_to_area, in_set, about, refers_to | `RegisterOrchestrationAddOnRelationKinds`: derives_from, depends_on, ships_as, contains, investigates, implements | `RegisterOrchestrationRelationKinds` |
+
+Call the governance half first. Every core record type is added to `RegisterGovernanceTypes`. On an instance without the add-on:
+- a `task_ref` (Signal or Amendment) is refused as a validation error that names the add-on, on the module path and on `InsertSignal` alike; an empty `task_ref` is fine;
+- `QueryGoalContext` and a context packet anchored on a task, goal or run are a bad request, not an internal error; mcp lists `get_goal_context` only when Goal is registered;
+- role subscriptions on Task and task_plan are left out of the seed and reported (`RoleSeedReport.LeftOut`);
+- a subscription filter naming Task is refused as an unregistered type.
+
+The example server wires core governance with `ENABLE_GOVERNANCE_RECORDS` and both with `ENABLE_ORCHESTRATION` (which implies it). `ENABLE_GOVERNANCE` is roles and grants, not records.
+
 ### Item addresses (D110)
 
 Every record carries a system-assigned address: its type's prefix plus a running number (`D110`, `T412`, `INV27`). The address is unique on the instance and never changes.
@@ -5690,9 +5706,12 @@ app.NotifySignalCreated(ctx, s.ID, s.Slug)
 func RegisterOrchestrationTypes(app *App, db DB)
 ```
 
-Registers the five orchestration content types with their custom state flows and MCP
-read+write tools. Fail-open: if `db` is nil, flow registration errors are logged and
-startup continues. Call after `CreateOrchestrationTables` and before `App.Run`.
+Registers the six record types of core governance and the Orchestration add-on with
+their custom state flows and MCP read+write tools: `RegisterGovernanceTypes` (Signal,
+Decision, Amendment), then `RegisterOrchestrationAddOn` (Task, Goal, Run). Fail-open: if
+`db` is nil, flow registration errors are logged and startup continues. Call after
+`CreateOrchestrationTables` and before `App.Run`. An instance without the add-on calls
+`CreateGovernanceTables` and `RegisterGovernanceTypes` instead.
 
 ```go
 smeldr.CreateOrchestrationTables(db)

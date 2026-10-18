@@ -77,13 +77,14 @@ var coreAddressTables = []struct{ typeName, table, legacy string }{
 	{"Subscription", "smeldr_subscriptions", ""},
 }
 
-// orchestrationAddressTypes are the types [CreateOrchestrationTables] gives
-// address storage; [CreateAuthorityTables] does the same for
-// authorityAddressTypes.
+// governanceAddressTypes and orchestrationAddOnAddressTypes are the types
+// [CreateGovernanceTables] and [CreateOrchestrationAddOnTables] give address
+// storage; [CreateAuthorityTables] does the same for authorityAddressTypes.
 var (
-	orchestrationAddressTypes = []string{"Signal", "Task", "Decision", "Amendment", "Goal", "Run"}
-	authorityAddressTypes     = []string{"Rule", "AuthorityStub"}
-	subscriptionAddressTypes  = []string{"Subscription"}
+	governanceAddressTypes         = []string{"Signal", "Decision", "Amendment"}
+	orchestrationAddOnAddressTypes = []string{"Task", "Goal", "Run"}
+	authorityAddressTypes          = []string{"Rule", "AuthorityStub"}
+	subscriptionAddressTypes       = []string{"Subscription"}
 )
 
 // ensureAddressStorage adds the address columns to table (idempotent) and the

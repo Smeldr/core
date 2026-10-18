@@ -70,6 +70,11 @@ func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID stri
 	if db == nil {
 		return nil, ErrInternal
 	}
+	// Goals belong to the Orchestration add-on (T881): an instance without it
+	// has no Goal table, which is a bad request, not an internal failure.
+	if err := requireRecordTable(ctx, db, "smeldr_goals", "Goal"); err != nil {
+		return nil, err
+	}
 
 	// Per-item read rules (core-read-surfaces 3b): the caller's scope, loaded
 	// before the lookup. A hidden Goal is a miss that walks the remaining steps,
@@ -708,12 +713,25 @@ type Run struct {
 	LastActor string `json:"last_actor,omitempty" db:"last_actor"`
 }
 
-// CreateOrchestrationTables creates the six orchestration content tables
-// (smeldr_signals, smeldr_tasks, smeldr_decisions, smeldr_amendments,
-// smeldr_goals, smeldr_runs) if they do not already exist. Call once at
-// application startup before [RegisterOrchestrationTypes].
+// CreateOrchestrationTables creates the six record tables of core governance
+// and the Orchestration add-on: [CreateGovernanceTables] (smeldr_signals,
+// smeldr_decisions, smeldr_amendments) and [CreateOrchestrationAddOnTables]
+// (smeldr_tasks, smeldr_goals, smeldr_runs), if they do not already exist.
+// Call once at application startup before [RegisterOrchestrationTypes]. An
+// instance without the add-on calls [CreateGovernanceTables] alone.
 func CreateOrchestrationTables(db DB) error {
-	stmts := []string{
+	if err := CreateGovernanceTables(db); err != nil {
+		return err
+	}
+	return CreateOrchestrationAddOnTables(db)
+}
+
+// CreateGovernanceTables creates the tables of core governance (smeldr_signals,
+// smeldr_decisions, smeldr_amendments) if they do not already exist, with
+// their address storage (S, D, A). Call once at startup before
+// [RegisterGovernanceTypes].
+func CreateGovernanceTables(db DB) error {
+	return createRecordTables(db, governanceAddressTypes, []string{
 		`CREATE TABLE IF NOT EXISTS smeldr_signals (
 			id          TEXT PRIMARY KEY,
 			slug        TEXT NOT NULL UNIQUE,
@@ -740,25 +758,6 @@ func CreateOrchestrationTables(db DB) error {
 			last_actor    TEXT NOT NULL DEFAULT ''
 		)`,
 		signalOpenSubjectIndex,
-		`CREATE TABLE IF NOT EXISTS smeldr_tasks (
-			id          TEXT PRIMARY KEY,
-			title       TEXT NOT NULL DEFAULT '',
-			slug        TEXT NOT NULL UNIQUE,
-			status      TEXT NOT NULL DEFAULT 'draft',
-			published_at TIMESTAMPTZ,
-			scheduled_at TIMESTAMPTZ,
-			created_at  TIMESTAMPTZ NOT NULL,
-			updated_at  TIMESTAMPTZ NOT NULL,
-			rev         INTEGER NOT NULL DEFAULT 0,
-			task_id     TEXT NOT NULL DEFAULT '',
-			priority    INTEGER NOT NULL DEFAULT 0,
-			band        TEXT NOT NULL DEFAULT '',
-			size        TEXT NOT NULL DEFAULT '',
-			description TEXT NOT NULL DEFAULT '',
-			note_ref    TEXT NOT NULL DEFAULT '',
-			implements  TEXT NOT NULL DEFAULT '',
-			last_actor  TEXT NOT NULL DEFAULT ''
-		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_decisions (
 			id              TEXT PRIMARY KEY,
 			slug            TEXT NOT NULL UNIQUE,
@@ -800,6 +799,34 @@ func CreateOrchestrationTables(db DB) error {
 			task_ref         TEXT NOT NULL DEFAULT '',
 			last_actor       TEXT NOT NULL DEFAULT ''
 		)`,
+	})
+}
+
+// CreateOrchestrationAddOnTables creates the tables of the Orchestration
+// add-on (smeldr_tasks, smeldr_goals, smeldr_runs) if they do not already
+// exist, with their address storage (T, G, R). Call after
+// [CreateGovernanceTables] and before [RegisterOrchestrationAddOn].
+func CreateOrchestrationAddOnTables(db DB) error {
+	return createRecordTables(db, orchestrationAddOnAddressTypes, []string{
+		`CREATE TABLE IF NOT EXISTS smeldr_tasks (
+			id          TEXT PRIMARY KEY,
+			title       TEXT NOT NULL DEFAULT '',
+			slug        TEXT NOT NULL UNIQUE,
+			status      TEXT NOT NULL DEFAULT 'draft',
+			published_at TIMESTAMPTZ,
+			scheduled_at TIMESTAMPTZ,
+			created_at  TIMESTAMPTZ NOT NULL,
+			updated_at  TIMESTAMPTZ NOT NULL,
+			rev         INTEGER NOT NULL DEFAULT 0,
+			task_id     TEXT NOT NULL DEFAULT '',
+			priority    INTEGER NOT NULL DEFAULT 0,
+			band        TEXT NOT NULL DEFAULT '',
+			size        TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			note_ref    TEXT NOT NULL DEFAULT '',
+			implements  TEXT NOT NULL DEFAULT '',
+			last_actor  TEXT NOT NULL DEFAULT ''
+		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_goals (
 			id           TEXT PRIMARY KEY,
 			title        TEXT NOT NULL DEFAULT '',
@@ -838,15 +865,33 @@ func CreateOrchestrationTables(db DB) error {
 			acknowledged_at TIMESTAMPTZ,
 			last_actor      TEXT NOT NULL DEFAULT ''
 		)`,
-	}
+	})
+}
+
+// createRecordTables runs stmts and gives types their address storage: the
+// address columns and indexes, the counter table and the core prefixes (D110),
+// on fresh and on older databases alike (idempotent).
+func createRecordTables(db DB, types []string, stmts []string) error {
 	for _, stmt := range stmts {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 			return err
 		}
 	}
-	// D110: the address columns and indexes, the counter table and the core
-	// prefixes, on fresh and on older databases alike (idempotent).
-	return registerCoreAddresses(context.Background(), db, orchestrationAddressTypes...)
+	return registerCoreAddresses(context.Background(), db, types...)
+}
+
+// requireRecordTable answers a bad request naming typeName when its table is
+// not on db: a Task, Goal or Run on an instance without the Orchestration
+// add-on (T881). A failed check lets the read go on, which reports its own
+// error.
+func requireRecordTable(ctx context.Context, db DB, table, typeName string) error {
+	if ok, err := tableExists(ctx, db, table); err == nil && !ok {
+		if orchestrationAddOnTypes[typeName] {
+			return fmt.Errorf("%w: %ss belong to the Orchestration add-on, which this instance does not run", ErrBadRequest, typeName)
+		}
+		return fmt.Errorf("%w: this instance keeps no %s records", ErrBadRequest, typeName)
+	}
+	return nil
 }
 
 // signalOpenSubjectIndex serves core's Signal resolver (D115): the open
@@ -1011,26 +1056,23 @@ func EnsureLastActorColumns(ctx context.Context, db DB) error {
 	return nil
 }
 
-// RegisterOrchestrationTypes registers the six orchestration content types
-// ([Signal], [Task], [Decision], [Amendment], [Goal], [Run]) with the
-// application. The first five also get their custom state flows; [Run]
-// deliberately does not (D38 — see its own doc comment). Call after
-// [CreateOrchestrationTables] and before [App.Run]. Flow registration
-// errors are logged and do not block startup (fail-open).
+// RegisterOrchestrationTypes registers core governance and the Orchestration
+// add-on: [RegisterGovernanceTypes] ([Signal], [Decision], [Amendment]) and
+// [RegisterOrchestrationAddOn] ([Task], [Goal], [Run]). Call after
+// [CreateOrchestrationTables] and before [App.Run]. An instance without the
+// add-on calls [RegisterGovernanceTypes] alone.
 func RegisterOrchestrationTypes(app *App, db DB) {
-	flows := []StateFlow{
-		orchSignalFlow(),
-		orchTaskFlow(),
-		orchDecisionFlow(),
-		orchAmendmentFlow(),
-		orchGoalFlow(),
-	}
-	for _, f := range flows {
-		if err := app.RegisterFlow(f); err != nil {
-			slog.Error("smeldr: RegisterOrchestrationTypes: RegisterFlow failed",
-				"flow", f.Name, "error", err)
-		}
-	}
+	RegisterGovernanceTypes(app, db)
+	RegisterOrchestrationAddOn(app, db)
+}
+
+// RegisterGovernanceTypes registers the record types of core governance:
+// [Signal], [Decision] and [Amendment], with their state flows and their
+// reference fields (D113). Every core record type is added here. Call after
+// [CreateGovernanceTables] and before [App.Run]. Flow registration errors are
+// logged and do not block startup (fail-open).
+func RegisterGovernanceTypes(app *App, db DB) {
+	registerFlows(app, orchSignalFlow(), orchDecisionFlow(), orchAmendmentFlow())
 	app.signalConditions = true
 	// D113: reference fields are resolved, stored canonically and related by
 	// the system on every write path.
@@ -1039,11 +1081,6 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 		At("/signals"), Repo(NewSQLRepo[*Signal](db, Table("smeldr_signals"))), MCP(MCPRead, MCPWrite), withAddress(),
 		app.referenceSaveHooks(signalReferences(), nil),
 	))
-	app.Content(NewModule[*Task]((*Task)(nil),
-		At("/tasks"), Repo(NewSQLRepo[*Task](db, Table("smeldr_tasks"))), MCP(MCPRead, MCPWrite), withAddress(),
-		app.referenceSaveHooks(taskReferences(), nil),
-		DefaultListOrder("Priority", false), // T262: lower Priority sorts first
-	))
 	app.Content(NewModule[*Decision]((*Decision)(nil),
 		At("/decisions"), Repo(NewSQLRepo[*Decision](db, Table("smeldr_decisions"))), MCP(MCPRead, MCPWrite), withAddress(),
 	))
@@ -1051,19 +1088,40 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 		At("/amendments"), Repo(NewSQLRepo[*Amendment](db, Table("smeldr_amendments"))), MCP(MCPRead, MCPWrite), withAddress(),
 		app.referenceSaveHooks(amendmentReferences(), &amends),
 	))
+}
+
+// RegisterOrchestrationAddOn registers the record types of the Orchestration
+// add-on: [Task] and [Goal] with their state flows, and [Run], which
+// deliberately has none (D38, see its own doc comment). Call after
+// [RegisterGovernanceTypes] and [CreateOrchestrationAddOnTables], before
+// [App.Run]. Flow registration errors are logged and do not block startup.
+func RegisterOrchestrationAddOn(app *App, db DB) {
+	registerFlows(app, orchTaskFlow(), orchGoalFlow())
+	app.Content(NewModule[*Task]((*Task)(nil),
+		At("/tasks"), Repo(NewSQLRepo[*Task](db, Table("smeldr_tasks"))), MCP(MCPRead, MCPWrite), withAddress(),
+		app.referenceSaveHooks(taskReferences(), nil),
+		DefaultListOrder("Priority", false), // T262: lower Priority sorts first
+	))
 	app.Content(NewModule[*Goal]((*Goal)(nil),
 		At("/goals"), Repo(NewSQLRepo[*Goal](db, Table("smeldr_goals"))), MCP(MCPRead, MCPWrite), withAddress(),
 		DefaultListOrder("Priority", false), // T262: lower Priority sorts first
 	))
-	// Run gets no entry in the flows slice above — D38 requires no
-	// StateFlow (see Run's own doc comment). MCP(MCPRead, MCPWrite) is not
-	// just consistency with its five siblings: D38's claim/renewal/
-	// land-time-holder-check writes all travel the MCP update path
-	// (mcp/tool.go's handleToolsCall → MCPUpdate), so MCPWrite is a real
+	// MCP(MCPRead, MCPWrite) is not just consistency with its siblings: D38's
+	// claim/renewal/land-time-holder-check writes all travel the MCP update
+	// path (mcp/tool.go's handleToolsCall -> MCPUpdate), so MCPWrite is a real
 	// requirement for the future listener, not a style preference.
 	app.Content(NewModule[*Run]((*Run)(nil),
 		At("/runs"), Repo(NewSQLRepo[*Run](db, Table("smeldr_runs"))), MCP(MCPRead, MCPWrite), withAddress(),
 	))
+}
+
+// registerFlows registers flows, logging a failure without blocking startup.
+func registerFlows(app *App, flows ...StateFlow) {
+	for _, f := range flows {
+		if err := app.RegisterFlow(f); err != nil {
+			slog.Error("smeldr: RegisterFlow failed", "flow", f.Name, "error", err)
+		}
+	}
 }
 
 // RegisterOrchestrationRelationKinds registers the relation kinds that
@@ -1080,30 +1138,19 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 // Idempotent — safe to call on every boot; UpsertKind updates in place if a
 // kind with the same type_name is already registered.
 func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStore) error {
+	if err := RegisterGovernanceRelationKinds(ctx, store); err != nil {
+		return err
+	}
+	return RegisterOrchestrationAddOnRelationKinds(ctx, store)
+}
+
+// RegisterGovernanceRelationKinds registers the relation kinds of core
+// governance: amends, supersedes, contradicts, addresses, grounded_in,
+// belongs_to_domain, belongs_to_area, in_set, and the kinds the system
+// asserts for reference fields (D113) about and refers_to; and it designates
+// "domain" and "area" as reference types. Idempotent, safe on every boot.
+func RegisterGovernanceRelationKinds(ctx context.Context, store *RelationStore) error {
 	kinds := []RelationKindDef{
-		{
-			TypeName:     "derives_from",
-			Label:        "Derives From",
-			ReverseLabel: "Source Of",
-			Mode:         "asserted",
-			Directional:  true,
-			TypePairs:    json.RawMessage(`[{"source_type":"Task","target_type":"Goal"}]`),
-		},
-		{
-			TypeName:    "depends_on",
-			Label:       "Depends On",
-			Mode:        "asserted",
-			Directional: true,
-			TypePairs:   json.RawMessage(`[{"source_type":"Task","target_type":"Task"}]`),
-		},
-		{
-			TypeName:     "ships_as",
-			Label:        "Ships As",
-			ReverseLabel: "Shipped By",
-			Mode:         "asserted",
-			Directional:  true,
-			TypePairs:    json.RawMessage(`[{"source_type":"Task","target_type":"Amendment"}]`),
-		},
 		{
 			// D102: an Amendment amends the Decision it changes. Asserted when
 			// the Amendment is created with its amends field set; the pair is the
@@ -1124,18 +1171,6 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"}]`),
 		},
 		{
-			TypeName:     "contains",
-			Label:        "Contains",
-			ReverseLabel: "Part Of",
-			Mode:         "asserted",
-			Directional:  true,
-			TypePairs: json.RawMessage(`[{"source_type":"Goal","target_type":"Goal"},` +
-				`{"source_type":"Goal","target_type":"Task"},` +
-				`{"source_type":"Goal","target_type":"Decision"},` +
-				`{"source_type":"Goal","target_type":"Amendment"},` +
-				`{"source_type":"Goal","target_type":"Signal"}]`),
-		},
-		{
 			// contradicts is symmetric — "A contradicts B" reads identically
 			// to "B contradicts A", unlike contains/part-of, so no
 			// ReverseLabel is set. Directional: false is honest metadata
@@ -1148,14 +1183,6 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			Mode:        "asserted",
 			Directional: false,
 			TypePairs:   json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"}]`),
-		},
-		{
-			TypeName:     "investigates",
-			Label:        "Investigates",
-			ReverseLabel: "Investigated By",
-			Mode:         "asserted",
-			Directional:  true,
-			TypePairs:    json.RawMessage(`[{"source_type":"Task","target_type":"Decision"}]`),
 		},
 		{
 			// Scoped to Decision->Decision only, for the one real need that
@@ -1223,16 +1250,6 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			Directional: true,
 		},
 		{
-			// D113: a Task carries out a Decision. Asserted by the system from
-			// Task.Implements when it names a Decision (a Goal is derives_from).
-			TypeName:     "implements",
-			Label:        "Implements",
-			ReverseLabel: "Implemented By",
-			Mode:         "asserted",
-			Directional:  true,
-			TypePairs:    json.RawMessage(`[{"source_type":"Task","target_type":"Decision"}]`),
-		},
-		{
 			// D113: a Signal is about a record: its subject, its task_ref or
 			// its answer_ref (the field is in the edge's attributes). The
 			// source is always a Signal and the target any type, so TypePairs
@@ -1254,10 +1271,8 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 			Directional:  true,
 		},
 	}
-	for _, k := range kinds {
-		if err := store.UpsertKind(ctx, k); err != nil {
-			return fmt.Errorf("register relation kind %q: %w", k.TypeName, err)
-		}
+	if err := upsertRelationKinds(ctx, store, kinds); err != nil {
+		return err
 	}
 
 	// "domain" and "area" (D71/D72) are reference/lookup data, not editorial
@@ -1268,6 +1283,78 @@ func RegisterOrchestrationRelationKinds(ctx context.Context, store *RelationStor
 	for _, t := range []string{"domain", "area"} {
 		if err := store.RegisterReferenceType(ctx, t); err != nil {
 			return fmt.Errorf("register reference type %q: %w", t, err)
+		}
+	}
+	return nil
+}
+
+// RegisterOrchestrationAddOnRelationKinds registers the relation kinds of the
+// Orchestration add-on, whose ends are Tasks and Goals: derives_from,
+// depends_on, ships_as, contains, investigates and implements. Idempotent,
+// safe on every boot.
+func RegisterOrchestrationAddOnRelationKinds(ctx context.Context, store *RelationStore) error {
+	return upsertRelationKinds(ctx, store, []RelationKindDef{
+		{
+			TypeName:     "derives_from",
+			Label:        "Derives From",
+			ReverseLabel: "Source Of",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Task","target_type":"Goal"}]`),
+		},
+		{
+			TypeName:    "depends_on",
+			Label:       "Depends On",
+			Mode:        "asserted",
+			Directional: true,
+			TypePairs:   json.RawMessage(`[{"source_type":"Task","target_type":"Task"}]`),
+		},
+		{
+			TypeName:     "ships_as",
+			Label:        "Ships As",
+			ReverseLabel: "Shipped By",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Task","target_type":"Amendment"}]`),
+		},
+		{
+			TypeName:     "contains",
+			Label:        "Contains",
+			ReverseLabel: "Part Of",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs: json.RawMessage(`[{"source_type":"Goal","target_type":"Goal"},` +
+				`{"source_type":"Goal","target_type":"Task"},` +
+				`{"source_type":"Goal","target_type":"Decision"},` +
+				`{"source_type":"Goal","target_type":"Amendment"},` +
+				`{"source_type":"Goal","target_type":"Signal"}]`),
+		},
+		{
+			TypeName:     "investigates",
+			Label:        "Investigates",
+			ReverseLabel: "Investigated By",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Task","target_type":"Decision"}]`),
+		},
+		{
+			// D113: a Task carries out a Decision. Asserted by the system from
+			// Task.Implements when it names a Decision (a Goal is derives_from).
+			TypeName:     "implements",
+			Label:        "Implements",
+			ReverseLabel: "Implemented By",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"Task","target_type":"Decision"}]`),
+		},
+	})
+}
+
+// upsertRelationKinds registers kinds on store.
+func upsertRelationKinds(ctx context.Context, store *RelationStore, kinds []RelationKindDef) error {
+	for _, k := range kinds {
+		if err := store.UpsertKind(ctx, k); err != nil {
+			return fmt.Errorf("register relation kind %q: %w", k.TypeName, err)
 		}
 	}
 	return nil
