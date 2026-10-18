@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.165.0 · smeldr.dev/mcp v1.64.1 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.27.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.166.0 · smeldr.dev/mcp v1.64.2 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.27.0 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -339,6 +339,14 @@ reverse-proxy idle timeouts.
     Signal's `about`, Task `implements`, Amendment `ships_as`, a runtime
     type's `refers_to`) sends `relation.asserted` (new_row true). Before, a
     raw Signal insert sent none, and on SQLite none of them did.
+  - Since core v1.166.0 core governance (Signal, Decision, Amendment:
+    `CreateGovernanceTables`, `RegisterGovernanceTypes`,
+    `RegisterGovernanceRelationKinds`) and the Orchestration add-on (Task,
+    Goal, Run: `...OrchestrationAddOn...`) register separately; the old
+    combined calls and `ENABLE_ORCHESTRATION` still mean both, and
+    `ENABLE_GOVERNANCE_RECORDS` wires core governance alone. Without the
+    add-on a `task_ref` is refused naming it, and mcp v1.64.2 does not list
+    `get_goal_context`.
   - Since mcp v1.64.1 the relation tools (`get_relations`,
     `get_reachability`, `assert_relation`, `propose_relation`,
     `observe_relation`, `preview_impact`) take an address, slug or ID. An
