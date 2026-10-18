@@ -170,6 +170,21 @@ func (s *ReadScope) load(ctx context.Context, rs *RoleStore, tokenID string) err
 func (s *ReadScope) loadAnchor(ctx context.Context, db DB, kind, direction, anchorID string) error {
 	now := time.Now().UTC()
 	const live = ` AND relation_kind = $2 AND edge_class = 'asserted' AND (invalid_at IS NULL OR invalid_at > $3)`
+	if anchorType, place := placeKindTargets[kind]; place && (direction == "incoming" || direction == "both") {
+		// A place kind (D142): the place itself and everything in it, down the
+		// hierarchy (an Area of a Domain and what is placed in it).
+		members, err := placeMembers(ctx, db, anchorType, anchorID)
+		if err != nil {
+			return fmt.Errorf("anchor %s: %w", anchorID, err)
+		}
+		for _, m := range members {
+			s.add(m.typeName, m.id)
+		}
+		if direction == "incoming" {
+			return nil
+		}
+		direction = "outgoing" // "both": the outgoing hop below still applies
+	}
 	if direction == "incoming" || direction == "both" {
 		if err := s.addRows(ctx, db, `SELECT source_type, source_id FROM smeldr_relations WHERE target_id = $1`+live, anchorID, kind, now); err != nil {
 			return fmt.Errorf("anchor %s incoming: %w", anchorID, err)

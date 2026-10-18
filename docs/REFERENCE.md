@@ -812,7 +812,9 @@ func (s *ReadScope) TypeReadable(typeName string) bool
 **Reader roles.**
 - `RegisterScopedReaderRole` defines `scoped-reader` (static).
 - `RegisterDomainReaderRole` defines `domain-reader` (dynamic, `belongs_to_domain`, incoming).
-- Both have ops exactly `["read"]`, are idempotent, and are registered by example/server when governance is enabled. A Domain reader who should see the Domain gets a separate `scoped-reader` grant for it.
+- `RegisterAreaReaderRole` defines `area-reader` (dynamic, `belongs_to_area`, incoming; T882).
+- All three have ops exactly `["read"]`, are idempotent, and are registered by example/server when governance is enabled.
+- **Place readers read through the place hierarchy (D142, T882).** A grant on a place kind (`belongs_to_root`, `belongs_to_domain`, `belongs_to_area`) reads the place itself, every record placed in it, and for a place below it (a Domain in Root, an Area in a Domain) that place and what is placed in it. No other relation kind is followed. So a domain-reader reads its Domain, its Areas and everything placed in either; an area-reader its Area and what is placed in it. Before T882 the anchor was not readable (a scoped member's Navigator landed empty, T843). The per-item check (`RoleStore.Authorized`) uses the same walk; the place record itself counts only for `read`, so a `decision-domain-admin` approves the Decisions in its Domain and its Areas, never the Domain record.
 
 **Static patterns are stored as IDs.** `RoleStore.Grant` resolves each `type:item` pattern through the App's resolver (address, slug, ID, then the transitional legacy number) and stores `type:<ID>`, the only form `Authorized` and `ReadScope` match. A wildcard `type:*` is kept, and duplicates collapse. A pattern that is not `type:item`, names an unregistered type, or names no record of its type is refused with a validation error naming it. A RoleStore used without an App stores the patterns as given. **A synthetic type is kept as given** (since v1.148.1, A497): its pattern names a domain, not a record. The only one is `RuleType`, so a stewardship pattern `RuleType:<name>` is stored unchanged next to resolved record patterns, and `Authorized`, `ReadScope` and `StewardedRuleTypes` match it literally.
 
@@ -5971,8 +5973,9 @@ safe to call on every boot; `UpsertKind` updates in place if a kind is already r
 | `investigates` | directional | Task→Decision | asserted | Investigates / Investigated By |
 | `addresses` | directional | Decision→Decision | asserted | Addresses / Addressed By |
 | `grounded_in` | directional | Decision→Decision | asserted | Grounded In / Grounds |
-| `belongs_to_domain` | directional | Decision→domain | asserted | Belongs To Domain / Domain Of |
-| `belongs_to_area` | directional | Decision→area | asserted | Belongs To Area / Area Of |
+| `belongs_to_root` | directional | any→Root | asserted | Belongs To Root / Root Of |
+| `belongs_to_domain` | directional | any→Domain | asserted | Belongs To Domain / Domain Of |
+| `belongs_to_area` | directional | any→Area | asserted | Belongs To Area / Area Of |
 | `in_set` | directional | (open — no `TypePairs`) | asserted | In Set / (none) |
 | `implements` | directional | Task→Decision | asserted | Implements / Implemented By |
 | `about` | directional | (open, no `TypePairs`; the source is a Signal) | asserted | About / Subject Of |
@@ -5998,6 +6001,34 @@ that registered a kind before its reverse label existed gets it on its next boot
 `implements`, `about` and `refers_to` (D113, A521) are asserted by the system from reference
 fields, never by hand: a Task's `implements` naming a Decision, a Signal's subject, `task_ref`
 and `answer_ref`, and a runtime-defined reference field. See "References between records" below.
+
+### Places: Root, Domain, Area and Set (D142, T882)
+
+Root, Domain, Area and Set are compiled core record types, registered by `RegisterGovernanceTypes` (tables from `CreateGovernanceTables`), each with `name` and `description` and its own MCP tools (`list_domains`, `get_domain`, `create_domain`, ...).
+
+| Type | Address | Table | Flow |
+|---|---|---|---|
+| `Root` | `ROOT1` | `smeldr_roots` (one row: a unique index on a constant) | `active` |
+| `Domain` | `DOM<n>` | `smeldr_domains` | `active`, `archived` |
+| `Area` | `ARE<n>` | `smeldr_areas` | `active`, `archived` |
+| `Set` | `SET<n>` | `smeldr_sets` | `active`, `archived` |
+
+- **Root is the organization**, one per instance. `App.EnsureRoot(ctx, name)` creates it with a default Domain (`Default`, slug `default`; the word is brand's to propose, D111) and the edge `Domain belongs_to_root Root`, with provenance (job `setup`), and returns the existing Root on every later call. An empty name is a validation error; an instance that still keeps the runtime `domain` type answers `ErrConflict` (run `MigratePlaces`, which creates Root). example/server calls it at boot with `ORGANIZATION_NAME` (default `INSTANCE_NAME`).
+- **Places.** `belongs_to_root`, `belongs_to_domain` and `belongs_to_area` accept any record type as the source (`"*"` in `TypePairs`). A Domain belongs to Root, an Area to its Domain (D72), and a Decision that spans Domains relates to Root explicitly (D83). A non-Decision record without a place belongs to the whole organization: that is not an incomplete state. A Set (`in_set`) carries no authority (D71).
+- **Cardinality** is not enforced for non-Decision records. For a Decision, exactly one place (Root, one Domain, or one Area, where an Area implies its Domain) is the rule T883 enforces: a second place edge on a Decision is refused, and `proposed -> ratified` is refused without one (D142 point 4).
+- **Reading** follows the place hierarchy; see "Reader roles" above.
+
+**`MigratePlaces(ctx, PlaceMigrationOptions{DryRun, RootName})`** moves an instance from the runtime `domain`, `area` and `set` types it defined before D142, once (`smeldr-server migrate-places`, dry run unless `--apply`, `--report=<file>`):
+1. Every runtime record is copied to the compiled table with the same ID, slug, timestamps, address and number; `name` and `description` come from its fields; an archived record stays archived, any other becomes `active`.
+2. Relation ends, provenance subjects, event-log subjects (`subject_type`, `other_type`), static grant patterns (`domain:<id>` becomes `Domain:<id>`) and the address counter change from the runtime name to the compiled one. IDs do not change, so dynamic grants anchored on a place keep working, and the next Domain continues the numbering.
+3. The runtime schemas are set to `kind = 'retired'`: kept, no longer loaded. The runtime rows stay in `smeldr_dynamic_content`.
+4. Root and the default Domain are created (`EnsureRoot` with `RootName`), and every Domain without one gets `belongs_to_root`.
+
+Steps 1 to 3 run in one transaction; a dry run runs them in a transaction it rolls back, so its report is exact. A second run moves nothing. A runtime record whose address a compiled row already holds is a validation error. Until the migration has run, boot leaves the place prefixes with the runtime types (a warning names `migrate-places`) and `EnsureRoot` waits.
+
+**Rollback.** First choice: restore the database backup taken before the run. By hand, in one transaction: delete the copied rows from the compiled tables (their IDs are in the report), rewrite the type names back (`Domain` to `domain` in `smeldr_relations`, `smeldr_provenance`, `smeldr_events`, the grant patterns and the counter), set the schemas back to `kind = 'content'`, and delete Root, the default Domain and the `belongs_to_root` edges. Then run the previous binary.
+
+**What a client sees change** (an MCP client that read the runtime types): `list_content`, `get_content` and `create_content` with `type_name: "domain"` stop working (the type is not loaded); use `list_domains`, `get_domain`, `create_domain`, `update_domain` (and the same for areas and sets). Items have the compiled shape (`ID`, `Slug`, `Status`, `address`, `name`, `description`). Relation ends and `get_relations` use `Domain`, `Area`, `Set`. Event names stay `domain.*`; addresses (`DOM1`) do not change.
 
 ### References between records (D113, A521)
 

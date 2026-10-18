@@ -1650,7 +1650,7 @@ func (s *RoleStore) Authorized(ctx context.Context, tokenID, op string, target A
 			if !g.anchorID.Valid || g.anchorID.String == "" || target.ID == "" {
 				continue // can't resolve without both ends
 			}
-			matched, err := s.relationExists(ctx, g.relKind.String, g.relDir.String, target.ID, g.anchorID.String)
+			matched, err := s.relationExists(ctx, g.relKind.String, g.relDir.String, target.ID, g.anchorID.String, op == "read")
 			if err != nil {
 				pendingErr = err
 				continue // don't abort — check remaining grants
@@ -1757,7 +1757,7 @@ func (s *RoleStore) RoleGranted(ctx context.Context, tokenID, roleName string, t
 			if !g.anchorID.Valid || g.anchorID.String == "" || target.ID == "" {
 				continue // can't resolve without both ends
 			}
-			matched, err := s.relationExists(ctx, g.relKind.String, g.relDir.String, target.ID, g.anchorID.String)
+			matched, err := s.relationExists(ctx, g.relKind.String, g.relDir.String, target.ID, g.anchorID.String, false)
 			if err != nil {
 				pendingErr = err
 				continue // don't abort — check remaining grants
@@ -1938,12 +1938,32 @@ func (s *RoleStore) StewardshipInbox(ctx context.Context, tokenID string) (*Stew
 // Only asserted edges (edge_class='asserted') that have not been invalidated
 // (invalid_at IS NULL OR invalid_at > now) are considered — reusing the same
 // "active edge" predicate applied by [RelationStore.SweepStructural].
-func (s *RoleStore) relationExists(ctx context.Context, kind, direction, itemID, anchorID string) (bool, error) {
+func (s *RoleStore) relationExists(ctx context.Context, kind, direction, itemID, anchorID string, includeAnchor bool) (bool, error) {
 	// A time, not an RFC3339 string: invalid_at is written as a time.Time, and
 	// SQLite compares a string argument as text against the stored value.
 	now := time.Now().UTC()
 	checkIncoming := direction == "incoming" || direction == "both"
 	checkOutgoing := direction == "outgoing" || direction == "both"
+
+	// A place kind (D142) follows the place hierarchy, as the read scope
+	// does: an item placed in the anchor or in a place below it. The anchor
+	// itself counts only when includeAnchor (read: a domain-reader reads its
+	// Domain).
+	if anchorType, place := placeKindTargets[kind]; place && checkIncoming {
+		if itemID == anchorID && includeAnchor {
+			return true, nil
+		}
+		members, err := placeMembers(ctx, s.db, anchorType, anchorID)
+		if err != nil {
+			return false, fmt.Errorf("smeldr: relationExists place: %w", err)
+		}
+		for _, m := range members[1:] {
+			if m.id == itemID {
+				return true, nil
+			}
+		}
+		checkIncoming = false
+	}
 
 	if checkIncoming {
 		var n int

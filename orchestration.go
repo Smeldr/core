@@ -492,16 +492,30 @@ func RegisterScopedReaderRole(ctx context.Context, rs *RoleStore) error {
 
 // RegisterDomainReaderRole defines (or updates) the "domain-reader" role:
 // Operations exactly ["read"], ScopeMode dynamic over "belongs_to_domain",
-// direction "incoming". A grant anchored on a Domain reads every item with a
-// live, asserted belongs_to_domain edge to it (the same shape as
-// [RegisterDecisionDomainAdminRole]). It does not read the Domain record itself:
-// grant that separately with [RegisterScopedReaderRole]'s role. Idempotent.
+// direction "incoming". A grant anchored on a Domain reads the Domain itself,
+// every record placed in it, the Areas that belong to it and the records
+// placed in those Areas: the place hierarchy (D72, D142), no other relation.
+// Idempotent.
 func RegisterDomainReaderRole(ctx context.Context, rs *RoleStore) error {
 	return rs.DefineRole(ctx, RoleDefinition{
 		Name:              "domain-reader",
 		Operations:        []string{"read"},
 		ScopeMode:         ScopeDynamic,
 		ScopeRelationKind: "belongs_to_domain",
+		ScopeDirection:    "incoming",
+	})
+}
+
+// RegisterAreaReaderRole defines (or updates) the "area-reader" role:
+// Operations exactly ["read"], ScopeMode dynamic over "belongs_to_area",
+// direction "incoming". A grant anchored on an Area reads the Area itself and
+// every record placed in it (D142). Idempotent.
+func RegisterAreaReaderRole(ctx context.Context, rs *RoleStore) error {
+	return rs.DefineRole(ctx, RoleDefinition{
+		Name:              "area-reader",
+		Operations:        []string{"read"},
+		ScopeMode:         ScopeDynamic,
+		ScopeRelationKind: "belongs_to_area",
 		ScopeDirection:    "incoming",
 	})
 }
@@ -727,11 +741,12 @@ func CreateOrchestrationTables(db DB) error {
 }
 
 // CreateGovernanceTables creates the tables of core governance (smeldr_signals,
-// smeldr_decisions, smeldr_amendments) if they do not already exist, with
-// their address storage (S, D, A). Call once at startup before
+// smeldr_decisions, smeldr_amendments, and the places of D142: smeldr_roots,
+// smeldr_domains, smeldr_areas, smeldr_sets) if they do not already exist,
+// with their address storage (S, D, A, ROOT, DOM, ARE, SET). Call once at startup before
 // [RegisterGovernanceTypes].
 func CreateGovernanceTables(db DB) error {
-	return createRecordTables(db, governanceAddressTypes, []string{
+	return createRecordTables(db, governanceAddressTypes, append([]string{
 		`CREATE TABLE IF NOT EXISTS smeldr_signals (
 			id          TEXT PRIMARY KEY,
 			slug        TEXT NOT NULL UNIQUE,
@@ -799,7 +814,7 @@ func CreateGovernanceTables(db DB) error {
 			task_ref         TEXT NOT NULL DEFAULT '',
 			last_actor       TEXT NOT NULL DEFAULT ''
 		)`,
-	})
+	}, placeTableStmts...))
 }
 
 // CreateOrchestrationAddOnTables creates the tables of the Orchestration
@@ -1068,7 +1083,8 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 
 // RegisterGovernanceTypes registers the record types of core governance:
 // [Signal], [Decision] and [Amendment], with their state flows and their
-// reference fields (D113). Every core record type is added here. Call after
+// reference fields (D113), and the places of D142: [Root], [Domain], [Area]
+// and [Set]. Every core record type is added here. Call after
 // [CreateGovernanceTables] and before [App.Run]. Flow registration errors are
 // logged and do not block startup (fail-open).
 func RegisterGovernanceTypes(app *App, db DB) {
@@ -1088,6 +1104,8 @@ func RegisterGovernanceTypes(app *App, db DB) {
 		At("/amendments"), Repo(NewSQLRepo[*Amendment](db, Table("smeldr_amendments"))), MCP(MCPRead, MCPWrite), withAddress(),
 		app.referenceSaveHooks(amendmentReferences(), &amends),
 	))
+	// D142: Root, Domain, Area and Set.
+	registerPlaceTypes(app, db)
 }
 
 // RegisterOrchestrationAddOn registers the record types of the Orchestration
@@ -1218,18 +1236,24 @@ func RegisterGovernanceRelationKinds(ctx context.Context, store *RelationStore) 
 			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"}]`),
 		},
 		{
-			// D72's authority-hierarchy model (domain-area-root-implementation.md
-			// §1): Domain and Area are per-instance dynamic content types, not
-			// compiled into core, so the target type name is the lowercase
-			// dynamic-type convention (dynamic_test.go's own "recipe"/"tag"/"post")
-			// rather than the PascalCase compiled-type convention every other kind
-			// in this function uses for its source side.
+			// D142: the places. Any record may be placed (the source is any
+			// type, "*"); the target is the compiled place type. A Domain
+			// belongs to Root, an Area to its Domain (D72), and a Decision
+			// that spans Domains relates to Root explicitly (D83).
+			TypeName:     "belongs_to_root",
+			Label:        "Belongs To Root",
+			ReverseLabel: "Root Of",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"*","target_type":"Root"}]`),
+		},
+		{
 			TypeName:     "belongs_to_domain",
 			Label:        "Belongs To Domain",
 			ReverseLabel: "Domain Of",
 			Mode:         "asserted",
 			Directional:  true,
-			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"domain"}]`),
+			TypePairs:    json.RawMessage(`[{"source_type":"*","target_type":"Domain"}]`),
 		},
 		{
 			TypeName:     "belongs_to_area",
@@ -1237,7 +1261,7 @@ func RegisterGovernanceRelationKinds(ctx context.Context, store *RelationStore) 
 			ReverseLabel: "Area Of",
 			Mode:         "asserted",
 			Directional:  true,
-			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"area"}]`),
+			TypePairs:    json.RawMessage(`[{"source_type":"*","target_type":"Area"}]`),
 		},
 		{
 			// D71's Set: no TypePairs, deliberately open — every other kind in

@@ -91,3 +91,43 @@ func (s AuthorityStub) MarshalJSON() ([]byte, error) {
 		omitPublishFields
 	}{plain: plain(s)})
 }
+
+// MarshalJSON encodes the Root without PublishedAt and ScheduledAt, which a
+// place's flow can never set (D114, D142).
+func (r Root) MarshalJSON() ([]byte, error) {
+	type plain Root
+	return json.Marshal(struct {
+		plain
+		omitPublishFields
+	}{plain: plain(r)})
+}
+
+// MarshalJSON encodes the Domain without PublishedAt and ScheduledAt, which a
+// place's flow can never set (D114, D142).
+func (d Domain) MarshalJSON() ([]byte, error) {
+	type plain Domain
+	return json.Marshal(struct {
+		plain
+		omitPublishFields
+	}{plain: plain(d)})
+}
+
+// MarshalJSON encodes the Area without PublishedAt and ScheduledAt, which a
+// place's flow can never set (D114, D142).
+func (a Area) MarshalJSON() ([]byte, error) {
+	type plain Area
+	return json.Marshal(struct {
+		plain
+		omitPublishFields
+	}{plain: plain(a)})
+}
+
+// MarshalJSON encodes the Set without PublishedAt and ScheduledAt, which a
+// place's flow can never set (D114, D142).
+func (s Set) MarshalJSON() ([]byte, error) {
+	type plain Set
+	return json.Marshal(struct {
+		plain
+		omitPublishFields
+	}{plain: plain(s)})
+}

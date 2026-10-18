@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestOrchestrationTypes_embedNode verifies at compile time that all six
@@ -550,15 +551,16 @@ func TestRegisterOrchestrationTypes_flows(t *testing.T) {
 	// without logging errors.
 	RegisterOrchestrationTypes(app, db)
 
-	// Verify the 5 orchestration flows were inserted (exclude the default seed flow).
+	// Verify the 5 orchestration flows and the 4 place flows (D142) were
+	// inserted (exclude the default seed flow).
 	row := db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM smeldr_state_flows WHERE type_name IS NOT NULL")
 	var n int
 	if err := row.Scan(&n); err != nil {
 		t.Fatalf("count state flows: %v", err)
 	}
-	if n != 5 {
-		t.Errorf("registered flow count = %d, want 5 (Run must not add a sixth)", n)
+	if n != 9 {
+		t.Errorf("registered flow count = %d, want 9 (Run must not add one)", n)
 	}
 
 	// Load-bearing assertion, not just an unchanged count: a type
@@ -1318,8 +1320,9 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 		"investigates":      {"Investigates", "Investigated By", `[{"source_type":"Task","target_type":"Decision"}]`, true},
 		"addresses":         {"Addresses", "Addressed By", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
 		"grounded_in":       {"Grounded In", "Grounds", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
-		"belongs_to_domain": {"Belongs To Domain", "Domain Of", `[{"source_type":"Decision","target_type":"domain"}]`, true},
-		"belongs_to_area":   {"Belongs To Area", "Area Of", `[{"source_type":"Decision","target_type":"area"}]`, true},
+		"belongs_to_root":   {"Belongs To Root", "Root Of", `[{"source_type":"*","target_type":"Root"}]`, true},
+		"belongs_to_domain": {"Belongs To Domain", "Domain Of", `[{"source_type":"*","target_type":"Domain"}]`, true},
+		"belongs_to_area":   {"Belongs To Area", "Area Of", `[{"source_type":"*","target_type":"Area"}]`, true},
 		"in_set":            {"In Set", "", `[]`, true},
 		// D113: the kinds the system asserts for reference fields.
 		"implements": {"Implements", "Implemented By", `[{"source_type":"Task","target_type":"Decision"}]`, true},
@@ -1414,16 +1417,21 @@ func TestRegisterOrchestrationRelationKinds_RegistersReferenceTypes(t *testing.T
 // TestAppSweepStructural_ReferenceTypeTarget_DraftSurvives is the
 // end-to-end regression test for the actual reported symptom, using the
 // real RegisterOrchestrationRelationKinds wiring rather than a hand-rolled
-// kind: a Domain item created but never published must not have its
-// belongs_to_domain edge invalidated by a structural sweep.
+// kind: a Domain (compiled since D142) must not have its belongs_to_domain
+// edge invalidated by a structural sweep.
 func TestAppSweepStructural_ReferenceTypeTarget_DraftSurvives(t *testing.T) {
-	db, rs, app, itemID := setupDynamicTargetDB(t, "domain", Draft)
+	db, rs, app, _ := setupDynamicTargetDB(t, "topic", Draft)
 	if err := RegisterOrchestrationRelationKinds(context.Background(), rs); err != nil {
 		t.Fatalf("RegisterOrchestrationRelationKinds: %v", err)
 	}
+	now := time.Now().UTC()
+	if _, err := db.Exec(`INSERT INTO smeldr_domains (id, slug, status, created_at, updated_at, name) VALUES ('dom-1', 'core', 'active', $1, $1, 'core')`, now); err != nil {
+		t.Fatal(err)
+	}
+	itemID := "dom-1"
 	seedDecision(t, db, "decision-1", "proposed")
 	if _, err := rs.MCPAssertRelation(context.Background(),
-		"Decision", "decision-1", "domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		"Decision", "decision-1", "Domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
 		t.Fatalf("MCPAssertRelation: %v", err)
 	}
 

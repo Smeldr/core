@@ -44,9 +44,9 @@ func migrationFixture(t *testing.T) (*sql.DB, *App) {
 	mustExecMig(t, db, `INSERT INTO smeldr_signals (id, slug, created_at, updated_at, task_ref) VALUES ('s-1', 's-1', $1, $1, 'D74-DECLINE')`, at(15))
 	mustExecMig(t, db, `INSERT INTO smeldr_signals (id, slug, created_at, updated_at, task_ref) VALUES ('s-2', 's-2', $1, $1, 'D5')`, at(16))
 	mustExecMig(t, db, `INSERT INTO smeldr_content_type_schemas (id, type_name, label, kind, url_prefix, fields, created_at, updated_at)
-		VALUES ('sch', 'domain', 'Domain', 'content', '', '[{"Name":"Title","Type":"string","Role":"title"}]', $1, $1)`, at(0))
+		VALUES ('sch', 'topic', 'Topic', 'content', '', '[{"Name":"Title","Type":"string","Role":"title"}]', $1, $1)`, at(0))
 	for i := range 2 {
-		mustExecMig(t, db, `INSERT INTO smeldr_dynamic_content (id, slug, type_name, created_at, updated_at) VALUES ($1, $1, 'domain', $2, $2)`,
+		mustExecMig(t, db, `INSERT INTO smeldr_dynamic_content (id, slug, type_name, created_at, updated_at) VALUES ($1, $1, 'topic', $2, $2)`,
 			fmt.Sprintf("dom-%d", i), at(20+i))
 	}
 
@@ -75,12 +75,12 @@ func migrationFixture(t *testing.T) (*sql.DB, *App) {
 		t.Fatalf("post-deploy Signal: %q %v, want S3 (2 old Signals reserved)", s.Address, err)
 	}
 	mustExecMig(t, db, `INSERT INTO smeldr_signals (id, slug, created_at, updated_at) VALUES ('s-raw', 's-raw', $1, $1)`, at(100))
-	repo, err := app.DynamicContentRepo("domain")
+	repo, err := app.DynamicContentRepo("topic")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n, err := repo.CreateDraft(ctx, map[string]any{"Title": "new"}); err != nil || n.Address != "DOM3" {
-		t.Fatalf("post-deploy domain: %v %v, want DOM3", n, err)
+	if n, err := repo.CreateDraft(ctx, map[string]any{"Title": "new"}); err != nil || n.Address != "TOP3" {
+		t.Fatalf("post-deploy domain: %v %v, want TOP3", n, err)
 	}
 	return db, app
 }
@@ -162,15 +162,15 @@ func TestMigrateAddresses_AfterSeedingKeepsUniqueness(t *testing.T) {
 		}
 	}
 	var dom []string
-	rows, _ := db.Query(`SELECT address FROM smeldr_dynamic_content WHERE type_name = 'domain' ORDER BY created_at`)
+	rows, _ := db.Query(`SELECT address FROM smeldr_dynamic_content WHERE type_name = 'topic' ORDER BY created_at`)
 	for rows.Next() {
 		var a string
 		_ = rows.Scan(&a)
 		dom = append(dom, a)
 	}
 	rows.Close()
-	if strings.Join(dom, ",") != "DOM1,DOM2,DOM3" {
-		t.Errorf("domain addresses = %v, want DOM1,DOM2,DOM3", dom)
+	if strings.Join(dom, ",") != "TOP1,TOP2,TOP3" {
+		t.Errorf("topic addresses = %v, want TOP1,TOP2,TOP3", dom)
 	}
 
 	dr := typeReport(rep, "Decision")

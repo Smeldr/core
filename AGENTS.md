@@ -667,7 +667,8 @@ See [docs/REFERENCE.md](docs/REFERENCE.md#decision-steward-role-grants-and-deleg
 
 **Read access to some records, not all (core v1.146.0, A494).** Two built-in reader roles, ops exactly `["read"]`, registered when `ENABLE_GOVERNANCE` is set:
 - **`scoped-reader`** (static): `grant_role` with `scope_static` patterns such as `["Decision:D12", "Task:*"]`. The item may be named by its address, slug or ID; the grant stores its ID. A pattern that names no record is refused.
-- **`domain-reader`** (dynamic): `scope_anchor_id` set to a Domain's ID reads every item with a live `belongs_to_domain` edge to it. It does not read the Domain itself; grant that with `scoped-reader`.
+- **`domain-reader`** (dynamic): `scope_anchor_id` set to a Domain's ID reads the Domain itself, the Areas in it, and every item placed in either (`belongs_to_domain`, `belongs_to_area`; the place hierarchy, D142).
+- **`area-reader`** (dynamic): `scope_anchor_id` set to an Area's ID reads the Area and every item placed in it (`belongs_to_area`).
 
 Since core v1.147.0 (A495) the item surfaces apply them:
 - get, list, update, publish, archive, delete, transitions and the `/_content` routes show a scoped reader only what it may read;

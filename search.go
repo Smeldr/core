@@ -40,15 +40,14 @@ const (
 )
 
 // placeRelationKinds are the relation kinds that give a record its place
-// (D142): a live asserted edge of one of them from a record is its place. A
-// Root relation kind joins this list when Root becomes a core type (T882).
-var placeRelationKinds = []string{"belongs_to_domain", "belongs_to_area"}
+// (D142): a live asserted edge of one of them from a record is its place.
+var placeRelationKinds = []string{"belongs_to_root", "belongs_to_domain", "belongs_to_area"}
 
 // placeTypes are the record types a named place may be, tried in order; a
 // type that is not registered is skipped. The capitalized names are the core
-// types T882 introduces, the lower-case ones the instance-defined types before
-// it.
-var placeTypes = []string{"Domain", "Area", "domain", "area"}
+// types (T882), the lower-case ones the instance-defined types before them, on
+// an instance that has not run MigratePlaces yet.
+var placeTypes = []string{"Root", "Domain", "Area", "domain", "area"}
 
 // searchRoles are the schema field roles a runtime-defined type searches when
 // none of its fields sets [SchemaField.Search].

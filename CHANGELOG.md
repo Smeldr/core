@@ -18,6 +18,15 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **Root, Domain, Area and Set are core types (D142, T882, A541).** Compiled record types registered by `RegisterGovernanceTypes`, addresses `ROOT`, `DOM`, `ARE`, `SET`. `App.EnsureRoot` creates the organization's Root with a default Domain once (example/server: `ORGANIZATION_NAME`). New relation kind `belongs_to_root`; `belongs_to_domain`, `belongs_to_area` and `belongs_to_root` accept any record as the source (`"*"` in `TypePairs`). New role `area-reader` (`RegisterAreaReaderRole`). `App.MigratePlaces` and `smeldr-server migrate-places` move an instance's runtime `domain`, `area` and `set` records to the compiled types with their addresses, edges, provenance, events and grants.
+
+### Changed
+
+- **Place readers read through the place hierarchy (D142, T882, A541).** A domain-reader reads its Domain, the Areas in it and everything placed in either; an area-reader its Area and what is placed in it; the per-item check follows the same walk, the place record itself only for read. Before, a domain-reader could not read its own Domain (T843). Search treats `belongs_to_root` as a place.
+- **Clients of the runtime place types change** after `migrate-places`: the generic content tools with `type_name: "domain"` give way to the module tools (`list_domains`, ...) and relation ends read `Domain`, `Area`, `Set` (REFERENCE, "Places").
+
 ---
 
 ## [1.167.0] - 2026-10-18

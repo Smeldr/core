@@ -27,6 +27,8 @@
 //	                      Amendment, their flows and relation kinds) without the
 //	                      Orchestration add-on. Records, not access: roles and
 //	                      grants are ENABLE_GOVERNANCE.
+//	ORGANIZATION_NAME     the name of the Root created with the organization (D142;
+//	                      default: INSTANCE_NAME)
 //	ENABLE_ORCHESTRATION  wire core governance records and the Orchestration add-on
 //	                      (Task, Goal, Run); implies ENABLE_GOVERNANCE_RECORDS
 //	ENABLE_AUTHORITY      wire the Authority mechanism (Rule, AuthorityStub — decision-
@@ -84,6 +86,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -115,6 +118,7 @@ type ServerConfig struct {
 	EnableBlocks             bool
 	EnableOrchestration      bool
 	EnableGovernanceRecords  bool
+	OrganizationName         string
 	EnableAuthority          bool
 	EnableCheck              bool
 	EnableRedirects          bool
@@ -184,6 +188,7 @@ func parseConfig() ServerConfig {
 		EnableBlocks:             os.Getenv("ENABLE_BLOCKS") != "",
 		EnableOrchestration:      os.Getenv("ENABLE_ORCHESTRATION") != "",
 		EnableGovernanceRecords:  os.Getenv("ENABLE_GOVERNANCE_RECORDS") != "",
+		OrganizationName:         envOr("ORGANIZATION_NAME", envOr("INSTANCE_NAME", "smeldr-dogfood")),
 		EnableAuthority:          os.Getenv("ENABLE_AUTHORITY") != "",
 		EnableCheck:              os.Getenv("ENABLE_CHECK") != "",
 		EnableRedirects:          os.Getenv("ENABLE_REDIRECTS") != "",
@@ -217,6 +222,17 @@ func parseConfig() ServerConfig {
 		OAuthDBPath:              envOr("OAUTH_DB_PATH", "./oauth.db"),
 		InstanceName:             envOr("INSTANCE_NAME", "smeldr-dogfood"),
 	}
+}
+
+// organizationName is the name Root gets (D142): ORGANIZATION_NAME, else the
+// instance name, else "smeldr".
+func (c ServerConfig) organizationName() string {
+	for _, n := range []string{c.OrganizationName, c.InstanceName} {
+		if n != "" {
+			return n
+		}
+	}
+	return "smeldr"
 }
 
 // governanceRecords reports whether core governance records are wired:
@@ -449,12 +465,25 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 	}
 
+	// D142: the organization's Root and default Domain, once. An instance
+	// that still keeps the runtime domain type gets them from migrate-places.
+	if cfg.governanceRecords() {
+		if _, err := app.EnsureRoot(context.Background(), cfg.organizationName()); errors.Is(err, smeldr.ErrConflict) {
+			slog.Warn("smeldr-server: Root not created; run migrate-places", "reason", err)
+		} else if err != nil {
+			return ServerResult{}, fmt.Errorf("ensure root: %w", err)
+		}
+	}
+
 	if cfg.EnableRelations && cfg.governanceRecords() && cfg.EnableGovernance {
 		if err := smeldr.RegisterDecisionDomainAdminRole(context.Background(), roleStore); err != nil {
 			return ServerResult{}, fmt.Errorf("register decision-domain-admin role: %w", err)
 		}
 		if err := smeldr.RegisterDomainReaderRole(context.Background(), roleStore); err != nil {
 			return ServerResult{}, fmt.Errorf("register domain-reader role: %w", err)
+		}
+		if err := smeldr.RegisterAreaReaderRole(context.Background(), roleStore); err != nil {
+			return ServerResult{}, fmt.Errorf("register area-reader role: %w", err)
 		}
 	}
 
@@ -770,6 +799,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "migrate-webhook-subscriptions" {
 		os.Exit(runMigrateWebhookSubscriptions(os.Args[2:], os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "migrate-places" {
+		os.Exit(runMigratePlaces(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	if len(os.Args) > 1 && os.Args[1] == "seed-role-subscriptions" {
 		os.Exit(runSeedRoleSubscriptions(os.Args[2:], os.Stdout, os.Stderr))

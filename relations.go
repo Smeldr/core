@@ -468,7 +468,8 @@ func validateTypePairs(kind RelationKindDef, edge RelationEdge) error {
 		return nil
 	}
 	for _, p := range pairs {
-		if p.SourceType == edge.SourceType && p.TargetType == edge.TargetType {
+		// "*" as the source admits any type (D142's places).
+		if (p.SourceType == edge.SourceType || p.SourceType == "*") && p.TargetType == edge.TargetType {
 			return nil
 		}
 	}

@@ -69,7 +69,8 @@ func TestPG_ReadScope(t *testing.T) {
 			t.Errorf("Readable(%s, %s) = %v; Authorized says %v", c[0], c[1], got, want)
 		}
 	}
-	if !s.Readable("Decision", "a1") || s.Readable("Domain", "A") || s.All() {
+	// A place reader reads its place too (D142, T882).
+	if !s.Readable("Decision", "a1") || !s.Readable("Domain", "A") || s.All() {
 		t.Errorf("unexpected scope: a1 %v, Domain %v, All %v", s.Readable("Decision", "a1"), s.Readable("Domain", "A"), s.All())
 	}
 }

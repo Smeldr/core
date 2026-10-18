@@ -162,7 +162,8 @@ func TestReadScope_TypeReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for typeName, want := range map[string]bool{"Goal": true, "Run": true, "Decision": true, "Task": false, "Domain": false} {
+	// A place reader reads its place itself (D142, T843): Domain is readable.
+	for typeName, want := range map[string]bool{"Goal": true, "Run": true, "Decision": true, "Task": false, "Domain": true} {
 		if got := s.TypeReadable(typeName); got != want {
 			t.Errorf("TypeReadable(%s) = %v; want %v", typeName, got, want)
 		}
@@ -255,7 +256,8 @@ func TestReaderRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !s.Readable("Goal", "g1") || !s.Readable("Decision", "a1") || s.Readable("Domain", "A") || s.Readable("Task", "a2") {
+	// The domain-reader reads its Domain too (D142, T843).
+	if !s.Readable("Goal", "g1") || !s.Readable("Decision", "a1") || !s.Readable("Domain", "A") || s.Readable("Task", "a2") {
 		t.Errorf("reader roles read the wrong items: %+v", s)
 	}
 	for _, op := range []string{"update", "approve", "manage"} {

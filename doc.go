@@ -139,6 +139,11 @@
 //     [CreateGovernanceTables] and [RegisterGovernanceTypes]; the
 //     Orchestration add-on ([Task], [Goal], [Run]) has
 //     [CreateOrchestrationAddOnTables] and [RegisterOrchestrationAddOn].
+//   - Places (D142: [Root], [Domain], [Area], [Set]): the organization's
+//     structure, registered with core governance. [App.EnsureRoot] creates
+//     the one Root and a default Domain; any record may belong to a Domain
+//     or an Area, and place readers read through the hierarchy.
+//     [App.MigratePlaces] moves an instance's runtime place types to them.
 //   - Custom state flows ([StateFlow], [State], [Transition],
 //     [TransitionTrigger]) — a data-driven state machine registered per
 //     content type via [App.RegisterFlow], for lifecycles beyond the built-in

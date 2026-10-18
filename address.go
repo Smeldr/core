@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"regexp"
 	"slices"
@@ -35,6 +36,12 @@ var coreAddressPrefixes = map[string]string{
 	"AuthorityStub": "B",
 	// Subscriptions (subscription.go, D116): S is Signal, so N for notify.
 	"Subscription": "N",
+	// Places (places.go, D142). DOM and ARE are the prefixes the runtime
+	// domain and area types had, so their addresses stay.
+	"Root":   "ROOT",
+	"Domain": "DOM",
+	"Area":   "ARE",
+	"Set":    "SET",
 }
 
 var addressPrefixRe = regexp.MustCompile(`^[A-Z]{1,4}$`)
@@ -75,13 +82,17 @@ var coreAddressTables = []struct{ typeName, table, legacy string }{
 	{"Rule", "smeldr_rules", ""},
 	{"AuthorityStub", "smeldr_authority_stubs", ""},
 	{"Subscription", "smeldr_subscriptions", ""},
+	{"Root", "smeldr_roots", ""},
+	{"Domain", "smeldr_domains", ""},
+	{"Area", "smeldr_areas", ""},
+	{"Set", "smeldr_sets", ""},
 }
 
 // governanceAddressTypes and orchestrationAddOnAddressTypes are the types
 // [CreateGovernanceTables] and [CreateOrchestrationAddOnTables] give address
 // storage; [CreateAuthorityTables] does the same for authorityAddressTypes.
 var (
-	governanceAddressTypes         = []string{"Signal", "Decision", "Amendment"}
+	governanceAddressTypes         = []string{"Signal", "Decision", "Amendment", "Root", "Domain", "Area", "Set"}
 	orchestrationAddOnAddressTypes = []string{"Task", "Goal", "Run"}
 	authorityAddressTypes          = []string{"Rule", "AuthorityStub"}
 	subscriptionAddressTypes       = []string{"Subscription"}
@@ -358,6 +369,17 @@ func registerCoreAddresses(ctx context.Context, db DB, types ...string) error {
 			return err
 		}
 		prefix := coreAddressPrefixes[t.typeName]
+		if held, err := heldByLegacyPlaceType(ctx, db, t.typeName, prefix); err != nil {
+			return err
+		} else if held {
+			// The instance still keeps the runtime type this place type
+			// replaces (D142): its counter keeps the prefix until
+			// MigratePlaces moves it, so boot does not fail before the
+			// migration can run.
+			slog.WarnContext(ctx, "smeldr: address prefix still held by the runtime type the place type replaces; run migrate-places",
+				"type", t.typeName, "prefix", prefix, "holder", legacyPlaceTypes[t.typeName])
+			continue
+		}
 		table, legacy := t.table, t.legacy
 		register := registerAddressPrefix
 		if legacy == "" {
@@ -370,6 +392,24 @@ func registerCoreAddresses(ctx context.Context, db DB, types ...string) error {
 		}
 	}
 	return nil
+}
+
+// heldByLegacyPlaceType reports whether prefix is still the address prefix of
+// the lowercase runtime type typeName replaces (domain for Domain, D142).
+func heldByLegacyPlaceType(ctx context.Context, db DB, typeName, prefix string) (bool, error) {
+	legacy, ok := legacyPlaceTypes[typeName]
+	if !ok {
+		return false, nil
+	}
+	var holder string
+	err := db.QueryRowContext(ctx, `SELECT type_name FROM smeldr_address_counters WHERE prefix = $1`, prefix).Scan(&holder)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("%w: read address prefix %s: %s", ErrInternal, prefix, err)
+	}
+	return holder == legacy, nil
 }
 
 // RecordAddress is a record's system-assigned address (D110), embedded in the

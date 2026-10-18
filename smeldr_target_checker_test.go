@@ -410,13 +410,13 @@ func assertDomainEdgeSurvives(t *testing.T, rs *RelationStore, decisionID string
 }
 
 func TestDefaultTargetChecker_ReferenceType_DraftAlive(t *testing.T) {
-	db, rs, app, itemID := setupDynamicTargetDB(t, "domain", Draft)
-	if err := rs.RegisterReferenceType(context.Background(), "domain"); err != nil {
+	db, rs, app, itemID := setupDynamicTargetDB(t, "topic", Draft)
+	if err := rs.RegisterReferenceType(context.Background(), "topic"); err != nil {
 		t.Fatalf("RegisterReferenceType: %v", err)
 	}
 	seedDecision(t, db, "decision-1", "proposed")
 	if _, err := rs.MCPAssertRelation(context.Background(),
-		"Decision", "decision-1", "domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		"Decision", "decision-1", "topic", itemID, "belongs_to_topic", nil, nil, nil, nil); err != nil {
 		t.Fatalf("MCPAssertRelation: %v", err)
 	}
 
@@ -431,13 +431,13 @@ func TestDefaultTargetChecker_ReferenceType_DraftAlive(t *testing.T) {
 }
 
 func TestDefaultTargetChecker_ReferenceType_PublishedAlive(t *testing.T) {
-	db, rs, app, itemID := setupDynamicTargetDB(t, "domain", Published)
-	if err := rs.RegisterReferenceType(context.Background(), "domain"); err != nil {
+	db, rs, app, itemID := setupDynamicTargetDB(t, "topic", Published)
+	if err := rs.RegisterReferenceType(context.Background(), "topic"); err != nil {
 		t.Fatalf("RegisterReferenceType: %v", err)
 	}
 	seedDecision(t, db, "decision-1", "proposed")
 	if _, err := rs.MCPAssertRelation(context.Background(),
-		"Decision", "decision-1", "domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		"Decision", "decision-1", "topic", itemID, "belongs_to_topic", nil, nil, nil, nil); err != nil {
 		t.Fatalf("MCPAssertRelation: %v", err)
 	}
 
@@ -452,13 +452,13 @@ func TestDefaultTargetChecker_ReferenceType_PublishedAlive(t *testing.T) {
 }
 
 func TestDefaultTargetChecker_ReferenceType_ScheduledAlive(t *testing.T) {
-	db, rs, app, itemID := setupDynamicTargetDB(t, "domain", Scheduled)
-	if err := rs.RegisterReferenceType(context.Background(), "domain"); err != nil {
+	db, rs, app, itemID := setupDynamicTargetDB(t, "topic", Scheduled)
+	if err := rs.RegisterReferenceType(context.Background(), "topic"); err != nil {
 		t.Fatalf("RegisterReferenceType: %v", err)
 	}
 	seedDecision(t, db, "decision-1", "proposed")
 	if _, err := rs.MCPAssertRelation(context.Background(),
-		"Decision", "decision-1", "domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		"Decision", "decision-1", "topic", itemID, "belongs_to_topic", nil, nil, nil, nil); err != nil {
 		t.Fatalf("MCPAssertRelation: %v", err)
 	}
 
@@ -473,13 +473,13 @@ func TestDefaultTargetChecker_ReferenceType_ScheduledAlive(t *testing.T) {
 }
 
 func TestDefaultTargetChecker_ReferenceType_ArchivedDead(t *testing.T) {
-	db, rs, app, itemID := setupDynamicTargetDB(t, "domain", Archived)
-	if err := rs.RegisterReferenceType(context.Background(), "domain"); err != nil {
+	db, rs, app, itemID := setupDynamicTargetDB(t, "topic", Archived)
+	if err := rs.RegisterReferenceType(context.Background(), "topic"); err != nil {
 		t.Fatalf("RegisterReferenceType: %v", err)
 	}
 	seedDecision(t, db, "decision-1", "proposed")
 	if _, err := rs.MCPAssertRelation(context.Background(),
-		"Decision", "decision-1", "domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		"Decision", "decision-1", "topic", itemID, "belongs_to_topic", nil, nil, nil, nil); err != nil {
 		t.Fatalf("MCPAssertRelation: %v", err)
 	}
 
@@ -500,13 +500,13 @@ func TestDefaultTargetChecker_ReferenceType_ArchivedDead(t *testing.T) {
 }
 
 func TestDefaultTargetChecker_ReferenceType_RowMissing(t *testing.T) {
-	db, rs, app, _ := setupDynamicTargetDB(t, "domain", Draft)
-	if err := rs.RegisterReferenceType(context.Background(), "domain"); err != nil {
+	db, rs, app, _ := setupDynamicTargetDB(t, "topic", Draft)
+	if err := rs.RegisterReferenceType(context.Background(), "topic"); err != nil {
 		t.Fatalf("RegisterReferenceType: %v", err)
 	}
 	seedDecision(t, db, "decision-1", "proposed")
 	if _, err := rs.MCPAssertRelation(context.Background(),
-		"Decision", "decision-1", "domain", "never-created", "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		"Decision", "decision-1", "topic", "never-created", "belongs_to_topic", nil, nil, nil, nil); err != nil {
 		t.Fatalf("MCPAssertRelation: %v", err)
 	}
 
@@ -520,13 +520,13 @@ func TestDefaultTargetChecker_ReferenceType_RowMissing(t *testing.T) {
 }
 
 func TestDefaultTargetChecker_ReferenceTypeQueryError(t *testing.T) {
-	db, rs, app, itemID := setupDynamicTargetDB(t, "domain", Draft)
-	if err := rs.RegisterReferenceType(context.Background(), "domain"); err != nil {
+	db, rs, app, itemID := setupDynamicTargetDB(t, "topic", Draft)
+	if err := rs.RegisterReferenceType(context.Background(), "topic"); err != nil {
 		t.Fatalf("RegisterReferenceType: %v", err)
 	}
 	seedDecision(t, db, "decision-1", "proposed")
 	if _, err := rs.MCPAssertRelation(context.Background(),
-		"Decision", "decision-1", "domain", itemID, "belongs_to_domain", nil, nil, nil, nil); err != nil {
+		"Decision", "decision-1", "topic", itemID, "belongs_to_topic", nil, nil, nil, nil); err != nil {
 		t.Fatalf("MCPAssertRelation: %v", err)
 	}
 
