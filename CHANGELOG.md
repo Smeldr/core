@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.166.0] - 2026-10-18
+
 ### Added
 
 - **Core governance and the Orchestration add-on register separately (T881, A535).** `CreateGovernanceTables`, `RegisterGovernanceTypes` and `RegisterGovernanceRelationKinds` set up Signal, Decision and Amendment with their flows, addresses and relation kinds; `CreateOrchestrationAddOnTables`, `RegisterOrchestrationAddOn` and `RegisterOrchestrationAddOnRelationKinds` set up Task, Goal and Run. `CreateOrchestrationTables`, `RegisterOrchestrationTypes` and `RegisterOrchestrationRelationKinds` call both and keep working as before. The example server gains `ENABLE_GOVERNANCE_RECORDS` (core governance only); `ENABLE_ORCHESTRATION` keeps meaning both, and `ENABLE_CHECK`, `ENABLE_EVAL_QUEUE_DRAIN` and `ENABLE_STANDING_DRIFT_CHECK` now need governance records, not the add-on.
