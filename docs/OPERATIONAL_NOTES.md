@@ -4,6 +4,26 @@ Durable tooling and framework gotchas — reference facts, not a diary. See
 `CLAUDE.md` for standing process rules; this file is only for things that
 are true about the tools regardless of what task is in flight.
 
+## Running the Postgres integration suite (pgxcheck, T890)
+
+The pgx tests that touch Postgres carry the build tag `integration`: a plain `go test ./...`
+in pgx compiles none of them and is green in about a second. Run them with
+`scripts/pgxcheck`:
+
+1. Start the database: the Docker container `smeldr-pgtest` (postgres:16, user and password
+   `forge`, database `forgetest`, port 5432). pgxcheck never starts it.
+2. From `scripts/pgxcheck`: `DATABASE_URL=postgres://forge:forge@localhost:5432/forgetest?sslmode=disable GOWORK=off go run .`
+   It sets a temporary `replace smeldr.dev/core => ../` in pgx/go.mod, runs
+   `go test -tags integration -count=1 -json ./...`, restores go.mod and go.sum, and prints
+   `pgx integration: <n> passed, <f> failed, <s> skipped against <host>/<db>` with every
+   failed and skipped test.
+3. It exits non-zero without `DATABASE_URL`, when no test ran, or on any failure or skip.
+   `TestPG_RaceChild` is left out: it only runs as the child process of
+   `TestPG_ConflictPolicy_TwoProcesses`.
+
+A tagged run without `DATABASE_URL` fails at once (`TestMain` in pgx/integration_test.go)
+instead of skipping every test.
+
 ## Running the D110 address migration (Phase 3, on Peter's yes)
 
 `smeldr-server migrate-addresses` (example/server) runs `MigrateAddresses` on the

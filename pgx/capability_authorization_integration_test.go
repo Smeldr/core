@@ -80,7 +80,8 @@ func TestPG_CapabilityAuthorization(t *testing.T) {
 	for _, c := range visible {
 		names = append(names, c.Resource+" "+c.Verb)
 	}
-	want := []string{"item get", "item list", "item update", "relation get", "relation list", "signal list", "signal answer", "subscription get", "subscription list", "subscription update"}
+	// item search (T885) is visible to any token that holds read.
+	want := []string{"item get", "item list", "item update", "item search", "relation get", "relation list", "signal list", "signal answer", "subscription get", "subscription list", "subscription update"}
 	if len(names) != len(want) {
 		t.Fatalf("visible %v; want %v", names, want)
 	}

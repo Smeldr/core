@@ -18,6 +18,14 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`TestPG_CapabilityAuthorization` expects `item search` (T890, A543).** The Postgres test of visible capabilities predated T885's `item search` (visible to any token that holds `read`), so it failed on main from v1.167.0; the code was right, the list was not. Test only, no behaviour change.
+
+### Added
+
+- **`scripts/pgxcheck` runs the Postgres integration suite for real (T890, A543)** and prints one line to quote (`pgx integration: <n> passed, <f> failed, <s> skipped against <host>/<db>`); it fails without a database, on any failure or skip, and when nothing ran. A tagged pgx run without `DATABASE_URL` now fails instead of skipping every test. See docs/OPERATIONAL_NOTES.md.
+
 ### Added
 
 - **Root, Domain, Area and Set are core types (D142, T882, A541).** Compiled record types registered by `RegisterGovernanceTypes`, addresses `ROOT`, `DOM`, `ARE`, `SET`. `App.EnsureRoot` creates the organization's Root with a default Domain once (example/server: `ORGANIZATION_NAME`). New relation kind `belongs_to_root`; `belongs_to_domain`, `belongs_to_area` and `belongs_to_root` accept any record as the source (`"*"` in `TypePairs`). New role `area-reader` (`RegisterAreaReaderRole`). `App.MigratePlaces` and `smeldr-server migrate-places` move an instance's runtime `domain`, `area` and `set` records to the compiled types with their addresses, edges, provenance, events and grants.

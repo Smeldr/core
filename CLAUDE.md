@@ -844,6 +844,14 @@ The detail belongs in the submodule's own file.
 **Pre-tag checklist — all must be green before tagging:**
 1. `git status --short` returns nothing (working tree clean)
 2. `go test ./...` is green (root); `go test ./...` inside each changed submodule is green
+2a. The Postgres integration suite ran for real: from `scripts/pgxcheck`, with the
+   `smeldr-pgtest` container up, `DATABASE_URL=... GOWORK=off go run .` prints
+   `pgx integration: <n> passed, 0 failed, 0 skipped against <host>/<db>` and exits 0.
+   `go test ./...` in pgx without `-tags integration` compiles none of those tests, and a
+   tagged run without `DATABASE_URL` used to skip them all; both looked green (T890).
+   **Quote that line in every commit review request** whose change touches what pgx covers
+   (stores, read scope, relations, migrations, capabilities, search): architect answers a
+   request without it with feedback.
 3. `CHANGELOG.md` (root) and each changed submodule's `CHANGELOG.md` has an entry for the
    version being tagged
 4. For standalone modules that depend on smeldr.dev/core (smeldr.dev/mcp, smeldr.dev/media, smeldr.dev/cli),
