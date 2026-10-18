@@ -161,6 +161,7 @@ func TestTransitionItemVia_FailedTransitionsRecordNothing(t *testing.T) {
 	app, db, _, store := setupProvenanceTransitionApp(t)
 	insertSignal(t, db, "sig-p-4", "sig-p-4-slug", "pending")
 	insertDecision(t, db, "dec-p-1", "dec-p-1-slug", "proposed")
+	placeDecision(t, db, "dec-p-1")
 	registerReasonGatedFlow(t, app, db)
 
 	tests := []struct {
@@ -325,6 +326,7 @@ func TestTransitionItemVia_SubjectProvenance_RoundTrip(t *testing.T) {
 	}
 
 	insertDecision(t, db, "dec-p-2", "dec-p-2-slug", "proposed")
+	placeDecision(t, db, "dec-p-2")
 	tokenID := setupTokenWithRole(t, db, rs, "admin")
 	if err := RegisterDecisionStewardRole(ctx, rs); err != nil {
 		t.Fatalf("RegisterDecisionStewardRole: %v", err)

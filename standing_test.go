@@ -137,6 +137,7 @@ func TestItemStanding_TypeWithoutStanding(t *testing.T) {
 func ratifyDecision(t *testing.T, app *App, db *sql.DB, rs *RoleStore, id, slug string) {
 	t.Helper()
 	insertDecision(t, db, id, slug, "proposed")
+	placeDecision(t, db, id)
 	tokenID := setupTokenWithRole(t, db, rs, "admin")
 	if err := RegisterDecisionStewardRole(context.Background(), rs); err != nil {
 		t.Fatalf("RegisterDecisionStewardRole: %v", err)

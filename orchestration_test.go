@@ -1279,6 +1279,7 @@ func TestTransitionItem_authorizeDecisionScope_wired(t *testing.T) {
 	if err := NewSQLRepo[*Decision](db, Table("smeldr_decisions")).Save(context.Background(), d); err != nil {
 		t.Fatalf("save Decision: %v", err)
 	}
+	placeDecision(t, db, d.ID)
 
 	decisionScopeRoles["core"] = "core-ratifier"
 	t.Cleanup(func() { delete(decisionScopeRoles, "core") })

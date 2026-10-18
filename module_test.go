@@ -3086,6 +3086,7 @@ func decisionModuleAtStatus(t *testing.T, status string) (*Module[*Decision], *R
 	if err := repo.Save(context.Background(), d); err != nil {
 		t.Fatalf("seed Decision: %v", err)
 	}
+	placeDecision(t, db, d.ID)
 	m := NewModule((*Decision)(nil), Repo(repo))
 	m.setDB(db)
 	store := NewRoleStore(db)

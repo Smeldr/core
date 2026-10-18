@@ -652,6 +652,15 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, rels *Relatio
 		}
 	}
 
+	// D142 point 4 (T883): a Decision is ratified only with a place, on both
+	// doors into ratified, before the authorization check (the place decides
+	// who holds the authority, D83).
+	if typeName == "Decision" && toStatus == "ratified" {
+		if err := requireDecisionPlace(ctx, db, itemID); err != nil {
+			return err
+		}
+	}
+
 	// ── FAIL-CLOSED: required_reason ─────────────────────────────────────────
 	// Unconditional — does not depend on governance or actorID, since "did the
 	// caller supply a reason" is a fact about the call itself, not an identity.

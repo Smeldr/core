@@ -182,6 +182,7 @@ func TestApp_TransitionItem_Dynamic_HappyPath(t *testing.T) {
 func TestApp_TransitionItem_Compiled_RoleGated_Forbidden(t *testing.T) {
 	app, db, _ := setupTransitionItemApp(t)
 	insertDecision(t, db, "dec-1", "dec-1-slug", "proposed")
+	placeDecision(t, db, "dec-1")
 
 	_, err := app.TransitionItem(TrustedRead(NewTestContext(User{ID: "author-1"})), "Decision", "dec-1-slug", "ratified")
 	if !errors.Is(err, ErrForbidden) {
@@ -192,6 +193,7 @@ func TestApp_TransitionItem_Compiled_RoleGated_Forbidden(t *testing.T) {
 func TestApp_TransitionItem_Compiled_RoleGated_Granted(t *testing.T) {
 	app, db, rs := setupTransitionItemApp(t)
 	insertDecision(t, db, "dec-2", "dec-2-slug", "proposed")
+	placeDecision(t, db, "dec-2")
 	tokenID := setupTokenWithRole(t, db, rs, "admin")
 	if err := RegisterDecisionStewardRole(context.Background(), rs); err != nil {
 		t.Fatalf("RegisterDecisionStewardRole: %v", err)

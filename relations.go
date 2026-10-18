@@ -629,6 +629,11 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 		}
 		edge = canonicalizeNonDirectional(kind, edge)
 	}
+	if edge.EdgeClass == "asserted" {
+		if err := requireOnePlace(ctx, s.db, edge); err != nil {
+			return RelationEdge{}, err
+		}
+	}
 	edge, newRow, err := writeEdgeRow(ctx, s.db, edge)
 	if err != nil {
 		return RelationEdge{}, err

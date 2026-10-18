@@ -645,6 +645,7 @@ func TestApp_Check_WiresIntoTransitionItem(t *testing.T) {
 		t.Error("App.Check should return the same *App for chaining")
 	}
 	insertDecision(t, db, "dec-check-1", "dec-check-1-slug", "proposed")
+	placeDecision(t, db, "dec-check-1")
 	tokenID := setupTokenWithRole(t, db, rs, "admin")
 	if err := RegisterDecisionStewardRole(context.Background(), rs); err != nil {
 		t.Fatalf("RegisterDecisionStewardRole: %v", err)

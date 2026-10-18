@@ -4,6 +4,8 @@ package smeldr
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -205,4 +207,85 @@ func placeMembers(ctx context.Context, db DB, anchorType, anchorID string) ([]pl
 		}
 	}
 	return out, nil
+}
+
+// placeTables maps each compiled place type to its table, for the labels in
+// the place refusals.
+var placeTables = map[string]string{"Root": "smeldr_roots", "Domain": "smeldr_domains", "Area": "smeldr_areas"}
+
+// recordPlace is a record's place: the kind and target of its live asserted
+// place edge.
+type recordPlace struct{ kind, targetType, targetID string }
+
+// decisionPlace returns the place of the record id: its oldest live asserted
+// edge of a [placeRelationKinds] kind (T883). It reads the kind, not the
+// target type, so an edge to a legacy domain or area counts as a place
+// before [App.MigratePlaces] has run, as [App.placedSources] does.
+// found=false with a nil error means the record has no place.
+func decisionPlace(ctx context.Context, db DB, id string) (recordPlace, bool, error) {
+	var p recordPlace
+	err := db.QueryRowContext(ctx,
+		`SELECT relation_kind, target_type, target_id FROM smeldr_relations
+		  WHERE source_id = $1 AND edge_class = 'asserted'
+		    AND relation_kind IN ($2, $3, $4)
+		    AND (invalid_at IS NULL OR invalid_at > $5)
+		  ORDER BY created_at, id LIMIT 1`,
+		id, placeRelationKinds[0], placeRelationKinds[1], placeRelationKinds[2], time.Now().UTC(),
+	).Scan(&p.kind, &p.targetType, &p.targetID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return recordPlace{}, false, nil
+	}
+	if err != nil {
+		return recordPlace{}, false, fmt.Errorf("%w: place of %s: %s", ErrInternal, id, err)
+	}
+	return p, true, nil
+}
+
+// requireDecisionPlace refuses to ratify a Decision without a place (D142
+// point 4, T883): the place decides who may approve it (D83), so a Decision
+// with none is refused fail-closed, for every caller, on every door into
+// ratified.
+func requireDecisionPlace(ctx context.Context, db DB, id string) error {
+	_, found, err := decisionPlace(ctx, db, id)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("%w: Decision %s has no place: place it before ratifying, with assert_relation belongs_to_domain (a Domain), belongs_to_area (an Area) or belongs_to_root (Root, for a Decision that spans Domains)",
+			ErrConflict, recordLabel(ctx, db, "smeldr_decisions", id))
+	}
+	return nil
+}
+
+// requireOnePlace refuses a second place for a Decision (T883): a Decision
+// has exactly one place, Root, one Domain or one Area (an Area implies its
+// Domain). The same edge again is not a second place. Other records are not
+// limited.
+func requireOnePlace(ctx context.Context, db DB, edge RelationEdge) error {
+	if edge.SourceType != "Decision" || placeKindTargets[edge.RelationKind] == "" {
+		return nil
+	}
+	p, found, err := decisionPlace(ctx, db, edge.SourceID)
+	if err != nil || !found {
+		return err
+	}
+	if p.kind == edge.RelationKind && p.targetID == edge.TargetID {
+		return nil
+	}
+	return fmt.Errorf("%w: Decision %s already has a place (%s %s): a Decision has exactly one place; withdraw that relation first",
+		ErrConflict, recordLabel(ctx, db, "smeldr_decisions", edge.SourceID), p.kind,
+		recordLabel(ctx, db, placeTables[p.targetType], p.targetID))
+}
+
+// recordLabel is the address of the record id in table, or id when it has
+// none or cannot be read: a label for a message, never a failure of its own.
+func recordLabel(ctx context.Context, db DB, table, id string) string {
+	if table == "" {
+		return id
+	}
+	var address string
+	if err := db.QueryRowContext(ctx, `SELECT address FROM `+quoteIdent(table)+` WHERE id = $1`, id).Scan(&address); err != nil || address == "" {
+		return id
+	}
+	return address
 }

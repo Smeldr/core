@@ -33,6 +33,7 @@ cross-referenced below by their Amendment ID.
 ### Changed
 
 - **Place readers read through the place hierarchy (D142, T882, A541).** A domain-reader reads its Domain, the Areas in it and everything placed in either; an area-reader its Area and what is placed in it; the per-item check follows the same walk, the place record itself only for read. Before, a domain-reader could not read its own Domain (T843). Search treats `belongs_to_root` as a place.
+- **A Decision is ratified only with a place, and holds exactly one (D142 point 4, T883, A545).** `proposed -> ratified` and `pending-re-evaluation -> ratified` are refused (`ErrConflict`, 409 over HTTP, the message over MCP) for a Decision without a live asserted `belongs_to_root`, `belongs_to_domain` or `belongs_to_area` edge, on every path (MCP, CLI, HTTP), before the authorization check; the message says how to place it. An edge to a runtime `domain` or `area` counts before `migrate-places`. A second place edge on a Decision (another Domain, an Area, Root) is refused until the first is withdrawn; the same edge again is fine, and other records keep any number of places. Find unplaced Decisions with `search` (`types: ["Decision"], place: "none"`). Ratified Decisions without a place stay ratified.
 - **Clients of the runtime place types change** after `migrate-places`: the generic content tools with `type_name: "domain"` give way to the module tools (`list_domains`, ...) and relation ends read `Domain`, `Area`, `Set` (REFERENCE, "Places").
 
 ---

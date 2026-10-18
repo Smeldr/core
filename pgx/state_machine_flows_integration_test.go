@@ -44,6 +44,30 @@ func TestPG_OrchestrationFlows(t *testing.T) {
 	if err := decisions.Save(ctx, &smeldr.Decision{Node: smeldr.Node{ID: "d1", Slug: "d1", Status: "proposed"}}); err != nil {
 		t.Fatalf("save decision: %v", err)
 	}
+	// T883: a Decision without a place is not ratified, and holds one place only.
+	if err := smeldr.CreateRelationTables(db); err != nil {
+		t.Fatalf("CreateRelationTables: %v", err)
+	}
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "Decision", "d1", "ratified"); !errors.Is(err, smeldr.ErrConflict) {
+		t.Errorf("ratifying an unplaced Decision: err = %v, want ErrConflict", err)
+	}
+	rels, err := smeldr.NewRelationStore(db)
+	if err != nil {
+		t.Fatalf("NewRelationStore: %v", err)
+	}
+	if err := smeldr.RegisterGovernanceRelationKinds(ctx, rels); err != nil {
+		t.Fatalf("RegisterGovernanceRelationKinds: %v", err)
+	}
+	place := func(kind, targetType, targetID string) error {
+		return rels.Assert(ctx, smeldr.RelationEdge{SourceType: "Decision", SourceID: "d1", TargetType: targetType, TargetID: targetID,
+			RelationKind: kind, EdgeClass: "asserted", Attributes: []byte("{}")})
+	}
+	if err := place("belongs_to_root", "Root", "root-1"); err != nil {
+		t.Fatalf("place d1: %v", err)
+	}
+	if err := place("belongs_to_domain", "Domain", "dom-1"); !errors.Is(err, smeldr.ErrConflict) {
+		t.Errorf("a second place: err = %v, want ErrConflict", err)
+	}
 	if _, err := app.TransitionItem(smeldr.TrustedRead(smeldr.NewTestContext(smeldr.User{ID: "nobody"})), "Decision", "d1", "ratified"); !errors.Is(err, smeldr.ErrForbidden) {
 		t.Errorf("ratifying without the operation: err = %v, want ErrForbidden", err)
 	}
