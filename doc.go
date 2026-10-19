@@ -139,12 +139,12 @@
 //     [CreateGovernanceTables] and [RegisterGovernanceTypes]; the
 //     Orchestration add-on ([Task], [Goal], [Run]) has
 //     [CreateOrchestrationAddOnTables] and [RegisterOrchestrationAddOn].
-//   - Places (D142: [Root], [Domain], [Area], [Set]): the organization's
-//     structure, registered with core governance. [App.EnsureRoot] creates
-//     the one Root and a default Domain; any record may belong to a Domain
+//   - Places (D142: [Organization], [Domain], [Area], [Set]): the organization's
+//     structure, registered with core governance. [App.EnsureOrganization] creates
+//     the one Organization and a default Domain; any record may belong to a Domain
 //     or an Area, and place readers read through the hierarchy.
 //     [App.MigratePlaces] moves an instance's runtime place types to them.
-//     A Decision has exactly one place (Root, a Domain or an Area) and is
+//     A Decision has exactly one place (Organization, a Domain or an Area) and is
 //     ratified only once it has one.
 //   - Approval (D142): the operations [OperationRatify] and
 //     [OperationApproveChange], held by the roles [RoleApprover] (the whole

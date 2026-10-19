@@ -13,8 +13,8 @@ import (
 )
 
 // migrate-places on an instance that still keeps a runtime domain type: the
-// server boots (Root waits for the migration), the dry run writes nothing,
-// --apply moves the Domain, creates Root and writes the report file.
+// server boots (Organization waits for the migration), the dry run writes nothing,
+// --apply moves the Domain, creates Organization and writes the report file.
 func TestRunMigratePlaces(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "smeldr.db")
@@ -60,10 +60,10 @@ func TestRunMigratePlaces(t *testing.T) {
 	if code := runMigratePlaces([]string{"--apply", "--report=" + reportPath}, &out, &errOut); code != 0 {
 		t.Fatalf("apply exit %d: %s", code, errOut.String())
 	}
-	if err := json.Unmarshal(out.Bytes(), &rep); err != nil || rep.DryRun || rep.Root != "ROOT1" || rep.Moved[0].Address != "DOM1" {
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil || rep.DryRun || rep.Organization != "ORG1" || rep.Moved[0].Address != "DOM1" {
 		t.Fatalf("apply = %s, %v", out.String(), err)
 	}
-	if b, err := os.ReadFile(reportPath); err != nil || !bytes.Contains(b, []byte(`"root": "ROOT1"`)) {
+	if b, err := os.ReadFile(reportPath); err != nil || !bytes.Contains(b, []byte(`"organization": "ORG1"`)) {
 		t.Errorf("report file = %s, %v", b, err)
 	}
 	if code := runMigratePlaces([]string{"--nope"}, &out, &errOut); code != 2 {

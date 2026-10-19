@@ -1317,14 +1317,14 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 			`{"source_type":"Goal","target_type":"Decision"},` +
 			`{"source_type":"Goal","target_type":"Amendment"},` +
 			`{"source_type":"Goal","target_type":"Signal"}]`, true},
-		"contradicts":       {"Contradicts", "", `[{"source_type":"Decision","target_type":"Decision"}]`, false},
-		"investigates":      {"Investigates", "Investigated By", `[{"source_type":"Task","target_type":"Decision"}]`, true},
-		"addresses":         {"Addresses", "Addressed By", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
-		"grounded_in":       {"Grounded In", "Grounds", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
-		"belongs_to_root":   {"Belongs To Root", "Root Of", `[{"source_type":"*","target_type":"Root"}]`, true},
-		"belongs_to_domain": {"Belongs To Domain", "Domain Of", `[{"source_type":"*","target_type":"Domain"}]`, true},
-		"belongs_to_area":   {"Belongs To Area", "Area Of", `[{"source_type":"*","target_type":"Area"}]`, true},
-		"in_set":            {"In Set", "", `[]`, true},
+		"contradicts":             {"Contradicts", "", `[{"source_type":"Decision","target_type":"Decision"}]`, false},
+		"investigates":            {"Investigates", "Investigated By", `[{"source_type":"Task","target_type":"Decision"}]`, true},
+		"addresses":               {"Addresses", "Addressed By", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
+		"grounded_in":             {"Grounded In", "Grounds", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
+		"belongs_to_organization": {"Belongs To Organization", "Organization Of", `[{"source_type":"*","target_type":"Organization"}]`, true},
+		"belongs_to_domain":       {"Belongs To Domain", "Domain Of", `[{"source_type":"*","target_type":"Domain"}]`, true},
+		"belongs_to_area":         {"Belongs To Area", "Area Of", `[{"source_type":"*","target_type":"Area"}]`, true},
+		"in_set":                  {"In Set", "", `[]`, true},
 		// D113: the kinds the system asserts for reference fields.
 		"implements": {"Implements", "Implemented By", `[{"source_type":"Task","target_type":"Decision"}]`, true},
 		"about":      {"About", "Subject Of", `[]`, true},

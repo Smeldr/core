@@ -83,7 +83,7 @@ func TestRatify_PlaceBeforeAuthorization(t *testing.T) {
 
 func TestRatify_PlacedPasses(t *testing.T) {
 	for _, tc := range []struct{ targetType, kind string }{
-		{"Root", "belongs_to_root"},
+		{"Organization", "belongs_to_organization"},
 		{"Domain", "belongs_to_domain"},
 		{"Area", "belongs_to_area"},
 		{"domain", "belongs_to_domain"}, // before migrate-places
@@ -197,7 +197,7 @@ func TestDecisionPlace_ExactlyOne(t *testing.T) {
 	for _, e := range []RelationEdge{
 		edge("dec-1", "Decision", "Domain", "dom-b", "belongs_to_domain"),
 		edge("dec-1", "Decision", "Area", "are-1", "belongs_to_area"),
-		edge("dec-1", "Decision", "Root", "root-1", "belongs_to_root"),
+		edge("dec-1", "Decision", "Organization", "root-1", "belongs_to_organization"),
 	} {
 		err := rs.Assert(ctx, e)
 		if !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "Decision D9 already has a place (belongs_to_domain DOM3)") {
@@ -229,8 +229,8 @@ func TestDecisionPlace_ExactlyOne(t *testing.T) {
 func TestDecisionPlace_LegacyTargetLabel(t *testing.T) {
 	_, db, rs := placesApp(t)
 	placeEdge(t, db, "dec-l", "domain", "legacy-dom", "belongs_to_domain", "asserted", nil)
-	err := rs.Assert(context.Background(), RelationEdge{SourceType: "Decision", SourceID: "dec-l", TargetType: "Root", TargetID: "root-1",
-		RelationKind: "belongs_to_root", EdgeClass: "asserted", Attributes: json.RawMessage("{}")})
+	err := rs.Assert(context.Background(), RelationEdge{SourceType: "Decision", SourceID: "dec-l", TargetType: "Organization", TargetID: "root-1",
+		RelationKind: "belongs_to_organization", EdgeClass: "asserted", Attributes: json.RawMessage("{}")})
 	if !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "(belongs_to_domain legacy-dom)") {
 		t.Errorf("err = %v; want the legacy target named by ID", err)
 	}
@@ -242,8 +242,8 @@ func TestDecisionPlace_QueryError(t *testing.T) {
 	if _, err := db.Exec(`DROP TABLE smeldr_relations`); err != nil {
 		t.Fatal(err)
 	}
-	err := rs.Assert(context.Background(), RelationEdge{SourceType: "Decision", SourceID: "dec-q", TargetType: "Root", TargetID: "root-1",
-		RelationKind: "belongs_to_root", EdgeClass: "asserted", Attributes: json.RawMessage("{}")})
+	err := rs.Assert(context.Background(), RelationEdge{SourceType: "Decision", SourceID: "dec-q", TargetType: "Organization", TargetID: "root-1",
+		RelationKind: "belongs_to_organization", EdgeClass: "asserted", Attributes: json.RawMessage("{}")})
 	if !errors.Is(err, ErrInternal) {
 		t.Errorf("err = %v; want internal", err)
 	}

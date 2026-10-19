@@ -16,9 +16,9 @@ import (
 type PlaceMigrationOptions struct {
 	// DryRun reports what the migration would do and writes nothing.
 	DryRun bool
-	// RootName is the organization's name, for the Root the migration
+	// OrganizationName is the organization's name, for the Organization the migration
 	// creates when the instance has none (required then).
-	RootName string
+	OrganizationName string
 }
 
 // PlaceMigrationReport is what [App.MigratePlaces] did, or would do.
@@ -35,10 +35,10 @@ type PlaceMigrationReport struct {
 	// RetiredSchemas are the runtime schemas set to kind "retired": kept, no
 	// longer loaded.
 	RetiredSchemas []string `json:"retired_schemas"`
-	// Root is the Root's address after the migration ("" in a dry run when
-	// none exists yet), and RootEdges the Domains related to it.
-	Root      string `json:"root,omitempty"`
-	RootEdges int    `json:"root_edges"`
+	// Organization is the Organization's address after the migration ("" in a dry run when
+	// none exists yet), and OrganizationEdges the Domains related to it.
+	Organization      string `json:"organization,omitempty"`
+	OrganizationEdges int    `json:"organization_edges"`
 }
 
 // PlaceMove is one runtime record copied to its compiled place type.
@@ -67,10 +67,10 @@ type legacyPlaceRow struct {
 //     runtime name to the compiled one; IDs do not change, so dynamic grants
 //     anchored on a place keep working;
 //   - the runtime schemas are set to kind "retired": kept, no longer loaded;
-//   - Root and the default Domain are created ([App.EnsureRoot]) and every
-//     Domain that does not yet belong to Root gets belongs_to_root.
+//   - Organization and the default Domain are created ([App.EnsureOrganization]) and every
+//     Domain that does not yet belong to Organization gets belongs_to_organization.
 //
-// All of it but Root runs in one transaction. A second run moves nothing.
+// All of it but Organization runs in one transaction. A second run moves nothing.
 // DryRun reports and writes nothing. The runtime rows stay in
 // smeldr_dynamic_content, so a rollback is the reverse rewrite plus kind
 // "content" on the schemas (REFERENCE, "Places").
@@ -128,31 +128,31 @@ func (a *App) MigratePlaces(ctx context.Context, opts PlaceMigrationOptions) (*P
 		}); err != nil && !errors.Is(err, errDry) {
 			return nil, fmt.Errorf("%w: MigratePlaces: %s", ErrInternal, err)
 		}
-		if root, err := QueryOne[*Root](ctx, db, `SELECT * FROM smeldr_roots LIMIT 1`); err == nil {
-			rep.Root = root.Address
+		if root, err := QueryOne[*OrganizationRecord](ctx, db, `SELECT * FROM smeldr_organizations LIMIT 1`); err == nil {
+			rep.Organization = root.Address
 		}
 		return rep, nil
 	}
 	if err := runInTx(ctx, db, work); err != nil {
 		return nil, fmt.Errorf("%w: MigratePlaces: %s", ErrInternal, err)
 	}
-	// The counters of place types the instance never defined (Root, and Set
+	// The counters of place types the instance never defined (Organization, and Set
 	// on process.smeldr.dev) exist only now that no runtime type holds a
 	// prefix.
 	if err := registerCoreAddresses(ctx, db, compiledPlaceTypes...); err != nil {
 		return nil, err
 	}
-	root, err := a.EnsureRoot(ctx, opts.RootName)
+	root, err := a.EnsureOrganization(ctx, opts.OrganizationName)
 	if err != nil {
 		return nil, err
 	}
-	rep.Root = root.Address
+	rep.Organization = root.Address
 	if tables["smeldr_relations"] {
-		n, err := a.relateDomainsToRoot(ctx, db, root.ID)
+		n, err := a.relateDomainsToOrganization(ctx, db, root.ID)
 		if err != nil {
 			return nil, err
 		}
-		rep.RootEdges = n
+		rep.OrganizationEdges = n
 	}
 	return rep, nil
 }
@@ -302,13 +302,13 @@ func rewritePlaceTypeName(ctx context.Context, exec DB, tables map[string]bool, 
 	return nil
 }
 
-// relateDomainsToRoot gives every Domain that does not belong to Root its
-// belongs_to_root edge, and returns how many it added.
-func (a *App) relateDomainsToRoot(ctx context.Context, db DB, rootID string) (int, error) {
+// relateDomainsToOrganization gives every Domain that does not belong to Organization its
+// belongs_to_organization edge, and returns how many it added.
+func (a *App) relateDomainsToOrganization(ctx context.Context, db DB, rootID string) (int, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT d.id FROM smeldr_domains d WHERE NOT EXISTS (
 		   SELECT 1 FROM smeldr_relations r WHERE r.source_id = d.id AND r.target_id = $1
-		     AND r.relation_kind = 'belongs_to_root' AND r.invalid_at IS NULL)`, rootID)
+		     AND r.relation_kind = 'belongs_to_organization' AND r.invalid_at IS NULL)`, rootID)
 	if err != nil {
 		return 0, fmt.Errorf("%w: MigratePlaces: read Domains: %s", ErrInternal, err)
 	}
@@ -329,11 +329,11 @@ func (a *App) relateDomainsToRoot(ctx context.Context, db DB, rootID string) (in
 	job := placesSetupActor
 	for _, id := range ids {
 		edge, _, err := writeEdgeRow(ctx, db, RelationEdge{
-			SourceType: "Domain", SourceID: id, TargetType: "Root", TargetID: rootID,
-			RelationKind: "belongs_to_root", EdgeClass: "asserted", CreatedByJob: &job, Attributes: json.RawMessage("{}"),
+			SourceType: "Domain", SourceID: id, TargetType: "Organization", TargetID: rootID,
+			RelationKind: "belongs_to_organization", EdgeClass: "asserted", CreatedByJob: &job, Attributes: json.RawMessage("{}"),
 		})
 		if err != nil {
-			return 0, fmt.Errorf("%w: MigratePlaces: relate Domain %s to Root: %s", ErrInternal, id, err)
+			return 0, fmt.Errorf("%w: MigratePlaces: relate Domain %s to Organization: %s", ErrInternal, id, err)
 		}
 		if a.relationStore != nil {
 			a.relationStore.announceEdge(ctx, edge, true)

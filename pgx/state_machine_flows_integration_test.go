@@ -62,7 +62,7 @@ func TestPG_OrchestrationFlows(t *testing.T) {
 		return rels.Assert(ctx, smeldr.RelationEdge{SourceType: "Decision", SourceID: "d1", TargetType: targetType, TargetID: targetID,
 			RelationKind: kind, EdgeClass: "asserted", Attributes: []byte("{}")})
 	}
-	if err := place("belongs_to_root", "Root", "root-1"); err != nil {
+	if err := place("belongs_to_organization", "Organization", "root-1"); err != nil {
 		t.Fatalf("place d1: %v", err)
 	}
 	if err := place("belongs_to_domain", "Domain", "dom-1"); !errors.Is(err, smeldr.ErrConflict) {

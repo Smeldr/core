@@ -27,7 +27,7 @@ func publishFieldSamples() map[string]any {
 		"Run":           &Run{Node: n},
 		"Rule":          &Rule{Node: n},
 		"AuthorityStub": &AuthorityStub{Node: n},
-		"Root":          &Root{Node: n},
+		"Organization":  &OrganizationRecord{Node: n},
 		"Domain":        &Domain{Node: n},
 		"Area":          &Area{Node: n},
 		"Set":           &Set{Node: n},

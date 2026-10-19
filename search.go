@@ -41,13 +41,13 @@ const (
 
 // placeRelationKinds are the relation kinds that give a record its place
 // (D142): a live asserted edge of one of them from a record is its place.
-var placeRelationKinds = []string{"belongs_to_root", "belongs_to_domain", "belongs_to_area"}
+var placeRelationKinds = []string{"belongs_to_organization", "belongs_to_domain", "belongs_to_area"}
 
 // placeTypes are the record types a named place may be, tried in order; a
 // type that is not registered is skipped. The capitalized names are the core
 // types (T882), the lower-case ones the instance-defined types before them, on
 // an instance that has not run MigratePlaces yet.
-var placeTypes = []string{"Root", "Domain", "Area", "domain", "area"}
+var placeTypes = []string{"Organization", "Domain", "Area", "domain", "area"}
 
 // searchRoles are the schema field roles a runtime-defined type searches when
 // none of its fields sets [SchemaField.Search].

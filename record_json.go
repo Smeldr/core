@@ -92,10 +92,10 @@ func (s AuthorityStub) MarshalJSON() ([]byte, error) {
 	}{plain: plain(s)})
 }
 
-// MarshalJSON encodes the Root without PublishedAt and ScheduledAt, which a
+// MarshalJSON encodes the Organization without PublishedAt and ScheduledAt, which a
 // place's flow can never set (D114, D142).
-func (r Root) MarshalJSON() ([]byte, error) {
-	type plain Root
+func (r OrganizationRecord) MarshalJSON() ([]byte, error) {
+	type plain OrganizationRecord
 	return json.Marshal(struct {
 		plain
 		omitPublishFields

@@ -11,56 +11,56 @@ import (
 	"time"
 )
 
-// placesSetupActor is the job that creates Root and the default Domain.
+// placesSetupActor is the job that creates Organization and the default Domain.
 const placesSetupActor = "setup"
 
-// defaultDomainSlug and defaultDomainName name the Domain created with Root.
+// defaultDomainSlug and defaultDomainName name the Domain created with Organization.
 // The word is brand's to propose (D111); D141 then renames it here too.
 const (
-	defaultDomainSlug = "default"
-	defaultDomainName = "Default"
+	defaultDomainSlug = "general"
+	defaultDomainName = "General"
 )
 
-// EnsureRoot makes sure the instance has its Root (D142): when none exists it
-// creates Root with name, a default Domain, and the belongs_to_root edge from
-// the Domain to Root, in one transaction, recording provenance for each as
-// the setup job. An existing Root is left as it is and returned, so the call
+// EnsureOrganization makes sure the instance has its Organization (D142): when none exists it
+// creates Organization with name, a default Domain, and the belongs_to_organization edge from
+// the Domain to Organization, in one transaction, recording provenance for each as
+// the setup job. An existing Organization is left as it is and returned, so the call
 // is safe on every boot. An empty name is refused; on an instance that has not
 // run [App.MigratePlaces] yet it is [ErrConflict], and the migration creates
-// Root itself. Call after
+// Organization itself. Call after
 // [CreateGovernanceTables] and [RegisterGovernanceTypes]; the edge needs the
 // relation tables ([CreateRelationTables]) and is skipped without them.
-func (a *App) EnsureRoot(ctx context.Context, name string) (*Root, error) {
+func (a *App) EnsureOrganization(ctx context.Context, name string) (*OrganizationRecord, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, Err("name", "is required: the organization's name")
 	}
 	db := a.cfg.DB
 	if db == nil {
-		return nil, fmt.Errorf("%w: EnsureRoot needs a database", ErrInternal)
+		return nil, fmt.Errorf("%w: EnsureOrganization needs a database", ErrInternal)
 	}
-	if existing, err := QueryOne[*Root](ctx, db, `SELECT * FROM smeldr_roots LIMIT 1`); err == nil {
+	if existing, err := QueryOne[*OrganizationRecord](ctx, db, `SELECT * FROM smeldr_organizations LIMIT 1`); err == nil {
 		return existing, nil
 	} else if !errors.Is(err, ErrNotFound) {
-		return nil, fmt.Errorf("%w: EnsureRoot: read Root: %s", ErrInternal, err)
+		return nil, fmt.Errorf("%w: EnsureOrganization: read Organization: %s", ErrInternal, err)
 	}
 	// An instance that still keeps the runtime domain type has not run
 	// MigratePlaces: the Domain address prefix is not free yet.
 	if held, err := heldByLegacyPlaceType(ctx, db, "Domain", coreAddressPrefixes["Domain"]); err != nil {
 		return nil, err
 	} else if held {
-		return nil, fmt.Errorf("%w: the runtime domain type still holds the DOM prefix; run migrate-places, which creates Root", ErrConflict)
+		return nil, fmt.Errorf("%w: the runtime domain type still holds the DOM prefix; run migrate-places, which creates Organization", ErrConflict)
 	}
 	relations, err := tableExists(ctx, db, "smeldr_relations")
 	if err != nil {
-		return nil, fmt.Errorf("%w: EnsureRoot: %s", ErrInternal, err)
+		return nil, fmt.Errorf("%w: EnsureOrganization: %s", ErrInternal, err)
 	}
 	now := time.Now().UTC()
-	root := &Root{Node: Node{ID: NewID(), Slug: "root", Status: "active", CreatedAt: now, UpdatedAt: now}, Name: name}
+	root := &OrganizationRecord{Node: Node{ID: NewID(), Slug: "organization", Status: "active", CreatedAt: now, UpdatedAt: now}, Name: name}
 	domain := &Domain{Node: Node{ID: NewID(), Slug: defaultDomainSlug, Status: "active", CreatedAt: now, UpdatedAt: now}, Name: defaultDomainName}
 	var edge RelationEdge
 	err = runInTx(ctx, db, func(exec DB) error {
-		if err := insertPlace(ctx, exec, "Root", "smeldr_roots", &root.Node, &root.RecordAddress, root.Name); err != nil {
+		if err := insertPlace(ctx, exec, "Organization", "smeldr_organizations", &root.Node, &root.RecordAddress, root.Name); err != nil {
 			return err
 		}
 		if err := insertPlace(ctx, exec, "Domain", "smeldr_domains", &domain.Node, &domain.RecordAddress, domain.Name); err != nil {
@@ -71,18 +71,18 @@ func (a *App) EnsureRoot(ctx context.Context, name string) (*Root, error) {
 		}
 		job := placesSetupActor
 		edge, _, err = writeEdgeRow(ctx, exec, RelationEdge{
-			SourceType: "Domain", SourceID: domain.ID, TargetType: "Root", TargetID: root.ID,
-			RelationKind: "belongs_to_root", EdgeClass: "asserted", CreatedByJob: &job, Attributes: json.RawMessage("{}"),
+			SourceType: "Domain", SourceID: domain.ID, TargetType: "Organization", TargetID: root.ID,
+			RelationKind: "belongs_to_organization", EdgeClass: "asserted", CreatedByJob: &job, Attributes: json.RawMessage("{}"),
 		})
 		return err
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%w: EnsureRoot: %s", ErrInternal, err)
+		return nil, fmt.Errorf("%w: EnsureOrganization: %s", ErrInternal, err)
 	}
-	for _, rec := range []struct{ typeName, id string }{{"Root", root.ID}, {"Domain", domain.ID}} {
+	for _, rec := range []struct{ typeName, id string }{{"Organization", root.ID}, {"Domain", domain.ID}} {
 		recordProvenance(ctx, a.provenanceStore, ProvenanceRecord{
 			SubjectType: rec.typeName, SubjectID: rec.id, Verb: "create",
-			ActorKind: "job", ActorID: placesSetupActor, Reason: "the organization's Root and default Domain (D142)",
+			ActorKind: "job", ActorID: placesSetupActor, Reason: "the organization's Organization and default Domain (D142)",
 		})
 	}
 	if a.relationStore != nil && edge.ID != "" {

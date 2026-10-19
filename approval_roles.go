@@ -375,8 +375,8 @@ const founderReason = "founder of the organization (D142)"
 // admin and approver roles (D142 point 6), each grant recorded with the reason
 // "founder of the organization (D142)" in its provenance, by the actor in ctx.
 // It defines the approver role when the instance has not yet. Idempotent: a
-// grant the user already holds is not repeated. Call it once the Root exists
-// ([App.EnsureRoot]). Needs [App.Governance]; an empty userID is a
+// grant the user already holds is not repeated. Call it once the Organization exists
+// ([App.EnsureOrganization]). Needs [App.Governance]; an empty userID is a
 // [*ValidationError].
 func (a *App) GrantFounder(ctx context.Context, userID string) error {
 	if userID == "" {

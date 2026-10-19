@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,6 +93,20 @@ func (atOption) isOption() {}
 // The prefix must start with "/" and must not end with "/".
 // Example: smeldr.At("/posts")
 func At(prefix string) Option { return atOption{prefix: prefix} }
+
+// typeNameOption carries the content type name of a Module. Use [TypeName].
+type typeNameOption struct{ name string }
+
+func (typeNameOption) isOption() {}
+
+// TypeName returns an [Option] that names a module's content type when the
+// Go struct cannot carry the name itself, for example because the package
+// already exports that identifier. The name is what the type registry, the
+// MCP tools (list_<snake>s), state flows, addresses, relations and events
+// use, and what the default URL prefix is made from; without it the type name
+// is the struct's name. It must be a Go-style identifier in PascalCase.
+// Example: smeldr.TypeName("Organization") on a struct OrganizationRecord.
+func TypeName(name string) Option { return typeNameOption{name: name} }
 
 // moduleCacheOption carries the TTL for a module-level [CacheStore].
 // Use [Cache] to create one.
@@ -570,10 +585,24 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 	// Detect Markdownable capability.
 	_, m.neg.md = any(proto).(Markdownable)
 
+	// The type name comes first: the default prefix is made from it, and an
+	// At option later in the list still wins.
+	for _, o := range opts {
+		if v, ok := o.(typeNameOption); ok {
+			if !typeNameRe.MatchString(v.name) {
+				panic(fmt.Sprintf("smeldr: TypeName %q must be a PascalCase identifier", v.name))
+			}
+			m.contentTypeName = v.name
+			m.prefix = "/" + strings.ToLower(v.name) + "s"
+		}
+	}
+
 	// Parse options.
 	var repoFound bool
 	for _, o := range opts {
 		switch v := o.(type) {
+		case typeNameOption:
+			// applied above
 		case atOption:
 			m.prefix = v.prefix
 		case moduleCacheOption:
@@ -2744,6 +2773,9 @@ func (m *Module[T]) deleteHandler(w http.ResponseWriter, r *http.Request) {
 // Compile-time assertion: *Module[T] must satisfy MCPModule.
 var _ MCPModule = (*Module[struct{ Node }])(nil)
 
+// typeNameRe is the shape of a [TypeName]: a PascalCase Go identifier.
+var typeNameRe = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
+
 // typeName returns the unqualified type name of t, dereferencing pointer types.
 func typeName(t reflect.Type) string {
 	for t.Kind() == reflect.Ptr {
@@ -2871,7 +2903,7 @@ func (m *Module[T]) MCPMeta() MCPMeta {
 	}
 	return MCPMeta{
 		Prefix:         m.prefix,
-		TypeName:       typeName(t),
+		TypeName:       m.contentTypeName,
 		Operations:     m.mcpOps,
 		SingleInstance: m.singleInstance,
 	}

@@ -10,19 +10,22 @@ import (
 	"time"
 )
 
-// Places (D142): Root, Domain, Area and Set are core record types, present on
-// every instance with core governance. Root is one record per instance, the
-// organization; Domains belong to Root, Areas belong to a Domain (D72), and
+// Places (D142): Organization, Domain, Area and Set are core record types, present on
+// every instance with core governance. Organization is one record per instance, the
+// organization; Domains belong to Organization, Areas belong to a Domain (D72), and
 // any record may be placed in a Domain or an Area. A Set groups records and
 // carries no authority (D71).
 
-// Root is the organization: one record per instance (D142), created by
-// [App.EnsureRoot] with the organization's name. Domains belong to it by
-// belongs_to_root, and a Decision that spans Domains relates to it explicitly
-// (D83).
-type Root struct {
+// OrganizationRecord is the organization: one record per instance (D142),
+// created by [App.EnsureOrganization] with the organization's name. Domains
+// belong to it by belongs_to_organization, and a Decision that spans Domains
+// relates to it explicitly (D83). Its type name is Organization everywhere a
+// user, an agent or a tool sees it ([TypeName]); only the Go struct carries
+// the Record suffix, because [Organization] is the schema.org constant this
+// package already exports (a D141 exception, T895).
+type OrganizationRecord struct {
 	Node
-	// RecordAddress is the Root's address (D110, prefix ROOT).
+	// RecordAddress is the Organization's address (D110, prefix ORG).
 	RecordAddress
 	// Name is the organization's name.
 	Name string `json:"name" db:"name" smeldr:"required" smeldr_search:"text"`
@@ -68,7 +71,7 @@ type Set struct {
 }
 
 // compiledPlaceTypes are the compiled place types, in registration order.
-var compiledPlaceTypes = []string{"Root", "Domain", "Area", "Set"}
+var compiledPlaceTypes = []string{"Organization", "Domain", "Area", "Set"}
 
 // legacyPlaceTypes maps each place type to the lowercase runtime type it
 // replaces: instances defined domain, area and set themselves before D142,
@@ -76,11 +79,11 @@ var compiledPlaceTypes = []string{"Root", "Domain", "Area", "Set"}
 var legacyPlaceTypes = map[string]string{"Domain": "domain", "Area": "area", "Set": "set"}
 
 // placeTableStmts are the tables of the place types. A unique index on a
-// constant keeps smeldr_roots to one row: an instance can never hold a second
-// Root.
+// constant keeps smeldr_organizations to one row: an instance can never hold a second
+// Organization.
 var placeTableStmts = []string{
-	placeTableStmt("smeldr_roots"),
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_smeldr_roots_one ON smeldr_roots ((1))`,
+	placeTableStmt("smeldr_organizations"),
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_smeldr_organizations_one ON smeldr_organizations ((1))`,
 	placeTableStmt("smeldr_domains"),
 	placeTableStmt("smeldr_areas"),
 	placeTableStmt("smeldr_sets"),
@@ -104,13 +107,13 @@ func placeTableStmt(table string) string {
 }
 
 // placeFlow is the state flow of a place type: active, and archived for
-// every type but Root (an archived place is no longer a live target, as an
+// every type but Organization (an archived place is no longer a live target, as an
 // archived reference type before D142).
 func placeFlow(typeName string) StateFlow {
-	if typeName == "Root" {
+	if typeName == "Organization" {
 		return StateFlow{
-			Name:     "place-root",
-			TypeName: "Root",
+			Name:     "place-organization",
+			TypeName: "Organization",
 			States:   []State{{Name: "active", IsInitial: true}},
 		}
 	}
@@ -134,8 +137,8 @@ func registerPlaceTypes(app *App, db DB) {
 	for _, t := range compiledPlaceTypes {
 		registerFlows(app, placeFlow(t))
 	}
-	app.Content(NewModule[*Root]((*Root)(nil),
-		At("/roots"), Repo(NewSQLRepo[*Root](db, Table("smeldr_roots"))), MCP(MCPRead, MCPWrite), withAddress(),
+	app.Content(NewModule[*OrganizationRecord]((*OrganizationRecord)(nil),
+		TypeName("Organization"), Repo(NewSQLRepo[*OrganizationRecord](db, Table("smeldr_organizations"))), MCP(MCPRead, MCPWrite), withAddress(),
 	))
 	app.Content(NewModule[*Domain]((*Domain)(nil),
 		At("/domains"), Repo(NewSQLRepo[*Domain](db, Table("smeldr_domains"))), MCP(MCPRead, MCPWrite), withAddress(),
@@ -151,17 +154,17 @@ func registerPlaceTypes(app *App, db DB) {
 // placeKindTargets maps each place relation kind to the place type it targets,
 // and placeKindOf the other way: the kind that places a record in a type.
 var (
-	placeKindTargets = map[string]string{"belongs_to_root": "Root", "belongs_to_domain": "Domain", "belongs_to_area": "Area"}
-	placeKindOf      = map[string]string{"Root": "belongs_to_root", "Domain": "belongs_to_domain", "Area": "belongs_to_area"}
-	placeRank        = map[string]int{"Root": 0, "Domain": 1, "Area": 2}
+	placeKindTargets = map[string]string{"belongs_to_organization": "Organization", "belongs_to_domain": "Domain", "belongs_to_area": "Area"}
+	placeKindOf      = map[string]string{"Organization": "belongs_to_organization", "Domain": "belongs_to_domain", "Area": "belongs_to_area"}
+	placeRank        = map[string]int{"Organization": 0, "Domain": 1, "Area": 2}
 )
 
 // placedItem is one record of a place hierarchy walk.
 type placedItem struct{ typeName, id string }
 
-// placeMembers walks the place hierarchy Root -> Domain -> Area (D72, D142)
+// placeMembers walks the place hierarchy Organization -> Domain -> Area (D72, D142)
 // down from the place anchorID of type anchorType: the place itself, every
-// record placed in it, and for a place below it (a Domain in Root, an Area in
+// record placed in it, and for a place below it (a Domain in Organization, an Area in
 // a Domain) that place and what is placed in it. No other relation kind is
 // followed. Read scopes and the per-item check both use it, and so will the
 // approve scopes (T884).
@@ -211,7 +214,7 @@ func placeMembers(ctx context.Context, db DB, anchorType, anchorID string) ([]pl
 
 // placeTables maps each compiled place type to its table, for the labels in
 // the place refusals.
-var placeTables = map[string]string{"Root": "smeldr_roots", "Domain": "smeldr_domains", "Area": "smeldr_areas"}
+var placeTables = map[string]string{"Organization": "smeldr_organizations", "Domain": "smeldr_domains", "Area": "smeldr_areas"}
 
 // recordPlace is a record's place: the kind and target of its live asserted
 // place edge.
@@ -251,14 +254,14 @@ func requireDecisionPlace(ctx context.Context, db DB, id string) error {
 		return err
 	}
 	if !found {
-		return fmt.Errorf("%w: Decision %s has no place: place it before ratifying, with assert_relation belongs_to_domain (a Domain), belongs_to_area (an Area) or belongs_to_root (Root, for a Decision that spans Domains)",
+		return fmt.Errorf("%w: Decision %s has no place: place it before ratifying, with assert_relation belongs_to_domain (a Domain), belongs_to_area (an Area) or belongs_to_organization (Organization, for a Decision that spans Domains)",
 			ErrConflict, recordLabel(ctx, db, "smeldr_decisions", id))
 	}
 	return nil
 }
 
 // requireOnePlace refuses a second place for a Decision (T883): a Decision
-// has exactly one place, Root, one Domain or one Area (an Area implies its
+// has exactly one place, Organization, one Domain or one Area (an Area implies its
 // Domain). The same edge again is not a second place. Other records are not
 // limited.
 func requireOnePlace(ctx context.Context, db DB, edge RelationEdge) error {

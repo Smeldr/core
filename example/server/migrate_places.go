@@ -14,7 +14,7 @@ import (
 
 // runMigratePlaces is the `smeldr-server migrate-places` subcommand (D142): it
 // moves the runtime domain, area and set types an instance defined before
-// D142 to the compiled Domain, Area and Set, creates Root and the default
+// D142 to the compiled Domain, Area and Set, creates Organization and the default
 // Domain, and prints the report as JSON. It is a dry run unless --apply is
 // given; --report also writes the JSON to that file, for the deploy record.
 // It returns the process exit code.
@@ -47,7 +47,7 @@ func runMigratePlaces(args []string, stdout, stderr io.Writer) int {
 	}
 	defer result.StopAll()
 
-	rep, err := result.App.MigratePlaces(context.Background(), smeldr.PlaceMigrationOptions{DryRun: !*apply, RootName: cfg.organizationName()})
+	rep, err := result.App.MigratePlaces(context.Background(), smeldr.PlaceMigrationOptions{DryRun: !*apply, OrganizationName: cfg.organizationName()})
 	if err != nil {
 		fmt.Fprintf(stderr, "migrate-places: %v\n", err)
 		return 1

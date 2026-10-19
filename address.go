@@ -38,10 +38,10 @@ var coreAddressPrefixes = map[string]string{
 	"Subscription": "N",
 	// Places (places.go, D142). DOM and ARE are the prefixes the runtime
 	// domain and area types had, so their addresses stay.
-	"Root":   "ROOT",
-	"Domain": "DOM",
-	"Area":   "ARE",
-	"Set":    "SET",
+	"Organization": "ORG",
+	"Domain":       "DOM",
+	"Area":         "ARE",
+	"Set":          "SET",
 }
 
 var addressPrefixRe = regexp.MustCompile(`^[A-Z]{1,4}$`)
@@ -82,7 +82,7 @@ var coreAddressTables = []struct{ typeName, table, legacy string }{
 	{"Rule", "smeldr_rules", ""},
 	{"AuthorityStub", "smeldr_authority_stubs", ""},
 	{"Subscription", "smeldr_subscriptions", ""},
-	{"Root", "smeldr_roots", ""},
+	{"Organization", "smeldr_organizations", ""},
 	{"Domain", "smeldr_domains", ""},
 	{"Area", "smeldr_areas", ""},
 	{"Set", "smeldr_sets", ""},
@@ -92,7 +92,7 @@ var coreAddressTables = []struct{ typeName, table, legacy string }{
 // [CreateGovernanceTables] and [CreateOrchestrationAddOnTables] give address
 // storage; [CreateAuthorityTables] does the same for authorityAddressTypes.
 var (
-	governanceAddressTypes         = []string{"Signal", "Decision", "Amendment", "Root", "Domain", "Area", "Set"}
+	governanceAddressTypes         = []string{"Signal", "Decision", "Amendment", "Organization", "Domain", "Area", "Set"}
 	orchestrationAddOnAddressTypes = []string{"Task", "Goal", "Run"}
 	authorityAddressTypes          = []string{"Rule", "AuthorityStub"}
 	subscriptionAddressTypes       = []string{"Subscription"}

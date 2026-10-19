@@ -27,7 +27,7 @@
 //	                      Amendment, their flows and relation kinds) without the
 //	                      Orchestration add-on. Records, not access: roles and
 //	                      grants are ENABLE_GOVERNANCE.
-//	ORGANIZATION_NAME     the name of the Root created with the organization (D142;
+//	ORGANIZATION_NAME     the name of the Organization created with the organization (D142;
 //	                      default: INSTANCE_NAME)
 //	ORGANIZATION_FOUNDER  the user ID of the person who created the organization;
 //	                      at boot it gets the admin and approver roles (D142),
@@ -231,7 +231,7 @@ func parseConfig() ServerConfig {
 	}
 }
 
-// organizationName is the name Root gets (D142): ORGANIZATION_NAME, else the
+// organizationName is the name Organization gets (D142): ORGANIZATION_NAME, else the
 // instance name, else "smeldr".
 func (c ServerConfig) organizationName() string {
 	for _, n := range []string{c.OrganizationName, c.InstanceName} {
@@ -472,13 +472,13 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 	}
 
-	// D142: the organization's Root and default Domain, once. An instance
+	// D142: the organization's Organization and default Domain, once. An instance
 	// that still keeps the runtime domain type gets them from migrate-places.
 	if cfg.governanceRecords() {
-		if _, err := app.EnsureRoot(context.Background(), cfg.organizationName()); errors.Is(err, smeldr.ErrConflict) {
-			slog.Warn("smeldr-server: Root not created; run migrate-places", "reason", err)
+		if _, err := app.EnsureOrganization(context.Background(), cfg.organizationName()); errors.Is(err, smeldr.ErrConflict) {
+			slog.Warn("smeldr-server: Organization not created; run migrate-places", "reason", err)
 		} else if err != nil {
-			return ServerResult{}, fmt.Errorf("ensure root: %w", err)
+			return ServerResult{}, fmt.Errorf("ensure organization: %w", err)
 		}
 	}
 

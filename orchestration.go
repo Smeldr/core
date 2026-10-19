@@ -784,9 +784,9 @@ func CreateOrchestrationTables(db DB) error {
 }
 
 // CreateGovernanceTables creates the tables of core governance (smeldr_signals,
-// smeldr_decisions, smeldr_amendments, and the places of D142: smeldr_roots,
+// smeldr_decisions, smeldr_amendments, and the places of D142: smeldr_organizations,
 // smeldr_domains, smeldr_areas, smeldr_sets) if they do not already exist,
-// with their address storage (S, D, A, ROOT, DOM, ARE, SET). Call once at startup before
+// with their address storage (S, D, A, ORG, DOM, ARE, SET). Call once at startup before
 // [RegisterGovernanceTypes].
 func CreateGovernanceTables(db DB) error {
 	return createRecordTables(db, governanceAddressTypes, append([]string{
@@ -1126,7 +1126,7 @@ func RegisterOrchestrationTypes(app *App, db DB) {
 
 // RegisterGovernanceTypes registers the record types of core governance:
 // [Signal], [Decision] and [Amendment], with their state flows and their
-// reference fields (D113), and the places of D142: [Root], [Domain], [Area]
+// reference fields (D113), and the places of D142: [Organization], [Domain], [Area]
 // and [Set]. Every core record type is added here. Call after
 // [CreateGovernanceTables] and before [App.Run]. Flow registration errors are
 // logged and do not block startup (fail-open).
@@ -1147,7 +1147,7 @@ func RegisterGovernanceTypes(app *App, db DB) {
 		At("/amendments"), Repo(NewSQLRepo[*Amendment](db, Table("smeldr_amendments"))), MCP(MCPRead, MCPWrite), withAddress(),
 		app.referenceSaveHooks(amendmentReferences(), &amends),
 	))
-	// D142: Root, Domain, Area and Set.
+	// D142: Organization, Domain, Area and Set.
 	registerPlaceTypes(app, db)
 }
 
@@ -1281,14 +1281,14 @@ func RegisterGovernanceRelationKinds(ctx context.Context, store *RelationStore) 
 		{
 			// D142: the places. Any record may be placed (the source is any
 			// type, "*"); the target is the compiled place type. A Domain
-			// belongs to Root, an Area to its Domain (D72), and a Decision
-			// that spans Domains relates to Root explicitly (D83).
-			TypeName:     "belongs_to_root",
-			Label:        "Belongs To Root",
-			ReverseLabel: "Root Of",
+			// belongs to Organization, an Area to its Domain (D72), and a Decision
+			// that spans Domains relates to Organization explicitly (D83).
+			TypeName:     "belongs_to_organization",
+			Label:        "Belongs To Organization",
+			ReverseLabel: "Organization Of",
 			Mode:         "asserted",
 			Directional:  true,
-			TypePairs:    json.RawMessage(`[{"source_type":"*","target_type":"Root"}]`),
+			TypePairs:    json.RawMessage(`[{"source_type":"*","target_type":"Organization"}]`),
 		},
 		{
 			TypeName:     "belongs_to_domain",
