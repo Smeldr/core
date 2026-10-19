@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.168.0] - 2026-10-19
+
 ### Fixed
 
 - **`TestPG_CapabilityAuthorization` expects `item search` (T890, A543).** The Postgres test of visible capabilities predated T885's `item search` (visible to any token that holds `read`), so it failed on main from v1.167.0; the code was right, the list was not. Test only, no behaviour change.
