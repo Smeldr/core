@@ -15,7 +15,7 @@ func TestDelegationRoles_ReadTheirItemAfterBoot(t *testing.T) {
 		oldOp    string
 		register func(context.Context, *RoleStore) error
 	}{
-		{"item-approver", "approve", RegisterItemApproverRole},
+		{"item-approver", "ratify", RegisterItemApproverRole},
 		{"item-reviewer", "review", RegisterItemReviewerRole},
 	} {
 		t.Run(c.role, func(t *testing.T) {

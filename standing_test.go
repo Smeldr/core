@@ -139,10 +139,10 @@ func ratifyDecision(t *testing.T, app *App, db *sql.DB, rs *RoleStore, id, slug 
 	insertDecision(t, db, id, slug, "proposed")
 	placeDecision(t, db, id)
 	tokenID := setupTokenWithRole(t, db, rs, "admin")
-	if err := RegisterDecisionStewardRole(context.Background(), rs); err != nil {
-		t.Fatalf("RegisterDecisionStewardRole: %v", err)
+	if err := RegisterApproverRole(context.Background(), rs); err != nil {
+		t.Fatalf("RegisterApproverRole: %v", err)
 	}
-	if _, err := rs.Grant(context.Background(), RoleGrant{TokenID: tokenID, RoleName: "decision-steward"}); err != nil {
+	if _, err := rs.Grant(context.Background(), RoleGrant{TokenID: tokenID, RoleName: "approver"}); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
 	if _, err := app.TransitionItemVia(TrustedRead(NewTestContext(User{ID: tokenID})), "mcp", "Decision", slug, "ratified", "ratified by steward"); err != nil {

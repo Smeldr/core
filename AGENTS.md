@@ -645,25 +645,13 @@ holding the `"steward"` operation. `RoleStore.StewardedRuleTypes`/
 steward" and "what currently touches authority I steward" — see
 [docs/REFERENCE.md](docs/REFERENCE.md#rule-type-stewardship-d63d64-decision-governance-modelmd-5).
 
-**Per-Domain Decision authority** — granting one person ratify/supersede
-authority over Decisions in a specific Domain (D71/D72's Domain/Area model)
-also uses these same tools with no new mechanism: `grant_role` with
-`role: "decision-domain-admin"` (auto-defined when `ENABLE_GOVERNANCE`,
-`ENABLE_RELATIONS`, and `ENABLE_ORCHESTRATION` are all set) and
-`scope_anchor_id` set to the target Domain item's own ID — real delegation,
-narrower than the flat `admin` role, matching D68's own policy. See
-[docs/REFERENCE.md](docs/REFERENCE.md#decision-domain-authority-d68d71d72-decide-decision-scope-role-policy).
+**Approval roles (D142, T884).** Two operations: `ratify` (ratify, supersede or amend a Decision; the four Decision doors require it) and `approve-change` (approve a change, such as a pull request, against the Decisions in force; no core gate requires it yet). `approve` is retired: a boot migration gives every role that held it the two new words, and renames the roles. The roles, granted with `grant_role`:
+- **`approver`** (was `decision-steward`): `ratify`, `approve-change`, `review`, over the whole organization. `admin` holds no approval operation: whoever ratifies needs this role or one of the next ones explicitly.
+- **`domain-approver`** (was `decision-domain-admin`): `ratify`, `approve-change`, with `scope_anchor_id` a Domain's ID. It covers the Decisions placed in that Domain, its Areas and what is placed in them (the place hierarchy).
+- **`area-approver`** (new): `approve-change` only, with `scope_anchor_id` an Area's ID.
+- `item-approver` (one item, `delegate_item`) holds `ratify`, `approve-change`, `read`.
 
-**Decision review/ratify authority, instance-wide** — `grant_role` with
-`role: "decision-steward"` (auto-defined when `ENABLE_GOVERNANCE` is set:
-`Operations: ["review", "approve"]`, `ScopeMode: global`, `TrustLevel: 0`)
-grants review/ratify authority over every Decision on the instance, not
-scoped to one Domain. `admin`'s own `Operations` bundle no longer carries
-`review`/`approve` (they are reserved for the Plan governance loop, not a
-generic admin-tier grant, per `design/governance-model.md` §4, as of
-01a0e3f9-2) — an `admin`-holding token that also needs to ratify/review
-Decisions must hold `decision-steward` via an explicit grant.
-See [docs/REFERENCE.md](docs/REFERENCE.md#decision-steward-role-grants-and-delegate-v1).
+**The agent rule (D142, fail closed).** A token of class `agent` or `job` (D105) never ratifies: `transition_item` to `ratified` or `superseded` by such a token is refused `ErrForbidden` whatever its grants, and `grant_role` of a role that holds `ratify` to such a token is refused. It may hold `approve-change` only on an `area-approver` grant anchored on an Area, given by a token of class `human` that itself holds `approve-change` over that Area; any other approval grant to it is refused. The person who created the organization gets `admin` and `approver` (`App.GrantFounder`, example/server `ORGANIZATION_FOUNDER`). See [docs/REFERENCE.md](docs/REFERENCE.md#approval-roles-d142-t884).
 
 **Read access to some records, not all (core v1.146.0, A494).** Two built-in reader roles, ops exactly `["read"]`, registered when `ENABLE_GOVERNANCE` is set:
 - **`scoped-reader`** (static): `grant_role` with `scope_static` patterns such as `["Decision:D12", "Task:*"]`. The item may be named by its address, slug or ID; the grant stores its ID. A pattern that names no record is refused.

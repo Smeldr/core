@@ -90,6 +90,9 @@ func migrateGovernance(ctx context.Context, db DB) error {
 	if err := migrateAdminRoleRemovesReviewApprove(ctx, db); err != nil {
 		return err
 	}
+	if err := migrateApprovalRoles(ctx, db); err != nil {
+		return err
+	}
 	if err := seedToolPolicies(ctx, db); err != nil {
 		return err
 	}
@@ -153,7 +156,8 @@ func seedDefaultRoles(ctx context.Context, db DB) error {
 	return nil
 }
 
-// migrateAdminRoleRemovesReviewApprove removes "review" and "approve" from an
+// migrateAdminRoleRemovesReviewApprove removes "review" and the approval
+// operations ("approve", and since T884 "ratify" and "approve-change") from an
 // already-seeded admin role's Operations (design/grants-and-delegate-v1.md
 // §2 step 3, 01a0e3f9-2). seedDefaultRoles' own literal fix only takes effect
 // on a fresh install — its ON CONFLICT (name) DO NOTHING means an
@@ -184,7 +188,7 @@ func migrateAdminRoleRemovesReviewApprove(ctx context.Context, db DB) error {
 	filtered := make([]string, 0, len(ops))
 	changed := false
 	for _, op := range ops {
-		if op == "review" || op == "approve" {
+		if op == "review" || op == retiredApproveOperation || op == OperationRatify || op == OperationApproveChange {
 			changed = true
 			continue
 		}
@@ -231,8 +235,8 @@ type toolPolicy struct {
 //	"define-flow"          — Admin only (state flow definition)
 //	"define-relation-kind" — Admin only (relation kind definition)
 //
-// "approve" and "review" are reserved for the Plan governance loop (§6) — they must NOT
-// be used as generic Admin-tier gates.
+// "ratify", "approve-change" and "review" are approval operations (D142, T884;
+// "approve" is retired) — they must NOT be used as generic Admin-tier gates.
 var builtInToolPolicies = []toolPolicy{
 	// Content lifecycle — module-generated tools (per-type but listed for common built-ins)
 	{"create_post", "create"},
@@ -1085,6 +1089,11 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 		return "", fmt.Errorf("smeldr: Grant: role %q: %w", grant.RoleName, ErrNotFound)
 	} else if err != nil {
 		return "", fmt.Errorf("smeldr: Grant: lookup role %q: %w", grant.RoleName, err)
+	}
+	// D142 point 5 (T884): agent and job tokens never hold ratify, and hold
+	// approve-change only on an Area grant from a human with authority there.
+	if err := s.checkAgentGrant(ctx, grant, roleID); err != nil {
+		return "", err
 	}
 
 	scopeStatic, err := s.normalizeStaticScope(ctx, grant.ScopeStatic)

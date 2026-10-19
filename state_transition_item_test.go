@@ -195,10 +195,10 @@ func TestApp_TransitionItem_Compiled_RoleGated_Granted(t *testing.T) {
 	insertDecision(t, db, "dec-2", "dec-2-slug", "proposed")
 	placeDecision(t, db, "dec-2")
 	tokenID := setupTokenWithRole(t, db, rs, "admin")
-	if err := RegisterDecisionStewardRole(context.Background(), rs); err != nil {
-		t.Fatalf("RegisterDecisionStewardRole: %v", err)
+	if err := RegisterApproverRole(context.Background(), rs); err != nil {
+		t.Fatalf("RegisterApproverRole: %v", err)
 	}
-	if _, err := rs.Grant(context.Background(), RoleGrant{TokenID: tokenID, RoleName: "decision-steward"}); err != nil {
+	if _, err := rs.Grant(context.Background(), RoleGrant{TokenID: tokenID, RoleName: "approver"}); err != nil {
 		t.Fatalf("Grant decision-steward: %v", err)
 	}
 

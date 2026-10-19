@@ -75,13 +75,13 @@ func TestPG_OrchestrationFlows(t *testing.T) {
 		t.Errorf("a forbidden ratification changed the status to %q", got)
 	}
 	tokenID := "pg-token-" + smeldr.NewID()
-	if err := smeldr.RegisterDecisionStewardRole(ctx, store); err != nil {
-		t.Fatalf("RegisterDecisionStewardRole: %v", err)
+	if err := smeldr.RegisterApproverRole(ctx, store); err != nil {
+		t.Fatalf("RegisterApproverRole: %v", err)
 	}
 	if err := store.DefineRole(ctx, smeldr.RoleDefinition{Name: "pg-admin", Operations: []string{"approve"}, ScopeMode: smeldr.ScopeGlobal}); err != nil {
 		t.Fatalf("DefineRole: %v", err)
 	}
-	for _, role := range []string{"pg-admin", "decision-steward"} {
+	for _, role := range []string{"pg-admin", "approver"} {
 		if _, err := store.Grant(ctx, smeldr.RoleGrant{TokenID: tokenID, RoleName: role}); err != nil {
 			t.Fatalf("Grant %s: %v", role, err)
 		}

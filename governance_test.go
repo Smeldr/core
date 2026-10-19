@@ -809,18 +809,18 @@ func TestGetRole_Found(t *testing.T) {
 	ctx := context.Background()
 
 	if err := store.DefineRole(ctx, RoleDefinition{
-		Name: "decision-steward", Operations: []string{"review", "approve"},
+		Name: "approver", Operations: []string{"review", "approve"},
 		ScopeMode: ScopeGlobal, TrustLevel: 0,
 	}); err != nil {
 		t.Fatalf("DefineRole: %v", err)
 	}
 
-	got, err := store.GetRole(ctx, "decision-steward")
+	got, err := store.GetRole(ctx, "approver")
 	if err != nil {
 		t.Fatalf("GetRole: %v", err)
 	}
-	if got.Name != "decision-steward" {
-		t.Errorf("Name: got %q, want %q", got.Name, "decision-steward")
+	if got.Name != "approver" {
+		t.Errorf("Name: got %q, want %q", got.Name, "approver")
 	}
 	if len(got.Operations) != 2 || got.Operations[0] != "review" || got.Operations[1] != "approve" {
 		t.Errorf("Operations: got %#v, want [review approve]", got.Operations)

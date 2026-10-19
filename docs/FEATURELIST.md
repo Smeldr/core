@@ -144,9 +144,11 @@ Opt-in: an app that never calls `App.Governance(store)` sees no governance behav
   before it expires
 - `list_roles` MCP tool (v1.42.0) — lists every role defined on the instance: name,
   operations, scope shape
-- Domain-scoped Decision stewardship — `RegisterDecisionDomainAdminRole`,
-  `RegisterDecisionStewardRole` (v1.94.0) define roles that hold ratify/supersede authority
-  over Decisions within one Domain, rather than instance-wide
+- Approval roles (D142, T884): `ratify` and `approve-change` operations; `approver`
+  (organization), `domain-approver` (one Domain, through its Areas) and `area-approver`
+  (one Area, approve-change only); agent and job tokens never ratify and hold
+  approve-change only on a human-delegated Area grant; `App.GrantFounder`; boot migration
+  from `decision-steward`/`decision-domain-admin` (v1.94.0)
 - `lookup_token_names` MCP tool (v1.43.0) + `TokenStore.NamesForUserIDs(ctx, userIDs)`
   (v1.104.0) — batch-resolve actor IDs seen in `last_actor`/`RoleGrant.Grantor`/relation
   `created_by` back to their human-readable token names

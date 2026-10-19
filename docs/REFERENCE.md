@@ -655,64 +655,39 @@ added alongside `get_goal_context`/`get_sweep_run`'s own rows) or every
 governance-enabled caller is silently forbidden, the same gap A298 already
 closed once for `get_sweep_run`.
 
-### Decision-Domain authority (D68/D71/D72, decide-decision-scope-role-policy)
+### Approval roles (D142, T884)
 
-Per-Domain ratify/supersede authority is modeled as a `ScopeDynamic` role grant
-anchored on a Domain item, not a role per Scope string value.
-`RegisterDecisionDomainAdminRole` (called automatically when
-`ENABLE_GOVERNANCE`, `ENABLE_RELATIONS`, and `ENABLE_ORCHESTRATION` are all
-set) defines a single `"decision-domain-admin"` role
-(`Operations: ["approve"]`, `ScopeMode: ScopeDynamic`,
-`ScopeRelationKind: "belongs_to_domain"`, `ScopeDirection: "incoming"`) —
-reusing `RoleStore.Authorized`'s existing dynamic-scope resolution against the
-`belongs_to_domain` edges asserted between a `Decision` and its Domain item, no
-new authorization code needed:
+Two operations decide who approves: `smeldr.OperationRatify` (`"ratify"`: ratify, supersede or amend a Decision) and `smeldr.OperationApproveChange` (`"approve-change"`: approve a change, such as a pull request, against the Decisions in force). The four Decision doors (`proposed→ratified`, `pending-re-evaluation→ratified`, `pending-re-evaluation→superseded`, `ratified→superseded`) require `ratify`, strictly. No core gate requires `approve-change` yet; the pull request check will. `"approve"` is retired.
+
+| Role (constant) | Operations | Scope | Register with |
+|---|---|---|---|
+| `approver` (`RoleApprover`, was `decision-steward`) | ratify, approve-change, review | global | `RegisterApproverRole` |
+| `domain-approver` (`RoleDomainApprover`, was `decision-domain-admin`) | ratify, approve-change | dynamic, `belongs_to_domain`, incoming, anchored on a Domain | `RegisterDomainApproverRole` |
+| `area-approver` (`RoleAreaApprover`) | approve-change | dynamic, `belongs_to_area`, incoming, anchored on an Area | `RegisterAreaApproverRole` |
+| `item-approver` | ratify, approve-change, read | static, one item | `RegisterItemApproverRole` |
+
+A dynamic place grant follows the place hierarchy (D142, T882): a domain-approver anchored on a Domain covers the Decisions placed in it, the Areas in it and what is placed in them. `admin` holds no approval operation (01a0e3f9-2); a token that ratifies holds one of these roles explicitly. A Decision is ratified only with a place (T883), so its place decides which domain-approver may act.
 
 ```go
-// Grant one person authority over Decisions in the "core" Domain — anchor is
-// that Domain item's own ID, not a role name per Scope value.
+_ = smeldr.RegisterDomainApproverRole(ctx, rs)
 app.RoleStore().Grant(ctx, smeldr.RoleGrant{
-    TokenID: tokenID, RoleName: "decision-domain-admin",
-    ScopeAnchorID: coreDomainItemID,
+    TokenID: tokenID, RoleName: smeldr.RoleDomainApprover,
+    ScopeAnchorID: domainID,
 })
 ```
 
-A grant like this authorizes `proposed→ratified`/`pending-re-evaluation→ratified`/
-`pending-re-evaluation→superseded`/`ratified→superseded` (the four `approve`-gated
-transitions on `orchDecisionFlow`, D63/D64) only for Decisions carrying a
-`belongs_to_domain` edge to `coreDomainItemID` — real per-Domain delegation, not
-a flat admin tier. A `ScopeGlobal` grant of the built-in `admin` role (which
-already holds `approve`) still authorizes every Decision regardless of Domain,
-matching D72's own "Root admin has authority everywhere" semantic. A Decision
-with no `belongs_to_domain` edge at all (D72's Root case) can only be acted on
-by a `ScopeGlobal`-holding role — there is no dynamic anchor for it to match.
+`RegisterDecisionStewardRole` and `RegisterDecisionDomainAdminRole` are deprecated wrappers that define `approver` and `domain-approver`; they go in the first MINOR after Smeldr Cloud has moved.
 
-`decisionScopeRoles` (`orchestration.go`, a flat `Scope`-string→role-name map)
-is deliberately left unpopulated — this mechanism was chosen over it during
-policy review; see the map's own doc comment for the full reasoning.
+**Migration.** `App.Governance` runs it at every boot, idempotently: `decision-steward` is renamed `approver` and `decision-domain-admin` `domain-approver` (their grants follow, keeping ID, scope, expiry and audit trail; when the new role already exists the grants move to it and a duplicate is dropped). Every stored role that holds `approve` also gets `ratify` and `approve-change`; `approve` stays on custom roles so a custom flow that requires it keeps working, and the core roles drop it when they are registered again. Open Signals addressed to `approve` (ratification-required, conflict-detected) are addressed to `ratify`. Each rename gets a governance audit record by actor `system`.
 
-### Decision-steward role (grants-and-delegate-v1)
+**The agent rule (D142 point 5, D105), fail closed.**
+- `RoleStore.Grant` reads the grantee's class (`smeldr_tokens.actor_class` by `user_id`; the class signed into the token when the grantee is the caller). For a grantee of class `agent` or `job`: a role that holds `ratify` is refused; a role that holds `approve-change` is refused unless it is scoped over `belongs_to_area` and the grant is anchored on an existing Area; and that Area grant needs a grantor (the caller, or the store's audit actor) of class `human` who holds `approve-change` over the Area. A class that cannot be read refuses. A grantee without a token row, or an instance without the class columns, is unclassified and not refused by this rule.
+- `validateTransition` refuses a transition that requires `ratify` when the actor in ctx is an agent or job token, whatever its grants say.
+- Unclassified tokens are not refused by the rule; classifying or retiring them is a separate step.
 
-`RegisterDecisionStewardRole` (called automatically when `ENABLE_GOVERNANCE`
-is set) defines a single `"decision-steward"` role
-(`Operations: ["review", "approve"]`, `ScopeMode: global`, `TrustLevel: 0`) —
-a plain, instance-wide grant, unlike `decision-domain-admin`'s per-Domain
-dynamic scope above. A holder can review/ratify any Decision on the
-instance:
+**Founder.** `App.GrantFounder(ctx, userID)` grants `admin` and `approver` to the person who created the organization, with the reason "founder of the organization (D142)" in each grant's provenance; idempotent. example/server calls it at boot for `ORGANIZATION_FOUNDER`.
 
-```go
-app.RoleStore().Grant(ctx, smeldr.RoleGrant{
-    TokenID: tokenID, RoleName: "decision-steward",
-})
-```
-
-This role exists so `admin`'s own `Operations` bundle no longer needs to
-carry `review`/`approve` (reserved for the Plan governance loop, not a
-generic admin-tier grant, per `design/governance-model.md` §4). As of
-`seedDefaultRoles` (01a0e3f9-2), a fresh install's `admin` role no longer
-includes either word — an `admin`-holding token that also needs to
-ratify/review Decisions must hold `decision-steward` via an explicit grant.
-Defining the role does not itself grant it to anyone.
+`decisionScopeRoles` (`orchestration.go`, a flat `Scope`-string to role-name map) is deliberately left unpopulated; see its doc comment.
 
 ### Time-boxed grants (`ExpiresAt`, grants-and-delegate-v1 §3.1/3.2)
 
@@ -725,7 +700,7 @@ for relations:
 ```go
 expiry := time.Now().Add(14 * 24 * time.Hour) // 14-day time-boxed grant
 app.RoleStore().Grant(ctx, smeldr.RoleGrant{
-    TokenID: tokenID, RoleName: "decision-steward", ExpiresAt: &expiry,
+    TokenID: tokenID, RoleName: smeldr.RoleApprover, ExpiresAt: &expiry,
 })
 ```
 

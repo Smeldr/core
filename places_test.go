@@ -185,7 +185,7 @@ func TestPlaces_HierarchyReading(t *testing.T) {
 	edge("Decision", "d3", "Domain", "domB", "belongs_to_domain")
 	edge("Decision", "d4", "Domain", "domA", "contains") // another kind: not followed
 	rs := NewRoleStore(db)
-	for _, f := range []func(context.Context, *RoleStore) error{RegisterDomainReaderRole, RegisterAreaReaderRole, RegisterDecisionDomainAdminRole} {
+	for _, f := range []func(context.Context, *RoleStore) error{RegisterDomainReaderRole, RegisterAreaReaderRole, RegisterDomainApproverRole} {
 		if err := f(ctx, rs); err != nil {
 			t.Fatal(err)
 		}
@@ -197,7 +197,7 @@ func TestPlaces_HierarchyReading(t *testing.T) {
 	}
 	grant("dr", "domain-reader", "domA")
 	grant("ar", "area-reader", "areX")
-	grant("da", "decision-domain-admin", "domA")
+	grant("da", "domain-approver", "domA")
 	cases := []struct {
 		tok      string
 		readable map[string]bool
@@ -220,12 +220,12 @@ func TestPlaces_HierarchyReading(t *testing.T) {
 			}
 		}
 	}
-	// approve follows the hierarchy too (a Decision in an Area of the Domain)
+	// ratify follows the hierarchy too (a Decision in an Area of the Domain)
 	// but never the place record itself.
 	for target, want := range map[string]bool{"d1": true, "d2": true, "d3": false, "domA": false, "areX": true} {
-		got, err := rs.Authorized(ctx, "da", "approve", AuthTarget{TypeName: "Decision", ID: target})
+		got, err := rs.Authorized(ctx, "da", "ratify", AuthTarget{TypeName: "Decision", ID: target})
 		if err != nil || got != want {
-			t.Errorf("approve %s = %v, %v; want %v", target, got, err, want)
+			t.Errorf("ratify %s = %v, %v; want %v", target, got, err, want)
 		}
 	}
 }

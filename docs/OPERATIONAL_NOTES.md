@@ -24,6 +24,23 @@ in pgx compiles none of them and is green in about a second. Run them with
 A tagged run without `DATABASE_URL` fails at once (`TestMain` in pgx/integration_test.go)
 instead of skipping every test.
 
+## The approval-role migration (T884, at the first boot of the places release)
+
+`App.Governance` renames `decision-steward` to `approver` and `decision-domain-admin` to
+`domain-approver` at boot, keeps every grant, and readdresses open `approve` conditions to
+`ratify`; the boot log line `migrateApprovalRoles: approval roles moved to D142` gives the
+counts. What breaks for a caller that is not updated in the same release:
+
+- **Smeldr Cloud** grants `decision-domain-admin` by name (`internal/pilotorg`): that grant
+  fails once the role is renamed. Cloud's change to `domain-approver` ships with the release.
+  Its `DelegationRoles` key `approve` and its reading of `required_role` (`"approve"`) become
+  `ratify`.
+- **ops' process-test-copy scripts** grant `decision-steward` to test-copy-admin, a token of
+  class agent: after the release that grant (as `approver`) is refused and that token can no
+  longer ratify, by design. Ratify checks there use the human token.
+- An agent or job token that ratified before the release is refused from then on, whatever
+  its grants.
+
 ## Running the D110 address migration (Phase 3, on Peter's yes)
 
 `smeldr-server migrate-addresses` (example/server) runs `MigrateAddresses` on the

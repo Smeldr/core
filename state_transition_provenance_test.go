@@ -328,10 +328,10 @@ func TestTransitionItemVia_SubjectProvenance_RoundTrip(t *testing.T) {
 	insertDecision(t, db, "dec-p-2", "dec-p-2-slug", "proposed")
 	placeDecision(t, db, "dec-p-2")
 	tokenID := setupTokenWithRole(t, db, rs, "admin")
-	if err := RegisterDecisionStewardRole(ctx, rs); err != nil {
-		t.Fatalf("RegisterDecisionStewardRole: %v", err)
+	if err := RegisterApproverRole(ctx, rs); err != nil {
+		t.Fatalf("RegisterApproverRole: %v", err)
 	}
-	if _, err := rs.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "decision-steward"}); err != nil {
+	if _, err := rs.Grant(ctx, RoleGrant{TokenID: tokenID, RoleName: "approver"}); err != nil {
 		t.Fatalf("Grant decision-steward: %v", err)
 	}
 	if _, err := app.TransitionItemVia(TrustedRead(NewTestContext(User{ID: tokenID})), "mcp", "Decision", "dec-p-2-slug", "ratified", "ratified by steward"); err != nil {

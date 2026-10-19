@@ -29,6 +29,9 @@
 //	                      grants are ENABLE_GOVERNANCE.
 //	ORGANIZATION_NAME     the name of the Root created with the organization (D142;
 //	                      default: INSTANCE_NAME)
+//	ORGANIZATION_FOUNDER  the user ID of the person who created the organization;
+//	                      at boot it gets the admin and approver roles (D142),
+//	                      once (needs ENABLE_GOVERNANCE)
 //	ENABLE_ORCHESTRATION  wire core governance records and the Orchestration add-on
 //	                      (Task, Goal, Run); implies ENABLE_GOVERNANCE_RECORDS
 //	ENABLE_AUTHORITY      wire the Authority mechanism (Rule, AuthorityStub — decision-
@@ -107,18 +110,21 @@ import (
 // ServerConfig holds all configuration derived from environment variables.
 // Construct it via [parseConfig] for production use, or set fields directly in tests.
 type ServerConfig struct {
-	Secret                   string
-	BaseURL                  string
-	Port                     string
-	Addr                     string
-	EnableTokens             bool
-	EnableGovernance         bool
-	EnableRelations          bool
-	EnableDynamicContent     bool
-	EnableBlocks             bool
-	EnableOrchestration      bool
-	EnableGovernanceRecords  bool
-	OrganizationName         string
+	Secret                  string
+	BaseURL                 string
+	Port                    string
+	Addr                    string
+	EnableTokens            bool
+	EnableGovernance        bool
+	EnableRelations         bool
+	EnableDynamicContent    bool
+	EnableBlocks            bool
+	EnableOrchestration     bool
+	EnableGovernanceRecords bool
+	OrganizationName        string
+	// OrganizationFounder is the user ID that gets admin and approver at boot
+	// (ORGANIZATION_FOUNDER, D142); empty grants nothing.
+	OrganizationFounder      string
 	EnableAuthority          bool
 	EnableCheck              bool
 	EnableRedirects          bool
@@ -189,6 +195,7 @@ func parseConfig() ServerConfig {
 		EnableOrchestration:      os.Getenv("ENABLE_ORCHESTRATION") != "",
 		EnableGovernanceRecords:  os.Getenv("ENABLE_GOVERNANCE_RECORDS") != "",
 		OrganizationName:         envOr("ORGANIZATION_NAME", envOr("INSTANCE_NAME", "smeldr-dogfood")),
+		OrganizationFounder:      os.Getenv("ORGANIZATION_FOUNDER"),
 		EnableAuthority:          os.Getenv("ENABLE_AUTHORITY") != "",
 		EnableCheck:              os.Getenv("ENABLE_CHECK") != "",
 		EnableRedirects:          os.Getenv("ENABLE_REDIRECTS") != "",
@@ -476,8 +483,11 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.EnableRelations && cfg.governanceRecords() && cfg.EnableGovernance {
-		if err := smeldr.RegisterDecisionDomainAdminRole(context.Background(), roleStore); err != nil {
-			return ServerResult{}, fmt.Errorf("register decision-domain-admin role: %w", err)
+		if err := smeldr.RegisterDomainApproverRole(context.Background(), roleStore); err != nil {
+			return ServerResult{}, fmt.Errorf("register domain-approver role: %w", err)
+		}
+		if err := smeldr.RegisterAreaApproverRole(context.Background(), roleStore); err != nil {
+			return ServerResult{}, fmt.Errorf("register area-approver role: %w", err)
 		}
 		if err := smeldr.RegisterDomainReaderRole(context.Background(), roleStore); err != nil {
 			return ServerResult{}, fmt.Errorf("register domain-reader role: %w", err)
@@ -488,8 +498,8 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.EnableGovernance {
-		if err := smeldr.RegisterDecisionStewardRole(context.Background(), roleStore); err != nil {
-			return ServerResult{}, fmt.Errorf("register decision-steward role: %w", err)
+		if err := smeldr.RegisterApproverRole(context.Background(), roleStore); err != nil {
+			return ServerResult{}, fmt.Errorf("register approver role: %w", err)
 		}
 		if err := smeldr.RegisterItemApproverRole(context.Background(), roleStore); err != nil {
 			return ServerResult{}, fmt.Errorf("register item-approver role: %w", err)
@@ -499,6 +509,13 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 		if err := smeldr.RegisterScopedReaderRole(context.Background(), roleStore); err != nil {
 			return ServerResult{}, fmt.Errorf("register scoped-reader role: %w", err)
+		}
+		// D142: the person who created the organization holds admin and
+		// approver, recorded with the reason in provenance.
+		if cfg.OrganizationFounder != "" {
+			if err := app.GrantFounder(context.Background(), cfg.OrganizationFounder); err != nil {
+				return ServerResult{}, fmt.Errorf("grant founder: %w", err)
+			}
 		}
 	}
 

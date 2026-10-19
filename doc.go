@@ -146,6 +146,12 @@
 //     [App.MigratePlaces] moves an instance's runtime place types to them.
 //     A Decision has exactly one place (Root, a Domain or an Area) and is
 //     ratified only once it has one.
+//   - Approval (D142): the operations [OperationRatify] and
+//     [OperationApproveChange], held by the roles [RoleApprover] (the whole
+//     organization), [RoleDomainApprover] (one Domain) and [RoleAreaApprover]
+//     (one Area, approve-change only). An agent or job token never ratifies,
+//     and holds approve-change only on an Area grant from a human.
+//     [App.GrantFounder] gives the organization's founder admin and approver.
 //   - Custom state flows ([StateFlow], [State], [Transition],
 //     [TransitionTrigger]) — a data-driven state machine registered per
 //     content type via [App.RegisterFlow], for lifecycles beyond the built-in

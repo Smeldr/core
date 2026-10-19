@@ -2925,16 +2925,16 @@ func govGrant(t *testing.T, store *RoleStore, tokenID, roleName string) {
 }
 
 // govGrantDecisionSteward defines (if not already defined) and grants the
-// "decision-steward" role to tokenID — the review/approve authority admin's
+// "approver" role to tokenID — the review/approve authority admin's
 // own Operations no longer bundles (01a0e3f9-2). Tests that need a token
 // able to ratify/review a Decision call this alongside govGrant(..., "admin")
 // for any other operation the test also exercises.
 func govGrantDecisionSteward(t *testing.T, store *RoleStore, tokenID string) {
 	t.Helper()
-	if err := RegisterDecisionStewardRole(context.Background(), store); err != nil {
-		t.Fatalf("RegisterDecisionStewardRole: %v", err)
+	if err := RegisterApproverRole(context.Background(), store); err != nil {
+		t.Fatalf("RegisterApproverRole: %v", err)
 	}
-	govGrant(t, store, tokenID, "decision-steward")
+	govGrant(t, store, tokenID, "approver")
 }
 
 // readsDrafts reports whether the module's HTTP read scope for ctx reads

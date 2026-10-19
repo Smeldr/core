@@ -720,3 +720,31 @@ func TestBuildApp_GovernanceRecordsOnly(t *testing.T) {
 		})
 	}
 }
+
+// ORGANIZATION_FOUNDER gets admin and approver at boot (D142, T884), and a
+// second boot grants nothing twice.
+func TestBuildApp_OrganizationFounder(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SECRET", "test-secret-that-is-at-least-32-bytes")
+	t.Setenv("BASE_URL", "https://cms.example.com")
+	t.Setenv("ENABLE_GOVERNANCE", "1")
+	t.Setenv("ENABLE_GOVERNANCE_RECORDS", "1")
+	t.Setenv("ORGANIZATION_FOUNDER", "founder-1")
+	db, err := sql.Open("sqlite", filepath.Join(dir, "smeldr.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for i := 0; i < 2; i++ {
+		res, err := buildApp(parseConfig(), db)
+		if err != nil {
+			t.Fatalf("boot %d: %v", i, err)
+		}
+		res.StopAll()
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM smeldr_role_grants g JOIN smeldr_roles r ON r.id = g.role_id
+		WHERE g.token_id = 'founder-1' AND r.name IN ('admin', 'approver')`).Scan(&n); err != nil || n != 2 {
+		t.Errorf("founder grants = %d (%v), want admin and approver once each", n, err)
+	}
+}

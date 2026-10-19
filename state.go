@@ -672,6 +672,11 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, rels *Relatio
 	if requiredOperation == "" {
 		return nil // no operation gate on this transition
 	}
+	// D142 point 5 (T884): an agent or job token never ratifies, whatever its
+	// grants say.
+	if err := refuseAutomatedRatify(ctx, requiredOperation); err != nil {
+		return err
+	}
 	if rs == nil {
 		if strict {
 			return fmt.Errorf("%w: transition %s→%s requires operation %q but governance is not wired",

@@ -390,7 +390,7 @@ func TestDecisionFlow_definition(t *testing.T) {
 		t.Errorf("initial = %q, want %q", got, "proposed")
 	}
 
-	// D34/D40/D63/D64: ratify and supersede require the "approve" operation,
+	// D34/D40/D63/D64: ratify and supersede require the "ratify" operation,
 	// fail-closed — both from "proposed"/"ratified" directly (D34) and from
 	// "pending-re-evaluation" (D40): re-evaluation is the same
 	// authority-bearing act through a different door.
@@ -411,26 +411,26 @@ func TestDecisionFlow_definition(t *testing.T) {
 	if ratify == nil {
 		t.Fatal("proposed→ratified transition not found")
 	}
-	if ratify.RequiredOperation != "approve" || !ratify.Strict {
-		t.Errorf("proposed→ratified: RequiredOperation=%q Strict=%v, want %q true", ratify.RequiredOperation, ratify.Strict, "approve")
+	if ratify.RequiredOperation != "ratify" || !ratify.Strict {
+		t.Errorf("proposed→ratified: RequiredOperation=%q Strict=%v, want %q true", ratify.RequiredOperation, ratify.Strict, "ratify")
 	}
 	if supersede == nil {
 		t.Fatal("ratified→superseded transition not found")
 	}
-	if supersede.RequiredOperation != "approve" || !supersede.Strict {
-		t.Errorf("ratified→superseded: RequiredOperation=%q Strict=%v, want %q true", supersede.RequiredOperation, supersede.Strict, "approve")
+	if supersede.RequiredOperation != "ratify" || !supersede.Strict {
+		t.Errorf("ratified→superseded: RequiredOperation=%q Strict=%v, want %q true", supersede.RequiredOperation, supersede.Strict, "ratify")
 	}
 	if reEvalRatify == nil {
 		t.Fatal("pending-re-evaluation→ratified transition not found")
 	}
-	if reEvalRatify.RequiredOperation != "approve" || !reEvalRatify.Strict {
-		t.Errorf("pending-re-evaluation→ratified: RequiredOperation=%q Strict=%v, want %q true", reEvalRatify.RequiredOperation, reEvalRatify.Strict, "approve")
+	if reEvalRatify.RequiredOperation != "ratify" || !reEvalRatify.Strict {
+		t.Errorf("pending-re-evaluation→ratified: RequiredOperation=%q Strict=%v, want %q true", reEvalRatify.RequiredOperation, reEvalRatify.Strict, "ratify")
 	}
 	if reEvalSupersede == nil {
 		t.Fatal("pending-re-evaluation→superseded transition not found")
 	}
-	if reEvalSupersede.RequiredOperation != "approve" || !reEvalSupersede.Strict {
-		t.Errorf("pending-re-evaluation→superseded: RequiredOperation=%q Strict=%v, want %q true", reEvalSupersede.RequiredOperation, reEvalSupersede.Strict, "approve")
+	if reEvalSupersede.RequiredOperation != "ratify" || !reEvalSupersede.Strict {
+		t.Errorf("pending-re-evaluation→superseded: RequiredOperation=%q Strict=%v, want %q true", reEvalSupersede.RequiredOperation, reEvalSupersede.Strict, "ratify")
 	}
 }
 
@@ -1161,7 +1161,7 @@ func TestAuthorizeDecisionScope_Granted(t *testing.T) {
 	db := setupGovernanceDB(t)
 	rs := NewRoleStore(db)
 	const uid = "tok-core-ratifier"
-	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"approve"}}); err != nil {
+	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"ratify"}}); err != nil {
 		t.Fatalf("DefineRole: %v", err)
 	}
 	if _, err := rs.Grant(context.Background(), RoleGrant{TokenID: uid, RoleName: "core-ratifier"}); err != nil {
@@ -1178,7 +1178,7 @@ func TestAuthorizeDecisionScope_NotGranted(t *testing.T) {
 	db := setupGovernanceDB(t)
 	rs := NewRoleStore(db)
 	const uid = "tok-no-grant"
-	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"approve"}}); err != nil {
+	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"ratify"}}); err != nil {
 		t.Fatalf("DefineRole: %v", err)
 	}
 	d := &Decision{Node: Node{ID: NewID()}, Scope: "core"}
@@ -1230,7 +1230,7 @@ func TestAuthorizeDecisionScopeByID_GrantedRole(t *testing.T) {
 		t.Fatalf("CreateOrchestrationTables: %v", err)
 	}
 	rs := NewRoleStore(db)
-	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"approve"}}); err != nil {
+	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"ratify"}}); err != nil {
 		t.Fatalf("DefineRole: %v", err)
 	}
 	const uid = "tok-byid-granted"
@@ -1253,7 +1253,7 @@ func TestAuthorizeDecisionScopeByID_NotGranted(t *testing.T) {
 		t.Fatalf("CreateOrchestrationTables: %v", err)
 	}
 	rs := NewRoleStore(db)
-	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"approve"}}); err != nil {
+	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"ratify"}}); err != nil {
 		t.Fatalf("DefineRole: %v", err)
 	}
 	d := &Decision{Node: Node{ID: NewID(), Slug: GenerateSlug("d-byid-ungranted")}, Scope: "core"}
@@ -1272,7 +1272,7 @@ func TestAuthorizeDecisionScopeByID_NotGranted(t *testing.T) {
 // integration test (01a07631).
 func TestTransitionItem_authorizeDecisionScope_wired(t *testing.T) {
 	app, db, rs := setupTransitionItemApp(t)
-	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"approve"}}); err != nil {
+	if err := rs.DefineRole(context.Background(), RoleDefinition{Name: "core-ratifier", Operations: []string{"ratify"}}); err != nil {
 		t.Fatalf("DefineRole: %v", err)
 	}
 	d := &Decision{Node: Node{ID: NewID(), Slug: GenerateSlug("d-transitionitem-wired"), Status: "proposed"}, Scope: "core"}
@@ -1807,24 +1807,24 @@ func TestCreateOrchestrationTables_DecisionTitleColumn(t *testing.T) {
 	}
 }
 
-func TestRegisterDecisionDomainAdminRole_RoundTrip(t *testing.T) {
+func TestRegisterDomainApproverRole_RoundTrip(t *testing.T) {
 	db := setupGovernanceDB(t)
 	store := NewRoleStore(db)
 	ctx := context.Background()
 
-	if err := RegisterDecisionDomainAdminRole(ctx, store); err != nil {
-		t.Fatalf("RegisterDecisionDomainAdminRole: %v", err)
+	if err := RegisterDomainApproverRole(ctx, store); err != nil {
+		t.Fatalf("RegisterDomainApproverRole: %v", err)
 	}
 
 	var ops, scopeMode, relKind, relDir string
 	if err := db.QueryRowContext(ctx,
 		`SELECT operations, scope_mode, scope_relation_kind, scope_direction
-			FROM smeldr_roles WHERE name = 'decision-domain-admin'`,
+			FROM smeldr_roles WHERE name = 'domain-approver'`,
 	).Scan(&ops, &scopeMode, &relKind, &relDir); err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if ops != `["approve"]` {
-		t.Errorf("operations: got %q, want %q", ops, `["approve"]`)
+	if ops != `["ratify","approve-change"]` {
+		t.Errorf("operations: got %q, want %q", ops, `["ratify","approve-change"]`)
 	}
 	if scopeMode != "dynamic" {
 		t.Errorf("scope_mode: got %q, want %q", scopeMode, "dynamic")
@@ -1837,21 +1837,21 @@ func TestRegisterDecisionDomainAdminRole_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestRegisterDecisionDomainAdminRole_Idempotent(t *testing.T) {
+func TestRegisterDomainApproverRole_Idempotent(t *testing.T) {
 	db := setupGovernanceDB(t)
 	store := NewRoleStore(db)
 	ctx := context.Background()
 
-	if err := RegisterDecisionDomainAdminRole(ctx, store); err != nil {
+	if err := RegisterDomainApproverRole(ctx, store); err != nil {
 		t.Errorf("first call: %v", err)
 	}
-	if err := RegisterDecisionDomainAdminRole(ctx, store); err != nil {
+	if err := RegisterDomainApproverRole(ctx, store); err != nil {
 		t.Errorf("second call: %v", err)
 	}
 
 	var count int
 	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM smeldr_roles WHERE name = 'decision-domain-admin'`,
+		`SELECT COUNT(*) FROM smeldr_roles WHERE name = 'domain-approver'`,
 	).Scan(&count); err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -1860,25 +1860,25 @@ func TestRegisterDecisionDomainAdminRole_Idempotent(t *testing.T) {
 	}
 }
 
-func TestRegisterDecisionStewardRole_RoundTrip(t *testing.T) {
+func TestRegisterApproverRole_RoundTrip(t *testing.T) {
 	db := setupGovernanceDB(t)
 	store := NewRoleStore(db)
 	ctx := context.Background()
 
-	if err := RegisterDecisionStewardRole(ctx, store); err != nil {
-		t.Fatalf("RegisterDecisionStewardRole: %v", err)
+	if err := RegisterApproverRole(ctx, store); err != nil {
+		t.Fatalf("RegisterApproverRole: %v", err)
 	}
 
 	var ops, scopeMode string
 	var trustLevel int
 	if err := db.QueryRowContext(ctx,
 		`SELECT operations, scope_mode, trust_level
-			FROM smeldr_roles WHERE name = 'decision-steward'`,
+			FROM smeldr_roles WHERE name = 'approver'`,
 	).Scan(&ops, &scopeMode, &trustLevel); err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if !strings.Contains(ops, "review") || !strings.Contains(ops, "approve") {
-		t.Errorf("operations: got %q, want to contain both review and approve", ops)
+	if ops != `["ratify","approve-change","review"]` {
+		t.Errorf("operations: got %q, want ratify, approve-change and review", ops)
 	}
 	if scopeMode != string(ScopeGlobal) {
 		t.Errorf("scope_mode: got %q, want %q", scopeMode, ScopeGlobal)
@@ -1888,21 +1888,21 @@ func TestRegisterDecisionStewardRole_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestRegisterDecisionStewardRole_Idempotent(t *testing.T) {
+func TestRegisterApproverRole_Idempotent(t *testing.T) {
 	db := setupGovernanceDB(t)
 	store := NewRoleStore(db)
 	ctx := context.Background()
 
-	if err := RegisterDecisionStewardRole(ctx, store); err != nil {
+	if err := RegisterApproverRole(ctx, store); err != nil {
 		t.Errorf("first call: %v", err)
 	}
-	if err := RegisterDecisionStewardRole(ctx, store); err != nil {
+	if err := RegisterApproverRole(ctx, store); err != nil {
 		t.Errorf("second call: %v", err)
 	}
 
 	var count int
 	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM smeldr_roles WHERE name = 'decision-steward'`,
+		`SELECT COUNT(*) FROM smeldr_roles WHERE name = 'approver'`,
 	).Scan(&count); err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -1926,8 +1926,8 @@ func TestRegisterItemApproverRole_RoundTrip(t *testing.T) {
 	).Scan(&ops, &scopeMode); err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if !strings.Contains(ops, "approve") {
-		t.Errorf("operations: got %q, want to contain approve", ops)
+	if ops != `["ratify","approve-change","read"]` {
+		t.Errorf("operations: got %q, want ratify, approve-change and read", ops)
 	}
 	if scopeMode != string(ScopeStatic) {
 		t.Errorf("scope_mode: got %q, want %q", scopeMode, ScopeStatic)

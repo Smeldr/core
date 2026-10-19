@@ -227,7 +227,7 @@ type Signal struct {
 	ToState   string `json:"to_state" db:"to_state"`
 	// RequiredOperation names the operation that would have been required
 	// to perform the blocked transition (D63/D64, Amendment A309 — an
-	// operation word, e.g. "approve", not a role name; renamed from
+	// operation word, e.g. "ratify", not a role name; renamed from
 	// RequiredRole). Empty when this Signal does not concern a blocked
 	// transition. JSON key and DB column deliberately kept as
 	// "required_role" — unlike the Go field, both are consumer-facing
@@ -367,78 +367,121 @@ type Decision struct {
 // (ratified→superseded) — per D34. Deliberately starts empty and stays empty:
 // decide-decision-scope-role-policy (2026-09-20) considered populating this
 // map (Path A, one role name per Scope string value) and rejected it in
-// favor of Path B — [RegisterDecisionDomainAdminRole]'s real, per-Domain
+// favor of Path B — [RegisterDomainApproverRole]'s real, per-Domain
 // delegation via the belongs_to_domain relation kind (D71/D72) and
 // RoleStore.Authorized's existing ScopeDynamic mechanism, matching D68's own
 // policy ("authority is granted per scope... via delegation") without a
 // role-per-Scope-value naming burden. An unmapped Scope value is not an
 // error — it simply means authorizeDecisionScope has nothing additional to
 // check for that item, and the generic RequiredOperation gate already set on
-// orchDecisionFlow's transitions (now backed by RegisterDecisionDomainAdminRole
+// orchDecisionFlow's transitions (now backed by RegisterDomainApproverRole
 // grants, alongside ScopeGlobal admin) is what enforces authority today.
 // Unaffected by D63/D64's RequiredRole→RequiredOperation migration: this
 // mechanism calls RoleStore.RoleGranted directly, independent of
 // validateTransition and its own operation-based check.
 var decisionScopeRoles = map[string]string{}
 
-// decisionRatifyOperation is the operation orchDecisionFlow's own
-// proposed→ratified transition requires (RequiredOperation, D63/D64). Shared
-// with [emitConflictDetectedSignal] (relations.go) so a conflict-detected
-// Signal's own receiver names the same operation the actual ratification
-// gate checks, without duplicating the literal string in two files (01a0dd64-2).
-const decisionRatifyOperation = "approve"
+// decisionRatifyOperation is the operation every door of orchDecisionFlow
+// into ratified or superseded requires (RequiredOperation, D63/D64): ratify,
+// supersede or amend a Decision (D142 point 5, T884; "approve" until then).
+// Shared with [emitConflictDetectedSignal] (relations.go) and the
+// ratification-required condition (signal_resolve.go), so a condition's
+// receiver names the operation the gate checks (01a0dd64-2).
+const decisionRatifyOperation = OperationRatify
 
-// RegisterDecisionDomainAdminRole defines (or updates) the
-// "decision-domain-admin" role: Operations: ["approve"], scoped dynamically
-// via the belongs_to_domain relation kind (D71/D72,
-// [RegisterOrchestrationRelationKinds]) with ScopeDirection "incoming" — a
-// grant of this role, anchored on a specific Domain item's own ID, matches
-// exactly the Decisions carrying a belongs_to_domain edge to that Domain
-// (relationExists' own "incoming" semantic: itemID has a relation pointing
-// TO anchorID, which is precisely a Decision→domain edge). This gives real,
-// per-Domain delegation — D68's own policy ("a holder of authority over
-// scope X may grant authority over X to another actor") — reusing
-// RoleStore.Authorized's already-tested ScopeDynamic resolution; no new
-// authorization code was needed, only this role definition
-// (decide-decision-scope-role-policy, Path B, chosen over populating
-// [decisionScopeRoles]). Idempotent — safe to call on every boot;
-// RoleStore.DefineRole updates the role in place if one with this name is
-// already registered.
-func RegisterDecisionDomainAdminRole(ctx context.Context, rs *RoleStore) error {
+// The two approval operations (D142 point 5, T884). They replace "approve",
+// which a boot migration rewrites to both ([migrateGovernance]).
+const (
+	// OperationRatify ratifies, supersedes or amends a Decision. A token of
+	// class agent or job never uses it: a grant of a role that holds it to
+	// such a token is refused, and so is the transition.
+	OperationRatify = "ratify"
+	// OperationApproveChange approves a change, such as a pull request,
+	// against the Decisions in force. An agent may hold it within one Area,
+	// on an area-approver grant from a human with authority over that Area.
+	OperationApproveChange = "approve-change"
+)
+
+// The approval roles (D142 point 6, T884).
+const (
+	// RoleApprover holds ratify, approve-change and review over the whole
+	// organization (was decision-steward).
+	RoleApprover = "approver"
+	// RoleDomainApprover holds ratify and approve-change over one Domain and
+	// everything placed in it or in its Areas (was decision-domain-admin).
+	RoleDomainApprover = "domain-approver"
+	// RoleAreaApprover holds approve-change only, over one Area and what is
+	// placed in it. It is the approval role an agent may be given.
+	RoleAreaApprover = "area-approver"
+)
+
+// RegisterApproverRole defines (or updates) the "approver" role: ratify,
+// approve-change and review over the whole organization (global scope,
+// TrustLevel 0). Admin does not bundle approval (01a0e3f9-2): whoever ratifies
+// holds this role, or a domain-approver or item-approver grant, explicitly.
+// Defining the role grants it to no one. Idempotent: safe on every boot.
+func RegisterApproverRole(ctx context.Context, rs *RoleStore) error {
 	return rs.DefineRole(ctx, RoleDefinition{
-		Name:              "decision-domain-admin",
-		Operations:        []string{"approve"},
+		Name:       RoleApprover,
+		Operations: []string{OperationRatify, OperationApproveChange, "review"},
+		ScopeMode:  ScopeGlobal,
+		TrustLevel: 0,
+	})
+}
+
+// RegisterDomainApproverRole defines (or updates) the "domain-approver" role:
+// ratify and approve-change, scoped dynamically over belongs_to_domain
+// (incoming). A grant anchored on a Domain covers the records placed in that
+// Domain, its Areas and the records placed in them, through the place
+// hierarchy walk (D142, [placeMembers]). Idempotent: safe on every boot.
+func RegisterDomainApproverRole(ctx context.Context, rs *RoleStore) error {
+	return rs.DefineRole(ctx, RoleDefinition{
+		Name:              RoleDomainApprover,
+		Operations:        []string{OperationRatify, OperationApproveChange},
 		ScopeMode:         ScopeDynamic,
 		ScopeRelationKind: "belongs_to_domain",
 		ScopeDirection:    "incoming",
 	})
 }
 
-// RegisterDecisionStewardRole defines (or updates) the "decision-steward"
-// role: Operations: ["review", "approve"], ScopeMode: global, TrustLevel: 0
-// (design/grants-and-delegate-v1.md §2). A plain, instance-wide governance
-// role, distinct from [RegisterDecisionDomainAdminRole]'s per-Domain dynamic
-// scope: a holder can review/approve any Decision, not just ones under a
-// specific Domain edge. Exists so admin's own Operations bundle can drop
-// "review"/"approve" (governance-model.md §4's own rule: those two verbs are
-// reserved for the Plan governance loop, not a generic admin-tier grant)
-// without breaking whoever currently ratifies Decisions on the strength of
-// holding admin alone — they hold this role instead, via an explicit
-// grant_role call. Defining the role is idempotent and does not itself
-// grant it to anyone; RoleStore.DefineRole updates the role in place if one
-// with this name is already registered.
-func RegisterDecisionStewardRole(ctx context.Context, rs *RoleStore) error {
+// RegisterAreaApproverRole defines (or updates) the "area-approver" role:
+// approve-change only, scoped dynamically over belongs_to_area (incoming), so
+// a grant anchored on an Area covers the records placed in it. It is the one
+// approval role an agent or job token may be granted, and then only by a
+// human who holds approve-change over that Area ([RoleStore.Grant]).
+// Idempotent: safe on every boot.
+func RegisterAreaApproverRole(ctx context.Context, rs *RoleStore) error {
 	return rs.DefineRole(ctx, RoleDefinition{
-		Name:       "decision-steward",
-		Operations: []string{"review", "approve"},
-		ScopeMode:  ScopeGlobal,
-		TrustLevel: 0,
+		Name:              RoleAreaApprover,
+		Operations:        []string{OperationApproveChange},
+		ScopeMode:         ScopeDynamic,
+		ScopeRelationKind: "belongs_to_area",
+		ScopeDirection:    "incoming",
 	})
 }
 
+// RegisterDecisionDomainAdminRole defines the "domain-approver" role, the
+// role decision-domain-admin was renamed to (D142, T884).
+//
+// Deprecated: use [RegisterDomainApproverRole]. Removed in the first MINOR
+// after Smeldr Cloud has moved to the new names.
+func RegisterDecisionDomainAdminRole(ctx context.Context, rs *RoleStore) error {
+	return RegisterDomainApproverRole(ctx, rs)
+}
+
+// RegisterDecisionStewardRole defines the "approver" role, the role
+// decision-steward was renamed to (D142, T884).
+//
+// Deprecated: use [RegisterApproverRole]. Removed in the first MINOR after
+// Smeldr Cloud has moved to the new names.
+func RegisterDecisionStewardRole(ctx context.Context, rs *RoleStore) error {
+	return RegisterApproverRole(ctx, rs)
+}
+
 // RegisterItemApproverRole defines (or updates) the "item-approver" role:
-// Operations: ["approve", "read"], ScopeMode: static (design/workspace-delegate-region-v1.md
-// §0 P1, 01a0e3f9-5). Unlike [RegisterDecisionStewardRole]'s global scope,
+// Operations: ["ratify", "approve-change", "read"] ("approve" until T884),
+// ScopeMode: static (design/workspace-delegate-region-v1.md
+// §0 P1, 01a0e3f9-5). Unlike [RegisterApproverRole]'s global scope,
 // this role's ScopeMode is static so a grant's own ScopeStatic list — the
 // specific "type:id" pair smeldr.dev/mcp's delegate_item tool writes —
 // actually narrows what the grant authorizes. [RoleStore.Authorized] and
@@ -458,7 +501,7 @@ func RegisterDecisionStewardRole(ctx context.Context, rs *RoleStore) error {
 func RegisterItemApproverRole(ctx context.Context, rs *RoleStore) error {
 	return rs.DefineRole(ctx, RoleDefinition{
 		Name:       "item-approver",
-		Operations: []string{"approve", "read"},
+		Operations: []string{OperationRatify, OperationApproveChange, "read"},
 		ScopeMode:  ScopeStatic,
 	})
 }
@@ -1604,17 +1647,18 @@ func orchDecisionFlow() StateFlow {
 			{Name: "archived", IsTerminal: true, Locked: true},
 		},
 		Transitions: []Transition{
-			// D34/D40/D63/D64: ratify and supersede require the "approve"
-			// operation, fail-closed (Strict) so a nil RoleStore or missing
-			// actor rejects rather than silently allows — held by the
-			// built-in "admin" role's seeded Operations list, requiring no
-			// new provisioning to start enforcing. D40 extends the same gate
+			// D34/D40/D63/D64: ratify and supersede require the "ratify"
+			// operation ("approve" until T884), fail-closed (Strict) so a nil
+			// RoleStore or missing actor rejects rather than silently allows.
+			// Admin does not hold it (01a0e3f9-2): approver, domain-approver
+			// and item-approver grants do, and an agent or job token never
+			// uses it (D142, validateTransition). D40 extends the same gate
 			// to the re-evaluation door into the same two states: ratifying
 			// or superseding is an authority-bearing act regardless of which
 			// state it is entered from, and having been re-evaluated first
 			// does not supply the authority the direct path requires.
 			// Migrated from RequiredRole: "admin" (exact-role-name match via
-			// RoleGranted) to RequiredOperation: "approve" (operation match
+			// RoleGranted) to RequiredOperation (operation match
 			// via Authorized) by D63/D64, Amendment A309 — see
 			// validateTransition's own godoc for the mechanism change.
 			{From: "proposed", To: "ratified", RequiredOperation: decisionRatifyOperation, Strict: true},
