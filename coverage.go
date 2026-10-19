@@ -133,8 +133,14 @@ func registerCoverageRule(app *App, db DB) {
 	refs := app.referenceSaveHooks(coverageRuleReferences(), nil)
 	prepareRefs := refs.prepare
 	refs.prepare = func(ctx Context, existing, item any) error {
-		if err := normalizeCoverageRule(item.(*CoverageRule)); err != nil {
+		r := item.(*CoverageRule)
+		if err := normalizeCoverageRule(r); err != nil {
 			return err
+		}
+		// A changed rule goes back to not checked (T901): its count and time
+		// were for the old pattern. Same write as the change.
+		if old, ok := existing.(*CoverageRule); ok && coverageRuleChanged(old, r) {
+			r.MatchCount, r.CheckedAt = 0, nil
 		}
 		return prepareRefs(ctx, existing, item)
 	}
@@ -154,6 +160,13 @@ func registerCoverageRule(app *App, db DB) {
 		At("/coverage-rules"), Repo(NewSQLRepo[*CoverageRule](db, Table("smeldr_coverage_rules"))), MCP(MCPRead, MCPWrite), withAddress(),
 		refs,
 	))
+}
+
+// coverageRuleChanged reports whether r differs from old in what decides its
+// matches: the kind, the repository or the pattern, compared normalized (a
+// repository differing only in case is the same).
+func coverageRuleChanged(old, r *CoverageRule) bool {
+	return old.Kind != r.Kind || old.Repository != r.Repository || old.Pattern != r.Pattern
 }
 
 // coverageRepositoryRe is the shape of a repository: owner/name.

@@ -425,3 +425,71 @@ func BenchmarkDecisionsForPaths(b *testing.B) {
 		}
 	}
 }
+
+// T901: an update that changes the pattern, repository or kind clears the
+// rule's count and checked time; one that changes none keeps them.
+func TestCoverageRule_ChangeClearsCount(t *testing.T) {
+	f := newCoverageFixture(t)
+	ctx := TrustedRead(authorCtx())
+	seed := TrustedRead(authorCtx()).(Context)
+	tree := []string{"internal/billing/a.go", "internal/billing/b.go", "README.md", "cmd/x/main.go", "docs/x.md"}
+	state := func(id string) (int, bool) {
+		var n int
+		var at sql.NullString
+		if err := f.db.QueryRow(`SELECT match_count, checked_at FROM smeldr_coverage_rules WHERE id = $1`, id).Scan(&n, &at); err != nil {
+			t.Fatal(err)
+		}
+		return n, at.Valid
+	}
+	for _, tc := range []struct {
+		name    string
+		fields  map[string]any
+		cleared bool
+	}{
+		{"same pattern again", map[string]any{"pattern": "internal/billing/**"}, false},
+		{"repository differing in case only", map[string]any{"repository": "ACME/App"}, false},
+		{"same kind", map[string]any{"kind": "path"}, false},
+		{"pattern changed", map[string]any{"pattern": "internal/billing/*.go"}, true},
+		{"repository changed", map[string]any{"repository": "acme/other-app"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Reset the rule to its original values, then count.
+			if _, err := f.db.Exec(`UPDATE smeldr_coverage_rules SET pattern = 'internal/billing/**', repository = 'acme/app' WHERE id = $1`, f.ruleBilling.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.app.CheckCoverage(ctx, CheckCoverageQuery{Repository: "acme/app", Paths: tree}); err != nil {
+				t.Fatal(err)
+			}
+			if n, checked := state(f.ruleBilling.ID); n != 2 || !checked {
+				t.Fatalf("before: count %d, checked %v", n, checked)
+			}
+			if _, err := f.rules.MCPUpdate(seed, f.ruleBilling.Slug, tc.fields); err != nil {
+				t.Fatal(err)
+			}
+			n, checked := state(f.ruleBilling.ID)
+			if tc.cleared && (n != 0 || checked) || !tc.cleared && (n != 2 || !checked) {
+				t.Errorf("after: count %d, checked %v; want cleared %v", n, checked, tc.cleared)
+			}
+		})
+	}
+}
+
+func TestCoverageRuleChanged(t *testing.T) {
+	base := CoverageRule{Kind: "path", Repository: "acme/app", Pattern: "a/**"}
+	for _, tc := range []struct {
+		change func(*CoverageRule)
+		want   bool
+	}{
+		{func(*CoverageRule) {}, false},
+		{func(r *CoverageRule) { r.Pattern = "b/**" }, true},
+		{func(r *CoverageRule) { r.Repository = "acme/b" }, true},
+		{func(r *CoverageRule) { r.Kind = "symbol" }, true},
+		{func(r *CoverageRule) { r.Area = "ARE9"; r.MatchCount = 7 }, false},
+	} {
+		r := base
+		tc.change(&r)
+		if got := coverageRuleChanged(&base, &r); got != tc.want {
+			t.Errorf("%+v: changed = %v, want %v", r, got, tc.want)
+		}
+	}
+}

@@ -110,4 +110,18 @@ func TestPG_CoverageRules(t *testing.T) {
 		// legacy matches now (resolved), billing matches nothing (opened).
 		t.Errorf("open conditions after the second tree = %d (%v), want 1", open, err)
 	}
+
+	// T901: a changed pattern clears the count and the checked time.
+	var slug string
+	if err := db.QueryRowContext(ctx, `SELECT slug FROM smeldr_coverage_rules WHERE pattern = 'legacy/**'`).Scan(&slug); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := module("CoverageRule").MCPUpdate(seed, slug, map[string]any{"pattern": "legacy/*.go"}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	var checked *string
+	if err := db.QueryRowContext(ctx, `SELECT match_count, checked_at::text FROM smeldr_coverage_rules WHERE slug = $1`, slug).Scan(&count, &checked); err != nil || count != 0 || checked != nil {
+		t.Errorf("after a pattern change: count %d, checked %v (%v); want 0 and not checked", count, checked, err)
+	}
 }
