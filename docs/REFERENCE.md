@@ -4237,6 +4237,7 @@ A Signal is one of two kinds, and its kind decides how it ends. Nothing expires.
 | `ratification-required` | condition | the Decision leaves `proposed` |
 | `authorization-required` | condition | the subject leaves `from_state` (the blocked transition happened or was abandoned) |
 | `conflict-detected` | condition | the `contradicts` edge ends or a side leaves `ratified`; for a taken URL, the item is published or its slug changes |
+| `coverage-matches-nothing` | condition | the coverage rule is changed or archived, or matches again at the next `CheckCoverage` (T886) |
 | `downstream-blocked`, `reference-stale`, `premise-flagged` | condition | registered with their rule; no emitter yet, so none can be created |
 | `review-requested` | request | answered or withdrawn |
 | `question` | request | answered or withdrawn |
@@ -6017,6 +6018,20 @@ Steps 1 to 3 run in one transaction; a dry run runs them in a transaction it rol
 **Rollback.** First choice: restore the database backup taken before the run. By hand, in one transaction: delete the copied rows from the compiled tables (their IDs are in the report), rewrite the type names back (`Domain` to `domain` in `smeldr_relations`, `smeldr_provenance`, `smeldr_events`, the grant patterns and the counter), set the schemas back to `kind = 'content'`, and delete Organization, the default Domain and the `belongs_to_organization` edges. Then run the previous binary.
 
 **What a client sees change** (an MCP client that read the runtime types): `list_content`, `get_content` and `create_content` with `type_name: "domain"` stop working (the type is not loaded); use `list_domains`, `get_domain`, `create_domain`, `update_domain` (and the same for areas and sets). Items have the compiled shape (`ID`, `Slug`, `Status`, `address`, `name`, `description`). Relation ends and `get_relations` use `Domain`, `Area`, `Set`. Event names stay `domain.*`; addresses (`DOM1`) do not change.
+
+### Coverage rules: which Decisions apply to these paths (D142, T886)
+
+An Area covers repository paths through its coverage rules, and one resolution answers which Decisions apply to a list of paths: the pull request check and the MCP tool share it. Core never reads a repository: **the caller supplies the paths.**
+
+**`CoverageRule`** is a governance record type (address `COV<n>`, table `smeldr_coverage_rules`, flow `active`/`archived`, MCP tools `create_coverage_rule`, `list_coverage_rules`, `get_coverage_rule`, `update_coverage_rule`, `archive_coverage_rule`, ...). Fields: `area` (an Area by address, slug or ID, stored as its address; write-once, so moving a rule is archive plus create; the system relates the rule to the Area by `belongs_to_area`, so it is read under the Area's read rules), `kind` (`path`, the only kind so far), `repository` (`owner/name`, stored in lower case), `pattern`, and the read-only `match_count`, `checked_at`. A pattern: `*` any run within one segment, `?` one character, `**` any number of segments (`internal/billing/**`, `cmd/*/main.go`, `**/*_test.go`); without wildcards it covers one file. Refused: empty, a leading `/`, `..` or empty segments, a backslash, `**` inside a segment, more than 512 characters. Only Areas have rules; one Area may cover paths in several repositories. No line rules (D142).
+
+**`Area.approval_mode`**: `comment-only` (default) or `requires-approval`, what a change touching the Area needs. Stored for the pull request check, which reads it.
+
+**`App.DecisionsForPaths(ctx, DecisionsForPathsQuery{Repository, Paths, ExcludeOrganization})`** returns the covered Areas (address, name, Domain, `approval_mode`, the paths and rules that put each there), the Decisions in force (standing `holds`: ratified or pending re-evaluation) placed in those Areas, in their Domains and, unless excluded, on the Organization (`place` is `area`, `domain` or `organization`, with `place_address` and the covered Areas it applies through), and the `uncovered` paths. Under the caller's read rules: an Area, rule or Decision the caller may not read is left out, and a path only a hidden Area covers reads as uncovered. At most 3,000 paths per call (GitHub's cap on a pull request's file list); more is `ErrBadRequest`, and the results of calls over parts of a longer list add up. Cost: one query for the repository's rules, compiled once (literal patterns by map lookup, `dir/**` by prefix, the rest segment by segment without regexp), one query each for the Domains, the Decisions and their standing. `BenchmarkDecisionsForPaths` (3,000 paths, 300 rules, SQLite): about 40 ms.
+
+**`App.CheckCoverage(ctx, CheckCoverageQuery{Repository, Paths})`** takes the repository's full file list (at most 100,000 paths, where GitHub's tree API truncates) and, for every active rule of the repository, stores `match_count` and `checked_at`, opens `coverage-matches-nothing` for a rule that matches nothing (one per rule) and resolves it for a rule that matches again. Updating or archiving a rule resolves its condition too. The condition is addressed to the operation `approve-change`; routing by operation is not scoped to the Area yet, so every holder of `approve-change` sees it (a known limit).
+
+MCP: `decisions_for_paths` (Author, capability `item decisions_for_paths`, filtered by the read rules) and `check_coverage` (Editor, capability `item check_coverage`, operation `manage`). CLI: `smeldr-cli decisions-for-paths --repo owner/name [--stdin] [--no-organization]` and `smeldr-cli coverage check --repo owner/name --stdin`.
 
 ### References between records (D113, A521)
 

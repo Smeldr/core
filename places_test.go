@@ -13,7 +13,7 @@ import (
 )
 
 // placesApp is an instance with core governance, relations and provenance.
-func placesApp(t *testing.T) (*App, *sql.DB, *RelationStore) {
+func placesApp(t testing.TB) (*App, *sql.DB, *RelationStore) {
 	t.Helper()
 	db := newSQLiteDB(t)
 	for _, f := range []func(DB) error{CreateGovernanceTables, CreateRelationTables, CreateProvenanceTable} {

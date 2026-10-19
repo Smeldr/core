@@ -54,8 +54,8 @@ func wantValidation(t *testing.T, err error, field string) {
 
 func TestSignalTypes_Catalog(t *testing.T) {
 	types := SignalTypes()
-	if len(types) != 8 {
-		t.Fatalf("catalog has %d types, want 8", len(types))
+	if len(types) != 9 {
+		t.Fatalf("catalog has %d types, want 9", len(types))
 	}
 	kinds := map[SignalKind]int{}
 	for _, info := range types {
@@ -67,8 +67,8 @@ func TestSignalTypes_Catalog(t *testing.T) {
 			t.Errorf("SignalTypeOf(%s) = %+v, %v", info.Type, got, ok)
 		}
 	}
-	if kinds[SignalCondition] != 6 || kinds[SignalRequest] != 2 {
-		t.Errorf("kinds = %v, want 6 conditions and 2 requests", kinds)
+	if kinds[SignalCondition] != 7 || kinds[SignalRequest] != 2 {
+		t.Errorf("kinds = %v, want 7 conditions and 2 requests", kinds)
 	}
 	types[0].Type = "changed"
 	if SignalTypes()[0].Type == "changed" {

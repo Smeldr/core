@@ -149,6 +149,10 @@ Opt-in: an app that never calls `App.Governance(store)` sees no governance behav
   (one Area, approve-change only); agent and job tokens never ratify and hold
   approve-change only on a human-delegated Area grant; `App.GrantFounder`; boot migration
   from `decision-steward`/`decision-domain-admin` (v1.94.0)
+- Coverage rules (D142, T886): `CoverageRule` (an Area's repository path patterns),
+  `Area.approval_mode`, `App.DecisionsForPaths` (which Decisions apply to these paths),
+  `App.CheckCoverage` and the `coverage-matches-nothing` condition; MCP
+  `decisions_for_paths`, `check_coverage`; CLI `decisions-for-paths`, `coverage check`
 - `lookup_token_names` MCP tool (v1.43.0) + `TokenStore.NamesForUserIDs(ctx, userIDs)`
   (v1.104.0) — batch-resolve actor IDs seen in `last_actor`/`RoleGrant.Grantor`/relation
   `created_by` back to their human-readable token names

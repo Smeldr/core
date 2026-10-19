@@ -131,3 +131,13 @@ func (s Set) MarshalJSON() ([]byte, error) {
 		omitPublishFields
 	}{plain: plain(s)})
 }
+
+// MarshalJSON encodes the CoverageRule without PublishedAt and ScheduledAt,
+// which its flow can never set (D114, T886).
+func (r CoverageRule) MarshalJSON() ([]byte, error) {
+	type plain CoverageRule
+	return json.Marshal(struct {
+		plain
+		omitPublishFields
+	}{plain: plain(r)})
+}

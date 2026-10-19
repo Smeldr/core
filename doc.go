@@ -152,6 +152,10 @@
 //     (one Area, approve-change only). An agent or job token never ratifies,
 //     and holds approve-change only on an Area grant from a human.
 //     [App.GrantFounder] gives the organization's founder admin and approver.
+//   - Coverage (D142): an Area's [CoverageRule] records name repository path
+//     patterns; [App.DecisionsForPaths] answers which Decisions in force
+//     apply to a list of paths, and [App.CheckCoverage] keeps the rules true
+//     against a repository's file list.
 //   - Custom state flows ([StateFlow], [State], [Transition],
 //     [TransitionTrigger]) — a data-driven state machine registered per
 //     content type via [App.RegisterFlow], for lifecycles beyond the built-in

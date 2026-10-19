@@ -99,6 +99,10 @@ var capabilityTable = []Capability{
 	{ResourceItem, VerbTransition, "manage", ReasonPerFlow, false},
 	{ResourceItem, "compose", "manage", ReasonNotTaken, true},
 	{ResourceItem, "search", "read", ReasonNotTaken, true},
+	// Coverage (T886): the resolution filters by the read rules; the check
+	// writes counts and opens conditions for every rule of a repository.
+	{ResourceItem, "decisions_for_paths", "read", ReasonNotTaken, true},
+	{ResourceItem, "check_coverage", "manage", ReasonNotTaken, true},
 
 	{ResourceType, VerbGet, "read", ReasonNotTaken, false},
 	{ResourceType, VerbList, "read", ReasonNotTaken, false},
@@ -218,11 +222,12 @@ var legacyOperationFloor = map[string]Role{
 // surface filters per item. Every other type-less read needs a scope that
 // reads everything ([ReadScope.All]): the read rules fail toward less access.
 var typelessReadsAny = map[capabilityKey]bool{
-	{ResourceSignal, VerbList}:       true, // list_signals filters Signals by their subject
-	{ResourceItem, "search"}:         true, // App.Search filters every hit by the read rules
-	{ResourceRelation, VerbList}:     true, // ListRelations keeps edges with both ends readable
-	{ResourceSubscription, VerbGet}:  true, // the owner rule is inside the act
-	{ResourceSubscription, VerbList}: true, // the list is the owner's own
+	{ResourceSignal, VerbList}:            true, // list_signals filters Signals by their subject
+	{ResourceItem, "search"}:              true, // App.Search filters every hit by the read rules
+	{ResourceItem, "decisions_for_paths"}: true, // App.DecisionsForPaths filters by the read rules
+	{ResourceRelation, VerbList}:          true, // ListRelations keeps edges with both ends readable
+	{ResourceSubscription, VerbGet}:       true, // the owner rule is inside the act
+	{ResourceSubscription, VerbList}:      true, // the list is the owner's own
 }
 
 // typedReads lists the read capabilities called with an item type (and often

@@ -789,7 +789,7 @@ func CreateOrchestrationTables(db DB) error {
 // with their address storage (S, D, A, ORG, DOM, ARE, SET). Call once at startup before
 // [RegisterGovernanceTypes].
 func CreateGovernanceTables(db DB) error {
-	return createRecordTables(db, governanceAddressTypes, append([]string{
+	if err := createRecordTables(db, governanceAddressTypes, append(append([]string{
 		`CREATE TABLE IF NOT EXISTS smeldr_signals (
 			id          TEXT PRIMARY KEY,
 			slug        TEXT NOT NULL UNIQUE,
@@ -857,7 +857,11 @@ func CreateGovernanceTables(db DB) error {
 			task_ref         TEXT NOT NULL DEFAULT '',
 			last_actor       TEXT NOT NULL DEFAULT ''
 		)`,
-	}, placeTableStmts...))
+	}, placeTableStmts...), coverageRuleTableStmts...)); err != nil {
+		return err
+	}
+	// The Area's approval mode (T886), on a database made before it.
+	return EnsureColumn(context.Background(), db, "smeldr_areas", "approval_mode", "TEXT NOT NULL DEFAULT 'comment-only'")
 }
 
 // CreateOrchestrationAddOnTables creates the tables of the Orchestration
@@ -1147,8 +1151,9 @@ func RegisterGovernanceTypes(app *App, db DB) {
 		At("/amendments"), Repo(NewSQLRepo[*Amendment](db, Table("smeldr_amendments"))), MCP(MCPRead, MCPWrite), withAddress(),
 		app.referenceSaveHooks(amendmentReferences(), &amends),
 	))
-	// D142: Organization, Domain, Area and Set.
+	// D142: Organization, Domain, Area and Set, and the Areas' coverage rules.
 	registerPlaceTypes(app, db)
+	registerCoverageRule(app, db)
 }
 
 // RegisterOrchestrationAddOn registers the record types of the Orchestration

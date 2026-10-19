@@ -41,6 +41,7 @@ var signalTypeTable = []SignalTypeInfo{
 	{"downstream-blocked", SignalCondition, "resolved when the blocking item is done; no emitter yet"},
 	{"reference-stale", SignalCondition, "resolved when the reference is refreshed or removed; no emitter yet"},
 	{"premise-flagged", SignalCondition, "resolved when the premise is re-confirmed or the dependent item changes; no emitter yet"},
+	{"coverage-matches-nothing", SignalCondition, "resolved when the coverage rule is changed, archived or matches again (CheckCoverage)"},
 	{"review-requested", SignalRequest, "answered by the review, or withdrawn by the asker"},
 	{"question", SignalRequest, "answered by the answer, or withdrawn by the asker"},
 }

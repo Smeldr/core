@@ -31,6 +31,7 @@ func publishFieldSamples() map[string]any {
 		"Domain":        &Domain{Node: n},
 		"Area":          &Area{Node: n},
 		"Set":           &Set{Node: n},
+		"CoverageRule":  &CoverageRule{Node: n},
 	}
 }
 

@@ -155,7 +155,7 @@ func TestPacketAndGoalContext_ResolveAddress(t *testing.T) {
 }
 
 // findModule returns the App's registered Module[T].
-func findModule[T any](t *testing.T, app *App) *Module[T] {
+func findModule[T any](t testing.TB, app *App) *Module[T] {
 	t.Helper()
 	for _, mm := range app.mcpModules {
 		if m, ok := mm.(*Module[T]); ok {

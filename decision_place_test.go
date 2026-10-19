@@ -29,7 +29,7 @@ func stewardContext(t *testing.T, db *sql.DB, rs *RoleStore) context.Context {
 }
 
 // placeEdge inserts a place edge from the Decision id.
-func placeEdge(t *testing.T, db DB, id, targetType, targetID, kind, class string, invalidAt any) {
+func placeEdge(t testing.TB, db DB, id, targetType, targetID, kind, class string, invalidAt any) {
 	t.Helper()
 	if err := CreateRelationTables(db); err != nil {
 		t.Fatal(err)

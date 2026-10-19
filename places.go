@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -47,7 +48,8 @@ type Domain struct {
 }
 
 // Area is a part of one Domain (D72): it belongs to its Domain by
-// belongs_to_domain, and records are placed in it by belongs_to_area.
+// belongs_to_domain, and records are placed in it by belongs_to_area. Its
+// coverage rules say which repository paths it covers ([CoverageRule]).
 type Area struct {
 	Node
 	// RecordAddress is the Area's address (D110, prefix ARE).
@@ -56,6 +58,10 @@ type Area struct {
 	Name string `json:"name" db:"name" smeldr:"required" smeldr_search:"text"`
 	// Description is free text in Markdown.
 	Description string `json:"description" db:"description" smeldr_format:"markdown" smeldr_search:"text"`
+	// ApprovalMode is what a change touching the Area needs (D142 point 8):
+	// [ApprovalModeCommentOnly] (the default) or [ApprovalModeRequiresApproval].
+	// Stored for the pull request check, which reads it.
+	ApprovalMode string `json:"approval_mode" db:"approval_mode" smeldr_enum:"comment-only|requires-approval" smeldr_description:"What a change touching the Area needs: comment-only (default) or requires-approval."`
 }
 
 // Set groups records by in_set. It carries no authority (D71): a Set is never
@@ -82,15 +88,15 @@ var legacyPlaceTypes = map[string]string{"Domain": "domain", "Area": "area", "Se
 // constant keeps smeldr_organizations to one row: an instance can never hold a second
 // Organization.
 var placeTableStmts = []string{
-	placeTableStmt("smeldr_organizations"),
+	placeTableStmt("smeldr_organizations", ""),
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_smeldr_organizations_one ON smeldr_organizations ((1))`,
-	placeTableStmt("smeldr_domains"),
-	placeTableStmt("smeldr_areas"),
-	placeTableStmt("smeldr_sets"),
+	placeTableStmt("smeldr_domains", ""),
+	placeTableStmt("smeldr_areas", "approval_mode TEXT NOT NULL DEFAULT 'comment-only',"),
+	placeTableStmt("smeldr_sets", ""),
 }
 
 // placeTableStmt is the table of a place type.
-func placeTableStmt(table string) string {
+func placeTableStmt(table, extra string) string {
 	return `CREATE TABLE IF NOT EXISTS ` + table + ` (
 		id           TEXT PRIMARY KEY,
 		slug         TEXT NOT NULL UNIQUE,
@@ -102,6 +108,7 @@ func placeTableStmt(table string) string {
 		rev          INTEGER NOT NULL DEFAULT 0,
 		name         TEXT NOT NULL DEFAULT '',
 		description  TEXT NOT NULL DEFAULT '',
+		` + extra + `
 		last_actor   TEXT NOT NULL DEFAULT ''
 	)`
 }
@@ -145,6 +152,7 @@ func registerPlaceTypes(app *App, db DB) {
 	))
 	app.Content(NewModule[*Area]((*Area)(nil),
 		At("/areas"), Repo(NewSQLRepo[*Area](db, Table("smeldr_areas"))), MCP(MCPRead, MCPWrite), withAddress(),
+		saveHooksOption{prepare: func(_ Context, _, item any) error { return normalizeApprovalMode(item.(*Area)) }},
 	))
 	app.Content(NewModule[*Set]((*Set)(nil),
 		At("/sets"), Repo(NewSQLRepo[*Set](db, Table("smeldr_sets"))), MCP(MCPRead, MCPWrite), withAddress(),
@@ -291,4 +299,18 @@ func recordLabel(ctx context.Context, db DB, table, id string) string {
 		return id
 	}
 	return address
+}
+
+// normalizeApprovalMode defaults an Area's approval mode to comment-only and
+// refuses any value but the two modes (T886).
+func normalizeApprovalMode(a *Area) error {
+	a.ApprovalMode = strings.TrimSpace(a.ApprovalMode)
+	switch a.ApprovalMode {
+	case "":
+		a.ApprovalMode = ApprovalModeCommentOnly
+	case ApprovalModeCommentOnly, ApprovalModeRequiresApproval:
+	default:
+		return Err("approval_mode", fmt.Sprintf("must be %q or %q", ApprovalModeCommentOnly, ApprovalModeRequiresApproval))
+	}
+	return nil
 }

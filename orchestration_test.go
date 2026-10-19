@@ -559,8 +559,8 @@ func TestRegisterOrchestrationTypes_flows(t *testing.T) {
 	if err := row.Scan(&n); err != nil {
 		t.Fatalf("count state flows: %v", err)
 	}
-	if n != 9 {
-		t.Errorf("registered flow count = %d, want 9 (Run must not add one)", n)
+	if n != 10 {
+		t.Errorf("registered flow count = %d, want 10 (Run must not add one)", n)
 	}
 
 	// Load-bearing assertion, not just an unchanged count: a type
