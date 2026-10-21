@@ -103,9 +103,12 @@ func coverageRuleFlow() StateFlow {
 		Name:     "coverage-rule",
 		TypeName: "CoverageRule",
 		States:   []State{{Name: "active", IsInitial: true}, {Name: "archived"}},
+		// D146 (T910): archiving a rule, or bringing it back, changes its
+		// Area's gate: ratify over the rule (its Area's domain-approver or an
+		// approver, through the place walk). Not strict, as the place flows.
 		Transitions: []Transition{
-			{From: "active", To: "archived"},
-			{From: "archived", To: "active"},
+			{From: "active", To: "archived", RequiredOperation: OperationRatify},
+			{From: "archived", To: "active", RequiredOperation: OperationRatify},
 		},
 	}
 }
@@ -137,12 +140,32 @@ func registerCoverageRule(app *App, db DB) {
 		if err := normalizeCoverageRule(r); err != nil {
 			return err
 		}
-		// A changed rule goes back to not checked (T901): its count and time
-		// were for the old pattern. Same write as the change.
-		if old, ok := existing.(*CoverageRule); ok && coverageRuleChanged(old, r) {
+		old, isUpdate := existing.(*CoverageRule)
+		if isUpdate && coverageRuleChanged(old, r) {
+			// D146 (T910): changing what a rule covers loosens or moves its
+			// Area's gate: ratify over the rule's Area.
+			if err := requireOperationOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "CoverageRule", ID: old.ID},
+				fmt.Sprintf("changing %s's pattern, repository or kind", ruleLabel(old)), old.Area, "D146"); err != nil {
+				return err
+			}
+			// A changed rule goes back to not checked (T901): its count and
+			// time were for the old pattern. Same write as the change.
 			r.MatchCount, r.CheckedAt = 0, nil
 		}
-		return prepareRefs(ctx, existing, item)
+		if err := prepareRefs(ctx, existing, item); err != nil {
+			return err
+		}
+		if isUpdate {
+			return nil
+		}
+		// D146: a new rule needs approve-change over its Area (an area-approver
+		// on it, its domain-approver, an approver).
+		var areaID string
+		if err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_areas WHERE address = $1 OR id = $1`, r.Area).Scan(&areaID); err != nil {
+			return fmt.Errorf("%w: the Area %s of the new rule cannot be read: %s", ErrInternal, r.Area, err)
+		}
+		return requireOperationOver(ctx, app.governance, OperationApproveChange, AuthTarget{TypeName: "Area", ID: areaID},
+			"adding a coverage rule to "+r.Area, r.Area, "D146")
 	}
 	afterRefs := refs.after
 	refs.after = func(ctx Context, db DB, rs *RelationStore, existing, item any) {
@@ -159,6 +182,10 @@ func registerCoverageRule(app *App, db DB) {
 	app.Content(NewModule[*CoverageRule]((*CoverageRule)(nil),
 		At("/coverage-rules"), Repo(NewSQLRepo[*CoverageRule](db, Table("smeldr_coverage_rules"))), MCP(MCPRead, MCPWrite), withAddress(),
 		refs,
+		On[*CoverageRule](BeforeDelete, func(ctx Context, r *CoverageRule) error {
+			return requireOperationOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "CoverageRule", ID: r.ID},
+				"deleting "+ruleLabel(r), r.Area, "D146")
+		}),
 	))
 }
 
@@ -849,4 +876,12 @@ func (a *App) resolveCoverageCondition(ctx context.Context, id, resolution strin
 		}
 	}
 	resolver.resolve(ctx, sigs, resolution)
+}
+
+// ruleLabel is a rule's address, or its ID before it has one.
+func ruleLabel(r *CoverageRule) string {
+	if r.Address != "" {
+		return r.Address
+	}
+	return r.ID
 }

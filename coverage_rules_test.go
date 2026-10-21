@@ -96,6 +96,14 @@ func newCoverageFixture(t testing.TB) coverageFixture {
 	if err := RegisterScopedReaderRole(ctx, rs); err != nil {
 		t.Fatal(err)
 	}
+	// The seed author is an approver: rules are added and changed under
+	// approve-change and ratify over their Area (D146).
+	if err := RegisterApproverRole(ctx, rs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rs.Grant(ctx, RoleGrant{TokenID: "u-author", RoleName: RoleApprover}); err != nil {
+		t.Fatal(err)
+	}
 	_ = app.Handler()
 	org, err := app.EnsureOrganization(ctx, "Acme")
 	if err != nil {

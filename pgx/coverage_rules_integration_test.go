@@ -4,6 +4,7 @@ package pgx
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	smeldr "smeldr.dev/core"
@@ -56,6 +57,13 @@ func TestPG_CoverageRules(t *testing.T) {
 		RelationKind: "belongs_to_domain", EdgeClass: "asserted", Attributes: []byte("{}")}); err != nil {
 		t.Fatal(err)
 	}
+	// The seed actor adds rules as an approver (D146: approve-change over the Area).
+	if err := smeldr.RegisterApproverRole(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Grant(ctx, smeldr.RoleGrant{TokenID: "seed", RoleName: smeldr.RoleApprover}); err != nil {
+		t.Fatal(err)
+	}
 	for _, pattern := range []string{"internal/billing/**", "legacy/**"} {
 		if _, err := module("CoverageRule").MCPCreate(seed, map[string]any{"area": area.Address, "repository": "Acme/App", "pattern": pattern}); err != nil {
 			t.Fatalf("rule %s: %v", pattern, err)
@@ -69,9 +77,6 @@ func TestPG_CoverageRules(t *testing.T) {
 	}
 	if err := rels.Assert(ctx, smeldr.RelationEdge{SourceType: "Decision", SourceID: "d1", TargetType: "Area", TargetID: area.ID,
 		RelationKind: "belongs_to_area", EdgeClass: "asserted", Attributes: []byte("{}")}); err != nil {
-		t.Fatal(err)
-	}
-	if err := smeldr.RegisterApproverRole(ctx, store); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Grant(ctx, smeldr.RoleGrant{TokenID: "approver-1", RoleName: smeldr.RoleApprover}); err != nil {
@@ -123,5 +128,35 @@ func TestPG_CoverageRules(t *testing.T) {
 	var checked *string
 	if err := db.QueryRowContext(ctx, `SELECT match_count, checked_at::text FROM smeldr_coverage_rules WHERE slug = $1`, slug).Scan(&count, &checked); err != nil || count != 0 || checked != nil {
 		t.Errorf("after a pattern change: count %d, checked %v (%v); want 0 and not checked", count, checked, err)
+	}
+
+	// T910 (D146): an agent area-approver adds a rule to its Area and may not
+	// archive it; a domain-approver changes the Area's approval mode.
+	if err := smeldr.RegisterAreaApproverRole(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	if err := smeldr.RegisterDomainApproverRole(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Grant(ctx, smeldr.RoleGrant{TokenID: "agent-x", RoleName: smeldr.RoleAreaApprover, ScopeAnchorID: area.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Grant(ctx, smeldr.RoleGrant{TokenID: "dapp", RoleName: smeldr.RoleDomainApprover, ScopeAnchorID: domainID}); err != nil {
+		t.Fatal(err)
+	}
+	agent := smeldr.TrustedRead(smeldr.NewTestContext(smeldr.User{ID: "agent-x", Roles: []smeldr.Role{smeldr.Editor, smeldr.Agent}})).(smeldr.Context)
+	added, err := module("CoverageRule").MCPCreate(agent, map[string]any{"area": area.Address, "repository": "acme/app", "pattern": "agent/**"})
+	if err != nil {
+		t.Fatalf("agent area-approver adds a rule: %v", err)
+	}
+	if _, err := app.TransitionItem(agent, "CoverageRule", added.(*smeldr.CoverageRule).Slug, "archived"); !errors.Is(err, smeldr.ErrForbidden) {
+		t.Errorf("agent archives a rule: %v, want forbidden", err)
+	}
+	dapp := smeldr.TrustedRead(smeldr.NewTestContext(smeldr.User{ID: "dapp", Roles: []smeldr.Role{smeldr.Editor, smeldr.Human}})).(smeldr.Context)
+	if _, err := module("Area").MCPUpdate(dapp, area.Slug, map[string]any{"approval_mode": smeldr.ApprovalModeRequiresApproval}); err != nil {
+		t.Errorf("domain-approver sets requires-approval: %v", err)
+	}
+	if _, err := module("Area").MCPUpdate(agent, area.Slug, map[string]any{"approval_mode": smeldr.ApprovalModeCommentOnly}); !errors.Is(err, smeldr.ErrForbidden) {
+		t.Errorf("agent loosens the mode: %v, want forbidden", err)
 	}
 }

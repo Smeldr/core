@@ -124,6 +124,14 @@ func placeFlow(typeName string) StateFlow {
 			States:   []State{{Name: "active", IsInitial: true}},
 		}
 	}
+	// D146 (T910): archiving an Area, or bringing it back, changes its
+	// approval gate, so it needs ratify over the Area (its Domain's
+	// domain-approver or an approver, through the place walk). Not strict:
+	// without governance, or for a system transition, it is skipped.
+	var op string
+	if typeName == "Area" {
+		op = OperationRatify
+	}
 	return StateFlow{
 		Name:     "place-" + camelToSnake(typeName),
 		TypeName: typeName,
@@ -132,8 +140,8 @@ func placeFlow(typeName string) StateFlow {
 			{Name: "archived"},
 		},
 		Transitions: []Transition{
-			{From: "active", To: "archived"},
-			{From: "archived", To: "active"},
+			{From: "active", To: "archived", RequiredOperation: op},
+			{From: "archived", To: "active", RequiredOperation: op},
 		},
 	}
 }
@@ -152,7 +160,11 @@ func registerPlaceTypes(app *App, db DB) {
 	))
 	app.Content(NewModule[*Area]((*Area)(nil),
 		At("/areas"), Repo(NewSQLRepo[*Area](db, Table("smeldr_areas"))), MCP(MCPRead, MCPWrite), withAddress(),
-		saveHooksOption{prepare: func(_ Context, _, item any) error { return normalizeApprovalMode(item.(*Area)) }},
+		saveHooksOption{prepare: func(ctx Context, existing, item any) error { return app.prepareArea(ctx, existing, item.(*Area)) }},
+		On[*Area](BeforeDelete, func(ctx Context, a *Area) error {
+			return requireOperationOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "Area", ID: a.ID},
+				"deleting "+areaLabel(a), areaLabel(a), "D146")
+		}),
 	))
 	app.Content(NewModule[*Set]((*Set)(nil),
 		At("/sets"), Repo(NewSQLRepo[*Set](db, Table("smeldr_sets"))), MCP(MCPRead, MCPWrite), withAddress(),
@@ -343,19 +355,33 @@ func (s *RelationStore) requirePlaceAuthority(ctx context.Context, edge Relation
 	case edge.SourceType == "Area":
 		act = fmt.Sprintf("moving %s into %s", source, place)
 	}
+	return requireOperationOver(ctx, rs, OperationRatify, AuthTarget{TypeName: edge.TargetType, ID: edge.TargetID}, act, place, "D145")
+}
+
+// requireOperationOver is the check D145 and D146 share: the actor in ctx
+// must hold op over target, the anchor of a dynamic grant counting (a
+// domain-approver holds it over its own Domain). act names what is being
+// done and over the place, for the refusal; decision names the Decision that
+// requires it. No governance (rs nil) skips the check; no actor is refused;
+// an agent or job token is refused for ratify whatever its grants (T884),
+// not for approve-change, which an agent may hold on an Area grant.
+func requireOperationOver(ctx context.Context, rs *RoleStore, op string, target AuthTarget, act, over, decision string) error {
+	if rs == nil {
+		return nil
+	}
 	actor, kind := actorFromContext(ctx)
 	switch {
 	case actor == "":
-		return fmt.Errorf("%w: %s needs ratify over %s, and no actor is known", ErrForbidden, act, place)
-	case automatedClass(kind):
-		return fmt.Errorf("%w: an %s token never ratifies, so it cannot do this: %s needs ratify over %s (D145)", ErrForbidden, kind, act, place)
+		return fmt.Errorf("%w: %s needs %s over %s, and no actor is known", ErrForbidden, act, op, over)
+	case op == OperationRatify && automatedClass(kind):
+		return fmt.Errorf("%w: an %s token never ratifies, so it cannot do this: %s needs ratify over %s (%s)", ErrForbidden, kind, act, over, decision)
 	}
-	ok, err := rs.authorizedOver(ctx, actor, OperationRatify, AuthTarget{TypeName: edge.TargetType, ID: edge.TargetID}, true)
+	ok, err := rs.authorizedOver(ctx, actor, op, target, true)
 	if err != nil {
-		return fmt.Errorf("%w: the authority over %s's place cannot be read: %s", ErrInternal, source, err)
+		return fmt.Errorf("%w: the authority over %s cannot be read: %s", ErrInternal, over, err)
 	}
 	if !ok {
-		return fmt.Errorf("%w: %s needs ratify over %s (D145)", ErrForbidden, act, place)
+		return fmt.Errorf("%w: %s needs %s over %s (%s)", ErrForbidden, act, op, over, decision)
 	}
 	return nil
 }
@@ -428,4 +454,34 @@ func (s *RelationStore) withdrawPlaceAuthority(ctx context.Context, id string) e
 		return nil
 	}
 	return s.requirePlaceAuthority(ctx, e, true)
+}
+
+// areaLabel is an Area's address, or its ID before it has one.
+func areaLabel(a *Area) string {
+	if a.Address != "" {
+		return a.Address
+	}
+	return a.ID
+}
+
+// prepareArea normalizes an Area's approval mode and, on an update that
+// changes it (either way), requires ratify over the Area (D146, T910): the
+// mode is the Area's approval gate.
+func (app *App) prepareArea(ctx Context, existing any, a *Area) error {
+	if err := normalizeApprovalMode(a); err != nil {
+		return err
+	}
+	old, ok := existing.(*Area)
+	if !ok {
+		return nil
+	}
+	before := old.ApprovalMode
+	if before == "" {
+		before = ApprovalModeCommentOnly
+	}
+	if before == a.ApprovalMode {
+		return nil
+	}
+	return requireOperationOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "Area", ID: old.ID},
+		fmt.Sprintf("changing %s's approval mode", areaLabel(old)), areaLabel(old), "D146")
 }
