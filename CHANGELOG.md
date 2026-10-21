@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.168.1] - 2026-10-21
+
 ### Fixed
 
 - **A changed coverage rule goes back to not checked (T901, A553).** An update that changes a `CoverageRule`'s pattern, repository or kind now clears `match_count` and `checked_at` in the same write, so the rule no longer shows the old pattern's count until the next `CheckCoverage`. A repository differing only in case is no change.
