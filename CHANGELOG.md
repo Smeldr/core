@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.169.0] - 2026-10-21
+
 ### Changed
 
 - **Changing an Area's approval gate needs ratify over the Area (D146, T910, A562).** Changing an Area's `approval_mode`, archiving, reactivating or deleting the Area, and changing a coverage rule's pattern, repository or kind, archiving, reactivating or deleting the rule now need `ratify` over the Area (an `approver`, or the Area's `domain-approver`); adding a coverage rule needs `approve-change` over its Area (an `area-approver` on it qualifies, an agent one too). Agent and job tokens are refused for ratify. Refusals are `ErrForbidden` naming the act and the Area.
