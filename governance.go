@@ -1599,6 +1599,14 @@ func (s *RoleStore) grantedOperations(ctx context.Context, tokenID string) (map[
 // grants continue to be evaluated, and the error is surfaced only if no other
 // grant authorizes the request.
 func (s *RoleStore) Authorized(ctx context.Context, tokenID, op string, target AuthTarget) (bool, error) {
+	return s.authorizedOver(ctx, tokenID, op, target, op == "read")
+}
+
+// authorizedOver is [RoleStore.Authorized] with the choice of whether a
+// dynamic grant's anchor itself counts: for read it does (a domain-reader
+// reads its Domain), and for ratify over a place it does too (a
+// domain-approver may place a Decision in its own Domain, D145).
+func (s *RoleStore) authorizedOver(ctx context.Context, tokenID, op string, target AuthTarget, includeAnchor bool) (bool, error) {
 	rows, err := s.db.QueryContext(ctx, tokenGrantsQuery, tokenID, time.Now().UTC())
 	if err != nil {
 		return false, fmt.Errorf("smeldr: Authorized: query grants: %w", err)
@@ -1659,7 +1667,7 @@ func (s *RoleStore) Authorized(ctx context.Context, tokenID, op string, target A
 			if !g.anchorID.Valid || g.anchorID.String == "" || target.ID == "" {
 				continue // can't resolve without both ends
 			}
-			matched, err := s.relationExists(ctx, g.relKind.String, g.relDir.String, target.ID, g.anchorID.String, op == "read")
+			matched, err := s.relationExists(ctx, g.relKind.String, g.relDir.String, target.ID, g.anchorID.String, includeAnchor)
 			if err != nil {
 				pendingErr = err
 				continue // don't abort — check remaining grants

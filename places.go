@@ -314,3 +314,118 @@ func normalizeApprovalMode(a *Area) error {
 	}
 	return nil
 }
+
+// requirePlaceAuthority is D145's check on a place edge (T906): a Decision
+// that is no longer proposed, and an Area that already had a Domain, are
+// placed and moved only by someone who holds ratify over the place, because
+// the place decides who holds authority over them (D83, D142). leaving is
+// true when the edge is withdrawn (the old place), false when it is asserted
+// (the new place); a move is both. Any other edge passes, and so does every
+// edge on a database without governance (nobody could ratify there).
+func (s *RelationStore) requirePlaceAuthority(ctx context.Context, edge RelationEdge, leaving bool) error {
+	if placeKindTargets[edge.RelationKind] == "" {
+		return nil
+	}
+	rs, _ := governanceFor(s.db)
+	if rs == nil {
+		return nil
+	}
+	gated, sourceTable, err := s.placeGated(ctx, edge, leaving)
+	if err != nil || !gated {
+		return err
+	}
+	source := recordLabel(ctx, s.db, sourceTable, edge.SourceID)
+	place := recordLabel(ctx, s.db, placeTables[edge.TargetType], edge.TargetID)
+	act := fmt.Sprintf("placing %s in %s", source, place)
+	switch {
+	case leaving:
+		act = fmt.Sprintf("moving %s out of %s", source, place)
+	case edge.SourceType == "Area":
+		act = fmt.Sprintf("moving %s into %s", source, place)
+	}
+	actor, kind := actorFromContext(ctx)
+	switch {
+	case actor == "":
+		return fmt.Errorf("%w: %s needs ratify over %s, and no actor is known", ErrForbidden, act, place)
+	case automatedClass(kind):
+		return fmt.Errorf("%w: an %s token never ratifies, so it cannot do this: %s needs ratify over %s (D145)", ErrForbidden, kind, act, place)
+	}
+	ok, err := rs.authorizedOver(ctx, actor, OperationRatify, AuthTarget{TypeName: edge.TargetType, ID: edge.TargetID}, true)
+	if err != nil {
+		return fmt.Errorf("%w: the authority over %s's place cannot be read: %s", ErrInternal, source, err)
+	}
+	if !ok {
+		return fmt.Errorf("%w: %s needs ratify over %s (D145)", ErrForbidden, act, place)
+	}
+	return nil
+}
+
+// placeGated reports whether D145 gates a place edge: from a Decision that is
+// not proposed (a Decision or Area not found by ID is [ErrNotFound], so a
+// source named by address or slug cannot skip the check), or, for belongs_to_domain from an Area, a withdrawal or the
+// assertion of a Domain after the Area had one before (a move, not its first
+// Domain). It also returns the source's table, for the message.
+func (s *RelationStore) placeGated(ctx context.Context, edge RelationEdge, leaving bool) (bool, string, error) {
+	switch edge.SourceType {
+	case "Decision":
+		var status string
+		err := s.db.QueryRowContext(ctx, `SELECT status FROM smeldr_decisions WHERE id = $1`, edge.SourceID).Scan(&status)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			// Fail closed: the Go API takes the source as given, so an
+			// address or slug here would otherwise skip the check.
+			return false, "", fmt.Errorf("%w: no Decision with ID %q; a place edge names its Decision by ID", ErrNotFound, edge.SourceID)
+		case err != nil:
+			return false, "", fmt.Errorf("%w: the state of Decision %s cannot be read: %s", ErrInternal, edge.SourceID, err)
+		}
+		return status != "proposed", "smeldr_decisions", nil
+	case "Area":
+		if edge.RelationKind != "belongs_to_domain" {
+			return false, "", nil
+		}
+		var n int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_areas WHERE id = $1`, edge.SourceID).Scan(&n); err != nil {
+			return false, "", fmt.Errorf("%w: Area %s cannot be read: %s", ErrInternal, edge.SourceID, err)
+		}
+		if n == 0 {
+			return false, "", fmt.Errorf("%w: no Area with ID %q; a place edge names its Area by ID", ErrNotFound, edge.SourceID)
+		}
+		if leaving {
+			return true, "smeldr_areas", nil
+		}
+		// A move: the Area belonged to a Domain before, and not to this one
+		// now (asserting the same live edge again moves nothing).
+		var had, same int
+		err := s.db.QueryRowContext(ctx,
+			`SELECT COUNT(*), COALESCE(SUM(CASE WHEN target_id = $2 AND (invalid_at IS NULL OR invalid_at > $3) THEN 1 ELSE 0 END), 0)
+			   FROM smeldr_relations
+			  WHERE source_id = $1 AND relation_kind = 'belongs_to_domain' AND edge_class = 'asserted'`,
+			edge.SourceID, edge.TargetID, time.Now().UTC()).Scan(&had, &same)
+		if err != nil {
+			return false, "", fmt.Errorf("%w: the Domains of Area %s cannot be read: %s", ErrInternal, edge.SourceID, err)
+		}
+		return had > 0 && same == 0, "smeldr_areas", nil
+	}
+	return false, "", nil
+}
+
+// withdrawPlaceAuthority applies [RelationStore.requirePlaceAuthority] to the
+// live asserted place edge id is about to end. An edge that is not one (or
+// does not exist) is left to Withdraw's own answers.
+func (s *RelationStore) withdrawPlaceAuthority(ctx context.Context, id string) error {
+	var e RelationEdge
+	var class string
+	var invalid *time.Time
+	err := s.db.QueryRowContext(ctx,
+		`SELECT source_type, source_id, target_type, target_id, relation_kind, edge_class, invalid_at FROM smeldr_relations WHERE id = $1`, id).
+		Scan(&e.SourceType, &e.SourceID, &e.TargetType, &e.TargetID, &e.RelationKind, &class, nullTimeScanner{dst: &invalid})
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return fmt.Errorf("%w: withdraw relation %s: %s", ErrInternal, id, err)
+	case class != "asserted" || invalid != nil && !invalid.After(time.Now()):
+		return nil
+	}
+	return s.requirePlaceAuthority(ctx, e, true)
+}

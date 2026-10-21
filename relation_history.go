@@ -193,6 +193,9 @@ func (s *RelationStore) Withdraw(ctx context.Context, id, reason string) error {
 	if err := s.withdrawVisible(ctx, id); err != nil {
 		return err
 	}
+	if err := s.withdrawPlaceAuthority(ctx, id); err != nil {
+		return err
+	}
 	ended, err := s.endEdge(ctx, id, endingFromContext(ctx, EdgeEndWithdrawn, reason))
 	if err != nil {
 		return fmt.Errorf("%w: withdraw relation %s: %s", ErrInternal, id, err)

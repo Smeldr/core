@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Changed
+
+- **Placing or moving a non-proposed Decision, or an Area, needs ratify over the place (D145, T906, A561).** `assert_relation` and `withdraw_relation` (and `RelationStore.Assert`, `MCPAssertRelation`, `Withdraw`) of a place edge from a Decision that is no longer `proposed` now need `ratify` over the new place and over the place it leaves, for the actor in context; an Area's `belongs_to_domain` is gated the same way once it has had a Domain. An `approver` covers every place, a `domain-approver` its Domain and that Domain's Areas. Agent and job tokens, and Authors without ratify, are refused with `ErrForbidden` naming the act and the place. Proposed Decisions and an Area's first Domain stay at the Author tier; system writes are unchanged.
+
 ---
 
 ## [1.168.1] - 2026-10-21

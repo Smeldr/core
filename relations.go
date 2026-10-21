@@ -633,6 +633,10 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 		if err := requireOnePlace(ctx, s.db, edge); err != nil {
 			return RelationEdge{}, err
 		}
+		// D145 (T906): a placed Decision or an Area moves only under ratify.
+		if err := s.requirePlaceAuthority(ctx, edge, false); err != nil {
+			return RelationEdge{}, err
+		}
 	}
 	edge, newRow, err := writeEdgeRow(ctx, s.db, edge)
 	if err != nil {
