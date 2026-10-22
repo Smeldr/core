@@ -103,6 +103,9 @@ var capabilityTable = []Capability{
 	// writes counts and opens conditions for every rule of a repository.
 	{ResourceItem, "decisions_for_paths", "read", ReasonNotTaken, true},
 	{ResourceItem, "check_coverage", "manage", ReasonNotTaken, true},
+	// Who approves a place (D147, T911): the read rules on the place apply
+	// inside ApproversOf.
+	{ResourceItem, "approvers_of", "read", ReasonNotTaken, true},
 
 	{ResourceType, VerbGet, "read", ReasonNotTaken, false},
 	{ResourceType, VerbList, "read", ReasonNotTaken, false},
@@ -225,6 +228,7 @@ var typelessReadsAny = map[capabilityKey]bool{
 	{ResourceSignal, VerbList}:            true, // list_signals filters Signals by their subject
 	{ResourceItem, "search"}:              true, // App.Search filters every hit by the read rules
 	{ResourceItem, "decisions_for_paths"}: true, // App.DecisionsForPaths filters by the read rules
+	{ResourceItem, "approvers_of"}:        true, // App.ApproversOf answers only for a readable place
 	{ResourceRelation, VerbList}:          true, // ListRelations keeps edges with both ends readable
 	{ResourceSubscription, VerbGet}:       true, // the owner rule is inside the act
 	{ResourceSubscription, VerbList}:      true, // the list is the owner's own

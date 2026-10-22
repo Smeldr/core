@@ -152,6 +152,8 @@
 //     (one Area, approve-change only). An agent or job token never ratifies,
 //     and holds approve-change only on an Area grant from a human.
 //     [App.GrantFounder] gives the organization's founder admin and approver.
+//     [App.ApproversOf] tells anyone who reads a place who approves there
+//     (D147), without administer.
 //   - Coverage (D142): an Area's [CoverageRule] records name repository path
 //     patterns; [App.DecisionsForPaths] answers which Decisions in force
 //     apply to a list of paths, and [App.CheckCoverage] keeps the rules true
