@@ -158,6 +158,9 @@
 //     patterns; [App.DecisionsForPaths] answers which Decisions in force
 //     apply to a list of paths, and [App.CheckCoverage] keeps the rules true
 //     against a repository's file list.
+//   - Pinned sources (D148): [Decision].Sources lists the external files a
+//     Decision rests on, each at a full commit SHA with a role
+//     ([DecisionSource]); set while proposed, frozen once ratified.
 //   - Custom state flows ([StateFlow], [State], [Transition],
 //     [TransitionTrigger]) — a data-driven state machine registered per
 //     content type via [App.RegisterFlow], for lifecycles beyond the built-in

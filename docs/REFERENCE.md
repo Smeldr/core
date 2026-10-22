@@ -6020,6 +6020,23 @@ Steps 1 to 3 run in one transaction; a dry run runs them in a transaction it rol
 
 **What a client sees change** (an MCP client that read the runtime types): `list_content`, `get_content` and `create_content` with `type_name: "domain"` stop working (the type is not loaded); use `list_domains`, `get_domain`, `create_domain`, `update_domain` (and the same for areas and sets). Items have the compiled shape (`ID`, `Slug`, `Status`, `address`, `name`, `description`). Relation ends and `get_relations` use `Domain`, `Area`, `Set`. Event names stay `domain.*`; addresses (`DOM1`) do not change.
 
+### Pinned sources on a Decision (D148, T914)
+
+A Decision that rests on an external source (a readme, a token file, a specification, code, an ADR) carries the claim in its own text and names the source by a pin. **`Decision.Sources`** (`sources`, type `DecisionSources`, a list of `DecisionSource`, stored as a JSON array in `smeldr_decisions.sources`; `[]`, never null) holds at most `DecisionSourcesMax` (20). Each source:
+
+| Field | Rule |
+|---|---|
+| `repository` | `owner/name`, stored in lower case (the coverage rules' check) |
+| `commit` | a full 40-character SHA, stored in lower case; a branch, tag or short SHA is refused |
+| `path` | one file, relative to the repository root: no leading `/`, no backslash, no empty or `..` segment, no `*` or `?`, at most 512 characters |
+| `anchor` | optional: a heading or line range, one line, at most 200 characters |
+| `role` | `source`, `evidence` or `implementation` (`DecisionSourceRoleSource`, `...Evidence`, `...Implementation`) |
+| `hash` | optional: `sha256:` and 64 hex, the SHA-256 of the file at the commit, stored in lower case |
+
+The same repository, commit, path and anchor twice is refused. Refusals are validation errors on `sources[i].field`. The check runs in the Decision's save hook, so `create_decision`, `update_decision`, HTTP and the Go API all apply it. Core stores the pins and never fetches them (it has no repository access): the reader fetches the file at the pinned commit and may compare the hash.
+
+**Set them while the Decision is proposed.** A Decision that is ratified, pending re-evaluation, superseded or archived is locked: its content, sources included, is not edited. To re-pin a ratified Decision to a new commit, supersede it with a new Decision: what was ratified is the claim together with its pins. As a further check, a write that does reach a non-proposed Decision's sources (a full PUT that also changes its state) needs `ratify` over the Decision's place, through the same check as D145 and D146 (agent and job tokens refused, no place refused, no governance skipped). `EnsureDecisionSourcesColumn` adds the column to an older database (example/server calls it at boot). The MCP schema advertises `sources` as an array of objects (`MCPField.Items`).
+
 ### Coverage rules: which Decisions apply to these paths (D142, T886)
 
 An Area covers repository paths through its coverage rules, and one resolution answers which Decisions apply to a list of paths: the pull request check and the MCP tool share it. Core never reads a repository: **the caller supplies the paths.**

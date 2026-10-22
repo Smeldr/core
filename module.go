@@ -2892,7 +2892,45 @@ func mcpStructField(sf reflect.StructField) MCPField {
 	if enum := sf.Tag.Get("smeldr_enum"); enum != "" && f.Enum == nil {
 		f.Enum = strings.Split(enum, "|")
 	}
+	f.Items = mcpItemsSchema(sf.Type)
 	return f
+}
+
+// mcpItemsSchema is the JSON Schema of one element of t when t is a slice of
+// structs (see [MCPField].Items), else nil.
+func mcpItemsSchema(t reflect.Type) map[string]any {
+	if t.Kind() != reflect.Slice {
+		return nil
+	}
+	e := t.Elem()
+	for e.Kind() == reflect.Ptr {
+		e = e.Elem()
+	}
+	if e.Kind() != reflect.Struct || e == reflect.TypeOf(time.Time{}) {
+		return nil
+	}
+	props := map[string]any{}
+	required := []string{}
+	for i := 0; i < e.NumField(); i++ {
+		sf := e.Field(i)
+		if !sf.IsExported() || sf.Tag.Get("json") == "-" {
+			continue
+		}
+		name := mcpJSONName(sf)
+		typ := mcpGoTypeStr(sf.Type)
+		if typ == "datetime" || typ == "array" {
+			typ = "string"
+		}
+		prop := map[string]any{"type": typ}
+		if enum := sf.Tag.Get("smeldr_enum"); enum != "" {
+			prop["enum"] = strings.Split(enum, "|")
+		}
+		props[name] = prop
+		if !strings.Contains(sf.Tag.Get("json"), ",omitempty") {
+			required = append(required, name)
+		}
+	}
+	return map[string]any{"type": "object", "properties": props, "required": required}
 }
 
 // MCPMeta returns the MCP registration metadata for this module.

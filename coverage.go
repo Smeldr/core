@@ -232,24 +232,35 @@ func normalizeRepository(repo string) (string, error) {
 
 // checkCoveragePattern refuses a pattern the matcher would read wrongly.
 func checkCoveragePattern(p string) error {
+	return checkRepositoryPath("pattern", "a pattern", "internal/billing/**", p, true)
+}
+
+// checkRepositoryPath refuses a path in a repository the matcher or a reader
+// would read wrongly: empty, too long, absolute, with a backslash, an empty
+// or .. segment. With wildcards, ** must stand alone in its segment; without,
+// * and ? are refused (a file, not a pattern). field names the field in the
+// refusal, noun what it is ("a pattern", "a path"), example a valid one.
+func checkRepositoryPath(field, noun, example, p string, wildcards bool) error {
 	switch {
 	case p == "":
-		return Err("pattern", "is required: a path in the repository, for example internal/billing/**")
+		return Err(field, "is required: a path in the repository, for example "+example)
 	case len(p) > coveragePatternMaxLen:
-		return Err("pattern", fmt.Sprintf("is longer than %d characters", coveragePatternMaxLen))
+		return Err(field, fmt.Sprintf("is longer than %d characters", coveragePatternMaxLen))
 	case strings.HasPrefix(p, "/"):
-		return Err("pattern", "starts with /: write it relative to the repository root, for example internal/billing/**")
+		return Err(field, "starts with /: write it relative to the repository root, for example "+example)
 	case strings.Contains(p, `\`):
-		return Err("pattern", `contains a backslash: separate segments with /`)
+		return Err(field, `contains a backslash: separate segments with /`)
+	case !wildcards && strings.ContainsAny(p, "*?"):
+		return Err(field, "contains * or ?: name one file, for example "+example)
 	}
 	for _, seg := range strings.Split(p, "/") {
 		switch {
 		case seg == "":
-			return Err("pattern", "has an empty segment (//, or a trailing /)")
+			return Err(field, "has an empty segment (//, or a trailing /)")
 		case seg == "..":
-			return Err("pattern", "has a .. segment: a pattern stays inside the repository")
-		case seg != "**" && strings.Contains(seg, "**"):
-			return Err("pattern", "has ** inside a segment: ** stands alone between slashes")
+			return Err(field, "has a .. segment: "+noun+" stays inside the repository")
+		case wildcards && seg != "**" && strings.Contains(seg, "**"):
+			return Err(field, "has ** inside a segment: ** stands alone between slashes")
 		}
 	}
 	return nil

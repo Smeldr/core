@@ -69,6 +69,12 @@ type MCPField struct {
 	// (the smeldr_deprecated:"true" tag; D110's legacy human-ID fields). Its
 	// Description says what happens to a value sent there and when it goes.
 	Deprecated bool
+	// Items is the JSON Schema of one element when the field is a list of
+	// objects (a slice of structs, such as [Decision].Sources): type object,
+	// properties from the element's json tags, required for the fields
+	// without omitempty, enum from smeldr_enum. Nil for every other field,
+	// whose list elements are strings.
+	Items map[string]any
 }
 
 // MCPModule is implemented by any [Module][T] that has been registered with

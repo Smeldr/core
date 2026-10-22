@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **Pinned external sources on a Decision (D148, T914, A565).** `Decision.Sources` (`sources`): at most 20 `DecisionSource` pins, each `repository` (owner/name), `commit` (a full 40-character SHA, never a branch), `path` (one file), optional `anchor`, `role` (`source`, `evidence`, `implementation`) and optional `hash` (`sha256:` + 64 hex), validated on every write path and stored as a JSON array. Set while the Decision is proposed; a ratified Decision is locked, so re-pinning is a superseding Decision, and a write that reaches a non-proposed Decision's sources needs ratify over its place. Core never fetches a source. `EnsureDecisionSourcesColumn` for older databases (called by example/server). `MCPField.Items` gives the JSON Schema of a list of objects, so `create_decision` and `update_decision` can advertise the shape.
+
 ---
 
 ## [1.170.0] - 2026-10-22

@@ -354,6 +354,11 @@ type Decision struct {
 	// when TensionRuleID is set (a future Check-precondition task, §4) —
 	// this field only records the declaration.
 	TensionReason string `json:"tension_reason" db:"tension_reason" smeldr_format:"markdown"`
+	// Sources are the Decision's pinned external sources (D148): each a file
+	// at a full commit SHA, with a role. The claim stays in the Decision's own
+	// text; a source says where it came from. On a Decision that is no longer
+	// proposed, changing them needs ratify over its place.
+	Sources DecisionSources `json:"sources" db:"sources" smeldr_description:"Pinned external sources (D148), at most 20: each {repository: owner/name, commit: a full 40-character SHA (never a branch), path: one file, anchor: optional heading or line range, role: source|evidence|implementation, hash: optional sha256:<64 hex> of the file at the commit}. An update replaces the whole list. On a Decision that is no longer proposed, changing it needs ratify over its place."`
 	// LastActor is the actor ID of this item's most recent writer (D78;
 	// Option A, 2026-10-08): whoever created it, last changed its content or
 	// last moved it. Set by the server, never from a request body. Empty when
@@ -835,6 +840,7 @@ func CreateGovernanceTables(db DB) error {
 			reversibility   TEXT NOT NULL DEFAULT '',
 			tension_rule_id TEXT NOT NULL DEFAULT '',
 			tension_reason  TEXT NOT NULL DEFAULT '',
+			sources         TEXT NOT NULL DEFAULT '[]',
 			last_actor      TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS smeldr_amendments (
@@ -1032,6 +1038,16 @@ func EnsureDecisionTensionColumns(ctx context.Context, db DB) error {
 	return nil
 }
 
+// EnsureDecisionSourcesColumn adds [Decision]'s sources column (D148) to
+// smeldr_decisions on databases created before it. Fresh installs have it
+// from [CreateOrchestrationTables]. Idempotent, safe to call on every boot.
+func EnsureDecisionSourcesColumn(ctx context.Context, db DB) error {
+	if err := EnsureColumn(ctx, db, "smeldr_decisions", "sources", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		return fmt.Errorf("smeldr: EnsureDecisionSourcesColumn: %w", err)
+	}
+	return nil
+}
+
 // EnsureDecisionTitleColumn adds [Decision]'s title column to
 // smeldr_decisions on pre-existing SQLite databases that predate this
 // Amendment. Fresh installs already have the column via
@@ -1146,6 +1162,9 @@ func RegisterGovernanceTypes(app *App, db DB) {
 	))
 	app.Content(NewModule[*Decision]((*Decision)(nil),
 		At("/decisions"), Repo(NewSQLRepo[*Decision](db, Table("smeldr_decisions"))), MCP(MCPRead, MCPWrite), withAddress(),
+		saveHooksOption{prepare: func(ctx Context, existing, item any) error {
+			return app.prepareDecision(ctx, existing, item.(*Decision))
+		}},
 	))
 	app.Content(NewModule[*Amendment]((*Amendment)(nil),
 		At("/amendments"), Repo(NewSQLRepo[*Amendment](db, Table("smeldr_amendments"))), MCP(MCPRead, MCPWrite), withAddress(),
