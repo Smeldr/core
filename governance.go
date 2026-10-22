@@ -83,6 +83,9 @@ func migrateGovernance(ctx context.Context, db DB) error {
 	if err := EnsureRoleGrantExpiresAtColumn(ctx, db); err != nil {
 		return err
 	}
+	if err := normalizeRoleGrantExpiry(ctx, db); err != nil {
+		return err
+	}
 
 	if err := seedDefaultRoles(ctx, db); err != nil {
 		return err
@@ -101,6 +104,57 @@ func migrateGovernance(ctx context.Context, db DB) error {
 	// deployment (apps that never call WithTokenStore). Log and continue.
 	if _, err := pruneInertTokenGrants(ctx, db); err != nil {
 		slog.Warn("smeldr: migrateGovernance: inert grant pruning skipped", "err", err)
+	}
+	return nil
+}
+
+// roleGrantExpiryUTCSuffix ends the text the SQLite driver writes for a UTC
+// time.Time, the form every expiry comparison passes its now in.
+const roleGrantExpiryUTCSuffix = " +0000 UTC"
+
+// normalizeRoleGrantExpiry rewrites a stored grant expiry that is text in
+// another form than the driver's UTC one (a time in another zone, RFC3339)
+// as its UTC time, so the text comparison with a UTC now is right (T916). On
+// SQLite expires_at is text; on Postgres it is a timestamptz, read back as a
+// time.Time, and left alone. An expiry that cannot be parsed is set to the
+// Unix epoch, so the grant is expired (fail closed), with a warning naming
+// it. Idempotent: run on every boot by [migrateGovernance].
+func normalizeRoleGrantExpiry(ctx context.Context, db DB) error {
+	rows, err := db.QueryContext(ctx, `SELECT id, expires_at FROM smeldr_role_grants WHERE expires_at IS NOT NULL`)
+	if err != nil {
+		return fmt.Errorf("smeldr: migrateGovernance: read grant expiries: %w", err)
+	}
+	fix := map[string]time.Time{}
+	for rows.Next() {
+		var id string
+		var v any
+		if err := rows.Scan(&id, &v); err != nil {
+			rows.Close()
+			return fmt.Errorf("smeldr: migrateGovernance: read grant expiries: %w", err)
+		}
+		if b, ok := v.([]byte); ok {
+			v = string(b)
+		}
+		text, ok := v.(string)
+		if !ok || strings.HasSuffix(text, roleGrantExpiryUTCSuffix) {
+			continue
+		}
+		t, err := ParseTimestamp(text)
+		if err != nil {
+			slog.WarnContext(ctx, "smeldr: grant expiry cannot be read; the grant is expired", "grant", id, "expires_at", text)
+			t = time.Unix(0, 0).UTC()
+		}
+		fix[id] = t
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("smeldr: migrateGovernance: read grant expiries: %w", err)
+	}
+	rows.Close()
+	for id, t := range fix {
+		if _, err := db.ExecContext(ctx, `UPDATE smeldr_role_grants SET expires_at = $1 WHERE id = $2`, t, id); err != nil {
+			return fmt.Errorf("smeldr: migrateGovernance: rewrite grant expiry: %w", err)
+		}
 	}
 	return nil
 }
@@ -1117,6 +1171,15 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 	defer w.rollback()
 	exec := w.exec
 
+	// Stored in UTC (T916): on SQLite the column is text, compared as text
+	// with a UTC now, so a time in another zone would expire at the wrong
+	// moment. A copy; the caller's value is not changed.
+	var expiresAt *time.Time
+	if grant.ExpiresAt != nil {
+		utc := grant.ExpiresAt.UTC()
+		expiresAt = &utc
+	}
+
 	if _, err := exec.ExecContext(ctx,
 		`INSERT INTO smeldr_role_grants (id, token_id, role_id, scope_static, scope_anchor_id, expires_at, created_at)
 			SELECT $1, $2, $3, $4, $5, $6, $7
@@ -1126,7 +1189,7 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 				  AND scope_anchor_id IS NOT DISTINCT FROM $10
 				  AND scope_static = $11
 			)`,
-		newID, grant.TokenID, roleID, string(staticJSON), anchorID, grant.ExpiresAt, now,
+		newID, grant.TokenID, roleID, string(staticJSON), anchorID, expiresAt, now,
 		grant.TokenID, roleID, anchorID, string(staticJSON),
 	); err != nil {
 		return "", fmt.Errorf("smeldr: Grant: insert: %w", err)

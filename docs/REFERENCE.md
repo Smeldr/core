@@ -691,7 +691,7 @@ app.RoleStore().Grant(ctx, smeldr.RoleGrant{
 
 ### Time-boxed grants (`ExpiresAt`, grants-and-delegate-v1 §3.1/3.2)
 
-`RoleGrant.ExpiresAt *time.Time` makes a grant time-boxed instead of standing.
+`RoleGrant.ExpiresAt *time.Time` makes a grant time-boxed instead of standing. It may be given in any time zone: `Grant` stores it in UTC (T916), so it expires at its moment on SQLite too, where the column is text; at every `App.Governance` boot, a stored expiry in another form (another zone, RFC3339) is rewritten to UTC, and one that cannot be read is set to the Unix epoch (expired, fail closed) with a warning naming the grant.
 `nil` (the default, unchanged for every existing caller) is a standing grant
 with no expiry. A non-nil value is when the grant stops matching — same
 "absent, not present-but-inert" shape `RelationEdge.InvalidAt` already uses

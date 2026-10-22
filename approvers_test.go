@@ -37,7 +37,7 @@ func newApproversFixture(t *testing.T) areaGateFixture {
 	if err := RegisterDomainReaderRole(ctx, f.rs); err != nil {
 		t.Fatal(err)
 	}
-	past := time.Now().UTC().Add(-time.Hour)
+	past := time.Now().In(time.FixedZone("CEST", 2*3600)).Add(-time.Hour) // T916: any zone
 	for _, g := range []RoleGrant{
 		{TokenID: "human-3", RoleName: RoleDomainApprover, ScopeAnchorID: f.dom2},
 		{TokenID: "old-1", RoleName: RoleDomainApprover, ScopeAnchorID: f.domain, ExpiresAt: &past},

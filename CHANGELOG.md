@@ -22,6 +22,10 @@ cross-referenced below by their Amendment ID.
 
 - **`App.ApproversOf`: who approves a place (D147, T911, A563).** For an Organization, Domain or Area the caller may read, returns the `approver` holders, the `domain-approver` holders of its Domain and, for an Area, its `area-approver` holders, each as token name, role, class and anchor address (empty when the caller may not read the anchor). Unreadable and unknown places are `ErrNotFound` alike; expired grants and holders with no live token are left out; no `administer` needed. New type `PlaceApprover`, capability `item approvers_of`.
 
+### Fixed
+
+- **An expired grant could keep authorizing on SQLite (T916, A564).** A `RoleGrant.ExpiresAt` given in a zone east of UTC was stored as text in that zone and compared as text with a UTC now, so the grant kept authorizing for up to the zone offset after it expired (and one west of UTC ended early). `Grant` now stores the expiry in UTC, and `App.Governance` rewrites stored expiries in other forms to UTC at boot; an unreadable one is expired, with a warning. Postgres (timestamptz) was not affected.
+
 ---
 
 ## [1.169.0] - 2026-10-21
