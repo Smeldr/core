@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.170.0] - 2026-10-22
+
 ### Added
 
 - **`App.ApproversOf`: who approves a place (D147, T911, A563).** For an Organization, Domain or Area the caller may read, returns the `approver` holders, the `domain-approver` holders of its Domain and, for an Area, its `area-approver` holders, each as token name, role, class and anchor address (empty when the caller may not read the anchor). Unreadable and unknown places are `ErrNotFound` alike; expired grants and holders with no live token are left out; no `administer` needed. New type `PlaceApprover`, capability `item approvers_of`.
