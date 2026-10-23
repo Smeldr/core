@@ -116,6 +116,12 @@ var capabilityTable = []Capability{
 	// Who approves a place (D147, T911): the read rules on the place apply
 	// inside ApproversOf.
 	{ResourceItem, "approvers_of", "read", ReasonNotTaken, true},
+	// Rest counts (D150, T919): live and stored, filtered by the read rules
+	// inside RestCounts and StoredRestCounts.
+	{ResourceItem, "rest_counts", "read", ReasonNotTaken, true},
+	// Confirming a premise (D149): core authorizes it by ratify over the
+	// Decision's place (App.ConfirmPremise), so the gate is a read.
+	{ResourceItem, "confirm_premise", "read", ReasonNotTaken, true},
 
 	{ResourceType, VerbGet, "read", ReasonNotTaken, false},
 	{ResourceType, VerbList, "read", ReasonNotTaken, false},
@@ -239,6 +245,8 @@ var typelessReadsAny = map[capabilityKey]bool{
 	{ResourceItem, "search"}:              true, // App.Search filters every hit by the read rules
 	{ResourceItem, "decisions_for_paths"}: true, // App.DecisionsForPaths filters by the read rules
 	{ResourceItem, "approvers_of"}:        true, // App.ApproversOf answers only for a readable place
+	{ResourceItem, "rest_counts"}:         true, // RestCounts and StoredRestCounts apply the read rules per item
+	{ResourceItem, "confirm_premise"}:     true, // App.ConfirmPremise checks the read and ratify over the place
 	{ResourceItem, "answer_change_check"}: true, // App.AnswerChangeCheck checks the Area's read and approve-change
 	{ResourceItem, "change_checks"}:       true, // ChangeCheckOf and ListChangeChecks filter by the read rules
 	{ResourceRelation, VerbList}:          true, // ListRelations keeps edges with both ends readable
