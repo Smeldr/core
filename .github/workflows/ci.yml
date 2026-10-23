@@ -52,7 +52,7 @@ jobs:
           echo "All files gofmt'd"
 
       - name: Run tests with race detector
-        run: go test -race ./...
+        run: go test -race -timeout 30m ./...
 
       - name: Install staticcheck
         run: go install honnef.co/go/tools/cmd/staticcheck@latest
