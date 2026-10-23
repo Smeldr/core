@@ -124,8 +124,7 @@ func (s *RelationStore) recordEdgeEnd(ctx context.Context, edge RelationEdge, e 
 	})
 	// D115: the contradiction this edge stated has ended.
 	if edge.RelationKind == "contradicts" {
-		s.signalResolver().resolveContradiction(ctx, edge.SourceID, edge.TargetID,
-			fmt.Sprintf("the contradicts relation %s ended: %s", edge.ID, e.cause))
+		s.signalResolver().resolveContradiction(ctx, edge.SourceID, edge.TargetID, e.cause)
 	}
 	// D149: a premise edge that ended may end a premise-flagged condition,
 	// and a Decision that left its place takes its conditions along.

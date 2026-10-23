@@ -863,7 +863,7 @@ func CreateGovernanceTables(db DB) error {
 			task_ref         TEXT NOT NULL DEFAULT '',
 			last_actor       TEXT NOT NULL DEFAULT ''
 		)`,
-	}, placeTableStmts...), append(append(coverageRuleTableStmts, changeCheckTableStmts...), premiseFlagTableStmts...)...)); err != nil {
+	}, placeTableStmts...), append(append(append(coverageRuleTableStmts, changeCheckTableStmts...), premiseFlagTableStmts...), contradictionFlagTableStmts...)...)); err != nil {
 		return err
 	}
 	// The Area's approval mode (T886), on a database made before it.

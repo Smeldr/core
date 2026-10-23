@@ -165,6 +165,10 @@
 //     ratify holder confirms it with [App.ConfirmPremise] or, by the condition,
 //     [App.ConfirmPremiseCondition]; an open condition follows its Decision's place;
 //     [App.SweepPremiseFlags] is the backstop.
+//   - Contradictions (D85, T928): a contradicts edge opens a conflict-detected
+//     condition about each side, placed with it and naming only it;
+//     [App.SweepContradictionConditions] rewrites older rows and keeps the
+//     places in line.
 //   - Coverage (D142): an Area's [CoverageRule] records name repository path
 //     patterns; [App.DecisionsForPaths] answers which Decisions in force
 //     apply to a list of paths, and [App.CheckCoverage] keeps the rules true

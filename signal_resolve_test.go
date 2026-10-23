@@ -125,12 +125,7 @@ func TestResolve_ConflictDetected(t *testing.T) {
 
 	app, db := signalTestApp(t)
 	r := app.signalResolver()
-	for _, subject := range []string{"d2", "d1"} {
-		if err := r.emit(ctx, &Signal{Sender: "system", Receiver: "approve", SignalType: "conflict-detected",
-			Message: contradictsMessage("d1", "d2"), SubjectType: "Decision", SubjectID: subject}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	r.emitContradiction(ctx, RelationEdge{ID: "e1", SourceType: "Decision", SourceID: "d1", TargetType: "Decision", TargetID: "d2", RelationKind: "contradicts"})
 	app.afterStatusChange(ctx, statusTransition{typeName: "Decision", id: "d2", from: "ratified", to: "pending-re-evaluation"})
 	if n := countSignals(t, db, "conflict-detected", "resolved"); n != 2 {
 		t.Errorf("resolved after a side left ratified = %d, want 2", n)
@@ -310,7 +305,7 @@ func TestOpenSignalsOlderThan(t *testing.T) {
 // The resolver finds a contradiction's rows by their message, and rows written
 // before D115 carry this exact text: the wording must not change.
 func TestContradictsMessage_Wording(t *testing.T) {
-	if got := contradictsMessage("d1", "d2"); got != "Decision d1 contradicts Decision d2" {
-		t.Errorf("contradictsMessage = %q; the stored rows use \"Decision d1 contradicts Decision d2\"", got)
+	if got := contradictsMessage("D12"); got != "D12 contradicts a Decision" {
+		t.Errorf("contradictsMessage = %q; it names only its own Decision (T928)", got)
 	}
 }

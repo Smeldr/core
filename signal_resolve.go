@@ -134,44 +134,6 @@ func (r signalResolver) announceCreated(ctx context.Context, s *Signal) {
 	announceSignalReferenceEdges(ctx, r.relations, s.ID)
 }
 
-// contradictsMessage is the message of both conflict-detected rows of one
-// contradicts edge, and the rows of an edge are found again by it: the
-// emitter ([RelationStore.emitConflictDetectedSignal]) writes it, and the
-// matchers ([signalResolver.resolveContradiction] and
-// [signalResolver.resolveContradictionsOf]) build their lookups from it. Rows
-// written before D115 carry the same text, so the wording must not change:
-// TestContradictsMessage_Wording pins it, and TestResolve_ConflictDetected
-// proves the emitter and the matchers agree.
-func contradictsMessage(sourceID, targetID string) string {
-	return fmt.Sprintf("Decision %s contradicts Decision %s", sourceID, targetID)
-}
-
-// resolveContradiction resolves the open conflict-detected rows of the
-// contradicts edge from sourceID to targetID.
-func (r signalResolver) resolveContradiction(ctx context.Context, sourceID, targetID, resolution string) {
-	sigs, err := r.selectOpen(ctx, "signal_type = 'conflict-detected' AND subject_type = 'Decision' AND message = $1",
-		contradictsMessage(sourceID, targetID))
-	if err != nil {
-		if !isNoSuchTable(err) {
-			slog.WarnContext(ctx, "smeldr: signal resolver: contradiction lookup failed", "source", sourceID, "target", targetID, "error", err)
-		}
-		return
-	}
-	r.resolve(ctx, sigs, resolution)
-}
-
-// resolveContradictionsOf resolves every open contradiction a Decision is a
-// side of: both rows of each of its contradicts edges.
-func (r signalResolver) resolveContradictionsOf(ctx context.Context, decisionID, resolution string) {
-	mine, err := r.selectOpen(ctx, "signal_type = 'conflict-detected' AND subject_type = 'Decision' AND (subject_id = $1 OR message LIKE $2 OR message LIKE $3)",
-		decisionID, contradictsMessage(decisionID, "%"), contradictsMessage("%", decisionID))
-	if err != nil {
-		slog.WarnContext(ctx, "smeldr: signal resolver: contradiction lookup failed", "decision", decisionID, "error", err)
-		return
-	}
-	r.resolve(ctx, mine, resolution)
-}
-
 // resolveSignalsFor is the resolver's part of a committed status change
 // ([App.afterStatusChange]): it resolves the conditions the change ends and
 // opens the ones it starts. One indexed lookup per change.
@@ -225,7 +187,7 @@ func (a *App) resolveSignalsFor(ctx context.Context, t statusTransition) {
 	// premise.
 	r.evaluatePremisesOf(ctx, t.id)
 	if t.from == decisionRatified {
-		r.resolveContradictionsOf(ctx, t.id, resolution)
+		r.resolveContradictionsOf(ctx, t.id, t.to)
 	}
 	if t.to == decisionProposed && !ratificationOpen {
 		a.emitRatificationRequired(ctx, t.id)

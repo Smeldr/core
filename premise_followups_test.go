@@ -234,9 +234,9 @@ func TestPremiseFlagged_MoveFails(t *testing.T) {
 	}
 	// Read failures are logged, never returned.
 	fail := signalResolver{db: &awaitsFailDB{DB: f.db, match: "smeldr_", err: errors.New("disk")}}
-	fail.syncPremisePlaces(context.Background(), "d")
+	fail.syncDecisionConditionPlaces(context.Background(), "d")
 	failPlaces := signalResolver{db: &awaitsFailDB{DB: f.db, match: "source_type = 'Signal'", err: errors.New("disk")}}
-	failPlaces.syncPremisePlaces(context.Background(), "d")
+	failPlaces.syncDecisionConditionPlaces(context.Background(), "d")
 }
 
 // TestConfirmPremiseCondition_Failures: a failed read or write is ErrInternal.
@@ -256,5 +256,25 @@ func TestConfirmPremiseCondition_Failures(t *testing.T) {
 	app := &App{cfg: Config{DB: &execFailDB{DB: f.db, failOn: "UPDATE smeldr_premise_flags"}}}
 	if err := app.ConfirmPremiseCondition(ctx, sigID, "why"); !errors.Is(err, ErrInternal) {
 		t.Errorf("the write fails: %v", err)
+	}
+}
+
+// TestConfirmPremise_Failures: a failed read in ConfirmPremise is ErrInternal,
+// and a failed read of the open conditions is logged by the sweep.
+func TestConfirmPremise_Failures(t *testing.T) {
+	f := newPremiseFixture(t)
+	f.placedDecision(t, "d", "ratified")
+	f.placedDecision(t, "p", "proposed")
+	f.rest(t, "d", "grounded_in", "p")
+	ctx := WithReadScope(context.Background(), AllReadScope())
+	for _, match := range []string{"SELECT address, status FROM smeldr_decisions", "CAST(confirmed_at AS TEXT)", "WHERE status = 'open'"} {
+		app := &App{cfg: Config{DB: &awaitsFailDB{DB: f.db, match: match, err: errors.New("disk")}}}
+		if err := app.ConfirmPremise(ctx, "d", "p", "why"); !errors.Is(err, ErrInternal) {
+			t.Errorf("%s fails: %v", match, err)
+		}
+	}
+	app := &App{cfg: Config{DB: &awaitsFailDB{DB: f.db, match: "SELECT DISTINCT subject_id, '' FROM smeldr_signals WHERE signal_type = $1", err: errors.New("disk")}}}
+	if _, err := app.SweepPremiseFlags(context.Background()); err != nil {
+		t.Errorf("a failed read of the open conditions is logged, not returned: %v", err)
 	}
 }

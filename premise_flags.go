@@ -194,59 +194,24 @@ func (r signalResolver) evaluatePremiseErr(ctx context.Context, decisionID, prem
 // openPremise opens the condition of a pair: the Signal, its row and its
 // place edge in one transaction, announced after the commit (condition 3).
 func (r signalResolver) openPremise(ctx context.Context, decisionID, premiseID, label string, row premiseRow) (string, error) {
-	db := r.db
 	s := &Signal{
 		Sender: "system", Receiver: decisionRatifyOperation, SignalType: premiseFlagged,
 		Message:     premiseMessage(label),
 		SubjectType: "Decision", SubjectID: decisionID, RequiredOperation: decisionRatifyOperation,
 	}
-	place, placed, err := decisionPlace(ctx, db, decisionID)
-	if err != nil {
-		return "", err
-	}
-	job := "premise-flagged"
-	var edge RelationEdge
-	err = runInTx(ctx, db, func(exec DB) error {
-		if err := InsertSignal(withSignalSystem(ctx), exec, s); err != nil {
-			return err
-		}
-		// Claim the pair: a concurrent evaluation that opened it first wins,
-		// and this transaction rolls its Signal back.
-		var res sql.Result
+	// Claim the pair: a concurrent evaluation that opened it first wins, and
+	// this transaction rolls its Signal back.
+	return r.openDecisionCondition(ctx, s, decisionID, "premise-flagged", func(exec DB, signalID string) (sql.Result, error) {
 		if row.found {
-			res, err = exec.ExecContext(ctx,
+			return exec.ExecContext(ctx,
 				`UPDATE smeldr_premise_flags SET signal_id = $1, confirmed_by = '', confirmed_at = NULL, confirmed_reason = '', confirmed_premise_state = ''
 				  WHERE decision_id = $2 AND premise_id = $3 AND signal_id = $4`,
-				s.ID, decisionID, premiseID, row.signalID)
-		} else {
-			res, err = exec.ExecContext(ctx,
-				`INSERT INTO smeldr_premise_flags (decision_id, premise_id, signal_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-				decisionID, premiseID, s.ID)
+				signalID, decisionID, premiseID, row.signalID)
 		}
-		if err != nil {
-			return err
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return errRequestTaken
-		}
-		if !placed {
-			return nil
-		}
-		edge, _, err = writeEdgeRow(ctx, exec, RelationEdge{SourceType: "Signal", SourceID: s.ID, TargetType: place.targetType, TargetID: place.targetID,
-			RelationKind: place.kind, EdgeClass: "asserted", CreatedByJob: &job, Attributes: []byte("{}")})
-		return err
+		return exec.ExecContext(ctx,
+			`INSERT INTO smeldr_premise_flags (decision_id, premise_id, signal_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+			decisionID, premiseID, signalID)
 	})
-	if errors.Is(err, errRequestTaken) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if placed && r.relations != nil {
-		r.relations.announceEdge(ctx, edge, true)
-	}
-	r.announceCreated(ctx, s)
-	return "opened", nil
 }
 
 // premisePairsOf returns the pairs a Decision is a side of: its live premise
@@ -302,25 +267,26 @@ func (r signalResolver) premiseEdgeChanged(ctx context.Context, edge RelationEdg
 	case isPremiseKind(edge.RelationKind) && edge.TargetType == "Decision":
 		r.evaluatePremise(ctx, edge.SourceID, edge.TargetID)
 	case placeKindTargets[edge.RelationKind] != "":
-		r.syncPremisePlaces(ctx, edge.SourceID)
+		r.syncDecisionConditionPlaces(ctx, edge.SourceID)
 	}
 }
 
-// syncPremisePlaces keeps every open premise-flagged condition about a
-// Decision placed where the Decision is placed (T925): a place edge of the
+// syncDecisionConditionPlaces keeps every open premise-flagged and
+// contradiction (conflict-detected) condition about a Decision placed where
+// the Decision is placed (T925, T928): a place edge of the
 // condition that is not the Decision's current place is ended (cause
 // [EdgeEndMoved]) and the current one written if missing, in one
 // transaction per condition, announced after the commit. An unplaced
 // Decision leaves its conditions unplaced. Fail-open: an error is logged
 // and the condition stays where it was until the next sync or sweep.
-func (r signalResolver) syncPremisePlaces(ctx context.Context, decisionID string) {
-	if err := r.syncPremisePlacesErr(ctx, decisionID); err != nil && !isNoSuchTable(err) {
+func (r signalResolver) syncDecisionConditionPlaces(ctx context.Context, decisionID string) {
+	if err := r.syncDecisionConditionPlacesErr(ctx, decisionID); err != nil && !isNoSuchTable(err) {
 		slog.WarnContext(ctx, "smeldr: premise-flagged place not synced", "decision", decisionID, "error", err)
 	}
 }
 
-func (r signalResolver) syncPremisePlacesErr(ctx context.Context, decisionID string) error {
-	open, err := r.selectOpen(ctx, "signal_type = $1 AND subject_type = 'Decision' AND subject_id = $2", premiseFlagged, decisionID)
+func (r signalResolver) syncDecisionConditionPlacesErr(ctx context.Context, decisionID string) error {
+	open, err := r.selectOpen(ctx, "signal_type IN ('premise-flagged', 'conflict-detected') AND subject_type = 'Decision' AND subject_id = $1", decisionID)
 	if err != nil || len(open) == 0 {
 		return err
 	}
@@ -454,7 +420,7 @@ func (a *App) SweepPremiseFlags(ctx context.Context) (PremiseSweep, error) {
 		return out, nil
 	}
 	for _, d := range decisions {
-		r.syncPremisePlaces(ctx, d[0])
+		r.syncDecisionConditionPlaces(ctx, d[0])
 	}
 	return out, nil
 }

@@ -400,6 +400,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.EnsurePremiseFlagTable(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure premise flag table: %w", err)
 		}
+		if err := smeldr.EnsureContradictionFlagTable(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure contradiction flag table: %w", err)
+		}
 		if err := smeldr.EnsureTaskGoalTitleColumns(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure task and goal title columns: %w", err)
 		}
@@ -488,6 +491,14 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 			slog.Warn("smeldr-server: Organization not created; run migrate-places", "reason", err)
 		} else if err != nil {
 			return ServerResult{}, fmt.Errorf("ensure organization: %w", err)
+		}
+		// T928: contradiction conditions written before it name the other
+		// Decision and have no place. Fixed at boot, so a deploy fixes them
+		// even with the structural sweep off; fail-open.
+		if res, err := app.SweepContradictionConditions(context.Background()); err != nil {
+			slog.Warn("smeldr-server: contradiction conditions not swept", "error", err)
+		} else if res.Reworded > 0 || res.Unparsed > 0 {
+			slog.Info("smeldr-server: contradiction conditions swept", "reworded", res.Reworded, "resolved", res.Resolved, "unparsed", res.Unparsed)
 		}
 	}
 
@@ -690,6 +701,26 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 				Err:       premiseErrStr,
 				ActorKind: "job",
 				ActorID:   "sweep-premise-flags",
+			})
+			// The contradiction conditions (T928): old rows reworded and
+			// placed, open ones kept with their Decision.
+			contradictions, contradictionErr := app.SweepContradictionConditions(ctx)
+			contradictionErrStr := ""
+			if contradictionErr != nil {
+				contradictionErrStr = contradictionErr.Error()
+				slog.ErrorContext(ctx, "contradiction sweep failed", "error", contradictionErr)
+			}
+			_ = runStore.Append(ctx, smeldr.SweepRunRecord{
+				ID:        smeldr.NewID(),
+				Detector:  "contradictions",
+				RanAt:     time.Now().UTC(),
+				Interval:  schedule,
+				Walked:    contradictions.Decisions,
+				Flagged:   contradictions.Reworded,
+				Skipped:   contradictions.Unparsed,
+				Err:       contradictionErrStr,
+				ActorKind: "job",
+				ActorID:   "sweep-contradictions",
 			})
 			return walked, flagged, skipped, sweepErr
 		}

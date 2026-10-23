@@ -316,3 +316,23 @@ func TestSweepRestCounts_PlaceKinds(t *testing.T) {
 		t.Error("depth")
 	}
 }
+
+// TestSweepRestCounts_Dangling: an edge to an item with no row is not an
+// item: it is neither counted nor walked.
+func TestSweepRestCounts_Dangling(t *testing.T) {
+	f := newRestFixture(t)
+	if err := EnsureRestCountTable(context.Background(), f.db); err != nil {
+		t.Fatal(err)
+	}
+	f.item(t, "a", "ratified")
+	f.item(t, "b", "ratified")
+	f.edge(t, "a", "grounded_in", "b", false)
+	f.edge(t, "a", "grounded_in", "ghost", false)
+	run, err := f.app.SweepRestCounts(context.Background())
+	if err != nil || run.Items != 2 {
+		t.Fatalf("run = %+v %v", run, err)
+	}
+	if got := storedOf(t, f, allReader(), "a"); got.ThisRestsOn != (RestCount{Closed: 1}) {
+		t.Errorf("a = %+v", got.ThisRestsOn)
+	}
+}

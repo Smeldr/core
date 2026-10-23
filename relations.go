@@ -682,34 +682,9 @@ func (s *RelationStore) announceEdge(ctx context.Context, edge RelationEdge, new
 // logged, never returned, since a failed structural-Signal emission must
 // never fail the relation assertion itself.
 func (s *RelationStore) emitConflictDetectedSignal(ctx context.Context, edge RelationEdge) {
-	r := s.signalResolver()
-	// The resolver finds these rows again by this message (contradictsMessage).
-	message := contradictsMessage(edge.SourceID, edge.TargetID)
-	// D115: one open condition per contradiction. An edge asserted again while
-	// its rows are open adds none.
-	open, err := r.selectOpen(ctx, "signal_type = 'conflict-detected' AND subject_type = 'Decision' AND message = $1", message)
-	if err != nil {
-		slog.WarnContext(ctx, "smeldr: emitConflictDetectedSignal: lookup failed", "edge_id", edge.ID, "error", err)
-		return
-	}
-	if len(open) > 0 {
-		return
-	}
-	pairs := [2]struct{ subjectID string }{{edge.TargetID}, {edge.SourceID}}
-	for _, pair := range pairs {
-		sig := &Signal{
-			Sender:      "system",
-			Receiver:    decisionRatifyOperation,
-			SignalType:  "conflict-detected",
-			Message:     message,
-			SubjectType: "Decision",
-			SubjectID:   pair.subjectID,
-		}
-		if err := r.emit(ctx, sig); err != nil {
-			slog.WarnContext(ctx, "smeldr: emitConflictDetectedSignal: insert failed",
-				"edge_id", edge.ID, "subject_id", pair.subjectID, "error", err)
-		}
-	}
+	// T928: each side's condition is placed with its Decision and names only
+	// that Decision; the pair is kept in smeldr_contradiction_flags.
+	s.signalResolver().emitContradiction(ctx, edge)
 }
 
 // signalResolver returns the store's Signal resolver (D115).
