@@ -82,7 +82,7 @@ func TestPG_CapabilityAuthorization(t *testing.T) {
 	}
 	// item search (T885), item decisions_for_paths (T886) and item
 	// approvers_of (T911) are visible to any token that holds read.
-	want := []string{"item get", "item list", "item update", "item search", "item decisions_for_paths", "item approvers_of", "relation get", "relation list", "signal list", "signal answer", "subscription get", "subscription list", "subscription update"}
+	want := []string{"item get", "item list", "item update", "item search", "item decisions_for_paths", "item answer_change_check", "item change_checks", "item approvers_of", "relation get", "relation list", "signal list", "signal answer", "subscription get", "subscription list", "subscription update"}
 	if len(names) != len(want) {
 		t.Fatalf("visible %v; want %v", names, want)
 	}

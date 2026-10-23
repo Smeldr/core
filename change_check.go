@@ -4,6 +4,7 @@ package smeldr
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -498,8 +499,8 @@ func (a *App) claimSupersede(ctx context.Context, oldID, oldAddress, newestID, n
 		applyStateChange(ctx, db, a.provenanceStore, stateChange{
 			typeName: "ChangeCheck", id: oldID, from: from, to: ChangeCheckSuperseded, reason: reason, actorKind: kind, actorID: actor,
 		})
-		dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, "", "change_check.transitioned",
-			transitionWebhookData{Type: "change_check", ID: oldID, Address: oldAddress, FromState: from, ToState: ChangeCheckSuperseded, Reason: reason, ActorID: actor, ActorKind: kind})
+		dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, "", "changecheck.transitioned",
+			transitionWebhookData{Type: "changecheck", ID: oldID, Address: oldAddress, FromState: from, ToState: ChangeCheckSuperseded, Reason: reason, ActorID: actor, ActorKind: kind})
 		if a.relationStore != nil {
 			a.relationStore.announceEdge(ctx, edge, true)
 		}
@@ -671,4 +672,106 @@ func (a *App) changeCheckView(ctx context.Context, id string) (ChangeCheckResult
 	}
 	sort.Slice(out.Decisions, func(i, j int) bool { return out.Decisions[i].Address < out.Decisions[j].Address })
 	return out, rows.Err()
+}
+
+// ChangeCheckQuery filters [App.ListChangeChecks]: history is read by filter,
+// never as one long list (D143), so at least Repository, Area or Decision is
+// given.
+type ChangeCheckQuery struct {
+	// Repository is owner/name; with Number, one change's Checks.
+	Repository string
+	// Number narrows Repository to one change.
+	Number int
+	// Area is an Area (address, slug or ID): the Checks placed in it.
+	Area string
+	// Decision is a Decision (address, slug or ID): the Checks checked
+	// against it.
+	Decision string
+	// Status is one state of the change-check flow; empty is every state.
+	Status string
+	// Limit caps the result (default 50, at most 500).
+	Limit int
+}
+
+// ListChangeChecks returns the Checks matching q that the caller may read,
+// newest first, at most q.Limit of them. A query with none of Repository,
+// Area or Decision is [ErrBadRequest]. An Area or Decision filter must name a
+// record the caller may read: one that is unknown or unreadable matches no
+// Checks, so a filter never says anything about a place the caller cannot
+// see. The read filter is applied before the limit (the Checks are read in
+// pages until the limit is filled).
+func (a *App) ListChangeChecks(ctx context.Context, q ChangeCheckQuery) ([]ChangeCheck, error) {
+	if a.cfg.DB == nil {
+		return nil, fmt.Errorf("%w: ListChangeChecks needs a database", ErrInternal)
+	}
+	if q.Repository == "" && q.Area == "" && q.Decision == "" {
+		return nil, fmt.Errorf("%w: give a repository, an Area or a Decision: Checks are read by filter, never as one list", ErrBadRequest)
+	}
+	switch {
+	case q.Limit <= 0:
+		q.Limit = 50
+	case q.Limit > 500:
+		q.Limit = 500
+	}
+	scope, err := scopeFor(ctx, a.governance)
+	if err != nil {
+		return nil, err
+	}
+	out := []ChangeCheck{}
+	where := []string{"1 = 1"}
+	var args []any
+	arg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	if q.Repository != "" {
+		repo, err := normalizeRepository(q.Repository)
+		if err != nil {
+			return nil, err
+		}
+		where = append(where, "c.repository = "+arg(repo))
+	}
+	if q.Number > 0 {
+		where = append(where, "c.number = "+arg(q.Number))
+	}
+	if q.Status != "" {
+		where = append(where, "c.status = "+arg(q.Status))
+	}
+	for _, f := range []struct{ ident, typeName, table, kind string }{
+		{q.Area, "Area", "smeldr_areas", "belongs_to_area"},
+		{q.Decision, "Decision", "smeldr_decisions", "checked_against"},
+	} {
+		if f.ident == "" {
+			continue
+		}
+		var id string
+		err := a.cfg.DB.QueryRowContext(ctx, `SELECT id FROM `+f.table+` WHERE address = $1 OR slug = $1 OR id = $1 LIMIT 1`, f.ident).Scan(&id)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return out, nil
+		case err != nil:
+			return nil, fmt.Errorf("%w: read the %s %q: %v", ErrInternal, f.typeName, f.ident, err)
+		}
+		if !scope.Readable(f.typeName, id) {
+			return out, nil
+		}
+		where = append(where, `EXISTS (SELECT 1 FROM smeldr_relations r WHERE r.source_id = c.id AND r.relation_kind = '`+f.kind+`'
+			AND r.invalid_at IS NULL AND r.target_id = `+arg(id)+`)`)
+	}
+	base := `SELECT c.* FROM smeldr_change_checks c WHERE ` + strings.Join(where, " AND ") + ` ORDER BY c.address_no DESC`
+	for offset := 0; len(out) < q.Limit; offset += q.Limit {
+		page, err := Query[*ChangeCheck](ctx, a.cfg.DB, base+fmt.Sprintf(" LIMIT %d OFFSET %d", q.Limit, offset), args...)
+		if err != nil {
+			return nil, fmt.Errorf("%w: list Checks: %v", ErrInternal, err)
+		}
+		for _, c := range page {
+			if len(out) < q.Limit && scope.Readable("ChangeCheck", c.ID) {
+				out = append(out, *c)
+			}
+		}
+		if len(page) < q.Limit {
+			break
+		}
+	}
+	return out, nil
 }

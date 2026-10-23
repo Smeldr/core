@@ -106,6 +106,13 @@ var capabilityTable = []Capability{
 	// The pull request check (T918): the adapter's token or an operator makes
 	// and closes Checks; the read rules apply to what each reader sees.
 	{ResourceItem, "check_change", "manage", ReasonNotTaken, true},
+	// Answering for an Area of a Check: core authorizes the answer by
+	// approve-change over that Area (App.AnswerChangeCheck), so the gate is
+	// the read of a Check.
+	{ResourceItem, "answer_change_check", "read", ReasonNotTaken, true},
+	// Reading Checks (get_change_check, list_change_checks): filtered per
+	// Check by the read rules inside ChangeCheckOf and ListChangeChecks.
+	{ResourceItem, "change_checks", "read", ReasonNotTaken, true},
 	// Who approves a place (D147, T911): the read rules on the place apply
 	// inside ApproversOf.
 	{ResourceItem, "approvers_of", "read", ReasonNotTaken, true},
@@ -232,6 +239,8 @@ var typelessReadsAny = map[capabilityKey]bool{
 	{ResourceItem, "search"}:              true, // App.Search filters every hit by the read rules
 	{ResourceItem, "decisions_for_paths"}: true, // App.DecisionsForPaths filters by the read rules
 	{ResourceItem, "approvers_of"}:        true, // App.ApproversOf answers only for a readable place
+	{ResourceItem, "answer_change_check"}: true, // App.AnswerChangeCheck checks the Area's read and approve-change
+	{ResourceItem, "change_checks"}:       true, // ChangeCheckOf and ListChangeChecks filter by the read rules
 	{ResourceRelation, VerbList}:          true, // ListRelations keeps edges with both ends readable
 	{ResourceSubscription, VerbGet}:       true, // the owner rule is inside the act
 	{ResourceSubscription, VerbList}:      true, // the list is the owner's own

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // T918 part 1: the ChangeCheck type and its resolution.
@@ -480,5 +481,124 @@ func TestEnsureChangeCheckTables(t *testing.T) {
 	}
 	if err := EnsureChangeCheckTables(context.Background(), &execFailDB{DB: db, failOn: "smeldr_address_counters"}); err == nil {
 		t.Error("failing address storage: no error")
+	}
+}
+
+func TestListChangeChecks(t *testing.T) {
+	f := newChangeCheckFixture(t)
+	for _, tc := range []struct {
+		number int
+		head   string
+		paths  []string
+	}{
+		{70, headA, []string{"internal/billing/a.go"}},
+		{70, headB, []string{"internal/billing/a.go"}},
+		{71, headA, []string{"cmd/x/main.go"}},
+	} {
+		if _, err := f.app.CheckChange(f.ops, ChangeInput{Repository: "acme/app", Number: tc.number, HeadCommit: tc.head, Paths: tc.paths}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func(ctx Context, q ChangeCheckQuery) int {
+		t.Helper()
+		got, err := f.app.ListChangeChecks(ctx, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(got)
+	}
+	for _, tc := range []struct {
+		name string
+		q    ChangeCheckQuery
+		want int
+	}{
+		{"repository", ChangeCheckQuery{Repository: "Acme/App"}, 3},
+		{"one change", ChangeCheckQuery{Repository: "acme/app", Number: 70}, 2},
+		{"live only", ChangeCheckQuery{Repository: "acme/app", Number: 70, Status: ChangeCheckCommented}, 1},
+		{"by Area", ChangeCheckQuery{Area: f.a2.Address}, 1},
+		{"by Decision", ChangeCheckQuery{Decision: f.dArea}, 2},
+		{"limit", ChangeCheckQuery{Repository: "acme/app", Limit: 1}, 1},
+		{"unknown Area", ChangeCheckQuery{Area: "ARE999"}, 0},
+	} {
+		if got := count(f.ops, tc.q); got != tc.want {
+			t.Errorf("%s: %d, want %d", tc.name, got, tc.want)
+		}
+	}
+	// A reader of the first Area sees only its Checks.
+	if got := count(f.reader, ChangeCheckQuery{Repository: "acme/app"}); got != 2 {
+		t.Errorf("reader: %d, want 2", got)
+	}
+	// A filter on a place or Decision the reader cannot read says nothing:
+	// no Checks, though Checks of its own Area may touch that place.
+	if got := count(f.reader, ChangeCheckQuery{Area: f.a2.Address}); got != 0 {
+		t.Errorf("reader filtering by an unreadable Area: %d", got)
+	}
+	if got := count(f.reader, ChangeCheckQuery{Decision: f.dOrg}); got != 0 {
+		t.Errorf("reader filtering by an unreadable Decision: %d", got)
+	}
+	if got := count(f.reader, ChangeCheckQuery{Decision: f.dArea}); got != 2 {
+		t.Errorf("reader filtering by its own Area's Decision: %d", got)
+	}
+	// The limit is filled after the read filter: the newest Check (of the
+	// second Area) is unreadable, the next readable one is still returned.
+	if got, err := f.app.ListChangeChecks(f.reader, ChangeCheckQuery{Repository: "acme/app", Limit: 1}); err != nil || len(got) != 1 || got[0].Number != 70 {
+		t.Errorf("reader, limit 1: %v, %v", got, err)
+	}
+	if _, err := f.app.ListChangeChecks(f.ops, ChangeCheckQuery{Number: 70}); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("no filter: %v", err)
+	}
+	if _, err := f.app.ListChangeChecks(f.ops, ChangeCheckQuery{Repository: "acme"}); err == nil {
+		t.Error("bad repository accepted")
+	}
+	if got := count(f.ops, ChangeCheckQuery{Repository: "acme/app", Limit: 9999}); got != 3 {
+		t.Errorf("limit capped: %d", got)
+	}
+	if _, err := f.db.Exec(`ALTER TABLE smeldr_change_checks RENAME TO gone`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.app.ListChangeChecks(f.ops, ChangeCheckQuery{Repository: "acme/app"}); !errors.Is(err, ErrInternal) {
+		t.Errorf("table gone: %v", err)
+	}
+	if _, err := f.db.Exec(`ALTER TABLE smeldr_areas RENAME TO areas_gone`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.app.ListChangeChecks(f.ops, ChangeCheckQuery{Area: "ARE1"}); !errors.Is(err, ErrInternal) {
+		t.Errorf("Areas gone: %v", err)
+	}
+	if _, err := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")}).ListChangeChecks(context.Background(), ChangeCheckQuery{Repository: "a/b"}); !errors.Is(err, ErrInternal) {
+		t.Errorf("no database: %v", err)
+	}
+}
+
+// A supersede is announced like every other Check transition.
+func TestChangeCheck_SupersedeEventName(t *testing.T) {
+	f := newChangeCheckFixture(t)
+	f.app.EventStream()
+	ch, err := f.app.eventBroadcaster.subscribeScoped("ops-1", eventStreamChannelAll, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.app.eventBroadcaster.unsubscribe(ch)
+	in := ChangeInput{Repository: "acme/app", Number: 80, HeadCommit: headA, Paths: []string{"internal/billing/a.go"}}
+	if _, err := f.app.CheckChange(f.ops, in); err != nil {
+		t.Fatal(err)
+	}
+	in.HeadCommit = headB
+	if _, err := f.app.CheckChange(f.ops, in); err != nil {
+		t.Fatal(err)
+	}
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case b := <-ch:
+			if strings.Contains(string(b), `"to_state":"superseded"`) {
+				if !strings.Contains(string(b), `"event":"changecheck.transitioned"`) {
+					t.Errorf("supersede event: %s", b)
+				}
+				return
+			}
+		case <-timeout:
+			t.Fatal("no supersede event")
+		}
 	}
 }
