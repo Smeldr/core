@@ -4,6 +4,7 @@ package pgx
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	smeldr "smeldr.dev/core"
@@ -71,5 +72,39 @@ func TestPG_ChangeCheck(t *testing.T) {
 	old, err := app.ChangeCheckOf(ops, first.Check.Address)
 	if err != nil || string(old.Check.Status) != smeldr.ChangeCheckSuperseded {
 		t.Errorf("first after the next commit: %+v, %v", old.Check, err)
+	}
+
+	// T918 part 2: the old Check's request was withdrawn, the new one's is
+	// open; the generic answer is refused, an approver's answer approves.
+	var withdrawn int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_signals WHERE subject_id = $1 AND status = 'withdrawn'`, first.Check.ID).Scan(&withdrawn); err != nil || withdrawn != 1 {
+		t.Errorf("old request withdrawn: %d, %v", withdrawn, err)
+	}
+	live, err := app.CheckChange(ops, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requestID string
+	if err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_signals WHERE subject_id = $1 AND status = 'open'`, live.Check.ID).Scan(&requestID); err != nil {
+		t.Fatalf("open request: %v", err)
+	}
+	if err := smeldr.RegisterApproverRole(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range []smeldr.RoleGrant{{TokenID: "boss", RoleName: smeldr.RoleApprover}, {TokenID: "boss", RoleName: "editor"}} {
+		if _, err := store.Grant(ctx, g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	boss := smeldr.NewTestContext(smeldr.User{ID: "boss", Roles: []smeldr.Role{smeldr.Editor, smeldr.Human}})
+	if err := app.AnswerSignal(boss, requestID, "approve", ""); !errors.Is(err, smeldr.ErrConflict) {
+		t.Errorf("generic answer: %v", err)
+	}
+	if err := app.AnswerChangeCheck(boss, live.Check.Address, "ARE900", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	after, err := app.ChangeCheckOf(ops, live.Check.Address)
+	if err != nil || string(after.Check.Status) != smeldr.ChangeCheckApproved {
+		t.Errorf("after the answer: %+v, %v", after.Check, err)
 	}
 }

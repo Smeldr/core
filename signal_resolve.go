@@ -119,13 +119,19 @@ func (r signalResolver) emit(ctx context.Context, s *Signal) error {
 	if err := InsertSignal(withSignalSystem(ctx), r.db, s); err != nil {
 		return err
 	}
+	r.announceCreated(ctx, s)
+	return nil
+}
+
+// announceCreated announces a Signal core wrote: its signal.created event
+// and its reference edges. Called after the write has committed.
+func (r signalResolver) announceCreated(ctx context.Context, s *Signal) {
 	dispatchTransitionWebhook(ctx, r.webhooks, r.pool, r.broadcaster, s.Receiver, "signal.created", transitionWebhookData{
 		Type: "signal", ID: s.ID, Slug: s.Slug, Address: s.Address, ToState: string(s.Status),
 		typeName: "Signal", aboutType: s.SubjectType, aboutID: s.SubjectID,
 		fields: map[string]string{"receiver": s.Receiver, "sender": s.Sender, "signal_type": s.SignalType},
 	})
 	announceSignalReferenceEdges(ctx, r.relations, s.ID)
-	return nil
 }
 
 // contradictsMessage is the message of both conflict-detected rows of one
@@ -433,6 +439,10 @@ func (a *App) closeSignalRequest(ctx context.Context, ident, to, verb, field, te
 	}
 	if status != signalOpen {
 		return fmt.Errorf("%w: the Signal is %s, not open", ErrConflict, status)
+	}
+	// A Check's approval request is answered for its Area only (T918).
+	if err := refuseChangeCheckRequest(ctx, a.cfg.DB, id); err != nil {
+		return err
 	}
 	// D113: answer_ref names a record the caller can read; it is stored as
 	// "Type:ID" and becomes an about edge from the Signal.

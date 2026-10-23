@@ -140,6 +140,7 @@ var changeCheckTableStmts = []string{
 		answered_by   TEXT NOT NULL DEFAULT '',
 		answered_at   TIMESTAMPTZ,
 		reason        TEXT NOT NULL DEFAULT '',
+		signal_id     TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (check_id, area_id)
 	)`,
 }
@@ -155,6 +156,10 @@ func EnsureChangeCheckTables(ctx context.Context, db DB) error {
 		}
 	}
 	if err := registerCoreAddresses(ctx, db, "ChangeCheck"); err != nil {
+		return fmt.Errorf("smeldr: EnsureChangeCheckTables: %w", err)
+	}
+	// The request of each Area (T918 part 2), on a table made before it.
+	if err := EnsureColumn(ctx, db, "smeldr_change_check_areas", "signal_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("smeldr: EnsureChangeCheckTables: %w", err)
 	}
 	return nil
@@ -448,39 +453,63 @@ func (a *App) insertChangeCheck(ctx context.Context, in ChangeInput, res Decisio
 	return c, nil
 }
 
-// claimSupersede moves the Check id to superseded when it is not already,
-// with one conditional write, so of several calls at the same moment exactly
-// one moves it (and reports true). It records the change and announces it as
-// a transition does.
-func (a *App) claimSupersede(ctx context.Context, id, address, by string) (bool, error) {
+// claimSupersede moves the Check old to superseded when it is not already,
+// with one conditional write and the supersedes edge from newest in the same
+// transaction: of several calls at the same moment exactly one moves it
+// (and reports true), and a superseded Check is never seen without its edge.
+// After the commit it records the change, announces it and the edge, and
+// withdraws the Check's open requests (part 2).
+func (a *App) claimSupersede(ctx context.Context, oldID, oldAddress, newestID, newestAddress string) (bool, error) {
 	db := a.cfg.DB
 	actor, kind := actorFromContext(ctx)
-	reason := "superseded by " + by
+	reason := "superseded by " + newestAddress
+	job := "change-check"
 	for range 3 {
 		var from string
-		if err := db.QueryRowContext(ctx, `SELECT status FROM smeldr_change_checks WHERE id = $1`, id).Scan(&from); err != nil {
-			return false, fmt.Errorf("%w: read %s: %v", ErrInternal, address, err)
+		if err := db.QueryRowContext(ctx, `SELECT status FROM smeldr_change_checks WHERE id = $1`, oldID).Scan(&from); err != nil {
+			return false, fmt.Errorf("%w: read %s: %v", ErrInternal, oldAddress, err)
 		}
 		if from == ChangeCheckSuperseded {
 			return false, nil
 		}
-		res, err := db.ExecContext(ctx,
-			`UPDATE smeldr_change_checks SET status = $1, updated_at = $2, last_actor = $3, rev = rev + 1 WHERE id = $4 AND status = $5`,
-			ChangeCheckSuperseded, time.Now().UTC(), actor, id, from)
+		var edge RelationEdge
+		moved := false
+		err := runInTx(ctx, db, func(exec DB) error {
+			res, err := exec.ExecContext(ctx,
+				`UPDATE smeldr_change_checks SET status = $1, updated_at = $2, last_actor = $3, rev = rev + 1 WHERE id = $4 AND status = $5`,
+				ChangeCheckSuperseded, time.Now().UTC(), actor, oldID, from)
+			if err != nil {
+				return err
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				return nil // its state moved meanwhile
+			}
+			moved = true
+			edge, _, err = writeEdgeRow(ctx, exec, RelationEdge{SourceType: "ChangeCheck", SourceID: newestID, TargetType: "ChangeCheck", TargetID: oldID,
+				RelationKind: "supersedes", EdgeClass: "asserted", CreatedByJob: &job, Attributes: json.RawMessage("{}")})
+			return err
+		})
 		if err != nil {
-			return false, fmt.Errorf("%w: supersede %s: %v", ErrInternal, address, err)
+			return false, fmt.Errorf("%w: %s supersedes %s: %v", ErrInternal, newestAddress, oldAddress, err)
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			continue // its state moved meanwhile: read it again
+		if !moved {
+			continue // read it again
 		}
 		applyStateChange(ctx, db, a.provenanceStore, stateChange{
-			typeName: "ChangeCheck", id: id, from: from, to: ChangeCheckSuperseded, reason: reason, actorKind: kind, actorID: actor,
+			typeName: "ChangeCheck", id: oldID, from: from, to: ChangeCheckSuperseded, reason: reason, actorKind: kind, actorID: actor,
 		})
 		dispatchTransitionWebhook(ctx, a.webhookStore, a.webhookPool, a.eventBroadcaster, "", "change_check.transitioned",
-			transitionWebhookData{Type: "change_check", ID: id, Address: address, FromState: from, ToState: ChangeCheckSuperseded, Reason: reason, ActorID: actor, ActorKind: kind})
+			transitionWebhookData{Type: "change_check", ID: oldID, Address: oldAddress, FromState: from, ToState: ChangeCheckSuperseded, Reason: reason, ActorID: actor, ActorKind: kind})
+		if a.relationStore != nil {
+			a.relationStore.announceEdge(ctx, edge, true)
+		}
+		// Its answers would count for nothing now (T918 part 2).
+		if err := a.withdrawChangeCheckRequests(ctx, oldID, reason); err != nil {
+			return true, err
+		}
 		return true, nil
 	}
-	return false, fmt.Errorf("%w: %s kept changing while it was superseded", ErrConflict, address)
+	return false, fmt.Errorf("%w: %s kept changing while it was superseded", ErrConflict, oldAddress)
 }
 
 // supersedeOlderChecks leaves the newest Check of a change (the highest
@@ -514,15 +543,26 @@ func (a *App) supersedeOlderChecks(ctx context.Context, repo string, number int)
 	newest := all[0]
 	job := "change-check"
 	for _, old := range all[1:] {
-		if old.status == ChangeCheckSuperseded {
+		if old.status != ChangeCheckSuperseded {
+			if _, err := a.claimSupersede(ctx, old.id, old.address, newest.id, newest.address); err != nil {
+				return err
+			}
 			continue
 		}
-		claimed, err := a.claimSupersede(ctx, old.id, old.address, newest.address)
-		if err != nil {
+		// A superseded Check keeps no open request: one whose withdrawal
+		// failed after the claim is withdrawn now (S3154).
+		if err := a.withdrawChangeCheckRequests(ctx, old.id, "superseded by "+newest.address); err != nil {
 			return err
 		}
-		if !claimed {
-			continue // another call superseded it, and writes the edge
+		// A Check superseded before the edge was written with it (an older
+		// row) gets the edge from the newest.
+		var n int
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM smeldr_relations WHERE target_id = $1 AND relation_kind = 'supersedes' AND invalid_at IS NULL`, old.id).Scan(&n); err != nil {
+			return fmt.Errorf("%w: the supersedes edges of %s: %v", ErrInternal, old.address, err)
+		}
+		if n > 0 {
+			continue
 		}
 		edge, wrote, err := writeEdgeRow(ctx, db, RelationEdge{SourceType: "ChangeCheck", SourceID: newest.id, TargetType: "ChangeCheck", TargetID: old.id,
 			RelationKind: "supersedes", EdgeClass: "asserted", CreatedByJob: &job, Attributes: json.RawMessage("{}")})
@@ -540,6 +580,10 @@ func (a *App) supersedeOlderChecks(ctx context.Context, repo string, number int)
 // awaiting-approval when a touched Area requires approval, else commented. A
 // Check past checking is left as it is (a redelivered event).
 func (a *App) settleChangeCheck(ctx context.Context, c *ChangeCheck) error {
+	if string(c.Status) == ChangeCheckAwaitingApproval {
+		// A redelivery opens a request that failed to open before.
+		return a.requestChangeCheckApprovals(ctx, c)
+	}
 	if string(c.Status) != ChangeCheckChecking {
 		return nil
 	}
@@ -551,6 +595,9 @@ func (a *App) settleChangeCheck(ctx context.Context, c *ChangeCheck) error {
 		return err
 	}
 	c.Status = Status(to)
+	if to == ChangeCheckAwaitingApproval {
+		return a.requestChangeCheckApprovals(ctx, c)
+	}
 	return nil
 }
 

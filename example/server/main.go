@@ -510,6 +510,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.RegisterItemApproverRole(context.Background(), roleStore); err != nil {
 			return ServerResult{}, fmt.Errorf("register item-approver role: %w", err)
 		}
+		if err := smeldr.RegisterItemChangeApproverRole(context.Background(), roleStore); err != nil {
+			return ServerResult{}, fmt.Errorf("register item-change-approver role: %w", err)
+		}
 		if err := smeldr.RegisterItemReviewerRole(context.Background(), roleStore); err != nil {
 			return ServerResult{}, fmt.Errorf("register item-reviewer role: %w", err)
 		}

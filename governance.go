@@ -1145,14 +1145,24 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 		return "", fmt.Errorf("smeldr: Grant: lookup role %q: %w", grant.RoleName, err)
 	}
 	// D142 point 5 (T884): agent and job tokens never hold ratify, and hold
-	// approve-change only on an Area grant from a human with authority there.
-	if err := s.checkAgentGrant(ctx, grant, roleID); err != nil {
-		return "", err
+	// approve-change only on an Area grant from a human with authority there,
+	// or on one ChangeCheck through the one-item role (T918), checked below.
+	if grant.RoleName != RoleItemChangeApprover {
+		if err := s.checkAgentGrant(ctx, grant, roleID); err != nil {
+			return "", err
+		}
 	}
 
 	scopeStatic, err := s.normalizeStaticScope(ctx, grant.ScopeStatic)
 	if err != nil {
 		return "", err
+	}
+	if grant.RoleName == RoleItemChangeApprover {
+		named := grant
+		named.ScopeStatic = scopeStatic
+		if err := s.checkItemChangeApproverGrant(ctx, named); err != nil {
+			return "", err
+		}
 	}
 	staticJSON, _ := json.Marshal(scopeStatic) // []string marshal never fails
 	var anchorID *string
