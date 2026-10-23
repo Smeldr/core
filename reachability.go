@@ -5,7 +5,6 @@ package smeldr
 import (
 	"context"
 	"fmt"
-	"sort"
 )
 
 // MaxReachabilityDepth is the hard ceiling on [RelationStore.Reachability]'s maxDepth
@@ -237,12 +236,7 @@ func (s *RelationStore) reachability(ctx context.Context, anchorType, anchorID, 
 		cut := 0
 		if maxItems > 0 && returned+len(order) > maxItems {
 			// The cap lands in this ring: keep a stable choice, count the rest.
-			sort.Slice(order, func(i, j int) bool {
-				if order[i].typ != order[j].typ {
-					return order[i].typ < order[j].typ
-				}
-				return order[i].id < order[j].id
-			})
+			sortNodes(order)
 			keep := maxItems - returned
 			cut = len(order) - keep
 			order = order[:keep]

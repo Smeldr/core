@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **Rest counts, part 1: live counts for one item (D150, T919, A570).** `App.RestCounts` counts what rests on an item and what it rests on, transitively over live `grounded_in`, `addresses` and `amends` edges (`RestRelationKinds`), each item once, split into open and closed by D109 (`awaits_action`; a type with no flow counts closed). The caller's read rules apply as in the reachability walk: a hidden item is neither counted nor walked through, and an unknown or unreadable anchor is `ErrNotFound` alike. Each direction walks at most `RestCountLimit` (1,000) items and says `at_least` when it stopped there. One edge query and one state query per type for each ring, not one per item. New types `RestCount`, `RestCounts`.
+
 ---
 
 ## [1.171.0] - 2026-10-23
