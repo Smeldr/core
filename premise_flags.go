@@ -297,9 +297,112 @@ func (r signalResolver) evaluatePremisesOf(ctx context.Context, decisionID strin
 // premiseEdgeChanged evaluates the pair of an asserted or ended edge, when it
 // is a premise edge between Decisions.
 func (r signalResolver) premiseEdgeChanged(ctx context.Context, edge RelationEdge) {
-	if isPremiseKind(edge.RelationKind) && edge.SourceType == "Decision" && edge.TargetType == "Decision" {
+	switch {
+	case edge.SourceType != "Decision":
+	case isPremiseKind(edge.RelationKind) && edge.TargetType == "Decision":
 		r.evaluatePremise(ctx, edge.SourceID, edge.TargetID)
+	case placeKindTargets[edge.RelationKind] != "":
+		r.syncPremisePlaces(ctx, edge.SourceID)
 	}
+}
+
+// syncPremisePlaces keeps every open premise-flagged condition about a
+// Decision placed where the Decision is placed (T925): a place edge of the
+// condition that is not the Decision's current place is ended (cause
+// [EdgeEndMoved]) and the current one written if missing, in one
+// transaction per condition, announced after the commit. An unplaced
+// Decision leaves its conditions unplaced. Fail-open: an error is logged
+// and the condition stays where it was until the next sync or sweep.
+func (r signalResolver) syncPremisePlaces(ctx context.Context, decisionID string) {
+	if err := r.syncPremisePlacesErr(ctx, decisionID); err != nil && !isNoSuchTable(err) {
+		slog.WarnContext(ctx, "smeldr: premise-flagged place not synced", "decision", decisionID, "error", err)
+	}
+}
+
+func (r signalResolver) syncPremisePlacesErr(ctx context.Context, decisionID string) error {
+	open, err := r.selectOpen(ctx, "signal_type = $1 AND subject_type = 'Decision' AND subject_id = $2", premiseFlagged, decisionID)
+	if err != nil || len(open) == 0 {
+		return err
+	}
+	place, placed, err := decisionPlace(ctx, r.db, decisionID)
+	if err != nil {
+		return err
+	}
+	job := "premise-flagged"
+	for _, s := range open {
+		edges, err := signalPlaceEdges(ctx, r.db, s.id)
+		if err != nil {
+			return err
+		}
+		var stale []string
+		kept := false
+		for _, e := range edges {
+			if placed && !kept && e.RelationKind == place.kind && e.TargetID == place.targetID {
+				kept = true
+				continue
+			}
+			stale = append(stale, e.ID)
+		}
+		write := placed && !kept
+		if len(stale) == 0 && !write {
+			continue
+		}
+		var ended []RelationEdge
+		var added RelationEdge
+		err = runInTx(ctx, r.db, func(exec DB) error {
+			now := time.Now().UTC()
+			for _, id := range stale {
+				e, ok, err := endEdgeRow(ctx, exec, id, now)
+				if err != nil {
+					return err
+				}
+				if ok {
+					ended = append(ended, e)
+				}
+			}
+			if !write {
+				return nil
+			}
+			added, _, err = writeEdgeRow(ctx, exec, RelationEdge{SourceType: "Signal", SourceID: s.id, TargetType: place.targetType, TargetID: place.targetID,
+				RelationKind: place.kind, EdgeClass: "asserted", CreatedByJob: &job, Attributes: []byte("{}")})
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		if r.relations != nil {
+			for _, e := range ended {
+				r.relations.recordEdgeEnd(ctx, e, edgeEnding{cause: EdgeEndMoved, reason: "the Decision moved", actorKind: "job", actorID: job})
+			}
+			if write {
+				r.relations.announceEdge(ctx, added, true)
+			}
+		}
+	}
+	return nil
+}
+
+// signalPlaceEdges returns a Signal's live place edges, oldest first.
+func signalPlaceEdges(ctx context.Context, db DB, signalID string) ([]RelationEdge, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, relation_kind, target_id FROM smeldr_relations
+		  WHERE source_type = 'Signal' AND source_id = $1
+		    AND relation_kind IN ('belongs_to_organization', 'belongs_to_domain', 'belongs_to_area')
+		    AND (invalid_at IS NULL OR invalid_at > $2)
+		  ORDER BY created_at, id`, signalID, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RelationEdge
+	for rows.Next() {
+		var e RelationEdge
+		if err := rows.Scan(&e.ID, &e.RelationKind, &e.TargetID); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // PremiseSweep is what one [App.SweepPremiseFlags] run did.
@@ -342,6 +445,16 @@ func (a *App) SweepPremiseFlags(ctx context.Context) (PremiseSweep, error) {
 		case did == "resolved":
 			out.Resolved++
 		}
+	}
+	// The open conditions follow their Decision's place (T925).
+	decisions, err := premisePairs(ctx, a.cfg.DB,
+		`SELECT DISTINCT subject_id, '' FROM smeldr_signals WHERE signal_type = $1 AND status = 'open'`, premiseFlagged)
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: SweepPremiseFlags: open conditions not read", "error", err)
+		return out, nil
+	}
+	for _, d := range decisions {
+		r.syncPremisePlaces(ctx, d[0])
 	}
 	return out, nil
 }
@@ -397,13 +510,87 @@ func (a *App) ConfirmPremise(ctx context.Context, decision, premise, reason stri
 	if len(open) == 0 {
 		return fmt.Errorf("%w: %s has no open premise-flagged condition for that premise", ErrConflict, label)
 	}
+	return a.confirmPremisePair(ctx, decisionID, premiseID, premiseState, label, open, reason)
+}
+
+// confirmPremisePair records a confirmation of the pair and resolves its
+// open condition, for both confirm forms. Nothing it writes or returns names
+// the premise.
+func (a *App) confirmPremisePair(ctx context.Context, decisionID, premiseID, premiseState, label string, open []openSignal, reason string) error {
 	actor, _ := actorFromContext(ctx)
-	if _, err := db.ExecContext(ctx,
+	if _, err := a.cfg.DB.ExecContext(ctx,
 		`UPDATE smeldr_premise_flags SET confirmed_by = $1, confirmed_at = $2, confirmed_reason = $3, confirmed_premise_state = $4
 		  WHERE decision_id = $5 AND premise_id = $6`,
 		actor, time.Now().UTC(), reason, premiseState, decisionID, premiseID); err != nil {
 		return fmt.Errorf("%w: record the confirmation of %s: %v", ErrInternal, label, err)
 	}
-	r.resolve(ctx, open, "confirmed by "+actor+": "+reason)
+	a.signalResolver().resolve(ctx, open, "confirmed by "+actor+": "+reason)
 	return nil
+}
+
+// ConfirmPremiseCondition is [App.ConfirmPremise] by the condition: the
+// caller names the open premise-flagged Signal (address, slug or ID) and
+// never the premise, which it may not be able to read (T925). The Signal
+// must be readable (it is, with its Decision, D113), else [ErrNotFound];
+// a resolved one is [ErrConflict]. It needs ratify over the resting
+// Decision's place and a reason, as ConfirmPremise does. No error, result
+// or record it writes names the premise.
+func (a *App) ConfirmPremiseCondition(ctx context.Context, condition, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return Err("reason", "is required: say why the Decision still holds")
+	}
+	if a.cfg.DB == nil {
+		return fmt.Errorf("%w: ConfirmPremiseCondition needs a database", ErrInternal)
+	}
+	db := a.cfg.DB
+	scope, err := scopeFor(ctx, a.governance)
+	if err != nil {
+		return err
+	}
+	notFound := fmt.Errorf("%w: no premise-flagged condition %q you can read", ErrNotFound, condition)
+	_, signalID, _, status, err := a.lookupCompiledRecord(ctx, "Signal", condition, scope)
+	if errors.Is(err, ErrNotFound) {
+		return notFound
+	}
+	if err != nil {
+		return err
+	}
+	if ok, err := newEndReader(ctx, db, scope).readable("Signal", signalID); err != nil {
+		return fmt.Errorf("%w: read the condition %q: %v", ErrInternal, condition, err)
+	} else if !ok {
+		return notFound
+	}
+	var decisionID, premiseID string
+	err = db.QueryRowContext(ctx, `SELECT decision_id, premise_id FROM smeldr_premise_flags WHERE signal_id = $1`, signalID).Scan(&decisionID, &premiseID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows) || isNoSuchTable(err):
+		return notFound
+	case err != nil:
+		return fmt.Errorf("%w: read the condition %q: %v", ErrInternal, condition, err)
+	}
+	d, err := readPremiseDecision(ctx, db, decisionID)
+	if err != nil {
+		return fmt.Errorf("%w: read the condition %q: %v", ErrInternal, condition, err)
+	}
+	label := d.label(decisionID)
+	if err := requireOperationOver(ctx, a.governance, OperationRatify, AuthTarget{TypeName: "Decision", ID: decisionID},
+		"confirming the premise of "+label, label, "D149"); err != nil {
+		return err
+	}
+	if status != signalOpen {
+		return fmt.Errorf("%w: the condition %q is %s, not open", ErrConflict, condition, status)
+	}
+	p, err := readPremiseDecision(ctx, db, premiseID)
+	if err != nil {
+		return fmt.Errorf("%w: read the condition %q: %v", ErrInternal, condition, err)
+	}
+	open, err := a.signalResolver().selectOpen(ctx, "id = $1", signalID)
+	if err != nil {
+		return fmt.Errorf("%w: read the condition %q: %v", ErrInternal, condition, err)
+	}
+	if len(open) == 0 {
+		return fmt.Errorf("%w: the condition %q is no longer open", ErrConflict, condition)
+	}
+	return a.confirmPremisePair(ctx, decisionID, premiseID, p.state, label, open, reason)
 }

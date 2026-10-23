@@ -162,7 +162,8 @@
 //     the caller's place grants cover.
 //   - Premises (D149): a Decision in force that rests on one that is not opens
 //     a premise-flagged condition, resolved when the rule stops holding or a
-//     ratify holder confirms it with [App.ConfirmPremise];
+//     ratify holder confirms it with [App.ConfirmPremise] or, by the condition,
+//     [App.ConfirmPremiseCondition]; an open condition follows its Decision's place;
 //     [App.SweepPremiseFlags] is the backstop.
 //   - Coverage (D142): an Area's [CoverageRule] records name repository path
 //     patterns; [App.DecisionsForPaths] answers which Decisions in force

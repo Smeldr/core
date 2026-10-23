@@ -96,4 +96,41 @@ func TestPG_PremiseFlagged(t *testing.T) {
 	if n, _ := open(); n != 1 {
 		t.Errorf("open after reopening: %d", n)
 	}
+
+	// T925: the Decision moves to the Organization; its open condition follows
+	// with exactly one live place edge, and is confirmed by the condition.
+	var orgID, sigID, plID string
+	if err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_organizations LIMIT 1`).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_relations WHERE source_id = 'dec-d' AND relation_kind = 'belongs_to_domain' AND invalid_at IS NULL`).Scan(&plID); err != nil {
+		t.Fatal(err)
+	}
+	if err := smeldr.RegisterApproverRole(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Grant(ctx, smeldr.RoleGrant{TokenID: "boss", RoleName: smeldr.RoleApprover}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rels.Withdraw(boss, plID, "moving it"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rels.Assert(boss, smeldr.RelationEdge{SourceType: "Decision", SourceID: "dec-d", TargetType: "Organization", TargetID: orgID,
+		RelationKind: "belongs_to_organization", EdgeClass: "asserted", Attributes: json.RawMessage("{}")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_signals WHERE signal_type = 'premise-flagged' AND status = 'open'`).Scan(&sigID); err != nil {
+		t.Fatal(err)
+	}
+	var places int
+	var target string
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*), MAX(target_id) FROM smeldr_relations WHERE source_id = $1 AND relation_kind LIKE 'belongs_to_%' AND invalid_at IS NULL`, sigID).Scan(&places, &target); err != nil || places != 1 || target != orgID {
+		t.Errorf("condition places = %d at %s, %v", places, target, err)
+	}
+	if err := app.ConfirmPremiseCondition(boss, sigID, "still right"); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := open(); n != 0 {
+		t.Errorf("open after confirming by the condition: %d", n)
+	}
 }

@@ -30,6 +30,9 @@ const (
 	EdgeEndAmendmentRejected = "amendment-rejected"
 	// EdgeEndPurged: removed by the administrative purge [RelationStore.Delete].
 	EdgeEndPurged = "purged"
+	// EdgeEndMoved: an open condition's place edge, ended because the record
+	// it is about moved to another place, and the condition with it (T925).
+	EdgeEndMoved = "moved"
 	// EdgeEndNotRecorded: the row has ended but no record says how. Every end
 	// before relation history (core v1.128.0) reads this way; nothing is
 	// backfilled or invented.
@@ -124,7 +127,8 @@ func (s *RelationStore) recordEdgeEnd(ctx context.Context, edge RelationEdge, e 
 		s.signalResolver().resolveContradiction(ctx, edge.SourceID, edge.TargetID,
 			fmt.Sprintf("the contradicts relation %s ended: %s", edge.ID, e.cause))
 	}
-	// D149: a premise edge that ended may end a premise-flagged condition.
+	// D149: a premise edge that ended may end a premise-flagged condition,
+	// and a Decision that left its place takes its conditions along.
 	s.signalResolver().premiseEdgeChanged(ctx, edge)
 }
 
