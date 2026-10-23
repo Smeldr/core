@@ -160,6 +160,10 @@
 //     [App.SweepRestCounts] stores them per place bucket for every item, and
 //     [App.StoredRestCounts] reads them for a list, summed over the buckets
 //     the caller's place grants cover.
+//   - Premises (D149): a Decision in force that rests on one that is not opens
+//     a premise-flagged condition, resolved when the rule stops holding or a
+//     ratify holder confirms it with [App.ConfirmPremise];
+//     [App.SweepPremiseFlags] is the backstop.
 //   - Coverage (D142): an Area's [CoverageRule] records name repository path
 //     patterns; [App.DecisionsForPaths] answers which Decisions in force
 //     apply to a list of paths, and [App.CheckCoverage] keeps the rules true

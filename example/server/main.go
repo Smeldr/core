@@ -397,6 +397,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.EnsureChangeCheckTables(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure change check tables: %w", err)
 		}
+		if err := smeldr.EnsurePremiseFlagTable(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure premise flag table: %w", err)
+		}
 		if err := smeldr.EnsureTaskGoalTitleColumns(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure task and goal title columns: %w", err)
 		}
@@ -668,6 +671,25 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 				Err:       restErrStr,
 				ActorKind: "job",
 				ActorID:   "sweep-rest-counts",
+			})
+			// The premise-flagged backstop (D149, T919): every premise pair.
+			premises, premiseErr := app.SweepPremiseFlags(ctx)
+			premiseErrStr := ""
+			if premiseErr != nil {
+				premiseErrStr = premiseErr.Error()
+				slog.ErrorContext(ctx, "premise sweep failed", "error", premiseErr)
+			}
+			_ = runStore.Append(ctx, smeldr.SweepRunRecord{
+				ID:        smeldr.NewID(),
+				Detector:  "premise-flags",
+				RanAt:     time.Now().UTC(),
+				Interval:  schedule,
+				Walked:    premises.Pairs,
+				Flagged:   premises.Opened + premises.Resolved,
+				Skipped:   premises.Failed,
+				Err:       premiseErrStr,
+				ActorKind: "job",
+				ActorID:   "sweep-premise-flags",
 			})
 			return walked, flagged, skipped, sweepErr
 		}

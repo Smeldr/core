@@ -124,6 +124,8 @@ func (s *RelationStore) recordEdgeEnd(ctx context.Context, edge RelationEdge, e 
 		s.signalResolver().resolveContradiction(ctx, edge.SourceID, edge.TargetID,
 			fmt.Sprintf("the contradicts relation %s ended: %s", edge.ID, e.cause))
 	}
+	// D149: a premise edge that ended may end a premise-flagged condition.
+	s.signalResolver().premiseEdgeChanged(ctx, edge)
 }
 
 // endEdge ends the live row id now and records how. It reports whether a live

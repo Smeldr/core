@@ -221,6 +221,9 @@ func (a *App) resolveSignalsFor(ctx context.Context, t statusTransition) {
 	if t.typeName != "Decision" {
 		return
 	}
+	// D149: the Decision's premise pairs, as the resting Decision and as the
+	// premise.
+	r.evaluatePremisesOf(ctx, t.id)
 	if t.from == decisionRatified {
 		r.resolveContradictionsOf(ctx, t.id, resolution)
 	}

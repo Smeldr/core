@@ -654,6 +654,7 @@ func (s *RelationStore) announceEdge(ctx context.Context, edge RelationEdge, new
 	if edge.RelationKind == "contradicts" {
 		s.emitConflictDetectedSignal(ctx, edge)
 	}
+	s.signalResolver().premiseEdgeChanged(ctx, edge)
 }
 
 // emitConflictDetectedSignal fires D85's conflict-detected structural Signal

@@ -40,7 +40,7 @@ var signalTypeTable = []SignalTypeInfo{
 	{"conflict-detected", SignalCondition, "resolved when the contradicts edge ends or a side leaves ratified; for a taken URL, when the item is published or its slug changes"},
 	{"downstream-blocked", SignalCondition, "resolved when the blocking item is done; no emitter yet"},
 	{"reference-stale", SignalCondition, "resolved when the reference is refreshed or removed; no emitter yet"},
-	{"premise-flagged", SignalCondition, "resolved when the premise is re-confirmed or the dependent item changes; no emitter yet"},
+	{"premise-flagged", SignalCondition, "resolved when the premise is in force again, the grounded_in or addresses edge ends, the resting Decision leaves force, or a ratify holder confirms it with confirm_premise (D149, T919)"},
 	{"coverage-matches-nothing", SignalCondition, "resolved when the coverage rule is changed, archived or matches again (CheckCoverage)"},
 	{"merge-unapproved", SignalCondition, "resolved when an approver answers for the Area with answer_change_check: approved after the fact, or not approved with a reason (T918)"},
 	{"review-requested", SignalRequest, "answered by the review, or withdrawn by the asker"},
