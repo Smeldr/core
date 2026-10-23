@@ -26,6 +26,9 @@ type ReadScope struct {
 	all      bool
 	items    map[string]map[string]bool // type -> id: the readable items
 	anyOfTyp map[string]bool            // "type" from a "type:*" pattern
+	// places holds the places ("Domain:<id>", "Area:<id>") a read grant on a
+	// place kind anchors: the stored rest counts read the buckets they cover.
+	places map[string]bool
 }
 
 // All reports whether the scope reads every item: a legacy Author or higher
@@ -180,6 +183,10 @@ func (s *ReadScope) loadAnchor(ctx context.Context, db DB, kind, direction, anch
 		for _, m := range members {
 			s.add(m.typeName, m.id)
 		}
+		if s.places == nil {
+			s.places = map[string]bool{}
+		}
+		s.places[anchorType+":"+anchorID] = true
 		if direction == "incoming" {
 			return nil
 		}
@@ -222,6 +229,26 @@ func (s *ReadScope) add(typeName, id string) {
 		s.items[typeName] = ids
 	}
 	ids[id] = true
+}
+
+// coversRestBucket reports whether the scope reads every item the rest count
+// sweep stored in a bucket ([App.SweepRestCounts]): a scope that reads
+// everything covers every bucket; a read grant on a Domain covers that
+// Domain's bucket and those of its Areas (bucketDomain); one on an Area
+// covers that Area's. The Organization's bucket holds unplaced items and is
+// covered only by a scope that reads everything.
+func (s *ReadScope) coversRestBucket(bucketType, bucketID, bucketDomain string) bool {
+	switch {
+	case s == nil:
+		return false
+	case s.all:
+		return true
+	case bucketType == "Domain":
+		return s.places["Domain:"+bucketID]
+	case bucketType == "Area":
+		return s.places["Area:"+bucketID] || (bucketDomain != "" && s.places["Domain:"+bucketDomain])
+	}
+	return false
 }
 
 // cutPattern splits a static scope pattern "type:id" (or "type:*") at its first colon.

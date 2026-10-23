@@ -157,6 +157,9 @@
 //   - Rest counts (D150): [App.RestCounts] counts, live, what rests on an item
 //     and what it rests on over [RestRelationKinds], transitively, open and
 //     closed, under the caller's read rules and capped at [RestCountLimit].
+//     [App.SweepRestCounts] stores them per place bucket for every item, and
+//     [App.StoredRestCounts] reads them for a list, summed over the buckets
+//     the caller's place grants cover.
 //   - Coverage (D142): an Area's [CoverageRule] records name repository path
 //     patterns; [App.DecisionsForPaths] answers which Decisions in force
 //     apply to a list of paths, and [App.CheckCoverage] keeps the rules true

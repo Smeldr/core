@@ -615,6 +615,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.CreateSweepRunTable(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create sweep run table: %w", err)
 		}
+		if err := smeldr.EnsureRestCountTable(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("create rest count tables: %w", err)
+		}
 		// Fall back to the hourly default when ServerConfig is constructed
 		// directly rather than via parseConfig's own envOr default (e.g. a
 		// caller building ServerConfig by hand) — matches
@@ -646,6 +649,25 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 				Err:       errStr,
 				ActorKind: "job",
 				ActorID:   "sweep-structural",
+			})
+			// The stored rest counts (D150, T919) follow the structural
+			// sweep on the same schedule, recorded as their own detector.
+			run, restErr := app.SweepRestCounts(ctx)
+			restErrStr := ""
+			if restErr != nil {
+				restErrStr = restErr.Error()
+				slog.ErrorContext(ctx, "rest counts sweep failed", "error", restErr)
+			}
+			_ = runStore.Append(ctx, smeldr.SweepRunRecord{
+				ID:        smeldr.NewID(),
+				Detector:  "rest-counts",
+				RanAt:     time.Now().UTC(),
+				Interval:  schedule,
+				Walked:    run.Items,
+				Flagged:   run.Capped,
+				Err:       restErrStr,
+				ActorKind: "job",
+				ActorID:   "sweep-rest-counts",
 			})
 			return walked, flagged, skipped, sweepErr
 		}
