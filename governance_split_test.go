@@ -69,8 +69,8 @@ func TestGovernanceOnly_Registration(t *testing.T) {
 	if err := RegisterOrchestrationAddOnRelationKinds(context.Background(), fullRS); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(fullRS.ListKinds()); got != 17 {
-		t.Errorf("governance + add-on kinds = %d, want 17", got)
+	if got := len(fullRS.ListKinds()); got != 18 {
+		t.Errorf("governance + add-on kinds = %d, want 18", got)
 	}
 	both, bothDB := signalTestApp(t)
 	for _, name := range []string{"Signal", "Decision", "Amendment", "Task", "Goal", "Run"} {

@@ -32,6 +32,7 @@ func publishFieldSamples() map[string]any {
 		"Area":          &Area{Node: n},
 		"Set":           &Set{Node: n},
 		"CoverageRule":  &CoverageRule{Node: n},
+		"ChangeCheck":   &ChangeCheck{Node: n},
 	}
 }
 

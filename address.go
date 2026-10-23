@@ -44,6 +44,8 @@ var coreAddressPrefixes = map[string]string{
 	"Set":          "SET",
 	// Coverage rules of Areas (coverage.go, T886).
 	"CoverageRule": "COV",
+	// The pull request check (change_check.go, T918).
+	"ChangeCheck": "CHK",
 }
 
 var addressPrefixRe = regexp.MustCompile(`^[A-Z]{1,4}$`)
@@ -89,13 +91,14 @@ var coreAddressTables = []struct{ typeName, table, legacy string }{
 	{"Area", "smeldr_areas", ""},
 	{"Set", "smeldr_sets", ""},
 	{"CoverageRule", "smeldr_coverage_rules", ""},
+	{"ChangeCheck", "smeldr_change_checks", ""},
 }
 
 // governanceAddressTypes and orchestrationAddOnAddressTypes are the types
 // [CreateGovernanceTables] and [CreateOrchestrationAddOnTables] give address
 // storage; [CreateAuthorityTables] does the same for authorityAddressTypes.
 var (
-	governanceAddressTypes         = []string{"Signal", "Decision", "Amendment", "Organization", "Domain", "Area", "Set", "CoverageRule"}
+	governanceAddressTypes         = []string{"Signal", "Decision", "Amendment", "Organization", "Domain", "Area", "Set", "CoverageRule", "ChangeCheck"}
 	orchestrationAddOnAddressTypes = []string{"Task", "Goal", "Run"}
 	authorityAddressTypes          = []string{"Rule", "AuthorityStub"}
 	subscriptionAddressTypes       = []string{"Subscription"}

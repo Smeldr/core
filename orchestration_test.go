@@ -559,8 +559,8 @@ func TestRegisterOrchestrationTypes_flows(t *testing.T) {
 	if err := row.Scan(&n); err != nil {
 		t.Fatalf("count state flows: %v", err)
 	}
-	if n != 10 {
-		t.Errorf("registered flow count = %d, want 10 (Run must not add one)", n)
+	if n != 11 {
+		t.Errorf("registered flow count = %d, want 11 (Run must not add one)", n)
 	}
 
 	// Load-bearing assertion, not just an unchanged count: a type
@@ -1311,7 +1311,9 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 		"depends_on":   {"Depends On", "", `[{"source_type":"Task","target_type":"Task"}]`, true},
 		"ships_as":     {"Ships As", "Shipped By", `[{"source_type":"Task","target_type":"Amendment"}]`, true},
 		"amends":       {"Amends", "Amended By", `[{"source_type":"Amendment","target_type":"Decision"}]`, true},
-		"supersedes":   {"Supersedes", "Superseded By", `[{"source_type":"Decision","target_type":"Decision"}]`, true},
+		"supersedes":   {"Supersedes", "Superseded By", `[{"source_type":"Decision","target_type":"Decision"},{"source_type":"ChangeCheck","target_type":"ChangeCheck"}]`, true},
+		// T918: a pull request check names the Decisions it checked against.
+		"checked_against": {"Checked Against", "Checks", `[{"source_type":"ChangeCheck","target_type":"Decision"}]`, true},
 		"contains": {"Contains", "Part Of", `[{"source_type":"Goal","target_type":"Goal"},` +
 			`{"source_type":"Goal","target_type":"Task"},` +
 			`{"source_type":"Goal","target_type":"Decision"},` +

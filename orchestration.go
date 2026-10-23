@@ -863,7 +863,7 @@ func CreateGovernanceTables(db DB) error {
 			task_ref         TEXT NOT NULL DEFAULT '',
 			last_actor       TEXT NOT NULL DEFAULT ''
 		)`,
-	}, placeTableStmts...), coverageRuleTableStmts...)); err != nil {
+	}, placeTableStmts...), append(coverageRuleTableStmts, changeCheckTableStmts...)...)); err != nil {
 		return err
 	}
 	// The Area's approval mode (T886), on a database made before it.
@@ -1173,6 +1173,7 @@ func RegisterGovernanceTypes(app *App, db DB) {
 	// D142: Organization, Domain, Area and Set, and the Areas' coverage rules.
 	registerPlaceTypes(app, db)
 	registerCoverageRule(app, db)
+	registerChangeCheck(app, db)
 }
 
 // RegisterOrchestrationAddOn registers the record types of the Orchestration
@@ -1253,7 +1254,17 @@ func RegisterGovernanceRelationKinds(ctx context.Context, store *RelationStore) 
 			ReverseLabel: "Superseded By",
 			Mode:         "asserted",
 			Directional:  true,
-			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"}]`),
+			TypePairs:    json.RawMessage(`[{"source_type":"Decision","target_type":"Decision"},{"source_type":"ChangeCheck","target_type":"ChangeCheck"}]`),
+		},
+		{
+			// T918: a pull request check names the Decisions in force for the
+			// paths it touched, so each reader sees those it may read.
+			TypeName:     "checked_against",
+			Label:        "Checked Against",
+			ReverseLabel: "Checks",
+			Mode:         "asserted",
+			Directional:  true,
+			TypePairs:    json.RawMessage(`[{"source_type":"ChangeCheck","target_type":"Decision"}]`),
 		},
 		{
 			// contradicts is symmetric — "A contradicts B" reads identically

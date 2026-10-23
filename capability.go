@@ -103,6 +103,9 @@ var capabilityTable = []Capability{
 	// writes counts and opens conditions for every rule of a repository.
 	{ResourceItem, "decisions_for_paths", "read", ReasonNotTaken, true},
 	{ResourceItem, "check_coverage", "manage", ReasonNotTaken, true},
+	// The pull request check (T918): the adapter's token or an operator makes
+	// and closes Checks; the read rules apply to what each reader sees.
+	{ResourceItem, "check_change", "manage", ReasonNotTaken, true},
 	// Who approves a place (D147, T911): the read rules on the place apply
 	// inside ApproversOf.
 	{ResourceItem, "approvers_of", "read", ReasonNotTaken, true},

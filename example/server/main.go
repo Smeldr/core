@@ -394,6 +394,9 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.EnsureDecisionSourcesColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure decision sources column: %w", err)
 		}
+		if err := smeldr.EnsureChangeCheckTables(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure change check tables: %w", err)
+		}
 		if err := smeldr.EnsureTaskGoalTitleColumns(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure task and goal title columns: %w", err)
 		}

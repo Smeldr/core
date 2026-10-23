@@ -158,6 +158,9 @@
 //     patterns; [App.DecisionsForPaths] answers which Decisions in force
 //     apply to a list of paths, and [App.CheckCoverage] keeps the rules true
 //     against a repository's file list.
+//   - The pull request check (D143, D144): [App.CheckChange] checks one
+//     commit of a proposed change against the Decisions in force for its
+//     paths and records it as a [ChangeCheck]; core never calls the host.
 //   - Pinned sources (D148): [Decision].Sources lists the external files a
 //     Decision rests on, each at a full commit SHA with a role
 //     ([DecisionSource]); set while proposed, frozen once ratified.
