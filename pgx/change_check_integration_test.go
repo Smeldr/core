@@ -107,4 +107,26 @@ func TestPG_ChangeCheck(t *testing.T) {
 	if err != nil || string(after.Check.Status) != smeldr.ChangeCheckApproved {
 		t.Errorf("after the answer: %+v, %v", after.Check, err)
 	}
+
+	// T918 part 3: an audit-after-merge Area opens a condition at merge, and
+	// the approver's answer resolves it.
+	if _, err := db.ExecContext(ctx, `UPDATE smeldr_areas SET approval_mode = 'audit-after-merge' WHERE id = 'are-b'`); err != nil {
+		t.Fatal(err)
+	}
+	audit := smeldr.ChangeInput{Repository: "acme/app", Number: 6, HeadCommit: "cccccccccccccccccccccccccccccccccccccccc", Paths: []string{"internal/billing/a.go"}}
+	checked, err := app.CheckChange(ops, audit)
+	if err != nil || string(checked.Check.Status) != smeldr.ChangeCheckCommented {
+		t.Fatalf("audit check: %+v, %v", checked.Check, err)
+	}
+	merged, err := app.RecordMerge(ops, smeldr.MergeInput{Repository: "acme/app", Number: 6, HeadCommit: audit.HeadCommit, MergeCommit: "dddddddddddddddddddddddddddddddddddddddd"})
+	if err != nil || len(merged.Opened) != 1 {
+		t.Fatalf("merge: %+v, %v", merged, err)
+	}
+	if err := app.AnswerChangeCheck(boss, checked.Check.Address, "ARE900", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM smeldr_signals WHERE subject_id = $1 AND signal_type = 'merge-unapproved'`, checked.Check.ID).Scan(&status); err != nil || status != "resolved" {
+		t.Errorf("audit condition: %q, %v", status, err)
+	}
 }

@@ -297,6 +297,12 @@ func (a *App) AnswerChangeCheck(ctx context.Context, check, area string, approve
 		return fmt.Errorf("%w: read the Area %s of the Check: %v", ErrInternal, row.address, err)
 	}
 	label := recordLabel(ctx, db, "smeldr_change_checks", checkID)
+	if row.mode == ApprovalModeAuditAfterMerge {
+		if !approve && reason == "" {
+			return Err("reason", "is required when the change is not approved: say why")
+		}
+		return a.answerAuditArea(ctx, checkID, label, status, row, approve, reason)
+	}
 	switch {
 	case row.mode == "":
 		return fmt.Errorf("%w: %s does not touch Area %s", ErrConflict, label, row.address)

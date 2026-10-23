@@ -61,7 +61,7 @@ type Area struct {
 	// ApprovalMode is what a change touching the Area needs (D142 point 8):
 	// [ApprovalModeCommentOnly] (the default) or [ApprovalModeRequiresApproval].
 	// Stored for the pull request check, which reads it.
-	ApprovalMode string `json:"approval_mode" db:"approval_mode" smeldr_enum:"comment-only|requires-approval" smeldr_description:"What a change touching the Area needs: comment-only (default) or requires-approval."`
+	ApprovalMode string `json:"approval_mode" db:"approval_mode" smeldr_enum:"comment-only|requires-approval|audit-after-merge" smeldr_description:"What a change touching the Area needs: comment-only (default), requires-approval, or audit-after-merge (never blocks; a change merged without approval opens an audit)."`
 }
 
 // Set groups records by in_set. It carries no authority (D71): a Set is never
@@ -320,9 +320,9 @@ func normalizeApprovalMode(a *Area) error {
 	switch a.ApprovalMode {
 	case "":
 		a.ApprovalMode = ApprovalModeCommentOnly
-	case ApprovalModeCommentOnly, ApprovalModeRequiresApproval:
+	case ApprovalModeCommentOnly, ApprovalModeRequiresApproval, ApprovalModeAuditAfterMerge:
 	default:
-		return Err("approval_mode", fmt.Sprintf("must be %q or %q", ApprovalModeCommentOnly, ApprovalModeRequiresApproval))
+		return Err("approval_mode", fmt.Sprintf("must be %q, %q or %q", ApprovalModeCommentOnly, ApprovalModeRequiresApproval, ApprovalModeAuditAfterMerge))
 	}
 	return nil
 }

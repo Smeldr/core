@@ -228,7 +228,7 @@ var changeCheckCommitRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // approvalModeRank orders the approval modes by strictness, for a Check's
 // setting.
-var approvalModeRank = map[string]int{ApprovalModeCommentOnly: 0, ApprovalModeRequiresApproval: 2}
+var approvalModeRank = map[string]int{ApprovalModeCommentOnly: 0, ApprovalModeAuditAfterMerge: 1, ApprovalModeRequiresApproval: 2}
 
 // normalizeChangeInput checks in and returns it in its stored form.
 func normalizeChangeInput(in ChangeInput) (ChangeInput, error) {
