@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.171.0] - 2026-10-23
+
 ### Added
 
 - **The pull request check, part 4: reading Checks and the tool capabilities (T918, A569).** `App.ListChangeChecks` lists Checks by repository and number, Area or Decision (never one long list), under the read rules. Capabilities `item answer_change_check` and `item change_checks` (read) gate the MCP tools `answer_change_check`, `get_change_check` and `list_change_checks` (smeldr.dev/mcp); `check_change` and `record_merge` keep `item check_change`.
