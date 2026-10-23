@@ -18,6 +18,14 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.173.0] - 2026-10-23
+
+### Security
+
+- **Toolchain go1.26.10 (A575)** for GO-2026-6809 in `crypto/x509`. The `go 1.26.5` minimum is unchanged; build server binaries with go1.26.10 or later.
+
 ### Fixed
 
 - **conflict-detected is placed with its Decision and names only it (T928, A576).** A `contradicts` edge's two conditions are each placed where their own Decision is placed (in the insert's transaction) and follow it when it moves; their messages (`D12 contradicts a Decision`) and resolutions no longer name the other Decision or the relation by internal ID. The pair is kept in `smeldr_contradiction_flags` (`EnsureContradictionFlagTable`); the resolver finds rows there, not by their message. `App.SweepContradictionConditions` rewrites older rows (message, resolution, pair row, place) and resolves stale open ones; the example server runs it at boot and on the structural sweep. Provenance records written before this may still hold an internal ID.
