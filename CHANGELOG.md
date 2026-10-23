@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.172.0] - 2026-10-23
+
 ### Added
 
 - **Premise-flagged follow-ups: confirm by the condition, and the condition moves with its Decision (T925, A574).** `App.ConfirmPremiseCondition(ctx, condition, reason)` confirms by the open `premise-flagged` Signal, so a ratify holder who may not read the premise can confirm, and nothing names it. An open condition now follows its Decision's place on every place edge assert and end, with exactly one live place edge (new end cause `EdgeEndMoved`, `moved`); `SweepPremiseFlags` syncs them as the backstop.
