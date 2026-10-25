@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.174.0] - 2026-10-25
+
 ### Changed
 
 - **Only `grounded_in` is a premise for `premise-flagged` (D153, T931, A579).** `addresses` says a Decision is about another (declines it, follows it up, clarifies it), not that it rests on it, so a ratified decline copy that addresses the Decision it declined no longer raises the condition. A condition opened from an `addresses` edge before this release resolves at its next evaluation (at the latest the next premise sweep) with the reason `addresses is not a premise relation (D153)`. Rest counts (D150) still count `addresses`.
