@@ -16,10 +16,19 @@ import (
 // Decision that is not (D149).
 const premiseFlagged = "premise-flagged"
 
-// isPremiseKind reports whether kind is one by which a Decision rests on
-// another for D149: grounded in it, or addressing it. amends is left out (Q4).
+// premiseKind is the relation kind by which a Decision rests on another
+// (D149, as amended by D153): grounded_in only. addresses says a Decision is
+// about another (declines it, follows it up, clarifies it), not that it rests
+// on it; amends is left out too (D149 Q4).
+const premiseKind = "grounded_in"
+
+// notPremiseReason is why an open condition that came from an addresses edge
+// resolves (D153).
+const notPremiseReason = "addresses is not a premise relation (D153)"
+
+// isPremiseKind reports whether kind is the premise relation.
 func isPremiseKind(kind string) bool {
-	return kind == "grounded_in" || kind == "addresses"
+	return kind == premiseKind
 }
 
 // premiseFlagTableStmts create the table of the premise pairs: one row per
@@ -86,16 +95,19 @@ func (d premiseDecision) label(id string) string {
 	return "Decision " + id
 }
 
-// premiseEdgeLive reports whether a live grounded_in or addresses edge runs
-// from the Decision to the premise.
-func premiseEdgeLive(ctx context.Context, db DB, decisionID, premiseID string) (bool, error) {
-	var n int
-	err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM smeldr_relations
+// premiseEdgesLive reports whether a live grounded_in edge runs from the
+// Decision to the premise, and whether a live addresses edge does (which is
+// not a premise, D153, but names the reason an old condition resolves).
+func premiseEdgesLive(ctx context.Context, db DB, decisionID, premiseID string) (grounded, addressed bool, err error) {
+	var g, a int
+	err = db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(CASE WHEN relation_kind = $3 THEN 1 ELSE 0 END), 0),
+		        COALESCE(SUM(CASE WHEN relation_kind = 'addresses' THEN 1 ELSE 0 END), 0)
+		   FROM smeldr_relations
 		  WHERE source_type = 'Decision' AND source_id = $1 AND target_type = 'Decision' AND target_id = $2
-		    AND relation_kind IN ('grounded_in', 'addresses') AND (invalid_at IS NULL OR invalid_at > $3)`,
-		decisionID, premiseID, time.Now().UTC()).Scan(&n)
-	return n > 0, err
+		    AND (invalid_at IS NULL OR invalid_at > $4)`,
+		decisionID, premiseID, premiseKind, time.Now().UTC()).Scan(&g, &a)
+	return g > 0, a > 0, err
 }
 
 // premiseRow is a pair's row: its Signal and last confirmation.
@@ -124,7 +136,7 @@ func readPremiseRow(ctx context.Context, db DB, decisionID, premiseID string) (p
 
 // evaluatePremise brings the premise-flagged condition of the pair
 // (decisionID, premiseID) in line with D149: open when the Decision is in
-// force, a live grounded_in or addresses edge runs to the premise, and the
+// force, a live grounded_in edge runs to the premise, and the
 // premise is not in force; resolved, with the reason saying which, when that
 // no longer holds. In force is a standing that holds (Q2). A pair whose
 // condition was confirmed opens again only when the premise's state differs
@@ -149,7 +161,7 @@ func (r signalResolver) evaluatePremiseErr(ctx context.Context, decisionID, prem
 	if err != nil {
 		return "", err
 	}
-	live, err := premiseEdgeLive(ctx, db, decisionID, premiseID)
+	live, addressed, err := premiseEdgesLive(ctx, db, decisionID, premiseID)
 	if err != nil {
 		return "", err
 	}
@@ -171,6 +183,9 @@ func (r signalResolver) evaluatePremiseErr(ctx context.Context, decisionID, prem
 		ended = label + " no longer exists"
 	case !holds[d.state]:
 		ended = label + " is no longer in force (" + d.state + ")"
+	case !live && addressed:
+		// A condition opened before D153 from an addresses edge.
+		ended = notPremiseReason
 	case !live:
 		ended = "the relation from " + label + " to its premise ended"
 	case !p.found:
@@ -219,11 +234,11 @@ func (r signalResolver) openPremise(ctx context.Context, decisionID, premiseID, 
 func premisePairsOf(ctx context.Context, db DB, decisionID string) ([][2]string, error) {
 	return premisePairs(ctx, db,
 		`SELECT source_id, target_id FROM smeldr_relations
-		  WHERE source_type = 'Decision' AND target_type = 'Decision' AND relation_kind IN ('grounded_in', 'addresses')
+		  WHERE source_type = 'Decision' AND target_type = 'Decision' AND relation_kind = $3
 		    AND (invalid_at IS NULL OR invalid_at > $2) AND (source_id = $1 OR target_id = $1)
 		 UNION
 		 SELECT decision_id, premise_id FROM smeldr_premise_flags WHERE decision_id = $1 OR premise_id = $1`,
-		decisionID, time.Now().UTC())
+		decisionID, time.Now().UTC(), premiseKind)
 }
 
 // premisePairs runs a query of (decision, premise) rows.
@@ -380,7 +395,7 @@ type PremiseSweep struct {
 }
 
 // SweepPremiseFlags evaluates every premise pair (D149): each live
-// grounded_in or addresses edge between Decisions, and each pair that ever
+// grounded_in edge between Decisions, and each pair that ever
 // opened the condition. It is the backstop for a change the event-driven
 // evaluation missed; the structural sweep's schedule runs it. A pair that
 // fails is counted and logged, and the sweep goes on. Reading the pairs
@@ -391,10 +406,10 @@ func (a *App) SweepPremiseFlags(ctx context.Context) (PremiseSweep, error) {
 	}
 	pairs, err := premisePairs(ctx, a.cfg.DB,
 		`SELECT source_id, target_id FROM smeldr_relations
-		  WHERE source_type = 'Decision' AND target_type = 'Decision' AND relation_kind IN ('grounded_in', 'addresses')
+		  WHERE source_type = 'Decision' AND target_type = 'Decision' AND relation_kind = $2
 		    AND (invalid_at IS NULL OR invalid_at > $1)
 		 UNION
-		 SELECT decision_id, premise_id FROM smeldr_premise_flags`, time.Now().UTC())
+		 SELECT decision_id, premise_id FROM smeldr_premise_flags`, time.Now().UTC(), premiseKind)
 	if err != nil {
 		return PremiseSweep{}, fmt.Errorf("%w: SweepPremiseFlags: %v", ErrInternal, err)
 	}

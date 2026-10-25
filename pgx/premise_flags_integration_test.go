@@ -133,4 +133,28 @@ func TestPG_PremiseFlagged(t *testing.T) {
 	if n, _ := open(); n != 0 {
 		t.Errorf("open after confirming by the condition: %d", n)
 	}
+
+	// D153: a condition left open on a pair whose live edge is addresses (as
+	// the sweep before D153 opened them) resolves at the next sweep with that
+	// reason, and addresses opens nothing again.
+	if _, err := db.ExecContext(ctx, `UPDATE smeldr_decisions SET status = 'proposed' WHERE id = 'dec-p'`); err != nil {
+		t.Fatal(err)
+	}
+	if sweep, err := app.SweepPremiseFlags(ctx); err != nil || sweep.Opened != 1 {
+		t.Fatalf("reopen = %+v %v", sweep, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE smeldr_relations SET relation_kind = 'addresses' WHERE source_id = 'dec-d' AND target_id = 'dec-p' AND relation_kind = 'grounded_in'`); err != nil {
+		t.Fatal(err)
+	}
+	if sweep, err := app.SweepPremiseFlags(ctx); err != nil || sweep.Resolved != 1 || sweep.Opened != 0 {
+		t.Errorf("addresses sweep = %+v %v", sweep, err)
+	}
+	var because int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_signals WHERE signal_type = 'premise-flagged' AND status = 'resolved' AND resolution = $1`,
+		"addresses is not a premise relation (D153)").Scan(&because); err != nil || because != 1 {
+		t.Errorf("resolved with the D153 reason: %d %v", because, err)
+	}
+	if sweep, err := app.SweepPremiseFlags(ctx); err != nil || sweep.Opened != 0 {
+		t.Errorf("after D153 = %+v %v", sweep, err)
+	}
 }

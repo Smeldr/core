@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Changed
+
+- **Only `grounded_in` is a premise for `premise-flagged` (D153, T931, A579).** `addresses` says a Decision is about another (declines it, follows it up, clarifies it), not that it rests on it, so a ratified decline copy that addresses the Decision it declined no longer raises the condition. A condition opened from an `addresses` edge before this release resolves at its next evaluation (at the latest the next premise sweep) with the reason `addresses is not a premise relation (D153)`. Rest counts (D150) still count `addresses`.
+
 ### Fixed
 
 - **The structural sweep no longer ends every relation to or from a task_plan (T932, A578).** A runtime type with its own state flow is alive unless archived or gone, as a reference type; before, it counted as alive only when published, which a task_plan never is, so its `refers_to` and `about` edges were ended each hour. `App.RepairSweptEdges` and `smeldr-server repair-swept-edges` (dry run by default) restore the wrongly ended edges as new rows, with no event and no condition; a relation with a later row ended for another reason (a withdraw, a rewrite) stays ended.

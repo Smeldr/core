@@ -101,11 +101,45 @@ func TestPremiseFlagged_Message(t *testing.T) {
 			t.Errorf("message names the premise: %q", parts[1])
 		}
 	}
-	// addresses opens it as well; an unplaced Decision gets no place edge.
+	// An unplaced Decision gets the condition with no place edge.
 	f.decision(t, "u", "ratified")
-	f.rest(t, "u", "addresses", "p")
+	f.rest(t, "u", "grounded_in", "p")
 	if got := f.premiseSignals(t, "u")["open"]; len(got) != 1 {
-		t.Errorf("addresses: %v", got)
+		t.Errorf("unplaced: %v", got)
+	}
+}
+
+// TestPremiseFlagged_AddressesIsNotAPremise (D153): an addresses edge to a
+// Decision not in force opens nothing; a condition opened from one before
+// D153 resolves at the next sweep with that reason; grounded_in still opens.
+func TestPremiseFlagged_AddressesIsNotAPremise(t *testing.T) {
+	f := newPremiseFixture(t)
+	ctx := context.Background()
+	f.placedDecision(t, "d", "ratified")
+	f.placedDecision(t, "p", "proposed")
+	f.rest(t, "d", "addresses", "p")
+	if got := f.premiseSignals(t, "d"); len(got) != 0 {
+		t.Fatalf("addresses opened: %v", got)
+	}
+	// As the sweep before D153 left it: an open condition on the pair.
+	r := f.app.signalResolver()
+	if did, err := r.openPremise(ctx, "d", "p", "D-d", premiseRow{}); err != nil || did != "opened" {
+		t.Fatalf("open the old condition: %q %v", did, err)
+	}
+	sweep, err := f.app.SweepPremiseFlags(ctx)
+	if err != nil || sweep.Resolved != 1 || sweep.Opened != 0 {
+		t.Errorf("sweep = %+v %v", sweep, err)
+	}
+	if got := f.premiseSignals(t, "d"); len(got["open"]) != 0 || len(got["resolved"]) != 1 || !strings.HasSuffix(got["resolved"][0], "|"+notPremiseReason) {
+		t.Errorf("signals = %v; want resolved %q", got, notPremiseReason)
+	}
+	// It stays resolved, and grounded_in still opens one.
+	if sweep, err := f.app.SweepPremiseFlags(ctx); err != nil || sweep.Opened != 0 || sweep.Resolved != 0 {
+		t.Errorf("second sweep = %+v %v", sweep, err)
+	}
+	f.rest(t, "d", "grounded_in", "p")
+	if got := f.premiseSignals(t, "d")["open"]; len(got) != 1 {
+		t.Errorf("grounded_in: %v", got)
 	}
 }
 
@@ -146,7 +180,7 @@ func TestPremiseFlagged_Resolves(t *testing.T) {
 	f.placedDecision(t, "p2", "superseded")
 	f.rest(t, "d1", "grounded_in", "p")
 	edge := f.rest(t, "d2", "grounded_in", "p2")
-	f.rest(t, "d3", "addresses", "p2")
+	f.rest(t, "d3", "grounded_in", "p2")
 	for _, d := range []string{"d1", "d2", "d3"} {
 		if len(f.premiseSignals(t, d)["open"]) != 1 {
 			t.Fatalf("%s not open", d)
@@ -291,7 +325,7 @@ func TestSweepPremiseFlags_Failures(t *testing.T) {
 	if _, err := (&App{cfg: Config{DB: &govQueryFailDB{DB: f.db, failOn: "UNION"}}}).SweepPremiseFlags(context.Background()); !errors.Is(err, ErrInternal) {
 		t.Errorf("pairs fail: %v", err)
 	}
-	for _, failOn := range []string{"SELECT address, status FROM smeldr_decisions", "SELECT COUNT(*) FROM smeldr_relations", "FROM smeldr_premise_flags WHERE decision_id", "WHERE status = 'open'"} {
+	for _, failOn := range []string{"SELECT address, status FROM smeldr_decisions", "relation_kind = 'addresses'", "FROM smeldr_premise_flags WHERE decision_id", "WHERE status = 'open'"} {
 		app := &App{cfg: Config{DB: &awaitsFailDB{DB: f.db, match: failOn, err: errors.New("disk")}}}
 		if failOn == "WHERE status = 'open'" {
 			// An open Signal must exist for the lookup to run.
