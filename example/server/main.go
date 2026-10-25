@@ -895,6 +895,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "migrate-signal-kinds" {
 		os.Exit(runMigrateSignalKinds(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "repair-swept-edges" {
+		os.Exit(runRepairSweptEdges(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "migrate-references" {
 		os.Exit(runMigrateReferences(os.Args[2:], os.Stdout, os.Stderr))
 	}

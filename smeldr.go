@@ -1160,6 +1160,15 @@ func defaultTargetChecker(db DB) TargetChecker {
 			return false, fmt.Errorf("smeldr: defaultTargetChecker: %q: reference-type registry could not be checked: %w", targetType, err)
 		}
 
+		// A runtime-defined type with a state flow of its own (task_plan:
+		// draft, submitted, approved, abandoned) never publishes: none of its
+		// states is death, only archived or a missing row (T932), as for a
+		// reference type. A type on the default flow stays editorial.
+		ownFlow, err := typeHasOwnFlow(ctx, db, targetType)
+		if err != nil {
+			return false, fmt.Errorf("smeldr: defaultTargetChecker: %q: state flows could not be checked: %w", targetType, err)
+		}
+
 		rows, err := db.QueryContext(ctx,
 			"SELECT status FROM smeldr_dynamic_content WHERE id=$1", targetID)
 		if err != nil {
@@ -1173,11 +1182,25 @@ func defaultTargetChecker(db DB) TargetChecker {
 		if err := rows.Scan(&status); err != nil {
 			return false, err
 		}
-		if isReference > 0 {
+		if isReference > 0 || ownFlow {
 			return status != "archived", nil
 		}
 		return status == "published", nil
 	}
+}
+
+// typeHasOwnFlow reports whether typeName has a state flow registered for it,
+// not only the default flow. A database without the flow tables has none.
+func typeHasOwnFlow(ctx context.Context, db DB, typeName string) (bool, error) {
+	var n int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_state_flows WHERE type_name = $1`, typeName).Scan(&n)
+	if err != nil {
+		if isNoSuchTable(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // SweepStructural runs a structural premise sweep using [defaultTargetChecker].

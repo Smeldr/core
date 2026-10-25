@@ -20,6 +20,7 @@ cross-referenced below by their Amendment ID.
 
 ### Fixed
 
+- **The structural sweep no longer ends every relation to or from a task_plan (T932, A578).** A runtime type with its own state flow is alive unless archived or gone, as a reference type; before, it counted as alive only when published, which a task_plan never is, so its `refers_to` and `about` edges were ended each hour. `App.RepairSweptEdges` and `smeldr-server repair-swept-edges` (dry run by default) restore the wrongly ended edges as new rows, with no event and no condition; a relation with a later row ended for another reason (a withdraw, a rewrite) stays ended.
 - **The example modules pin the toolchain (T930, A577).** `example/server`, `example/blog`, `example/api` and `example/docs` carry `toolchain go1.26.10`, so a plain `go build` there uses go1.26.10 even where the installed Go is older (before, `example/server` built with go1.26.5, which ships GO-2026-6809). `scripts/checkpins -root` checks each example's toolchain line against the root's; CI runs it on every push.
 
 ---

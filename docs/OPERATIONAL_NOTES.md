@@ -41,6 +41,30 @@ counts. What breaks for a caller that is not updated in the same release:
 - An agent or job token that ratified before the release is refused from then on, whatever
   its grants.
 
+## Repairing edges the structural sweep ended (T932, on Peter's yes)
+
+Until the T932 fix, the sweep ended every relation to or from a runtime type with its own
+state flow (task_plan) each hour.
+
+The order (Peter's condition, 2026-10-25):
+
+1. The fixed release is deployed. Running the repair before it is pointless: the next sweep
+   ends the restored edges again.
+2. Devops runs `smeldr-server repair-swept-edges` (a dry run: it writes nothing and prints
+   the counts per type and kind) and attaches the report to the devops Task.
+3. Before any `--apply`, devops sends a Signal to architect and to Peter with the dry run's
+   counts, and waits for Peter's go, so every Monitor and the relay can be stopped first if
+   he wants that.
+4. On Peter's go: `smeldr-server repair-swept-edges --apply --report=r.json`, report attached.
+5. Devops sends a Signal to architect and to Peter that the run is done, with the report's
+   counts, so any stopped Monitor and the relay can be started again.
+
+**What `--apply` emits:** nothing on the event stream or to webhooks. A restore writes the
+new relation row and one `assert` provenance record (job `sweep-repair`); it sends no
+`relation.asserted`, no `signal.*` event, runs no resolver and opens no condition. So there
+is no burst to quiet, and no summary event either: the report file is the record of the run.
+A second apply restores nothing.
+
 ## Running the D110 address migration (Phase 3, on Peter's yes)
 
 `smeldr-server migrate-addresses` (example/server) runs `MigrateAddresses` on the
