@@ -20,4 +20,4 @@ jobs:
         working-directory: scripts/checkpins
         env:
           GOWORK: 'off'
-        run: go run . ../../example/api ../../example/blog ../../example/docs ../../example/server
+        run: go run . -root ../.. ../../example/api ../../example/blog ../../example/docs ../../example/server

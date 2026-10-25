@@ -91,6 +91,16 @@ example's test fixes that test in the same commit; before this, example tests ra
 only at the next pin bump (example/server's provenance test stayed red from v1.121.0
 to 1a8bd1e unnoticed).
 
+**Toolchain lines (T930).** A module that builds a binary pins the toolchain in its
+own go.mod: a build follows the go.mod of the directory it runs in, so the root's
+`toolchain` line does not reach `example/server`. Without its own line, a plain
+`go build` there on a machine whose installed Go is older uses that older Go (T929's
+rehearsal built go1.26.5, which ships GO-2026-6809). Every example module carries
+`toolchain` equal to the root's; CI's unit job runs `checkpins -root ../.. -pins=false`
+over the examples on every push and fails when one is missing or older. When the
+root's toolchain is bumped, bump the examples in the same commit
+(`go mod edit -toolchain=goX.Y.Z` in each).
+
 ## PowerShell working directory
 
 `cd`/`Set-Location` updates PowerShell's own logical location (what

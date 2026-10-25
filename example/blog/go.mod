@@ -2,6 +2,8 @@ module example/blog
 
 go 1.26.5
 
+toolchain go1.26.10
+
 require (
 	modernc.org/sqlite v1.50.1
 	smeldr.dev/core v1.173.0

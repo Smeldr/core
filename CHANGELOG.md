@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The example modules pin the toolchain (T930, A577).** `example/server`, `example/blog`, `example/api` and `example/docs` carry `toolchain go1.26.10`, so a plain `go build` there uses go1.26.10 even where the installed Go is older (before, `example/server` built with go1.26.5, which ships GO-2026-6809). `scripts/checkpins -root` checks each example's toolchain line against the root's; CI runs it on every push.
+
 ---
 
 ## [1.173.0] - 2026-10-23

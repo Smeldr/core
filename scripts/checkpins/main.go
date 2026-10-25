@@ -10,19 +10,27 @@
 //
 // Usage:
 //
-//	go run ./scripts/checkpins <dir>...
+//	go run ./scripts/checkpins [-root <dir>] [-pins=false] <dir>...
 //
 // Exits non-zero and prints every stale pin found; exits 0 silently when
 // every pin is current.
+//
+// With -root (the directory of the module the dirs belong to), it also
+// checks each dir's toolchain line (T930): a dir that builds a binary must
+// pin a toolchain at least as new as the root's, or a plain go build there
+// on an older installed Go uses the older one. -pins=false skips the
+// network pin lookup, so CI can run the toolchain check on every push.
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 )
 
 // stalePin describes one smeldr.dev/* dependency whose pinned version is
@@ -40,13 +48,35 @@ type stalePin struct {
 type versionLookup func(module string) (string, error)
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: checkpins <dir>...")
+	root := flag.String("root", "", "the root module's directory: also check each dir's toolchain line against it")
+	pins := flag.Bool("pins", true, "check smeldr.dev/* pins against the module proxy")
+	flag.Parse()
+	if flag.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "usage: checkpins [-root <dir>] [-pins=false] <dir>...")
 		os.Exit(2)
 	}
 
+	if *root != "" {
+		problems, err := checkToolchains(*root, flag.Args())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "checkpins: %v\n", err)
+			os.Exit(1)
+		}
+		if len(problems) > 0 {
+			fmt.Fprintln(os.Stderr, "checkpins: toolchain line(s) behind the root:")
+			for _, p := range problems {
+				fmt.Fprintln(os.Stderr, "  "+p)
+			}
+			os.Exit(1)
+		}
+		fmt.Println("checkpins: every toolchain line matches the root")
+	}
+	if !*pins {
+		return
+	}
+
 	var stale []stalePin
-	for _, dir := range os.Args[1:] {
+	for _, dir := range flag.Args() {
 		pins, err := checkDir(dir, goListLatestVersion)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "checkpins: %s: %v\n", dir, err)
@@ -120,4 +150,68 @@ func goListLatestVersion(module string) (string, error) {
 		return "", fmt.Errorf("no published versions found for %s", module)
 	}
 	return fields[len(fields)-1], nil
+}
+
+// readToolchain returns the toolchain line of dir's go.mod ("go1.26.10"),
+// or "" when it has none.
+func readToolchain(dir string) (string, error) {
+	path := dir + "/go.mod"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	return toolchainOf(path, data)
+}
+
+// toolchainOf parses a go.mod and returns its toolchain line, or "".
+func toolchainOf(path string, data []byte) (string, error) {
+	f, err := modfile.Parse(path, data, nil)
+	if err != nil {
+		return "", fmt.Errorf("parse %s: %w", path, err)
+	}
+	if f.Toolchain == nil {
+		return "", nil
+	}
+	return f.Toolchain.Name, nil
+}
+
+// checkToolchains compares each dir's toolchain line with the root's and
+// returns one problem per dir whose line is missing or older, naming the
+// dir and both versions. The root must have a toolchain line.
+func checkToolchains(root string, dirs []string) ([]string, error) {
+	want, err := readToolchain(root)
+	if err != nil {
+		return nil, err
+	}
+	if want == "" {
+		return nil, fmt.Errorf("%s/go.mod has no toolchain line to compare against", root)
+	}
+	var problems []string
+	for _, dir := range dirs {
+		got, err := readToolchain(dir)
+		if err != nil {
+			return nil, err
+		}
+		if p := toolchainProblem(dir, got, want); p != "" {
+			problems = append(problems, p)
+		}
+	}
+	return problems, nil
+}
+
+// toolchainProblem says what is wrong with dir's toolchain got against the
+// root's want, or "" when got is at least as new.
+func toolchainProblem(dir, got, want string) string {
+	if got == "" {
+		return fmt.Sprintf("%s: no toolchain line; the root pins %s", dir, want)
+	}
+	if semver.Compare(toSemver(got), toSemver(want)) < 0 {
+		return fmt.Sprintf("%s: toolchain %s is older than the root's %s", dir, got, want)
+	}
+	return ""
+}
+
+// toSemver turns a toolchain name ("go1.26.10") into a semver ("v1.26.10").
+func toSemver(toolchain string) string {
+	return "v" + strings.TrimPrefix(toolchain, "go")
 }

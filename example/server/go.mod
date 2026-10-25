@@ -2,6 +2,8 @@ module example/server
 
 go 1.26.5
 
+toolchain go1.26.10
+
 require (
 	modernc.org/sqlite v1.50.1
 	smeldr.dev/agent v0.9.2

@@ -66,6 +66,16 @@ jobs:
       - name: Run govulncheck
         run: govulncheck ./...
 
+      # T930: every example module pins a toolchain at least as new as the
+      # root's, so a plain build there never falls back to an older Go.
+      - name: Check the examples' toolchain lines
+        working-directory: scripts/checkpins
+        env:
+          GOWORK: 'off'
+        run: |
+          go test ./...
+          go run . -root ../.. -pins=false ../../example/api ../../example/blog ../../example/docs ../../example/server
+
       - name: Install golangci-lint
         run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 
