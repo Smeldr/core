@@ -47,7 +47,7 @@ require (
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	smeldr.dev/github v0.1.0
+	smeldr.dev/github v0.1.1
 )
 
 replace smeldr.dev/core => ../..
