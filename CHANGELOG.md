@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A refused `ENABLE_GITHUB` boot writes nothing (T946, A582).** The example server created its core webhook before the GitHub App key was parsed, so a key that is not an RSA PEM refused the boot but left a webhook endpoint behind. It now validates the adapter's whole config first (a check build of the adapter) and writes the webhook only after every check has passed.
+
 ---
 
 ## [1.175.0] - 2026-10-26

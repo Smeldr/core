@@ -85,32 +85,47 @@ func mountGitHub(ctx context.Context, cfg ServerConfig, app *smeldr.App, tokens 
 	if err := checkGitHubActor(ctx, app, tokens, g.AdapterTokenID); err != nil {
 		return err
 	}
+	adapterCfg := github.Config{
+		Checker:       app,
+		Actor:         smeldr.User{ID: g.AdapterTokenID},
+		WebhookSecret: []byte(g.WebhookSecret),
+		AppID:         g.AppID,
+		PrivateKeyPEM: key,
+		CheckURL:      g.CheckURL,
+		ItemURL:       g.ItemURL,
+	}
+	// Validate the adapter's own config (the key parses) before the one write
+	// below, so a refused boot writes nothing (T946). New only checks: no
+	// network call, no goroutine, and no log while NamesShown is unset.
+	check := adapterCfg
+	check.CoreWebhookSecret = []byte("pending")
+	if _, err := github.New(check); err != nil {
+		return gitHubKeyError(err)
+	}
 	coreSecret := g.CoreWebhookSecret
 	if coreSecret == "" {
 		if coreSecret, err = ensureGitHubCoreWebhook(ctx, webhooks, strings.TrimRight(cfg.BaseURL, "/")+"/github/core-events"); err != nil {
 			return err
 		}
 	}
-	adapter, err := github.New(github.Config{
-		Checker:           app,
-		Actor:             smeldr.User{ID: g.AdapterTokenID},
-		WebhookSecret:     []byte(g.WebhookSecret),
-		CoreWebhookSecret: []byte(coreSecret),
-		AppID:             g.AppID,
-		PrivateKeyPEM:     key,
-		CheckURL:          g.CheckURL,
-		ItemURL:           g.ItemURL,
-		NamesShown:        g.NamesShown,
-	})
+	adapterCfg.CoreWebhookSecret = []byte(coreSecret)
+	adapterCfg.NamesShown = g.NamesShown
+	adapter, err := github.New(adapterCfg)
 	if err != nil {
-		// The adapter's errors name the Config field and the parse failure,
-		// never key bytes.
-		return fmt.Errorf("ENABLE_GITHUB: GITHUB_APP_PRIVATE_KEY is not an RSA private key in PEM: %w", err)
+		return gitHubKeyError(err)
 	}
 	app.Handle("POST /github/webhook", adapter)
 	app.Handle("POST /github/core-events", adapter.CoreEvents())
 	slog.InfoContext(ctx, "github: adapter mounted", "webhook", "/github/webhook", "core_events", "/github/core-events", "app_id", g.AppID)
 	return nil
+}
+
+// gitHubKeyError is the refusal for an adapter config that github.New
+// refuses; with every other field checked before, that is the key. The
+// adapter's errors name the Config field and the parse failure, never key
+// bytes.
+func gitHubKeyError(err error) error {
+	return fmt.Errorf("ENABLE_GITHUB: GITHUB_APP_PRIVATE_KEY is not an RSA private key in PEM: %w", err)
 }
 
 // gitHubPrivateKey returns the App's key from GITHUB_APP_PRIVATE_KEY or the

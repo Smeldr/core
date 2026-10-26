@@ -107,6 +107,17 @@ func (f gitHubFixture) boot(t *testing.T, cfg ServerConfig) (ServerResult, strin
 	return res, logs.String(), err
 }
 
+// endpoints counts the stored webhook endpoints: a refused boot writes none
+// (T946).
+func (f gitHubFixture) endpoints(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM smeldr_webhook_endpoints`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 // assertNoSecret fails when any secret value appears in text.
 func (f gitHubFixture) assertNoSecret(t *testing.T, text string) {
 	t.Helper()
@@ -217,6 +228,9 @@ func TestGitHub_Refuses(t *testing.T) {
 			}
 			f.assertNoSecret(t, err.Error())
 			f.assertNoSecret(t, logs)
+			if n := f.endpoints(t); n != 0 {
+				t.Errorf("a refused boot left %d webhook endpoints", n)
+			}
 		})
 	}
 }
@@ -237,6 +251,9 @@ func TestGitHub_Actor(t *testing.T) {
 			f := newGitHubFixture(t, tc.class, tc.grant)
 			if _, _, err := f.boot(t, f.config()); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+			if n := f.endpoints(t); n != 0 {
+				t.Errorf("a refused boot left %d webhook endpoints", n)
 			}
 		})
 	}
