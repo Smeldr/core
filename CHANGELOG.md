@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.175.0] - 2026-10-26
+
 ### Added
 
 - **Gated merges for a self-hosted server, with environment variables only (T940, A580).** The example server mounts the GitHub adapter (`smeldr.dev/github` v0.1.0) when `ENABLE_GITHUB` is set: `POST /github/webhook` and `POST /github/core-events`, configured by `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (or `_FILE`), `GITHUB_WEBHOOK_SECRET` and `GITHUB_ADAPTER_TOKEN_ID` (a class job token holding `check_change`). It registers its own core webhook for `changecheck.transitioned`. A missing or wrong value refuses to start, naming the variable, never its value. No change to the `smeldr.dev/core` package.
