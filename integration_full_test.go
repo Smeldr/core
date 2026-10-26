@@ -2467,7 +2467,7 @@ func TestFull_G23_CLIRoundTrip(t *testing.T) {
 
 // - G24: SSRF validation (M11) ----------------------------------------------
 
-// TestFull_G24_SSRFValidation verifies that validateWebhookURL rejects HTTP,
+// TestFull_G24_SSRFValidation verifies that ValidateWebhookURL rejects HTTP,
 // localhost, .local hostnames, and private IPs, while accepting a well-formed
 // HTTPS URL with a routable public IP.
 func TestFull_G24_SSRFValidation(t *testing.T) {
@@ -2487,7 +2487,7 @@ func TestFull_G24_SSRFValidation(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateWebhookURL(tc.url)
+			err := ValidateWebhookURL(tc.url)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("want error containing %q, got nil", tc.errSnip)

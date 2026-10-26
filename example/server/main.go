@@ -290,6 +290,18 @@ func buildCommandApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 // It does not call app.Run — that remains the caller's responsibility.
 // All subsystem failures return an error instead of calling log.Fatalf.
 func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
+	// Every configuration refusal before the first write: a refused boot
+	// writes nothing (T955).
+	checks, err := validateBoot(cfg)
+	if err != nil {
+		return ServerResult{}, err
+	}
+	if cfg.EnableGitHub {
+		if err := checkGitHubToken(context.Background(), smeldr.NewTokenStore(db, cfg.Secret), cfg.GitHub.AdapterTokenID); err != nil {
+			return ServerResult{}, err
+		}
+	}
+
 	if err := migrateDB(db); err != nil {
 		return ServerResult{}, fmt.Errorf("migrate: %w", err)
 	}
@@ -305,26 +317,14 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		tokenStore = smeldr.NewTokenStore(db, cfg.Secret)
 	}
 
-	titleCutover, err := parseCutover("TITLE_CUTOVER", cfg.TitleCutover)
-	if err != nil {
-		return ServerResult{}, err
-	}
-	signalMessageCutover, err := parseCutover("SIGNAL_MESSAGE_CUTOVER", cfg.SignalMessageCutover)
-	if err != nil {
-		return ServerResult{}, err
-	}
-	signalEventCutover, err := parseCutover("SIGNAL_EVENT_CUTOVER", cfg.SignalEventCutover)
-	if err != nil {
-		return ServerResult{}, err
-	}
 	app := smeldr.New(smeldr.Config{
 		BaseURL:              cfg.BaseURL,
 		Secret:               []byte(cfg.Secret),
 		DB:                   db,
 		TokenStore:           tokenStore,
-		TitleCutover:         titleCutover,
-		SignalMessageCutover: signalMessageCutover,
-		SignalEventCutover:   signalEventCutover,
+		TitleCutover:         checks.titleCutover,
+		SignalMessageCutover: checks.signalMessageCutover,
+		SignalEventCutover:   checks.signalEventCutover,
 	})
 
 	var roleStore *smeldr.RoleStore
@@ -335,6 +335,13 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 			return ServerResult{}, fmt.Errorf("governance: %w", err)
 		}
 		roleStore = store
+		// The adapter's grant needs the role store; checked here, before
+		// any other write (T955).
+		if cfg.EnableGitHub {
+			if err := checkGitHubGrant(app, cfg.GitHub.AdapterTokenID); err != nil {
+				return ServerResult{}, err
+			}
+		}
 	}
 
 	var rs *smeldr.RelationStore
@@ -489,9 +496,6 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.EnableCheck {
-		if !cfg.EnableAuthority || !cfg.governanceRecords() {
-			return ServerResult{}, fmt.Errorf("ENABLE_CHECK requires ENABLE_AUTHORITY and ENABLE_GOVERNANCE_RECORDS (or ENABLE_ORCHESTRATION)")
-		}
 		if err := smeldr.CreateCheckTable(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create check table: %w", err)
 		}
@@ -593,9 +597,6 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	var mcpOptions []mcp.ServerOption
 
 	if cfg.EnableMedia {
-		if cfg.MediaBackend != "local" {
-			return ServerResult{}, fmt.Errorf("unsupported MEDIA_STORE_BACKEND %q (only \"local\" is supported)", cfg.MediaBackend)
-		}
 		store := media.NewLocalMediaStore(app)
 		mediaSrv := media.Register(app, store)
 		mcpOptions = append(mcpOptions, mcp.WithModule(mediaSrv))
@@ -634,7 +635,7 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.EnableGitHub {
-		if err := mountGitHub(context.Background(), cfg, app, tokenStore, webhookStore); err != nil {
+		if err := mountGitHub(context.Background(), cfg, app, webhookStore, checks.gitHubKey); err != nil {
 			return ServerResult{}, err
 		}
 	}
@@ -643,9 +644,6 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		app.EventStream()
 	}
 	if cfg.EnableEventLog {
-		if !cfg.EnableEventStream {
-			return ServerResult{}, fmt.Errorf("ENABLE_EVENT_LOG requires ENABLE_EVENT_STREAM")
-		}
 		if err := smeldr.CreateEventLogTable(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create event log: %w", err)
 		}
@@ -672,9 +670,6 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.EnableStructuralSweep {
-		if !cfg.EnableRelations {
-			return ServerResult{}, fmt.Errorf("ENABLE_STRUCTURAL_SWEEP requires ENABLE_RELATIONS")
-		}
 		runStore := smeldr.NewSweepRunStore(db)
 		if err := smeldr.CreateSweepRunTable(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create sweep run table: %w", err)
@@ -684,14 +679,8 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 		// Fall back to the hourly default when ServerConfig is constructed
 		// directly rather than via parseConfig's own envOr default (e.g. a
-		// caller building ServerConfig by hand) — matches
-		// agent.NewEvalQueueScheduler's own established default-fallback
-		// pattern rather than passing an invalid empty cron expression
-		// through.
-		schedule := cfg.StructuralSweepSchedule
-		if schedule == "" {
-			schedule = "0 * * * *"
-		}
+		// caller building ServerConfig by hand), as validateBoot does.
+		schedule := scheduleOr(cfg.StructuralSweepSchedule, defaultStructuralSweepSchedule)
 		// Wrapping closure records each run via SweepRunStore — the
 		// dependency-free smeldr.dev/agent package cannot do this itself
 		// without importing smeldr.dev/core (SweepRunStore's own doc
@@ -783,17 +772,11 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.EnableEvalQueueDrain {
-		if !cfg.governanceRecords() {
-			return ServerResult{}, fmt.Errorf("ENABLE_EVAL_QUEUE_DRAIN requires ENABLE_GOVERNANCE_RECORDS (or ENABLE_ORCHESTRATION)")
-		}
 		runStore := smeldr.NewSweepRunStore(db)
 		if err := smeldr.CreateSweepRunTable(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create sweep run table: %w", err)
 		}
-		schedule := cfg.EvalQueueDrainSchedule
-		if schedule == "" {
-			schedule = "*/5 * * * *"
-		}
+		schedule := scheduleOr(cfg.EvalQueueDrainSchedule, defaultEvalQueueDrainSchedule)
 		// Wrapping closure records each run via SweepRunStore, same pattern as
 		// SweepStructural's own sweepFn above — agent.NewEvalQueueScheduler has
 		// no hook for this, so agent.NewSweepScheduler is called directly
@@ -833,17 +816,11 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.EnableStandingDriftCheck {
-		if !cfg.governanceRecords() {
-			return ServerResult{}, fmt.Errorf("ENABLE_STANDING_DRIFT_CHECK requires ENABLE_GOVERNANCE_RECORDS (or ENABLE_ORCHESTRATION)")
-		}
 		runStore := smeldr.NewSweepRunStore(db)
 		if err := smeldr.CreateSweepRunTable(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create sweep run table: %w", err)
 		}
-		schedule := cfg.StandingDriftSchedule
-		if schedule == "" {
-			schedule = "30 3 * * *"
-		}
+		schedule := scheduleOr(cfg.StandingDriftSchedule, defaultStandingDriftSchedule)
 		// Report-only: CheckStandingDrift records a Finding per mismatch and never
 		// repairs. Each run is recorded via SweepRunStore, same pattern as the
 		// other scheduled detectors above.

@@ -18,6 +18,14 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **`ValidateWebhookURL` (T955, A588).** The SSRF check `WebhookStore.Create` applies to every target (HTTPS, no localhost or `.local`, no host that resolves to a private or loopback address), exported so a caller can refuse a bad URL before it writes anything. It resolves the host.
+
+### Fixed
+
+- **example/server: a refused boot writes nothing (T955, A588).** Every refusal of a flag or variable (flag dependencies, the cutovers, `MEDIA_STORE_BACKEND`, the three cron schedules, and `ENABLE_GITHUB`'s variables, key and core webhook URL) is checked before the first write; the adapter's token is read before it, and its grant checked right after governance is wired. Devops found `ENABLE_GITHUB` without its webhook secret created the webhook job and delivery log tables before it exited (T954). Error texts are unchanged.
+
 ---
 
 ## [1.177.0] - 2026-10-26

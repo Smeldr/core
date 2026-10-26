@@ -209,7 +209,7 @@ func TestValidateWebhookURL(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateWebhookURL(tc.url)
+			err := ValidateWebhookURL(tc.url)
 			if tc.wantErr && err == nil {
 				t.Fatalf("want error containing %q, got nil", tc.errMsg)
 			}

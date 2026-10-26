@@ -85,6 +85,10 @@ GITHUB_NAMES_SHOWN    optional comma list of owner/name whose comments show name
 GITHUB_CHECK_URL, GITHUB_ITEM_URL  optional link formats
 ```
 
+A boot refused for a flag or a variable (a missing dependency, a value that
+does not parse, a GitHub variable) exits before it writes anything to the
+database, so a refused deploy leaves nothing to roll back (T955).
+
 This list is `example/server/main.go`'s own doc comment, kept in sync
 by hand — if the two ever disagree, the source is correct and this
 file is stale; read the doc comment directly rather than assume this

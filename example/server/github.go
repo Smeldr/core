@@ -54,60 +54,20 @@ func parseGitHubConfig(getenv func(string) string) gitHubConfig {
 
 // mountGitHub mounts the GitHub adapter on POST /github/webhook (the GitHub
 // App's webhook URL) and POST /github/core-events (a core webhook for
-// changecheck.transitioned). Every check fails closed and names the variable
-// or the dependency, never a value: no secret, key or token is logged or
-// returned.
-func mountGitHub(ctx context.Context, cfg ServerConfig, app *smeldr.App, tokens *smeldr.TokenStore, webhooks *smeldr.WebhookStore) error {
-	if !cfg.EnableTokens || !cfg.EnableGovernance || !cfg.EnableRelations || !cfg.EnableWebhooks || !cfg.governanceRecords() {
-		return errors.New("ENABLE_GITHUB requires ENABLE_TOKENS, ENABLE_GOVERNANCE, ENABLE_RELATIONS, ENABLE_WEBHOOKS and ENABLE_GOVERNANCE_RECORDS (or ENABLE_ORCHESTRATION)")
-	}
+// changecheck.transitioned). validateBoot has checked the configuration and
+// checkGitHubToken and checkGitHubGrant the adapter's token, all before the
+// first write (T955), so what is left here is the one write (the core
+// webhook) and the mount. No secret, key or token is logged or returned.
+func mountGitHub(ctx context.Context, cfg ServerConfig, app *smeldr.App, webhooks *smeldr.WebhookStore, key []byte) error {
 	g := cfg.GitHub
-	var missing []string
-	if g.AppID == "" {
-		missing = append(missing, "GITHUB_APP_ID")
-	}
-	if g.PrivateKey == "" && g.PrivateKeyFile == "" {
-		missing = append(missing, "GITHUB_APP_PRIVATE_KEY (or GITHUB_APP_PRIVATE_KEY_FILE)")
-	}
-	if g.WebhookSecret == "" {
-		missing = append(missing, "GITHUB_WEBHOOK_SECRET")
-	}
-	if g.AdapterTokenID == "" {
-		missing = append(missing, "GITHUB_ADAPTER_TOKEN_ID")
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("ENABLE_GITHUB: not set: %s", strings.Join(missing, ", "))
-	}
-	key, err := gitHubPrivateKey(g)
-	if err != nil {
-		return err
-	}
-	if err := checkGitHubActor(ctx, app, tokens, g.AdapterTokenID); err != nil {
-		return err
-	}
-	adapterCfg := github.Config{
-		Checker:       app,
-		Actor:         smeldr.User{ID: g.AdapterTokenID},
-		WebhookSecret: []byte(g.WebhookSecret),
-		AppID:         g.AppID,
-		PrivateKeyPEM: key,
-		CheckURL:      g.CheckURL,
-		ItemURL:       g.ItemURL,
-	}
-	// Validate the adapter's own config (the key parses) before the one write
-	// below, so a refused boot writes nothing (T946). New only checks: no
-	// network call, no goroutine, and no log while NamesShown is unset.
-	check := adapterCfg
-	check.CoreWebhookSecret = []byte("pending")
-	if _, err := github.New(check); err != nil {
-		return gitHubKeyError(err)
-	}
 	coreSecret := g.CoreWebhookSecret
 	if coreSecret == "" {
-		if coreSecret, err = ensureGitHubCoreWebhook(ctx, webhooks, strings.TrimRight(cfg.BaseURL, "/")+"/github/core-events"); err != nil {
+		var err error
+		if coreSecret, err = ensureGitHubCoreWebhook(ctx, webhooks, gitHubCoreEventsURL(cfg)); err != nil {
 			return err
 		}
 	}
+	adapterCfg := gitHubAdapterConfig(cfg, app, key)
 	adapterCfg.CoreWebhookSecret = []byte(coreSecret)
 	adapterCfg.NamesShown = g.NamesShown
 	adapter, err := github.New(adapterCfg)
@@ -118,6 +78,55 @@ func mountGitHub(ctx context.Context, cfg ServerConfig, app *smeldr.App, tokens 
 	app.Handle("POST /github/core-events", adapter.CoreEvents())
 	slog.InfoContext(ctx, "github: adapter mounted", "webhook", "/github/webhook", "core_events", "/github/core-events", "app_id", g.AppID)
 	return nil
+}
+
+// gitHubAdapterConfig is the adapter's Config without the core webhook
+// secret and the names shown.
+func gitHubAdapterConfig(cfg ServerConfig, checker github.Checker, key []byte) github.Config {
+	g := cfg.GitHub
+	return github.Config{
+		Checker:       checker,
+		Actor:         smeldr.User{ID: g.AdapterTokenID},
+		WebhookSecret: []byte(g.WebhookSecret),
+		AppID:         g.AppID,
+		PrivateKeyPEM: key,
+		CheckURL:      g.CheckURL,
+		ItemURL:       g.ItemURL,
+	}
+}
+
+// noChecker stands in for the App in checkGitHubAdapterConfig's check build:
+// github.New makes no call, so none of these runs.
+type noChecker struct{}
+
+func (noChecker) CheckChange(context.Context, smeldr.ChangeInput) (smeldr.ChangeCheckResult, error) {
+	return smeldr.ChangeCheckResult{}, errors.New("github: check build only")
+}
+
+func (noChecker) RecordMerge(context.Context, smeldr.MergeInput) (smeldr.MergeResult, error) {
+	return smeldr.MergeResult{}, errors.New("github: check build only")
+}
+
+func (noChecker) ChangeCheckOf(context.Context, string) (smeldr.ChangeCheckResult, error) {
+	return smeldr.ChangeCheckResult{}, errors.New("github: check build only")
+}
+
+// checkGitHubAdapterConfig validates the adapter's own config (the key
+// parses) by a check build of github.New, before any write (T946, T955).
+// New only checks: no network call, no goroutine, and no log while
+// NamesShown is unset.
+func checkGitHubAdapterConfig(cfg ServerConfig, key []byte) error {
+	check := gitHubAdapterConfig(cfg, noChecker{}, key)
+	check.CoreWebhookSecret = []byte("pending")
+	if _, err := github.New(check); err != nil {
+		return gitHubKeyError(err)
+	}
+	return nil
+}
+
+// gitHubCoreEventsURL is the target of the core webhook the server registers.
+func gitHubCoreEventsURL(cfg ServerConfig) string {
+	return strings.TrimRight(cfg.BaseURL, "/") + "/github/core-events"
 }
 
 // gitHubKeyError is the refusal for an adapter config that github.New
@@ -144,9 +153,11 @@ func gitHubPrivateKey(g gitHubConfig) ([]byte, error) {
 	return []byte(strings.ReplaceAll(g.PrivateKey, `\n`, "\n")), nil
 }
 
-// checkGitHubActor checks that the adapter's identity is a live job token's
-// user that holds check_change: an adapter never acts as a person.
-func checkGitHubActor(ctx context.Context, app *smeldr.App, tokens *smeldr.TokenStore, userID string) error {
+// checkGitHubToken checks that the adapter's identity is a live job token's
+// user: an adapter never acts as a person. It only reads, and buildApp calls
+// it before its first write (T955). On a database with no token table the
+// read fails and the boot is refused with nothing written.
+func checkGitHubToken(ctx context.Context, tokens *smeldr.TokenStore, userID string) error {
 	records, err := tokens.List(ctx)
 	if err != nil {
 		return fmt.Errorf("ENABLE_GITHUB: GITHUB_ADAPTER_TOKEN_ID: the tokens cannot be read: %w", err)
@@ -165,7 +176,16 @@ func checkGitHubActor(ctx context.Context, app *smeldr.App, tokens *smeldr.Token
 	case token.ActorClass != "job":
 		return errors.New("ENABLE_GITHUB: GITHUB_ADAPTER_TOKEN_ID: the token is not of class job; create the adapter's token with class job")
 	}
-	err = app.AuthorizeCapability(smeldr.NewContextWithUser(smeldr.User{ID: userID}), smeldr.ResourceItem, "check_change", smeldr.AuthTarget{})
+	return nil
+}
+
+// checkGitHubGrant checks that the adapter's user holds check_change. It
+// needs the role store wired, so buildApp calls it right after
+// App.Governance and before every other write. It is only reached when
+// checkGitHubToken found a live token, so the governance tables exist and
+// Governance's idempotent migration adds no schema (T955).
+func checkGitHubGrant(app *smeldr.App, userID string) error {
+	err := app.AuthorizeCapability(smeldr.NewContextWithUser(smeldr.User{ID: userID}), smeldr.ResourceItem, "check_change", smeldr.AuthTarget{})
 	switch {
 	case errors.Is(err, smeldr.ErrForbidden):
 		return errors.New("ENABLE_GITHUB: GITHUB_ADAPTER_TOKEN_ID: the token does not hold check_change; grant it a role with manage, for example editor")

@@ -222,6 +222,7 @@ func TestGitHub_Refuses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := f.config()
 			tc.edit(&cfg)
+			before := schemaOf(t, f.db)
 			_, logs, err := f.boot(t, cfg)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want %q", err, tc.want)
@@ -231,12 +232,17 @@ func TestGitHub_Refuses(t *testing.T) {
 			if n := f.endpoints(t); n != 0 {
 				t.Errorf("a refused boot left %d webhook endpoints", n)
 			}
+			assertSchemaUnchanged(t, f.db, before)
 		})
 	}
 }
 
 // TestGitHub_Actor: the adapter's token must be of class job and hold
-// check_change.
+// check_change. Neither refusal changes the schema (T955): the class is read
+// before any write; the grant is checked right after Governance, whose
+// migration is idempotent on a database that already has a live token, so
+// it adds no schema (it may rewrite its own seeded policy rows, which is
+// data, not schema).
 func TestGitHub_Actor(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -249,12 +255,14 @@ func TestGitHub_Actor(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newGitHubFixture(t, tc.class, tc.grant)
+			before := schemaOf(t, f.db)
 			if _, _, err := f.boot(t, f.config()); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v, want %q", err, tc.want)
 			}
 			if n := f.endpoints(t); n != 0 {
 				t.Errorf("a refused boot left %d webhook endpoints", n)
 			}
+			assertSchemaUnchanged(t, f.db, before)
 		})
 	}
 }

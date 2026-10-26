@@ -3374,7 +3374,14 @@ func (s *WebhookStore) DecryptSecret(ep WebhookEndpoint) ([]byte, error)
 ```
 
 `Create` validates `targetURL` for SSRF safety (HTTPS required, no private or
-loopback IPs). Secrets are encrypted with AES-256-GCM using a key derived from
+loopback IPs) with `ValidateWebhookURL`, which is exported so a caller can
+refuse a bad URL before it writes anything (T955):
+
+```go
+func ValidateWebhookURL(rawURL string) error // a *ValidationError on field "url"; resolves the host
+```
+
+ Secrets are encrypted with AES-256-GCM using a key derived from
 `appSecret`. Rotating `Config.Secret` invalidates all stored secrets.
 
 Required tables — run once at startup:

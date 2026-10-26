@@ -152,7 +152,7 @@ func (s *WebhookStore) DecryptSecret(ep WebhookEndpoint) ([]byte, error) {
 // signing secret is generated, encrypted, and persisted. The plaintext secret
 // is returned once — it cannot be retrieved again.
 func (s *WebhookStore) Create(ctx context.Context, targetURL string, events []string) (WebhookEndpoint, string, error) {
-	if err := validateWebhookURL(targetURL); err != nil {
+	if err := ValidateWebhookURL(targetURL); err != nil {
 		return WebhookEndpoint{}, "", err
 	}
 	raw := make([]byte, 32)
@@ -598,15 +598,17 @@ func (a *App) NotifySignalCreated(ctx context.Context, id, slug string) {
 	announceSignalReferenceEdges(ctx, a.relationStore, id)
 }
 
-// validateWebhookURL validates rawURL for SSRF safety. Returns a
-// [*ValidationError] describing the rejection reason when the URL fails any
-// check.
+// ValidateWebhookURL validates rawURL for SSRF safety: the check
+// [WebhookStore.Create] applies to every target, exported so a caller can
+// refuse a bad URL before it writes anything (T955). It resolves the host.
+// Returns a [*ValidationError] describing the rejection reason when the URL
+// fails any check.
 //
 // Rejects:
 //   - URLs with a scheme other than https
 //   - Hostnames of "localhost" or with a ".local" suffix
 //   - URLs whose hostname resolves to any private or loopback IP range
-func validateWebhookURL(rawURL string) error {
+func ValidateWebhookURL(rawURL string) error {
 	u, err := url.ParseRequestURI(rawURL)
 	if err != nil {
 		return Err("url", "invalid URL: "+err.Error())
@@ -639,7 +641,7 @@ func validateWebhookURL(rawURL string) error {
 
 // privateRanges holds the pre-compiled private, loopback, and link-local CIDR
 // blocks checked by isPrivateIP. Compiled once at init to avoid repeated
-// allocations on every validateWebhookURL call.
+// allocations on every ValidateWebhookURL call.
 var privateRanges []*net.IPNet
 
 func init() {
