@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.178.0] - 2026-10-26
+
 ### Added
 
 - **`ValidateWebhookURL` (T955, A588).** The SSRF check `WebhookStore.Create` applies to every target (HTTPS, no localhost or `.local`, no host that resolves to a private or loopback address), exported so a caller can refuse a bad URL before it writes anything. It resolves the host.
