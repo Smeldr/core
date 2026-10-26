@@ -150,7 +150,7 @@ func TestAuthorizeCapability_TypelessRead(t *testing.T) {
 		}
 		key := capabilityKey{c.Resource, c.Verb}
 		err := f.app.AuthorizeCapability(f.reader, c.Resource, c.Verb, AuthTarget{})
-		if want := typelessReadsAny[key]; (err == nil) != want {
+		if want := typelessReadsAny[key] || authenticatedReads[key]; (err == nil) != want {
 			t.Errorf("per-item reader, %s %s with no type: %v; want allowed %v", c.Resource, c.Verb, err, want)
 		}
 		if err != nil && !errors.Is(err, ErrForbidden) {
@@ -159,7 +159,11 @@ func TestAuthorizeCapability_TypelessRead(t *testing.T) {
 		if err := f.app.AuthorizeCapability(f.global, c.Resource, c.Verb, AuthTarget{}); err != nil {
 			t.Errorf("global reader, %s %s with no type: %v", c.Resource, c.Verb, err)
 		}
-		if err := f.app.AuthorizeCapability(nobody, c.Resource, c.Verb, AuthTarget{}); !errors.Is(err, ErrForbidden) {
+		err = f.app.AuthorizeCapability(nobody, c.Resource, c.Verb, AuthTarget{})
+		switch {
+		case authenticatedReads[key] && err != nil:
+			t.Errorf("reader of nothing, %s %s: %v; want allowed (any authenticated caller)", c.Resource, c.Verb, err)
+		case !authenticatedReads[key] && !errors.Is(err, ErrForbidden):
 			t.Errorf("reader of nothing, %s %s: %v; want ErrForbidden", c.Resource, c.Verb, err)
 		}
 	}
@@ -175,6 +179,7 @@ var readDecisions = map[capabilityKey]string{
 	{ResourceItem, "search"}:                "reads any: App.Search filters every hit by the read rules",
 	{ResourceItem, "decisions_for_paths"}:   "reads any: App.DecisionsForPaths filters Areas, rules and Decisions by the read rules",
 	{ResourceItem, "approvers_of"}:          "reads any: App.ApproversOf answers only for a readable place",
+	{ResourceItem, "administrators"}:        "authenticated: names and classes of the administrators, for any member (D154)",
 	{ResourceItem, "rest_counts"}:           "reads any: RestCounts and StoredRestCounts apply the read rules per item",
 	{ResourceItem, "confirm_premise"}:       "reads any: App.ConfirmPremise checks the read and ratify over the place",
 	{ResourceItem, "answer_change_check"}:   "reads any: App.AnswerChangeCheck checks the Area's read and approve-change",
@@ -367,12 +372,12 @@ func TestVisibleCapabilities_PerItemReader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"item get", "item list", "item search", "item decisions_for_paths", "item answer_change_check", "item change_checks", "item approvers_of", "item rest_counts", "item confirm_premise", "relation get", "relation list", "signal list", "subscription get", "subscription list"}
+	want := []string{"item get", "item list", "item search", "item decisions_for_paths", "item answer_change_check", "item change_checks", "item approvers_of", "item administrators", "item rest_counts", "item confirm_premise", "relation get", "relation list", "signal list", "subscription get", "subscription list"}
 	if !slices.Equal(capabilityNames(got), want) {
 		t.Errorf("per-item reader sees %v; want %v", capabilityNames(got), want)
 	}
-	if got, _ := f.app.VisibleCapabilities(f.as("nobody")); len(got) != 0 {
-		t.Errorf("reader of nothing sees %v", capabilityNames(got))
+	if got, _ := f.app.VisibleCapabilities(f.as("nobody")); !slices.Equal(capabilityNames(got), []string{"item administrators"}) {
+		t.Errorf("reader of nothing sees %v; want only who administers (D154)", capabilityNames(got))
 	}
 }
 
@@ -401,7 +406,7 @@ func TestVisibleCapabilities_NoRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range got {
-		if c.Operation != "update" {
+		if c.Operation != "update" && !authenticatedReads[capabilityKey{c.Resource, c.Verb}] {
 			t.Errorf("update-only grant sees %s %s (%s)", c.Resource, c.Verb, c.Operation)
 		}
 	}

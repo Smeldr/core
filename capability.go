@@ -116,6 +116,9 @@ var capabilityTable = []Capability{
 	// Who approves a place (D147, T911): the read rules on the place apply
 	// inside ApproversOf.
 	{ResourceItem, "approvers_of", "read", ReasonNotTaken, true},
+	// Who administers the instance (D154, T944): names and classes only,
+	// answered to every authenticated caller (authenticatedReads).
+	{ResourceItem, "administrators", "read", ReasonNotTaken, true},
 	// Rest counts (D150, T919): live and stored, filtered by the read rules
 	// inside RestCounts and StoredRestCounts.
 	{ResourceItem, "rest_counts", "read", ReasonNotTaken, true},
@@ -254,6 +257,14 @@ var typelessReadsAny = map[capabilityKey]bool{
 	{ResourceSubscription, VerbList}:      true, // the list is the owner's own
 }
 
+// authenticatedReads lists the read capabilities every authenticated caller
+// passes, also one whose scope reads nothing: what they return is decided to
+// be visible to any member (D154: who administers here, so that a member with
+// no grant yet knows whom to ask).
+var authenticatedReads = map[capabilityKey]bool{
+	{ResourceItem, "administrators"}: true,
+}
+
 // typedReads lists the read capabilities called with an item type (and often
 // an ID), so a caller who reads at least one item of some type can use them:
 // the type's own read rules then decide per call.
@@ -335,6 +346,8 @@ func (a *App) AuthorizeCapability(ctx Context, resource, verb string, target Aut
 func authorizeRead(scope *ReadScope, c Capability, target AuthTarget) error {
 	key := capabilityKey{c.Resource, c.Verb}
 	switch {
+	case authenticatedReads[key]:
+		return nil
 	case target.TypeName == "" || !typedReads[key]:
 		if scope.All() || (typelessReadsAny[key] && scope.readsAny()) {
 			return nil
@@ -385,7 +398,7 @@ func (a *App) VisibleCapabilities(ctx Context) ([]Capability, error) {
 	for _, c := range capabilityTable {
 		if c.Operation == "read" {
 			key := capabilityKey{c.Resource, c.Verb}
-			if scope.All() || ((typedReads[key] || typelessReadsAny[key]) && scope.readsAny()) {
+			if authenticatedReads[key] || scope.All() || ((typedReads[key] || typelessReadsAny[key]) && scope.readsAny()) {
 				out = append(out, c)
 			}
 			continue
