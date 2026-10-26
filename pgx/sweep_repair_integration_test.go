@@ -5,6 +5,7 @@ package pgx
 import (
 	"context"
 	"testing"
+	"time"
 
 	smeldr "smeldr.dev/core"
 )
@@ -45,7 +46,9 @@ func TestPG_SweepKeepsOwnFlowTypes(t *testing.T) {
 		t.Fatalf("sweep flagged %d, %v; want the edge to an approved memo kept", flagged, err)
 	}
 	// End it the way the old sweep did, then repair.
-	if _, err := db.ExecContext(ctx, `UPDATE smeldr_relations SET invalid_at = now() WHERE id = 'e-keep'`); err != nil {
+	// Times from Go, not the database's now(): the two clocks may differ, and
+	// the repair compares against Go's.
+	if _, err := db.ExecContext(ctx, `UPDATE smeldr_relations SET invalid_at = $1 WHERE id = 'e-keep'`, time.Now().UTC().Add(-2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO smeldr_provenance (id, timestamp, subject_type, subject_id, verb, from_state, to_state, actor_kind, actor_id, surface, reason)
@@ -69,7 +72,7 @@ func TestPG_SweepKeepsOwnFlowTypes(t *testing.T) {
 	}
 	// The restored row ended for another reason (a withdraw): the swept row is
 	// superseded and stays ended.
-	if _, err := db.ExecContext(ctx, `UPDATE smeldr_relations SET invalid_at = now() WHERE target_id = 'memo-1' AND invalid_at IS NULL`); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE smeldr_relations SET invalid_at = $1 WHERE target_id = 'memo-1' AND invalid_at IS NULL`, time.Now().UTC().Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if run, err := app.RepairSweptEdges(ctx, true); err != nil || run.Restored != 0 || run.SkippedSuperseded != 1 {

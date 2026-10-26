@@ -4391,18 +4391,20 @@ design (D51/D46)** — a write surface would invite exactly the
 `acknowledged`/`dismissed`/`accepted-as-is` human-resolution claims D46
 forbids. A finding resolves when its own detector stops firing for the
 same subject, not by human action — the same "authoritative state lives
-outside `Node.Status`" shape `Run` (D38) already established. The only
-read surface is `smeldr.dev/mcp`'s `list_findings` tool (Author role).
+outside `Node.Status`" shape `Run` (D38) already established. The read
+surface is `App.ListFindings` (below), served by `smeldr.dev/mcp`'s
+`list_findings` tool and `smeldr-cli findings` (T953).
 
 Identity is `(Detector, SubjectType, SubjectID)` — `Record` upserts:
 a repeat finding for the same subject updates `LastSeenAt`/`Message`
 only; a new subject inserts with `FirstSeenAt == LastSeenAt`.
 
-Currently wired for the `structural` detector only (`RelationStore.
-SweepStructural`'s own `onStale` callback, `Provenance: "detected"`).
-`DrainEvalQueue`'s own scheduled-provenance condition is not yet
-wired — it has no equivalent "newly flagged" callback to extend, a
-separate follow-up.
+Four detectors record when a store is wired: `structural`
+(`SweepStructural`, subject a `RelationEdge`, provenance `detected`),
+`eval-queue` (`DrainEvalQueue`, the item that transitioned, `scheduled`),
+`standing-drift` (`CheckStandingDrift`, `detected`) and declared-tension
+aggregation on a Decision's ratification. The example server wires the
+store when governance records or the structural sweep are on (T948).
 
 ```go
 type FindingStore interface {
@@ -4410,6 +4412,24 @@ type FindingStore interface {
     List(ctx context.Context, detector string) ([]Finding, error)
 }
 ```
+
+**`App.ListFindings(ctx, FindingQuery{Detector, SubjectType, Limit})`
+(T953)** returns `[]FindingView{Detector, SubjectType, SubjectID, Address,
+Provenance, Message, FirstSeenAt, LastSeenAt}`, newest first by
+`last_seen_at`; `Limit` 0 means 100, at most 500 (else `ErrBadRequest`).
+The finding's own ID is not shown; `Address` is the subject's address when
+it has one. **A finding is shown only when the caller may read its
+subject:** an item by the read rules; a `RelationEdge` only when both its
+ends are readable; a finding whose subject no longer exists only to a
+scope that reads everything. So a reader never sees a finding, or its
+message, about an item it cannot read. Filtered rows do not count toward
+the limit. Without a store wired it is `ErrNotFound` ("findings are not
+recorded on this instance"), not an empty list; a failed read is
+`ErrInternal`. Capability `ops list` (`read`), in the reads-any set: a
+caller who reads at least one item may call it, and **every tool on `ops
+list` must filter its result per subject the same way** (a test in
+smeldr.dev/mcp pins `list_findings` as the only one). MCP `list_findings`
+{detector?, subject_type?, limit?}, CLI `smeldr-cli findings`.
 
 ---
 

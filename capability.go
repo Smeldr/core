@@ -252,9 +252,13 @@ var typelessReadsAny = map[capabilityKey]bool{
 	{ResourceItem, "confirm_premise"}:     true, // App.ConfirmPremise checks the read and ratify over the place
 	{ResourceItem, "answer_change_check"}: true, // App.AnswerChangeCheck checks the Area's read and approve-change
 	{ResourceItem, "change_checks"}:       true, // ChangeCheckOf and ListChangeChecks filter by the read rules
-	{ResourceRelation, VerbList}:          true, // ListRelations keeps edges with both ends readable
-	{ResourceSubscription, VerbGet}:       true, // the owner rule is inside the act
-	{ResourceSubscription, VerbList}:      true, // the list is the owner's own
+	// App.ListFindings shows a finding only when its subject is readable
+	// (T953). Every tool on ops list must filter its result per subject the
+	// same way: reads-any lets a narrow reader in.
+	{ResourceOps, VerbList}:          true,
+	{ResourceRelation, VerbList}:     true, // ListRelations keeps edges with both ends readable
+	{ResourceSubscription, VerbGet}:  true, // the owner rule is inside the act
+	{ResourceSubscription, VerbList}: true, // the list is the owner's own
 }
 
 // authenticatedReads lists the read capabilities every authenticated caller

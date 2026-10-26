@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **Findings can be read (T953, A587).** `App.ListFindings(ctx, FindingQuery{Detector, SubjectType, Limit})` returns the recorded findings newest first as `FindingView` (detector, subject type and ID, the subject's address, provenance, message, first and last seen). A finding is shown only when the caller may read its subject; a relation edge needs both ends readable; a finding about a subject that no longer exists only reaches a scope that reads everything. Without a finding store it is `ErrNotFound` with the reason. Capability `ops list` moves to the reads-any set, filtered per subject. smeldr.dev/mcp `list_findings`, smeldr.dev/cli `smeldr-cli findings`.
+
 ---
 
 ## [1.176.0] - 2026-10-26
