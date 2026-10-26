@@ -24,6 +24,9 @@ func TestRunMigrateWebhookSubscriptions(t *testing.T) {
 	if err := migrateDB(db); err != nil {
 		t.Fatal(err)
 	}
+	if err := smeldr.CreateWebhookTables(db); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`INSERT INTO smeldr_webhook_endpoints (id, events, target_url, secret_enc, created_at) VALUES ('e1', '["task.transitioned"]', 'https://x.example', 's', CURRENT_TIMESTAMP)`); err != nil {
 		t.Fatal(err)
 	}

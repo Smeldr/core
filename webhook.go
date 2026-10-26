@@ -30,7 +30,7 @@ type Titled interface {
 // endpoints via [WebhookStore]. The signing secret is returned once at
 // creation and cannot be retrieved afterwards.
 //
-// Database DDL (must be executed before [App.Webhooks] is called):
+// The table is created by [CreateWebhookTables] (T947):
 //
 //	CREATE TABLE smeldr_webhook_endpoints (
 //	    id         TEXT    PRIMARY KEY,

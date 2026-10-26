@@ -18,7 +18,13 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **`CreateWebhookTables` (T947, A583).** Creates `smeldr_webhook_endpoints`, `smeldr_outbound_jobs` (with `event_id`) and `smeldr_delivery_logs` and the two indexes the delivery worker reads by, if they do not exist. Idempotent; SQLite and Postgres. Call it before `App.Webhooks`.
+
 ### Fixed
+
+- **Webhooks are delivered on a database that never had the job tables (T947, A583).** The job and delivery log tables were only documented in comments, so with `ENABLE_WEBHOOKS` on a database without them every enqueue failed ("no such table") and no core event reached a webhook, including the `changecheck.transitioned` the GitHub adapter needs. The example server now calls `CreateWebhookTables` before `App.Webhooks`.
 
 - **A refused `ENABLE_GITHUB` boot writes nothing (T946, A582).** The example server created its core webhook before the GitHub App key was parsed, so a key that is not an RSA PEM refused the boot but left a webhook endpoint behind. It now validates the adapter's whole config first (a check build of the adapter) and writes the webhook only after every check has passed.
 

@@ -616,9 +616,11 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 
 	var webhookStore *smeldr.WebhookStore
 	if cfg.EnableWebhooks {
-		// D117: an outbound job names its event-log row.
-		if err := smeldr.EnsureOutboundJobEventIDColumn(context.Background(), db); err != nil {
-			return ServerResult{}, fmt.Errorf("ensure smeldr_outbound_jobs.event_id: %w", err)
+		// The endpoint, job and delivery log tables, before App.Webhooks:
+		// without the job table no event is delivered (T947). It also adds
+		// event_id (D117) to a job table from before it.
+		if err := smeldr.CreateWebhookTables(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create webhook tables: %w", err)
 		}
 		webhookStore = smeldr.NewWebhookStore(db, []byte(cfg.Secret))
 		app.Webhooks(webhookStore)
@@ -975,14 +977,6 @@ func migrateDB(db *sql.DB) error {
 			expires_at TIMESTAMPTZ,
 			revoked_at TIMESTAMPTZ,
 			user_id    TEXT
-		)`,
-		`CREATE TABLE IF NOT EXISTS smeldr_webhook_endpoints (
-			id         TEXT    PRIMARY KEY,
-			events     TEXT    NOT NULL,
-			target_url TEXT    NOT NULL,
-			secret_enc TEXT    NOT NULL,
-			active     BOOLEAN NOT NULL DEFAULT TRUE,
-			created_at TIMESTAMPTZ NOT NULL
 		)`,
 	}
 	for _, s := range stmts {

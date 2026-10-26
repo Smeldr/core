@@ -48,7 +48,7 @@ type OutboundDelivery interface {
 // per endpoint per triggering event. The worker pool polls for due jobs and
 // retries them with exponential backoff until success or expiry.
 //
-// Database DDL (must be executed before [App.Webhooks] is called):
+// The table is created by [CreateWebhookTables] (T947):
 //
 //	CREATE TABLE smeldr_outbound_jobs (
 //	    id            TEXT    PRIMARY KEY,
@@ -83,7 +83,7 @@ type OutboundJob struct {
 
 // DeliveryLog is a record of one delivery attempt for an [OutboundJob].
 //
-// Database DDL (must be executed before [App.Webhooks] is called):
+// The table is created by [CreateWebhookTables] (T947):
 //
 //	CREATE TABLE smeldr_delivery_logs (
 //	    id           TEXT    PRIMARY KEY,
@@ -216,6 +216,60 @@ func EnsureOutboundJobEventIDColumn(ctx context.Context, db DB) error {
 		return fmt.Errorf("smeldr: EnsureOutboundJobEventIDColumn: %w", err)
 	}
 	return nil
+}
+
+// webhookTableStmts are the statements of [CreateWebhookTables], with the
+// table each one makes, in the order they run.
+var webhookTableStmts = []struct{ table, stmt string }{
+	{"smeldr_webhook_endpoints", `CREATE TABLE IF NOT EXISTS smeldr_webhook_endpoints (
+		id         TEXT    PRIMARY KEY,
+		events     TEXT    NOT NULL,
+		target_url TEXT    NOT NULL,
+		secret_enc TEXT    NOT NULL,
+		active     BOOLEAN NOT NULL DEFAULT TRUE,
+		created_at TIMESTAMPTZ NOT NULL
+	)`},
+	{"smeldr_outbound_jobs", `CREATE TABLE IF NOT EXISTS smeldr_outbound_jobs (
+		id            TEXT    PRIMARY KEY,
+		endpoint_id   TEXT    NOT NULL,
+		target_url    TEXT    NOT NULL,
+		secret_enc    TEXT    NOT NULL,
+		payload       BYTEA   NOT NULL,
+		event         TEXT    NOT NULL,
+		attempts      INTEGER NOT NULL DEFAULT 0,
+		next_retry_at TIMESTAMPTZ NOT NULL,
+		created_at    TIMESTAMPTZ NOT NULL,
+		expires_at    TIMESTAMPTZ NOT NULL,
+		status        TEXT    NOT NULL DEFAULT 'pending',
+		event_id      TEXT    NOT NULL DEFAULT ''
+	)`},
+	{"smeldr_outbound_jobs", `CREATE INDEX IF NOT EXISTS idx_smeldr_outbound_jobs_due ON smeldr_outbound_jobs (status, next_retry_at)`},
+	{"smeldr_delivery_logs", `CREATE TABLE IF NOT EXISTS smeldr_delivery_logs (
+		id           TEXT    PRIMARY KEY,
+		job_id       TEXT    NOT NULL,
+		attempted_at TIMESTAMPTZ NOT NULL,
+		status_code  INTEGER NOT NULL DEFAULT 0,
+		duration_ms  INTEGER NOT NULL DEFAULT 0,
+		error        TEXT    NOT NULL DEFAULT ''
+	)`},
+	{"smeldr_delivery_logs", `CREATE INDEX IF NOT EXISTS idx_smeldr_delivery_logs_job ON smeldr_delivery_logs (job_id)`},
+}
+
+// CreateWebhookTables creates the tables outbound webhooks need, if they do
+// not exist: smeldr_webhook_endpoints, smeldr_outbound_jobs (with event_id,
+// D117) and smeldr_delivery_logs, and the indexes the delivery worker reads by
+// (due jobs by status and next_retry_at, logs by job). Call it before
+// [App.Webhooks]; without the job table no event is ever delivered (T947).
+// Idempotent and safe on every boot: existing tables keep their rows, and a
+// job table made before D117 gains event_id. Works on SQLite and Postgres.
+func CreateWebhookTables(db DB) error {
+	ctx := context.Background()
+	for _, s := range webhookTableStmts {
+		if _, err := db.ExecContext(ctx, s.stmt); err != nil {
+			return fmt.Errorf("smeldr: CreateWebhookTables: %s: %w", s.table, err)
+		}
+	}
+	return EnsureOutboundJobEventIDColumn(ctx, db)
 }
 
 // runWorker is the main loop for one worker goroutine.

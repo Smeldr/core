@@ -3321,6 +3321,14 @@ Registered outbound delivery destination. `secretEnc` is unexported — the
 plaintext signing secret is returned once by `WebhookStore.Create` and
 cannot be retrieved again.
 
+### `CreateWebhookTables` (T947)
+
+```go
+func CreateWebhookTables(db DB) error
+```
+
+Creates the tables outbound webhooks need, if they do not exist: `smeldr_webhook_endpoints`, `smeldr_outbound_jobs` (with `event_id`, D117) and `smeldr_delivery_logs`, plus the indexes the delivery worker reads by (`idx_smeldr_outbound_jobs_due` on `status, next_retry_at`, `idx_smeldr_delivery_logs_job` on `job_id`), then adds `event_id` to a job table from before D117 (`EnsureOutboundJobEventIDColumn`). Call it before `App.Webhooks`: without the job table no event is delivered, and `Enqueue` logs "no such table". Idempotent and safe on every boot; existing rows are kept. SQLite and Postgres. A failing statement is returned with its table named. The example server calls it under `ENABLE_WEBHOOKS`.
+
 ### `WebhookStore`
 
 ```go
