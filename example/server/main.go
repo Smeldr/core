@@ -74,6 +74,8 @@
 //	                             each item's stored standing with its state's tag, records a Finding
 //	                             per mismatch; requires governance records; default off)
 //	STANDING_DRIFT_CHECK_SCHEDULE  5-field cron expression for the check (default: "30 3 * * *", daily)
+//	(findings)            with governance records or the structural sweep on, smeldr_findings is
+//	                      created and App.Findings wired, so the detectors record (T948)
 //	ENABLE_CONTEXT_PACKET wire GET /packet/{type}/{slug} (Editor role required; requires
 //	                      ENABLE_RELATIONS and governance records, T159)
 //	ENABLE_REACHABILITY   wire GET /reachability/{type}/{id} (Author role required; requires
@@ -650,6 +652,18 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 			return ServerResult{}, fmt.Errorf("create subscriptions: %w", err)
 		}
 		app.Subscriptions()
+	}
+
+	// Findings (D51): the structural sweep, the eval queue drain, the
+	// standing drift check and declared-tension aggregation record into this
+	// store, and record nothing without it (T948). Wired whenever one of them
+	// can run: governance records or the structural sweep (which needs
+	// relations, so a boot it refuses makes no table).
+	if cfg.governanceRecords() || (cfg.EnableStructuralSweep && cfg.EnableRelations) {
+		if err := smeldr.CreateFindingTable(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create finding table: %w", err)
+		}
+		app.Findings(smeldr.NewFindingStore(db))
 	}
 
 	if cfg.EnableStructuralSweep {

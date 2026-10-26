@@ -64,6 +64,8 @@ MASTODON_CLIENT_ID    Mastodon OAuth client ID (required when ENABLE_SOCIAL)
 MASTODON_CLIENT_SECRET Mastodon OAuth client secret (required when ENABLE_SOCIAL)
 MASTODON_INSTANCE_URL  Mastodon instance base URL (required when ENABLE_SOCIAL)
 ENABLE_WEBHOOKS       wire outbound webhook delivery (creates its tables at boot)
+(findings)            recorded in smeldr_findings by the sweeps and checks whenever
+                      governance records or the structural sweep are on
 ENABLE_PROVENANCE     wire transition-provenance recording (App.Provenance)
 ENABLE_AGENTS         wire the agent job system (connects to this server's own /mcp endpoint)
 AGENT_MCP_URL         agent MCP endpoint (default: http://127.0.0.1:PORT/mcp/message)
