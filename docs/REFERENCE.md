@@ -1008,6 +1008,39 @@ own docs; this tool requires a `smeldr_tool_policies` seed row
 own row) or every governance-enabled caller is silently forbidden, the same
 gap A298/A311 already closed for `get_sweep_run`/`get_stewardship_inbox`.
 
+### Severity and rule type ranks (decision-governance-model §3, §6)
+
+```go
+type Severity string // "low", "medium", "high", "critical"
+
+const (
+    SeverityLow      Severity = "low"
+    SeverityMedium   Severity = "medium"
+    SeverityHigh     Severity = "high"
+    SeverityCritical Severity = "critical"
+)
+
+func CreateRuleTypeRankTable(db DB) error
+func SetRuleTypeOrder(ctx context.Context, db DB, names []string) error
+func RuleTypeRank(ctx context.Context, db DB, name string) (rank int, ok bool, err error)
+func SeverityOf(ctx context.Context, db DB, rs *RelationStore, anchorType, anchorID, ruleType, kind, direction string, maxDepth int) (Severity, error)
+```
+
+`Severity` is a closed ordinal scale, compared by rank, not a numeric score; an unknown value ranks lowest.
+
+**`CreateRuleTypeRankTable`** creates `smeldr_rule_type_ranks (name, rank)` if it does not exist. Call it at startup alongside `CreateAuthorityTables`; the example server does under `ENABLE_AUTHORITY` (T949).
+
+**`SetRuleTypeOrder`** declares the whole ordering of rule types, weakest first: the rank is the index in `names`. It is a full replace, not a merge: a name left out loses its rank. It does not run in a transaction, so a failure part way leaves a partial ordering and returns the error.
+
+**`RuleTypeRank`** returns a name's rank; `ok` is false when the name is not registered, never a silent 0.
+
+**`SeverityOf`** returns the higher of two values:
+
+1. **Fan-out:** `rs.Reachability(ctx, anchorType, anchorID, kind, direction, maxDepth)` from the anchor (direction `incoming`, `outgoing` or `both`), bucketed by the total number of items reached: 0 is low, under 5 medium, under 20 high, otherwise critical.
+2. **Rule type floor:** the position of `ruleType` in the registered ordering. An empty or unregistered rule type gives low; a single registered rule type gives critical; otherwise the position rank / (count - 1) gives critical at 0.75 or more, high at 0.5, medium at 0.25, else low.
+
+The floor only raises the fan-out, never replaces it: explicit edges are sparse near the top of the rule type hierarchy, so fan-out alone undercounts exposure where the stakes are highest. Pass `""` as `ruleType` when the anchor has none; `SeverityOf` does not look it up itself. A reachability error is returned. With a non-empty `ruleType` and no `smeldr_rule_type_ranks` table, the rank lookup fails and `SeverityOf` returns that error, so create the table first. No MCP tool, CLI command or HTTP route calls these today; they are for Go embedders.
+
 ### Capabilities (D94, A499)
 
 A capability is one act on one resource. It is the unit that the MCP, REST and CLI surfaces each project (D94). Types are an argument of the `item` resource, so adding a content type never adds a capability.
