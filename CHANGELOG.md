@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.176.0] - 2026-10-26
+
 ### Added
 
 - **`CreateWebhookTables` (T947, A583).** Creates `smeldr_webhook_endpoints`, `smeldr_outbound_jobs` (with `event_id`) and `smeldr_delivery_logs` and the two indexes the delivery worker reads by, if they do not exist. Idempotent; SQLite and Postgres. Call it before `App.Webhooks`.
