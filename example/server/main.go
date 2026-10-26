@@ -480,6 +480,11 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.CreateAuthorityTables(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create authority tables: %w", err)
 		}
+		// The rule type ranks SeverityOf floors by: without the table a
+		// Decision with a rule type would fail there (T949).
+		if err := smeldr.CreateRuleTypeRankTable(db); err != nil {
+			return ServerResult{}, fmt.Errorf("create rule type rank table: %w", err)
+		}
 		smeldr.RegisterAuthorityTypes(app, db)
 	}
 

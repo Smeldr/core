@@ -30,6 +30,8 @@ cross-referenced below by their Amendment ID.
 
 - **The example server records findings (T948, A584).** `App.Findings` was never wired in example/server, so the structural sweep, the eval queue drain, the standing drift check and declared-tension aggregation recorded nothing, although `ENABLE_STANDING_DRIFT_CHECK` is documented to record a finding per mismatch. It now creates `smeldr_findings` and wires the store whenever governance records or the structural sweep are on. No surface reads findings yet; they are read on the server. Deploy note: the first boot of this release creates `smeldr_findings`, so on an instance that guards schema changes (process.smeldr.dev) that window needs `START_MIGRATES=1`.
 
+- **The example server creates the rule type rank table (T949, A585).** `CreateRuleTypeRankTable` was never called, so `SeverityOf` for a Decision with a rule type would fail on the missing table instead of using the rule type's floor. Nothing calls `SeverityOf` in core, mcp, cli or the example server today, so no request failed; the table is now created with the authority tables under `ENABLE_AUTHORITY`. Deploy note: on an instance with `ENABLE_AUTHORITY`, the first boot of this release creates `smeldr_rule_type_ranks`, so a window that guards schema changes needs `START_MIGRATES=1`.
+
 ---
 
 ## [1.175.0] - 2026-10-26
