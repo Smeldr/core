@@ -426,6 +426,12 @@ SECRET=changeme go run .
 | `AGENT_MCP_TOKEN` | when ENABLE_AGENTS | bearer token for agent MCP calls |
 | `OAUTH_ISSUER` | optional | enable OAuth 2.1; set to canonical issuer URL |
 | `OAUTH_DB_PATH` | when OAUTH_ISSUER | path to OAuth SQLite database (default: `./oauth.db`) |
+| `ENABLE_GITHUB` | boolean | mount the GitHub adapter of the pull request check (smeldr.dev/github) on `POST /github/webhook` and `POST /github/core-events`; needs tokens, governance, relations, webhooks and governance records; refuses to start, naming the variable, when one below is missing or wrong |
+| `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET` | when ENABLE_GITHUB | the GitHub App's ID and webhook secret |
+| `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_FILE` | when ENABLE_GITHUB | the App's private key, PEM, or a file holding it |
+| `GITHUB_ADAPTER_TOKEN_ID` | when ENABLE_GITHUB | the `token_id` `create_token` returned for a class `job` token that holds `check_change` (grant `editor`); the adapter acts in process as that token, so discard its plaintext |
+| `GITHUB_CORE_WEBHOOK_SECRET` | optional | by default the server registers its own core webhook for `changecheck.transitioned`; set this to register it yourself |
+| `GITHUB_NAMES_SHOWN`, `GITHUB_CHECK_URL`, `GITHUB_ITEM_URL` | optional | repositories whose comments show names (D152), link formats |
 
 Boolean vars gate their subsystem: set the var to any non-empty value to enable it
 (`ENABLE_TOKENS=1`, `ENABLE_GOVERNANCE=true`, etc.).

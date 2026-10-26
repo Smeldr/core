@@ -70,6 +70,17 @@ AGENT_MCP_URL         agent MCP endpoint (default: http://127.0.0.1:PORT/mcp/mes
 AGENT_MCP_TOKEN       bearer token for agent MCP calls
 OAUTH_ISSUER          enable OAuth 2.1; set to canonical issuer URL (requires ENABLE_TOKENS)
 OAUTH_DB_PATH         path to the OAuth SQLite database (default: ./oauth.db)
+ENABLE_GITHUB         mount the GitHub adapter of the pull request check (gated merges):
+                      POST /github/webhook and POST /github/core-events; needs ENABLE_TOKENS,
+                      ENABLE_GOVERNANCE, ENABLE_RELATIONS, ENABLE_WEBHOOKS and
+                      ENABLE_GOVERNANCE_RECORDS (or ENABLE_ORCHESTRATION)
+GITHUB_APP_ID         the GitHub App's ID
+GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_FILE  the App's private key (PEM)
+GITHUB_WEBHOOK_SECRET the GitHub App's webhook secret
+GITHUB_ADAPTER_TOKEN_ID the token_id of a class job token granted editor
+GITHUB_CORE_WEBHOOK_SECRET  optional; by default the server registers its own core webhook
+GITHUB_NAMES_SHOWN    optional comma list of owner/name whose comments show names
+GITHUB_CHECK_URL, GITHUB_ITEM_URL  optional link formats
 ```
 
 This list is `example/server/main.go`'s own doc comment, kept in sync

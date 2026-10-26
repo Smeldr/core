@@ -84,6 +84,21 @@
 //	AGENT_MCP_TOKEN       bearer token for agent MCP calls
 //	OAUTH_ISSUER          enable OAuth 2.1; set to canonical issuer URL (requires ENABLE_TOKENS)
 //	OAUTH_DB_PATH         path to the OAuth SQLite database (default: ./oauth.db)
+//	ENABLE_GITHUB         mount the pull request check's GitHub adapter (smeldr.dev/github) on
+//	                      POST /github/webhook and POST /github/core-events (T940); requires
+//	                      ENABLE_TOKENS, ENABLE_GOVERNANCE, ENABLE_RELATIONS, ENABLE_WEBHOOKS and
+//	                      ENABLE_GOVERNANCE_RECORDS (or ENABLE_ORCHESTRATION); refuses to start
+//	                      when a value below is missing or wrong, naming it, never its value
+//	GITHUB_APP_ID         the GitHub App's ID (required when ENABLE_GITHUB)
+//	GITHUB_APP_PRIVATE_KEY      the App's private key, PEM (a literal \n is a newline), or
+//	GITHUB_APP_PRIVATE_KEY_FILE a file holding it; one of the two
+//	GITHUB_WEBHOOK_SECRET the GitHub App's webhook secret (required when ENABLE_GITHUB)
+//	GITHUB_ADAPTER_TOKEN_ID the token_id create_token returned for a class job token that holds
+//	                      check_change (grant editor); the adapter acts in process as it
+//	GITHUB_CORE_WEBHOOK_SECRET optional: by default the server registers its own core webhook
+//	                      for changecheck.transitioned at BASE_URL/github/core-events
+//	GITHUB_NAMES_SHOWN    optional comma list of owner/name whose comments show names (D152)
+//	GITHUB_CHECK_URL, GITHUB_ITEM_URL optional link formats for the status and the comment
 package main
 
 import (
@@ -165,6 +180,10 @@ type ServerConfig struct {
 	// D115); empty means warnings only.
 	SignalMessageCutover string
 	SignalEventCutover   string
+	// EnableGitHub (ENABLE_GITHUB) mounts the pull request check's GitHub
+	// adapter, configured by the GITHUB_* variables (T940).
+	EnableGitHub bool
+	GitHub       gitHubConfig
 }
 
 // ServerResult holds the live components returned by [buildApp].
@@ -228,6 +247,8 @@ func parseConfig() ServerConfig {
 		OAuthIssuer:              os.Getenv("OAUTH_ISSUER"),
 		OAuthDBPath:              envOr("OAUTH_DB_PATH", "./oauth.db"),
 		InstanceName:             envOr("INSTANCE_NAME", "smeldr-dogfood"),
+		EnableGitHub:             os.Getenv("ENABLE_GITHUB") != "",
+		GitHub:                   parseGitHubConfig(os.Getenv),
 	}
 }
 
@@ -593,12 +614,20 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		)
 	}
 
+	var webhookStore *smeldr.WebhookStore
 	if cfg.EnableWebhooks {
 		// D117: an outbound job names its event-log row.
 		if err := smeldr.EnsureOutboundJobEventIDColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure smeldr_outbound_jobs.event_id: %w", err)
 		}
-		app.Webhooks(smeldr.NewWebhookStore(db, []byte(cfg.Secret)))
+		webhookStore = smeldr.NewWebhookStore(db, []byte(cfg.Secret))
+		app.Webhooks(webhookStore)
+	}
+
+	if cfg.EnableGitHub {
+		if err := mountGitHub(context.Background(), cfg, app, tokenStore, webhookStore); err != nil {
+			return ServerResult{}, err
+		}
 	}
 
 	if cfg.EnableEventStream {

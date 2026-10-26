@@ -66,7 +66,9 @@ SECRET=changeme go run .
 Optional subsystems are gated by environment variables (`ENABLE_TOKENS`,
 `ENABLE_GOVERNANCE`, `ENABLE_RELATIONS`, `ENABLE_DYNAMIC_CONTENT`, `ENABLE_BLOCKS`,
 `ENABLE_MEDIA`, `ENABLE_SOCIAL`, `ENABLE_WEBHOOKS`, `ENABLE_PROVENANCE`,
-`ENABLE_STRUCTURAL_SWEEP`, `ENABLE_AGENTS`, `OAUTH_ISSUER`).
+`ENABLE_STRUCTURAL_SWEEP`, `ENABLE_AGENTS`, `ENABLE_GITHUB`, `OAUTH_ISSUER`).
+`ENABLE_GITHUB` turns on gated merges for a GitHub repository with environment
+variables only (see `docs/SELF_HOSTING.md`).
 Set any to a non-empty value to enable that subsystem. See `example/server/main.go`
 for the full variable reference and wiring order.
 
