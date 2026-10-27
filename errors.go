@@ -89,6 +89,38 @@ var (
 	ErrInternal = newSentinel(http.StatusInternalServerError, "internal_server_error", "Internal server error")
 )
 
+// RefusalError is a refusal whose Reason is safe to show the caller (T971).
+// errors.Is(err, ErrForbidden) holds for it, so every check for a forbidden
+// still matches; what changes is that WriteError and smeldr.dev/mcp show the
+// Reason instead of the bare "Forbidden".
+//
+// The rule for a Reason: it names only what the caller sent and the
+// caller's own token, never an item the caller may not read, and it reads
+// the same whether or not such an item exists, so it is no existence
+// oracle. Every other refusal stays the generic [ErrForbidden].
+type RefusalError struct {
+	// Reason says why, in words safe to show the caller.
+	Reason string
+}
+
+// Refused returns a [*RefusalError] with reason.
+func Refused(reason string) *RefusalError { return &RefusalError{Reason: reason} }
+
+// Error returns "forbidden: " and the reason.
+func (e *RefusalError) Error() string { return "forbidden: " + e.Reason }
+
+// Code returns "forbidden", the code of [ErrForbidden].
+func (e *RefusalError) Code() string { return "forbidden" }
+
+// HTTPStatus returns 403.
+func (e *RefusalError) HTTPStatus() int { return http.StatusForbidden }
+
+// Public returns the reason: it is safe to show the caller.
+func (e *RefusalError) Public() string { return e.Reason }
+
+// Is reports whether target is [ErrForbidden].
+func (e *RefusalError) Is(target error) bool { return target == ErrForbidden }
+
 // fieldError holds a single field-level validation failure. Unexported — only
 // used as input to the JSON encoder and within ValidationError.
 type fieldError struct {

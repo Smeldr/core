@@ -21,10 +21,12 @@ cross-referenced below by their Amendment ID.
 ### Added
 
 - **`ValidateConfig` (T969, A594).** `MustConfig`'s rules (the smeldr.config merge, an absolute `BaseURL`, a `Secret` of at least 16 bytes) as a function that returns a `*ValidationError` instead of panicking. `MustConfig` now calls it and panics with exactly the messages it always had.
+- **`RefusalError` and `Refused` (T971, A595).** A refusal whose reason is safe to show: `errors.Is(err, ErrForbidden)` still holds, and `Public()` is the reason, so `WriteError` and smeldr.dev/mcp show it instead of the bare "Forbidden". The rule: the reason names only what the caller sent and its own token, and is no existence oracle. The D142 refusals use it: an agent or job token never ratifying a Decision ("an agent token never ratifies, supersedes or amends a Decision (D142); a human approver does"), and the agent-grant rule of `RoleStore.Grant`. Found by T968's clean run: the README tutorial's key moment showed only "forbidden".
 
 ### Changed
 
 - **example/server: `INSTANCE_NAME` defaults to `smeldr` (T969).** It was `smeldr-dogfood`, which a new self-hoster's Organization took as its name. An instance that sets `ORGANIZATION_NAME` or `INSTANCE_NAME` is unchanged.
+- **The agent-grant rule checks the grantor before the Area (T971).** A missing Area and an Area the grantor holds no approve-change over are now refused with one text ("the grantor holds no approve-change over Area X, so cannot delegate it to an agent token"); before, a missing Area had its own message, which told a grantor whether an Area existed.
 
 ### Fixed
 

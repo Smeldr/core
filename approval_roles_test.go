@@ -158,6 +158,11 @@ func TestRatify_AgentNeverRatifies(t *testing.T) {
 			if tc.want == nil && err != nil || tc.want != nil && (!errors.Is(err, tc.want) || !strings.Contains(err.Error(), "never ratifies")) {
 				t.Errorf("err = %v, want %v", err, tc.want)
 			}
+			// The D142 refusal carries its reason (T971).
+			var re *RefusalError
+			if tc.want != nil && (!errors.As(err, &re) || !strings.Contains(re.Reason, "never ratifies, supersedes or amends a Decision (D142)")) {
+				t.Errorf("err = %v, want a RefusalError with the D142 reason", err)
+			}
 		})
 	}
 }
@@ -171,6 +176,19 @@ func TestGrant_AgentRule(t *testing.T) {
 	if _, err := f.rs.Grant(context.Background(), RoleGrant{TokenID: "human-2", RoleName: "editor"}); err != nil {
 		t.Fatal(err)
 	}
+	// No existence oracle (T971): a missing Area and an existing Area the
+	// grantor holds nothing over are refused with the same text.
+	reason := func(anchor string) string {
+		_, err := f.rs.Grant(as("human-2", Human), RoleGrant{TokenID: "job-1", RoleName: RoleAreaApprover, ScopeAnchorID: anchor})
+		var re *RefusalError
+		if !errors.As(err, &re) {
+			t.Fatalf("%s: err = %v, want a RefusalError", anchor, err)
+		}
+		return strings.ReplaceAll(re.Reason, anchor, "<anchor>")
+	}
+	if missing, unreadable := reason("no-such-area"), reason(f.area); missing != unreadable {
+		t.Errorf("an existence oracle:\nmissing:    %s\nunreadable: %s", missing, unreadable)
+	}
 	for _, tc := range []struct {
 		name  string
 		ctx   context.Context
@@ -181,7 +199,7 @@ func TestGrant_AgentRule(t *testing.T) {
 		{"job domain-approver", human, RoleGrant{TokenID: "job-1", RoleName: RoleDomainApprover, ScopeAnchorID: f.domain}, "never holds ratify"},
 		{"agent item-approver", human, RoleGrant{TokenID: "agent-1", RoleName: "item-approver", ScopeStatic: []string{"Decision:x"}}, "never holds ratify"},
 		{"agent area-approver without anchor", human, RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover}, "only within one Area"},
-		{"agent area-approver on a Domain", human, RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.domain}, "is not an Area"},
+		{"agent area-approver on a Domain", human, RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.domain}, "holds no approve-change over Area"},
 		{"no grantor", context.Background(), RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "needs a human grantor"},
 		{"agent grantor", as("agent-1", Agent), RoleGrant{TokenID: "job-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "must come from a human token; the grantor is agent"},
 		{"unclassified grantor", as("plain-1"), RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "the grantor is unclassified"},
@@ -196,6 +214,11 @@ func TestGrant_AgentRule(t *testing.T) {
 			_, err := f.rs.Grant(tc.ctx, tc.grant)
 			if tc.want == "" && err != nil || tc.want != "" && (!errors.Is(err, ErrForbidden) || !strings.Contains(err.Error(), tc.want)) {
 				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+			// Each refusal of the agent rule carries its reason (T971).
+			var re *RefusalError
+			if tc.want != "" && (!errors.As(err, &re) || !strings.Contains(re.Reason, tc.want)) {
+				t.Errorf("err = %v, want a RefusalError whose reason has %q", err, tc.want)
 			}
 		})
 	}

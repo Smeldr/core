@@ -33,7 +33,8 @@ This rule exists so that:
 `WriteError` — it is a distinct translation for a distinct transport. It
 distinguishes exactly five conditions today: `*ValidationError` → `-32602`,
 `smeldr.ErrBadRequest` → `-32602`, `smeldr.ErrNotFound` → `-32001`,
-`smeldr.ErrForbidden` → `-32001`, `smeldr.ErrConflict` → `-32001`,
+`smeldr.ErrForbidden` → `-32001` (a `*RefusalError` as `forbidden: <reason>`, otherwise
+the bare `forbidden`), `smeldr.ErrConflict` → `-32001`,
 `smeldr.ErrRevConflict` → `-32002`. Every other sentinel — `ErrGone`,
 `ErrUnauth`, `ErrNotAcceptable`, `ErrTooManyRequests`, `ErrRequestTooLarge`,
 `ErrLastAdmin`, `ErrInternal` — falls through to the generic
@@ -68,6 +69,17 @@ WriteError(w, r, smeldr.ErrInternal)          // 500
 Sentinels are `smeldr.Error` values. They produce a JSON body with `code`,
 `message`, and `request_id`. They produce an HTML page when the request
 carries `Accept: text/html`.
+
+#### A refusal with a reason: `RefusalError`
+
+A forbidden is answered with the bare "Forbidden" because a reason could name
+an item the caller may not read. When the reason is safe, return
+`smeldr.Refused(reason)` (a `*RefusalError`) instead of wrapping `ErrForbidden`:
+`errors.Is(err, ErrForbidden)` still holds, and `WriteError` and the MCP
+pipeline show the reason. The reason names only what the caller sent and the
+caller's own token, and reads the same whether or not an item it mentions
+exists, so it is no existence oracle. It is not a sentinel: it carries a
+per-call reason, as a `ValidationError` carries field messages.
 
 #### When to add a new sentinel
 

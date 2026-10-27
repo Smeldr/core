@@ -1199,6 +1199,15 @@ Cost: a read with an attached scope runs no query and does not allocate. Otherwi
 
 Over smeldr.dev/mcp these map to -32001 for `ErrForbidden`, -32000 for `ErrNotFound` (since mcp v1.61.0), -32602 for `ErrBadRequest`, and -32603 for `ErrInternal`.
 
+**A refusal with a reason (T971).** Most forbiddens stay the bare `ErrForbidden`, because a reason could name an item the caller may not read. A refusal whose reason is safe to show is a `*RefusalError`:
+
+```go
+type RefusalError struct{ Reason string }
+func Refused(reason string) *RefusalError // errors.Is(err, ErrForbidden) holds; Public() is Reason
+```
+
+The rule for a Reason: it names only what the caller sent and the caller's own token, and reads the same whether or not an item it mentions exists (no existence oracle). `WriteError` answers 403 with the reason as the message; smeldr.dev/mcp answers -32001 with `forbidden: <reason>`. Core uses it for the D142 refusals: an agent or job token never ratifies, supersedes or amends a Decision, and the agent-grant rule of `RoleStore.Grant` (an agent or job never holds ratify; approve-change only within one Area, granted by a human holding approve-change over it). The grant rule's text for a missing Area and for an Area the grantor holds nothing over is the same.
+
 ---
 
 ### Search (T885)

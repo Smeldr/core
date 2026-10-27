@@ -313,36 +313,44 @@ func (s *RoleStore) checkAgentGrant(ctx context.Context, grant RoleGrant, roleID
 	if !automatedClass(class) {
 		return nil
 	}
+	// The refusals below name only what the caller sent (the role, the
+	// anchor) and the classes involved, so they carry their reason
+	// (RefusalError, T971).
 	if ratify {
-		return fmt.Errorf("%w: Grant: an %s token never holds ratify (D142): role %q holds it", ErrForbidden, class, grant.RoleName)
+		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an %s token never holds ratify (D142): role %q holds it", class, grant.RoleName)))
 	}
 	if ScopeMode(r.scopeMode) != ScopeDynamic || r.relationKind != "belongs_to_area" || grant.ScopeAnchorID == "" {
-		return fmt.Errorf("%w: Grant: an %s token holds approve-change only within one Area: role %q is not an Area role anchored on an Area (use %s)", ErrForbidden, class, grant.RoleName, RoleAreaApprover)
-	}
-	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_areas WHERE id = $1`, grant.ScopeAnchorID).Scan(&n); err != nil || n == 0 {
-		return fmt.Errorf("%w: Grant: the anchor %s of an %s token's %s grant is not an Area", ErrForbidden, grant.ScopeAnchorID, class, grant.RoleName)
+		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an %s token holds approve-change only within one Area: role %q is not an Area role anchored on an Area (use %s)", class, grant.RoleName, RoleAreaApprover)))
 	}
 	grantor, _ := actorFromContext(ctx)
 	if grantor == "" {
 		grantor = s.actorTokenID
 	}
 	if grantor == "" {
-		return fmt.Errorf("%w: Grant: an %s token's %s grant needs a human grantor, and none is known", ErrForbidden, class, grant.RoleName)
+		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an %s token's %s grant needs a human grantor, and none is known", class, grant.RoleName)))
 	}
 	grantorClass, err := actorClass(ctx, s.db, grantor)
 	if err != nil {
 		return fmt.Errorf("%w: Grant: the class of the grantor %s cannot be read: %s", ErrForbidden, grantor, err)
 	}
 	if grantorClass != string(Human) {
-		return fmt.Errorf("%w: Grant: an %s token's %s grant must come from a human token; the grantor is %s", ErrForbidden, class, grant.RoleName, classLabel(grantorClass))
+		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an %s token's %s grant must come from a human token; the grantor is %s", class, grant.RoleName, classLabel(grantorClass))))
 	}
-	ok, err := s.Authorized(ctx, grantor, OperationApproveChange, AuthTarget{TypeName: "Area", ID: grant.ScopeAnchorID})
-	if err != nil {
-		return fmt.Errorf("%w: Grant: the grantor's authority over the Area cannot be read: %s", ErrForbidden, err)
+	// A missing Area and an Area the grantor holds no approve-change over
+	// are refused with one text, so the refusal is no existence oracle
+	// (T971): the grantor learns only that it cannot delegate this anchor.
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_areas WHERE id = $1`, grant.ScopeAnchorID).Scan(&n); err != nil {
+		return fmt.Errorf("%w: Grant: the anchor of an %s token's %s grant cannot be read: %s", ErrForbidden, class, grant.RoleName, err)
+	}
+	ok := false
+	if n > 0 {
+		if ok, err = s.Authorized(ctx, grantor, OperationApproveChange, AuthTarget{TypeName: "Area", ID: grant.ScopeAnchorID}); err != nil {
+			return fmt.Errorf("%w: Grant: the grantor's authority over the Area cannot be read: %s", ErrForbidden, err)
+		}
 	}
 	if !ok {
-		return fmt.Errorf("%w: Grant: the grantor holds no approve-change over Area %s, so cannot delegate it", ErrForbidden, grant.ScopeAnchorID)
+		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("the grantor holds no approve-change over Area %s, so cannot delegate it to an %s token", grant.ScopeAnchorID, class)))
 	}
 	return nil
 }
@@ -363,7 +371,7 @@ func refuseAutomatedRatify(ctx context.Context, requiredOperation string) error 
 		return nil
 	}
 	if _, kind := actorFromContext(ctx); automatedClass(kind) {
-		return fmt.Errorf("%w: an %s token never ratifies, supersedes or amends a Decision (D142); a human approver does", ErrForbidden, kind)
+		return Refused(fmt.Sprintf("an %s token never ratifies, supersedes or amends a Decision (D142); a human approver does", kind))
 	}
 	return nil
 }
