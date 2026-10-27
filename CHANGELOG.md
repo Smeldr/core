@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.179.0] - 2026-10-27
+
 ### Added
 
 - **`ValidateConfig` (T969, A594).** `MustConfig`'s rules (the smeldr.config merge, an absolute `BaseURL`, a `Secret` of at least 16 bytes) as a function that returns a `*ValidationError` instead of panicking. `MustConfig` now calls it and panics with exactly the messages it always had.
