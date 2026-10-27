@@ -1208,6 +1208,23 @@ func Refused(reason string) *RefusalError // errors.Is(err, ErrForbidden) holds;
 
 The rule for a Reason: it names only what the caller sent and the caller's own token, and reads the same whether or not an item it mentions exists (no existence oracle). `WriteError` answers 403 with the reason as the message; smeldr.dev/mcp answers -32001 with `forbidden: <reason>`. Core uses it for the D142 refusals: an agent or job token never ratifies, supersedes or amends a Decision, and the agent-grant rule of `RoleStore.Grant` (an agent or job never holds ratify; approve-change only within one Area, granted by a human holding approve-change over it). The grant rule's text for a missing Area and for an Area the grantor holds nothing over is the same.
 
+**Reading a validation error's fields (T972).** A `*ValidationError` holds one failure per field. Read them with `errors.As` and `Fields()`, never by matching `Error()`'s text:
+
+```go
+type FieldError struct {
+    Field   string `json:"field"`
+    Message string `json:"message"`
+}
+func (e *ValidationError) Fields() []FieldError // in order, a copy; nil for a nil receiver
+
+var ve *smeldr.ValidationError
+if errors.As(err, &ve) {
+    for _, f := range ve.Fields() { /* f.Field, f.Message */ }
+}
+```
+
+`FieldError` is the same shape `WriteError` writes in the JSON `fields` array.
+
 ---
 
 ### Search (T885)

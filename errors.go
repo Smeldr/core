@@ -140,6 +140,27 @@ func (e *ValidationError) HTTPStatus() int { return http.StatusUnprocessableEnti
 func (e *ValidationError) Code() string    { return "validation_failed" }
 func (e *ValidationError) Public() string  { return "Validation failed" }
 
+// FieldError is one field's validation failure, as a [ValidationError]
+// holds it and as [WriteError] writes it in the JSON "fields" array.
+type FieldError struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+}
+
+// Fields returns the field failures in order, as a copy, so a caller reads
+// the field with errors.As instead of matching Error()'s text (T972). A nil
+// receiver returns nil.
+func (e *ValidationError) Fields() []FieldError {
+	if e == nil {
+		return nil
+	}
+	out := make([]FieldError, len(e.fields))
+	for i, f := range e.fields {
+		out[i] = FieldError{Field: f.field, Message: f.message}
+	}
+	return out
+}
+
 // Error returns a human-readable summary of all validation failures.
 func (e *ValidationError) Error() string {
 	if len(e.fields) == 1 {
@@ -302,10 +323,7 @@ func respond(w http.ResponseWriter, _ *http.Request, status int, requestID strin
 
 	var veFields *ValidationError
 	if errors.As(err, &veFields) {
-		body.Error.Fields = make([]fieldJSON, len(veFields.fields))
-		for i, f := range veFields.fields {
-			body.Error.Fields[i] = fieldJSON{Field: f.field, Message: f.message}
-		}
+		body.Error.Fields = veFields.Fields()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -320,16 +338,10 @@ type errorResponse struct {
 
 // errorBody holds the fields that appear inside the "error" key.
 type errorBody struct {
-	Code      string      `json:"code"`
-	Message   string      `json:"message"`
-	RequestID string      `json:"request_id"`
-	Fields    []fieldJSON `json:"fields,omitempty"`
-}
-
-// fieldJSON is the JSON representation of a single validation field error.
-type fieldJSON struct {
-	Field   string `json:"field"`
-	Message string `json:"message"`
+	Code      string       `json:"code"`
+	Message   string       `json:"message"`
+	RequestID string       `json:"request_id"`
+	Fields    []FieldError `json:"fields,omitempty"`
 }
 
 // htmlErrorPage is a minimal fallback HTML template used when Accept: text/html

@@ -150,14 +150,21 @@ func validateGitHub(cfg ServerConfig) ([]byte, error) {
 	return key, nil
 }
 
+// configVariables are the environment variables behind core's config
+// fields.
+var configVariables = map[string]string{"base_url": "BASE_URL", "secret": "SECRET", "smeldr_config": "SMELDR_CONFIG"}
+
 // configError names the variable behind a core config error: BASE_URL,
-// SECRET or SMELDR_CONFIG. It never contains SECRET's value; a BASE_URL
-// that does not parse is named with its value, as core's message does.
+// SECRET or SMELDR_CONFIG, read from the ValidationError's field (T972). It
+// never contains SECRET's value; a BASE_URL that does not parse is named
+// with its value, as core's message does.
 func configError(err error) error {
-	msg := err.Error()
-	for field, variable := range map[string]string{"base_url": "BASE_URL", "secret": "SECRET", "smeldr_config": "SMELDR_CONFIG"} {
-		if strings.Contains(msg, "validation failed: "+field+": ") {
-			return fmt.Errorf("%s: %s", variable, strings.TrimPrefix(msg, "validation failed: "+field+": "))
+	var ve *smeldr.ValidationError
+	if errors.As(err, &ve) {
+		if fields := ve.Fields(); len(fields) == 1 {
+			if variable, ok := configVariables[fields[0].Field]; ok {
+				return fmt.Errorf("%s: %s", variable, fields[0].Message)
+			}
 		}
 	}
 	return err

@@ -106,6 +106,9 @@ return smeldr.Require(
 )
 ```
 
+To read the failures in code, use `errors.As` and `Fields()` (a copy of the
+`[]FieldError`, in order), never a match on `Error()`'s text.
+
 `WriteError` detects `*ValidationError` via `errors.As` and adds a `fields`
 array to the response body:
 
