@@ -39,9 +39,8 @@ func TestMustConfig_emptyBaseURL(t *testing.T) {
 		if r == nil {
 			t.Fatal("expected panic for empty BaseURL")
 		}
-		msg := fmt.Sprint(r)
-		if !strings.Contains(msg, "BaseURL") {
-			t.Fatalf("panic message does not mention BaseURL: %s", msg)
+		if msg := fmt.Sprint(r); msg != `smeldr: Config.BaseURL is required (e.g. "https://example.com")` {
+			t.Fatalf("panic message = %s", msg)
 		}
 	}()
 	MustConfig(Config{
@@ -56,9 +55,8 @@ func TestMustConfig_invalidBaseURL(t *testing.T) {
 		if r == nil {
 			t.Fatal("expected panic for invalid BaseURL")
 		}
-		msg := fmt.Sprint(r)
-		if !strings.Contains(msg, "not a valid absolute URL") {
-			t.Fatalf("unexpected panic message: %s", msg)
+		if msg := fmt.Sprint(r); msg != `smeldr: Config.BaseURL "not-a-url" is not a valid absolute URL: parse "not-a-url": invalid URI for request` {
+			t.Fatalf("panic message = %s", msg)
 		}
 	}()
 	MustConfig(Config{
@@ -73,6 +71,9 @@ func TestMustConfig_relativeURL(t *testing.T) {
 		if r == nil {
 			t.Fatal("expected panic for relative URL")
 		}
+		if msg := fmt.Sprint(r); msg != `smeldr: Config.BaseURL "/relative-path" is not a valid absolute URL: <nil>` {
+			t.Fatalf("panic message = %s", msg)
+		}
 	}()
 	MustConfig(Config{
 		BaseURL: "/relative-path",
@@ -86,9 +87,8 @@ func TestMustConfig_shortSecret(t *testing.T) {
 		if r == nil {
 			t.Fatal("expected panic for short Secret")
 		}
-		msg := fmt.Sprint(r)
-		if !strings.Contains(msg, "Secret") {
-			t.Fatalf("panic message does not mention Secret: %s", msg)
+		if msg := fmt.Sprint(r); msg != "smeldr: Config.Secret must be at least 16 bytes" {
+			t.Fatalf("panic message = %s", msg)
 		}
 	}()
 	MustConfig(Config{

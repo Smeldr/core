@@ -54,7 +54,7 @@ ENABLE_RELATIONS      wire the relation graph store
 ENABLE_DYNAMIC_CONTENT wire the runtime content type system and schema store
 ENABLE_BLOCKS         wire the block/composition system MCP tools
 ENABLE_ORCHESTRATION  wire orchestration types (Signal, Task, Decision, Amendment, Goal)
-INSTANCE_NAME         source name embedded in Context Packet responses (default: smeldr-dogfood)
+INSTANCE_NAME         source name embedded in Context Packet responses (default: smeldr)
 ENABLE_REDIRECTS      wire database-backed redirect management
 ENABLE_PAGE_META      wire per-path SEO override store
 ENABLE_MEDIA          wire local media upload and management
@@ -84,6 +84,9 @@ GITHUB_CORE_WEBHOOK_SECRET  optional; by default the server registers its own co
 GITHUB_NAMES_SHOWN    optional comma list of owner/name whose comments show names
 GITHUB_CHECK_URL, GITHUB_ITEM_URL  optional link formats
 ```
+
+`BASE_URL` is required (an absolute URL), `SECRET` must be at least 16 bytes,
+and `ENABLE_GOVERNANCE_RECORDS` or `ENABLE_ORCHESTRATION` needs `ENABLE_RELATIONS`.
 
 A boot refused for a flag or a variable (a missing dependency, a value that
 does not parse, a GitHub variable) exits before it writes anything to the

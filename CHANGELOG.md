@@ -18,6 +18,18 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **`ValidateConfig` (T969, A594).** `MustConfig`'s rules (the smeldr.config merge, an absolute `BaseURL`, a `Secret` of at least 16 bytes) as a function that returns a `*ValidationError` instead of panicking. `MustConfig` now calls it and panics with exactly the messages it always had.
+
+### Changed
+
+- **example/server: `INSTANCE_NAME` defaults to `smeldr` (T969).** It was `smeldr-dogfood`, which a new self-hoster's Organization took as its name. An instance that sets `ORGANIZATION_NAME` or `INSTANCE_NAME` is unchanged.
+
+### Fixed
+
+- **example/server refuses a missing `BASE_URL`, a short `SECRET`, and governance records without relations, before any write (T969, A594).** A missing `BASE_URL` panicked inside `smeldr.New` after `smeldr_tokens` was created; it is now refused by validateBoot, naming the variable. `ENABLE_GOVERNANCE_RECORDS` or `ENABLE_ORCHESTRATION` without `ENABLE_RELATIONS` booted but could never ratify (`no such table: smeldr_relations`); it is now refused: a Decision is ratified in a place, and a place is a relation. Found by T968's clean run of the README start.
+
 ---
 
 ## [1.178.0] - 2026-10-26

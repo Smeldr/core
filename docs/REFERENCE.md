@@ -2999,6 +2999,15 @@ pair per line; lines starting with `#` are comments.
 The `secret` key is forbidden in config files — it must be supplied as an
 environment variable or directly in Go code.
 
+`MustConfig` merges the file, then requires an absolute `BaseURL` and a
+`Secret` of at least 16 bytes, and panics otherwise. `ValidateConfig` applies
+the same rules and returns the error instead, so a caller can refuse before it
+writes anything (T969):
+
+```go
+func ValidateConfig(cfg Config) (Config, error) // merged Config, or a *ValidationError on smeldr_config, base_url or secret
+```
+
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `base_url` | string | — | Canonical site URL, e.g. `https://example.com` |
@@ -3381,7 +3390,7 @@ refuse a bad URL before it writes anything (T955):
 func ValidateWebhookURL(rawURL string) error // a *ValidationError on field "url"; resolves the host
 ```
 
- Secrets are encrypted with AES-256-GCM using a key derived from
+Secrets are encrypted with AES-256-GCM using a key derived from
 `appSecret`. Rotating `Config.Secret` invalidates all stored secrets.
 
 Required tables — run once at startup:

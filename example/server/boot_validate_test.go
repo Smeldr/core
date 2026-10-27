@@ -61,12 +61,17 @@ func TestBoot_RefusalWritesNoSchema(t *testing.T) {
 		c.EnableGitHub = true
 		c.GitHub = gitHubConfig{AppID: "12345", PrivateKey: key, WebhookSecret: testGitHubWebhookSecret, AdapterTokenID: "adapter"}
 	}
-	records := func(c *ServerConfig) { c.EnableGovernanceRecords = true }
+	records := func(c *ServerConfig) { c.EnableRelations, c.EnableGovernanceRecords = true, true }
 	for _, tc := range []struct {
 		name string
 		edit func(*ServerConfig)
 		want string
 	}{
+		{"base url missing", func(c *ServerConfig) { c.BaseURL = "" }, `BASE_URL: Config.BaseURL is required`},
+		{"base url relative", func(c *ServerConfig) { c.BaseURL = "/x" }, `BASE_URL: Config.BaseURL "/x" is not a valid absolute URL`},
+		{"secret short", func(c *ServerConfig) { c.Secret = "short" }, "SECRET: Config.Secret must be at least 16 bytes"},
+		{"records without relations", func(c *ServerConfig) { c.EnableGovernanceRecords = true }, "ENABLE_GOVERNANCE_RECORDS requires ENABLE_RELATIONS"},
+		{"orchestration without relations", func(c *ServerConfig) { c.EnableOrchestration = true }, "ENABLE_ORCHESTRATION requires ENABLE_RELATIONS"},
 		{"title cutover", func(c *ServerConfig) { c.TitleCutover = "yesterday" }, "TITLE_CUTOVER: want an RFC3339 time"},
 		{"signal message cutover", func(c *ServerConfig) { c.SignalMessageCutover = "soon" }, "SIGNAL_MESSAGE_CUTOVER: want an RFC3339 time"},
 		{"signal event cutover", func(c *ServerConfig) { c.SignalEventCutover = "later" }, "SIGNAL_EVENT_CUTOVER: want an RFC3339 time"},
@@ -133,6 +138,7 @@ func TestBoot_RefusalWritesNoSchema(t *testing.T) {
 // scheduler to parse its schedule and stops it; nothing keeps running.
 func TestBoot_ScheduleCheckLeavesNoGoroutine(t *testing.T) {
 	cfg := ServerConfig{
+		Secret: "test-secret-that-is-at-least-32-bytes", BaseURL: "https://example.com",
 		EnableRelations: true, EnableStructuralSweep: true,
 		EnableGovernanceRecords: true, EnableEvalQueueDrain: true, EnableStandingDriftCheck: true,
 	}

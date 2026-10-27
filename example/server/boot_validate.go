@@ -35,6 +35,12 @@ type bootChecks struct {
 // variable, never a secret value. A new flag adds its refusal here.
 func validateBoot(cfg ServerConfig) (bootChecks, error) {
 	var checks bootChecks
+	// MustConfig's rules (core's ValidateConfig), so a missing BASE_URL or a
+	// short SECRET is refused here, before any write, instead of panicking
+	// in smeldr.New after the first one (T969).
+	if _, err := smeldr.ValidateConfig(smeldr.Config{BaseURL: cfg.BaseURL, Secret: []byte(cfg.Secret)}); err != nil {
+		return checks, configError(err)
+	}
 	var err error
 	if checks.titleCutover, err = parseCutover("TITLE_CUTOVER", cfg.TitleCutover); err != nil {
 		return checks, err
@@ -46,6 +52,8 @@ func validateBoot(cfg ServerConfig) (bootChecks, error) {
 		return checks, err
 	}
 	switch {
+	case cfg.governanceRecords() && !cfg.EnableRelations:
+		return checks, fmt.Errorf("%s requires ENABLE_RELATIONS (a Decision is ratified in a place, and a place is a relation)", recordsFlag(cfg))
 	case cfg.EnableCheck && (!cfg.EnableAuthority || !cfg.governanceRecords()):
 		return checks, errors.New("ENABLE_CHECK requires ENABLE_AUTHORITY and ENABLE_GOVERNANCE_RECORDS (or ENABLE_ORCHESTRATION)")
 	case cfg.EnableEventLog && !cfg.EnableEventStream:
@@ -140,4 +148,25 @@ func validateGitHub(cfg ServerConfig) ([]byte, error) {
 		}
 	}
 	return key, nil
+}
+
+// configError names the variable behind a core config error: BASE_URL,
+// SECRET or SMELDR_CONFIG. It never contains SECRET's value; a BASE_URL
+// that does not parse is named with its value, as core's message does.
+func configError(err error) error {
+	msg := err.Error()
+	for field, variable := range map[string]string{"base_url": "BASE_URL", "secret": "SECRET", "smeldr_config": "SMELDR_CONFIG"} {
+		if strings.Contains(msg, "validation failed: "+field+": ") {
+			return fmt.Errorf("%s: %s", variable, strings.TrimPrefix(msg, "validation failed: "+field+": "))
+		}
+	}
+	return err
+}
+
+// recordsFlag names the flag that turned governance records on.
+func recordsFlag(cfg ServerConfig) string {
+	if cfg.EnableOrchestration && !cfg.EnableGovernanceRecords {
+		return "ENABLE_ORCHESTRATION"
+	}
+	return "ENABLE_GOVERNANCE_RECORDS"
 }

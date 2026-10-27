@@ -47,6 +47,7 @@ func TestRunMigratePlaces(t *testing.T) {
 	db.Close()
 
 	t.Setenv("ENABLE_GOVERNANCE_RECORDS", "1")
+	t.Setenv("ENABLE_RELATIONS", "1")
 	var out, errOut bytes.Buffer
 	if code := runMigratePlaces(nil, &out, &errOut); code != 0 {
 		t.Fatalf("dry run exit %d: %s", code, errOut.String())

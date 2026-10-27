@@ -40,7 +40,7 @@
 //	                      (App.Check; decision-governance-model.md §4). Requires
 //	                      ENABLE_AUTHORITY and governance records (Check targets
 //	                      Decision specifically and queries the Authority graph).
-//	INSTANCE_NAME         source name embedded in Context Packet responses (default: smeldr-dogfood)
+//	INSTANCE_NAME         source name embedded in Context Packet responses (default: smeldr)
 //	ENABLE_REDIRECTS      wire database-backed redirect management
 //	ENABLE_PAGE_META      wire per-path SEO override store
 //	ENABLE_MEDIA          wire local media upload and management
@@ -215,7 +215,7 @@ func parseConfig() ServerConfig {
 		EnableBlocks:             os.Getenv("ENABLE_BLOCKS") != "",
 		EnableOrchestration:      os.Getenv("ENABLE_ORCHESTRATION") != "",
 		EnableGovernanceRecords:  os.Getenv("ENABLE_GOVERNANCE_RECORDS") != "",
-		OrganizationName:         envOr("ORGANIZATION_NAME", envOr("INSTANCE_NAME", "smeldr-dogfood")),
+		OrganizationName:         envOr("ORGANIZATION_NAME", envOr("INSTANCE_NAME", "smeldr")),
 		OrganizationFounder:      os.Getenv("ORGANIZATION_FOUNDER"),
 		EnableAuthority:          os.Getenv("ENABLE_AUTHORITY") != "",
 		EnableCheck:              os.Getenv("ENABLE_CHECK") != "",
@@ -248,7 +248,7 @@ func parseConfig() ServerConfig {
 		AgentMCPToken:            os.Getenv("AGENT_MCP_TOKEN"),
 		OAuthIssuer:              os.Getenv("OAUTH_ISSUER"),
 		OAuthDBPath:              envOr("OAUTH_DB_PATH", "./oauth.db"),
-		InstanceName:             envOr("INSTANCE_NAME", "smeldr-dogfood"),
+		InstanceName:             envOr("INSTANCE_NAME", "smeldr"),
 		EnableGitHub:             os.Getenv("ENABLE_GITHUB") != "",
 		GitHub:                   parseGitHubConfig(os.Getenv),
 	}

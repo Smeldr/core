@@ -26,8 +26,8 @@ func TestFindings_Wired(t *testing.T) {
 		edit func(*ServerConfig)
 		want bool
 	}{
-		{"governance records", func(c *ServerConfig) { c.EnableGovernanceRecords = true }, true},
-		{"orchestration", func(c *ServerConfig) { c.EnableOrchestration = true }, true},
+		{"governance records", func(c *ServerConfig) { c.EnableRelations, c.EnableGovernanceRecords = true, true }, true},
+		{"orchestration", func(c *ServerConfig) { c.EnableRelations, c.EnableOrchestration = true, true }, true},
 		{"structural sweep", func(c *ServerConfig) { c.EnableRelations, c.EnableStructuralSweep = true, true }, true},
 		{"neither", func(*ServerConfig) {}, false},
 	} {
@@ -64,7 +64,7 @@ func TestFindings_Wired(t *testing.T) {
 // TestFindings_DetectorRecords (T948): the standing drift check records a
 // finding, and a second boot keeps it.
 func TestFindings_DetectorRecords(t *testing.T) {
-	cfg := ServerConfig{Secret: "test-secret-that-is-at-least-32-bytes", BaseURL: "https://example.com", InstanceName: "test", EnableGovernanceRecords: true}
+	cfg := ServerConfig{Secret: "test-secret-that-is-at-least-32-bytes", BaseURL: "https://example.com", InstanceName: "test", EnableRelations: true, EnableGovernanceRecords: true}
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatal(err)

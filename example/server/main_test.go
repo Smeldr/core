@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,6 +238,7 @@ func TestServerToggles(t *testing.T) {
 
 	t.Run("on/orchestration", func(t *testing.T) {
 		cfg := baseConfig()
+		cfg.EnableRelations = true
 		cfg.EnableOrchestration = true
 		ts := buildTestServer(t, cfg)
 		token := createToken(t, ts, "author", "author")
@@ -352,6 +354,7 @@ func TestServerToggles(t *testing.T) {
 		// instance, not just tested as a library capability.
 		cfg := baseConfig()
 		cfg.EnableProvenance = true
+		cfg.EnableRelations = true
 		cfg.EnableOrchestration = true
 		ts := buildTestServer(t, cfg)
 		// A token classified human (D105): an untagged token's actor is
@@ -483,17 +486,16 @@ func TestServerToggles(t *testing.T) {
 	})
 
 	t.Run("off/contextPacketWithoutRelations", func(t *testing.T) {
-		// Without ENABLE_RELATIONS the packet endpoint must not mount.
-		// Same probe returns 404 (ServeMux fallthrough) when not registered.
+		// Without ENABLE_RELATIONS the packet endpoint cannot mount: since
+		// T969 orchestration itself requires ENABLE_RELATIONS, so the boot
+		// is refused before any write.
 		cfg := baseConfig()
 		cfg.EnableRelations = false
 		cfg.EnableOrchestration = true
 		cfg.EnableContextPacket = true
 		cfg.InstanceName = "test"
-		ts := buildTestServer(t, cfg)
-
-		if got := getStatus(t, ts.URL, "", "/packet/bad-type/x"); got != http.StatusNotFound {
-			t.Errorf("GET /packet/bad-type/x: got %d, want 404 (route must not mount without ENABLE_RELATIONS)", got)
+		if _, err := validateBoot(cfg); err == nil || !strings.Contains(err.Error(), "ENABLE_ORCHESTRATION requires ENABLE_RELATIONS") {
+			t.Errorf("validateBoot: err = %v, want the relations refusal", err)
 		}
 	})
 
@@ -670,6 +672,7 @@ func TestServerToggles(t *testing.T) {
 
 	t.Run("on/evalQueueDrain", func(t *testing.T) {
 		cfg := baseConfig()
+		cfg.EnableRelations = true
 		cfg.EnableOrchestration = true
 		cfg.EnableEvalQueueDrain = true
 		ts := buildTestServer(t, cfg)
@@ -729,6 +732,7 @@ func TestBuildApp_OrganizationFounder(t *testing.T) {
 	t.Setenv("BASE_URL", "https://cms.example.com")
 	t.Setenv("ENABLE_GOVERNANCE", "1")
 	t.Setenv("ENABLE_GOVERNANCE_RECORDS", "1")
+	t.Setenv("ENABLE_RELATIONS", "1")
 	t.Setenv("ORGANIZATION_FOUNDER", "founder-1")
 	db, err := sql.Open("sqlite", filepath.Join(dir, "smeldr.db"))
 	if err != nil {

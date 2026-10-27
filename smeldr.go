@@ -191,12 +191,36 @@ type Config struct {
 //	    Secret:  []byte(os.Getenv("SECRET")),
 //	}))
 func MustConfig(cfg Config) Config {
+	cfg, field, problem := checkConfig(cfg)
+	if field != "" {
+		panic("smeldr: " + problem)
+	}
+	return cfg
+}
+
+// ValidateConfig applies [MustConfig]'s rules and returns the error instead
+// of panicking: it merges smeldr.config (or the file SMELDR_CONFIG names)
+// into cfg, then requires an absolute BaseURL and a Secret of at least 16
+// bytes. It returns the merged Config, or a [*ValidationError] naming
+// smeldr_config, base_url or secret. A caller that must refuse before it
+// writes anything calls it first (T969); the rules live only here.
+func ValidateConfig(cfg Config) (Config, error) {
+	cfg, field, problem := checkConfig(cfg)
+	if field != "" {
+		return cfg, Err(field, problem)
+	}
+	return cfg, nil
+}
+
+// checkConfig merges the config file into cfg and checks it. It returns the
+// field at fault and MustConfig's message for it, or an empty field.
+func checkConfig(cfg Config) (Config, string, string) {
 	// D30: load smeldr.config (or the path in SMELDR_CONFIG) and merge file
 	// values into cfg. Go-code fields always take precedence.
 	if path := os.Getenv("SMELDR_CONFIG"); path != "" {
 		fc, err := loadConfigFile(path)
 		if err != nil {
-			panic("smeldr: " + err.Error())
+			return cfg, "smeldr_config", err.Error()
 		}
 		cfg = mergeFileConfig(cfg, fc)
 	} else {
@@ -204,16 +228,16 @@ func MustConfig(cfg Config) Config {
 		cfg = mergeFileConfig(cfg, fc)
 	}
 	if cfg.BaseURL == "" {
-		panic(`smeldr: Config.BaseURL is required (e.g. "https://example.com")`)
+		return cfg, "base_url", `Config.BaseURL is required (e.g. "https://example.com")`
 	}
 	u, err := url.ParseRequestURI(cfg.BaseURL)
 	if err != nil || !u.IsAbs() {
-		panic(fmt.Sprintf("smeldr: Config.BaseURL %q is not a valid absolute URL: %v", cfg.BaseURL, err))
+		return cfg, "base_url", fmt.Sprintf("Config.BaseURL %q is not a valid absolute URL: %v", cfg.BaseURL, err)
 	}
 	if len(cfg.Secret) < 16 {
-		panic("smeldr: Config.Secret must be at least 16 bytes")
+		return cfg, "secret", "Config.Secret must be at least 16 bytes"
 	}
-	return cfg
+	return cfg, "", ""
 }
 
 // Registrator is implemented by any value that can register its HTTP routes on

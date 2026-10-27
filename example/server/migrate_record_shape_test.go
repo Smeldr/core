@@ -21,6 +21,7 @@ func TestRunMigrateRecordShape(t *testing.T) {
 	t.Setenv("DATABASE_PATH", dbPath)
 	t.Setenv("BASE_URL", "https://cms.example.com")
 	t.Setenv("ENABLE_ORCHESTRATION", "1")
+	t.Setenv("ENABLE_RELATIONS", "1")
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
