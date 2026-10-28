@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.182.0] - 2026-10-28
+
 ### Changed
 
 - **A job token never creates a token and never grants a role (T986, A606, D156 point 1; breaking for job callers).** `TokenStore.createToken` refuses a caller of class `job` whatever the class it would mint, and `RoleStore.Grant` refuses a grantor of class `job` whatever the role, both with their reason (`RefusalError`). The pinned job behaviour of v1.181.0 is gone: Cloud's member provisioning runs under a person's authority since its T985. Revoking is unchanged. The grantor's class is read once per grant and passed to the agent rule.
