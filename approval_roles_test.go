@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -203,7 +204,7 @@ func TestGrant_AgentRule(t *testing.T) {
 		{"agent area-approver on a Domain", human, RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.domain}, "holds no approve-change over Area"},
 		{"no grantor", context.Background(), RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "needs a human grantor"},
 		{"agent grantor", as("agent-1", Agent), RoleGrant{TokenID: "job-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "an agent token never grants a role that ratifies or approves changes"},
-		{"job grantor of an Area grant", as("job-1", Job), RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "must come from a human token; the grantor is job"},
+		{"job grantor of an Area grant", as("job-1", Job), RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "a job token never grants a role (D156)"},
 		{"unclassified grantor", as("plain-1"), RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "the grantor is unclassified"},
 		{"human grantor without authority", as("human-2", Human), RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "holds no approve-change"},
 		{"human domain-approver delegates the Area", human, RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, ""},
@@ -547,9 +548,8 @@ func TestGrantFounder_DefineFails(t *testing.T) {
 // An agent grantor never grants a role that ratifies or approves changes (D142,
 // T984), whatever the grantee's class: otherwise an agent with admin hands
 // approver to a human token and ratifies through it. Roles without an approval
-// operation stay grantable. A job grantor is pinned as it is today, pending
-// the job question T984 leaves open (Cloud's job token carries a member's
-// approver over on reissue).
+// operation stay grantable. A job grantor is refused every grant
+// (TestGrant_JobGrantor).
 func TestGrant_AgentGrantor(t *testing.T) {
 	f := newApprovalFixture(t)
 	agent := as("agent-1", Agent)
@@ -567,7 +567,6 @@ func TestGrant_AgentGrantor(t *testing.T) {
 		{"area-approver to a human", agent, RoleGrant{TokenID: "human-2", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, `role "area-approver" holds approve-change`},
 		{"editor to a human", agent, RoleGrant{TokenID: "human-2", RoleName: "editor"}, ""},
 		{"admin to a human", agent, RoleGrant{TokenID: "human-2", RoleName: "admin"}, ""},
-		{"job grants approver to a human (today's behaviour, pending the job question)", as("job-1", Job), RoleGrant{TokenID: "human-2", RoleName: RoleApprover, Reason: "carried over by reissue from human-1"}, ""},
 		{"human grants approver to a human", as("human-1", Human), RoleGrant{TokenID: "human-2", RoleName: RoleApprover}, ""},
 		{"unclassified grants approver to a human", as("plain-1"), RoleGrant{TokenID: "human-2", RoleName: RoleApprover}, ""},
 		{"no grantor grants approver", context.Background(), RoleGrant{TokenID: "human-2", RoleName: RoleApprover}, ""},
@@ -599,5 +598,37 @@ func TestGrant_AgentGrantor(t *testing.T) {
 	}
 	if grants, err := f.rs.ListGrants(context.Background(), id); err != nil || len(grants) != 0 {
 		t.Errorf("grants of the minted token = %v (%v); want none", grants, err)
+	}
+}
+
+// A job token never grants a role, whatever it is (D156 point 1, T986): its
+// grants come from a person. Cloud's member provisioning moved to a person's
+// authority first (T985).
+func TestGrant_JobGrantor(t *testing.T) {
+	f := newApprovalFixture(t)
+	if err := RegisterItemChangeApproverRole(context.Background(), f.rs); err != nil {
+		t.Fatal(err)
+	}
+	job := as("job-1", Job)
+	for _, g := range []RoleGrant{
+		{TokenID: "human-2", RoleName: "editor"},
+		{TokenID: "human-2", RoleName: "admin"},
+		{TokenID: "human-2", RoleName: RoleApprover, Reason: "carried over by reissue from human-1"},
+		{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area},
+		{TokenID: "agent-1", RoleName: RoleItemChangeApprover, ScopeStatic: []string{"ChangeCheck:x"}},
+	} {
+		_, err := f.rs.Grant(job, g)
+		var re *RefusalError
+		if !errors.Is(err, ErrForbidden) || !errors.As(err, &re) || re.Reason != fmt.Sprintf("a job token never grants a role (D156): role %q", g.RoleName) {
+			t.Errorf("%s: err = %v; want the D156 refusal", g.RoleName, err)
+		}
+	}
+	// The store's audit actor is a grantor too.
+	if _, err := f.rs.WithAudit("job-1", nil).Grant(context.Background(), RoleGrant{TokenID: "human-2", RoleName: "editor"}); !errors.Is(err, ErrForbidden) {
+		t.Errorf("job audit actor as grantor = %v; want forbidden", err)
+	}
+	// A human grantor is unchanged.
+	if _, err := f.rs.Grant(as("human-1", Human), RoleGrant{TokenID: "human-2", RoleName: "editor"}); err != nil {
+		t.Errorf("human grantor: %v", err)
 	}
 }

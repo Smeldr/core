@@ -562,10 +562,16 @@ func (ts *TokenStore) ensureBootstrap(ctx context.Context) (userID string, creat
 // ([mintActorBootstrap] for the boot-time admin token, [mintActorStore] for a
 // program minting outside a request). Fail-open, written after the insert.
 func (ts *TokenStore) createToken(ctx context.Context, name, role string, class Role, ttl time.Duration, reason, mechanism string) (raw, userID string, err error) {
-	// An agent token mints only agent or job tokens (D142, T984): a human or
+	// A job token never creates a token (D156 point 1, T986), and an agent
+	// token mints only agent or job tokens (D142, T984): a human or
 	// unclassified token it minted could ratify for it.
-	if id, kind := actorFromContext(ctx); id != "" && kind == string(Agent) && class != Agent && class != Job {
-		return "", "", fmt.Errorf("create token: %w", Refused("an agent token mints only agent or job tokens (D142): the new token would be "+classLabel(string(class))))
+	if id, kind := actorFromContext(ctx); id != "" {
+		switch {
+		case kind == string(Job):
+			return "", "", fmt.Errorf("create token: %w", Refused("a job token never creates a token (D156)"))
+		case kind == string(Agent) && class != Agent && class != Job:
+			return "", "", fmt.Errorf("create token: %w", Refused("an agent token mints only agent or job tokens (D142): the new token would be "+classLabel(string(class))))
+		}
 	}
 	// The permission role is always first: signals.go reads Roles[0] as the
 	// actor's role, and the classification tag carries no permission at all.

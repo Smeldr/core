@@ -295,23 +295,27 @@ func TestActorKindFor_Precedence(t *testing.T) {
 	}
 }
 
-// An agent token mints only agent or job tokens (D142, T984): a human or
-// unclassified token it minted could ratify for it. A job token's minting is
-// pinned as it is today, pending the job question T984 leaves open: Cloud's
-// job token mints its members' human tokens.
-func TestCreateToken_AgentMintsOnlyAgentOrJob(t *testing.T) {
+// The class rules of minting: a job token never creates a token (D156 point
+// 1, T986); an agent token mints only agent or job tokens (D142, T984), since
+// a human or unclassified token it minted could ratify for it. A human,
+// unclassified or absent caller mints any class (D156 point 4).
+func TestCreateToken_ClassRules(t *testing.T) {
+	const agentRule = "an agent token mints only agent or job tokens (D142): the new token would be "
+	const jobRule = "a job token never creates a token (D156)"
 	for _, tc := range []struct {
 		name   string
 		caller context.Context
 		class  Role
 		want   string // "" mints
 	}{
-		{"agent mints human", as("agent-1", Agent), Human, "would be human"},
-		{"agent mints unclassified", as("agent-1", Agent), "", "would be unclassified"},
+		{"agent mints human", as("agent-1", Agent), Human, agentRule + "human"},
+		{"agent mints unclassified", as("agent-1", Agent), "", agentRule + "unclassified"},
 		{"agent mints agent", as("agent-1", Agent), Agent, ""},
 		{"agent mints job", as("agent-1", Agent), Job, ""},
-		{"job mints human (today's behaviour, pending the job question)", as("job-1", Job), Human, ""},
-		{"job mints unclassified (today's behaviour, pending the job question)", as("job-1", Job), "", ""},
+		{"job mints human", as("job-1", Job), Human, jobRule},
+		{"job mints unclassified", as("job-1", Job), "", jobRule},
+		{"job mints agent", as("job-1", Job), Agent, jobRule},
+		{"job mints job", as("job-1", Job), Job, jobRule},
 		{"human mints human", as("human-1", Human), Human, ""},
 		{"unclassified mints human", as("plain-1"), Human, ""},
 		{"no caller mints human", context.Background(), Human, ""},
@@ -326,14 +330,16 @@ func TestCreateToken_AgentMintsOnlyAgentOrJob(t *testing.T) {
 				return
 			}
 			var re *RefusalError
-			if raw != "" || !errors.Is(err, ErrForbidden) || !errors.As(err, &re) || !containsText(re.Reason, "an agent token mints only agent or job tokens (D142)") || !containsText(re.Reason, tc.want) {
-				t.Fatalf("mint = %q, %v; want a RefusalError with %q", raw, err, tc.want)
+			if raw != "" || !errors.Is(err, ErrForbidden) || !errors.As(err, &re) || re.Reason != tc.want {
+				t.Fatalf("mint = %q, %v; want a RefusalError %q", raw, err, tc.want)
 			}
 		})
 	}
-	// CreateWithID mints unclassified: refused for an agent caller too.
+	// CreateWithID mints unclassified: refused for an agent or job caller.
 	ts := NewTokenStore(newClassTokensDB(t), testSecret)
-	if _, _, err := ts.CreateWithID(as("agent-1", Agent), "minted", "editor", time.Hour); !errors.Is(err, ErrForbidden) {
-		t.Errorf("CreateWithID as an agent = %v; want forbidden", err)
+	for _, caller := range []context.Context{as("agent-1", Agent), as("job-1", Job)} {
+		if _, _, err := ts.CreateWithID(caller, "minted", "editor", time.Hour); !errors.Is(err, ErrForbidden) {
+			t.Errorf("CreateWithID = %v; want forbidden", err)
+		}
 	}
 }

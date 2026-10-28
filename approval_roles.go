@@ -291,7 +291,8 @@ type grantRole struct {
 //     audit actor) of class human who holds approve-change over that Area.
 //
 // Any other grantee, and any role without an approval operation, passes.
-func (s *RoleStore) checkAgentGrant(ctx context.Context, grant RoleGrant, roleID string) error {
+// grantorClass is the class [RoleStore.grantorClass] read for this grant.
+func (s *RoleStore) checkAgentGrant(ctx context.Context, grant RoleGrant, roleID, grantorClass string) error {
 	var r grantRole
 	var opsJSON string
 	var relKind sql.NullString
@@ -306,8 +307,15 @@ func (s *RoleStore) checkAgentGrant(ctx context.Context, grant RoleGrant, roleID
 	if !ratify && !change {
 		return nil
 	}
-	if err := s.refuseAgentGrantor(ctx, grant.RoleName, ratify); err != nil {
-		return err
+	// An agent never grants a role that ratifies or approves changes (D142
+	// point 5, T984, D156 point 3): otherwise an agent with admin hands
+	// approver to a human token and ratifies through it.
+	if grantorClass == string(Agent) {
+		op := OperationApproveChange
+		if ratify {
+			op = OperationRatify
+		}
+		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an agent token never grants a role that ratifies or approves changes (D142): role %q holds %s", grant.RoleName, op)))
 	}
 	class, err := actorClass(ctx, s.db, grant.TokenID)
 	if err != nil {
@@ -332,10 +340,6 @@ func (s *RoleStore) checkAgentGrant(ctx context.Context, grant RoleGrant, roleID
 	if grantor == "" {
 		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an %s token's %s grant needs a human grantor, and none is known", class, grant.RoleName)))
 	}
-	grantorClass, err := actorClass(ctx, s.db, grantor)
-	if err != nil {
-		return fmt.Errorf("%w: Grant: the class of the grantor %s cannot be read: %s", ErrForbidden, grantor, err)
-	}
 	if grantorClass != string(Human) {
 		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an %s token's %s grant must come from a human token; the grantor is %s", class, grant.RoleName, classLabel(grantorClass))))
 	}
@@ -358,32 +362,23 @@ func (s *RoleStore) checkAgentGrant(ctx context.Context, grant RoleGrant, roleID
 	return nil
 }
 
-// refuseAgentGrantor refuses a grant of a role that ratifies or approves
-// changes when its grantor (the actor in ctx, or the store's audit actor) is an
-// agent token (D142 point 5, T984). Without it an agent with admin hands
-// approver to a human token and ratifies through it. A job grantor is not
-// refused here: Cloud's job token provisions its members' grants, a question
-// left open by T984. An unknown grantor passes, as Go-side seeding does.
-func (s *RoleStore) refuseAgentGrantor(ctx context.Context, roleName string, ratify bool) error {
+// grantorClass is the class of a grant's grantor: the actor in ctx, else the
+// store's audit actor. "" is an unknown grantor (Go-side seeding, the founder
+// grant at boot) or an unclassified one. A class that cannot be read refuses,
+// fail closed.
+func (s *RoleStore) grantorClass(ctx context.Context) (string, error) {
 	grantor, _ := actorFromContext(ctx)
 	if grantor == "" {
 		grantor = s.actorTokenID
 	}
 	if grantor == "" {
-		return nil
+		return "", nil
 	}
 	class, err := actorClass(ctx, s.db, grantor)
 	if err != nil {
-		return fmt.Errorf("%w: Grant: the class of the grantor %s cannot be read: %s", ErrForbidden, grantor, err)
+		return "", fmt.Errorf("%w: Grant: the class of the grantor %s cannot be read: %s", ErrForbidden, grantor, err)
 	}
-	if class != string(Agent) {
-		return nil
-	}
-	op := OperationApproveChange
-	if ratify {
-		op = OperationRatify
-	}
-	return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an agent token never grants a role that ratifies or approves changes (D142): role %q holds %s", roleName, op)))
+	return class, nil
 }
 
 // classLabel names a class in a message.

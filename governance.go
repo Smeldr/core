@@ -1144,11 +1144,19 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 	} else if err != nil {
 		return "", fmt.Errorf("smeldr: Grant: lookup role %q: %w", grant.RoleName, err)
 	}
+	// D156 point 1 (T986): a job token never grants a role, whatever it is.
+	grantorClass, err := s.grantorClass(ctx)
+	if err != nil {
+		return "", err
+	}
+	if grantorClass == string(Job) {
+		return "", fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("a job token never grants a role (D156): role %q", grant.RoleName)))
+	}
 	// D142 point 5 (T884): agent and job tokens never hold ratify, and hold
 	// approve-change only on an Area grant from a human with authority there,
 	// or on one ChangeCheck through the one-item role (T918), checked below.
 	if grant.RoleName != RoleItemChangeApprover {
-		if err := s.checkAgentGrant(ctx, grant, roleID); err != nil {
+		if err := s.checkAgentGrant(ctx, grant, roleID, grantorClass); err != nil {
 			return "", err
 		}
 	}
