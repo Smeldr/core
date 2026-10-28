@@ -11,6 +11,10 @@ ships and dogfoods against — not a separate product.
 Every tagged release from `v1.67.0` onward attaches a Linux amd64
 binary, `smeldr-server-linux-amd64`, built via
 [`.github/workflows/release.yml`](../.github/workflows/release.yml).
+From `v1.180.0` the release also carries `smeldr-server-linux-arm64`,
+`smeldr-server-darwin-amd64`, `smeldr-server-darwin-arm64` and
+`smeldr-server-windows-amd64.exe`, and a `SHA256SUMS` file over all five.
+This guide runs the Linux binary as a service.
 Download it from the release's own page:
 
 ```bash

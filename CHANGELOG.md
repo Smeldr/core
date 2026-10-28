@@ -21,6 +21,7 @@ cross-referenced below by their Amendment ID.
 ### Added
 
 - **`ValidationError.Fields()` and `FieldError` (T972, A597).** A validation error's failures in order, as a copy, the same shape `WriteError` writes in the JSON `fields` array, so a caller reads the field with `errors.As` instead of matching `Error()`'s text. `WriteError` now builds its `fields` from it; the JSON is byte for byte the same. example/server's `configError` (T969) uses it to name BASE_URL, SECRET or SMELDR_CONFIG.
+- **Server binaries for five targets (T977, A599).** Every tag now attaches `smeldr-server` for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 and windows/amd64 (`.exe`), static and built with `-trimpath`, plus a `SHA256SUMS` file. `smeldr-server-linux-amd64` keeps its name.
 
 ---
 

@@ -17,14 +17,25 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build example/server (linux/amd64, static)
+      - name: Build example/server (five targets, static)
         working-directory: example/server
         env:
           GOWORK: 'off'
           CGO_ENABLED: '0'
-          GOOS: 'linux'
-          GOARCH: 'amd64'
-        run: go build -o smeldr-server-linux-amd64 .
+        run: |
+          set -eu
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            os=${target%/*}
+            arch=${target#*/}
+            ext=""
+            if [ "$os" = windows ]; then ext=".exe"; fi
+            GOOS=$os GOARCH=$arch go build -trimpath -o "dist/smeldr-server-$os-$arch$ext" .
+          done
+
+      - name: Write SHA256SUMS
+        working-directory: example/server/dist
+        run: sha256sum smeldr-server-* > SHA256SUMS
 
       - name: Confirm the release exists before attaching to it
         env:
@@ -41,7 +52,7 @@ jobs:
           echo "::error::Release ${{ github.ref_name }} did not appear within ~100s of the tag push."
           exit 1
 
-      - name: Attach binary to the release
+      - name: Attach binaries and SHA256SUMS to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ github.ref_name }} example/server/smeldr-server-linux-amd64
+        run: gh release upload ${{ github.ref_name }} example/server/dist/*
