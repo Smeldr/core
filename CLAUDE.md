@@ -461,7 +461,7 @@ done.
 All items must be resolved. Do not propose a commit until the gate is clear.**
 
 **Every commit — mandatory:**
-- [ ] `README.md` version line (`**vX.Y.Z — stable.**`) matches the version being shipped. Update if behind.
+- [ ] `README.md` version line (`**vX.Y.Z: stable.**`) matches the version being shipped. Update if behind.
 - [ ] No `🔲 Coming in Milestone N` badge remains for a milestone that has shipped.
 - [ ] `go test ./...` is green (re-run if any file changed since last verification).
 - [ ] `golangci-lint run ./...` is clean, or golangci-lint is not installed (skip with warning).
@@ -605,7 +605,7 @@ Before any other work, check these three files for staleness against the
 current codebase and recent amendments:
 
 1. `docs/REFERENCE.md` — does it reflect all current exported symbols and behaviour?
-2. `README.md` — is the version line (`**vX.Y.Z — stable.**`) current?
+2. `README.md` — is the version line (`**vX.Y.Z: stable.**`) current?
 3. `docs/FEATURELIST.md` — does it list all shipped features? Check "Last updated" version.
    Module registry versions and stability labels current?
 4. `C:\Users\peter\Documents\Code\Smeldr\common\agent\skills\smeldr.md` — does the version line match current versions?
@@ -768,7 +768,7 @@ date, a tagger, and a message, and appear as formal releases on GitHub.
 
 **When to tag (non-negotiable, no milestone gate):**
 Any commit on `main` that changes `README.md`'s version line
-(`**vX.Y.Z — stable.**`) gets an annotated tag and a GitHub Release —
+(`**vX.Y.Z: stable.**`) gets an annotated tag and a GitHub Release —
 always, unconditionally. The version line is the promise; the tag is what
 makes it true. This applies identically whether the commit is a patch
 bump for a single bugfix Amendment, a MINOR bump for new exported API, or
