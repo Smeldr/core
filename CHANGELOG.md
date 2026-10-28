@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.180.0] - 2026-10-28
+
 ### Added
 
 - **`ValidationError.Fields()` and `FieldError` (T972, A597).** A validation error's failures in order, as a copy, the same shape `WriteError` writes in the JSON `fields` array, so a caller reads the field with `errors.As` instead of matching `Error()`'s text. `WriteError` now builds its `fields` from it; the JSON is byte for byte the same. example/server's `configError` (T969) uses it to name BASE_URL, SECRET or SMELDR_CONFIG.
