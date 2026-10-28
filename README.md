@@ -16,7 +16,7 @@ Self-hosted. Open source. No runtime dependencies.
 - **Know.** Every action records who did it: a person, an AI agent or a job. Ask what is in force and what rests on it.
 - **Enforce.** Tie a Decision to the files it governs. A pull request shows the Decisions that apply and waits for the answer.
 
-**v1.180.0: stable.** Public APIs are stable within v1.
+**v1.181.0: stable.** Public APIs are stable within v1.
 See [CHANGELOG.md](CHANGELOG.md).
 
 ## Start in three minutes
