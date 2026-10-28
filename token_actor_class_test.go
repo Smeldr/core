@@ -294,3 +294,46 @@ func TestActorKindFor_Precedence(t *testing.T) {
 		t.Errorf("an empty actor id is unattributable whatever the tags: %q", got)
 	}
 }
+
+// An agent token mints only agent or job tokens (D142, T984): a human or
+// unclassified token it minted could ratify for it. A job token's minting is
+// pinned as it is today, pending the job question T984 leaves open: Cloud's
+// job token mints its members' human tokens.
+func TestCreateToken_AgentMintsOnlyAgentOrJob(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		caller context.Context
+		class  Role
+		want   string // "" mints
+	}{
+		{"agent mints human", as("agent-1", Agent), Human, "would be human"},
+		{"agent mints unclassified", as("agent-1", Agent), "", "would be unclassified"},
+		{"agent mints agent", as("agent-1", Agent), Agent, ""},
+		{"agent mints job", as("agent-1", Agent), Job, ""},
+		{"job mints human (today's behaviour, pending the job question)", as("job-1", Job), Human, ""},
+		{"job mints unclassified (today's behaviour, pending the job question)", as("job-1", Job), "", ""},
+		{"human mints human", as("human-1", Human), Human, ""},
+		{"unclassified mints human", as("plain-1"), Human, ""},
+		{"no caller mints human", context.Background(), Human, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := NewTokenStore(newClassTokensDB(t), testSecret)
+			raw, _, err := ts.CreateClassifiedWithReason(tc.caller, "minted", "editor", tc.class, time.Hour, "")
+			if tc.want == "" {
+				if err != nil || raw == "" {
+					t.Fatalf("mint = %q, %v; want a token", raw, err)
+				}
+				return
+			}
+			var re *RefusalError
+			if raw != "" || !errors.Is(err, ErrForbidden) || !errors.As(err, &re) || !containsText(re.Reason, "an agent token mints only agent or job tokens (D142)") || !containsText(re.Reason, tc.want) {
+				t.Fatalf("mint = %q, %v; want a RefusalError with %q", raw, err, tc.want)
+			}
+		})
+	}
+	// CreateWithID mints unclassified: refused for an agent caller too.
+	ts := NewTokenStore(newClassTokensDB(t), testSecret)
+	if _, _, err := ts.CreateWithID(as("agent-1", Agent), "minted", "editor", time.Hour); !errors.Is(err, ErrForbidden) {
+		t.Errorf("CreateWithID as an agent = %v; want forbidden", err)
+	}
+}

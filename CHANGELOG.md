@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An agent token could get a Decision ratified with no person involved (T984, A603, security).** With `admin`, an agent-class token minted a `human` token, granted it `approver` and ratified through it: the agent rule (D142 point 5) checked only the grantee's class, and minting checked no caller class. Now an agent never grants a role that holds `ratify` or `approve-change` (whatever the grantee), and mints only `agent` or `job` tokens. Both are refused with their reason (`RefusalError`). Job-class callers are unchanged until Cloud's provisioning moves (D156, T986). No agent-class actor on process.smeldr.dev had used the path.
+
 ---
 
 ## [1.180.0] - 2026-10-28
