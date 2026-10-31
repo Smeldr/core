@@ -315,6 +315,7 @@ type App struct {
 	redirectManifestReg    bool                                // true once GET /.well-known/redirects.json is registered
 	redirectManifestOpts   []Option                            // options for the redirect manifest handler (e.g. ManifestAuth)
 	schedulerModules       []schedulableModule                 // modules that implement scheduled publishing
+	schedulerWake          chan struct{}                       // wakes the Scheduler on a (re)schedule (T1003), buffered 1
 	rebuilderModules       []rebuilder                         // modules with derived content (sitemap, feed, AI)
 	stoppableModules       []stoppable                         // modules with background goroutines to stop at shutdown
 	mcpModules             []MCPModule                         // modules registered with smeldr.MCP(...)
@@ -635,6 +636,12 @@ func (a *App) Content(v any, opts ...Option) {
 		}
 		if sm, ok := r.(schedulableModule); ok {
 			a.schedulerModules = append(a.schedulerModules, sm)
+			if a.schedulerWake == nil {
+				a.schedulerWake = make(chan struct{}, 1)
+			}
+			if sw, ok := r.(interface{ setScheduleWake(func()) }); ok {
+				sw.setScheduleWake(a.wakeScheduler)
+			}
 		}
 		if rb, ok := r.(rebuilder); ok {
 			a.rebuilderModules = append(a.rebuilderModules, rb)
@@ -1945,6 +1952,17 @@ func (a *App) ServeDynamicContent() *App {
 	return a
 }
 
+// wakeScheduler tells the Scheduler to recompute its next tick (T1003). It
+// never blocks: a wake already pending covers this one, and before the
+// Scheduler runs the pending wake waits for it (the startup tick covers it
+// anyway).
+func (a *App) wakeScheduler() {
+	select {
+	case a.schedulerWake <- struct{}{}:
+	default:
+	}
+}
+
 // releaseVersion is the core release a binary was built from, set only by the
 // release build with -ldflags "-X smeldr.dev/core.releaseVersion=vX.Y.Z"
 // (.github/workflows/release.yml, T1000). example/server builds core through a
@@ -2191,6 +2209,7 @@ func (a *App) serve(ctx context.Context, ln net.Listener, shutdownTimeout time.D
 		u, _ := url.Parse(a.cfg.BaseURL)
 		bgCtx := NewBackgroundContext(u.Hostname())
 		sched := newScheduler(a.schedulerModules, bgCtx)
+		sched.wake = a.schedulerWake
 		schedCtx, schedCancel := context.WithCancel(context.Background())
 		sched.Start(schedCtx)
 		defer func() {

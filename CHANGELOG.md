@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Scheduling or rescheduling an item wakes the scheduler (T1003, A611).** The scheduler armed one timer for the soonest `ScheduledAt` it had seen, and nothing reset it. An item scheduled for a time before that wake waited until the wake, which could be days away when one item was scheduled far ahead. Now a module that saves an item in state Scheduled wakes the scheduler at once, through a non-blocking signal, so the item is published at its own time. The timer also never waits more than 60 seconds, so an item written by another process is picked up within a minute. All due items in one tick, the startup catch-up tick and the retry for a blocked item are unchanged.
+
 ---
 
 ## [1.183.0] - 2026-10-31

@@ -492,8 +492,9 @@ type Module[T any] struct {
 	llmsStore  *LLMsStore  // set by App.Content via setAIRegistry
 	withoutID  bool        // true when WithoutID() option was given
 
-	feedCfg   *FeedConfig // nil when no Feed option, or when DisableFeed was called
-	feedStore *FeedStore  // set by App.Content via setFeedStore
+	feedCfg      *FeedConfig // nil when no Feed option, or when DisableFeed was called
+	feedStore    *FeedStore  // set by App.Content via setFeedStore
+	scheduleWake func()      // set by App.Content via setScheduleWake (T1003)
 
 	mcpOps []MCPOperation // non-nil when MCP(...) option was given
 
@@ -1079,6 +1080,9 @@ func (m *Module[T]) hasTransitionHandlers() bool {
 // signature, when it threads a real reason through the REST/MCP lifecycle
 // paths.
 func (m *Module[T]) notifyAfter(ctx Context, sig LifecycleEvent, prevState, surface, reason string, item any) {
+	// Last, after this module's own reads of item (the snapshot): the woken
+	// Scheduler may change the same item when the repo shares it (MemoryRepo).
+	defer m.wakeIfScheduled(item)
 	m.applyStanding(ctx, sig, prevState, surface, reason, item)
 	if sig == AfterCreate && m.signalSink != nil {
 		// D115: the conditions a new item starts in (a proposed Decision).
@@ -1133,6 +1137,9 @@ func (m *Module[T]) notifyApp(ctx Context, sig LifecycleEvent, prevState, surfac
 // A call with from equal to to (an MCP publish of an already published item)
 // is not a transition: it fires the plain event sig, as before.
 func (m *Module[T]) afterStatusChange(ctx Context, sig LifecycleEvent, from, to Status, surface, reason string, item any, edited bool) {
+	// Last, after this module's own reads of item (the snapshot): the woken
+	// Scheduler may change the same item when the repo shares it (MemoryRepo).
+	defer m.wakeIfScheduled(item)
 	if from == to {
 		m.dispatchModuleTransition(ctx, from, to, sig, item)
 		m.notifyAfter(ctx, sig, string(from), surface, reason, item)
@@ -1287,6 +1294,19 @@ func (m *Module[T]) setFeedStore(store *FeedStore, baseURL string) {
 	if m.feedCfg != nil {
 		// Register the prefix now (items populated by first regenerateFeed call).
 		store.Set(m.prefix, *m.feedCfg, nil)
+	}
+}
+
+// setScheduleWake is called by [App.Content]: wake tells the App's [Scheduler]
+// to recompute its next tick (T1003).
+func (m *Module[T]) setScheduleWake(wake func()) { m.scheduleWake = wake }
+
+// wakeIfScheduled wakes the App's scheduler after a write left item Scheduled
+// (created, moved to Scheduled, or rescheduled), so an item due before the
+// armed timer is published at its own time, not at the old wake (T1003).
+func (m *Module[T]) wakeIfScheduled(item any) {
+	if m.scheduleWake != nil && nodeStatusOf(item) == Scheduled {
+		m.scheduleWake()
 	}
 }
 

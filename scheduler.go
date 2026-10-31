@@ -15,8 +15,11 @@ type schedulableModule interface {
 // Scheduler drives the Scheduled→Published transition for all content modules
 // registered with [App.Content]. A single background goroutine runs with an
 // adaptive timer: after each tick the timer is reset to fire at the soonest
-// remaining ScheduledAt across all modules, falling back to 60 seconds when no
-// scheduled items exist.
+// remaining ScheduledAt across all modules, but never more than
+// [schedulerMaxWait] (60 seconds) away, so an item written by another process
+// is picked up within a minute. A module that schedules or reschedules an item
+// wakes it at once (T1003), so an item due before the armed timer is published
+// at its own time.
 //
 // The Scheduler is created and started by [App.Run] and stopped as part of
 // graceful shutdown. Applications do not create Schedulers directly.
@@ -24,6 +27,10 @@ type Scheduler struct {
 	modules []schedulableModule
 	bgCtx   Context
 	done    chan struct{}
+	// wake, when set, makes run tick at once and re-arm its timer (T1003).
+	wake <-chan struct{}
+	// maxWait is [schedulerMaxWait] as it was when the Scheduler was made.
+	maxWait time.Duration
 }
 
 // newScheduler returns a Scheduler that will process scheduled items for each
@@ -33,6 +40,7 @@ func newScheduler(modules []schedulableModule, bgCtx Context) *Scheduler {
 		modules: modules,
 		bgCtx:   bgCtx,
 		done:    make(chan struct{}),
+		maxWait: schedulerMaxWait,
 	}
 }
 
@@ -75,7 +83,7 @@ func (s *Scheduler) run(ctx context.Context) {
 	// Process any items that became due while the server was offline.
 	next := s.tick()
 
-	timer := time.NewTimer(nextDur(next))
+	timer := time.NewTimer(nextDurMax(next, s.maxWait))
 	defer timer.Stop()
 
 	for {
@@ -84,21 +92,45 @@ func (s *Scheduler) run(ctx context.Context) {
 			return
 		case <-timer.C:
 			next = s.tick()
-			timer.Reset(nextDur(next))
+			timer.Reset(nextDurMax(next, s.maxWait))
+		case <-s.wake:
+			// An item was scheduled or rescheduled: tick now, so one due
+			// already is published, and re-arm from the new soonest time.
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			next = s.tick()
+			timer.Reset(nextDurMax(next, s.maxWait))
 		}
 	}
 }
 
-// nextDur returns the duration to wait before the next scheduler tick.
-// When next is nil (no scheduled items remain) it returns 60 seconds.
-// The returned duration is never less than 1 millisecond.
-func nextDur(next *time.Time) time.Duration {
+// schedulerMaxWait is the longest the Scheduler waits between ticks: it covers
+// items written outside this process (another instance, a direct write), which
+// send no wake (T1003). A variable so tests can shorten it.
+var schedulerMaxWait = 60 * time.Second
+
+// nextDur returns the duration to wait before the next scheduler tick: until
+// next, but at most [schedulerMaxWait], and [schedulerMaxWait] when next is nil
+// (no scheduled items remain). The returned duration is never less than 1
+// millisecond.
+func nextDur(next *time.Time) time.Duration { return nextDurMax(next, schedulerMaxWait) }
+
+// nextDurMax is [nextDur] with the cap given: the Scheduler passes the cap it
+// read when it was made, so its goroutine never reads schedulerMaxWait.
+func nextDurMax(next *time.Time, maxWait time.Duration) time.Duration {
 	if next == nil {
-		return 60 * time.Second
+		return maxWait
 	}
 	d := time.Until(*next)
 	if d < time.Millisecond {
 		return time.Millisecond
+	}
+	if d > maxWait {
+		return maxWait
 	}
 	return d
 }

@@ -239,6 +239,8 @@ At `scheduled_at`, Smeldr automatically transitions to `Published`,
 sets `PublishedAt`, fires `AfterPublish` signals,
 regenerates the sitemap, and adds the item to the RSS feed.
 
+The ticker wakes at the soonest `scheduled_at`, but never waits more than 60 seconds. A newly scheduled or rescheduled item wakes it at once (core v1.183.1, T1003), so an item due before the time the ticker was armed for is published at its own time. Before, it waited for the old wake, which could be days away when one item was scheduled far ahead. An item written outside the process (another instance on the same database, a direct write) sends no wake, and is picked up within a minute.
+
 ---
 
 ## Routing variants

@@ -3,6 +3,7 @@ package smeldr
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -315,4 +316,179 @@ func TestScheduler_startStop(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Scheduler.Wait() did not return within 2s after cancel")
 	}
+}
+
+// tickReporter passes each tick to m and then reports it on ticked.
+type tickReporter struct {
+	m      schedulableModule
+	ticked chan<- struct{}
+}
+
+func (r tickReporter) processScheduled(ctx Context, now time.Time) (int, *time.Time, error) {
+	n, next, err := r.m.processScheduled(ctx, now)
+	select {
+	case r.ticked <- struct{}{}:
+	default:
+	}
+	return n, next, err
+}
+
+// — wake and cap (T1003) ———————————————————————————————————————————————————
+
+// tickCounter is a schedulableModule that counts ticks and reports next as its
+// soonest remaining ScheduledAt.
+type tickCounter struct {
+	mu    sync.Mutex
+	ticks int
+	next  func() *time.Time
+}
+
+func (c *tickCounter) processScheduled(Context, time.Time) (int, *time.Time, error) {
+	c.mu.Lock()
+	c.ticks++
+	c.mu.Unlock()
+	return 0, c.next(), nil
+}
+
+func (c *tickCounter) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ticks
+}
+
+// waitTicks waits until c has ticked at least n times, or d has passed.
+func waitTicks(c *tickCounter, n int, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if c.count() >= n {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return c.count() >= n
+}
+
+func startScheduler(t *testing.T, c *tickCounter, wake chan struct{}) {
+	t.Helper()
+	s := newScheduler([]schedulableModule{c}, NewBackgroundContext("example.com"))
+	s.wake = wake
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Start(ctx)
+	t.Cleanup(func() { cancel(); s.Wait() })
+}
+
+// A wake ticks at once, although the timer is armed an hour out.
+func TestScheduler_WakeTicksAtOnce(t *testing.T) {
+	hourOut := func() *time.Time { t := time.Now().Add(time.Hour); return &t }
+	c := &tickCounter{next: hourOut}
+	wake := make(chan struct{}, 1)
+	startScheduler(t, c, wake)
+	if !waitTicks(c, 1, time.Second) {
+		t.Fatal("no startup tick")
+	}
+	wake <- struct{}{}
+	if !waitTicks(c, 2, 500*time.Millisecond) {
+		t.Fatalf("ticks = %d after a wake, want 2 (the wake did not tick)", c.count())
+	}
+}
+
+// The timer never waits longer than schedulerMaxWait, so an item written by
+// another process (no wake) is still picked up.
+func TestScheduler_MaxWaitCap(t *testing.T) {
+	defer func(d time.Duration) { schedulerMaxWait = d }(schedulerMaxWait)
+	schedulerMaxWait = 100 * time.Millisecond
+	c := &tickCounter{next: func() *time.Time { t := time.Now().Add(time.Hour); return &t }}
+	startScheduler(t, c, nil)
+	if !waitTicks(c, 2, 600*time.Millisecond) {
+		t.Fatalf("ticks = %d, want a capped tick within schedulerMaxWait", c.count())
+	}
+}
+
+// With nothing scheduled and no wake, the scheduler does not spin.
+func TestScheduler_NoBusyLoop(t *testing.T) {
+	defer func(d time.Duration) { schedulerMaxWait = d }(schedulerMaxWait)
+	schedulerMaxWait = time.Second
+	c := &tickCounter{next: func() *time.Time { return nil }}
+	startScheduler(t, c, make(chan struct{}, 1))
+	time.Sleep(300 * time.Millisecond)
+	if got := c.count(); got != 1 {
+		t.Errorf("ticks = %d in 300 ms, want 1 (the startup tick)", got)
+	}
+}
+
+func TestNextDur_Cap(t *testing.T) {
+	far := time.Now().Add(72 * time.Hour)
+	if got := nextDur(&far); got != schedulerMaxWait {
+		t.Errorf("nextDur(+72h) = %v, want the cap %v", got, schedulerMaxWait)
+	}
+}
+
+// App.wakeScheduler never blocks: a pending wake covers the next one.
+func TestApp_WakeSchedulerNeverBlocks(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	app.Content(NewModule((*testPost)(nil), Repo(NewMemoryRepo[*testPost]()), At("/posts")))
+	if app.schedulerWake == nil {
+		t.Fatal("App.Content did not make the wake channel for a schedulable module")
+	}
+	done := make(chan struct{})
+	go func() {
+		for range 1000 {
+			app.wakeScheduler()
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("wakeScheduler blocked")
+	}
+}
+
+// Rescheduling through a real module to a time before the armed timer
+// publishes the item at its own time, not at the old wake (T1003).
+func TestScheduler_RescheduleEarlierPublishesOnTime(t *testing.T) {
+	repo := NewMemoryRepo[*testPost]()
+	published := make(chan string, 4)
+	m := NewModule((*testPost)(nil), Repo(repo), At("/posts"), On(AfterPublish, func(_ Context, p *testPost) error {
+		published <- p.Slug
+		return nil
+	}))
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	app.Content(m)
+
+	far := time.Now().UTC().Add(time.Hour)
+	later := &testPost{Node: Node{ID: NewID(), Slug: "later", Status: Scheduled, ScheduledAt: &far}}
+	soon := &testPost{Node: Node{ID: NewID(), Slug: "soon", Status: Draft}}
+	for _, p := range []*testPost{later, soon} {
+		if err := repo.Save(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// ticked reports each tick, so the test writes only after the startup tick
+	// has read the repo (MemoryRepo hands out its stored pointers).
+	ticked := make(chan struct{}, 16)
+	s := newScheduler([]schedulableModule{tickReporter{m, ticked}}, NewBackgroundContext("example.com"))
+	s.wake = app.schedulerWake
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Start(ctx)
+	defer func() { cancel(); s.Wait() }()
+	<-ticked // the startup tick armed the timer an hour out
+
+	at := time.Now().UTC().Add(100 * time.Millisecond)
+	if err := m.MCPSchedule(NewTestContext(User{ID: "admin", Roles: []Role{Admin}}), "soon", at, ""); err != nil {
+		t.Fatalf("MCPSchedule: %v", err)
+	}
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case slug := <-published:
+			if slug == "soon" {
+				return
+			}
+		case <-timeout:
+			goto late
+		}
+	}
+late:
+	t.Fatal("the item scheduled 100 ms ahead was not published within 2 s: the scheduler kept its hour-long timer")
 }
