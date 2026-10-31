@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -253,5 +254,42 @@ func TestPG_SeedBlockTypeSchemas(t *testing.T) {
 		if s.TypeName == "content_block" && s.Label != "Customised" {
 			t.Errorf("content_block label = %q: the seed overwrote a customised row", s.Label)
 		}
+	}
+}
+
+// TestPG_DynamicContent_ScheduledIsPublished: the scheduler's entry for runtime
+// types (T1004) reads the scheduled rows and writes the guarded publish on
+// Postgres; an overdue item is published by the startup tick, scheduled_at
+// cleared.
+func TestPG_DynamicContent_ScheduledIsPublished(t *testing.T) {
+	db, _ := isolatedDB(t)
+	app, repo := dynamicApp(t, db, nil)
+	app.ServeDynamicContent()
+	ctx := context.Background()
+	node, err := repo.CreateDraft(ctx, map[string]any{"Title": "due"})
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	if err := repo.ScheduleContent(ctx, node.ID, time.Now().UTC().Add(-time.Minute)); err != nil {
+		t.Fatalf("ScheduleContent: %v", err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- app.RunListener(ln) }()
+	defer func() {
+		ln.Close()
+		<-done
+	}()
+	var got *smeldr.DynamicNode
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if got, err = repo.GetByID(ctx, node.ID); err == nil && got.Status == smeldr.Published {
+			break
+		}
+	}
+	if err != nil || got.Status != smeldr.Published || got.ScheduledAt != nil || got.PublishedAt.IsZero() {
+		t.Fatalf("after the startup tick: %+v, %v; want published, scheduled_at cleared", got, err)
 	}
 }

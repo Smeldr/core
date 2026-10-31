@@ -2092,7 +2092,7 @@ func (m *Module[T]) processScheduled(ctx Context, now time.Time) (int, *time.Tim
 
 // scheduledRetryInterval is how long the scheduler waits before trying a due
 // item again after the conflict policy blocked it.
-const scheduledRetryInterval = 60 * time.Second
+var scheduledRetryInterval = 60 * time.Second
 
 // scheduledBlockedLogged remembers which due items the conflict policy has
 // already blocked, so the Warn is written once per item and not on every tick.

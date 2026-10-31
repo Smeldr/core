@@ -40,6 +40,10 @@ type DynamicTypeRepo struct {
 	// ([SchemaField.References], D113); set by [App.DynamicContentRepo]. Nil
 	// for a repository built without an App, which stores references as given.
 	refApp *App
+	// scheduleWake wakes the App's scheduler after a schedule or reschedule
+	// (T1003, T1004); set by [App.DynamicContentRepo], nil without an App,
+	// where the scheduler's 60 s cap covers it.
+	scheduleWake func()
 }
 
 // NewDynamicTypeRepo returns a DynamicTypeRepo bound to the given type name.
@@ -693,21 +697,9 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 	if status == Published && publishedAt.IsZero() {
 		publishedAt = now
 	}
-	exec, commit, rollback, err := conflictTx(ctx, r.db)
-	if err != nil {
+	if _, err := r.writeStatus(ctx, plan, node, status, publishedAt, now, actorID, surface, false); err != nil {
 		return err
 	}
-	defer rollback()
-	if _, err = exec.ExecContext(ctx,
-		"UPDATE smeldr_dynamic_content SET status = $1, published_at = $2, updated_at = $3, last_actor = $4 WHERE id = $5 AND type_name = $6",
-		string(status), publishedAt, now, actorID, id, r.typeName); err != nil {
-		return err
-	}
-	moved := plan.supersede(ctx, exec)
-	if err := commit(); err != nil {
-		return fmt.Errorf("%w: SetStatus: commit: %s", ErrInternal, err)
-	}
-	plan.afterCommit(ctx, r.db, r.relStore, r.prov, r.announce, true, surface, moved)
 	changed := *node
 	changed.Status = status
 	changed.PublishedAt = publishedAt
@@ -716,6 +708,40 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 	r.statusChanged(ctx, &changed, node.Status, reason, surface)
 	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(status), id)
 	return nil
+}
+
+// writeStatus writes node's move to status under plan: the UPDATE and the
+// items plan supersedes in one transaction where the handle supports one, then
+// plan's effects. scheduled is the scheduler's publish (T1004): it clears
+// scheduled_at and applies only while the row is still in node's status, and
+// written is false, with nothing written, when the row has moved since.
+func (r *DynamicTypeRepo) writeStatus(ctx context.Context, plan *conflictPlan, node *DynamicNode, status Status, publishedAt, now time.Time, actorID, surface string, scheduled bool) (written bool, err error) {
+	exec, commit, rollback, err := conflictTx(ctx, r.db)
+	if err != nil {
+		return false, err
+	}
+	defer rollback()
+	q := "UPDATE smeldr_dynamic_content SET status = $1, published_at = $2, updated_at = $3, last_actor = $4 WHERE id = $5 AND type_name = $6"
+	args := []any{string(status), publishedAt, now, actorID, node.ID, r.typeName}
+	if scheduled {
+		q = "UPDATE smeldr_dynamic_content SET status = $1, published_at = $2, updated_at = $3, last_actor = $4, scheduled_at = NULL WHERE id = $5 AND type_name = $6 AND status = $7"
+		args = append(args, string(node.Status))
+	}
+	res, err := exec.ExecContext(ctx, q, args...)
+	if err != nil {
+		return false, err
+	}
+	if scheduled {
+		if n, err := res.RowsAffected(); err == nil && n == 0 {
+			return false, nil
+		}
+	}
+	moved := plan.supersede(ctx, exec)
+	if err := commit(); err != nil {
+		return false, fmt.Errorf("%w: SetStatus: commit: %s", ErrInternal, err)
+	}
+	plan.afterCommit(ctx, r.db, r.relStore, r.prov, r.announce, true, surface, moved)
+	return true, nil
 }
 
 // statusChanged records and announces a committed status change of changed
@@ -797,6 +823,9 @@ func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, schedu
 	changed.LastActor = actorID
 	r.statusChanged(ctx, &changed, node.Status, "", "")
 	fireAsyncTriggers(ctx, r.db, r.typeName, string(node.Status), string(Scheduled), id)
+	if r.scheduleWake != nil {
+		r.scheduleWake()
+	}
 	return nil
 }
 
@@ -1044,6 +1073,7 @@ func (a *App) DynamicContentRepo(typeName string) (*DynamicTypeRepo, error) {
 	repo.announceEdit = a.afterContentEdit
 	repo.titleCutover = a.cfg.TitleCutover
 	repo.refApp = a
+	repo.scheduleWake = a.wakeScheduler
 	return repo, nil
 }
 

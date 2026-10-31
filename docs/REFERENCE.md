@@ -241,6 +241,8 @@ regenerates the sitemap, and adds the item to the RSS feed.
 
 The ticker wakes at the soonest `scheduled_at`, but never waits more than 60 seconds. A newly scheduled or rescheduled item wakes it at once (core v1.183.1, T1003), so an item due before the time the ticker was armed for is published at its own time. Before, it waited for the old wake, which could be days away when one item was scheduled far ahead. An item written outside the process (another instance on the same database, a direct write) sends no wake, and is picked up within a minute.
 
+Runtime-defined types (`DefineContentType` with `ServeDynamicContent`) are scheduled the same way (core v1.183.1, T1004): `ScheduleContent` and the MCP `schedule_content` tool wake the ticker, and at `scheduled_at` the item is published with the same checks and events as a compiled one (published-URL check, conflict policy, provenance, `AfterPublish`, transition triggers, the type's sitemap fragment). Before, they were never published: the ticker read compiled modules only, and an app with only runtime-defined types ran none. After the upgrade, runtime items that are already overdue are published on the first start.
+
 ---
 
 ## Routing variants

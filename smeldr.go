@@ -1948,6 +1948,14 @@ func (a *App) ServeDynamicContent() *App {
 	if a.sitemapStore == nil {
 		a.sitemapStore = NewSitemapStore()
 	}
+	if !a.dynamicContentEnabled {
+		// Scheduled items of runtime-defined types are published by one
+		// scheduler entry over smeldr_dynamic_content (T1004).
+		a.schedulerModules = append(a.schedulerModules, dynamicScheduler{a})
+		if a.schedulerWake == nil {
+			a.schedulerWake = make(chan struct{}, 1)
+		}
+	}
 	a.dynamicContentEnabled = true
 	return a
 }
