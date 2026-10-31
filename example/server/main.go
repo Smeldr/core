@@ -110,6 +110,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"os"
 	"strconv"
 	"time"
@@ -955,10 +956,25 @@ func main() {
 	}
 	defer result.StopAll()
 
-	log.Printf("smeldr-server: listening on %s", cfg.Addr)
-	if err := result.App.Run(cfg.Addr); err != nil {
+	ln, err := listenAndAnnounce(cfg.Addr, log.Printf)
+	if err != nil {
 		log.Fatalf("smeldr-server: %v", err)
 	}
+	if err := result.App.RunListener(ln); err != nil {
+		log.Fatalf("smeldr-server: %v", err)
+	}
+}
+
+// listenAndAnnounce opens the listener on addr and only then logs the ready
+// line, so "listening on" is printed only once the port is really bound
+// (T1000). A port that is taken returns the error and logs nothing.
+func listenAndAnnounce(addr string, logf func(format string, args ...any)) (net.Listener, error) {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("listen %s: %w (set PORT or ADDR to use another port)", addr, err)
+	}
+	logf("smeldr-server: listening on %s", ln.Addr())
+	return ln, nil
 }
 
 // migrateDB creates the infrastructure tables that optional subsystems need.

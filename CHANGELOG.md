@@ -18,6 +18,20 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **`App.RunListener(ln net.Listener)` (T1000, A609).** `App.Run` on a listener the caller has already opened, with the same graceful shutdown. `Run` now opens the listener and calls it. smeldr-server opens the listener first and logs `smeldr-server: listening on <addr>` only after the bind has succeeded. A taken port gives `listen <addr>: ... (set PORT or ADDR to use another port)` and no ready line.
+
+### Changed
+
+- **`App.Run` binds before it parses templates (T1000).** `Run` now opens the listener first and then does what `RunListener` does, so a partial or template that does not parse is reported after the bind instead of before it. The listener is closed at once and `Run` returns the same error; nothing is served.
+
+### Fixed
+
+- **A release binary reports its core version, not `(devel)` (T1000).** The release workflow stamps `smeldr.dev/core.releaseVersion` with the tag for all five targets, and `parseSmeldrVersions` uses it when the local replace makes the build info say `(devel)`. The startup line and `/_health` show it.
+- **Startup log lines are plain ASCII (T1000).** The bootstrap token line and three migration and token-store warnings used an em dash, which showed as `â€”` in Windows PowerShell 5.1. A new test keeps the log calls in core and example/server ASCII.
+- **README quickstart for Windows (T1000).** There is a PowerShell path for steps 1 and 2 (Invoke-WebRequest, Get-FileHash, a SECRET without openssl). Downloads use `releases/latest/download`, so no command pins a version. `go install ...@latest`, the `PORT` note, and the platforms the start was run on: Linux, and Windows 11 in PowerShell and Git Bash.
+
 ---
 
 ## [1.182.0] - 2026-10-28

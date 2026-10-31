@@ -477,7 +477,7 @@ func RenameLegacyTables(ctx context.Context, db DB, pairs [][2]string) error {
 		if dst, err := tableExists(ctx, db, pair[1]); err == nil && dst {
 			// Destination already exists — partial migration from a previous run.
 			// Skip this pair rather than failing the rename.
-			slog.Warn("smeldr: legacy table migration skipped — destination already exists",
+			slog.Warn("smeldr: legacy table migration skipped: destination already exists",
 				"src", pair[0], "dst", pair[1])
 			continue
 		}

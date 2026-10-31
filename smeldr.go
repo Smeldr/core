@@ -430,7 +430,7 @@ func New(cfg Config) *App {
 		// Known as a handle without governance until App.Governance wires one.
 		registerGovernance(cfg.DB, nil)
 		if err := migrateLegacyTableNames(context.Background(), cfg.DB); err != nil {
-			slog.Warn("smeldr: legacy table migration failed — rename forge_* tables manually", "error", err)
+			slog.Warn("smeldr: legacy table migration failed; rename forge_* tables manually", "error", err)
 		}
 		if err := migrateStateFlows(context.Background(), cfg.DB); err != nil {
 			slog.Warn("smeldr: state flow migration failed", "error", err)
@@ -1700,7 +1700,7 @@ func (a *App) Handler() http.Handler {
 	// A83: auto-create a bootstrap admin token when smeldr_tokens is empty.
 	if a.tokenStore != nil {
 		if err := a.tokenStore.probeTable(context.Background()); err != nil {
-			fmt.Fprintf(os.Stderr, "WARN  smeldr: TokenStore is configured but the smeldr_tokens table is missing or inaccessible — create it using the DDL in the TokenStore documentation\n")
+			fmt.Fprintf(os.Stderr, "WARN  smeldr: TokenStore is configured but the smeldr_tokens table is missing or inaccessible; create it using the DDL in the TokenStore documentation\n")
 		} else {
 			userID, created := a.tokenStore.ensureBootstrap(context.Background())
 			// A237: the freshly created bootstrap token also needs an admin
@@ -1945,6 +1945,14 @@ func (a *App) ServeDynamicContent() *App {
 	return a
 }
 
+// releaseVersion is the core release a binary was built from, set only by the
+// release build with -ldflags "-X smeldr.dev/core.releaseVersion=vX.Y.Z"
+// (.github/workflows/release.yml, T1000). example/server builds core through a
+// local replace, so its build info says "(devel)" for core; the release binary
+// is built at the tag, so this names what is really in it. Empty everywhere
+// else, where "(devel)" stays the truth.
+var releaseVersion string
+
 // smeldrVersions reads the binary's embedded build info and returns a map of
 // short module name → version for all Smeldr core and companion modules
 // (smeldr.dev/core and related modules). Each module path under
@@ -1980,6 +1988,9 @@ func parseSmeldrVersions(info *debug.BuildInfo) map[string]string {
 	const base = "smeldr.dev/"
 	result := make(map[string]string)
 	add := func(path, version string) {
+		if path == base+"core" && version == "(devel)" && releaseVersion != "" {
+			version = releaseVersion
+		}
 		if !strings.HasPrefix(path, base) || version == "" {
 			return
 		}
@@ -2059,9 +2070,37 @@ func (a *App) Health() {
 //	    log.Fatal(err)
 //	}
 func (a *App) Run(addr string) error {
+	if addr == "" {
+		addr = ":http"
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	return a.RunListener(ln)
+}
+
+// RunListener is [App.Run] on a listener the caller has already opened: it
+// serves on ln and blocks until SIGINT or SIGTERM, with the same graceful
+// shutdown. A program that announces it is ready opens the listener first and
+// prints only after that succeeds, so the line can be trusted (T1000):
+//
+//	ln, err := net.Listen("tcp", "127.0.0.1:8080")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	log.Printf("listening on %s", ln.Addr())
+//	if err := app.RunListener(ln); err != nil {
+//	    log.Fatal(err)
+//	}
+//
+// ln is closed when RunListener returns. An error before serving (a partial or
+// template that does not parse) closes ln and is returned.
+func (a *App) RunListener(ln net.Listener) error {
 	// Load shared partials once, then push to each module before parsing.
 	partials, err := loadPartials(a.partialsDir)
 	if err != nil {
+		ln.Close()
 		return err
 	}
 	if len(partials) > 0 {
@@ -2076,6 +2115,7 @@ func (a *App) Run(addr string) error {
 	// errors are obvious rather than surfacing as 406 responses at request time.
 	for _, tp := range a.templateModules {
 		if err := tp.parseTemplates(); err != nil {
+			ln.Close()
 			return err
 		}
 	}
@@ -2097,14 +2137,6 @@ func (a *App) Run(addr string) error {
 			parts = append(parts, k+" "+versions[k])
 		}
 		fmt.Fprintf(os.Stderr, "smeldr: %s\n", strings.Join(parts, ", "))
-	}
-
-	if addr == "" {
-		addr = ":http"
-	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
 	}
 
 	// Block until an OS signal or a fatal server error.

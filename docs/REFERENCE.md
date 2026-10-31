@@ -65,6 +65,10 @@ app.Run(":8080")
 
 No boilerplate. No route registration. No sitemap library.
 
+**`App.Run` and `App.RunListener`.** `app.Run(addr)` opens the listener on `addr` and serves until SIGINT or SIGTERM, then shuts down gracefully within 5 seconds. `app.RunListener(ln)` (core v1.183.0, T1000) is the same on a listener the caller has already opened. Use it to print a ready line only after the bind has succeeded, as smeldr-server does: with the port taken, `net.Listen` fails and nothing claims to be listening. `ln` is closed when `RunListener` returns, also when a template or partial fails to parse before serving.
+
+A release binary of smeldr-server reports its core version on startup (`smeldr: core 1.183.0, ...`) and in `GET /_health`. The release build stamps it with `-ldflags "-X smeldr.dev/core.releaseVersion=vX.Y.Z"`, because example/server builds core through a local `replace`, whose build info says `(devel)`. A local build still says `(devel)`.
+
 ---
 
 ## Core concepts

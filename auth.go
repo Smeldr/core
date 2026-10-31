@@ -545,7 +545,7 @@ func (ts *TokenStore) ensureBootstrap(ctx context.Context) (userID string, creat
 		slog.Warn("smeldr: failed to create bootstrap admin token", "err", err)
 		return "", false
 	}
-	slog.Warn("smeldr: smeldr_tokens is empty — bootstrap admin token created (copy now, shown once):\n\t" + raw)
+	slog.Warn("smeldr: smeldr_tokens is empty: bootstrap admin token created (copy now, shown once):\n\t" + raw)
 	return uid, true
 }
 

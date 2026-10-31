@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -1210,4 +1211,88 @@ func TestMustParseTemplate_loadPartialsError_panics(t *testing.T) {
 		}
 	}()
 	app.MustParseTemplate("any.html")
+}
+
+// The release build stamps core's version (T1000): with releaseVersion set, a
+// core under a local replace reports it instead of "(devel)". A core with a
+// real version is never overridden, and without the stamp "(devel)" stays.
+func TestParseSmeldrVersions_ReleaseVersion(t *testing.T) {
+	replaced := &debug.BuildInfo{
+		Main: debug.Module{Path: "example.com/server", Version: "(devel)"},
+		Deps: []*debug.Module{{Path: "smeldr.dev/core", Version: "v1.66.1", Replace: &debug.Module{Path: "../..", Version: "(devel)"}}},
+	}
+	real := &debug.BuildInfo{
+		Main: debug.Module{Path: "example.com/server", Version: "(devel)"},
+		Deps: []*debug.Module{{Path: "smeldr.dev/core", Version: "v1.180.0"}},
+	}
+	defer func(v string) { releaseVersion = v }(releaseVersion)
+	for _, tc := range []struct {
+		name, stamp string
+		info        *debug.BuildInfo
+		want        string
+	}{
+		{"stamped, replaced", "v1.183.0", replaced, "1.183.0"},
+		{"unstamped, replaced", "", replaced, "(devel)"},
+		{"stamped, real version", "v1.183.0", real, "1.180.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			releaseVersion = tc.stamp
+			if got := parseSmeldrVersions(tc.info)["core"]; got != tc.want {
+				t.Errorf("core = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// RunListener serves on a listener the caller opened (T1000), so a program
+// can print its ready line only after the bind.
+func TestApp_RunListener(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	app.Handle("GET /ping", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	done := make(chan error, 1)
+	go func() { done <- app.RunListener(ln) }()
+	resp, err := http.Get("http://" + ln.Addr().String() + "/ping")
+	if err != nil {
+		t.Fatalf("GET on the caller's listener: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	proc, _ := os.FindProcess(os.Getpid())
+	if err := proc.Signal(os.Interrupt); err != nil {
+		t.Skipf("cannot send signal on this platform (%v)", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("RunListener = %v, want nil", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("RunListener did not return after SIGINT")
+	}
+}
+
+// A template that does not parse is returned before serving, and the
+// caller's listener is closed (T1000).
+func TestApp_RunListener_TemplateErrorClosesListener(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	app.partialsDir = filepath.Join(t.TempDir(), "missing-partials")
+	if err := os.WriteFile(app.partialsDir, []byte("not a dir"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.RunListener(ln); err == nil {
+		t.Fatal("RunListener = nil, want the partials error")
+	}
+	if _, err := net.Dial("tcp", ln.Addr().String()); err == nil {
+		t.Error("the listener is still open")
+	}
 }

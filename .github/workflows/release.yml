@@ -24,13 +24,15 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           set -eu
+          # The binary is built at the tag, so core in it is that release: stamp it,
+          # since the local replace makes the build info say "(devel)" (T1000).
           mkdir -p dist
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
             os=${target%/*}
             arch=${target#*/}
             ext=""
             if [ "$os" = windows ]; then ext=".exe"; fi
-            GOOS=$os GOARCH=$arch go build -trimpath -o "dist/smeldr-server-$os-$arch$ext" .
+            GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-X smeldr.dev/core.releaseVersion=${{ github.ref_name }}" -o "dist/smeldr-server-$os-$arch$ext" .
           done
 
       - name: Write SHA256SUMS
