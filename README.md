@@ -23,22 +23,12 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 **1. Run the server.**
 
-Download the server for your system from the newest release, check it against the release's checksums, and start it.
+Download the server for your system from the newest release and check it against the release's checksums.
 
 In bash (Linux, macOS, Git Bash on Windows, WSL):
 
     curl -LO https://github.com/Smeldr/core/releases/latest/download/smeldr-server-linux-amd64
     curl -sL https://github.com/Smeldr/core/releases/latest/download/SHA256SUMS | grep smeldr-server-linux-amd64 | sha256sum -c
-    mv smeldr-server-linux-amd64 smeldr-server && chmod +x smeldr-server
-    SECRET=$(openssl rand -hex 32) BASE_URL=http://localhost:8080 \
-      ENABLE_TOKENS=1 ENABLE_GOVERNANCE=1 ENABLE_RELATIONS=1 ENABLE_GOVERNANCE_RECORDS=1 \
-      ./smeldr-server
-
-The check prints `smeldr-server-linux-amd64: OK`. On another system, use the matching file from the release instead of `linux-amd64`:
-
-- **Linux on ARM:** `linux-arm64`.
-- **macOS:** `darwin-arm64` (Apple silicon) or `darwin-amd64`. Check with `shasum -a 256 -c`. A file downloaded in a browser is blocked by Gatekeeper until you run `xattr -d com.apple.quarantine <file>`.
-- **Git Bash on Windows:** the `windows-amd64.exe` files, renamed to `smeldr-server.exe` and `smeldr-cli.exe`. Git Bash still runs them as `./smeldr-server` and `./smeldr-cli`. In WSL, use the `linux-amd64` files as shown.
 
 In PowerShell (Windows):
 
@@ -46,15 +36,35 @@ In PowerShell (Windows):
     Invoke-WebRequest "$u/smeldr-server-windows-amd64.exe" -OutFile smeldr-server.exe
     Invoke-WebRequest "$u/SHA256SUMS" -OutFile server-SHA256SUMS
     (Get-FileHash smeldr-server.exe).Hash -eq (Select-String smeldr-server-windows-amd64.exe server-SHA256SUMS).Line.Split(' ')[0]
+
+Only go on if the check prints `smeldr-server-linux-amd64: OK` (bash) or `True` (PowerShell). If it prints `FAILED` or `False`, delete the file and do not run it.
+
+On another system, use the matching file from the release instead of `linux-amd64`:
+
+- **Linux on ARM:** `linux-arm64`.
+- **macOS:** `darwin-arm64` (Apple silicon) or `darwin-amd64`. Check with `shasum -a 256 -c`. A file downloaded in a browser is blocked by Gatekeeper until you run `xattr -d com.apple.quarantine <file>`.
+- **Git Bash on Windows:** the `windows-amd64.exe` files, renamed to `smeldr-server.exe` and `smeldr-cli.exe`. Git Bash still runs them as `./smeldr-server` and `./smeldr-cli`. In WSL, use the `linux-amd64` files as shown.
+
+The `.exe` files are not code-signed. If you download one in a browser instead, Windows may warn about it. We have not tested that path, so use the download command above, and check the file either way. cmd.exe is not covered: use PowerShell or Git Bash.
+
+Then start the server. In bash:
+
+    mv smeldr-server-linux-amd64 smeldr-server && chmod +x smeldr-server
+    SECRET=$(openssl rand -hex 32) BASE_URL=http://localhost:8080 \
+      ENABLE_TOKENS=1 ENABLE_GOVERNANCE=1 ENABLE_RELATIONS=1 ENABLE_GOVERNANCE_RECORDS=1 \
+      ./smeldr-server
+
+In PowerShell:
+
     $b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
     $env:SECRET = -join ($b | ForEach-Object { $_.ToString('x2') })
     $env:BASE_URL = 'http://localhost:8080'
     $env:ENABLE_TOKENS = '1'; $env:ENABLE_GOVERNANCE = '1'; $env:ENABLE_RELATIONS = '1'; $env:ENABLE_GOVERNANCE_RECORDS = '1'
     .\smeldr-server.exe
 
-The check prints `True`. cmd.exe is not covered: use PowerShell or Git Bash. A browser download of the unsigned `.exe` may meet a SmartScreen warning; we have not tested that path. The `Invoke-WebRequest` download above is the tested one, and either way, check the file before you run it.
+`latest/download` always gives the newest release. For a fixed version, write `download/vX.Y.Z` instead, here and in step 2.
 
-`latest/download` always gives the newest release. For a fixed version, write `download/vX.Y.Z` instead, here and in step 2. The server listens on `127.0.0.1:8080`. If that port is taken, set `PORT=8090` and `BASE_URL=http://localhost:8090` (in PowerShell, `$env:PORT` and `$env:BASE_URL`), and use that URL in step 2. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) for every setting.
+The server listens on `127.0.0.1:8080`. If that port is taken, set `PORT=8090` and `BASE_URL=http://localhost:8090` (in PowerShell, `$env:PORT` and `$env:BASE_URL`), and use that URL in step 2. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) for every setting.
 
 We have run these steps end to end on Linux (2026-10-28) and on Windows 11 in PowerShell and in Git Bash (2026-10-31). Not yet on macOS.
 
@@ -68,12 +78,12 @@ The ready line appears only once the port is really bound. Leave it running.
 
 **2. Make a token for yourself, and one for your AI agent.**
 
-In a second terminal, in the same directory, download the CLI the same way, then run `init` with the bootstrap token from step 1. In bash:
+In a second terminal, in the same directory, download the CLI the same way and check it.
+
+In bash:
 
     curl -LO https://github.com/Smeldr/cli/releases/latest/download/smeldr-cli-linux-amd64
     curl -sL https://github.com/Smeldr/cli/releases/latest/download/SHA256SUMS | grep smeldr-cli-linux-amd64 | sha256sum -c
-    mv smeldr-cli-linux-amd64 smeldr-cli && chmod +x smeldr-cli
-    SMELDR_BOOTSTRAP_TOKEN=<TOKEN> ./smeldr-cli init --url http://localhost:8080 --name <you>
 
 In PowerShell:
 
@@ -81,6 +91,16 @@ In PowerShell:
     Invoke-WebRequest "$u/smeldr-cli-windows-amd64.exe" -OutFile smeldr-cli.exe
     Invoke-WebRequest "$u/SHA256SUMS" -OutFile cli-SHA256SUMS
     (Get-FileHash smeldr-cli.exe).Hash -eq (Select-String smeldr-cli-windows-amd64.exe cli-SHA256SUMS).Line.Split(' ')[0]
+
+Only go on if the check prints `smeldr-cli-linux-amd64: OK` (bash) or `True` (PowerShell). If it prints `FAILED` or `False`, delete the file and do not run it.
+
+Then run `init` with the bootstrap token from step 1. In bash:
+
+    mv smeldr-cli-linux-amd64 smeldr-cli && chmod +x smeldr-cli
+    SMELDR_BOOTSTRAP_TOKEN=<TOKEN> ./smeldr-cli init --url http://localhost:8080 --name <you>
+
+In PowerShell:
+
     $env:SMELDR_BOOTSTRAP_TOKEN = '<TOKEN>'
     .\smeldr-cli.exe init --url http://localhost:8080 --name <you>
 
@@ -94,7 +114,11 @@ You should see:
     OK  .smeldr-cli.env written (mode 600; keep it out of version control: add it to .gitignore)
     OK  verification passed: the new token acts as admin
 
-On Windows the fourth line says that your user profile's permissions protect the file, instead of mode 600. The commands below are written as `./smeldr-cli`; in PowerShell, write `.\smeldr-cli.exe`.
+On Windows the fourth line reads:
+
+    OK  .smeldr-cli.env written (on Windows the file is protected by your user profile's permissions, not by a file mode; keep it out of version control: add it to .gitignore)
+
+The commands below are written as `./smeldr-cli`; in PowerShell, write `.\smeldr-cli.exe`.
 
 That token is yours, and it can ratify. Your AI agent gets its own, with less:
 
