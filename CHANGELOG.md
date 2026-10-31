@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.183.0] - 2026-10-31
+
 ### Added
 
 - **`App.RunListener(ln net.Listener)` (T1000, A609).** `App.Run` on a listener the caller has already opened, with the same graceful shutdown. `Run` now opens the listener and calls it. smeldr-server opens the listener first and logs `smeldr-server: listening on <addr>` only after the bind has succeeded. A taken port gives `listen <addr>: ... (set PORT or ADDR to use another port)` and no ready line.
