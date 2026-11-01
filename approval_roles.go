@@ -258,6 +258,18 @@ func actorClass(ctx context.Context, db DB, userID string) (string, error) {
 			}
 		}
 	}
+	// The identity's class when the holder is one (D165): its tokens may be
+	// several, and the class is the identity's.
+	idents, err := identitiesOf(ctx, db, []string{userID})
+	if err != nil {
+		return "", err
+	}
+	if ident := idents[userID]; ident != nil {
+		if ident.Class == IdentityUnclassified {
+			return "", nil
+		}
+		return ident.Class, nil
+	}
 	ok, err := tableExists(ctx, db, "smeldr_tokens")
 	if err != nil || !ok {
 		return "", err

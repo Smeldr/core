@@ -1144,6 +1144,10 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 	} else if err != nil {
 		return "", fmt.Errorf("smeldr: Grant: lookup role %q: %w", grant.RoleName, err)
 	}
+	// D165: a grant is held by an identity.
+	if err := checkGrantee(ctx, s.db, grant.TokenID); err != nil {
+		return "", err
+	}
 	// D156 point 1 (T986): a job token never grants a role, whatever it is.
 	grantorClass, err := s.grantorClass(ctx)
 	if err != nil {

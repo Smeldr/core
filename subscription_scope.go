@@ -3,9 +3,7 @@ package smeldr
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -169,16 +167,14 @@ func bearerFingerprint(r *http.Request) string {
 // IsRevoked reports whether the token with the stored fingerprint (its
 // [TokenRecord] ID) is revoked. A fingerprint the store does not hold is not
 // revoked: a token without a store row is checked by its signature alone.
+//
+// A token whose identity is suspended or retired counts as revoked (D165).
 func (ts *TokenStore) IsRevoked(ctx context.Context, fingerprint string) (bool, error) {
-	var revoked any
-	err := ts.db.QueryRowContext(ctx, `SELECT revoked_at FROM smeldr_tokens WHERE id = $1`, fingerprint).Scan(&revoked)
+	st, found, err := ts.readTokenState(ctx, fingerprint)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
 		return false, fmt.Errorf("%w: token revocation: %s", ErrInternal, err)
 	}
-	return revoked != nil, nil
+	return found && !st.usable(), nil
 }
 
 // legacyAdminOwner owns the subscription of a webhook endpoint created

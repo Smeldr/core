@@ -550,6 +550,30 @@ err = roles.RevokeWithReason(ctx, grantID, "rotation over")
 - A revoked grant's row is deleted, so its revoke reason is in its provenance record only. smeldr.dev/mcp's `get_item_provenance` reads it (mcp v1.53.0): `type_name` `Token` with the fingerprint id, or `RoleGrant` with the grant id, gated like `list_tokens` / `list_grants`. Those two names are reserved for these histories: a content type named `Token` or `RoleGrant` cannot be read through `get_item_provenance`.
 - smeldr.dev/mcp: `create_token`, `revoke_token`, `grant_role` and `revoke_grant` take an optional `reason`; `list_tokens` and `list_grants` return it. smeldr.dev/cli: `token create ... --reason`, `token revoke <id> --reason`.
 
+#### Identities (D165, G31 phase 1, T1014)
+
+An **identity** is one person, agent or job: the record its tokens belong to, that grants are held by, and that provenance names as the actor. Its id **is** the `user_id` its tokens are signed with, the value every grant (`RoleGrant.TokenID`), provenance row and `last_actor` already holds, so identities came in without rewriting any of them.
+
+```go
+err := smeldr.EnsureIdentities(ctx, db)                 // boot, before the TokenStore; idempotent
+ident, err := app.Identity(ctx, "IDN4")                 // by address or id
+raw, err := tokens.CreateForIdentity(ctx, "IDN4", "core-implementer-2026-11", "editor", 90*24*time.Hour, "rotation")
+report, err := app.MigrateIdentities(ctx, smeldr.IdentityMigrationOptions{DryRun: true})
+```
+
+- **The record:** `smeldr_identities` with `name`, `class` (`human`, `agent`, `job`, or `unclassified` for migrated rows only), `status` (`active`, `suspended`, `retired`), `attested_by`, `operator_id` (agents and jobs: the human responsible), `purpose`, `contact` (humans; `App.Identity` shows it only to an administrator), `rev`. Address prefix `IDN` (D110). **The class is fixed:** there is no way to change it; a wrong class means a new identity.
+- **`EnsureIdentities`** creates the table and its address storage, and adds `smeldr_tokens.identity_id` when the token table exists. The example server calls it after the token columns.
+- **A classified mint creates an identity** in the same transaction as the token (`CreateClassified`, `CreateClassifiedWithReason`, `create_token` with `actor_class`): name the token name, class the token class, `attested_by` the caller (or the mechanism, `token-store`). For an agent or job the operator is the caller when the caller is a human, the caller's operator when the caller is an agent, and unset for a mechanism.
+- **An unclassified mint creates no identity** (`Create`, `CreateWithID`, the bootstrap token): such a token keeps its signed, empty class, as before, until unclassified minting is retired (T998).
+- **`CreateForIdentity` joins an identity:** the token is signed with the identity's id, takes its class and acts with its grants. That is the new half of a rotation: mint, then revoke the old token. Refused (`*RefusalError`) when the identity is not active or is unclassified, and under the usual mint rules applied to the identity's class (an agent joins only an agent or job, D142; a job never mints, D156). An unknown identity is `ErrNotFound`.
+- **Verification reads the identity in the same one query** as revocation (`VerifyBearerToken`, `VerifyTokenString`, `TokenStore.IsRevoked`): the token takes its class from its identity, and a token whose identity is `suspended` or `retired` is refused at once (`IsRevoked` reports it as revoked, so stream connections close). The verified `User` carries the token's fingerprint in `User.TokenID`, never part of the signed payload. A database without the table verifies as before.
+- **Grants are held by the identity.** Once `smeldr_identities` exists, `RoleStore.Grant` refuses a grantee that is neither an identity nor a token's `user_id` (`*ValidationError` on `token_id`).
+- **Provenance names the identity, with the token as the means:** `ProvenanceRecord.Means` is the fingerprint of the token the act came through (`CreateProvenanceTable` adds the `means` column).
+- **Readers that assumed one token per `user_id`** now read the identity: `TokenRecord.IdentityID` and `ActorClass` (from the identity) in `TokenStore.List`, `NamesForUserIDs` (the identity's name), the approvers' list and the agent rule's class.
+- **Migration:** `App.MigrateIdentities` (and `smeldr-server migrate-identities [--apply] [--report=file]`, a dry run by default) turns each token `user_id` into one identity with the **same id**, oldest first: the newest token's name, its tokens' class or `unclassified`, the attester from its first token's mint record, operator unset; then links every token. The report lists by address what was created, the unclassified identities, those whose operator is not set, class disagreements (the newest token's class is taken), tokens with no `user_id` and grantees that name no token. Idempotent. Not on the boot path: take a backup and run it deliberately. Rollback: restore the backup, or `DROP TABLE smeldr_identities` and set `smeldr_tokens.identity_id` to NULL; no grant or provenance row was changed.
+- smeldr.dev/mcp: `create_token` takes `identity` (address or id) and returns `identity` (the address). smeldr.dev/cli: `token create ... --identity IDN4`.
+- **Planned, not in this release:** rotation as one act, suspend, reactivate, retire and edits, and the directory read (phase 2); Cloud linking its members (phase 3); every list reading the directory (phase 4).
+
 ### Bootstrap
 
 On first startup with an empty `smeldr_tokens` table, Smeldr auto-creates a
@@ -596,7 +620,7 @@ active admin token. Create a replacement first.
 
 | Tool | Description |
 |------|-------------|
-| `create_token` | Issues a new named token with a given role and TTL; optional `actor_class` (`agent`, `job` or `human`, mcp v1.48.0) classifies its actor |
+| `create_token` | Issues a new named token with a given role and TTL; optional `actor_class` (`agent`, `job` or `human`, mcp v1.48.0) classifies its actor; optional `identity` (address or id) mints it for that identity, and the result names the token's `identity` (D165) |
 | `list_tokens` | Lists all tokens with name, role, expiry, revoked status and `ActorClass` |
 | `revoke_token` | Revokes a token by ID — effective immediately |
 
@@ -4168,6 +4192,7 @@ app.Provenance(smeldr.NewProvenanceStore(db))
 | `ActorID` | `actor_id` | User UUID, job identifier, or agent identifier |
 | `Surface` | `surface` | `"http"` \| `"mcp"` \| `"cli"` \| `"trigger"`; `"cli"` has no current producer — nothing distinguishes a `smeldr-cli` HTTP request from any other |
 | `Reason` | `reason` | Free text, empty unless the caller supplied one — most acts carry none |
+| `Means` | `means` | The fingerprint of the token the act came through, while `ActorID` names the identity (D165); empty when the act came through no stored token, or before the column |
 
 ### Admin objects also write provenance
 

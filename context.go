@@ -22,6 +22,13 @@ type User struct {
 	// Roles is the set of roles held by this user. Smeldr's hierarchical
 	// permission checks ([HasRole], [IsRole]) operate on this slice.
 	Roles []Role
+
+	// TokenID is the stored fingerprint of the token the request carried, set
+	// by [VerifyBearerToken] and [VerifyTokenString] when they check a
+	// [TokenStore]; empty otherwise. Provenance records it as the means of an
+	// act, next to the identity in ID (D165). It is never part of a signed
+	// token.
+	TokenID string
 }
 
 // GuestUser is the zero-value User representing an unauthenticated request.

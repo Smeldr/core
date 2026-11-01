@@ -46,6 +46,8 @@ var coreAddressPrefixes = map[string]string{
 	"CoverageRule": "COV",
 	// The pull request check (change_check.go, T918).
 	"ChangeCheck": "CHK",
+	// Identities (identity.go, D165).
+	"Identity": "IDN",
 }
 
 var addressPrefixRe = regexp.MustCompile(`^[A-Z]{1,4}$`)
@@ -92,6 +94,7 @@ var coreAddressTables = []struct{ typeName, table, legacy string }{
 	{"Set", "smeldr_sets", ""},
 	{"CoverageRule", "smeldr_coverage_rules", ""},
 	{"ChangeCheck", "smeldr_change_checks", ""},
+	{"Identity", "smeldr_identities", ""},
 }
 
 // governanceAddressTypes and orchestrationAddOnAddressTypes are the types

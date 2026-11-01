@@ -249,5 +249,17 @@ func (a *App) liveTokens(ctx context.Context, holders []string) (map[string]live
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("%w: the approvers' tokens: %v", ErrInternal, err)
 	}
+	rows.Close()
+	// A holder that is an identity is named and classed by it (D165).
+	idents, err := identitiesOf(ctx, a.cfg.DB, holders)
+	if err != nil {
+		return nil, err
+	}
+	for holder, t := range out {
+		if ident := idents[holder]; ident != nil {
+			t.name, t.class = ident.Name, ident.Class
+			out[holder] = t
+		}
+	}
 	return out, nil
 }

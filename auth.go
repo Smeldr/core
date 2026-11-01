@@ -7,7 +7,6 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -299,7 +299,9 @@ func (b *bearerAuthFn) authenticate(r *http.Request) (User, bool) {
 // is invalid. secret must be the same value used to sign the token with [SignToken].
 //
 // When store is non-nil, VerifyBearerToken additionally checks the smeldr_tokens
-// table: the token's SHA-256 fingerprint must be present and not revoked.
+// table: the token's SHA-256 fingerprint must be present and not revoked, and
+// its identity, when it has one, active (D165). The returned user then takes
+// its class from the identity and carries the fingerprint in [User.TokenID].
 // Pass nil to skip database verification and use HMAC-only validation.
 //
 // This is the public counterpart to the unexported authenticate method on
@@ -316,19 +318,8 @@ func VerifyBearerToken(r *http.Request, secret []byte, store *TokenStore) (User,
 		return GuestUser, false
 	}
 	if store != nil {
-		h := sha256.Sum256([]byte(token))
-		id := hex.EncodeToString(h[:])
-		row := store.db.QueryRowContext(r.Context(),
-			`SELECT revoked_at FROM smeldr_tokens WHERE id = $1`, id,
-		)
-		var revokedAt *string
-		if err := row.Scan(&revokedAt); err != nil {
-			// Token fingerprint not in DB — not a managed token.
-			return GuestUser, false
-		}
-		if revokedAt != nil {
-			return GuestUser, false
-		}
+		// One query: the token's revocation and its identity (D165).
+		return store.verifyStored(r.Context(), token, user)
 	}
 	return user, true
 }
@@ -351,18 +342,7 @@ func VerifyTokenString(token string, secret []byte, store *TokenStore) (User, bo
 		return GuestUser, false
 	}
 	if store != nil {
-		h := sha256.Sum256([]byte(token))
-		id := hex.EncodeToString(h[:])
-		row := store.db.QueryRowContext(context.Background(),
-			`SELECT revoked_at FROM smeldr_tokens WHERE id = $1`, id,
-		)
-		var revokedAt *string
-		if err := row.Scan(&revokedAt); err != nil {
-			return GuestUser, false
-		}
-		if revokedAt != nil {
-			return GuestUser, false
-		}
+		return store.verifyStored(context.Background(), token, user)
 	}
 	return user, true
 }
@@ -419,6 +399,10 @@ type TokenRecord struct {
 	// wired, or for a token minted before reasons were recorded.
 	Reason string
 
+	// IdentityID is the identity the token belongs to (D165), nil for a token
+	// that has none: minted unclassified, or before [App.MigrateIdentities].
+	IdentityID *string
+
 	// RevokeReason is the reason given when the token was revoked
 	// ([TokenStore.RevokeWithReason]), from its "invalidate" provenance
 	// record. Empty under the same conditions as Reason.
@@ -458,6 +442,9 @@ type TokenStore struct {
 	// revocation is written; set by the App so its stream connections close
 	// (D116). Nil does nothing.
 	onRevoke func(fingerprint string)
+	// noIdentities is set once verification finds no identities table, so
+	// the hot path reads revocation alone from then on (D165).
+	noIdentities atomic.Bool
 }
 
 // NewTokenStore creates a [TokenStore] backed by db using secret as the HMAC
@@ -540,7 +527,7 @@ func (ts *TokenStore) ensureBootstrap(ctx context.Context) (userID string, creat
 	if err := row.Scan(&n); err != nil || n > 0 {
 		return "", false
 	}
-	raw, uid, err := ts.createToken(ctx, "bootstrap-admin", "admin", "", 10*365*24*time.Hour, "", mintActorBootstrap)
+	raw, uid, err := ts.createToken(ctx, "bootstrap-admin", "admin", "", 10*365*24*time.Hour, "", mintActorBootstrap, nil)
 	if err != nil {
 		slog.Warn("smeldr: failed to create bootstrap admin token", "err", err)
 		return "", false
@@ -561,7 +548,12 @@ func (ts *TokenStore) ensureBootstrap(ctx context.Context) (userID string, creat
 // [actActor]: the caller, or mechanism as a job when there is none
 // ([mintActorBootstrap] for the boot-time admin token, [mintActorStore] for a
 // program minting outside a request). Fail-open, written after the insert.
-func (ts *TokenStore) createToken(ctx context.Context, name, role string, class Role, ttl time.Duration, reason, mechanism string) (raw, userID string, err error) {
+//
+// join, when set, is the identity the token joins: it is signed with the
+// identity's id. Without one a classified mint creates a new identity in the
+// same transaction as the token, once [EnsureIdentities] has run; an
+// unclassified mint creates none (D165).
+func (ts *TokenStore) createToken(ctx context.Context, name, role string, class Role, ttl time.Duration, reason, mechanism string, join *Identity) (raw, userID string, err error) {
 	// A job token never creates a token (D156 point 1, T986), and an agent
 	// token mints only agent or job tokens (D142, T984): a human or
 	// unclassified token it minted could ratify for it.
@@ -580,27 +572,19 @@ func (ts *TokenStore) createToken(ctx context.Context, name, role string, class 
 		roles = append(roles, class)
 	}
 	user := User{ID: NewID(), Name: name, Roles: roles}
+	if join != nil {
+		user.ID = join.ID
+	}
 	raw, err = SignToken(user, ts.secret, ttl)
 	if err != nil {
 		return "", "", ErrInternal
 	}
-	h := sha256.Sum256([]byte(raw))
-	id := hex.EncodeToString(h[:])
+	id := tokenFingerprint(raw)
 	now := time.Now().UTC()
 	expiresAt := now.Add(ttl)
 	if class != "" {
-		_, err = ts.db.ExecContext(ctx,
-			`INSERT INTO smeldr_tokens (id, name, role, expires_at, created_at, user_id, actor_class) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-			id, name, role, expiresAt.Format(time.RFC3339), now.Format(time.RFC3339), user.ID, string(class),
-		)
-		if isNoSuchColumn(err, "actor_class") || isNoSuchColumn(err, "user_id") {
-			// Refuse rather than mint a token whose list entry would not say
-			// what it is: the signed payload would carry the class, the table
-			// would not.
-			return "", "", Err("actor_class", "smeldr_tokens has no actor_class column: run EnsureTokenActorClassColumn (and EnsureTokenUserIDColumn) before minting a classified token")
-		}
-		if err != nil {
-			return "", "", ErrInternal
+		if err := ts.insertClassified(ctx, id, name, role, class, expiresAt, now, user.ID, mechanism, join); err != nil {
+			return "", "", err
 		}
 		ts.recordTokenAct(ctx, id, "assert", reason, mechanism)
 		return raw, user.ID, nil
@@ -662,7 +646,7 @@ func (ts *TokenStore) recordTokenAct(ctx context.Context, id, verb, reason, mech
 // role must be a valid [Role] string ("author", "editor", "admin").
 // ttl must be positive.
 func (ts *TokenStore) Create(ctx context.Context, name, role string, ttl time.Duration) (string, error) {
-	raw, _, err := ts.createToken(ctx, name, role, "", ttl, "", mintActorStore)
+	raw, _, err := ts.createToken(ctx, name, role, "", ttl, "", mintActorStore, nil)
 	return raw, err
 }
 
@@ -718,7 +702,7 @@ func (ts *TokenStore) CreateClassifiedWithReason(ctx context.Context, name, role
 			return "", "", Err("role", `must be "author", "editor" or "admin" for a classified token`)
 		}
 	}
-	return ts.createToken(ctx, name, role, class, ttl, reason, mintActorStore)
+	return ts.createToken(ctx, name, role, class, ttl, reason, mintActorStore, nil)
 }
 
 // CreateWithID behaves exactly like [TokenStore.Create], but also returns
@@ -731,7 +715,7 @@ func (ts *TokenStore) CreateClassifiedWithReason(ctx context.Context, name, role
 // caller that also needs to grant one must hold this ID before calling
 // [RoleStore.Grant].
 func (ts *TokenStore) CreateWithID(ctx context.Context, name, role string, ttl time.Duration) (raw, userID string, err error) {
-	return ts.createToken(ctx, name, role, "", ttl, "", mintActorStore)
+	return ts.createToken(ctx, name, role, "", ttl, "", mintActorStore, nil)
 }
 
 // List returns all token records from smeldr_tokens ordered by created_at
@@ -742,14 +726,21 @@ func (ts *TokenStore) CreateWithID(ctx context.Context, name, role string, ttl t
 func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 	const base = `SELECT id, name, role, expires_at, revoked_at, created_at`
 	const tail = ` FROM smeldr_tokens ORDER BY created_at DESC`
-	hasUserID, hasClass := true, true
-	rows, err := ts.db.QueryContext(ctx, base+`, user_id, actor_class`+tail)
+	hasUserID, hasClass, hasIdentity := true, true, true
+	// With identities (D165): the token's identity, whose class it takes.
+	rows, err := ts.db.QueryContext(ctx, `SELECT t.id, t.name, t.role, t.expires_at, t.revoked_at, t.created_at,
+		t.user_id, t.actor_class, t.identity_id, COALESCE(i.class, '')
+		FROM smeldr_tokens t LEFT JOIN smeldr_identities i ON i.id = t.identity_id ORDER BY t.created_at DESC`)
+	if isNoSuchTable(err) || isNoSuchColumn(err, "identity_id") {
+		hasIdentity = false
+		rows, err = ts.db.QueryContext(ctx, base+`, user_id, actor_class`+tail)
+	}
 	if isNoSuchColumn(err, "actor_class") {
 		hasClass = false
 		rows, err = ts.db.QueryContext(ctx, base+`, user_id`+tail)
 	}
 	if isNoSuchColumn(err, "user_id") {
-		hasUserID, hasClass = false, false
+		hasUserID, hasClass, hasIdentity = false, false, false
 		rows, err = ts.db.QueryContext(ctx, base+tail)
 	}
 	if err != nil {
@@ -760,13 +751,17 @@ func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 	for rows.Next() {
 		var rec TokenRecord
 		var expiresAtStr, createdAtStr string
-		var revokedAtStr, userID, class *string
+		var revokedAtStr, userID, class, identityID *string
+		var identityClass string
 		dest := []any{&rec.ID, &rec.Name, &rec.Role, &expiresAtStr, &revokedAtStr, &createdAtStr}
 		if hasUserID {
 			dest = append(dest, &userID)
 		}
 		if hasClass {
 			dest = append(dest, &class)
+		}
+		if hasIdentity {
+			dest = append(dest, &identityID, &identityClass)
 		}
 		if err := rows.Scan(dest...); err != nil {
 			return nil, ErrInternal
@@ -777,8 +772,16 @@ func (ts *TokenStore) List(ctx context.Context) ([]TokenRecord, error) {
 			rec.RevokedAt, _ = time.Parse(time.RFC3339, *revokedAtStr)
 		}
 		rec.UserID = userID
+		rec.IdentityID = identityID
 		if class != nil {
 			rec.ActorClass = *class
+		}
+		switch identityClass {
+		case "":
+		case IdentityUnclassified:
+			rec.ActorClass = "" // the token takes its class from its identity (D165)
+		default:
+			rec.ActorClass = identityClass
 		}
 		out = append(out, rec)
 	}
@@ -853,8 +856,13 @@ func (ts *TokenStore) NamesForUserIDs(ctx context.Context, userIDs []string) (ma
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
 		args[i] = id
 	}
-	query := "SELECT user_id, name FROM smeldr_tokens WHERE user_id IN (" + strings.Join(placeholders, ", ") + ")"
-	rows, err := ts.db.QueryContext(ctx, query, args...)
+	in := strings.Join(placeholders, ", ")
+	// An identity's name when the id is one (D165), else the token's.
+	rows, err := ts.db.QueryContext(ctx, "SELECT t.user_id, COALESCE(i.name, t.name) FROM smeldr_tokens t "+
+		"LEFT JOIN smeldr_identities i ON i.id = t.user_id WHERE t.user_id IN ("+in+")", args...)
+	if isNoSuchTable(err) && !strings.Contains(err.Error(), "smeldr_tokens") {
+		rows, err = ts.db.QueryContext(ctx, "SELECT user_id, name FROM smeldr_tokens WHERE user_id IN ("+in+")", args...)
+	}
 	if isNoSuchColumn(err, "user_id") || isNoSuchTable(err) {
 		return make(map[string]string), nil
 	}

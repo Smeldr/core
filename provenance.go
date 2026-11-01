@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -33,6 +34,11 @@ type ProvenanceRecord struct {
 	ActorID     string    `json:"actor_id"`     // user UUID, job identifier, or agent identifier
 	Surface     string    `json:"surface"`      // "http" | "mcp" | "cli" | "trigger"; empty when not derivable
 	Reason      string    `json:"reason"`       // optional free text, empty unless supplied
+	// Means is the stored fingerprint of the token the actor acted with
+	// ([User.TokenID]), so a leaked token can be traced to the rows it wrote
+	// while ActorID names the identity (D165). Empty when the act came
+	// through no stored token, or before the column existed.
+	Means string `json:"means,omitempty"`
 }
 
 // ProvenanceFilter narrows a [ProvenanceStore.List] query.
@@ -56,6 +62,8 @@ type ProvenanceStore interface {
 // sqlProvenanceStore is the default SQL-backed [ProvenanceStore].
 type sqlProvenanceStore struct {
 	db DB
+	// noMeans is set once the table is found without the means column.
+	noMeans atomic.Bool
 }
 
 // NewProvenanceStore returns a [ProvenanceStore] backed by db.
@@ -109,14 +117,40 @@ func CreateProvenanceTable(db DB) error {
 		)`); err != nil {
 		return err
 	}
-	_, err := db.ExecContext(context.Background(),
-		`CREATE INDEX IF NOT EXISTS idx_smeldr_provenance_subject ON smeldr_provenance (subject_type, subject_id)`)
-	return err
+	if _, err := db.ExecContext(context.Background(),
+		`CREATE INDEX IF NOT EXISTS idx_smeldr_provenance_subject ON smeldr_provenance (subject_type, subject_id)`); err != nil {
+		return err
+	}
+	// The token an act came through (D165), on a table made before it.
+	return EnsureColumn(context.Background(), db, "smeldr_provenance", "means", "TEXT NOT NULL DEFAULT ''")
 }
 
 // Append persists r to the smeldr_provenance table.
 // Timestamp is stored as an RFC3339 string for SQLite compatibility.
+//
+// A record whose actor is the request's user gets that user's token as its
+// [ProvenanceRecord.Means] when it has none.
 func (s *sqlProvenanceStore) Append(ctx context.Context, r ProvenanceRecord) error {
+	if r.Means == "" {
+		if sc, ok := ctx.(interface{ User() User }); ok {
+			if u := sc.User(); u.ID != "" && u.ID == r.ActorID {
+				r.Means = u.TokenID
+			}
+		}
+	}
+	if !s.noMeans.Load() {
+		_, err := s.db.ExecContext(ctx,
+			`INSERT INTO smeldr_provenance
+			 (id, timestamp, subject_type, subject_id, verb, from_state, to_state, actor_kind, actor_id, surface, reason, means)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			r.ID, r.Timestamp.UTC().Format(time.RFC3339), r.SubjectType, r.SubjectID,
+			r.Verb, r.FromState, r.ToState, r.ActorKind, r.ActorID, r.Surface, r.Reason, r.Means,
+		)
+		if !isNoSuchColumn(err, "means") {
+			return err
+		}
+		s.noMeans.Store(true)
+	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO smeldr_provenance
 		 (id, timestamp, subject_type, subject_id, verb, from_state, to_state, actor_kind, actor_id, surface, reason)
@@ -161,6 +195,18 @@ func (s *sqlProvenanceStore) List(ctx context.Context, f ProvenanceFilter) ([]Pr
 	}
 	query += " ORDER BY timestamp DESC, id DESC"
 
+	if !s.noMeans.Load() {
+		withMeans := strings.Replace(query, "surface, reason", "surface, reason, means", 1)
+		rows, err := s.db.QueryContext(ctx, withMeans, args...)
+		if err == nil {
+			defer rows.Close()
+			return scanProvenanceRowsWith(rows, true)
+		}
+		if !isNoSuchColumn(err, "means") {
+			return nil, err
+		}
+		s.noMeans.Store(true)
+	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -172,12 +218,22 @@ func (s *sqlProvenanceStore) List(ctx context.Context, f ProvenanceFilter) ([]Pr
 // scanProvenanceRows reads rows selected as id, timestamp, subject_type,
 // subject_id, verb, from_state, to_state, actor_kind, actor_id, surface, reason.
 func scanProvenanceRows(rows *sql.Rows) ([]ProvenanceRecord, error) {
+	return scanProvenanceRowsWith(rows, false)
+}
+
+// scanProvenanceRowsWith is [scanProvenanceRows], reading means as a twelfth
+// column when withMeans.
+func scanProvenanceRowsWith(rows *sql.Rows, withMeans bool) ([]ProvenanceRecord, error) {
 	var out []ProvenanceRecord
 	for rows.Next() {
 		var r ProvenanceRecord
 		var tsStr string
-		if err := rows.Scan(&r.ID, &tsStr, &r.SubjectType, &r.SubjectID,
-			&r.Verb, &r.FromState, &r.ToState, &r.ActorKind, &r.ActorID, &r.Surface, &r.Reason); err != nil {
+		dest := []any{&r.ID, &tsStr, &r.SubjectType, &r.SubjectID,
+			&r.Verb, &r.FromState, &r.ToState, &r.ActorKind, &r.ActorID, &r.Surface, &r.Reason}
+		if withMeans {
+			dest = append(dest, &r.Means)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
 		r.Timestamp, _ = time.Parse(time.RFC3339, tsStr)

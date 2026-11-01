@@ -315,6 +315,11 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.EnsureTokenActorClassColumn(context.Background(), db); err != nil {
 			return ServerResult{}, fmt.Errorf("ensure smeldr_tokens.actor_class: %w", err)
 		}
+		// D165 (T1014): the identity record; tokens get identity_id. The
+		// migration of existing tokens is run separately (migrate-identities).
+		if err := smeldr.EnsureIdentities(context.Background(), db); err != nil {
+			return ServerResult{}, fmt.Errorf("ensure identities: %w", err)
+		}
 		tokenStore = smeldr.NewTokenStore(db, cfg.Secret)
 	}
 
@@ -934,6 +939,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "migrate-places" {
 		os.Exit(runMigratePlaces(os.Args[2:], os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "migrate-identities" {
+		os.Exit(runMigrateIdentities(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	if len(os.Args) > 1 && os.Args[1] == "seed-role-subscriptions" {
 		os.Exit(runSeedRoleSubscriptions(os.Args[2:], os.Stdout, os.Stderr))

@@ -741,8 +741,12 @@ func (r *rowDB) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, 
 func (r *rowDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
 	return nil, nil
 }
-func (r *rowDB) QueryRowContext(ctx context.Context, _ string, _ ...any) *sql.Row {
+func (r *rowDB) QueryRowContext(ctx context.Context, q string, _ ...any) *sql.Row {
 	conn := &rowDriverConn{revokedAt: r.revokedAt, noRow: r.noRow}
+	if strings.Contains(q, "smeldr_identities") {
+		// The stub has no identities table (D165): verification falls back.
+		conn.queryErr = errors.New("no such table: smeldr_identities")
+	}
 	db := sql.OpenDB(conn)
 	return db.QueryRowContext(ctx, "SELECT revoked_at")
 }
@@ -753,10 +757,11 @@ type rowDriverConn struct {
 	revokedAt *string
 	noRow     bool
 	done      bool
+	queryErr  error
 }
 
 func (c *rowDriverConn) Connect(_ context.Context) (driver.Conn, error) {
-	return &rowDriverConn{revokedAt: c.revokedAt, noRow: c.noRow}, nil
+	return &rowDriverConn{revokedAt: c.revokedAt, noRow: c.noRow, queryErr: c.queryErr}, nil
 }
 func (c *rowDriverConn) Driver() driver.Driver                        { return dummyDriver{} }
 func (c *rowDriverConn) Prepare(_ string) (driver.Stmt, error)        { return c, nil }
@@ -764,8 +769,13 @@ func (c *rowDriverConn) Close() error                                 { return n
 func (c *rowDriverConn) Begin() (driver.Tx, error)                    { return nil, nil }
 func (c *rowDriverConn) NumInput() int                                { return -1 }
 func (c *rowDriverConn) Exec(_ []driver.Value) (driver.Result, error) { return nil, nil }
-func (c *rowDriverConn) Query(_ []driver.Value) (driver.Rows, error)  { return c, nil }
-func (c *rowDriverConn) Columns() []string                            { return []string{"revoked_at"} }
+func (c *rowDriverConn) Query(_ []driver.Value) (driver.Rows, error) {
+	if c.queryErr != nil {
+		return nil, c.queryErr
+	}
+	return c, nil
+}
+func (c *rowDriverConn) Columns() []string { return []string{"revoked_at"} }
 func (c *rowDriverConn) Next(dest []driver.Value) error {
 	if c.done || c.noRow {
 		return io.EOF // sql.Row.Scan returns sql.ErrNoRows

@@ -72,6 +72,13 @@
 //     [TokenStore.Create], [TokenStore.List], and [TokenStore.Revoke]. A bootstrap
 //     admin token is generated automatically on first startup when the store is empty.
 //
+// Tokens belong to an [Identity] (D165): one person, agent or job, with a fixed
+// class, a status and, for agents and jobs, a human operator. Grants are held
+// by the identity and provenance names it, so a token can be rotated
+// ([TokenStore.CreateForIdentity], then revoke the old one) without splitting
+// its history. [EnsureIdentities] creates the record; [App.MigrateIdentities]
+// turns existing tokens into identities with the same ids.
+//
 // Use the [Authenticate] middleware to enforce authentication on routes registered
 // outside content modules.
 //
