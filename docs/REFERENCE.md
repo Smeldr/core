@@ -243,6 +243,8 @@ The ticker wakes at the soonest `scheduled_at`, but never waits more than 60 sec
 
 Runtime-defined types (`DefineContentType` with `ServeDynamicContent`) are scheduled the same way (core v1.183.1, T1004): `ScheduleContent` and the MCP `schedule_content` tool wake the ticker, and at `scheduled_at` the item is published with the same checks and events as a compiled one (published-URL check, conflict policy, provenance, `AfterPublish`, transition triggers, the type's sitemap fragment). Before, they were never published: the ticker read compiled modules only, and an app with only runtime-defined types ran none. After the upgrade, runtime items that are already overdue are published on the first start.
 
+Every path that puts an item in Scheduled wakes the ticker, `transition_item` and a runtime type's status change included (core v1.183.2, T1008). A due item whose save fails (for example SQLite's busy lock while another write commits) is tried again one second later; if that fails too, it is retried once a minute until it publishes.
+
 ---
 
 ## Routing variants

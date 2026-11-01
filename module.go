@@ -2080,6 +2080,10 @@ func (m *Module[T]) processScheduled(ctx Context, now time.Time) (int, *time.Tim
 			}
 		case duePublished:
 			published++
+		case dueSkipped:
+			if retry := skipRetryAt(m.contentTypeName+"/"+nodeIDOf(item), now); retry != nil && (next == nil || retry.Before(*next)) {
+				next = retry
+			}
 		}
 	}
 
@@ -2093,6 +2097,30 @@ func (m *Module[T]) processScheduled(ctx Context, now time.Time) (int, *time.Tim
 // scheduledRetryInterval is how long the scheduler waits before trying a due
 // item again after the conflict policy blocked it.
 var scheduledRetryInterval = 60 * time.Second
+
+// scheduledSkipRetry is how soon the scheduler tries a due item again after
+// its save failed (T1008): a transient failure, such as SQLite's busy lock
+// while another write commits, is retried at once, not at the 60 s cap.
+var scheduledSkipRetry = time.Second
+
+// scheduledSkipped remembers which due items have failed to save since they
+// last published, keyed type/id, so only the first failure is retried soon.
+var scheduledSkipped sync.Map
+
+// skipRetryAt returns when to try a due item again after its save failed:
+// [scheduledSkipRetry] from now on its first failure, nil (the cap) on the
+// ones after, so a lasting failure is retried and logged once a minute, not
+// every second. [clearSkipRetry] forgets the item once it publishes.
+func skipRetryAt(key string, now time.Time) *time.Time {
+	if _, seen := scheduledSkipped.LoadOrStore(key, struct{}{}); seen {
+		return nil
+	}
+	t := now.Add(scheduledSkipRetry)
+	return &t
+}
+
+// clearSkipRetry forgets a published item's earlier save failures.
+func clearSkipRetry(key string) { scheduledSkipped.Delete(key) }
 
 // scheduledBlockedLogged remembers which due items the conflict policy has
 // already blocked, so the Warn is written once per item and not on every tick.
@@ -2159,6 +2187,7 @@ func (m *Module[T]) publishDue(ctx Context, item T, now time.Time) dueOutcome {
 	}
 	plan.run(ctx, m.db, m.relationStore, m.provenanceStore, m.statusAnnouncer, true, surfaceTrigger)
 	scheduledBlockedLogged.Delete(m.contentTypeName + "/" + id)
+	clearSkipRetry(m.contentTypeName + "/" + id)
 	// A240: fire any registered async TransitionTrigger for this
 	// transition. processScheduled is system-initiated (skips
 	// validateTransition entirely, unlike the other four transition

@@ -61,6 +61,10 @@ func (d dynamicScheduler) processScheduled(ctx Context, now time.Time) (int, *ti
 			if retry := now.Add(scheduledRetryInterval); next == nil || retry.Before(*next) {
 				next = &retry
 			}
+		case dueSkipped:
+			if retry := skipRetryAt(row.TypeName+"/"+row.ID, now); retry != nil && (next == nil || retry.Before(*next)) {
+				next = retry
+			}
 		}
 	}
 	for _, typeName := range rebuild {
@@ -142,6 +146,7 @@ func (r *DynamicTypeRepo) publishDue(ctx Context, id string, now time.Time) dueO
 		return dueSkipped
 	}
 	scheduledBlockedLogged.Delete(key)
+	clearSkipRetry(key)
 	changed := *node
 	changed.Status = Published
 	changed.PublishedAt = now

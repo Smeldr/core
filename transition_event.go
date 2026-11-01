@@ -57,7 +57,15 @@ type statusTransition struct {
 // Steps 3 and 4 run asynchronously. Every failure is logged and never
 // returned: the change has committed. A module's own [On] handlers are not
 // fired here; each path fires them itself, as before.
+//
+// A change into Scheduled, a reschedule included, first wakes the scheduler
+// (T1008), so every path to Scheduled (transition_item, a dynamic type's
+// status change, DrainEvalQueue) is published at its own time, not at the
+// 60 s cap.
 func (a *App) afterStatusChange(ctx context.Context, t statusTransition) {
+	if t.to == string(Scheduled) {
+		a.wakeScheduler()
+	}
 	if t.from == t.to {
 		return
 	}
