@@ -3355,7 +3355,7 @@ func TestModule_MCPUpdate_decisionProposed_stillMutable(t *testing.T) {
 	const uid = "tok-admin"
 	govGrant(t, store, uid, "admin")
 
-	updated, err := m.MCPUpdate(NewTestContext(User{ID: uid, Name: "Admin", Roles: []Role{Admin}}), d.Slug, map[string]any{"Body": "draft edit"})
+	updated, err := m.MCPUpdate(NewTestContext(User{ID: uid, Name: "Admin", Roles: []Role{Admin}}), d.Slug, map[string]any{"Body": "draft edit", "rev": d.Rev}) // a governance update names its rev (T1010)
 	if err != nil {
 		t.Fatalf("MCPUpdate on proposed Decision: %v", err)
 	}

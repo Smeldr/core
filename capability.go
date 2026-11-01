@@ -419,7 +419,7 @@ func (a *App) VisibleCapabilities(ctx Context) ([]Capability, error) {
 // but should be corrected. Read-only after init.
 var capabilityWarnings = map[capabilityKey][]string{
 	{ResourceItem, VerbCreate}: {"slug_adjusted", "deprecated_field", "title_missing", "title_too_long", "field_too_long"},
-	{ResourceItem, VerbUpdate}: {"deprecated_field", "title_missing", "title_too_long", "field_too_long"},
+	{ResourceItem, VerbUpdate}: {"deprecated_field", "title_missing", "title_too_long", "field_too_long", "rev_missing"},
 	{ResourceType, "define"}:   {"title_field_missing"},
 }
 

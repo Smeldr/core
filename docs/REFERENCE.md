@@ -1964,6 +1964,34 @@ app.Content(m)
 
 `ParseTimestamp(v any) (time.Time, error)` reads any stored time value into a UTC `time.Time` (A505). It accepts a `time.Time`, an `int64` of Unix seconds, or a `string` or `[]byte` in RFC3339Nano, RFC3339 or Go's `time.Time.String` form, which is what SQLite drivers write for a `TIMESTAMPTZ` column. `nil` returns the zero time. It is the one parser for every stored form, so a surface that reads a time column as text can return it as RFC3339, like every other record (D114 point 4). `smeldr.dev/mcp`'s `list_signals` uses it from its next release.
 
+### Naming the rev you read (T1010)
+
+Governance records carry a `rev` that advances on every change, including every status move. Read the record, keep its rev, and send that rev with your update or transition. If someone changed the record in between, the server refuses your write with `rev_conflict` instead of overwriting their change.
+
+Decision, Amendment, Organization, Domain, Area and CoverageRule require the rev. Until `Config.RevCutover` has passed, a write without one succeeds with a `rev_missing` warning on field `rev`. After it, the write is refused. A rev you cached before a transition is stale afterwards too, so read the record again first.
+
+The conflict message says what to do. Read the record again. Apply your change again only if it still holds against the new version. If it does not hold, send a Signal to the record's owner. Never resend the same change unread. A ratification must also name the version the person read, and the person must see what changed before they ratify again.
+
+From Go, pass the rev with `App.TransitionItemAt`:
+
+```go
+res, err := app.TransitionItemAt(ctx, "mcp", "Decision", "D118", "archived", "", 4)
+if errors.Is(err, smeldr.ErrRevConflict) {
+    var rc *smeldr.RevConflictError
+    if errors.As(err, &rc) {
+        // rc.Sent is 4. rc.Current is the rev the record has now.
+        // Read the record again before you apply the change again.
+    }
+    return err
+}
+if err != nil {
+    return err
+}
+newRev := res["rev"]
+```
+
+Grants (`grant_role`, `revoke_grant`) are not covered yet. They move from the token to the identity in G31 (D165) and will name the identity's rev then. Relations, change checks and premise confirmations follow in the next step of T1010.
+
 ### Schema migration (T246)
 
 `Create*Table` functions (`CreateSiteConfigTable`, `CreateBlockTables`, etc.) use `CREATE TABLE IF NOT EXISTS` — correct for a fresh install, but a no-op against a table that already exists in an older shape. `EnsureColumn` adds one column to an existing table when it is absent:

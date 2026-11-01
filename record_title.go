@@ -155,3 +155,7 @@ func noteTitleWarnings(ctx context.Context, typeName string, ws []CreateWarning)
 
 // setTitleCutover stores [Config.TitleCutover] on the module (App.Content).
 func (m *Module[T]) setTitleCutover(t time.Time) { m.titleCutover = t }
+
+// setRevCutover sets when a governance update without a rev is refused
+// (T1010, [Config.RevCutover]).
+func (m *Module[T]) setRevCutover(t time.Time) { m.revCutover = t }

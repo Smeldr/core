@@ -157,6 +157,14 @@ type Config struct {
 	// The date belongs to whoever runs the instance. Optional.
 	TitleCutover time.Time
 
+	// RevCutover is when a governance write without the rev the caller read
+	// turns from a warning into a refusal (T1010). It covers updates and
+	// transitions of a Decision, Amendment, Organization, Domain, Area or
+	// CoverageRule. Zero, the default, means warnings only: the write succeeds
+	// with a rev_missing warning. Once the time has passed, it is refused with a
+	// validation error on rev. Optional.
+	RevCutover time.Time
+
 	// SignalMessageCutover is when a Signal message longer than
 	// [SignalMessageMaxLength] characters turns from a message_too_long
 	// warning into a refusal (D114). Zero, the default, means warnings only.
@@ -613,6 +621,9 @@ func (a *App) Content(v any, opts ...Option) {
 		}
 		if tc, ok := r.(interface{ setTitleCutover(time.Time) }); ok {
 			tc.setTitleCutover(a.cfg.TitleCutover)
+		}
+		if rc, ok := r.(interface{ setRevCutover(time.Time) }); ok {
+			rc.setRevCutover(a.cfg.RevCutover)
 		}
 		if sc, ok := r.(interface{ setSignalSink(signalSink) }); ok {
 			sc.setSignalSink(a)

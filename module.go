@@ -387,6 +387,17 @@ func nodePublishedAtOf(v any) time.Time {
 	return rv.FieldByIndex(path).Interface().(time.Time)
 }
 
+// nodeRevOf returns the Rev field of v, 0 when it has none.
+func nodeRevOf(v any) int {
+	rv := elemValue(v)
+	path := goFieldPath(rv.Type(), "Rev")
+	if path == nil {
+		return 0
+	}
+	r, _ := rv.FieldByIndex(path).Interface().(int)
+	return r
+}
+
 // nodeScheduledAtOf returns the ScheduledAt field of v, and whether v has one.
 func nodeScheduledAtOf(v any) (*time.Time, bool) {
 	rv := elemValue(v)
@@ -489,6 +500,7 @@ type Module[T any] struct {
 	tplMu            sync.RWMutex       // guards tplList, tplShow reads and swaps
 	siteName         string             // set by App.Content via setSiteName
 	titleCutover     time.Time          // set by App.Content via setTitleCutover (D112)
+	revCutover       time.Time          // set by App.Content via setRevCutover (T1010)
 	signalSink       signalSink         // the App, set by App.Content via setSignalSink (D115); nil without one
 	ogDefaults       *OGDefaults        // nil until App.Handler via setSEODefaults
 	appSchema        *AppSchema         // nil until App.Handler via setSEODefaults
@@ -3587,6 +3599,15 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 	// Web content that is not published may take another slug: a draft
 	// reserves no URL, so the publisher chooses one before publishing.
 	slugChangeable := m.draftSlugsShared() && nodeStatusOf(existing) != Published
+	// T1010: a governance record's update names the rev the caller read.
+	sentRevValue, revSent := sentRev(fields)
+	var revWarning *CreateWarning
+	if !revSent {
+		revWarning, err = revMissing(m.contentTypeName, slug, "update_"+snakeCase(m.contentTypeName), m.revCutover)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	if err := refuseImmutableKeys(fields, existing, slugChangeable); err != nil {
 		return nil, nil, err
 	}
@@ -3642,7 +3663,17 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 		return nil, nil, err
 	}
 	if err := m.repo.Save(ctx, item); err != nil {
+		if revSent && errors.Is(err, ErrRevConflict) {
+			current := sentRevValue
+			if now, ferr := m.repo.FindByID(ctx, nodeIDOf(existing)); ferr == nil {
+				current = nodeRevOf(now)
+			}
+			return nil, nil, &RevConflictError{Type: m.contentTypeName, ID: slug, Sent: sentRevValue, Current: current}
+		}
 		return nil, nil, err
+	}
+	if revWarning != nil {
+		warnings = append(warnings, *revWarning)
 	}
 	if m.syncSaveHook != nil {
 		if err := m.syncSaveHook(ctx, m.contentTypeName, nodeIDOf(item), item); err != nil {

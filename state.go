@@ -933,8 +933,12 @@ type conflictPlan struct {
 	typeName, activeState, newItemID, table string
 	isDynamic                               bool
 	losers                                  []string
-	unlock                                  func()
-	locked                                  bool
+	// losersHaveRev is whether the losers' table has a rev column, probed
+	// with the reads, outside the write's transaction (T1010): on Postgres a
+	// failed statement aborts the transaction it runs in.
+	losersHaveRev bool
+	unlock        func()
+	locked        bool
 }
 
 // conflictLocks holds one single-slot channel per type name: transitions into
@@ -1153,6 +1157,9 @@ func planConflict(ctx context.Context, db DB, typeName, toState, newItemID strin
 				plan.losers = append(plan.losers, id)
 			}
 		}
+		if len(plan.losers) > 0 {
+			plan.losersHaveRev, _ = columnExists(ctx, db, plan.table, "rev")
+		}
 		return plan, nil
 	}
 	return plan, nil
@@ -1230,6 +1237,14 @@ func (p *conflictPlan) supersede(ctx context.Context, exec DB) []string {
 			slog.WarnContext(ctx, "smeldr: conflict policy: supersede UPDATE failed",
 				"type", p.typeName, "id", oldID, "error", updateErr)
 			continue
+		}
+		// T1010: a superseded item's rev advances too, so a stale write to it
+		// is caught.
+		if p.losersHaveRev {
+			if _, _, err := bumpRev(ctx, exec, p.table, p.typeName, oldID, nil); err != nil {
+				slog.WarnContext(ctx, "smeldr: conflict policy: superseded item's rev not advanced",
+					"type", p.typeName, "id", oldID, "error", err)
+			}
 		}
 		moved = append(moved, oldID)
 	}
@@ -1629,6 +1644,21 @@ func (a *App) resolveItemID(ctx context.Context, typeName, ident string) (string
 // is shown only for a transition that required an operation under Strict
 // enforcement.
 func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, toState, reason string) (map[string]any, error) {
+	return a.transitionItem(ctx, surface, typeName, slug, toState, reason, nil)
+}
+
+// TransitionItemAt is [App.TransitionItemVia] for a caller that names the rev
+// it read (T1010): the move applies only while the item still has rev, and
+// otherwise returns a [*RevConflictError]. A Decision, Amendment, Organization,
+// Domain, Area or CoverageRule moved without one gets a rev_missing warning in
+// the result's "warnings", and is refused once [Config.RevCutover] has passed.
+// The result carries the item's new "rev".
+func (a *App) TransitionItemAt(ctx context.Context, surface, typeName, slug, toState, reason string, rev int) (map[string]any, error) {
+	return a.transitionItem(ctx, surface, typeName, slug, toState, reason, &rev)
+}
+
+// transitionItem is TransitionItemVia with an expected rev (nil: none named).
+func (a *App) transitionItem(ctx context.Context, surface, typeName, slug, toState, reason string, expected *int) (map[string]any, error) {
 	desc := a.typeRegistry.Lookup(typeName)
 	if desc == nil {
 		return nil, fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName)
@@ -1653,6 +1683,9 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 		if err != nil {
 			return nil, err
 		}
+		if expected != nil && node.Rev != *expected {
+			return nil, &RevConflictError{Type: typeName, ID: slug, Sent: *expected, Current: node.Rev}
+		}
 		if err := repo.setStatusVia(ctx, node.ID, Status(toState), reason, surface); err != nil {
 			return nil, err
 		}
@@ -1669,6 +1702,17 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	}
 	if !scope.Readable(typeName, id) {
 		return nil, ErrNotFound
+	}
+	// T1010: a governance record's move names the rev the caller read.
+	var warnings []CreateWarning
+	if expected == nil {
+		w, err := revMissing(typeName, slug, "transition_item", a.cfg.RevCutover)
+		if err != nil {
+			return nil, err
+		}
+		if w != nil {
+			warnings = append(warnings, *w)
+		}
 	}
 
 	// One extraction of the actor for validation, the stream self-skip and the
@@ -1709,12 +1753,35 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	defer plan.release()
 	ctx = plan.holding(ctx)
 
+	// T1010: whether the table has a rev, probed before the transaction (on
+	// Postgres a failed statement aborts the transaction it runs in).
+	hasRev, revErr := columnExists(ctx, db, table, "rev")
+	if revErr != nil && expected != nil {
+		return nil, fmt.Errorf("%w: rev check: %s", ErrInternal, revErr)
+	}
+	if expected != nil && !hasRev {
+		return nil, fmt.Errorf("%w: %s has no rev column, so the rev you sent cannot be checked", ErrInternal, typeName)
+	}
+
 	now := time.Now().UTC()
 	exec, commit, rollback, err := conflictTx(ctx, db)
 	if err != nil {
 		return nil, err
 	}
 	defer rollback()
+	// T1010: every move advances rev, so a stale write behind it is caught;
+	// with a named rev, only while the item still has it.
+	var newRev int
+	if hasRev {
+		newRev, _, err = bumpRev(ctx, exec, table, typeName, id, expected)
+		if err != nil {
+			var rc *RevConflictError
+			if errors.As(err, &rc) {
+				rc.ID, rc.Ratify = slug, toState == "ratified"
+			}
+			return nil, err
+		}
+	}
 	// D78: persist the actor alongside status/updated_at. table is resolved
 	// generically above and may be a third-party module's own table that
 	// predates the last_actor column (Finding 4, plan 01a0ce3a) — attempt
@@ -1787,7 +1854,14 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	// change fires. Only the module's handlers: provenance, standing, the
 	// x.transitioned event and the App's bus are already handled above, once.
 	a.fireModuleAfterTransition(ctx, typeName, id, currentStatus, toState)
-	return map[string]any{"id": id, "slug": realSlug, "status": toState, "last_actor": actorID}, nil
+	result := map[string]any{"id": id, "slug": realSlug, "status": toState, "last_actor": actorID}
+	if hasRev {
+		result["rev"] = newRev
+	}
+	if len(warnings) > 0 {
+		result["warnings"] = warnings
+	}
+	return result, nil
 }
 
 // transitionHookModule is a compiled [Module] whose own After handlers
@@ -2134,6 +2208,11 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "error", updateErr)
 				skipped++
 			} else {
+				// T1010: the move advances the item's rev, as transition_item's does.
+				if _, _, err := bumpRev(ctx, db, table, r.typeName, r.itemID, nil); err != nil {
+					slog.WarnContext(ctx, "smeldr: DrainEvalQueue: rev not advanced",
+						"type_name", r.typeName, "item_id", r.itemID, "error", err)
+				}
 				// The winner is written: now the items it supersedes, then the
 				// winner's own record below.
 				plan.run(drainActorContext(ctx), db, a.relationStore, a.provenanceStore, a.afterStatusChange, false, "trigger")
