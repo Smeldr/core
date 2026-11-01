@@ -65,6 +65,13 @@ func revMissing(typeName, id, write string, cutover time.Time) (*CreateWarning, 
 	if !revRequiredTypes[typeName] {
 		return nil, nil
 	}
+	return revMissingFor(id, write, cutover)
+}
+
+// revMissingFor is the rev rule for a write that always names a rev (a
+// governance relation, a change check answer, a premise confirmation): a
+// rev_missing warning, or a [ValidationError] on rev once cutover has passed.
+func revMissingFor(id, write string, cutover time.Time) (*CreateWarning, error) {
 	msg := fmt.Sprintf("%s %s: send the rev you read, so a change made since is not overwritten unseen", write, id)
 	if !cutover.IsZero() && !time.Now().Before(cutover) {
 		return nil, Err("rev", msg+"; it is required")
@@ -76,23 +83,24 @@ func revMissing(typeName, id, write string, cutover time.Time) (*CreateWarning, 
 }
 
 // sentRev returns the rev a partial update names, matched the way
-// encoding/json matches the Rev field (any case), and whether it names one.
-func sentRev(fields map[string]any) (int, bool) {
+// encoding/json matches the Rev field (any case), and whether it names one. A
+// rev that is not a number is a [ValidationError] on rev, never read as 0.
+func sentRev(fields map[string]any) (int, bool, error) {
 	for k, v := range fields {
 		if !strings.EqualFold(k, "rev") {
 			continue
 		}
 		switch n := v.(type) {
 		case float64:
-			return int(n), true
+			return int(n), true, nil
 		case int:
-			return n, true
+			return n, true, nil
 		case int64:
-			return int(n), true
+			return int(n), true, nil
 		}
-		return 0, true
+		return 0, true, Err("rev", "must be a number: the rev you read")
 	}
-	return 0, false
+	return 0, false, nil
 }
 
 // bumpRev advances the rev of the row id in table by one, and when expected is

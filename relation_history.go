@@ -91,11 +91,22 @@ type edgeRowQuerier interface {
 // event. It writes no record; see [RelationStore.recordEdgeEnd], which the
 // caller runs once the end is committed.
 func endEdgeRow(ctx context.Context, q edgeRowQuerier, id string, now time.Time) (RelationEdge, bool, error) {
+	return endEdgeRowAt(ctx, q, id, now, nil)
+}
+
+// endEdgeRowAt is [endEdgeRow] that, with expected set, ends the row only while
+// it still has the rev the caller read (T1010). Ending advances the rev.
+func endEdgeRowAt(ctx context.Context, q edgeRowQuerier, id string, now time.Time, expected *int) (RelationEdge, bool, error) {
 	var e RelationEdge
-	err := q.QueryRowContext(ctx,
-		"UPDATE smeldr_relations SET invalid_at=$1, updated_at=$2 WHERE id=$3 AND (invalid_at IS NULL OR invalid_at > $4) "+
-			"RETURNING id, relation_kind, edge_class, source_type, source_id, target_type, target_id",
-		now, now, id, now).Scan(&e.ID, &e.RelationKind, &e.EdgeClass, &e.SourceType, &e.SourceID, &e.TargetType, &e.TargetID)
+	query := "UPDATE smeldr_relations SET invalid_at=$1, updated_at=$2, rev = rev + 1 WHERE id=$3 AND (invalid_at IS NULL OR invalid_at > $4)"
+	args := []any{now, now, id, now}
+	if expected != nil {
+		query += " AND rev = $5"
+		args = append(args, *expected)
+	}
+	err := q.QueryRowContext(ctx, query+
+		" RETURNING id, relation_kind, edge_class, source_type, source_id, target_type, target_id, rev",
+		args...).Scan(&e.ID, &e.RelationKind, &e.EdgeClass, &e.SourceType, &e.SourceID, &e.TargetType, &e.TargetID, &e.Rev)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RelationEdge{}, false, nil
 	}
@@ -135,7 +146,13 @@ func (s *RelationStore) recordEdgeEnd(ctx context.Context, edge RelationEdge, e 
 // row was ended; an unknown or already ended row ends nothing and records
 // nothing.
 func (s *RelationStore) endEdge(ctx context.Context, id string, e edgeEnding) (bool, error) {
-	edge, ended, err := endEdgeRow(ctx, s.db, id, time.Now().UTC())
+	return s.endEdgeAt(ctx, id, e, nil)
+}
+
+// endEdgeAt is [RelationStore.endEdge] with the rev the caller read, nil for
+// none (T1010).
+func (s *RelationStore) endEdgeAt(ctx context.Context, id string, e edgeEnding, expected *int) (bool, error) {
+	edge, ended, err := endEdgeRowAt(ctx, s.db, id, time.Now().UTC(), expected)
 	if err != nil || !ended {
 		return false, err
 	}
@@ -192,16 +209,44 @@ func assertEnding(ctx context.Context, edge RelationEdge) edgeEnding {
 // governance wired on the store's database) a relation with an end the caller
 // may not read is [ErrNotFound], exactly as an unknown id, ended or not.
 func (s *RelationStore) Withdraw(ctx context.Context, id, reason string) error {
+	_, err := s.WithdrawAt(ctx, id, reason, nil)
+	return err
+}
+
+// WithdrawAt is [RelationStore.Withdraw] with the rev the caller read (T1010).
+// For a governance relation (belongs_to_*, grounded_in, contradicts,
+// supersedes) a stale rev is a [*RevConflictError], and none is a rev_missing
+// warning, or a refusal once [Config.RevCutover] has passed. rev nil names
+// none.
+func (s *RelationStore) WithdrawAt(ctx context.Context, id, reason string, rev *int) ([]CreateWarning, error) {
 	if strings.TrimSpace(reason) == "" {
-		return Err("reason", "is required to withdraw a relation")
+		return nil, Err("reason", "is required to withdraw a relation")
 	}
+	var warnings []CreateWarning
+	if rev == nil {
+		var kind string
+		if err := s.db.QueryRowContext(ctx, "SELECT relation_kind FROM smeldr_relations WHERE id=$1", id).Scan(&kind); err == nil && revRequiredKind(kind) {
+			w, err := revMissingFor(id, "withdraw_relation", s.revCutover)
+			if err != nil {
+				return nil, err
+			}
+			if w != nil {
+				warnings = append(warnings, *w)
+			}
+		}
+	}
+	return warnings, s.withdraw(ctx, id, reason, rev)
+}
+
+// withdraw is WithdrawAt's write, after the rev rule.
+func (s *RelationStore) withdraw(ctx context.Context, id, reason string, rev *int) error {
 	if err := s.withdrawVisible(ctx, id); err != nil {
 		return err
 	}
 	if err := s.withdrawPlaceAuthority(ctx, id); err != nil {
 		return err
 	}
-	ended, err := s.endEdge(ctx, id, endingFromContext(ctx, EdgeEndWithdrawn, reason))
+	ended, err := s.endEdgeAt(ctx, id, endingFromContext(ctx, EdgeEndWithdrawn, reason), rev)
 	if err != nil {
 		return fmt.Errorf("%w: withdraw relation %s: %s", ErrInternal, id, err)
 	}
@@ -209,13 +254,17 @@ func (s *RelationStore) Withdraw(ctx context.Context, id, reason string) error {
 		return nil
 	}
 	var at *time.Time
-	err = s.db.QueryRowContext(ctx, "SELECT invalid_at FROM smeldr_relations WHERE id=$1", id).
-		Scan(nullTimeScanner{dst: &at})
+	var current int
+	err = s.db.QueryRowContext(ctx, "SELECT invalid_at, rev FROM smeldr_relations WHERE id=$1", id).
+		Scan(nullTimeScanner{dst: &at}, &current)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return fmt.Errorf("%w: relation %s", ErrNotFound, id)
 	case err != nil:
 		return fmt.Errorf("%w: withdraw relation %s: %s", ErrInternal, id, err)
+	case at == nil && rev != nil && current != *rev:
+		// Live, but changed since the caller read it (T1010).
+		return &RevConflictError{Type: "RelationEdge", ID: id, Sent: *rev, Current: current}
 	case at == nil:
 		// Live a moment ago and not ended by this call: lost a race with a
 		// concurrent re-assert of an explicit future end. Report it as ended.

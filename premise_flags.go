@@ -448,6 +448,22 @@ func (a *App) SweepPremiseFlags(ctx context.Context) (PremiseSweep, error) {
 // slug or ID and must be readable (else [ErrNotFound]); a missing reason is a
 // validation error; a pair with no open condition is [ErrConflict].
 func (a *App) ConfirmPremise(ctx context.Context, decision, premise, reason string) error {
+	_, err := a.ConfirmPremiseAt(ctx, decision, premise, reason, nil)
+	return err
+}
+
+// ConfirmPremiseAt is [App.ConfirmPremise] with the rev of the Decision the
+// person read (T1010): a stale one is a [*RevConflictError], with nothing
+// recorded; none is a rev_missing warning, and a refusal once
+// [Config.RevCutover] has passed. rev nil names none.
+func (a *App) ConfirmPremiseAt(ctx context.Context, decision, premise, reason string, rev *int) ([]CreateWarning, error) {
+	var warnings []CreateWarning
+	err := a.confirmPremise(ctx, decision, premise, reason, rev, &warnings)
+	return warnings, err
+}
+
+// confirmPremise is ConfirmPremiseAt's body.
+func (a *App) confirmPremise(ctx context.Context, decision, premise, reason string, rev *int, warnings *[]CreateWarning) error {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return Err("reason", "is required: say why the Decision still holds")
@@ -491,7 +507,33 @@ func (a *App) ConfirmPremise(ctx context.Context, decision, premise, reason stri
 	if len(open) == 0 {
 		return fmt.Errorf("%w: %s has no open premise-flagged condition for that premise", ErrConflict, label)
 	}
+	if err := a.premiseDecisionRev(ctx, decisionID, label, rev, warnings); err != nil {
+		return err
+	}
 	return a.confirmPremisePair(ctx, decisionID, premiseID, premiseState, label, open, reason)
+}
+
+// premiseDecisionRev applies the rev rule to a premise confirmation (T1010):
+// the person names the rev of the Decision they read.
+func (a *App) premiseDecisionRev(ctx context.Context, decisionID, label string, rev *int, warnings *[]CreateWarning) error {
+	if rev == nil {
+		w, err := revMissingFor(label, "confirm_premise", a.cfg.RevCutover)
+		if err != nil {
+			return err
+		}
+		if w != nil {
+			*warnings = append(*warnings, *w)
+		}
+		return nil
+	}
+	var current int
+	if err := a.cfg.DB.QueryRowContext(ctx, "SELECT rev FROM smeldr_decisions WHERE id = $1", decisionID).Scan(&current); err != nil {
+		return fmt.Errorf("%w: rev check of %s: %v", ErrInternal, label, err)
+	}
+	if current != *rev {
+		return &RevConflictError{Type: "Decision", ID: label, Sent: *rev, Current: current}
+	}
+	return nil
 }
 
 // confirmPremisePair records a confirmation of the pair and resolves its
@@ -499,11 +541,16 @@ func (a *App) ConfirmPremise(ctx context.Context, decision, premise, reason stri
 // the premise.
 func (a *App) confirmPremisePair(ctx context.Context, decisionID, premiseID, premiseState, label string, open []openSignal, reason string) error {
 	actor, _ := actorFromContext(ctx)
-	if _, err := a.cfg.DB.ExecContext(ctx,
+	// T1010: two confirmations of the same premise state cannot both win.
+	res, err := a.cfg.DB.ExecContext(ctx,
 		`UPDATE smeldr_premise_flags SET confirmed_by = $1, confirmed_at = $2, confirmed_reason = $3, confirmed_premise_state = $4
-		  WHERE decision_id = $5 AND premise_id = $6`,
-		actor, time.Now().UTC(), reason, premiseState, decisionID, premiseID); err != nil {
+		  WHERE decision_id = $5 AND premise_id = $6 AND (confirmed_premise_state IS NULL OR confirmed_premise_state <> $4)`,
+		actor, time.Now().UTC(), reason, premiseState, decisionID, premiseID)
+	if err != nil {
 		return fmt.Errorf("%w: record the confirmation of %s: %v", ErrInternal, label, err)
+	}
+	if n, aerr := res.RowsAffected(); aerr == nil && n == 0 {
+		return fmt.Errorf("%w: the premise of %s was already confirmed for its current state", ErrConflict, label)
 	}
 	a.signalResolver().resolve(ctx, open, "confirmed by "+actor+": "+reason)
 	return nil
@@ -517,6 +564,21 @@ func (a *App) confirmPremisePair(ctx context.Context, decisionID, premiseID, pre
 // Decision's place and a reason, as ConfirmPremise does. No error, result
 // or record it writes names the premise.
 func (a *App) ConfirmPremiseCondition(ctx context.Context, condition, reason string) error {
+	_, err := a.ConfirmPremiseConditionAt(ctx, condition, reason, nil)
+	return err
+}
+
+// ConfirmPremiseConditionAt is [App.ConfirmPremiseCondition] with the rev of
+// the resting Decision the person read, under the rule of
+// [App.ConfirmPremiseAt] (T1010). rev nil names none.
+func (a *App) ConfirmPremiseConditionAt(ctx context.Context, condition, reason string, rev *int) ([]CreateWarning, error) {
+	var warnings []CreateWarning
+	err := a.confirmPremiseCondition(ctx, condition, reason, rev, &warnings)
+	return warnings, err
+}
+
+// confirmPremiseCondition is ConfirmPremiseConditionAt's body.
+func (a *App) confirmPremiseCondition(ctx context.Context, condition, reason string, rev *int, warnings *[]CreateWarning) error {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return Err("reason", "is required: say why the Decision still holds")
@@ -572,6 +634,9 @@ func (a *App) ConfirmPremiseCondition(ctx context.Context, condition, reason str
 	}
 	if len(open) == 0 {
 		return fmt.Errorf("%w: the condition %q is no longer open", ErrConflict, condition)
+	}
+	if err := a.premiseDecisionRev(ctx, decisionID, label, rev, warnings); err != nil {
+		return err
 	}
 	return a.confirmPremisePair(ctx, decisionID, premiseID, p.state, label, open, reason)
 }

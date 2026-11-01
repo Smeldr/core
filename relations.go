@@ -85,6 +85,12 @@ type RelationEdge struct {
 	// all of which are deliberate actions on an item).
 	LastConfirmedAt *time.Time `db:"last_confirmed_at"`
 
+	// Rev advances on every write of the row: a re-assert and its end
+	// (T1010). A caller that re-asserts or withdraws a governance relation
+	// (belongs_to_*, grounded_in, contradicts, supersedes) sends the rev it
+	// read, so a change made since is not overwritten unseen.
+	Rev int `db:"rev"`
+
 	// Ended says how and when this row's life ended, for a row read through
 	// [RelationStore.MCPGetRelations] whose invalid_at has passed; nil for a
 	// live row and on every other read. Not a column: it is read from the
@@ -104,6 +110,11 @@ type RelationKindRegistry struct {
 type RelationStore struct {
 	db       DB
 	registry *RelationKindRegistry
+
+	// revCutover is [Config.RevCutover], set by [App.Relations]: when a
+	// governance relation re-asserted or withdrawn without a rev is refused
+	// (T1010). Zero means warnings only.
+	revCutover time.Time
 
 	// provenanceStore is non-nil when both App.Relations and App.Provenance are
 	// wired on the same App — injected at App.Handler() time regardless of call
@@ -149,7 +160,7 @@ func (s *RelationStore) setSignalDeps(store *WebhookStore, pool *workerPool, bro
 
 // Column order constants — scan order must match SELECT order exactly.
 const relationKindColumns = `id, type_name, label, reverse_label, mode, directional, weighted, type_pairs, attributes, created_at, updated_at`
-const relationColumns = `id, source_type, source_id, target_type, target_id, relation_kind, edge_class, confidence, valid_at, invalid_at, created_by_job, created_by, attributes, created_at, updated_at, last_confirmed_at`
+const relationColumns = `id, source_type, source_id, target_type, target_id, relation_kind, edge_class, confidence, valid_at, invalid_at, created_by_job, created_by, attributes, created_at, updated_at, last_confirmed_at, rev`
 
 // relationInsertColumns excludes last_confirmed_at — it is only ever set by
 // [RelationStore.SweepStructural]'s own confirm-write, never on insert or
@@ -200,11 +211,15 @@ CREATE TABLE IF NOT EXISTS smeldr_relations (
     attributes      TEXT NOT NULL DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL,
     updated_at      TIMESTAMPTZ NOT NULL,
-    last_confirmed_at TIMESTAMPTZ
+    last_confirmed_at TIMESTAMPTZ,
+    rev             INTEGER NOT NULL DEFAULT 0
 )`); err != nil {
 		return err
 	}
 	if err := EnsureColumn(ctx, db, "smeldr_relations", "last_confirmed_at", "TIMESTAMPTZ"); err != nil {
+		return err
+	}
+	if err := EnsureColumn(ctx, db, "smeldr_relations", "rev", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	if err := EnsureRelationCreatedByColumn(ctx, db); err != nil {
@@ -500,6 +515,14 @@ func canonicalizeNonDirectional(kind RelationKindDef, edge RelationEdge) Relatio
 // It writes nothing else (no provenance, no event), so a create can call it on
 // its own transaction and announce the edge after the commit (D113).
 func writeEdgeRow(ctx context.Context, db DB, edge RelationEdge) (RelationEdge, bool, error) {
+	return writeEdgeRowAt(ctx, db, edge, nil)
+}
+
+// writeEdgeRowAt is [writeEdgeRow] with the rev the caller read (T1010): a
+// write over an existing row applies only while it still has that rev, and
+// otherwise returns a [*RevConflictError]. Every write over a row advances its
+// rev; the returned edge carries the rev it has now.
+func writeEdgeRowAt(ctx context.Context, db DB, edge RelationEdge, expected *int) (RelationEdge, bool, error) {
 	now := time.Now().UTC()
 
 	// 01a0e3bc-8: record the human/agent caller, same smeldrCtxAccessor
@@ -572,7 +595,18 @@ func writeEdgeRow(ctx context.Context, db DB, edge RelationEdge) (RelationEdge, 
 		edge.Attributes = json.RawMessage("{}")
 	}
 
-	_, err := db.ExecContext(ctx, `
+	args := []any{edge.ID, edge.SourceType, edge.SourceID,
+		edge.TargetType, edge.TargetID,
+		edge.RelationKind, edge.EdgeClass,
+		edge.Confidence, edge.ValidAt, edge.InvalidAt,
+		edge.CreatedByJob, edge.CreatedBy, string(edge.Attributes),
+		edge.CreatedAt, edge.UpdatedAt}
+	revGuard := ""
+	if expected != nil {
+		revGuard = "\nWHERE smeldr_relations.rev = $16"
+		args = append(args, *expected)
+	}
+	res, err := db.ExecContext(ctx, `
 INSERT INTO smeldr_relations (`+relationInsertColumns+`)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 ON CONFLICT (id) DO UPDATE SET
@@ -588,15 +622,23 @@ ON CONFLICT (id) DO UPDATE SET
     created_by_job = EXCLUDED.created_by_job,
     created_by     = EXCLUDED.created_by,
     attributes     = EXCLUDED.attributes,
-    updated_at     = EXCLUDED.updated_at`,
-		edge.ID, edge.SourceType, edge.SourceID,
-		edge.TargetType, edge.TargetID,
-		edge.RelationKind, edge.EdgeClass,
-		edge.Confidence, edge.ValidAt, edge.InvalidAt,
-		edge.CreatedByJob, edge.CreatedBy, string(edge.Attributes),
-		edge.CreatedAt, edge.UpdatedAt,
+    updated_at     = EXCLUDED.updated_at,
+    rev            = smeldr_relations.rev + 1`+revGuard,
+		args...,
 	)
 	if err != nil {
+		return RelationEdge{}, false, err
+	}
+	if expected != nil && !newRow {
+		if n, aerr := res.RowsAffected(); aerr == nil && n == 0 {
+			var current int
+			if cerr := db.QueryRowContext(ctx, "SELECT rev FROM smeldr_relations WHERE id=$1", edge.ID).Scan(&current); cerr != nil {
+				return RelationEdge{}, false, fmt.Errorf("%w: rev check: %s", ErrInternal, cerr)
+			}
+			return RelationEdge{}, false, &RevConflictError{Type: "RelationEdge", ID: edge.ID, Sent: *expected, Current: current}
+		}
+	}
+	if err := db.QueryRowContext(ctx, "SELECT rev FROM smeldr_relations WHERE id=$1", edge.ID).Scan(&edge.Rev); err != nil {
 		return RelationEdge{}, false, err
 	}
 	return edge, newRow, nil
@@ -623,6 +665,12 @@ ON CONFLICT (id) DO UPDATE SET
 // explicit ID of a row that has ended is refused ([ErrConflict]) rather than
 // revived.
 func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (RelationEdge, error) {
+	return s.insertEdgeAt(ctx, edge, nil)
+}
+
+// insertEdgeAt is [RelationStore.insertEdge] with the rev the caller read of an
+// existing row (T1010), nil for none.
+func (s *RelationStore) insertEdgeAt(ctx context.Context, edge RelationEdge, expected *int) (RelationEdge, error) {
 	if kind, ok := s.GetKind(edge.RelationKind); ok {
 		if err := validateTypePairs(kind, edge); err != nil {
 			return RelationEdge{}, err
@@ -638,7 +686,7 @@ func (s *RelationStore) insertEdge(ctx context.Context, edge RelationEdge) (Rela
 			return RelationEdge{}, err
 		}
 	}
-	edge, newRow, err := writeEdgeRow(ctx, s.db, edge)
+	edge, newRow, err := writeEdgeRowAt(ctx, s.db, edge, expected)
 	if err != nil {
 		return RelationEdge{}, err
 	}
@@ -768,11 +816,41 @@ func (s *RelationStore) MCPAssertRelation(ctx context.Context,
 	if _, ok := s.GetKind(relationKind); !ok {
 		return RelationEdge{}, ErrNotFound
 	}
+	edge, _, err := s.MCPAssertRelationAt(ctx, sourceType, sourceID, targetType, targetID, relationKind, confidence, validAt, invalidAt, attributes, nil)
+	return edge, err
+}
+
+// MCPAssertRelationAt is [RelationStore.MCPAssertRelation] with the rev the
+// caller read (T1010). A first assert names no rev. Re-asserting a live
+// governance relation (belongs_to_*, grounded_in, contradicts, supersedes),
+// which overwrites its confidence and attributes, names the edge's rev: a stale
+// one is a [*RevConflictError]; none is a rev_missing warning, and a refusal
+// once the App's [Config.RevCutover] has passed. rev nil names none.
+func (s *RelationStore) MCPAssertRelationAt(ctx context.Context,
+	sourceType, sourceID, targetType, targetID, relationKind string,
+	confidence *float64, validAt, invalidAt *time.Time,
+	attributes json.RawMessage, rev *int,
+) (RelationEdge, []CreateWarning, error) {
+	if _, ok := s.GetKind(relationKind); !ok {
+		return RelationEdge{}, nil, ErrNotFound
+	}
 	sourceID, targetID, err := s.resolveEnds(ctx, sourceType, sourceID, targetType, targetID)
 	if err != nil {
-		return RelationEdge{}, err
+		return RelationEdge{}, nil, err
 	}
-	return s.insertEdge(ctx, RelationEdge{
+	var warnings []CreateWarning
+	if rev == nil && revRequiredKind(relationKind) {
+		if liveID := s.liveAssertedEdge(ctx, sourceType, sourceID, targetType, targetID, relationKind); liveID != "" {
+			w, err := revMissingFor(liveID, "assert_relation "+relationKind, s.revCutover)
+			if err != nil {
+				return RelationEdge{}, nil, err
+			}
+			if w != nil {
+				warnings = append(warnings, *w)
+			}
+		}
+	}
+	edge, err := s.insertEdgeAt(ctx, RelationEdge{
 		SourceType:   sourceType,
 		SourceID:     sourceID,
 		TargetType:   targetType,
@@ -783,7 +861,29 @@ func (s *RelationStore) MCPAssertRelation(ctx context.Context,
 		ValidAt:      validAt,
 		InvalidAt:    invalidAt,
 		Attributes:   attributes,
-	})
+	}, rev)
+	return edge, warnings, err
+}
+
+// revRequiredKind reports whether relations of kind are governance writes that
+// name the rev the caller read when re-asserted or withdrawn (T1010).
+func revRequiredKind(kind string) bool {
+	switch kind {
+	case "grounded_in", "contradicts", "supersedes":
+		return true
+	}
+	return strings.HasPrefix(kind, "belongs_to_")
+}
+
+// liveAssertedEdge returns the id of the live asserted edge for the tuple, ""
+// when there is none (or the lookup fails: then the write itself decides).
+func (s *RelationStore) liveAssertedEdge(ctx context.Context, sourceType, sourceID, targetType, targetID, kind string) string {
+	var id string
+	_ = s.db.QueryRowContext(ctx,
+		`SELECT id FROM smeldr_relations WHERE source_type=$1 AND source_id=$2 AND target_type=$3 AND target_id=$4 `+
+			`AND relation_kind=$5 AND edge_class='asserted' AND (invalid_at IS NULL OR invalid_at > $6)`,
+		sourceType, sourceID, targetType, targetID, kind, time.Now().UTC()).Scan(&id)
+	return id
 }
 
 // MCPProposeRelation records an inferred edge for human or agent review.
@@ -1112,6 +1212,7 @@ func scanEdge(rows *sql.Rows) (RelationEdge, error) {
 		&attributes,
 		scanDest(&e.CreatedAt), scanDest(&e.UpdatedAt),
 		nullTimeScanner{dst: &e.LastConfirmedAt},
+		&e.Rev,
 	)
 	if err != nil {
 		return RelationEdge{}, err

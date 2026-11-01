@@ -258,6 +258,24 @@ type changeCheckAreaRow struct {
 // approval ([ErrConflict]); an answerer without the authority
 // ([ErrForbidden]).
 func (a *App) AnswerChangeCheck(ctx context.Context, check, area string, approve bool, reason string) error {
+	_, err := a.AnswerChangeCheckAt(ctx, check, area, approve, reason, nil)
+	return err
+}
+
+// AnswerChangeCheckAt is [App.AnswerChangeCheck] with the rev of the Check the
+// approver read (T1010): every answer advances the Check's rev, and an answer
+// that names a stale one is a [*RevConflictError], with nothing recorded. An
+// answer without one gets a rev_missing warning, and is refused once
+// [Config.RevCutover] has passed. rev nil names none.
+func (a *App) AnswerChangeCheckAt(ctx context.Context, check, area string, approve bool, reason string, rev *int) ([]CreateWarning, error) {
+	var warnings []CreateWarning
+	err := a.answerChangeCheck(ctx, check, area, approve, reason, rev, &warnings)
+	return warnings, err
+}
+
+// answerChangeCheck is AnswerChangeCheckAt's body; the rev rule's warning, if
+// any, is appended to warnings.
+func (a *App) answerChangeCheck(ctx context.Context, check, area string, approve bool, reason string, rev *int, warnings *[]CreateWarning) error {
 	reason = strings.TrimSpace(reason)
 	if !approve && reason == "" {
 		return Err("reason", "is required when the change is not approved: say why")
@@ -297,9 +315,31 @@ func (a *App) AnswerChangeCheck(ctx context.Context, check, area string, approve
 		return fmt.Errorf("%w: read the Area %s of the Check: %v", ErrInternal, row.address, err)
 	}
 	label := recordLabel(ctx, db, "smeldr_change_checks", checkID)
+	// T1010: the answer names the rev of the Check the approver read, and
+	// advances it, before anything is recorded.
+	claimRev := func() error {
+		if rev == nil {
+			w, err := revMissingFor(label, "answer_change_check", a.cfg.RevCutover)
+			if err != nil {
+				return err
+			}
+			if w != nil {
+				*warnings = append(*warnings, *w)
+			}
+		}
+		_, _, err := bumpRev(ctx, db, "smeldr_change_checks", "ChangeCheck", checkID, rev)
+		var rc *RevConflictError
+		if errors.As(err, &rc) {
+			rc.ID = label
+		}
+		return err
+	}
 	if row.mode == ApprovalModeAuditAfterMerge {
 		if !approve && reason == "" {
 			return Err("reason", "is required when the change is not approved: say why")
+		}
+		if err := claimRev(); err != nil {
+			return err
 		}
 		return a.answerAuditArea(ctx, checkID, label, status, row, approve, reason)
 	}
@@ -312,6 +352,9 @@ func (a *App) AnswerChangeCheck(ctx context.Context, check, area string, approve
 		return fmt.Errorf("%w: %s is %s, not awaiting approval", ErrConflict, label, status)
 	case row.verdict != AreaVerdictAwaiting:
 		return fmt.Errorf("%w: Area %s already answered %s (%s)", ErrConflict, row.address, label, row.verdict)
+	}
+	if err := claimRev(); err != nil {
+		return err
 	}
 	verdict, text := AreaVerdictApproved, "approve"
 	if !approve {

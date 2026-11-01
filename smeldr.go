@@ -1004,6 +1004,7 @@ type SyncSaveHook func(ctx context.Context, typeName, id string, item any) error
 func (a *App) Relations(store *RelationStore) *App {
 	a.relationStore = store
 	if store != nil {
+		store.revCutover = a.cfg.RevCutover
 		// The store's handle follows the App's read rules, whichever of
 		// Relations and Governance is wired first.
 		registerGovernance(store.db, a.governance)

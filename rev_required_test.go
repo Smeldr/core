@@ -238,18 +238,21 @@ func TestBumpRev(t *testing.T) {
 
 func TestSentRev(t *testing.T) {
 	for _, c := range []struct {
-		fields map[string]any
-		want   int
-		ok     bool
+		fields  map[string]any
+		want    int
+		ok      bool
+		invalid bool
 	}{
-		{map[string]any{"rev": float64(3)}, 3, true},
-		{map[string]any{"Rev": 4}, 4, true},
-		{map[string]any{"REV": int64(5)}, 5, true},
-		{map[string]any{"rev": "x"}, 0, true},
-		{map[string]any{"Body": "b"}, 0, false},
+		{map[string]any{"rev": float64(3)}, 3, true, false},
+		{map[string]any{"Rev": 4}, 4, true, false},
+		{map[string]any{"REV": int64(5)}, 5, true, false},
+		{map[string]any{"rev": "x"}, 0, true, true},
+		{map[string]any{"Body": "b"}, 0, false, false},
 	} {
-		if got, ok := sentRev(c.fields); got != c.want || ok != c.ok {
-			t.Errorf("sentRev(%v) = %d, %v; want %d, %v", c.fields, got, ok, c.want, c.ok)
+		got, ok, err := sentRev(c.fields)
+		var ve *ValidationError
+		if got != c.want || ok != c.ok || (c.invalid != errors.As(err, &ve)) {
+			t.Errorf("sentRev(%v) = %d, %v, %v; want %d, %v, invalid %v", c.fields, got, ok, err, c.want, c.ok, c.invalid)
 		}
 	}
 }

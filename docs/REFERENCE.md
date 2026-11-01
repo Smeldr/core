@@ -1990,7 +1990,13 @@ if err != nil {
 newRev := res["rev"]
 ```
 
-Grants (`grant_role`, `revoke_grant`) are not covered yet. They move from the token to the identity in G31 (D165) and will name the identity's rev then. Relations, change checks and premise confirmations follow in the next step of T1010.
+The same rule covers three more governance writes (T1010 part b):
+
+- **Relations** of the kinds `belongs_to_*`, `grounded_in`, `contradicts` and `supersedes`. Every relation carries a `rev` (`RelationEdge.Rev`, shown by `list_relations` and `get_relations`) that advances on every write of the row. A first assert names no rev. Re-asserting a live one, which overwrites its confidence and attributes, and withdrawing one name the edge's rev: `RelationStore.MCPAssertRelationAt`, `RelationStore.WithdrawAt`, and the `rev` argument of `assert_relation` and `withdraw_relation`.
+- **A change check answer** names the rev of the Check the approver read (`App.AnswerChangeCheckAt`, `answer_change_check`). Every answer advances the Check's rev, so a stale answer records nothing.
+- **A premise confirmation** names the rev of the Decision the person read (`App.ConfirmPremiseAt`, `App.ConfirmPremiseConditionAt`, `confirm_premise`). Two confirmations of the same premise state cannot both be recorded.
+
+A `rev` that is not a number is a validation error on `rev`. Grants (`grant_role`, `revoke_grant`) are not covered yet. They move from the token to the identity in G31 (D165) and will name the identity's rev then.
 
 ### Schema migration (T246)
 

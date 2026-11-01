@@ -3600,7 +3600,10 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 	// reserves no URL, so the publisher chooses one before publishing.
 	slugChangeable := m.draftSlugsShared() && nodeStatusOf(existing) != Published
 	// T1010: a governance record's update names the rev the caller read.
-	sentRevValue, revSent := sentRev(fields)
+	sentRevValue, revSent, err := sentRev(fields)
+	if err != nil {
+		return nil, nil, err
+	}
 	var revWarning *CreateWarning
 	if !revSent {
 		revWarning, err = revMissing(m.contentTypeName, slug, "update_"+snakeCase(m.contentTypeName), m.revCutover)
