@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.183.2] - 2026-11-01
+
 ### Fixed
 
 - **A due item whose publish fails once is retried within a second, and every path to Scheduled wakes the scheduler (T1008, A616).** On smeldr.dev's own build, a Story and a Post were scheduled over MCP for the same time. The Post published on time, but the Story published about 60 s late. In the same tick, the Story's save failed with "database is locked (SQLITE_BUSY)" while the Post's publish was still writing. A due item whose save failed was only retried at the next tick. With nothing else due, that tick came at the 60 s cap. Now the first failed save of a due item is retried 1 second later. A failure that repeats is retried at the cap, so a lasting failure is not retried and logged every second. This applies to compiled modules and runtime-defined types. On smeldr.dev's build, the Story now publishes 0 to 1 s after it is due. Moving an item to Scheduled through `transition_item` (compiled or runtime-defined types), a runtime type's status change, or `DrainEvalQueue` did not wake the scheduler, so the item waited for the 60 s cap. Every status change into Scheduled now wakes it. No exported API changed.
