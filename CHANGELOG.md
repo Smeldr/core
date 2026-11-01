@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.184.0] - 2026-11-01
+
 ### Added
 
 - **Governance writes name the rev the caller read (T1010, A620).** Two agents could overwrite each other's change to a governance record without either noticing. An update compared `rev` only when the caller sent one, and `transition_item` compared no rev at all. Now the governance types (Decision, Amendment, Organization, Domain, Area and CoverageRule) expect the rev the caller read, on every update and every transition, ratification included. A stale rev is refused with the new `RevConflictError` (`errors.Is(err, ErrRevConflict)`; 409 `rev_conflict`, MCP -32002), whose message says to read the record again and apply the change only if it still holds. Before `Config.RevCutover` a write without a rev still succeeds, with a `rev_missing` warning. After the cutover it is refused. Every status move now advances the rev, so a save that carries an older rev is refused after a transition too. The new `App.TransitionItemAt` takes the rev explicitly. Grants are not covered yet: they move from the token to the identity in G31 (D165), and will name the identity's rev then. Relations, change checks and premise confirmations follow in the next part of T1010.
