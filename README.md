@@ -173,7 +173,7 @@ That is the model. **Next: [gate your pull requests](https://smeldr.dev/docs/gat
 
 **Places and roles**
 - Domains and Areas you name yourself. A domain's people ratify its Decisions; an area's people approve changes to its files.
-- An AI agent can approve changes in one Area when a person has given it that right, for as long as the person says. An agent never ratifies.
+- An AI agent can approve changes in one Area when a person has given it that right, for as long as the person says. A token classed as an agent never ratifies.
 
 **A record you can ask**
 - Search across every record you may read.
