@@ -834,6 +834,9 @@ func (s *RelationStore) MCPAssertRelationAt(ctx context.Context,
 	if _, ok := s.GetKind(relationKind); !ok {
 		return RelationEdge{}, nil, ErrNotFound
 	}
+	if planTimeEdge(sourceType, relationKind) {
+		return RelationEdge{}, nil, errPlanTimeEdge()
+	}
 	sourceID, targetID, err := s.resolveEnds(ctx, sourceType, sourceID, targetType, targetID)
 	if err != nil {
 		return RelationEdge{}, nil, err

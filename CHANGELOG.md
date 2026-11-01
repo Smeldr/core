@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **A plan records the Areas and Decisions it rests on (G30 phase 1, T1015, A623).** Nothing tied a Task's plan to the Decisions in force for the files its work changes. So nobody could see which Decisions a plan was approved against. A `task_plan` now has three fields: `repository` (owner/name), `paths` (path patterns in the coverage-rule language: `*` matches within one segment, `?` one character, `**` any number of segments) and `no_commit` (the work ends in no commit, as for a review or an investigation). `EnsureTaskPlanFields` adds them on boot, and does nothing on an instance with no `task_plan` type. A plan whose work ends in a commit must declare `repository` and `paths` when it moves to submitted or approved. Until the instance's `Config.PlanPathsCutover`, a missing value only raises a `plan_paths_missing` warning. After that it is a validation error. An invalid pattern or repository is always refused. A `no_commit` plan needs neither. On the move to submitted, and again on the move to approved, Smeldr resolves the patterns to the Areas they fall in and to the Decisions in force. It records both on the plan as `belongs_to_area` and `checked_against` relations. The earlier record is ended first, so the history keeps both. The system alone writes these relations. An author's `assert_relation` or `withdraw_relation` on them is refused. The new `App.PlanTimeRecord` reads the record. It returns only the Areas and Decisions the reader may read. For a commit plan with no record it returns `recorded: false`, so a missing basis never looks like "no Decisions apply". A failed record is logged, and the transition still stands.
+
 ---
 
 ## [1.184.0] - 2026-11-01

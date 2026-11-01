@@ -955,6 +955,12 @@ func main() {
 		log.Fatalf("smeldr-server: %v", err)
 	}
 	defer result.StopAll()
+	// G30 phase 1 (T1015): plans declare repository, paths and no_commit.
+	// Handler loads the runtime-defined types (task_plan among them) first.
+	_ = result.App.Handler()
+	if err := smeldr.EnsureTaskPlanFields(context.Background(), result.App); err != nil {
+		log.Printf("smeldr-server: %v", err)
+	}
 
 	ln, err := listenAndAnnounce(cfg.Addr, log.Printf)
 	if err != nil {

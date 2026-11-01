@@ -458,6 +458,10 @@ type DecisionsForPathsQuery struct {
 	// Organization; by default they are included, since they are in force
 	// everywhere.
 	ExcludeOrganization bool
+	// Patterns reads Paths as path patterns in the coverage-rule language, as
+	// a plan declares them (T1015): a pattern falls in an Area when some path
+	// matches both it and one of the Area's rules.
+	Patterns bool
 }
 
 // CoveredArea is an Area some of the paths fall in.
@@ -538,7 +542,17 @@ func (a *App) DecisionsForPaths(ctx context.Context, q DecisionsForPathsQuery) (
 	for _, p := range normalizePaths(q.Paths) {
 		covered := false
 		seenArea := map[string]bool{}
-		matcher.match(p, func(i int) {
+		match := matcher.match
+		if q.Patterns {
+			match = func(pattern string, hit func(int)) {
+				for i, r := range rules {
+					if patternsOverlap(pattern, r.pattern) {
+						hit(i)
+					}
+				}
+			}
+		}
+		match(p, func(i int) {
 			covered = true
 			r := rules[i]
 			ca := byArea[r.areaID]
@@ -895,4 +909,68 @@ func ruleLabel(r *CoverageRule) string {
 		return r.Address
 	}
 	return r.ID
+}
+
+// patternsOverlap reports whether some path matches both coverage-rule
+// patterns a and b (T1015): a plan's declared pattern falls in an Area when it
+// overlaps one of the Area's rules. Segment-wise dynamic programming, where **
+// spans any number of segments, and within a segment * spans any run of
+// characters and ? one character.
+func patternsOverlap(a, b string) bool {
+	as, bs := strings.Split(a, "/"), strings.Split(b, "/")
+	n, m := len(as), len(bs)
+	memo := make(map[[2]int]bool, (n+1)*(m+1))
+	seen := make(map[[2]int]bool, (n+1)*(m+1))
+	var f func(i, j int) bool
+	f = func(i, j int) bool {
+		k := [2]int{i, j}
+		if seen[k] {
+			return memo[k]
+		}
+		seen[k] = true
+		var r bool
+		switch {
+		case i == n && j == m:
+			r = true
+		case i < n && as[i] == "**":
+			r = f(i+1, j) || (j < m && f(i, j+1))
+		case j < m && bs[j] == "**":
+			r = f(i, j+1) || (i < n && f(i+1, j))
+		case i < n && j < m:
+			r = segmentsOverlap(as[i], bs[j]) && f(i+1, j+1)
+		}
+		memo[k] = r
+		return r
+	}
+	return f(0, 0)
+}
+
+// segmentsOverlap reports whether some segment matches both glob segments
+// a and b, where * spans any run of characters and ? one character.
+func segmentsOverlap(a, b string) bool {
+	n, m := len(a), len(b)
+	memo := make(map[[2]int]bool, (n+1)*(m+1))
+	seen := make(map[[2]int]bool, (n+1)*(m+1))
+	var f func(i, j int) bool
+	f = func(i, j int) bool {
+		k := [2]int{i, j}
+		if seen[k] {
+			return memo[k]
+		}
+		seen[k] = true
+		var r bool
+		switch {
+		case i == n && j == m:
+			r = true
+		case i < n && a[i] == '*':
+			r = f(i+1, j) || (j < m && f(i, j+1))
+		case j < m && b[j] == '*':
+			r = f(i, j+1) || (i < n && f(i+1, j))
+		case i < n && j < m && (a[i] == '?' || b[j] == '?' || a[i] == b[j]):
+			r = f(i+1, j+1)
+		}
+		memo[k] = r
+		return r
+	}
+	return f(0, 0)
 }

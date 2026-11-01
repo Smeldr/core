@@ -1264,7 +1264,7 @@ func RegisterGovernanceRelationKinds(ctx context.Context, store *RelationStore) 
 			ReverseLabel: "Checks",
 			Mode:         "asserted",
 			Directional:  true,
-			TypePairs:    json.RawMessage(`[{"source_type":"ChangeCheck","target_type":"Decision"}]`),
+			TypePairs:    json.RawMessage(`[{"source_type":"ChangeCheck","target_type":"Decision"},{"source_type":"task_plan","target_type":"Decision"}]`),
 		},
 		{
 			// contradicts is symmetric — "A contradicts B" reads identically

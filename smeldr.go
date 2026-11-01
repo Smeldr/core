@@ -165,6 +165,12 @@ type Config struct {
 	// validation error on rev. Optional.
 	RevCutover time.Time
 
+	// PlanPathsCutover is when a plan submitted or approved without the
+	// repository and paths of its work turns from a plan_paths_missing
+	// warning into a refusal (G30 phase 1, T1015). A plan with no_commit set
+	// needs neither. Zero, the default, means warnings only. Optional.
+	PlanPathsCutover time.Time
+
 	// SignalMessageCutover is when a Signal message longer than
 	// [SignalMessageMaxLength] characters turns from a message_too_long
 	// warning into a refusal (D114). Zero, the default, means warnings only.

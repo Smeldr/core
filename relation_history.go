@@ -222,6 +222,10 @@ func (s *RelationStore) WithdrawAt(ctx context.Context, id, reason string, rev *
 	if strings.TrimSpace(reason) == "" {
 		return nil, Err("reason", "is required to withdraw a relation")
 	}
+	var srcType, srcKind string
+	if err := s.db.QueryRowContext(ctx, "SELECT source_type, relation_kind FROM smeldr_relations WHERE id=$1", id).Scan(&srcType, &srcKind); err == nil && planTimeEdge(srcType, srcKind) {
+		return nil, errPlanTimeEdge()
+	}
 	var warnings []CreateWarning
 	if rev == nil {
 		var kind string

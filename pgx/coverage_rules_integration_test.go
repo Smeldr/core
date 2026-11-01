@@ -130,6 +130,45 @@ func TestPG_CoverageRules(t *testing.T) {
 		t.Errorf("after a pattern change: count %d, checked %v (%v); want 0 and not checked", count, checked, err)
 	}
 
+	// T1015 (G30 phase 1): a plan's declared paths are resolved at submit
+	// into plan-time edges on Postgres, by pattern overlap.
+	app.ServeDynamicContent()
+	planFields := []byte(`[{"name":"band","type":"string"},{"name":"body","type":"string","role":"body"}]`)
+	if _, err := app.DefineContentType(ctx, &smeldr.ContentTypeSchema{TypeName: "task_plan", Kind: "content", Fields: planFields}); err != nil {
+		t.Fatalf("define task_plan: %v", err)
+	}
+	if err := smeldr.EnsureTaskPlanFields(ctx, app); err != nil {
+		t.Fatalf("EnsureTaskPlanFields: %v", err)
+	}
+	if err := app.RegisterFlow(smeldr.StateFlow{Name: "plan-flow", TypeName: "task_plan",
+		States:      []smeldr.State{{Name: "draft", IsInitial: true}, {Name: "submitted"}, {Name: "approved"}},
+		Transitions: []smeldr.Transition{{From: "draft", To: "submitted"}, {From: "submitted", To: "approved"}},
+	}); err != nil {
+		t.Fatalf("plan flow: %v", err)
+	}
+	plans, err := app.DynamicContentRepo("task_plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := plans.CreateDraft(ctx, map[string]any{"band": "core", "body": "x", "repository": "acme/app", "paths": []any{"internal/billing/*.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "task_plan", plan.ID, "submitted"); err != nil {
+		t.Fatalf("submit the plan: %v", err)
+	}
+	if _, err := app.TransitionItem(smeldr.TrustedRead(ctx), "task_plan", plan.ID, "approved"); err != nil {
+		t.Fatalf("approve the plan: %v", err)
+	}
+	record, err := app.PlanTimeRecord(smeldr.TrustedRead(ctx), plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.Recorded || record.Transition != "approved" || len(record.Areas) != 1 || record.Areas[0].ID != area.ID ||
+		len(record.Decisions) != 1 || record.Decisions[0].ID != "d1" {
+		t.Errorf("plan-time record = %+v", record)
+	}
+
 	// T910 (D146): an agent area-approver adds a rule to its Area and may not
 	// archive it; a domain-approver changes the Area's approval mode.
 	if err := smeldr.RegisterAreaApproverRole(ctx, store); err != nil {

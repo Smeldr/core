@@ -1313,7 +1313,7 @@ func TestRegisterOrchestrationRelationKinds_RoundTrip(t *testing.T) {
 		"amends":       {"Amends", "Amended By", `[{"source_type":"Amendment","target_type":"Decision"}]`, true},
 		"supersedes":   {"Supersedes", "Superseded By", `[{"source_type":"Decision","target_type":"Decision"},{"source_type":"ChangeCheck","target_type":"ChangeCheck"}]`, true},
 		// T918: a pull request check names the Decisions it checked against.
-		"checked_against": {"Checked Against", "Checks", `[{"source_type":"ChangeCheck","target_type":"Decision"}]`, true},
+		"checked_against": {"Checked Against", "Checks", `[{"source_type":"ChangeCheck","target_type":"Decision"},{"source_type":"task_plan","target_type":"Decision"}]`, true},
 		"contains": {"Contains", "Part Of", `[{"source_type":"Goal","target_type":"Goal"},` +
 			`{"source_type":"Goal","target_type":"Task"},` +
 			`{"source_type":"Goal","target_type":"Decision"},` +

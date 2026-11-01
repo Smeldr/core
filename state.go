@@ -1686,10 +1686,18 @@ func (a *App) transitionItem(ctx context.Context, surface, typeName, slug, toSta
 		if expected != nil && node.Rev != *expected {
 			return nil, &RevConflictError{Type: typeName, ID: slug, Sent: *expected, Current: node.Rev}
 		}
+		var planWarning *CreateWarning
+		if typeName == planType && (toState == "submitted" || toState == "approved") && string(node.Status) != toState {
+			planWarning, _ = planPathsRule(node, a.cfg.PlanPathsCutover)
+		}
 		if err := repo.setStatusVia(ctx, node.ID, Status(toState), reason, surface); err != nil {
 			return nil, err
 		}
-		return map[string]any{"id": node.ID, "slug": node.Slug, "status": toState}, nil
+		result := map[string]any{"id": node.ID, "slug": node.Slug, "status": toState}
+		if planWarning != nil {
+			result["warnings"] = []CreateWarning{*planWarning}
+		}
+		return result, nil
 	}
 
 	if a.cfg.DB == nil {

@@ -66,6 +66,9 @@ func (a *App) afterStatusChange(ctx context.Context, t statusTransition) {
 	if t.to == string(Scheduled) {
 		a.wakeScheduler()
 	}
+	if t.from != t.to {
+		a.afterPlanTransition(ctx, t)
+	}
 	if t.from == t.to {
 		return
 	}

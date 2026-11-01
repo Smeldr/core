@@ -1998,6 +1998,15 @@ The same rule covers three more governance writes (T1010 part b):
 
 A `rev` that is not a number is a validation error on `rev`. Grants (`grant_role`, `revoke_grant`) are not covered yet. They move from the token to the identity in G31 (D165) and will name the identity's rev then.
 
+### The plan-time record (G30 phase 1, T1015)
+
+A Task's plan (`task_plan`) declares the work it does, and Smeldr records which Areas and Decisions that work rests on, so an approver can see what a plan was approved against.
+
+- **The declaration.** Three fields, added on boot by `EnsureTaskPlanFields` (a no-op without a task_plan type): `repository` (owner/name), `paths` (patterns in the coverage-rule language: `*` within a segment, `?` one character, `**` any number of segments) and `no_commit` (the work ends in no commit, D88).
+- **The rule.** A commit plan declares repository and paths when it moves to `submitted` or `approved`. Without them: a `plan_paths_missing` warning until `Config.PlanPathsCutover`, then a validation error. An invalid pattern or repository is always refused. A `no_commit` plan needs neither and gets no record.
+- **The record.** On the move to `submitted`, and again to `approved`, Smeldr resolves the declared patterns with an all-read system scope (`DecisionsForPaths` with `Patterns: true`: a pattern falls in an Area when some path matches both it and one of the Area's rules) and records `belongs_to_area` to each Area and `checked_against` to each Decision in force, written by the system (`created_by_job` `plan-time`). The record made before is ended first, so the history keeps both. An author's `assert_relation` or `withdraw_relation` of these relations is refused.
+- **The read.** `App.PlanTimeRecord(ctx, plan)`, and `plan_time` in mcp's `get_content` for a `task_plan`: the Areas and Decisions the reader may read, and `recorded` (false when a commit plan has no record, so a missing basis never reads as "no Decisions apply"), `recorded_at` and the `transition` it was made at. A failed record is logged; the transition stands.
+
 ### Schema migration (T246)
 
 `Create*Table` functions (`CreateSiteConfigTable`, `CreateBlockTables`, etc.) use `CREATE TABLE IF NOT EXISTS` — correct for a fresh install, but a no-op against a table that already exists in an older shape. `EnsureColumn` adds one column to an existing table when it is absent:

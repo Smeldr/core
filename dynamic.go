@@ -681,6 +681,12 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 	if status == Scheduled && node.Status != Scheduled && node.ScheduledAt == nil {
 		return errScheduledWithoutTime(r.typeName, id, true)
 	}
+	if r.typeName == planType && (status == "submitted" || status == "approved") && node.Status != status {
+		// G30 phase 1 (T1015): a commit plan declares repository and paths.
+		if _, err := planPathsRule(node, r.planPathsCutover()); err != nil {
+			return err
+		}
+	}
 	if status == Published || status == Scheduled {
 		if err := r.publishedSlugConflict(ctx, node); err != nil {
 			return err
