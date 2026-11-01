@@ -35,7 +35,7 @@ func runMigrateAddresses(args []string, stdout, stderr io.Writer) int {
 	}
 	cfg := parseConfig()
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)")
+	db, err := sql.Open("sqlite", sqliteDSN(dbPath, maintenanceBusyTimeout))
 	if err != nil {
 		fmt.Fprintf(stderr, "migrate-addresses: open db: %v\n", err)
 		return 1

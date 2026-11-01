@@ -135,6 +135,20 @@ WantedBy=multi-user.target
 `/opt/smeldr/smeldr.env` holds the environment variables above, one
 `KEY=value` per line, outside version control (it carries `SECRET`).
 
+## SQLite settings
+
+smeldr-server opens its file with three settings (since core v1.183.3, T1013):
+
+```
+smeldr.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_txlock=immediate
+```
+
+- **`journal_mode(WAL)`**: readers never block the writer, so a backup (`.backup`, `VACUUM INTO`) can run against the live file.
+- **`busy_timeout(5000)`**: a write that meets another process's write lock waits up to 5 seconds instead of failing at once with `database is locked`. The maintenance subcommands (`migrate-*`, `repair-swept-edges`, `seed-role-subscriptions`) open the same file from a second process while the server runs, and wait up to 10 seconds.
+- **`_txlock=immediate`**: every transaction starts with `BEGIN IMMEDIATE`, taking the write lock at once. Without it, a transaction that reads and then writes fails at once if another process wrote in between (`database is locked (517)`, a stale snapshot), and `busy_timeout` does not help with that. Smeldr's transactions read before they write, so this setting matters whenever a second process writes the file.
+
+If you build your own server on Smeldr with SQLite (modernc.org/sqlite), open the file the same way, above all when anything else writes it: a migration, a script, a second instance. Before these settings, a Story scheduled for the same second as a Post on smeldr.dev published a minute late, because its save met the Post's write lock (T1008).
+
 ## Your data, and restoring it
 
 Everything lives in the single SQLite file at `DATABASE_PATH`

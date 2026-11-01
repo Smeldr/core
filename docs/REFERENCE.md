@@ -1960,6 +1960,8 @@ app.Content(m)
 
 **Creates run in one transaction (D110).** Every create (the compiled MCP create and HTTP POST, dynamic content creates, and Signals) runs its pre-save check and INSERT in one transaction when the database handle supports BeginTx. Events, standing, provenance and the after-save step run only after commit, so nothing is announced for a row that rolled back. Dynamic content creates open one transaction per slug attempt, because Postgres aborts a transaction after a failed INSERT. A database handle without BeginTx runs the same statements without a transaction, as before. A Repository that is not an SQLRepo (MemoryRepo, or your own) is used as is.
 
+**SQLite: open the file with `?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_txlock=immediate`** (modernc.org/sqlite). Without a busy timeout, a write fails at once while another process holds the write lock; without `_txlock=immediate`, a transaction that reads and then writes fails at once on a stale WAL snapshot after another process wrote, which no timeout prevents. smeldr-server uses this DSN since core v1.183.3 (T1013); see SELF_HOSTING.md, "SQLite settings".
+
 `ParseTimestamp(v any) (time.Time, error)` reads any stored time value into a UTC `time.Time` (A505). It accepts a `time.Time`, an `int64` of Unix seconds, or a `string` or `[]byte` in RFC3339Nano, RFC3339 or Go's `time.Time.String` form, which is what SQLite drivers write for a `TIMESTAMPTZ` column. `nil` returns the zero time. It is the one parser for every stored form, so a surface that reads a time column as text can return it as RFC3339, like every other record (D114 point 4). `smeldr.dev/mcp`'s `list_signals` uses it from its next release.
 
 ### Schema migration (T246)

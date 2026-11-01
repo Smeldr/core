@@ -940,7 +940,7 @@ func main() {
 	}
 	cfg := parseConfig()
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
+	db, err := sql.Open("sqlite", sqliteDSN(dbPath, serverBusyTimeout))
 	if err != nil {
 		log.Fatalf("smeldr-server: open db: %v", err)
 	}
