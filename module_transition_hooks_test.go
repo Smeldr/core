@@ -169,6 +169,14 @@ func TestAfterHooks_StatusTransitionsMatchPUT(t *testing.T) {
 	transitionItem := func(t *testing.T, rec *afterRecorder, from, to Status) {
 		app, _, repo := newTransitionHookApp(t, nil, rec.options()...)
 		seed := seedPost(t, repo, "Item", from)
+		if to == Scheduled {
+			// A move to scheduled needs a time (T1009).
+			at := time.Now().Add(time.Hour).UTC()
+			seed.ScheduledAt = &at
+			if err := repo.Save(context.Background(), seed); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if _, err := app.TransitionItem(TrustedRead(hookCtx()), "testPost", seed.Slug, string(to)); err != nil {
 			t.Fatalf("TransitionItem: %v", err)
 		}

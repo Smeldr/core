@@ -951,6 +951,14 @@ func TestAdminSetStatus_AllValidStatuses(t *testing.T) {
 
 			w := dynPost(handler, fmt.Sprintf("/_content/recipe/%s/status", node.ID),
 				map[string]any{"status": st}, auth)
+			if st == "scheduled" {
+				// No scheduled_at: it would never be published, so it is refused
+				// with the call that sets the time (T1009).
+				if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "schedule_content") {
+					t.Errorf("status %q with no time = %d %s, want 422 naming schedule_content", st, w.Code, w.Body.String())
+				}
+				return
+			}
 			if w.Code != http.StatusOK {
 				t.Errorf("status %q = %d, want 200", st, w.Code)
 			}

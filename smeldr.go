@@ -316,6 +316,7 @@ type App struct {
 	redirectManifestOpts   []Option                            // options for the redirect manifest handler (e.g. ManifestAuth)
 	schedulerModules       []schedulableModule                 // modules that implement scheduled publishing
 	schedulerWake          chan struct{}                       // wakes the Scheduler on a (re)schedule (T1003), buffered 1
+	dynamicNoTimeOnce      sync.Once                           // the first dynamic tick reports Scheduled items with no time, once (T1009)
 	rebuilderModules       []rebuilder                         // modules with derived content (sitemap, feed, AI)
 	stoppableModules       []stoppable                         // modules with background goroutines to stop at shutdown
 	mcpModules             []MCPModule                         // modules registered with smeldr.MCP(...)

@@ -1574,8 +1574,9 @@ func TestModule_updateHandler_scheduleTransition(t *testing.T) {
 	m := newTestModule(repo)
 
 	body, _ := json.Marshal(map[string]any{
-		"title":  "My Post",
-		"status": string(Scheduled),
+		"title":       "My Post",
+		"status":      string(Scheduled),
+		"ScheduledAt": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 	})
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPut, "/testposts/"+existing.Slug, bytes.NewReader(body))

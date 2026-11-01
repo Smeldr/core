@@ -678,6 +678,9 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 	if err := validateTransition(ctx, r.db, r.rs, r.relStore, actorID, id, r.typeName, string(node.Status), string(status), reason); err != nil {
 		return err
 	}
+	if status == Scheduled && node.Status != Scheduled && node.ScheduledAt == nil {
+		return errScheduledWithoutTime(r.typeName, id, true)
+	}
 	if status == Published || status == Scheduled {
 		if err := r.publishedSlugConflict(ctx, node); err != nil {
 			return err
@@ -1505,7 +1508,7 @@ func newSetStatusHandler(a *App, auth AuthFunc) http.Handler {
 			switch {
 			case errors.Is(err, ErrNotFound):
 				WriteError(w, r, ErrNotFound)
-			case errors.Is(err, ErrConflict), errors.Is(err, ErrForbidden), errors.Is(err, ErrBadRequest):
+			case errors.Is(err, ErrConflict), errors.Is(err, ErrForbidden), errors.Is(err, ErrBadRequest), errors.As(err, new(*ValidationError)):
 				WriteError(w, r, err)
 			default:
 				slog.WarnContext(r.Context(), "smeldr: set_content_status", "id", id, "err", err)

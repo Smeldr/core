@@ -245,6 +245,8 @@ Runtime-defined types (`DefineContentType` with `ServeDynamicContent`) are sched
 
 Every path that puts an item in Scheduled wakes the ticker, `transition_item` and a runtime type's status change included (core v1.183.2, T1008). A due item whose save fails (for example SQLite's busy lock while another write commits) is tried again one second later; if that fails too, it is retried once a minute until it publishes.
 
+An item cannot be left in Scheduled without a `scheduled_at` (core v1.183.3, T1009): `transition_item` to scheduled, a runtime type's `set_content_status`, a PUT or create with status scheduled, and an update that clears `ScheduledAt` are refused with a validation error on `ScheduledAt` (HTTP 422, MCP invalid params) that names `schedule_<type>` (or `schedule_content` for a runtime type). A compiled type whose table has no `scheduled_at` column is refused too. `DrainEvalQueue` skips such a queued move and logs it. At startup the scheduler logs one warning per type with the count of items already Scheduled with no time; existing rows are not changed.
+
 ---
 
 ## Routing variants

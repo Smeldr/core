@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A move to scheduled without a `scheduled_at` is refused, so an item cannot silently never publish (T1009, A618).** An item left in Scheduled with no time was skipped by the scheduler, so it never published, and nothing said so. Now every write that would leave an item in Scheduled with no time is refused with a validation error on `ScheduledAt` (HTTP 422, MCP invalid params). The message names the call that sets the time: `schedule_<type>` for a compiled type, or `schedule_content` or `ScheduleContent` for a runtime-defined type. This covers `transition_item`, a runtime type's `set_content_status`, an HTTP PUT or `create_<type>` with status scheduled, and an `update_<type>` that clears `ScheduledAt`. A compiled type whose table has no `scheduled_at` column is refused too. `DrainEvalQueue` skips a queued move to scheduled that has no time, and logs it. `schedule_<type>`, `MCPSchedule` and `ScheduleContent` are unchanged. On startup, the scheduler logs one warning per type with the count of items already in Scheduled with no time. Existing rows are not changed. Upgrading: callers that moved items to scheduled without a time must now use `schedule_<type>`. An edit to an item that is already stuck in scheduled with no time is refused too, until it gets a time with `schedule_<type>` or goes back to draft. No exported API changed.
+
 ---
 
 ## [1.183.2] - 2026-11-01

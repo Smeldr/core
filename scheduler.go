@@ -2,6 +2,9 @@ package smeldr
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 )
@@ -133,4 +136,49 @@ func nextDurMax(next *time.Time, maxWait time.Duration) time.Duration {
 		return maxWait
 	}
 	return d
+}
+
+// errScheduledWithoutTime refuses a write that would leave typeName's item id
+// in Scheduled with no scheduled_at: the scheduler skips such an item, so it
+// would never be published (T1009). It is a [ValidationError] on ScheduledAt,
+// so the caller sees the message, which names the call that sets the time;
+// dynamic is true for a runtime-defined type.
+func errScheduledWithoutTime(typeName, id string, dynamic bool) error {
+	how := "schedule_" + snakeCase(typeName) + " (MCP) or a PUT with ScheduledAt"
+	if dynamic {
+		how = "schedule_content (MCP) or ScheduleContent"
+	}
+	return Err("ScheduledAt", fmt.Sprintf("%s %q cannot move to scheduled without a scheduled_at: it would never be published; use %s, which sets the time",
+		typeName, id, how))
+}
+
+// requireTableScheduledTime refuses a raw move of the item id in table into
+// Scheduled when it has no scheduled_at, or its table has no such column, so
+// it could never be published (T1009). A lookup that fails otherwise is logged
+// and allowed, so a probe problem never blocks a transition the flow allows.
+func requireTableScheduledTime(ctx context.Context, db DB, table, typeName, id string) error {
+	var missing int
+	err := db.QueryRowContext(ctx,
+		"SELECT CASE WHEN scheduled_at IS NULL THEN 1 ELSE 0 END FROM "+quoteIdent(table)+" WHERE id = $1", id).Scan(&missing)
+	switch {
+	case err == nil && missing == 0, errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err == nil, isNoSuchColumn(err, "scheduled_at"):
+		return errScheduledWithoutTime(typeName, id, false)
+	default:
+		slog.WarnContext(ctx, "smeldr: scheduled_at check failed; the move to scheduled is allowed",
+			"type", typeName, "id", id, "err", err)
+		return nil
+	}
+}
+
+// warnScheduledWithoutTime reports, at the scheduler's first tick, the n items
+// of typeName in Scheduled with no scheduled_at: they are never published
+// until someone gives them a time (T1009). Nothing when n is 0.
+func warnScheduledWithoutTime(typeName string, n int) {
+	if n == 0 {
+		return
+	}
+	slog.Warn("smeldr: scheduler: items are scheduled with no scheduled_at and will never be published; give each a time with schedule_<type>, or move it back to draft",
+		"type", typeName, "count", n)
 }

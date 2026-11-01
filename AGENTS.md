@@ -527,7 +527,7 @@ For each registered content type, these tools are available:
 - `create_{type}` — creates a Draft
 - `update_{type}` — partial update (absent fields preserved). A `status`, `slug` or `id` that differs from the stored value is refused (-32602, the field named; held, version pending): change status with `transition_item` or `publish_`/`schedule_`/`archive_`. Before, the update dropped them and reported success. The item identifier (`slug` or `id` argument) is not a body field. Exception (core v1.154.0): web content that is not published may take another `slug` (over MCP the argument is `new_slug`, since smeldr.dev/mcp v1.62.0; `slug` keeps naming the item), since a draft reserves no URL; publishing then checks the URL against published items only and, on a clash, names a free one (`... for example /posts/about-2`). Drafts may share a slug: when a slug names more than one item you can read, use the item's ID.
 - `publish_{type}` — transitions to Published
-- `schedule_{type}` — schedules for future publication (RFC3339 datetime)
+- `schedule_{type}` — schedules for future publication (RFC3339 datetime). It is the way to put an item in scheduled: a move to scheduled with no `ScheduledAt` (`transition_item`, a PUT, `create_{type}` with status scheduled, an update clearing the time) is refused with a validation error on `ScheduledAt` (core v1.183.3, T1009), because the item would never be published.
 - `archive_{type}` — transitions to Archived
 - `delete_{type}` — permanent deletion
 

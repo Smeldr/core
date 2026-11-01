@@ -387,6 +387,17 @@ func nodePublishedAtOf(v any) time.Time {
 	return rv.FieldByIndex(path).Interface().(time.Time)
 }
 
+// nodeScheduledAtOf returns the ScheduledAt field of v, and whether v has one.
+func nodeScheduledAtOf(v any) (*time.Time, bool) {
+	rv := elemValue(v)
+	path := goFieldPath(rv.Type(), "ScheduledAt")
+	if path == nil {
+		return nil, false
+	}
+	at, _ := rv.FieldByIndex(path).Interface().(*time.Time)
+	return at, true
+}
+
 // nodeIDOf returns the ID field of v.
 func nodeIDOf(v any) string {
 	rv := elemValue(v)
@@ -495,6 +506,9 @@ type Module[T any] struct {
 	feedCfg      *FeedConfig // nil when no Feed option, or when DisableFeed was called
 	feedStore    *FeedStore  // set by App.Content via setFeedStore
 	scheduleWake func()      // set by App.Content via setScheduleWake (T1003)
+	// noTimeOnce makes the scheduler's first tick report the module's
+	// Scheduled items with no ScheduledAt, once (T1009).
+	noTimeOnce sync.Once
 
 	mcpOps []MCPOperation // non-nil when MCP(...) option was given
 
@@ -973,6 +987,12 @@ func (m *Module[T]) beforeSave(ctx Context, sig LifecycleEvent, existing, item a
 // ([saveHooksOption] prepare), if it has one. Creates call it after the
 // BeforeCreate hooks, updates through [Module.beforeSave].
 func (m *Module[T]) prepareSave(ctx Context, existing, item any) error {
+	// An item saved in Scheduled with no time is never published (T1009).
+	if nodeStatusOf(item) == Scheduled {
+		if at, _ := nodeScheduledAtOf(item); at == nil {
+			return errScheduledWithoutTime(m.contentTypeName, nodeIDOf(item), false)
+		}
+	}
 	if m.savePrepare == nil {
 		return nil
 	}
@@ -2044,6 +2064,8 @@ func (m *Module[T]) processScheduled(ctx Context, now time.Time) (int, *time.Tim
 
 	published := 0
 	var next *time.Time
+	noTime := 0
+	defer m.noTimeOnce.Do(func() { warnScheduledWithoutTime(m.contentTypeName, noTime) })
 
 	for _, item := range items {
 		rv := reflect.ValueOf(item)
@@ -2052,10 +2074,12 @@ func (m *Module[T]) processScheduled(ctx Context, now time.Time) (int, *time.Tim
 		}
 		path := goFieldPath(rv.Type(), "ScheduledAt")
 		if path == nil {
+			noTime++
 			continue
 		}
 		fv := rv.FieldByIndex(path)
 		if fv.IsNil() {
+			noTime++
 			continue
 		}
 		scheduledAt := fv.Elem().Interface().(time.Time)

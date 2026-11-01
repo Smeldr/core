@@ -1677,6 +1677,11 @@ func (a *App) TransitionItemVia(ctx context.Context, surface, typeName, slug, to
 	if err := validateTransition(ctx, db, a.governance, a.relationStore, actorID, id, typeName, currentStatus, toState, reason); err != nil {
 		return nil, err
 	}
+	if toState == string(Scheduled) && currentStatus != toState {
+		if err := requireTableScheduledTime(ctx, db, table, typeName, id); err != nil {
+			return nil, err
+		}
+	}
 	// D34: layered scope-aware check on top of the generic RequiredOperation
 	// gate above — a no-op for every type except "Decision", and a no-op
 	// for Decision too until decisionScopeRoles is populated. Mirrors
@@ -2087,6 +2092,13 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 				slog.WarnContext(ctx, "smeldr: DrainEvalQueue: authorization-required signal failed",
 					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "required_operation", requiredOperation, "error", sigErr)
 			}
+			skipped++
+		case r.toState == string(Scheduled) && fromState != r.toState &&
+			requireTableScheduledTime(ctx, db, table, r.typeName, r.itemID) != nil:
+			// T1009: an item moved to scheduled with no time is never
+			// published; a background path has no caller to refuse, so skip.
+			slog.WarnContext(ctx, "smeldr: DrainEvalQueue: skipped, the item has no scheduled_at and would never be published",
+				"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState)
 			skipped++
 		default:
 			// D78: same identity DrainEvalQueue already records for this

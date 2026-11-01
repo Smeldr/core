@@ -245,6 +245,10 @@ func TestDraftSlugs_TransitionItemVia(t *testing.T) {
 	}
 	_, err := app.TransitionItem(ctx, "testPost", d1.ID, string(Published))
 	wantSlugTaken(t, err, "/testposts/about", "/testposts/about-2")
+	// A move to scheduled needs a time (T1009); with one, the slug is checked.
+	if _, err := db.Exec(`UPDATE test_posts SET scheduled_at = ? WHERE id = ?`, time.Now().Add(time.Hour).UTC(), d1.ID); err != nil {
+		t.Fatal(err)
+	}
 	_, err = app.TransitionItem(ctx, "testPost", d1.ID, string(Scheduled))
 	wantSlugTaken(t, err, "/testposts/about", "/testposts/about-2")
 	if _, err := db.Exec(`UPDATE test_posts SET slug = 'about-2' WHERE id = ?`, d2.ID); err != nil {

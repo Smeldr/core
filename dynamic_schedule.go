@@ -28,8 +28,15 @@ func (d dynamicScheduler) processScheduled(ctx Context, now time.Time) (int, *ti
 	var next *time.Time
 	repos := map[string]*DynamicTypeRepo{}
 	var rebuild []string
+	noTime := map[string]int{}
+	defer d.app.dynamicNoTimeOnce.Do(func() {
+		for typeName, n := range noTime {
+			warnScheduledWithoutTime(typeName, n)
+		}
+	})
 	for _, row := range rows {
 		if row.ScheduledAt == nil {
+			noTime[row.TypeName]++
 			continue
 		}
 		if row.ScheduledAt.After(now) {
