@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.187.0] - 2026-11-02
+
 ### Added
 
 - **One live row per relation (T1019, A628).** The assert path looked up a live relation before it inserted, so two first asserts of the same relation at the same moment could both miss it and both insert. A partial unique index, `idx_relations_live_tuple`, now covers the live tuple (rows with no `invalid_at`) on SQLite and Postgres and refuses the second insert. `CreateRelationTables` builds the index at boot when there are no live duplicates. When there are, it logs a warning that names `migrate-relation-dedup` and boot continues. A first assert that loses the race returns `ErrConflict` ("relation already exists as <id>"), so the caller can read that relation and re-assert with its rev if the change was meant for it. Internal writers treat the relation as already recorded and continue without an error. The new `App.MigrateRelationDuplicates(ctx, RelationDedupOptions{DryRun})` and `smeldr-server migrate-relation-dedup [--apply] [--report=file]` keep the oldest live row of each relation, end the others with cause `deduplicated` (`EdgeEndDeduplicated`), and then build the index. This is a dry run by default and is idempotent. Behaviour change: an explicit new id for a relation that already has a live row used to create a second live row, and is now refused.
