@@ -561,8 +561,6 @@ var typesNotYetUsed = map[ProblemType]bool{
 	"field.type_mismatch":                     true,
 	"field.unknown":                           true,
 	"schema.field_invalid":                    true,
-	"relation.to_itself":                      true,
-	"decision.replacement_state":              true,
 }
 
 // Every non-retired type is used by some site, or is still waiting for its

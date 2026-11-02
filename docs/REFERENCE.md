@@ -693,7 +693,7 @@ closed once for `get_sweep_run`.
 
 ### Approval roles (D142, T884)
 
-Two operations decide who approves: `smeldr.OperationRatify` (`"ratify"`: ratify, supersede or amend a Decision) and `smeldr.OperationApproveChange` (`"approve-change"`: approve a change, such as a pull request, against the Decisions in force). The four Decision doors (`proposed→ratified`, `pending-re-evaluation→ratified`, `pending-re-evaluation→superseded`, `ratified→superseded`) require `ratify`, strictly. No core gate requires `approve-change` yet; the pull request check will. `"approve"` is retired.
+Two operations decide who approves: `smeldr.OperationRatify` (`"ratify"`: ratify, supersede or amend a Decision) and `smeldr.OperationApproveChange` (`"approve-change"`: approve a change, such as a pull request, against the Decisions in force). The four Decision doors (`proposed→ratified`, `pending-re-evaluation→ratified`, `pending-re-evaluation→superseded`, `ratified→superseded`) require `ratify`, strictly. To replace a Decision, assert the `supersedes` relation from its ratified replacement first, then move it to `superseded`. Once it is superseded, the relation is refused (T1054). No core gate requires `approve-change` yet; the pull request check will. `"approve"` is retired.
 
 | Role (constant) | Operations | Scope | Register with |
 |---|---|---|---|
@@ -6440,6 +6440,15 @@ Ends resolve with `App.ResolveReadableID`: address, slug, ID, then the transitio
 | `ErrInternal` | the caller's read scope could not be loaded |
 
 Over MCP, `assert_relation`, `propose_relation` and `observe_relation` to a missing end answer not found.
+
+### Two refusals at the relation door (T1054)
+
+Every relation a caller writes goes through one door in `RelationStore`: `Assert`, and `MCPAssertRelation`, `MCPProposeRelation` and `MCPObserveRelation`, which back assert_relation, propose_relation and observe_relation. That door refuses two relations before any authority check or write:
+
+- **A relation from a record to itself**, of any kind and any edge class: a 422 validation error on `target_id`, type `relation.to_itself` (values `kind`, `record`). `record` is the record's address when its type is a core record type, else its ID. A runtime type's reference field that names its own item on an update is refused the same way, on that field (`kind` `refers_to`).
+- **A `supersedes` relation from one Decision to another that does not replace by the rule**: the replacement must be `ratified`, and the Decision it replaces must be `ratified` or `pending-re-evaluation`. Anything else is a 409 `conflict`, type `decision.replacement_state` (values `decision`, the one replaced; `replacement`; `state`, the state that broke the rule). It applies to a new asserted edge only. A re-assert of the live edge by its rev is not checked again, so a chain stays editable after its replacement is itself superseded. An inferred or observed `supersedes`, a `supersedes` between other types, and an end that is no stored Decision are not checked. A failed read of the two Decisions refuses with `ErrInternal`.
+
+Existing relations are not touched: the rules refuse new writes only.
 
 ### Fields per type (A505, D114)
 

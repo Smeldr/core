@@ -777,6 +777,10 @@ func (r *DynamicTypeRepo) referenceEdgeOn(ctx context.Context, db DB, id string,
 		}
 		return RelationEdge{}, err
 	}
+	// T1054: a reference cannot name its own item.
+	if ref.target == r.typeName && targetID == id {
+		return RelationEdge{}, relationToItself("refers_to", ref.stored, ref.field)
+	}
 	attrs, _ := json.Marshal(map[string]string{"field": ref.field})
 	job := referencesJob
 	return RelationEdge{SourceType: r.typeName, SourceID: id, TargetType: ref.target, TargetID: targetID,

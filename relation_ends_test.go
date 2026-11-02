@@ -143,7 +143,15 @@ func TestRelationEnds_HiddenEqualsMissing(t *testing.T) {
 	if !errors.Is(hidden, ErrNotFound) || !errors.Is(missing, ErrNotFound) || hidden.Error() != missing.Error() {
 		t.Errorf("hidden %v, missing %v; want the same ErrNotFound", hidden, missing)
 	}
-	if _, err := f.rels.MCPAssertRelation(f.reader, "invoice", f.a.ID, "invoice", f.a.ID, "mentions", nil, nil, nil, nil); err != nil {
+	invoices, _ := f.app.DynamicContentRepo("invoice")
+	c, err := invoices.CreateDraft(TrustedRead(context.Background()), map[string]any{"Title": "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.rs.Grant(context.Background(), RoleGrant{TokenID: "reader", RoleName: "scoped-reader", ScopeStatic: []string{"invoice:" + c.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.rels.MCPAssertRelation(f.reader, "invoice", f.a.ID, "invoice", c.ID, "mentions", nil, nil, nil, nil); err != nil {
 		t.Errorf("both ends readable: %v", err)
 	}
 }

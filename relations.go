@@ -714,6 +714,13 @@ func (s *RelationStore) insertEdgeAt(ctx context.Context, edge RelationEdge, exp
 		}
 		edge = canonicalizeNonDirectional(kind, edge)
 	}
+	// T1054: no relation from a record to itself, of any kind or class.
+	if edge.SourceType == edge.TargetType && edge.SourceID == edge.TargetID {
+		return RelationEdge{}, relationToItself(edge.RelationKind, relationEndLabel(ctx, s.db, edge.SourceType, edge.SourceID), "target_id")
+	}
+	if err := s.requireReplacementState(ctx, edge); err != nil {
+		return RelationEdge{}, err
+	}
 	if edge.EdgeClass == "asserted" {
 		if err := requireOnePlace(ctx, s.db, edge); err != nil {
 			return RelationEdge{}, err
@@ -729,6 +736,83 @@ func (s *RelationStore) insertEdgeAt(ctx context.Context, edge RelationEdge, exp
 	}
 	s.announceEdge(ctx, edge, newRow)
 	return edge, nil
+}
+
+// relationToItself is the refusal of a relation whose source and target are
+// one record, label, on field (T1054).
+func relationToItself(kind, label, field string) error {
+	return fieldErr(problemRelationToItself, field,
+		fmt.Sprintf("a relation cannot run from a record to itself: source and target are both %s", label),
+		problemValues{"kind": kind, "record": label})
+}
+
+// relationEndLabel names a relation end for a refusal: the record's address
+// when its type is a core record type with one, else its ID.
+func relationEndLabel(ctx context.Context, db DB, typeName, id string) string {
+	for _, t := range coreAddressTables {
+		if t.typeName == typeName {
+			return recordLabel(ctx, db, t.table, id)
+		}
+	}
+	return id
+}
+
+// requireReplacementState holds a new asserted supersedes edge from one
+// Decision to another to the replacement rule (T1054): the replacement is
+// ratified, and the Decision it replaces is ratified or pending
+// re-evaluation, so the order is the edge first, then the move to superseded.
+// A re-assert of the live edge is not checked again, so a chain stays
+// editable after its replacement is itself replaced. A store with no Decision
+// table, or an end that is no stored Decision, is not checked; any other
+// failed read refuses.
+func (s *RelationStore) requireReplacementState(ctx context.Context, edge RelationEdge) error {
+	if edge.EdgeClass != "asserted" || edge.RelationKind != supersedesKind ||
+		edge.SourceType != "Decision" || edge.TargetType != "Decision" || edge.ID != "" {
+		return nil
+	}
+	if s.liveAssertedEdge(ctx, edge.SourceType, edge.SourceID, edge.TargetType, edge.TargetID, edge.RelationKind) != "" {
+		return nil
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, address, status FROM smeldr_decisions WHERE id IN ($1, $2)`, edge.SourceID, edge.TargetID)
+	if err != nil {
+		if isNoSuchTable(err) {
+			return nil // a store with no Decision table holds no Decisions to replace
+		}
+		return fmt.Errorf("%w: read the Decisions of a supersedes edge: %v", ErrInternal, err)
+	}
+	defer rows.Close()
+	type end struct{ label, status string }
+	ends := map[string]end{}
+	for rows.Next() {
+		var id, address, status string
+		if err := rows.Scan(&id, &address, &status); err != nil {
+			return fmt.Errorf("%w: read the Decisions of a supersedes edge: %v", ErrInternal, err)
+		}
+		if address == "" {
+			address = id
+		}
+		ends[id] = end{address, status}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("%w: read the Decisions of a supersedes edge: %v", ErrInternal, err)
+	}
+	src, srcOK := ends[edge.SourceID]
+	tgt, tgtOK := ends[edge.TargetID]
+	if !srcOK || !tgtOK {
+		return nil // an end that does not exist is not this rule's to refuse
+	}
+	switch {
+	case src.status != "ratified":
+		return problem(problemDecisionReplacementState,
+			fmt.Errorf("%w: %s can replace %s only once it is ratified; it is %s", ErrConflict, src.label, tgt.label, src.status),
+			problemValues{"decision": tgt.label, "replacement": src.label, "state": src.status})
+	case tgt.status != "ratified" && tgt.status != "pending-re-evaluation":
+		return problem(problemDecisionReplacementState,
+			fmt.Errorf("%w: %s is %s; only a ratified Decision, or one pending re-evaluation, can be replaced: assert the supersedes relation before moving it to superseded", ErrConflict, tgt.label, tgt.status),
+			problemValues{"decision": tgt.label, "replacement": src.label, "state": tgt.status})
+	}
+	return nil
 }
 
 // announceEdge records the assert provenance of an edge already written and

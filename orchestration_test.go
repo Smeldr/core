@@ -997,7 +997,9 @@ func TestQueryGoalContext(t *testing.T) {
 		}
 		goalNodeID := insertTestGoal(t, db, "T500", "P3", "S")
 
-		if err := rs.Assert(ctx, RelationEdge{
+		// A self-link is refused at the door since T1054, so it is written
+		// as a row from before the rule: the reader still skips one.
+		if _, _, err := writeEdgeRow(ctx, db, RelationEdge{
 			ID:           NewID(),
 			SourceType:   "Goal",
 			SourceID:     goalNodeID,
@@ -1006,7 +1008,7 @@ func TestQueryGoalContext(t *testing.T) {
 			RelationKind: "self",
 			EdgeClass:    "asserted",
 		}); err != nil {
-			t.Fatalf("Assert self-link: %v", err)
+			t.Fatalf("write self-link row: %v", err)
 		}
 
 		gc, err := QueryGoalContext(ctx, db, rs, "T500")
