@@ -221,7 +221,7 @@ func MustConfig(cfg Config) Config {
 func ValidateConfig(cfg Config) (Config, error) {
 	cfg, field, problem := checkConfig(cfg)
 	if field != "" {
-		return cfg, Err(field, problem)
+		return cfg, fieldErr(problemConfigInvalid, field, problem, nil)
 	}
 	return cfg, nil
 }
@@ -536,7 +536,8 @@ func (a *App) Route(pattern string, spec RouteSpec) {
 					}
 					for _, item := range items {
 						if s, _ := item["Slug"].(string); s == slug {
-							return fmt.Errorf("%w: slug %q already published in type %q", ErrConflict, slug, dstTypeName)
+							return problem(problemSlugTaken, fmt.Errorf("%w: slug %q already published in type %q", ErrConflict, slug, dstTypeName),
+								problemValues{"slug": slug, "type": dstTypeName})
 						}
 					}
 					return nil
@@ -1625,7 +1626,7 @@ func (a *App) Handler() http.Handler {
 						return
 					}
 				}
-				WriteError(w, r, ErrNotFound)
+				WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
 			}))
 		}
 	}

@@ -58,7 +58,7 @@ func (a *App) RedefineContentTypeVia(ctx context.Context, surface string, schema
 		return nil, fmt.Errorf("smeldr: RedefineContentType requires Config.DB")
 	}
 	if schema == nil || schema.TypeName == "" {
-		return nil, Err("type_name", "required")
+		return nil, fieldErr(problemFieldRequired, "type_name", "required", nil)
 	}
 	// One redefinition at a time, from reading the current schema to swapping
 	// in the new one: two concurrent ones checked against the same old schema
@@ -67,10 +67,12 @@ func (a *App) RedefineContentTypeVia(ctx context.Context, surface string, schema
 	defer a.redefineMu.Unlock()
 	desc := a.typeRegistry.Lookup(schema.TypeName)
 	if desc == nil {
-		return nil, fmt.Errorf("%w: content type %q not registered", ErrNotFound, schema.TypeName)
+		return nil, problem(problemContentTypeNotFound, fmt.Errorf("%w: content type %q not registered", ErrNotFound, schema.TypeName),
+			problemValues{"type": schema.TypeName})
 	}
 	if desc.Kind != "content" || desc.Schema == nil {
-		return nil, fmt.Errorf("%w: %q is not a runtime-defined type; only those can be redefined", ErrBadRequest, schema.TypeName)
+		return nil, problem(problemContentTypeNotRuntime, fmt.Errorf("%w: %q is not a runtime-defined type; only those can be redefined", ErrBadRequest, schema.TypeName),
+			problemValues{"type": schema.TypeName})
 	}
 	reason, err := actReason(reason)
 	if err != nil {
@@ -101,7 +103,7 @@ func (a *App) RedefineContentTypeVia(ctx context.Context, surface string, schema
 		return nil, err
 	}
 	if next.URLPrefix != old.URLPrefix {
-		return nil, Err("url_prefix", "cannot be changed by a redefinition: setting, moving or removing a public prefix changes what is published")
+		return nil, fieldErr(problemContentTypeRedefineIncompatible, "url_prefix", "cannot be changed by a redefinition: setting, moving or removing a public prefix changes what is published", nil)
 	}
 	if err := checkRedefinition(old, &next); err != nil {
 		return nil, err
@@ -170,7 +172,7 @@ func checkRedefinition(old, next *ContentTypeSchema) error {
 	}
 	newFields, err := next.ParseFields()
 	if err != nil {
-		return Err("fields", "invalid JSON")
+		return fieldErr(problemFieldInvalidFormat, "fields", "invalid JSON", nil)
 	}
 	byName := make(map[string]SchemaField, len(newFields))
 	for _, f := range newFields {
@@ -183,16 +185,17 @@ func checkRedefinition(old, next *ContentTypeSchema) error {
 		nf, ok := byName[of.Name]
 		switch {
 		case !ok:
-			errs = append(errs, Err(of.Name, "cannot be removed by a redefinition: existing items hold it"))
+			errs = append(errs, fieldErr(problemContentTypeRedefineIncompatible, of.Name, "cannot be removed by a redefinition: existing items hold it", nil))
 		case nf.Type != of.Type:
-			errs = append(errs, Err(of.Name, fmt.Sprintf("type cannot change from %q to %q: existing items hold the old type", of.Type, nf.Type)))
+			errs = append(errs, fieldErr(problemContentTypeRedefineIncompatible, of.Name, fmt.Sprintf("type cannot change from %q to %q: existing items hold the old type", of.Type, nf.Type),
+				problemValues{"from_type": of.Type, "to_type": nf.Type}))
 		case nf.Required && !of.Required:
-			errs = append(errs, Err(of.Name, "cannot become required: existing items may not have it"))
+			errs = append(errs, fieldErr(problemContentTypeRedefineIncompatible, of.Name, "cannot become required: existing items may not have it", nil))
 		}
 	}
 	for _, nf := range newFields {
 		if !known[nf.Name] && nf.Required {
-			errs = append(errs, Err(nf.Name, "a new field must be optional: existing items do not have it"))
+			errs = append(errs, fieldErr(problemContentTypeRedefineIncompatible, nf.Name, "a new field must be optional: existing items do not have it", nil))
 		}
 	}
 	return Require(errs...)

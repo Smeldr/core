@@ -97,6 +97,7 @@ func (s *RoleStore) checkItemChangeApproverGrant(ctx context.Context, grant Role
 			rows.Close()
 			return problem(problemGrantAuthorityUnreadable, fmt.Errorf("%w: Grant: the Areas of the Check cannot be read: %s", ErrForbidden, err), nil)
 		}
+		x.address = addressOrID(x.address, x.id)
 		areas = append(areas, x)
 	}
 	rows.Close()
@@ -303,6 +304,7 @@ func (a *App) answerChangeCheck(ctx context.Context, check, area string, approve
 	// (S3154): an Area the caller may not read is not found.
 	var row changeCheckAreaRow
 	err = db.QueryRowContext(ctx, `SELECT id, address FROM smeldr_areas WHERE address = $1 OR slug = $1 OR id = $1 LIMIT 1`, area).Scan(&row.areaID, &row.address)
+	row.address = addressOrID(row.address, row.areaID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return problem(problemPlaceNotFound, fmt.Errorf("%w: no Area %q you can read", ErrNotFound, area), problemValues{"area": area})

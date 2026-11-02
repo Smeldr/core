@@ -2,6 +2,7 @@ package smeldr
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -358,7 +359,7 @@ func TestNavTree_DB_Update_notFound(t *testing.T) {
 	}
 
 	_, err := nt.Update(ctx, NavItem{ID: "nonexistent", Label: "x"})
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Update nonexistent: got %v, want ErrNotFound", err)
 	}
 }
@@ -392,7 +393,7 @@ func TestNavTree_DB_Delete_notFound(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 
-	if err := nt.Delete(ctx, "nonexistent"); err != ErrNotFound {
+	if err := nt.Delete(ctx, "nonexistent"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Delete nonexistent: got %v, want ErrNotFound", err)
 	}
 }

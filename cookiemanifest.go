@@ -110,7 +110,7 @@ func newCookieManifestHandler(site string, decls []Cookie, opts ...Option) http.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if auth != nil {
 			if _, ok := auth.authenticate(r); !ok {
-				WriteError(w, r, ErrUnauth)
+				WriteError(w, r, problem(problemAuthUnauthenticated, ErrUnauth, nil))
 				return
 			}
 		}

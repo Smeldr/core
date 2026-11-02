@@ -106,7 +106,7 @@ func signalMigrationTarget(t, status string) (newType, newStatus, answer string,
 // migrate.
 func MigrateSignalKinds(ctx context.Context, db DB, opts SignalMigrationOptions) (*SignalMigrationReport, error) {
 	if db == nil {
-		return nil, fmt.Errorf("%w: MigrateSignalKinds needs a database", ErrBadRequest)
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: MigrateSignalKinds needs a database", ErrBadRequest), nil)
 	}
 	rep := &SignalMigrationReport{Applied: opts.Apply, Changes: []SignalMigrationChange{}, Opened: []SignalMigrationChange{}, History: map[string]map[string]int{}}
 	if ok, err := tableExists(ctx, db, "smeldr_signals"); err != nil {

@@ -258,7 +258,7 @@ func parseConstraints(t reflect.Type) []fieldConstraint {
 func makeRequired(name string) func(reflect.Value) *fieldError {
 	return func(v reflect.Value) *fieldError {
 		if v.IsZero() {
-			return &fieldError{field: name, message: "required"}
+			return &fieldError{field: name, message: "required", typ: problemFieldRequired}
 		}
 		return nil
 	}
@@ -269,19 +269,19 @@ func makeMin(name string, n int) func(reflect.Value) *fieldError {
 		switch v.Kind() { //nolint:exhaustive
 		case reflect.String:
 			if len(v.String()) < n {
-				return &fieldError{field: name, message: "too short (min " + strconv.Itoa(n) + ")"}
+				return &fieldError{field: name, message: "too short (min " + strconv.Itoa(n) + ")", typ: problemFieldTooShort, values: problemValues{"min": strconv.Itoa(n)}}
 			}
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 			if v.Int() < int64(n) {
-				return &fieldError{field: name, message: "too small (min " + strconv.Itoa(n) + ")"}
+				return &fieldError{field: name, message: "too small (min " + strconv.Itoa(n) + ")", typ: problemFieldOutOfRange, values: problemValues{"min": strconv.Itoa(n)}}
 			}
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 			if v.Uint() < uint64(n) {
-				return &fieldError{field: name, message: "too small (min " + strconv.Itoa(n) + ")"}
+				return &fieldError{field: name, message: "too small (min " + strconv.Itoa(n) + ")", typ: problemFieldOutOfRange, values: problemValues{"min": strconv.Itoa(n)}}
 			}
 		case reflect.Float32, reflect.Float64:
 			if v.Float() < float64(n) {
-				return &fieldError{field: name, message: "too small (min " + strconv.Itoa(n) + ")"}
+				return &fieldError{field: name, message: "too small (min " + strconv.Itoa(n) + ")", typ: problemFieldOutOfRange, values: problemValues{"min": strconv.Itoa(n)}}
 			}
 		}
 		return nil
@@ -293,19 +293,19 @@ func makeMax(name string, n int) func(reflect.Value) *fieldError {
 		switch v.Kind() { //nolint:exhaustive
 		case reflect.String:
 			if len(v.String()) > n {
-				return &fieldError{field: name, message: "too long (max " + strconv.Itoa(n) + ")"}
+				return &fieldError{field: name, message: "too long (max " + strconv.Itoa(n) + ")", typ: problemFieldTooLong, values: problemValues{"limit": strconv.Itoa(n)}}
 			}
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 			if v.Int() > int64(n) {
-				return &fieldError{field: name, message: "too large (max " + strconv.Itoa(n) + ")"}
+				return &fieldError{field: name, message: "too large (max " + strconv.Itoa(n) + ")", typ: problemFieldOutOfRange, values: problemValues{"max": strconv.Itoa(n)}}
 			}
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 			if v.Uint() > uint64(n) {
-				return &fieldError{field: name, message: "too large (max " + strconv.Itoa(n) + ")"}
+				return &fieldError{field: name, message: "too large (max " + strconv.Itoa(n) + ")", typ: problemFieldOutOfRange, values: problemValues{"max": strconv.Itoa(n)}}
 			}
 		case reflect.Float32, reflect.Float64:
 			if v.Float() > float64(n) {
-				return &fieldError{field: name, message: "too large (max " + strconv.Itoa(n) + ")"}
+				return &fieldError{field: name, message: "too large (max " + strconv.Itoa(n) + ")", typ: problemFieldOutOfRange, values: problemValues{"max": strconv.Itoa(n)}}
 			}
 		}
 		return nil
@@ -320,11 +320,11 @@ func makeEmail(name string) func(reflect.Value) *fieldError {
 		}
 		at := strings.IndexByte(s, '@')
 		if at <= 0 || at == len(s)-1 {
-			return &fieldError{field: name, message: "invalid email address"}
+			return &fieldError{field: name, message: "invalid email address", typ: problemFieldInvalidFormat}
 		}
 		domain := s[at+1:]
 		if strings.Contains(domain, "@") || !strings.Contains(domain, ".") {
-			return &fieldError{field: name, message: "invalid email address"}
+			return &fieldError{field: name, message: "invalid email address", typ: problemFieldInvalidFormat}
 		}
 		return nil
 	}
@@ -338,7 +338,7 @@ func makeURL(name string) func(reflect.Value) *fieldError {
 		}
 		u, err := url.Parse(s)
 		if err != nil || u.Scheme == "" || u.Host == "" {
-			return &fieldError{field: name, message: "invalid URL"}
+			return &fieldError{field: name, message: "invalid URL", typ: problemFieldInvalidFormat}
 		}
 		return nil
 	}
@@ -348,12 +348,12 @@ func makeSlugCheck(name string) func(reflect.Value) *fieldError {
 	return func(v reflect.Value) *fieldError {
 		s := v.String()
 		if s == "" {
-			return &fieldError{field: name, message: "required"}
+			return &fieldError{field: name, message: "required", typ: problemFieldRequired}
 		}
 		for i := 0; i < len(s); i++ {
 			c := s[i]
 			if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
-				return &fieldError{field: name, message: "invalid slug (use a-z, 0-9, -)"}
+				return &fieldError{field: name, message: "invalid slug (use a-z, 0-9, -)", typ: problemFieldInvalidFormat}
 			}
 		}
 		return nil
@@ -368,7 +368,7 @@ func makeOneOf(name string, opts []string) func(reflect.Value) *fieldError {
 				return nil
 			}
 		}
-		return &fieldError{field: name, message: "must be one of: " + strings.Join(opts, ", ")}
+		return &fieldError{field: name, message: "must be one of: " + strings.Join(opts, ", "), typ: problemFieldNotInList, values: problemValues{"allowed": strings.Join(opts, ", ")}}
 	}
 }
 

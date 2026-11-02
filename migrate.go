@@ -348,7 +348,7 @@ func EnsureColumn(ctx context.Context, db DB, table, column, columnDDL string) e
 //	smeldr.EnsurePublishedSlugIndex(ctx, db, "posts")
 func EnsurePublishedSlugIndex(ctx context.Context, db DB, table string) error {
 	if table == "" {
-		return fmt.Errorf("%w: EnsurePublishedSlugIndex: table is required", ErrBadRequest)
+		return problem(problemMigratePrecondition, fmt.Errorf("%w: EnsurePublishedSlugIndex: table is required", ErrBadRequest), nil)
 	}
 	rows, err := db.QueryContext(ctx,
 		"SELECT slug FROM "+quoteIdent(table)+" WHERE slug <> '' AND status = 'published' GROUP BY slug HAVING COUNT(*) > 1 ORDER BY slug")
@@ -370,8 +370,8 @@ func EnsurePublishedSlugIndex(ctx context.Context, db DB, table string) error {
 		return fmt.Errorf("%w: EnsurePublishedSlugIndex: %s: %s", ErrInternal, table, err)
 	}
 	if len(dups) > 0 {
-		return fmt.Errorf("%w: EnsurePublishedSlugIndex: %s publishes these slugs more than once: %s; give all but one of each a new slug",
-			ErrConflict, table, strings.Join(dups, ", "))
+		return problem(problemMigrateDuplicatePublishedSlugs, fmt.Errorf("%w: EnsurePublishedSlugIndex: %s publishes these slugs more than once: %s; give all but one of each a new slug",
+			ErrConflict, table, strings.Join(dups, ", ")), problemValues{"table": table, "slugs": strings.Join(dups, ", ")})
 	}
 	if _, err := db.ExecContext(ctx,
 		"CREATE UNIQUE INDEX IF NOT EXISTS "+quoteIdent("idx_"+table+"_slug_published")+" ON "+quoteIdent(table)+
@@ -461,7 +461,7 @@ func RenameLegacyTables(ctx context.Context, db DB, pairs [][2]string) error {
 	for _, pair := range pairs {
 		for _, name := range pair {
 			if !legacyTableName.MatchString(name) {
-				return Err("table", fmt.Sprintf("%q is not a plain lower-case table name", name))
+				return fieldErr(problemFieldInvalidFormat, "table", fmt.Sprintf("%q is not a plain lower-case table name", name), problemValues{"value": name})
 			}
 		}
 	}

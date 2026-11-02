@@ -366,21 +366,15 @@ func (s *RelationStore) requirePlaceAuthority(ctx context.Context, edge Relation
 	return requireActOver(ctx, rs, OperationRatify, AuthTarget{TypeName: edge.TargetType, ID: edge.TargetID}, act, code, place, "D145")
 }
 
-// requireOperationOver is the check D145 and D146 share: the actor in ctx
-// must hold op over target, the anchor of a dynamic grant counting (a
+// requireActOver is the check D145 and D146 share: the actor in ctx must
+// hold op over target, the anchor of a dynamic grant counting (a
 // domain-approver holds it over its own Domain). act names what is being
-// done and over the place, for the refusal; decision names the Decision that
-// requires it. No governance (rs nil) skips the check; no actor is refused;
-// an agent or job token is refused for ratify whatever its grants (T884),
-// not for approve-change, which an agent may hold on an Area grant. Its
-// refusals carry no act code; [requireActOver] gives one.
-func requireOperationOver(ctx context.Context, rs *RoleStore, op string, target AuthTarget, act, over, decision string) error {
-	return requireActOver(ctx, rs, op, target, act, "", over, decision)
-}
-
-// requireActOver is [requireOperationOver] whose refusals also carry code,
-// a short name for the act (place, move, unplace, ...) that a UI keys its
-// text on, never the English phrase act.
+// done and over the place, for the refusal; code is the act's short name
+// (place, move, unplace, ...) that a UI keys its text on, never the English
+// phrase; decision names the Decision that requires it. No governance (rs
+// nil) skips the check; no actor is refused; an agent or job token is refused
+// for ratify whatever its grants (T884), not for approve-change, which an
+// agent may hold on an Area grant.
 func requireActOver(ctx context.Context, rs *RoleStore, op string, target AuthTarget, act, code, over, decision string) error {
 	if rs == nil {
 		return nil

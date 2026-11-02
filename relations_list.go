@@ -70,10 +70,10 @@ type RelationPage struct {
 // is an empty page; any other database failure is [ErrInternal].
 func (s *RelationStore) ListRelations(ctx context.Context, opts RelationListOptions) (RelationPage, error) {
 	if opts.Limit < 0 {
-		return RelationPage{}, Err("limit", "must not be negative")
+		return RelationPage{}, fieldErr(problemFieldOutOfRange, "limit", "must not be negative", problemValues{"min": "0"})
 	}
 	if opts.Offset < 0 {
-		return RelationPage{}, Err("offset", "must not be negative")
+		return RelationPage{}, fieldErr(problemFieldOutOfRange, "offset", "must not be negative", problemValues{"min": "0"})
 	}
 	limit := opts.Limit
 	switch {

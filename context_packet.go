@@ -249,7 +249,7 @@ func packetFetchItem(ctx context.Context, db DB, typeName, table, col, val strin
 			return "", Node{}, nil, err
 		}
 		if subjectOK != nil && !subjectOK(it.SubjectType, it.SubjectID) {
-			return "", Node{}, nil, ErrNotFound // its subject is hidden: a miss
+			return "", Node{}, nil, problem(problemItemNotFound, ErrNotFound, nil) // its subject is hidden: a miss
 		}
 		cid, f := packetFieldsFromItem(it)
 		return cid, it.Node, f, nil
@@ -261,7 +261,7 @@ func packetFetchItem(ctx context.Context, db DB, typeName, table, col, val strin
 		cid, f := packetFieldsFromItem(it)
 		return cid, it.Node, f, nil
 	default:
-		return "", Node{}, nil, ErrBadRequest
+		return "", Node{}, nil, problem(problemRequestInvalidParam, ErrBadRequest, nil)
 	}
 }
 
@@ -322,7 +322,7 @@ func BuildContextPacket(
 	}
 	entry, ok := anchorTypeTable[anchorType]
 	if !ok || anchorSlug == "" {
-		return nil, ErrBadRequest
+		return nil, problem(problemRequestInvalidParam, ErrBadRequest, nil)
 	}
 	// An anchor of a type this instance does not keep (Task, Goal or Run
 	// without the Orchestration add-on, T881) is a bad request.
@@ -330,7 +330,7 @@ func BuildContextPacket(
 		return nil, err
 	}
 	if depth < 1 || depth > 2 {
-		return nil, ErrBadRequest
+		return nil, problem(problemRequestInvalidParam, ErrBadRequest, nil)
 	}
 
 	// Per-item read rules (core-read-surfaces 3b): the caller's scope, loaded
@@ -348,11 +348,11 @@ func BuildContextPacket(
 	var anchorCID string
 	var anchorNode Node
 	var anchorFields map[string]any
-	err = ErrNotFound
+	err = problem(problemItemNotFound, ErrNotFound, nil)
 	for _, c := range identCandidates(entry.relationType, anchorSlug) {
 		anchorCID, anchorNode, anchorFields, err = packetFetchItem(ctx, db, anchorType, entry.table, c[0], c[1], subjectOK)
 		if err == nil && visible != nil && !visible(anchorNode.ID) {
-			err = ErrNotFound // hidden: go on as a miss would
+			err = problem(problemItemNotFound, ErrNotFound, nil) // hidden: go on as a miss would
 		}
 		if !errors.Is(err, ErrNotFound) {
 			break
@@ -563,7 +563,7 @@ func (a *App) ContextPacketHandler(rs *RelationStore, sourceName string) {
 	a.mux.Handle("GET /packet/{type}/{slug}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok {
-			WriteError(w, r, ErrUnauth)
+			WriteError(w, r, problem(problemAuthUnauthenticated, ErrUnauth, nil))
 			return
 		}
 		anchorType := r.PathValue("type")
@@ -573,7 +573,7 @@ func (a *App) ContextPacketHandler(rs *RelationStore, sourceName string) {
 		ctx := r.Context()
 		if a.governance == nil {
 			if !user.HasRole(Editor) {
-				WriteError(w, r, ErrForbidden)
+				WriteError(w, r, problem(problemRoleInsufficient, ErrForbidden, nil))
 				return
 			}
 			ctx = TrustedRead(ctx)
@@ -584,7 +584,7 @@ func (a *App) ContextPacketHandler(rs *RelationStore, sourceName string) {
 				return
 			}
 			if entry, known := anchorTypeTable[anchorType]; known && !scope.TypeReadable(entry.relationType) {
-				WriteError(w, r, ErrForbidden)
+				WriteError(w, r, problem(problemScopeTypeNotReadable, ErrForbidden, nil))
 				return
 			}
 			ctx = WithReadScope(ctx, scope)
@@ -594,7 +594,7 @@ func (a *App) ContextPacketHandler(rs *RelationStore, sourceName string) {
 		if d := r.URL.Query().Get("depth"); d != "" {
 			v, err := strconv.Atoi(d)
 			if err != nil || v < 1 || v > 2 {
-				WriteError(w, r, ErrBadRequest)
+				WriteError(w, r, problem(problemRequestInvalidParam, ErrBadRequest, nil))
 				return
 			}
 			depth = v

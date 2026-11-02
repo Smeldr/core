@@ -527,7 +527,7 @@ const eventsAfterScanFactor = 10
 // continuation this instance did not issue; [ErrInternal] on a query failure.
 func (a *App) EventsAfter(ctx context.Context, afterID string, limit int) (EventPage, error) {
 	if a.eventBroadcaster == nil || a.eventBroadcaster.log == nil {
-		return EventPage{}, fmt.Errorf("%w: the event log is not enabled", ErrBadRequest)
+		return EventPage{}, problem(problemEventLogNotEnabled, fmt.Errorf("%w: the event log is not enabled", ErrBadRequest), nil)
 	}
 	switch {
 	case limit <= 0:
@@ -691,7 +691,7 @@ func (a *App) openEventContinuation(cursor string) (seq int64, ok bool, err erro
 	if !strings.HasPrefix(cursor, eventContinuationPrefix) {
 		return 0, false, nil
 	}
-	bad := fmt.Errorf("%w: the cursor is not a continuation this instance issued", ErrBadRequest)
+	bad := problem(problemEventLogCursorInvalid, fmt.Errorf("%w: the cursor is not a continuation this instance issued", ErrBadRequest), nil)
 	raw, derr := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(cursor, eventContinuationPrefix))
 	block, _ := aes.NewCipher(a.eventCursorKey())
 	gcm, _ := cipher.NewGCM(block)

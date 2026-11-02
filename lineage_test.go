@@ -84,14 +84,14 @@ func TestTraceLineage_InvalidInput(t *testing.T) {
 	store := setupRelationStore(t)
 	ctx := context.Background()
 
-	if _, err := store.TraceLineage(ctx, "", "d1", 1); err != ErrBadRequest {
+	if _, err := store.TraceLineage(ctx, "", "d1", 1); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("empty anchorType: got %v, want ErrBadRequest", err)
 	}
-	if _, err := store.TraceLineage(ctx, "decision", "", 1); err != ErrBadRequest {
+	if _, err := store.TraceLineage(ctx, "decision", "", 1); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("empty anchorID: got %v, want ErrBadRequest", err)
 	}
 	for _, depth := range []int{0, -1, MaxLineageDepth + 1} {
-		if _, err := store.TraceLineage(ctx, "decision", "d1", depth); err != ErrBadRequest {
+		if _, err := store.TraceLineage(ctx, "decision", "d1", depth); !errors.Is(err, ErrBadRequest) {
 			t.Errorf("depth=%d: got %v, want ErrBadRequest", depth, err)
 		}
 	}

@@ -5,6 +5,7 @@ package smeldr
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -139,13 +140,13 @@ func TestReachabilityBounded_Arguments(t *testing.T) {
 	store := setupRelationStore(t)
 	ctx := context.Background()
 	fanFixture(t, store, 2)
-	if _, err := store.ReachabilityBounded(ctx, "item", "a", "", "outgoing", 2, -1); err != ErrBadRequest {
+	if _, err := store.ReachabilityBounded(ctx, "item", "a", "", "outgoing", 2, -1); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("negative maxItems = %v, want ErrBadRequest", err)
 	}
-	if _, err := store.ReachabilityBounded(ctx, "item", "a", "", "outgoing", 0, 5); err != ErrBadRequest {
+	if _, err := store.ReachabilityBounded(ctx, "item", "a", "", "outgoing", 0, 5); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("depth 0 = %v, want ErrBadRequest", err)
 	}
-	if _, err := store.ReachabilityBounded(ctx, "item", "a", "", "sideways", 2, 5); err != ErrBadRequest {
+	if _, err := store.ReachabilityBounded(ctx, "item", "a", "", "sideways", 2, 5); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("bad direction = %v, want ErrBadRequest", err)
 	}
 	// 0 is the default and a huge value is capped (the walk is complete either way here).

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 )
 
@@ -55,11 +56,13 @@ type FindingView struct {
 // below 0 or above 500 is [ErrBadRequest]; a failed read is [ErrInternal].
 func (a *App) ListFindings(ctx Context, q FindingQuery) ([]FindingView, error) {
 	if a.findingStore == nil || a.cfg.DB == nil {
-		return nil, fmt.Errorf("%w: findings are not recorded on this instance (no finding store is wired)", ErrNotFound)
+		return nil, problem(problemFeatureNotEnabled, fmt.Errorf("%w: findings are not recorded on this instance (no finding store is wired)", ErrNotFound),
+			problemValues{"feature": "findings"})
 	}
 	switch {
 	case q.Limit < 0 || q.Limit > maxFindingLimit:
-		return nil, fmt.Errorf("%w: limit must be between 0 and %d", ErrBadRequest, maxFindingLimit)
+		return nil, problem(problemLimitFindings, fmt.Errorf("%w: limit must be between 0 and %d", ErrBadRequest, maxFindingLimit),
+			problemValues{"max": strconv.Itoa(maxFindingLimit)})
 	case q.Limit == 0:
 		q.Limit = defaultFindingLimit
 	}

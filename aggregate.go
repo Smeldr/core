@@ -79,7 +79,7 @@ func aggregateListHandler(ctx context.Context, w http.ResponseWriter, r *http.Re
 func aggregateShowHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, specs []*ServesSpec) {
 	slug := r.PathValue("slug")
 	if slug == "" {
-		WriteError(w, r, ErrNotFound)
+		WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
 		return
 	}
 
@@ -109,5 +109,5 @@ func aggregateShowHandler(ctx context.Context, w http.ResponseWriter, r *http.Re
 			}
 		}
 	}
-	WriteError(w, r, ErrNotFound)
+	WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
 }

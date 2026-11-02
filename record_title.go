@@ -119,8 +119,8 @@ func checkAmendmentType(existing, item *Amendment) error {
 	if slices.Contains(AmendmentTypes, item.AmendmentType) {
 		return nil
 	}
-	return Err("amendment_type", fmt.Sprintf("%q is not an amendment type: use one of %s (D112)",
-		item.AmendmentType, strings.Join(AmendmentTypes, ", ")))
+	return fieldErr(problemAmendmentTypeNotInList, "amendment_type", fmt.Sprintf("%q is not an amendment type: use one of %s (D112)",
+		item.AmendmentType, strings.Join(AmendmentTypes, ", ")), problemValues{"value": item.AmendmentType, "allowed": strings.Join(AmendmentTypes, ", ")})
 }
 
 // titleChanged reports whether a full replace changes the record's title.

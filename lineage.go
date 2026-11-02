@@ -85,10 +85,10 @@ type LineageTrace struct {
 // maxDepth must be between 1 and [MaxLineageDepth] inclusive.
 func (s *RelationStore) TraceLineage(ctx context.Context, anchorType, anchorID string, maxDepth int) (*LineageTrace, error) {
 	if anchorType == "" || anchorID == "" {
-		return nil, ErrBadRequest
+		return nil, problem(problemRequestInvalidParam, ErrBadRequest, nil)
 	}
 	if maxDepth < 1 || maxDepth > MaxLineageDepth {
-		return nil, ErrBadRequest
+		return nil, problem(problemRequestInvalidParam, ErrBadRequest, nil)
 	}
 
 	anchor := reachabilityNode{anchorType, anchorID}

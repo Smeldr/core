@@ -145,13 +145,15 @@ func ensureAddressStorage(ctx context.Context, db DB, table string, scopeByType 
 // reserved for, and a core type only under its own reserved prefix.
 func checkAddressPrefix(typeName, prefix string) error {
 	if !addressPrefixRe.MatchString(prefix) {
-		return Err("prefix", fmt.Sprintf("%q must be 1 to 4 capital letters A-Z", prefix))
+		return fieldErr(problemFieldInvalidFormat, "prefix", fmt.Sprintf("%q must be 1 to 4 capital letters A-Z", prefix), problemValues{"value": prefix})
 	}
 	if want, core := coreAddressPrefixes[typeName]; core && prefix != want {
-		return Err("prefix", fmt.Sprintf("%s's address prefix is reserved as %q and cannot be changed", typeName, want))
+		return fieldErr(problemAddressPrefixReserved, "prefix", fmt.Sprintf("%s's address prefix is reserved as %q and cannot be changed", typeName, want),
+			problemValues{"type": typeName, "prefix": want})
 	}
 	if len(prefix) == 1 && coreAddressPrefixes[typeName] != prefix {
-		return Err("prefix", fmt.Sprintf("single-letter prefixes are reserved for core types; %q is not available for %s (use 2 to 4 letters)", prefix, typeName))
+		return fieldErr(problemAddressPrefixSingleLetter, "prefix", fmt.Sprintf("single-letter prefixes are reserved for core types; %q is not available for %s (use 2 to 4 letters)", prefix, typeName),
+			problemValues{"prefix": prefix, "type": typeName})
 	}
 	return nil
 }
@@ -187,7 +189,8 @@ func registerAddressPrefixWith(ctx context.Context, db DB, typeName, prefix stri
 	case err == nil && current == prefix:
 		return nil
 	case err == nil && lastNo > 0:
-		return Err("prefix", fmt.Sprintf("%s's address prefix is %q and is fixed: the type already has addresses", typeName, current))
+		return fieldErr(problemAddressPrefixFixed, "prefix", fmt.Sprintf("%s's address prefix is %q and is fixed: the type already has addresses", typeName, current),
+			problemValues{"type": typeName, "prefix": current})
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return fmt.Errorf("%w: read address prefix of %s: %s", ErrInternal, typeName, err)
 	}
@@ -195,7 +198,8 @@ func registerAddressPrefixWith(ctx context.Context, db DB, typeName, prefix stri
 	herr := db.QueryRowContext(ctx,
 		`SELECT type_name FROM smeldr_address_counters WHERE prefix = $1`, prefix).Scan(&holder)
 	if herr == nil {
-		return Err("prefix", fmt.Sprintf("%q is already the address prefix of %s", prefix, holder))
+		return fieldErr(problemAddressPrefixTaken, "prefix", fmt.Sprintf("%q is already the address prefix of %s", prefix, holder),
+			problemValues{"prefix": prefix, "type": holder})
 	}
 	if !errors.Is(herr, sql.ErrNoRows) {
 		return fmt.Errorf("%w: read address prefixes: %s", ErrInternal, herr)
@@ -256,7 +260,8 @@ func proposeAddressPrefix(ctx context.Context, db DB, typeName string) (string, 
 	}
 	letters := b.String()
 	if len(letters) < 2 {
-		return "", Err("prefix", fmt.Sprintf("no address prefix can be proposed for %q (it has fewer than 2 letters): give one of 2 to 4 capital letters", typeName))
+		return "", fieldErr(problemAddressPrefixUnavailable, "prefix", fmt.Sprintf("no address prefix can be proposed for %q (it has fewer than 2 letters): give one of 2 to 4 capital letters", typeName),
+			problemValues{"type": typeName})
 	}
 	var candidates []string
 	if len(letters) >= 3 {
@@ -286,7 +291,8 @@ func proposeAddressPrefix(ctx context.Context, db DB, typeName string) (string, 
 			return "", fmt.Errorf("%w: read address prefixes: %s", ErrInternal, err)
 		}
 	}
-	return "", Err("prefix", fmt.Sprintf("every proposed address prefix for %q is taken: give one of 2 to 4 capital letters", typeName))
+	return "", fieldErr(problemAddressPrefixUnavailable, "prefix", fmt.Sprintf("every proposed address prefix for %q is taken: give one of 2 to 4 capital letters", typeName),
+		problemValues{"type": typeName})
 }
 
 // allocateAddress takes typeName's next number in one statement on exec (the
@@ -542,14 +548,15 @@ func dynamicAddressSeed(ctx context.Context, db DB, s *ContentTypeSchema) (int64
 func settleDynamicPrefix(ctx context.Context, db DB, s *ContentTypeSchema, asked string, seed int64) (prefix string, proposed bool, err error) {
 	if !isAddressedSchema(s) {
 		if asked != "" {
-			return "", false, Err("prefix", "a type with a url_prefix is web content and has no address prefix")
+			return "", false, fieldErr(problemAddressPrefixWebContent, "prefix", "a type with a url_prefix is web content and has no address prefix", nil)
 		}
 		return "", false, nil
 	}
 	prefix = asked
 	if want, core := coreAddressPrefixes[s.TypeName]; core {
 		if prefix != "" && prefix != want {
-			return "", false, Err("prefix", fmt.Sprintf("%s's address prefix is reserved as %q", s.TypeName, want))
+			return "", false, fieldErr(problemAddressPrefixReserved, "prefix", fmt.Sprintf("%s's address prefix is reserved as %q", s.TypeName, want),
+				problemValues{"type": s.TypeName, "prefix": want})
 		}
 		prefix = want
 	}

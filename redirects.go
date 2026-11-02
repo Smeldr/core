@@ -275,7 +275,7 @@ func (s *RedirectStore) Remove(ctx context.Context, db DB, from string) error {
 func (s *RedirectStore) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.serveIfMatched(w, r) {
-			WriteError(w, r, ErrNotFound)
+			WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
 		}
 	})
 }
@@ -294,7 +294,7 @@ func (s *RedirectStore) serveIfMatched(w http.ResponseWriter, r *http.Request) b
 		return false
 	}
 	if e.To == "" {
-		WriteError(w, r, ErrGone)
+		WriteError(w, r, problem(problemRedirectGone, ErrGone, nil))
 		return true
 	}
 	dest := e.To

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -123,7 +124,7 @@ func TestSchemaStore_FindByTypeName_NotFound(t *testing.T) {
 
 	store := smeldr.NewSchemaStore(db)
 	_, err := store.FindByTypeName(context.Background(), "custom_nonexistent_type")
-	if err != smeldr.ErrNotFound {
+	if !errors.Is(err, smeldr.ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 }

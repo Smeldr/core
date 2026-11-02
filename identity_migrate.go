@@ -84,7 +84,8 @@ func (a *App) MigrateIdentities(ctx context.Context, opts IdentityMigrationOptio
 	if ok, err := tableExists(ctx, db, "smeldr_identities"); err != nil {
 		return nil, err
 	} else if !ok {
-		return nil, fmt.Errorf("%w: MigrateIdentities: no smeldr_identities table; run EnsureIdentities first", ErrBadRequest)
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: MigrateIdentities: no smeldr_identities table; run EnsureIdentities first", ErrBadRequest),
+			problemValues{"table": "smeldr_identities"})
 	}
 	tokens, err := migrationTokens(ctx, db)
 	if err != nil {

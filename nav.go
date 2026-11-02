@@ -288,7 +288,7 @@ func (n *NavTree) Update(ctx context.Context, item NavItem) (NavItem, error) {
 	}
 	affected, _ := res.RowsAffected()
 	if affected == 0 {
-		return NavItem{}, ErrNotFound
+		return NavItem{}, problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	if err := n.load(ctx, n.db); err != nil {
 		return NavItem{}, err
@@ -312,7 +312,7 @@ func (n *NavTree) Delete(ctx context.Context, id string) error {
 	n.mu.RUnlock()
 
 	if len(ids) == 0 {
-		return ErrNotFound
+		return problem(problemItemNotFound, ErrNotFound, nil)
 	}
 
 	placeholders := make([]string, len(ids))

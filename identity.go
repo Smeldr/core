@@ -343,12 +343,12 @@ func (ts *TokenStore) joinableIdentity(ctx context.Context, ref string) (*Identi
 	if ident.Status != IdentityActive {
 		return nil, fmt.Errorf("create token: %w", refuse(problemTokenIdentityNotActive,
 			fmt.Sprintf("identity %s is %s: it takes no new token", ident.Address, ident.Status),
-			problemValues{"identity": ident.Address, "state": string(ident.Status)}))
+			problemValues{"identity": addressOrID(ident.Address, ident.ID), "state": string(ident.Status)}))
 	}
 	if ident.Class == IdentityUnclassified {
 		return nil, fmt.Errorf("create token: %w", refuse(problemTokenIdentityUnclassified,
 			fmt.Sprintf("identity %s has no class: an unclassified identity takes no new token; create an identity with a class and retire this one", ident.Address),
-			problemValues{"identity": ident.Address}))
+			problemValues{"identity": addressOrID(ident.Address, ident.ID)}))
 	}
 	return ident, nil
 }

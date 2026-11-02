@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -102,7 +103,7 @@ func (s *SchemaStore) FindByTypeName(ctx context.Context, typeName string) (*Con
 		return nil, err
 	}
 	if len(rows) == 0 {
-		return nil, ErrNotFound
+		return nil, problem(problemContentTypeNotFound, ErrNotFound, nil)
 	}
 	return rows[0], nil
 }
@@ -413,7 +414,8 @@ func ValidateSchemaDef(schema *ContentTypeSchema) error {
 			return fieldErr(problemSchemaFieldInvalid, "fields", "schema field Name is required", nil)
 		}
 		if schema.Kind == "content" && reservedContentFieldNames[strings.ToLower(f.Name)] {
-			return Err("fields", fmt.Sprintf("%q is a reserved name: the server sets id, slug, status, address, address_no and external_ref itself", f.Name))
+			return fieldErr(problemSchemaFieldInvalid, "fields", fmt.Sprintf("%q is a reserved name: the server sets id, slug, status, address, address_no and external_ref itself", f.Name),
+				problemValues{"schema_field": f.Name})
 		}
 		if !knownTypes[f.Type] {
 			return fmt.Errorf("smeldr: schema field %q has unknown type %q", f.Name, f.Type)
@@ -422,16 +424,20 @@ func ValidateSchemaDef(schema *ContentTypeSchema) error {
 			return fmt.Errorf("smeldr: schema field %q has unknown role %q (valid: title, description, og_image, body, summary, channel)", f.Name, f.Role)
 		}
 		if f.MaxLength < 0 {
-			return Err("fields", fmt.Sprintf("%q has max_length %d: a limit is a positive number of characters", f.Name, f.MaxLength))
+			return fieldErr(problemSchemaFieldInvalid, "fields", fmt.Sprintf("%q has max_length %d: a limit is a positive number of characters", f.Name, f.MaxLength),
+				problemValues{"schema_field": f.Name, "value": strconv.Itoa(f.MaxLength)})
 		}
 		if f.MaxLength > 0 && f.Type != "string" {
-			return Err("fields", fmt.Sprintf("%q has max_length but type %q: a limit applies to a string field", f.Name, f.Type))
+			return fieldErr(problemSchemaFieldInvalid, "fields", fmt.Sprintf("%q has max_length but type %q: a limit applies to a string field", f.Name, f.Type),
+				problemValues{"schema_field": f.Name, "field_type": f.Type})
 		}
 		if f.References != "" && f.Type != "string" {
-			return Err("fields", fmt.Sprintf("%q references %s but has type %q: a reference is a string field", f.Name, f.References, f.Type))
+			return fieldErr(problemSchemaFieldInvalid, "fields", fmt.Sprintf("%q references %s but has type %q: a reference is a string field", f.Name, f.References, f.Type),
+				problemValues{"schema_field": f.Name, "type": f.References, "field_type": f.Type})
 		}
 		if f.Role == "title" && f.MaxLength > TitleMaxLength {
-			return Err("fields", fmt.Sprintf("%q is the title and has max_length %d: a title is at most %d characters (D112)", f.Name, f.MaxLength, TitleMaxLength))
+			return fieldErr(problemSchemaFieldInvalid, "fields", fmt.Sprintf("%q is the title and has max_length %d: a title is at most %d characters (D112)", f.Name, f.MaxLength, TitleMaxLength),
+				problemValues{"schema_field": f.Name, "value": strconv.Itoa(f.MaxLength), "limit": strconv.Itoa(TitleMaxLength)})
 		}
 		if f.Role == "channel" {
 			if f.Type != "string" {
@@ -474,7 +480,7 @@ func ValidateFields(schema *ContentTypeSchema, fields map[string]any) *Validatio
 	}
 	schemaFields, err := schema.ParseFields()
 	if err != nil {
-		return Err("schema", "invalid schema: "+err.Error())
+		return fieldErr(problemFieldInvalidFormat, "schema", "invalid schema: "+err.Error(), nil)
 	}
 	allowed := make(map[string]SchemaField, len(schemaFields))
 	for _, f := range schemaFields {
@@ -482,13 +488,13 @@ func ValidateFields(schema *ContentTypeSchema, fields map[string]any) *Validatio
 	}
 	for k := range fields {
 		if _, ok := allowed[k]; !ok {
-			return Err(k, "unknown field")
+			return fieldErr(problemFieldUnknown, k, "unknown field", nil)
 		}
 	}
 	for _, f := range schemaFields {
 		v, present := fields[f.Name]
 		if f.Required && !present {
-			return Err(f.Name, "required")
+			return fieldErr(problemFieldRequired, f.Name, "required", nil)
 		}
 		if present {
 			if ve := checkFieldType(f.Name, f.Type, v); ve != nil {
@@ -510,7 +516,7 @@ func ValidatePartialFields(schema *ContentTypeSchema, patch map[string]any) *Val
 	}
 	schemaFields, err := schema.ParseFields()
 	if err != nil {
-		return Err("schema", "invalid schema: "+err.Error())
+		return fieldErr(problemFieldInvalidFormat, "schema", "invalid schema: "+err.Error(), nil)
 	}
 	allowed := make(map[string]SchemaField, len(schemaFields))
 	for _, f := range schemaFields {
@@ -519,7 +525,7 @@ func ValidatePartialFields(schema *ContentTypeSchema, patch map[string]any) *Val
 	for k, v := range patch {
 		sf, ok := allowed[k]
 		if !ok {
-			return Err(k, "unknown field")
+			return fieldErr(problemFieldUnknown, k, "unknown field", nil)
 		}
 		if ve := checkFieldType(sf.Name, sf.Type, v); ve != nil {
 			return ve
@@ -535,37 +541,37 @@ func checkFieldType(name, typ string, v any) *ValidationError {
 	switch typ {
 	case "string":
 		if _, ok := v.(string); !ok {
-			return Err(name, "expected string")
+			return fieldErr(problemFieldTypeMismatch, name, "expected string", problemValues{"expected": "string"})
 		}
 	case "integer":
 		switch n := v.(type) {
 		case float64:
 			if math.Trunc(n) != n {
-				return Err(name, "expected integer (got non-integer number)")
+				return fieldErr(problemFieldTypeMismatch, name, "expected integer (got non-integer number)", problemValues{"expected": "integer"})
 			}
 		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 			// all integer Go types are acceptable
 		default:
-			return Err(name, "expected integer")
+			return fieldErr(problemFieldTypeMismatch, name, "expected integer", problemValues{"expected": "integer"})
 		}
 	case "number":
 		switch v.(type) {
 		case float64, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 			// any numeric type is acceptable
 		default:
-			return Err(name, "expected number")
+			return fieldErr(problemFieldTypeMismatch, name, "expected number", problemValues{"expected": "number"})
 		}
 	case "boolean":
 		if _, ok := v.(bool); !ok {
-			return Err(name, "expected boolean")
+			return fieldErr(problemFieldTypeMismatch, name, "expected boolean", problemValues{"expected": "boolean"})
 		}
 	case "array":
 		if _, ok := v.([]any); !ok {
-			return Err(name, "expected array")
+			return fieldErr(problemFieldTypeMismatch, name, "expected array", problemValues{"expected": "array"})
 		}
 	case "object":
 		if _, ok := v.(map[string]any); !ok {
-			return Err(name, "expected object")
+			return fieldErr(problemFieldTypeMismatch, name, "expected object", problemValues{"expected": "object"})
 		}
 	}
 	return nil

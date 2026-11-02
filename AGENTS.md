@@ -460,7 +460,8 @@ correct wiring order — some calls have load-bearing ordering constraints (e.g.
 - Read `ERROR_HANDLING.md` before writing any error-handling code
 - To branch on why core refused, use `smeldr.ProblemTypeOf(err)` (a stable id such as
   `decision.place_missing`, listed in `docs/PROBLEM_TYPES.md`) and read its named values
-  with `smeldr.ProblemValuesOf(err)`, never the message text
+  with `smeldr.ProblemValuesOf(err)`, never the message text. Every core refusal carries
+  a type; compare core errors with `errors.Is`, never `==`
 - A relation never runs from a record to itself (`relation.to_itself`). To replace a
   Decision, assert `supersedes` from its ratified replacement while the old one is
   still ratified or pending re-evaluation, then move it to superseded

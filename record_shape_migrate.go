@@ -103,7 +103,7 @@ var amendmentTypeMapping = map[string]string{
 // ([EnsureTaskGoalTitleColumns]); a table that does not exist is skipped.
 func MigrateRecordShape(ctx context.Context, db DB, opts RecordShapeMigrationOptions) (*RecordShapeMigrationReport, error) {
 	if db == nil {
-		return nil, fmt.Errorf("%w: MigrateRecordShape needs a database", ErrBadRequest)
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: MigrateRecordShape needs a database", ErrBadRequest), nil)
 	}
 	type titleSource struct{ typeName, table, source string }
 	var sources []titleSource
@@ -123,7 +123,8 @@ func MigrateRecordShape(ctx context.Context, db DB, opts RecordShapeMigrationOpt
 		if exists, err := tableExists(ctx, db, s.table); err != nil {
 			return nil, fmt.Errorf("%w: MigrateRecordShape: %s", ErrInternal, err)
 		} else if exists {
-			return nil, fmt.Errorf("%w: MigrateRecordShape: %s has no title column; run EnsureTaskGoalTitleColumns first", ErrBadRequest, s.table)
+			return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: MigrateRecordShape: %s has no title column; run EnsureTaskGoalTitleColumns first", ErrBadRequest, s.table),
+				problemValues{"table": s.table})
 		}
 	}
 	hasAmendments, err := tableExists(ctx, db, "smeldr_amendments")
@@ -131,7 +132,8 @@ func MigrateRecordShape(ctx context.Context, db DB, opts RecordShapeMigrationOpt
 		return nil, fmt.Errorf("%w: MigrateRecordShape: %s", ErrInternal, err)
 	}
 	if len(opts.AmendmentTypeMap) > 0 && !hasAmendments {
-		return nil, fmt.Errorf("%w: MigrateRecordShape: AmendmentTypeMap given but there is no smeldr_amendments table", ErrBadRequest)
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: MigrateRecordShape: AmendmentTypeMap given but there is no smeldr_amendments table", ErrBadRequest),
+			problemValues{"table": "smeldr_amendments"})
 	}
 	// The report names records by address where the table has the column
 	// (D110); a database migrated before it reports the ID only.
@@ -308,7 +310,7 @@ func resolveAmendmentTypeMap(given map[string]string, rows []amendmentRow, byAdd
 		}
 	}
 	if len(problems) > 0 {
-		return nil, fmt.Errorf("%w: MigrateRecordShape: AmendmentTypeMap: %s", ErrBadRequest, strings.Join(problems, "; "))
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: MigrateRecordShape: AmendmentTypeMap: %s", ErrBadRequest, strings.Join(problems, "; ")), nil)
 	}
 	return resolved, nil
 }

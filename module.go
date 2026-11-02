@@ -1494,7 +1494,7 @@ func (m *Module[T]) aiDocHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !m.visibleTo(scope, item) {
-		WriteError(w, r, ErrNotFound)
+		WriteError(w, r, problem(problemItemNotFound, ErrNotFound, nil))
 		return
 	}
 	head := m.resolveHead(ctx, item)
@@ -1728,8 +1728,8 @@ func (m *Module[T]) publishedSlugConflict(ctx context.Context, item T) error {
 // published: it names that public URL and a free one.
 func slugTakenError(prefix, slug, free string) error {
 	prefix = strings.TrimRight(prefix, "/")
-	return fmt.Errorf("%w: the URL %s/%s is already published; give this item another slug, for example %s/%s",
-		ErrConflict, prefix, slug, prefix, free)
+	return problem(problemSlugTaken, fmt.Errorf("%w: the URL %s/%s is already published; give this item another slug, for example %s/%s",
+		ErrConflict, prefix, slug, prefix, free), problemValues{"slug": slug, "prefix": prefix, "suggested_slug": free})
 }
 
 // slugGuard is a compiled module's slug rules, for [App.TransitionItemVia],
@@ -1783,7 +1783,8 @@ func (m *Module[T]) visibleSlugHolder(ctx context.Context, slug string, visible 
 // caller can read: only readable items are counted, so a hidden one is never
 // revealed, and the ID always resolves.
 func errAmbiguousSlug(slug string) error {
-	return fmt.Errorf("%w: the slug %q names more than one item you can read; use its ID", ErrConflict, slug)
+	return problem(problemSlugAmbiguous, fmt.Errorf("%w: the slug %q names more than one item you can read; use its ID", ErrConflict, slug),
+		problemValues{"slug": slug})
 }
 
 // moduleURLPrefix returns the URL prefix registered via [At], or "" if none.
@@ -1806,14 +1807,14 @@ func writeContent(w http.ResponseWriter, r *http.Request, ct string, v any) {
 	w.Header().Set("Vary", "Accept")
 	switch ct {
 	case "text/html":
-		WriteError(w, r, ErrNotAcceptable)
+		WriteError(w, r, problem(problemContentNotAcceptable, ErrNotAcceptable, nil))
 	case "text/markdown":
 		if md, ok := v.(Markdownable); ok {
 			w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(md.Markdown())) //nolint:errcheck
 		} else {
-			WriteError(w, r, ErrNotAcceptable)
+			WriteError(w, r, problem(problemContentNotAcceptable, ErrNotAcceptable, nil))
 		}
 	case "text/plain":
 		var body string
@@ -1949,7 +1950,7 @@ func (m *Module[T]) findVisibleBySlug(ctx Context, slug string) (T, error) {
 			return zero, err
 		}
 		if !visible(item) {
-			return zero, ErrNotFound
+			return zero, problem(problemItemNotFound, ErrNotFound, nil)
 		}
 		return item, nil
 	}
@@ -1958,7 +1959,7 @@ func (m *Module[T]) findVisibleBySlug(ctx Context, slug string) (T, error) {
 		return zero, err
 	}
 	if !m.visibleTo(s, item) {
-		return zero, ErrNotFound
+		return zero, problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	return item, nil
 }
@@ -1991,7 +1992,7 @@ func (m *Module[T]) resolveVisible(ctx Context, ident string) (T, error) {
 		return zero, err
 	}
 	if !m.visibleTo(s, item) {
-		return zero, ErrNotFound
+		return zero, problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	return item, nil
 }
@@ -2271,7 +2272,7 @@ func (m *Module[T]) listHandler(w http.ResponseWriter, r *http.Request) {
 	// APIOnly: this module has no public HTML surface.
 	if m.apiOnly {
 		if a := r.Header.Get("Accept"); a != "" && a != "*/*" && strings.Contains(a, "text/html") {
-			WriteError(w, r, ErrNotFound)
+			WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
 			return
 		}
 	}
@@ -2317,7 +2318,7 @@ func (m *Module[T]) showHandler(w http.ResponseWriter, r *http.Request) {
 	// APIOnly: this module has no public HTML surface.
 	if m.apiOnly {
 		if a := r.Header.Get("Accept"); a != "" && a != "*/*" && strings.Contains(a, "text/html") {
-			WriteError(w, r, ErrNotFound)
+			WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
 			return
 		}
 	}
@@ -2425,7 +2426,7 @@ func (m *Module[T]) notFound(w http.ResponseWriter, r *http.Request) {
 	if m.redirects.serveIfMatched(w, r) {
 		return
 	}
-	WriteError(w, r, ErrNotFound)
+	WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
 }
 
 // singleInstanceHandler serves GET /{prefix} for modules using [SingleInstance].
@@ -2447,7 +2448,7 @@ func (m *Module[T]) singleInstanceHandler(w http.ResponseWriter, r *http.Request
 	// startup panic for APIOnly+SingleInstance fires, but included for safety.
 	if m.apiOnly {
 		if a := r.Header.Get("Accept"); a != "" && a != "*/*" && strings.Contains(a, "text/html") {
-			WriteError(w, r, ErrNotFound)
+			WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
 			return
 		}
 	}
@@ -2516,7 +2517,7 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := ContextFrom(w, r)
 
 	if !m.checkWriteOp(ctx, "create", m.writeRole) {
-		WriteError(w, r, ErrForbidden)
+		WriteError(w, r, problem(problemWriteNotPermitted, ErrForbidden, nil))
 		return
 	}
 
@@ -2524,9 +2525,9 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(pv.Interface()); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			WriteError(w, r, ErrRequestTooLarge)
+			WriteError(w, r, problem(problemRequestTooLarge, ErrRequestTooLarge, nil))
 		} else {
-			WriteError(w, r, ErrBadRequest)
+			WriteError(w, r, problem(problemRequestMalformedBody, ErrBadRequest, nil))
 		}
 		return
 	}
@@ -2638,7 +2639,7 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := ContextFrom(w, r)
 
 	if !m.checkWriteOp(ctx, "update", m.writeRole) {
-		WriteError(w, r, ErrForbidden)
+		WriteError(w, r, problem(problemWriteNotPermitted, ErrForbidden, nil))
 		return
 	}
 
@@ -2654,9 +2655,9 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(pv.Interface()); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			WriteError(w, r, ErrRequestTooLarge)
+			WriteError(w, r, problem(problemRequestTooLarge, ErrRequestTooLarge, nil))
 		} else {
-			WriteError(w, r, ErrBadRequest)
+			WriteError(w, r, problem(problemRequestMalformedBody, ErrBadRequest, nil))
 		}
 		return
 	}
@@ -2732,8 +2733,9 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 		// full-replace route (a genuine transition, prevStatus != newStatus
 		// above, is validated separately by validateTransition and is not
 		// blocked by Locked).
-		WriteError(w, r, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
-			ErrConflict, m.contentTypeName, nodeIDOf(existing), prevStatus))
+		WriteError(w, r, problem(problemItemLockedState, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
+			ErrConflict, m.contentTypeName, nodeIDOf(existing), prevStatus),
+			problemValues{"type": m.contentTypeName, "record": nodeIDOf(existing), "state": string(prevStatus)}))
 		return
 	}
 
@@ -2823,7 +2825,7 @@ func (m *Module[T]) deleteHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := ContextFrom(w, r)
 
 	if !m.checkWriteOp(ctx, "delete", m.deleteRole) {
-		WriteError(w, r, ErrForbidden)
+		WriteError(w, r, problem(problemWriteNotPermitted, ErrForbidden, nil))
 		return
 	}
 
@@ -3216,7 +3218,7 @@ func (m *Module[T]) resolveItemFor(ctx Context, ident string, s *ReadScope) (T, 
 		// column, then external_ref, through its own column lookup.
 		col, legacy := legacyHumanIDColumns[m.contentTypeName]
 		if !legacy || !canColumn {
-			return zero, ErrNotFound
+			return zero, problem(problemItemNotFound, ErrNotFound, nil)
 		}
 		for _, c := range []string{col, "external_ref"} {
 			item, err := cr.FindByColumn(ctx, c, ident)
@@ -3226,7 +3228,7 @@ func (m *Module[T]) resolveItemFor(ctx Context, ident string, s *ReadScope) (T, 
 				return item, nil
 			}
 		}
-		return zero, ErrNotFound
+		return zero, problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	// The legacy step filters by ID before loading a row: only core record
 	// types have a legacy field, and they have no public clause.
@@ -3408,10 +3410,10 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	coerceSliceFields(fields, elemType)
 	data, err := json.Marshal(fields)
 	if err != nil {
-		return nil, ErrBadRequest
+		return nil, problem(problemRequestMalformedBody, ErrBadRequest, nil)
 	}
 	if err := json.Unmarshal(data, pv.Interface()); err != nil {
-		return nil, ErrBadRequest
+		return nil, problem(problemRequestMalformedBody, ErrBadRequest, nil)
 	}
 
 	f := getNodeFields(elemType)
@@ -3593,8 +3595,9 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 		return nil, nil, err
 	}
 	if isStateLocked(ctx, m.db, m.contentTypeName, string(nodeStatusOf(existing))) {
-		return nil, nil, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
-			ErrConflict, m.contentTypeName, nodeIDOf(existing), nodeStatusOf(existing))
+		return nil, nil, problem(problemItemLockedState, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
+			ErrConflict, m.contentTypeName, nodeIDOf(existing), nodeStatusOf(existing)),
+			problemValues{"type": m.contentTypeName, "record": nodeIDOf(existing), "state": string(nodeStatusOf(existing))})
 	}
 	// Web content that is not published may take another slug: a draft
 	// reserves no URL, so the publisher chooses one before publishing.
@@ -3632,10 +3635,10 @@ func (m *Module[T]) updateFields(ctx Context, slug string, fields map[string]any
 	coerceSliceFields(fields, elemType)
 	data, err := json.Marshal(fields)
 	if err != nil {
-		return nil, nil, ErrBadRequest
+		return nil, nil, problem(problemRequestMalformedBody, ErrBadRequest, nil)
 	}
 	if err := json.Unmarshal(data, pv.Interface()); err != nil {
-		return nil, nil, ErrBadRequest
+		return nil, nil, problem(problemRequestMalformedBody, ErrBadRequest, nil)
 	}
 
 	// Restore identity and lifecycle so callers cannot overwrite them. The
@@ -3712,7 +3715,7 @@ func refuseImmutableKeys(fields map[string]any, existing any, slugChangeable boo
 			field, stored = "status", string(nodeStatusOf(existing))
 		case strings.EqualFold(key, "slug") && slugChangeable:
 			if s, ok := v.(string); !ok || s == "" || GenerateSlug(s) != s {
-				return Err("slug", "must be a slug: lowercase letters, digits and hyphens")
+				return fieldErr(problemFieldInvalidFormat, "slug", "must be a slug: lowercase letters, digits and hyphens", nil)
 			}
 			continue
 		case strings.EqualFold(key, "slug"):
@@ -3728,7 +3731,7 @@ func refuseImmutableKeys(fields map[string]any, existing any, slugChangeable boo
 					continue
 				}
 			}
-			return Err("address_no", "is assigned by the server and cannot be changed")
+			return fieldErr(problemFieldImmutable, "address_no", "is assigned by the server and cannot be changed", nil)
 		default:
 			continue
 		}
@@ -3736,15 +3739,15 @@ func refuseImmutableKeys(fields map[string]any, existing any, slugChangeable boo
 			if s, ok := v.(string); ok && s == stored {
 				continue
 			}
-			return Err("address", "is assigned by the server and cannot be changed")
+			return fieldErr(problemFieldImmutable, "address", "is assigned by the server and cannot be changed", nil)
 		}
 		if s, ok := v.(string); ok && s == stored {
 			continue
 		}
 		if field == "status" {
-			return Err("status", "cannot be changed by an update; use transition_item (or the publish, schedule and archive tools)")
+			return fieldErr(problemFieldImmutable, "status", "cannot be changed by an update; use transition_item (or the publish, schedule and archive tools)", nil)
 		}
-		return Err(field, "cannot be changed by an update")
+		return fieldErr(problemFieldImmutable, field, "cannot be changed by an update", nil)
 	}
 	return nil
 }
@@ -3761,14 +3764,14 @@ func (m *Module[T]) patchHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := ContextFrom(w, r)
 
 	if !m.checkWriteOp(ctx, "update", m.writeRole) {
-		WriteError(w, r, ErrForbidden)
+		WriteError(w, r, problem(problemWriteNotPermitted, ErrForbidden, nil))
 		return
 	}
 
 	slug := r.PathValue("slug")
 	var fields map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
-		WriteError(w, r, ErrBadRequest)
+		WriteError(w, r, problem(problemRequestMalformedBody, ErrBadRequest, nil))
 		return
 	}
 

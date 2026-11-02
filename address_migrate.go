@@ -105,7 +105,7 @@ type migrationType struct {
 // transaction opens.
 func MigrateAddresses(ctx context.Context, db DB, opts AddressMigrationOptions) (*AddressMigrationReport, error) {
 	if db == nil {
-		return nil, fmt.Errorf("%w: MigrateAddresses needs a database", ErrBadRequest)
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: MigrateAddresses needs a database", ErrBadRequest), nil)
 	}
 	types, err := migrationTypes(ctx, db)
 	if err != nil {

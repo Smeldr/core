@@ -132,9 +132,9 @@ func signalReferences() []referenceField {
 func checkSignalSubjectPair(s *Signal) error {
 	switch {
 	case s.SubjectType != "" && strings.TrimSpace(s.SubjectID) == "":
-		return Err("subject_id", "is required with subject_type: name the record the Signal is about by address, slug or ID")
+		return fieldErr(problemFieldRequired, "subject_id", "is required with subject_type: name the record the Signal is about by address, slug or ID", nil)
 	case s.SubjectType == "" && strings.TrimSpace(s.SubjectID) != "":
-		return Err("subject_type", "is required with subject_id: name the type of the record the Signal is about")
+		return fieldErr(problemFieldRequired, "subject_type", "is required with subject_id: name the type of the record the Signal is about", nil)
 	}
 	return nil
 }
@@ -216,7 +216,8 @@ func (a *App) prepareReferences(ctx context.Context, fields []referenceField, ex
 		v := strings.TrimSpace(*p)
 		if v == "" {
 			if old != "" {
-				return Err(f.name, fmt.Sprintf("is write-once: it names %s and cannot be cleared; correct a wrong reference with the relation tools", old))
+				return fieldErr(problemReferenceWriteOnce, f.name, fmt.Sprintf("is write-once: it names %s and cannot be cleared; correct a wrong reference with the relation tools", old),
+					problemValues{"record": old})
 			}
 			*p = ""
 			continue
@@ -225,7 +226,7 @@ func (a *App) prepareReferences(ctx context.Context, fields []referenceField, ex
 			continue
 		}
 		if msg := a.addOnRefusal(f.targets(item)); msg != "" {
-			return Err(f.name, msg)
+			return fieldErr(problemReferenceAddonNotRun, f.name, msg, problemValues{"type": f.targets(item)[0]})
 		}
 		t, err := a.resolveReference(ctx, f.targets(item), v)
 		if err != nil {
@@ -233,7 +234,8 @@ func (a *App) prepareReferences(ctx context.Context, fields []referenceField, ex
 		}
 		stored := t.stored(f.byID)
 		if old != "" && stored != old {
-			return Err(f.name, fmt.Sprintf("is write-once: it names %s; correct a wrong reference with the relation tools", old))
+			return fieldErr(problemReferenceWriteOnce, f.name, fmt.Sprintf("is write-once: it names %s; correct a wrong reference with the relation tools", old),
+				problemValues{"record": old})
 		}
 		*p = stored
 	}
@@ -247,14 +249,15 @@ func (f referenceField) refuse(v string, types []string, err error) error {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		if f.refusal != nil {
-			return Err(f.name, f.refusal(v))
+			return fieldErr(problemReferenceNotFound, f.name, f.refusal(v), problemValues{"value": v, "type": strings.Join(types, ", ")})
 		}
-		return Err(f.name, fmt.Sprintf("no %s %q you can read; name it by address, slug or ID", strings.Join(types, " or "), v))
+		return fieldErr(problemReferenceNotFound, f.name, fmt.Sprintf("no %s %q you can read; name it by address, slug or ID", strings.Join(types, " or "), v),
+			problemValues{"value": v, "type": strings.Join(types, ", ")})
 	case errors.Is(err, ErrBadRequest):
 		if f.name == "subject_id" {
-			return Err("subject_type", "names no registered content type")
+			return fieldErr(problemReferenceSubjectTypeUnknown, "subject_type", "names no registered content type", nil)
 		}
-		return Err(f.name, err.Error())
+		return fieldErr(problemReferenceNotFound, f.name, err.Error(), problemValues{"value": v})
 	}
 	return err
 }
@@ -267,7 +270,7 @@ func liveEdge(ctx context.Context, db DB, edge RelationEdge) (RelationEdge, erro
 		edge.SourceType, edge.SourceID, edge.TargetType, edge.TargetID, edge.RelationKind, edge.EdgeClass,
 	).Scan(&edge.ID, scanDest(&edge.CreatedAt))
 	if errors.Is(err, sql.ErrNoRows) {
-		return edge, ErrNotFound
+		return edge, problem(problemRelationNotFound, ErrNotFound, nil)
 	}
 	return edge, err
 }
@@ -321,7 +324,7 @@ func recordTableOf(ctx context.Context, db DB, typeName string) (recordTable, er
 func (rt recordTable) lookup(ctx context.Context, db DB, ident string) (id, address string, err error) {
 	ident = strings.TrimSpace(ident)
 	if db == nil || rt.name == "" || ident == "" {
-		return "", "", ErrNotFound
+		return "", "", errItemNotFound
 	}
 	where, args := "", []any{}
 	if rt.dynamic {
@@ -359,11 +362,12 @@ func (rt recordTable) lookup(ctx context.Context, db DB, ident string) (id, addr
 		case 1:
 			return hits[0][0], hits[0][1], nil
 		case 2:
-			return "", "", Err(c[0], fmt.Sprintf("%q names more than one %s; name it by its address or ID", ident, rt.typeName))
+			return "", "", fieldErr(problemIdentAmbiguous, c[0], fmt.Sprintf("%q names more than one %s; name it by its address or ID", ident, rt.typeName),
+				problemValues{"value": ident, "type": rt.typeName})
 		}
 	}
 	if rt.dynamic {
-		return "", "", ErrNotFound
+		return "", "", errItemNotFound
 	}
 	legacyID, err := legacyLookupID(ctx, db, rt.typeName, quoteIdent(rt.name), ident, nil)
 	if err != nil {
@@ -421,7 +425,7 @@ func (a *App) resolveReference(ctx context.Context, types []string, ident string
 		}
 		return referenceTarget{Type: typeName, ID: id, Address: address}, nil
 	}
-	return referenceTarget{}, ErrNotFound
+	return referenceTarget{}, errItemNotFound
 }
 
 // referenceTable returns typeName's table facts, read once on the App's base
@@ -493,7 +497,7 @@ func referenceEdgeOn(ctx context.Context, db DB, tables referenceTables, f refer
 		}
 		return referenceEdge(f, item, typeName, id), nil
 	}
-	return RelationEdge{}, f.refuse(stored, f.targets(item), ErrNotFound)
+	return RelationEdge{}, f.refuse(stored, f.targets(item), errItemNotFound)
 }
 
 // referenceEdge is f's system-asserted edge from item to the target.
@@ -561,7 +565,7 @@ func prepareSignalReferences(ctx context.Context, db DB, s *Signal) (signalRefer
 		if plan.system {
 			return plan, nil
 		}
-		return plan, fmt.Errorf("%w: InsertSignal cannot check a Signal's subject or task_ref inside a caller's transaction; insert it on the base handle", ErrBadRequest)
+		return plan, problem(problemReferencesSignalInTx, fmt.Errorf("%w: InsertSignal cannot check a Signal's subject or task_ref inside a caller's transaction; insert it on the base handle", ErrBadRequest), nil)
 	}
 	ok, err := tableExists(ctx, db, "smeldr_relations")
 	if err != nil {
@@ -589,11 +593,11 @@ func prepareSignalReferences(ctx context.Context, db DB, s *Signal) (signalRefer
 		// same refusal the Signal module gives (T881). This path has no App,
 		// so the table stands in for the registration.
 		if rt := plan.tables[types[0]]; orchestrationAddOnTypes[types[0]] && (rt.name == "" || rt.dynamic) {
-			return plan, Err(f.name, addOnNotRunMessage(types[0]))
+			return plan, fieldErr(problemReferenceAddonNotRun, f.name, addOnNotRunMessage(types[0]), problemValues{"type": types[0]})
 		}
 		id, address, err := plan.tables[types[0]].lookup(ctx, db, *p)
 		if err == nil && scope != nil && !scope.All() && !scope.Readable(types[0], id) {
-			err = ErrNotFound // hidden answers as missing
+			err = errItemNotFound // hidden answers as missing
 		}
 		if err != nil {
 			return plan, f.refuse(*p, types, err)
@@ -705,7 +709,8 @@ func (a *App) checkSchemaReferences(schema *ContentTypeSchema) error {
 			continue
 		}
 		if a.typeRegistry.Lookup(f.References) == nil {
-			return Err("fields", fmt.Sprintf("%q references %q, which is not a registered content type", f.Name, f.References))
+			return fieldErr(problemFieldNotInList, "fields", fmt.Sprintf("%q references %q, which is not a registered content type", f.Name, f.References),
+				problemValues{"value": f.References, "schema_field": f.Name})
 		}
 	}
 	return nil
@@ -740,7 +745,8 @@ func (r *DynamicTypeRepo) prepareReferences(ctx context.Context, existing, field
 		old, _ := existing[sf.Name].(string)
 		switch {
 		case v == "" && old != "":
-			return nil, Err(sf.Name, fmt.Sprintf("is write-once: it names %s and cannot be cleared; correct a wrong reference with the relation tools", old))
+			return nil, fieldErr(problemReferenceWriteOnce, sf.Name, fmt.Sprintf("is write-once: it names %s and cannot be cleared; correct a wrong reference with the relation tools", old),
+				problemValues{"record": old})
 		case v == "":
 			fields[sf.Name] = ""
 			continue
@@ -754,7 +760,8 @@ func (r *DynamicTypeRepo) prepareReferences(ctx context.Context, existing, field
 		}
 		stored := t.stored(false)
 		if old != "" && stored != old {
-			return nil, Err(sf.Name, fmt.Sprintf("is write-once: it names %s; correct a wrong reference with the relation tools", old))
+			return nil, fieldErr(problemReferenceWriteOnce, sf.Name, fmt.Sprintf("is write-once: it names %s; correct a wrong reference with the relation tools", old),
+				problemValues{"record": old})
 		}
 		fields[sf.Name] = stored
 		if old == "" {

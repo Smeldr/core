@@ -465,6 +465,7 @@ func (a *App) insertChangeCheck(ctx context.Context, in ChangeInput, res Decisio
 // After the commit it records the change, announces it and the edge, and
 // withdraws the Check's open requests (part 2).
 func (a *App) claimSupersede(ctx context.Context, oldID, oldAddress, newestID, newestAddress string) (bool, error) {
+	oldAddress, newestAddress = addressOrID(oldAddress, oldID), addressOrID(newestAddress, newestID)
 	db := a.cfg.DB
 	actor, kind := actorFromContext(ctx)
 	reason := "superseded by " + newestAddress

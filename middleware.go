@@ -296,7 +296,7 @@ func NewRateLimiter(n int, d time.Duration, opts ...Option) (func(http.Handler) 
 			ok, wait := rl.allow(ip)
 			if !ok {
 				w.Header().Set("Retry-After", fmt.Sprintf("%d", int(wait.Seconds())+1))
-				WriteError(w, r, ErrTooManyRequests)
+				WriteError(w, r, problem(problemRateLimited, ErrTooManyRequests, nil))
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -703,12 +703,12 @@ func CSRF(auth AuthFunc) func(http.Handler) http.Handler {
 			// Validate token on unsafe methods.
 			cookie, err := r.Cookie(CSRFCookieName)
 			if err != nil || cookie.Value == "" {
-				WriteError(w, r, ErrForbidden)
+				WriteError(w, r, problem(problemCsrfInvalid, ErrForbidden, nil))
 				return
 			}
 			header := r.Header.Get("X-CSRF-Token")
 			if subtle.ConstantTimeCompare([]byte(header), []byte(cookie.Value)) != 1 {
-				WriteError(w, r, ErrForbidden)
+				WriteError(w, r, problem(problemCsrfInvalid, ErrForbidden, nil))
 				return
 			}
 			next.ServeHTTP(w, r)

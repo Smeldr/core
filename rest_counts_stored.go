@@ -5,6 +5,7 @@ package smeldr
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -458,7 +459,8 @@ func (g *restGraph) buckets(item int32, direction string, reached []int32, label
 // More items than allowed is [ErrBadRequest]; a failed read [ErrInternal].
 func (a *App) StoredRestCounts(ctx context.Context, items []ItemRef) ([]StoredRestCounts, error) {
 	if len(items) > MaxStoredRestCountItems {
-		return nil, fmt.Errorf("%w: at most %d items per call", ErrBadRequest, MaxStoredRestCountItems)
+		return nil, problem(problemLimitRestCountItems, fmt.Errorf("%w: at most %d items per call", ErrBadRequest, MaxStoredRestCountItems),
+			problemValues{"limit": strconv.Itoa(MaxStoredRestCountItems)})
 	}
 	db := a.cfg.DB
 	if db == nil {

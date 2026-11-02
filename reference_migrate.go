@@ -111,7 +111,7 @@ type referenceRow struct {
 // skipped. A malformed RefFields entry is [ErrBadRequest] before anything runs.
 func MigrateReferences(ctx context.Context, db DB, opts ReferenceMigrationOptions) (*ReferenceMigrationReport, error) {
 	if db == nil {
-		return nil, fmt.Errorf("%w: MigrateReferences needs a database", ErrBadRequest)
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: MigrateReferences needs a database", ErrBadRequest), nil)
 	}
 	refFields, err := parseRefFields(opts.RefFields)
 	if err != nil {
@@ -120,7 +120,8 @@ func MigrateReferences(ctx context.Context, db DB, opts ReferenceMigrationOption
 	if ok, err := tableExists(ctx, db, "smeldr_relations"); err != nil {
 		return nil, fmt.Errorf("%w: MigrateReferences: %s", ErrInternal, err)
 	} else if !ok {
-		return nil, fmt.Errorf("%w: MigrateReferences: there is no smeldr_relations table; wire App.Relations first", ErrBadRequest)
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: MigrateReferences: there is no smeldr_relations table; wire App.Relations first", ErrBadRequest),
+			problemValues{"table": "smeldr_relations"})
 	}
 	// Everything that needs a table check is read here, on the base handle.
 	if err := schemaRefFields(ctx, db, refFields); err != nil {
@@ -260,7 +261,8 @@ func parseRefFields(in map[string]string) (map[string]string, error) {
 	}
 	if len(bad) > 0 {
 		sort.Strings(bad)
-		return nil, fmt.Errorf("%w: MigrateReferences: RefFields entries must be \"type.field\" to a type name: %s", ErrBadRequest, strings.Join(bad, ", "))
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: MigrateReferences: RefFields entries must be \"type.field\" to a type name: %s", ErrBadRequest, strings.Join(bad, ", ")),
+			problemValues{"value": strings.Join(bad, ", ")})
 	}
 	return out, nil
 }

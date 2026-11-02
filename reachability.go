@@ -147,7 +147,7 @@ func (s *RelationStore) Reachability(ctx context.Context, anchorType, anchorID, 
 // Reachability is for in-process computations that need the whole walk.
 func (s *RelationStore) ReachabilityBounded(ctx context.Context, anchorType, anchorID, kind, direction string, maxDepth, maxItems int) (*Reachability, error) {
 	if maxItems < 0 {
-		return nil, ErrBadRequest
+		return nil, problem(problemRequestInvalidParam, ErrBadRequest, nil)
 	}
 	if maxItems == 0 {
 		maxItems = DefaultReachabilityItems
@@ -159,15 +159,15 @@ func (s *RelationStore) ReachabilityBounded(ctx context.Context, anchorType, anc
 // unbounded.
 func (s *RelationStore) reachability(ctx context.Context, anchorType, anchorID, kind, direction string, maxDepth, maxItems int) (*Reachability, error) {
 	if anchorType == "" || anchorID == "" {
-		return nil, ErrBadRequest
+		return nil, problem(problemRequestInvalidParam, ErrBadRequest, nil)
 	}
 	if maxDepth < 1 || maxDepth > MaxReachabilityDepth {
-		return nil, ErrBadRequest
+		return nil, problem(problemRequestInvalidParam, ErrBadRequest, nil)
 	}
 	switch direction {
 	case "incoming", "outgoing", "both":
 	default:
-		return nil, ErrBadRequest
+		return nil, problem(problemRequestInvalidParam, ErrBadRequest, nil)
 	}
 
 	// Per-item read rules (core-read-surfaces 3b): a node the caller may not

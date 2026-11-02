@@ -145,7 +145,7 @@ func (rb roleBuilder) Register() (Role, error) {
 	defer roleMu.Unlock()
 	if existing, ok := roleLevels[r]; ok {
 		if existing != rb.level {
-			return "", Err("role", "already registered with a different level")
+			return "", fieldErr(problemRoleLevelMismatch, "role", "already registered with a different level", nil)
 		}
 		return r, nil
 	}

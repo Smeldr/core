@@ -287,7 +287,7 @@ func (s *SitemapStore) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, ok := s.Get(r.URL.Path)
 		if !ok {
-			WriteError(w, r, ErrNotFound)
+			WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
 			return
 		}
 		w.Header().Set("Content-Type", "application/xml; charset=utf-8")

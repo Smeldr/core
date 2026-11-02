@@ -749,7 +749,7 @@ func TestQueryGoalContext(t *testing.T) {
 			t.Fatalf("CreateOrchestrationTables: %v", err)
 		}
 		_, err := QueryGoalContext(ctx, db, nil, "T999")
-		if err != ErrNotFound {
+		if !errors.Is(err, ErrNotFound) {
 			t.Errorf("err = %v, want ErrNotFound", err)
 		}
 	})

@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,62 +25,6 @@ var untypedSentinels = map[string]bool{
 // typedConstructors are the calls that name a refusal type as their first
 // argument.
 var typedConstructors = map[string]bool{"problem": true, "refuse": true, "fieldErr": true}
-
-// untypedSitesAllowed is how many untyped refusal sites each file may still
-// hold while T1039's phases type them. It only shrinks: a new untyped site, or
-// a count that rises, fails TestProblemTypeSites; a count that falls must be
-// lowered here in the same commit. Phase 3 ends with it empty.
-var untypedSitesAllowed = map[string]int{
-	"address.go":               9,
-	"address_migrate.go":       1,
-	"address_resolve.go":       3,
-	"aggregate.go":             2,
-	"audit.go":                 4,
-	"content_type_redefine.go": 9,
-	"context_packet.go":        10,
-	"cookiemanifest.go":        1,
-	"coverage.go":              12,
-	"dynamic.go":               30,
-	"dynamic_title.go":         1,
-	"edges.go":                 2,
-	"event_log.go":             2,
-	"eventstream.go":           8,
-	"finding_list.go":          2,
-	"identity_migrate.go":      1,
-	"lineage.go":               2,
-	"logcapture.go":            5,
-	"middleware.go":            3,
-	"migrate.go":               3,
-	"module.go":                34,
-	"nav.go":                   2,
-	"node.go":                  15,
-	"provenance.go":            1,
-	"provenance_read.go":       4,
-	"reachability.go":          4,
-	"reachability_handler.go":  4,
-	"record_shape_migrate.go":  4,
-	"record_title.go":          1,
-	"redirectmanifest.go":      1,
-	"redirects.go":             2,
-	"reference_migrate.go":     3,
-	"references.go":            21,
-	"relations_list.go":        2,
-	"rest_counts.go":           3,
-	"rest_counts_stored.go":    1,
-	"roles.go":                 1,
-	"scheduler.go":             1,
-	"schemas.go":               18,
-	"search.go":                5,
-	"signal_migrate.go":        1,
-	"sitemap.go":               1,
-	"smeldr.go":                3,
-	"stats.go":                 2,
-	"storage.go":               6,
-	"subscription_match.go":    1,
-	"subscription_webhook.go":  1,
-	"templates.go":             2,
-	"webhook.go":               6,
-}
 
 // refusalSite is one finding of the site check.
 type refusalSite struct {
@@ -330,107 +275,28 @@ func problemTypeConstNames() map[string]bool {
 	return names
 }
 
-// Every refusal site names a type from the closed list, except the untyped
-// sites T1039's later phases have yet to type (untypedSitesAllowed), whose
-// count per file only falls.
+// Every refusal site names a type from the closed list (T1039, T1061): a
+// Refused, Err, bare 4xx sentinel or untyped fieldError anywhere in the
+// package fails, with its line.
 func TestProblemTypeSites(t *testing.T) {
 	untyped, badTypes, _ := scanRefusalSites(t)
 	for _, b := range badTypes {
 		t.Errorf("%s: %s", b.pos, b.what)
 	}
-	if os.Getenv("SMELDR_PRINT_UNTYPED_SITES") != "" {
-		var files []string
-		for f := range untyped {
-			files = append(files, f)
-		}
-		sort.Strings(files)
-		for _, f := range files {
-			fmt.Printf("\t%q: %d,\n", f, len(untyped[f]))
-		}
-	}
-	files := map[string]bool{}
+	var files []string
 	for f := range untyped {
-		files[f] = true
+		files = append(files, f)
 	}
-	for f := range untypedSitesAllowed {
-		files[f] = true
-	}
-	for f := range files {
-		got, allowed := len(untyped[f]), untypedSitesAllowed[f]
-		switch {
-		case got > allowed:
-			var lines []string
-			for _, s := range untyped[f] {
-				lines = append(lines, fmt.Sprintf("%d %s", s.pos.Line, s.what))
-			}
-			t.Errorf("%s: %d untyped refusal sites, %d allowed; give the new one a type with problem, refuse or fieldErr (lines: %s)",
-				f, got, allowed, strings.Join(lines, ", "))
-		case got < allowed:
-			t.Errorf("%s: %d untyped refusal sites, %d allowed; lower untypedSitesAllowed[%q] to %d", f, got, allowed, f, got)
+	sort.Strings(files)
+	for _, f := range files {
+		for _, s := range untyped[f] {
+			t.Errorf("%s: an untyped refusal (%s): give it a type with problem, refuse or fieldErr", s.pos, s.what)
 		}
 	}
 }
 
-// typesNotYetUsed are the listed types no site names yet; it only shrinks,
-// and is empty once phase 3 of T1039 is done.
-var typesNotYetUsed = map[ProblemType]bool{
-	"role.insufficient":                  true,
-	"scope.type_not_readable":            true,
-	"write.not_permitted":                true,
-	"csrf.invalid":                       true,
-	"auth.unauthenticated":               true,
-	"item.locked_state":                  true,
-	"slug.published_immutable":           true,
-	"slug.taken":                         true,
-	"slug.ambiguous":                     true,
-	"migrate.duplicate_published_slugs":  true,
-	"route.not_found":                    true,
-	"content_type.not_found":             true,
-	"feature.not_enabled":                true,
-	"redirect.gone":                      true,
-	"request.malformed_body":             true,
-	"content_type.define_failed":         true,
-	"transition.status_required":         true,
-	"content_type.not_runtime":           true,
-	"slug.record_type_fixed":             true,
-	"limit.rest_count_items":             true,
-	"limit.findings":                     true,
-	"subscription.webhook_not_stream":    true,
-	"search.query_invalid":               true,
-	"eventstream.params_conflict":        true,
-	"eventstream.no_subscriptions":       true,
-	"event_log.not_enabled":              true,
-	"event_log.cursor_invalid":           true,
-	"references.signal_in_tx":            true,
-	"content.not_acceptable":             true,
-	"request.too_large":                  true,
-	"eventstream.too_many_streams":       true,
-	"rate.limited":                       true,
-	"title.cutover":                      true,
-	"signal.history_type_refused":        true,
-	"signal.message_too_long":            true,
-	"amendment.type_not_in_list":         true,
-	"schedule.needs_time":                true,
-	"reference.addon_not_run":            true,
-	"reference.subject_type_unknown":     true,
-	"field.immutable":                    true,
-	"content_type.redefine_incompatible": true,
-	"address.prefix_reserved":            true,
-	"address.prefix_single_letter":       true,
-	"address.prefix_fixed":               true,
-	"address.prefix_taken":               true,
-	"address.prefix_unavailable":         true,
-	"address.prefix_web_content":         true,
-	"webhook.url_not_allowed":            true,
-	"config.invalid":                     true,
-	"role.level_mismatch":                true,
-	"field.too_short":                    true,
-	"field.type_mismatch":                true,
-	"field.unknown":                      true,
-}
-
-// Every non-retired type is used by some site, or is still waiting for its
-// phase (typesNotYetUsed); a retired type is used by none.
+// Every non-retired type is used by some site; a retired type is used by
+// none.
 func TestProblemTypesUsed(t *testing.T) {
 	_, _, used := scanRefusalSites(t)
 	byID := map[ProblemType]int{}
@@ -446,17 +312,135 @@ func TestProblemTypesUsed(t *testing.T) {
 		switch {
 		case p.Retired != "" && n > 0:
 			t.Errorf("%s is retired in %s but still used", p.ID, p.Retired)
-		case p.Retired == "" && n == 0 && !typesNotYetUsed[p.ID]:
+		case p.Retired == "" && n == 0:
 			t.Errorf("%s is used by no site; use it or retire it", p.ID)
-		case n > 0 && typesNotYetUsed[p.ID]:
-			t.Errorf("%s is used now; remove it from typesNotYetUsed", p.ID)
 		}
 	}
-	if os.Getenv("SMELDR_PRINT_UNTYPED_SITES") != "" {
-		for _, p := range problemTypeList {
-			if byID[p.ID] == 0 && p.Retired == "" {
-				fmt.Printf("\t%q: true,\n", p.ID)
+}
+
+// builtInValues are the types whose values ProblemValuesOf takes from an
+// error's own fields rather than from a site's literal, and the names it
+// always sets.
+var builtInValues = map[string][]string{
+	"problemRevConflict":           {"type", "record", "rev_sent", "rev_current"},
+	"problemRelationAlreadyExists": {"relation"},
+}
+
+// alwaysValuesExceptions are value names written at every site of a type
+// but possibly empty at run time, so not sent every time. None today: every
+// act over a place carries its code (requireActOver), and a site that names a
+// record by an address read from its column falls back to the record's ID
+// (addressOrID).
+var alwaysValuesExceptions = map[string][]string{}
+
+// computedAlwaysValues is, per list constant, the value names every typed
+// site of the type writes in its literal (a site with nil values writes
+// none), minus alwaysValuesExceptions.
+func computedAlwaysValues(t *testing.T) map[string][]string {
+	t.Helper()
+	fset := token.NewFileSet()
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sites := map[string][]map[string]bool{}
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") || name == "problem_types.go" {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.CallExpr:
+				if id, ok := n.Fun.(*ast.Ident); ok && typedConstructors[id.Name] && len(n.Args) > 1 {
+					if c, ok := n.Args[0].(*ast.Ident); ok {
+						sites[c.Name] = append(sites[c.Name], literalKeys(n.Args[len(n.Args)-1]))
+					}
+				}
+			case *ast.CompositeLit:
+				if id, ok := n.Type.(*ast.Ident); ok && id.Name == "fieldError" {
+					var typ string
+					var values ast.Expr
+					for _, e := range n.Elts {
+						kv, ok := e.(*ast.KeyValueExpr)
+						if !ok {
+							continue
+						}
+						switch k, _ := kv.Key.(*ast.Ident); {
+						case k == nil:
+						case k.Name == "typ":
+							if v, ok := kv.Value.(*ast.Ident); ok {
+								typ = v.Name
+							}
+						case k.Name == "values":
+							values = kv.Value
+						}
+					}
+					if typ != "" {
+						sites[typ] = append(sites[typ], literalKeys(values))
+					}
+				}
 			}
+			return true
+		})
+	}
+	out := map[string][]string{}
+	for name, ss := range sites {
+		var common []string
+		for _, v := range declaredValues[name] {
+			all := true
+			for _, s := range ss {
+				all = all && s[v]
+			}
+			if all && !slices.Contains(alwaysValuesExceptions[name], v) {
+				common = append(common, v)
+			}
+		}
+		out[name] = common
+	}
+	for name, v := range builtInValues {
+		out[name] = v
+	}
+	return out
+}
+
+// literalKeys is the set of string keys of a problemValues literal; nil or
+// any other expression has none.
+func literalKeys(e ast.Expr) map[string]bool {
+	keys := map[string]bool{}
+	lit, ok := e.(*ast.CompositeLit)
+	if !ok {
+		return keys
+	}
+	for _, el := range lit.Elts {
+		if kv, ok := el.(*ast.KeyValueExpr); ok {
+			if b, ok := kv.Key.(*ast.BasicLit); ok {
+				if k, err := strconv.Unquote(b.Value); err == nil {
+					keys[k] = true
+				}
+			}
+		}
+	}
+	return keys
+}
+
+// Each type's AlwaysValues is exactly the computed set, in its Values order:
+// the bold names in docs/PROBLEM_TYPES.md and the data a product's catalogue
+// test reads are a promise the server keeps.
+func TestProblemTypesAlwaysValues(t *testing.T) {
+	computed := computedAlwaysValues(t)
+	for _, p := range problemTypeList {
+		want := computed[constNameOf(p.ID)]
+		if fmt.Sprint(p.AlwaysValues) != fmt.Sprint(want) && !(len(p.AlwaysValues) == 0 && len(want) == 0) {
+			t.Errorf("%s: AlwaysValues %v, computed %v", p.ID, p.AlwaysValues, want)
+		}
+	}
+	if os.Getenv("SMELDR_PRINT_ALWAYS_VALUES") != "" {
+		for _, p := range problemTypeList {
+			fmt.Printf("ALWAYS %s %s\n", p.ID, strings.Join(computed[constNameOf(p.ID)], ","))
 		}
 	}
 }

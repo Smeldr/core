@@ -2,6 +2,7 @@ package smeldr
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"testing"
 )
@@ -42,10 +43,10 @@ func TestReachability_EmptyAnchor(t *testing.T) {
 	store := setupRelationStore(t)
 	ctx := context.Background()
 
-	if _, err := store.Reachability(ctx, "", "1", "", "outgoing", 1); err != ErrBadRequest {
+	if _, err := store.Reachability(ctx, "", "1", "", "outgoing", 1); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("empty anchorType: got %v, want ErrBadRequest", err)
 	}
-	if _, err := store.Reachability(ctx, "post", "", "", "outgoing", 1); err != ErrBadRequest {
+	if _, err := store.Reachability(ctx, "post", "", "", "outgoing", 1); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("empty anchorID: got %v, want ErrBadRequest", err)
 	}
 }
@@ -55,7 +56,7 @@ func TestReachability_InvalidDepth(t *testing.T) {
 	ctx := context.Background()
 
 	for _, depth := range []int{0, -1, MaxReachabilityDepth + 1} {
-		if _, err := store.Reachability(ctx, "post", "p1", "", "outgoing", depth); err != ErrBadRequest {
+		if _, err := store.Reachability(ctx, "post", "p1", "", "outgoing", depth); !errors.Is(err, ErrBadRequest) {
 			t.Errorf("depth=%d: got %v, want ErrBadRequest", depth, err)
 		}
 	}
@@ -65,7 +66,7 @@ func TestReachability_InvalidDirection(t *testing.T) {
 	store := setupRelationStore(t)
 	ctx := context.Background()
 
-	if _, err := store.Reachability(ctx, "post", "p1", "", "sideways", 1); err != ErrBadRequest {
+	if _, err := store.Reachability(ctx, "post", "p1", "", "sideways", 1); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("got %v, want ErrBadRequest", err)
 	}
 }

@@ -221,11 +221,11 @@ func newAuditHandler(auth AuthFunc, store AuditStore, filter auditFilter) http.H
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok {
-			WriteError(w, r, ErrUnauth)
+			WriteError(w, r, problem(problemAuthUnauthenticated, ErrUnauth, nil))
 			return
 		}
 		if !user.HasRole(Editor) {
-			WriteError(w, r, ErrForbidden)
+			WriteError(w, r, problem(problemRoleInsufficient, ErrForbidden, nil))
 			return
 		}
 
@@ -234,7 +234,7 @@ func newAuditHandler(auth AuthFunc, store AuditStore, filter auditFilter) http.H
 		if s := q.Get("from"); s != "" {
 			t, err := time.Parse(time.RFC3339, s)
 			if err != nil {
-				WriteError(w, r, ErrBadRequest)
+				WriteError(w, r, problem(problemRequestInvalidParam, ErrBadRequest, nil))
 				return
 			}
 			f.From = t
@@ -242,7 +242,7 @@ func newAuditHandler(auth AuthFunc, store AuditStore, filter auditFilter) http.H
 		if s := q.Get("to"); s != "" {
 			t, err := time.Parse(time.RFC3339, s)
 			if err != nil {
-				WriteError(w, r, ErrBadRequest)
+				WriteError(w, r, problem(problemRequestInvalidParam, ErrBadRequest, nil))
 				return
 			}
 			f.To = t

@@ -175,7 +175,7 @@ func (b *eventBroadcaster) subscribeScoped(tokenID, channel string, includeOwn b
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.byToken[tokenID] >= eventStreamMaxSubscribersPerToken {
-		return nil, ErrTooManyRequests
+		return nil, problem(problemEventstreamTooManyStreams, ErrTooManyRequests, nil)
 	}
 	ch := make(chan []byte, eventStreamSubscriberBuffer)
 	b.subs[ch] = eventStreamSub{tokenID: tokenID, channels: parseChannels(channel), includeOwn: includeOwn, scope: scope}
@@ -437,11 +437,11 @@ func newEventStreamHandlerWith(auth AuthFunc, b *eventBroadcaster, loadScope str
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok {
-			WriteError(w, r, ErrUnauth)
+			WriteError(w, r, problem(problemAuthUnauthenticated, ErrUnauth, nil))
 			return
 		}
 		if !user.HasRole(Author) {
-			WriteError(w, r, ErrForbidden)
+			WriteError(w, r, problem(problemRoleInsufficient, ErrForbidden, nil))
 			return
 		}
 		fl, ok := w.(http.Flusher)
@@ -459,16 +459,16 @@ func newEventStreamHandlerWith(auth AuthFunc, b *eventBroadcaster, loadScope str
 		includeOwn := q.Get("include_own") == "true"
 		ident := q.Get("subscription")
 		if ident != "" && q.Has("channel") {
-			WriteError(w, r, fmt.Errorf("%w: ?subscription= and ?channel= cannot be combined", ErrBadRequest))
+			WriteError(w, r, problem(problemEventstreamParamsConflict, fmt.Errorf("%w: ?subscription= and ?channel= cannot be combined", ErrBadRequest), nil))
 			return
 		}
 		if ident != "" && src == nil {
-			WriteError(w, r, fmt.Errorf("%w: this instance keeps no subscriptions", ErrBadRequest))
+			WriteError(w, r, problem(problemEventstreamNoSubscriptions, fmt.Errorf("%w: this instance keeps no subscriptions", ErrBadRequest), nil))
 			return
 		}
 		after, resume := q.Get("after"), q.Has("after")
 		if resume && b.log == nil {
-			WriteError(w, r, fmt.Errorf("%w: ?after= needs the event log, which this instance does not keep", ErrBadRequest))
+			WriteError(w, r, problem(problemEventLogNotEnabled, fmt.Errorf("%w: ?after= needs the event log, which this instance does not keep", ErrBadRequest), nil))
 			return
 		}
 		var scope *ReadScope
@@ -715,7 +715,7 @@ func (b *eventBroadcaster) subscribeSubs(tokenID string, subs *connSubscriptions
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.byToken[tokenID] >= eventStreamMaxSubscribersPerToken {
-		return nil, nil, ErrTooManyRequests
+		return nil, nil, problem(problemEventstreamTooManyStreams, ErrTooManyRequests, nil)
 	}
 	ch := make(chan []byte, eventStreamSubscriberBuffer)
 	recompile := make(chan struct{}, 1)
@@ -761,7 +761,7 @@ func (b *eventBroadcaster) subscribeConn(tokenID, channel string, includeOwn boo
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.byToken[tokenID] >= eventStreamMaxSubscribersPerToken {
-		return nil, nil, ErrTooManyRequests
+		return nil, nil, problem(problemEventstreamTooManyStreams, ErrTooManyRequests, nil)
 	}
 	ch := make(chan []byte, eventStreamSubscriberBuffer)
 	reload := make(chan struct{}, 1)

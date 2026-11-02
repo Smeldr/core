@@ -148,8 +148,8 @@ func errScheduledWithoutTime(typeName, id string, dynamic bool) error {
 	if dynamic {
 		how = "schedule_content (MCP) or ScheduleContent"
 	}
-	return Err("ScheduledAt", fmt.Sprintf("%s %q cannot move to scheduled without a scheduled_at: it would never be published; use %s, which sets the time",
-		typeName, id, how))
+	return fieldErr(problemScheduleNeedsTime, "ScheduledAt", fmt.Sprintf("%s %q cannot move to scheduled without a scheduled_at: it would never be published; use %s, which sets the time",
+		typeName, id, how), problemValues{"type": typeName, "record": id})
 }
 
 // requireTableScheduledTime refuses a raw move of the item id in table into

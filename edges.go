@@ -162,7 +162,7 @@ func (s *ContentEdgeStore) RemoveChild(ctx context.Context, parentID, childID st
 		return err
 	}
 	if n == 0 {
-		return ErrNotFound
+		return problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	return nil
 }
@@ -174,7 +174,7 @@ func (s *ContentEdgeStore) RemoveChild(ctx context.Context, parentID, childID st
 // existing SortOrder. Returns [ErrBadRequest] when orderedChildIDs is empty.
 func (s *ContentEdgeStore) Reorder(ctx context.Context, parentID string, orderedChildIDs []string) error {
 	if len(orderedChildIDs) == 0 {
-		return ErrBadRequest
+		return problem(problemRequestInvalidParam, ErrBadRequest, nil)
 	}
 
 	var caseExpr strings.Builder

@@ -315,11 +315,11 @@ func newLogsHandler(auth AuthFunc, ring *logRing) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok {
-			WriteError(w, r, ErrUnauth)
+			WriteError(w, r, problem(problemAuthUnauthenticated, ErrUnauth, nil))
 			return
 		}
 		if !user.HasRole(Admin) {
-			WriteError(w, r, ErrForbidden)
+			WriteError(w, r, problem(problemRoleInsufficient, ErrForbidden, nil))
 			return
 		}
 
@@ -329,7 +329,7 @@ func newLogsHandler(auth AuthFunc, ring *logRing) http.Handler {
 		hasLevel := false
 		if s := q.Get("level"); s != "" {
 			if err := minLevel.UnmarshalText([]byte(strings.ToUpper(s))); err != nil {
-				WriteError(w, r, ErrBadRequest)
+				WriteError(w, r, problem(problemRequestInvalidParam, ErrBadRequest, nil))
 				return
 			}
 			hasLevel = true
@@ -339,7 +339,7 @@ func newLogsHandler(auth AuthFunc, ring *logRing) http.Handler {
 		if s := q.Get("since"); s != "" {
 			t, err := time.Parse(time.RFC3339, s)
 			if err != nil {
-				WriteError(w, r, ErrBadRequest)
+				WriteError(w, r, problem(problemRequestInvalidParam, ErrBadRequest, nil))
 				return
 			}
 			since = t
@@ -349,7 +349,7 @@ func newLogsHandler(auth AuthFunc, ring *logRing) http.Handler {
 		if s := q.Get("limit"); s != "" {
 			n, err := strconv.Atoi(s)
 			if err != nil || n < 0 {
-				WriteError(w, r, ErrBadRequest)
+				WriteError(w, r, problem(problemRequestInvalidParam, ErrBadRequest, nil))
 				return
 			}
 			limit = n

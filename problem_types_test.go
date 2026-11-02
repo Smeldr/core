@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -36,6 +37,11 @@ func TestProblemTypes_List(t *testing.T) {
 				t.Errorf("%s: value name %q malformed or twice", p.ID, v)
 			}
 			names[v] = true
+		}
+		for _, v := range p.AlwaysValues {
+			if !names[v] {
+				t.Errorf("%s: always-sent value %q is not one of its values", p.ID, v)
+			}
 		}
 		switch {
 		case seen[p.ID]:
@@ -90,6 +96,7 @@ Every refusal and validation error Smeldr core answers with carries a stable **t
 - In Go, ` + "`smeldr.ProblemTypeOf(err)`" + ` returns the id, ` + "`smeldr.ProblemValuesOf(err)`" + ` the values, and ` + "`smeldr.ProblemTypes()`" + ` the list below.
 - **Class** says where a UI shows it (D174): ` + "`refusal`" + ` (a rule says no), ` + "`correction`" + ` (fix the input, at the field), ` + "`conflict`" + ` (the record moved: read it again) or ` + "`failure`" + ` (outside the caller's reach). A UI with no text yet for an id shows its class's shared text.
 - **Values** are the named values a type carries, for a UI to fill its own text: each a string (a record as its address, a number in decimal, a list joined with ", "). A type lists every name its refusals use; one refusal sends those its message states, so a UI's text must read without any one of them. A value never says more than the message does, and never carries an item's title or text. A plain field's own name is in the field entry, not in its values.
+- **Bold** marks a value every refusal of the type sends (` + "`ProblemTypeInfo.AlwaysValues`" + `): a UI's text may rely on it. A test holds the list to what every site writes.
 - An id or a value name is never renamed or reused. A value name may be added to a type. A type that goes out of use is retired: it stays in this list with the version it was retired in, and what replaced it.
 - Audience: ` + "`person`" + ` is met in a UI; ` + "`developer`" + ` means a program called the API wrongly; ` + "`operator`" + ` means a migration or setup command.
 
@@ -107,6 +114,9 @@ Every refusal and validation error Smeldr core answers with carries a stable **t
 		values := make([]string, len(p.Values))
 		for i, v := range p.Values {
 			values[i] = "`" + v + "`"
+			if slices.Contains(p.AlwaysValues, v) {
+				values[i] = "**" + values[i] + "**"
+			}
 		}
 		fmt.Fprintf(&b, "| `%s` | %s | %d | %s | %s | %s | %s | %s |\n", p.ID, p.Class, p.Status, p.Audience, strings.Join(values, ", "), p.Rule, p.Title, retired)
 	}

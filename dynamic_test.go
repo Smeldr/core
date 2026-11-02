@@ -154,7 +154,7 @@ func TestDynamicTypeRepo_GetBySlug_NotFound(t *testing.T) {
 	repo := smeldr.NewDynamicTypeRepo(db, "recipe", recipeSchema())
 
 	_, err := repo.GetBySlug(context.Background(), "nonexistent")
-	if err != smeldr.ErrNotFound {
+	if !errors.Is(err, smeldr.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
@@ -178,7 +178,7 @@ func TestDynamicTypeRepo_GetByID_NotFound(t *testing.T) {
 	repo := smeldr.NewDynamicTypeRepo(db, "recipe", recipeSchema())
 
 	_, err := repo.GetByID(context.Background(), "nonexistent-id")
-	if err != smeldr.ErrNotFound {
+	if !errors.Is(err, smeldr.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
@@ -342,7 +342,7 @@ func TestDynamicTypeRepo_UpdateFields_NotFound(t *testing.T) {
 	repo := smeldr.NewDynamicTypeRepo(db, "recipe", recipeSchema())
 
 	err := repo.UpdateFields(context.Background(), "nonexistent", map[string]any{"Body": "x"})
-	if err != smeldr.ErrNotFound {
+	if !errors.Is(err, smeldr.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
@@ -395,7 +395,7 @@ func TestDynamicTypeRepo_SetStatus_NotFound(t *testing.T) {
 	repo := smeldr.NewDynamicTypeRepo(db, "recipe", recipeSchema())
 
 	err := repo.SetStatus(context.Background(), "nonexistent", smeldr.Published)
-	if err != smeldr.ErrNotFound {
+	if !errors.Is(err, smeldr.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }

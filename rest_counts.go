@@ -62,7 +62,7 @@ type RestCounts struct {
 // [ErrInternal].
 func (a *App) RestCounts(ctx context.Context, typeName, id string) (RestCounts, error) {
 	if typeName == "" || id == "" {
-		return RestCounts{}, ErrBadRequest
+		return RestCounts{}, problem(problemRequestInvalidParam, ErrBadRequest, nil)
 	}
 	if a.cfg.DB == nil {
 		return RestCounts{}, fmt.Errorf("%w: RestCounts needs a database", ErrInternal)
@@ -77,14 +77,14 @@ func (a *App) RestCounts(ctx context.Context, typeName, id string) (RestCounts, 
 	if ok, err := w.ends.readable(typeName, id); err != nil {
 		return RestCounts{}, fmt.Errorf("%w: rest counts of %s %s: %v", ErrInternal, typeName, id, err)
 	} else if !ok {
-		return RestCounts{}, ErrNotFound
+		return RestCounts{}, problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	status, err := w.states.read([]reachabilityNode{anchor})
 	if err != nil {
 		return RestCounts{}, err
 	}
 	if _, ok := status[anchor]; !ok {
-		return RestCounts{}, ErrNotFound
+		return RestCounts{}, problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	var out RestCounts
 	if out.ThisRestsOn, err = w.count(anchor, true); err != nil {

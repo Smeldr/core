@@ -308,7 +308,7 @@ func (m *Module[T]) renderListHTML(w http.ResponseWriter, r *http.Request, ctx C
 	m.tplMu.RUnlock()
 
 	if tpl == nil {
-		WriteError(w, r, ErrNotAcceptable)
+		WriteError(w, r, problem(problemContentNotAcceptable, ErrNotAcceptable, nil))
 		return
 	}
 
@@ -356,7 +356,7 @@ func (m *Module[T]) renderShowHTML(w http.ResponseWriter, r *http.Request, ctx C
 	m.tplMu.RUnlock()
 
 	if tpl == nil {
-		WriteError(w, r, ErrNotAcceptable)
+		WriteError(w, r, problem(problemContentNotAcceptable, ErrNotAcceptable, nil))
 		return
 	}
 

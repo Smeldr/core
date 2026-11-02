@@ -305,7 +305,7 @@ func QueryOne[T any](ctx context.Context, db DB, query string, args ...any) (T, 
 	}
 	if len(rows) == 0 {
 		var zero T
-		return zero, ErrNotFound
+		return zero, errItemNotFound
 	}
 	return rows[0], nil
 }
@@ -396,6 +396,10 @@ type MemoryRepo[T any] struct {
 	order []string // ID insertion order
 }
 
+// errItemNotFound is a repository's answer for an item it does not hold,
+// built once: a miss is common and carries no values.
+var errItemNotFound = problem(problemItemNotFound, ErrNotFound, nil)
+
 // NewMemoryRepo returns an empty MemoryRepo[T] ready for use.
 func NewMemoryRepo[T any]() *MemoryRepo[T] {
 	return &MemoryRepo[T]{items: make(map[string]T)}
@@ -444,7 +448,7 @@ func (r *MemoryRepo[T]) FindByID(_ context.Context, id string) (T, error) {
 	item, ok := r.items[id]
 	if !ok {
 		var zero T
-		return zero, ErrNotFound
+		return zero, errItemNotFound
 	}
 	return item, nil
 }
@@ -466,7 +470,7 @@ func (r *MemoryRepo[T]) FindByColumn(_ context.Context, column, value string) (T
 			}
 		}
 	}
-	return zero, ErrNotFound
+	return zero, errItemNotFound
 }
 
 // fieldNameForColumn resolves column to typ's own Go field name via its db
@@ -491,7 +495,7 @@ func (r *MemoryRepo[T]) FindBySlug(ctx context.Context, slug string) (T, error) 
 	items, _ := r.findAllBySlug(ctx, slug)
 	if len(items) == 0 {
 		var zero T
-		return zero, ErrNotFound
+		return zero, errItemNotFound
 	}
 	return items[0], nil
 }
@@ -610,7 +614,7 @@ func (r *MemoryRepo[T]) Delete(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.items[id]; !ok {
-		return ErrNotFound
+		return errItemNotFound
 	}
 	delete(r.items, id)
 	for i, oid := range r.order {
@@ -1059,7 +1063,7 @@ func (r *SQLRepo[T]) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	if n == 0 {
-		return ErrNotFound
+		return errItemNotFound
 	}
 	return nil
 }

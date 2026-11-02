@@ -63,16 +63,17 @@ type ProvenancePage struct {
 // history with Total 0, the same answer as a missing item.
 func (a *App) ItemProvenance(ctx context.Context, typeName, itemID string, audience ProvenanceAudience, limit, offset int) (ProvenancePage, error) {
 	if audience != ProvenanceMembers && audience != ProvenanceGated {
-		return ProvenancePage{}, Err("audience", `must be "members" or "gated"`)
+		return ProvenancePage{}, fieldErr(problemFieldNotInList, "audience", `must be "members" or "gated"`, problemValues{"allowed": "members, gated"})
 	}
 	if offset < 0 {
-		return ProvenancePage{}, Err("offset", "must not be negative")
+		return ProvenancePage{}, fieldErr(problemFieldOutOfRange, "offset", "must not be negative", problemValues{"min": "0"})
 	}
 	if limit < 0 {
-		return ProvenancePage{}, Err("limit", "must not be negative")
+		return ProvenancePage{}, fieldErr(problemFieldOutOfRange, "limit", "must not be negative", problemValues{"min": "0"})
 	}
 	if a.provenanceStore == nil {
-		return ProvenancePage{}, fmt.Errorf("%w: provenance is not enabled on this instance", ErrNotFound)
+		return ProvenancePage{}, problem(problemFeatureNotEnabled, fmt.Errorf("%w: provenance is not enabled on this instance", ErrNotFound),
+			problemValues{"feature": "provenance"})
 	}
 	if limit == 0 {
 		limit = defaultProvenanceLimit

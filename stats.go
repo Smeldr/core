@@ -139,11 +139,11 @@ func newStatsHandler(auth AuthFunc, app *App) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok {
-			WriteError(w, r, ErrUnauth)
+			WriteError(w, r, problem(problemAuthUnauthenticated, ErrUnauth, nil))
 			return
 		}
 		if !user.HasRole(Admin) {
-			WriteError(w, r, ErrForbidden)
+			WriteError(w, r, problem(problemRoleInsufficient, ErrForbidden, nil))
 			return
 		}
 

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -185,13 +186,14 @@ func (p *searchPlan) limit(q SearchQuery) int {
 func (a *App) planSearch(ctx Context, q SearchQuery) (*searchPlan, error) {
 	text := strings.TrimSpace(q.Text)
 	if text == "" && len(q.Types) == 0 && len(q.States) == 0 && q.Place == "" {
-		return nil, fmt.Errorf("%w: search needs text or at least one filter (types, states, place)", ErrBadRequest)
+		return nil, problem(problemSearchQueryInvalid, fmt.Errorf("%w: search needs text or at least one filter (types, states, place)", ErrBadRequest), nil)
 	}
 	if n := utf8.RuneCountInString(text); text != "" && (n < SearchTextMinLength || n > SearchTextMaxLength) {
-		return nil, fmt.Errorf("%w: search text must be %d to %d characters, got %d", ErrBadRequest, SearchTextMinLength, SearchTextMaxLength, n)
+		return nil, problem(problemSearchQueryInvalid, fmt.Errorf("%w: search text must be %d to %d characters, got %d", ErrBadRequest, SearchTextMinLength, SearchTextMaxLength, n),
+			problemValues{"min": strconv.Itoa(SearchTextMinLength), "max": strconv.Itoa(SearchTextMaxLength), "length": strconv.Itoa(n)})
 	}
 	if q.Limit < 0 || q.Offset < 0 {
-		return nil, fmt.Errorf("%w: search limit and offset must not be negative", ErrBadRequest)
+		return nil, problem(problemSearchQueryInvalid, fmt.Errorf("%w: search limit and offset must not be negative", ErrBadRequest), nil)
 	}
 	scope, err := scopeFor(ctx, a.governance)
 	if err != nil {
@@ -245,7 +247,8 @@ func (a *App) searchTargets(types []string) ([]searchableModule, []*TypeDescript
 		}
 		desc := a.typeRegistry.Lookup(name)
 		if desc == nil || desc.Kind != "content" {
-			return nil, nil, fmt.Errorf("%w: %q is not a record type this instance can search", ErrBadRequest, name)
+			return nil, nil, problem(problemSearchQueryInvalid, fmt.Errorf("%w: %q is not a record type this instance can search", ErrBadRequest, name),
+				problemValues{"type": name})
 		}
 		dynamic = append(dynamic, desc)
 	}
@@ -310,7 +313,7 @@ func (a *App) resolvePlace(ctx context.Context, ident string) (string, error) {
 			return "", err
 		}
 	}
-	return "", fmt.Errorf("%w: no Domain or Area %q", ErrNotFound, ident)
+	return "", problem(problemPlaceNotFound, fmt.Errorf("%w: no Domain or Area %q", ErrNotFound, ident), problemValues{"place": ident})
 }
 
 // isNotFound reports whether err is [ErrNotFound].

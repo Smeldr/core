@@ -87,7 +87,7 @@ func identCandidates(typeName, ident string) [][2]string {
 func legacyLookupID(ctx context.Context, db DB, typeName, table, ident string, visible func(id string) bool) (string, error) {
 	col, ok := legacyHumanIDColumns[typeName]
 	if !ok || db == nil || strings.TrimSpace(ident) == "" {
-		return "", ErrNotFound
+		return "", errItemNotFound
 	}
 	where := ` WHERE ` + quoteIdent(col) + ` = $1 OR external_ref = $1`
 	limit := ` LIMIT 2`
@@ -115,7 +115,7 @@ func legacyLookupID(ctx context.Context, db DB, typeName, table, ident string, v
 	}
 	switch len(ids) {
 	case 0:
-		return "", ErrNotFound
+		return "", errItemNotFound
 	case 1:
 		noteDeprecatedUse(ctx, typeName, "a lookup by a legacy value")
 		return ids[0], nil
@@ -126,7 +126,8 @@ func legacyLookupID(ctx context.Context, db DB, typeName, table, ident string, v
 			return "", err
 		}
 	}
-	return "", Err("id", fmt.Sprintf("%q matches %d %s records by their old number: name one by its address", ident, n, typeName))
+	return "", fieldErr(problemIdentAmbiguous, "id", fmt.Sprintf("%q matches %d %s records by their old number: name one by its address", ident, n, typeName),
+		problemValues{"value": ident, "count": strconv.Itoa(n), "type": typeName})
 }
 
 // legacyHumanIDField is implemented by the four core types with a legacy

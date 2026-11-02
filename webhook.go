@@ -611,21 +611,21 @@ func (a *App) NotifySignalCreated(ctx context.Context, id, slug string) {
 func ValidateWebhookURL(rawURL string) error {
 	u, err := url.ParseRequestURI(rawURL)
 	if err != nil {
-		return Err("url", "invalid URL: "+err.Error())
+		return fieldErr(problemFieldInvalidFormat, "url", "invalid URL: "+err.Error(), nil)
 	}
 	if u.Scheme != "https" {
-		return Err("url", "must use HTTPS")
+		return fieldErr(problemWebhookUrlNotAllowed, "url", "must use HTTPS", nil)
 	}
 	host := u.Hostname()
 	if host == "" {
-		return Err("url", "URL has no host")
+		return fieldErr(problemFieldInvalidFormat, "url", "URL has no host", nil)
 	}
 	if host == "localhost" || strings.HasSuffix(host, ".local") {
-		return Err("url", "must not target localhost or .local hostnames")
+		return fieldErr(problemWebhookUrlNotAllowed, "url", "must not target localhost or .local hostnames", nil)
 	}
 	addrs, err := net.LookupHost(host)
 	if err != nil {
-		return Err("url", "host cannot be resolved: "+err.Error())
+		return fieldErr(problemWebhookUrlNotAllowed, "url", "host cannot be resolved: "+err.Error(), nil)
 	}
 	for _, addr := range addrs {
 		ip := net.ParseIP(addr)
@@ -633,7 +633,7 @@ func ValidateWebhookURL(rawURL string) error {
 			continue
 		}
 		if isPrivateIP(ip) {
-			return Err("url", "must not target a private IP address")
+			return fieldErr(problemWebhookUrlNotAllowed, "url", "must not target a private IP address", nil)
 		}
 	}
 	return nil

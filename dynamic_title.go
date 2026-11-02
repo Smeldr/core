@@ -88,7 +88,13 @@ func warningsCheck(ws []CreateWarning, cutover time.Time) ([]CreateWarning, erro
 		return nil, nil
 	}
 	if !cutover.IsZero() && time.Now().After(cutover) {
-		return nil, Err(ws[0].Field, ws[0].Message)
+		switch ws[0].Code {
+		case "deprecated_signal_type":
+			return nil, fieldErr(problemSignalHistoryTypeRefused, ws[0].Field, ws[0].Message, nil)
+		case "message_too_long":
+			return nil, fieldErr(problemSignalMessageTooLong, ws[0].Field, ws[0].Message, nil)
+		}
+		return nil, fieldErr(problemTitleCutover, ws[0].Field, ws[0].Message, nil)
 	}
 	return ws, nil
 }

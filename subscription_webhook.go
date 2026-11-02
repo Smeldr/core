@@ -184,7 +184,7 @@ type WebhookMigrationChange struct {
 // without the endpoints table there is nothing to migrate.
 func MigrateWebhookSubscriptions(ctx context.Context, db DB, opts WebhookMigrationOptions) (*WebhookMigrationReport, error) {
 	if db == nil {
-		return nil, fmt.Errorf("%w: MigrateWebhookSubscriptions needs a database", ErrBadRequest)
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: MigrateWebhookSubscriptions needs a database", ErrBadRequest), nil)
 	}
 	rep := &WebhookMigrationReport{Applied: opts.Apply, Created: []WebhookMigrationChange{}}
 	if ok, err := tableExists(ctx, db, "smeldr_webhook_endpoints"); err != nil {

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -622,7 +623,7 @@ const maxActReason = 1000
 func actReason(reason string) (string, error) {
 	reason = strings.TrimSpace(reason)
 	if utf8.RuneCountInString(reason) > maxActReason {
-		return "", Err("reason", fmt.Sprintf("must be at most %d characters", maxActReason))
+		return "", fieldErr(problemFieldTooLong, "reason", fmt.Sprintf("must be at most %d characters", maxActReason), problemValues{"limit": strconv.Itoa(maxActReason)})
 	}
 	return reason, nil
 }

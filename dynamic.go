@@ -296,7 +296,7 @@ func (r *DynamicTypeRepo) resolveFor(ctx context.Context, ident string, visible 
 	}
 	node, err := r.GetByID(ctx, ident)
 	if err == nil && !ok(node) {
-		return nil, ErrNotFound
+		return nil, problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	return node, err
 }
@@ -314,7 +314,7 @@ func (r *DynamicTypeRepo) GetBySlug(ctx context.Context, slug string) (*DynamicN
 		return nil, err
 	}
 	if len(rows) == 0 {
-		return nil, ErrNotFound
+		return nil, problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	return rows[0], nil
 }
@@ -361,21 +361,22 @@ func (r *DynamicTypeRepo) publishedSlugConflict(ctx context.Context, node *Dynam
 // refused. The change is recorded like any field update.
 func (r *DynamicTypeRepo) SetSlugVia(ctx context.Context, surface, id, slug string) error {
 	if !r.webContent() {
-		return fmt.Errorf("%w: %s is a record type; its address is its identity and its slug does not change", ErrBadRequest, r.typeName)
+		return problem(problemSlugRecordTypeFixed, fmt.Errorf("%w: %s is a record type; its address is its identity and its slug does not change", ErrBadRequest, r.typeName),
+			problemValues{"type": r.typeName})
 	}
 	if slug == "" || GenerateSlug(slug) != slug {
-		return Err("slug", "must be a slug: lowercase letters, digits and hyphens")
+		return fieldErr(problemFieldInvalidFormat, "slug", "must be a slug: lowercase letters, digits and hyphens", nil)
 	}
 	node, err := r.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
 	if node.Status == Published {
-		return fmt.Errorf("%w: a published item keeps its URL; its slug does not change", ErrConflict)
+		return problem(problemSlugPublishedImmutable, fmt.Errorf("%w: a published item keeps its URL; its slug does not change", ErrConflict), nil)
 	}
 	if isStateLocked(ctx, r.db, r.typeName, string(node.Status)) {
-		return fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
-			ErrConflict, r.typeName, id, node.Status)
+		return problem(problemItemLockedState, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
+			ErrConflict, r.typeName, id, node.Status), problemValues{"type": r.typeName, "record": id, "state": string(node.Status)})
 	}
 	actorID, actorKind := actorFromContext(ctx)
 	now := time.Now().UTC()
@@ -412,7 +413,7 @@ func (r *DynamicTypeRepo) GetByID(ctx context.Context, id string) (*DynamicNode,
 		return nil, err
 	}
 	if len(rows) == 0 {
-		return nil, ErrNotFound
+		return nil, problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	return rows[0], nil
 }
@@ -569,8 +570,8 @@ func (r *DynamicTypeRepo) UpdateFieldsWithWarnings(ctx context.Context, surface,
 		return nil, err
 	}
 	if isStateLocked(ctx, r.db, r.typeName, string(node.Status)) {
-		return nil, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
-			ErrConflict, r.typeName, id, node.Status)
+		return nil, problem(problemItemLockedState, fmt.Errorf("%w: %s %q is locked in state %q — its content may not be modified; create a new item that supersedes it instead",
+			ErrConflict, r.typeName, id, node.Status), problemValues{"type": r.typeName, "record": id, "state": string(node.Status)})
 	}
 	existing := make(map[string]any)
 	if len(node.Fields) > 0 {
@@ -1184,7 +1185,7 @@ func insertDynamicRoutes(ctx context.Context, db DB, typeName, prefix string) {
 func serveDynamicList(w http.ResponseWriter, r *http.Request, a *App, typeName string) {
 	desc := a.typeRegistry.Lookup(typeName)
 	if desc == nil {
-		WriteError(w, r, ErrNotFound)
+		WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
 		return
 	}
 	opts := listOptsFromRequest(r)
@@ -1215,7 +1216,7 @@ func serveDynamicItem(w http.ResponseWriter, r *http.Request, a *App, typeName, 
 		// Same rule as a compiled module's notFound: a redirect entry for the
 		// path wins, and the answer never depends on a hidden item.
 		if !a.redirectStore.serveIfMatched(w, r) {
-			WriteError(w, r, ErrNotFound)
+			WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
 		}
 		return
 	}
@@ -1266,7 +1267,7 @@ func newDefineTypeHandler(a *App, auth AuthFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok || !HasRole(user.Roles, Admin) {
-			WriteError(w, r, ErrForbidden)
+			WriteError(w, r, problem(problemRoleInsufficient, ErrForbidden, nil))
 			return
 		}
 		var req struct {
@@ -1276,7 +1277,7 @@ func newDefineTypeHandler(a *App, auth AuthFunc) http.Handler {
 			Fields    json.RawMessage `json:"fields"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteError(w, r, ErrBadRequest)
+			WriteError(w, r, problem(problemRequestMalformedBody, ErrBadRequest, nil))
 			return
 		}
 		schema := &ContentTypeSchema{
@@ -1288,7 +1289,7 @@ func newDefineTypeHandler(a *App, auth AuthFunc) http.Handler {
 		desc, err := a.DefineContentType(r.Context(), schema)
 		if err != nil {
 			slog.WarnContext(r.Context(), "smeldr: define_content_type", "err", err)
-			WriteError(w, r, ErrBadRequest)
+			WriteError(w, r, problem(problemContentTypeDefineFailed, ErrBadRequest, nil))
 			return
 		}
 		writeDynamicJSON(w, map[string]any{
@@ -1312,7 +1313,7 @@ func newAdminListHandler(a *App, auth AuthFunc) http.Handler {
 		}
 		desc := a.typeRegistry.Lookup(typeName)
 		if desc == nil || desc.Kind != "content" {
-			WriteError(w, r, ErrNotFound)
+			WriteError(w, r, problem(problemContentTypeNotFound, ErrNotFound, nil))
 			return
 		}
 		repo, err := a.DynamicContentRepo(desc.Name)
@@ -1361,7 +1362,7 @@ func newAdminGetHandler(a *App, auth AuthFunc) http.Handler {
 		}
 		desc := a.typeRegistry.Lookup(typeName)
 		if desc == nil || desc.Kind != "content" {
-			WriteError(w, r, ErrNotFound)
+			WriteError(w, r, problem(problemContentTypeNotFound, ErrNotFound, nil))
 			return
 		}
 		repo, err := a.DynamicContentRepo(desc.Name)
@@ -1372,7 +1373,7 @@ func newAdminGetHandler(a *App, auth AuthFunc) http.Handler {
 		id := r.PathValue("id")
 		node, err := repo.GetByID(r.Context(), id)
 		if err != nil || !scope.Readable(desc.Name, node.ID) {
-			WriteError(w, r, ErrNotFound) // hidden and missing answer alike
+			WriteError(w, r, problem(problemItemNotFound, ErrNotFound, nil)) // hidden and missing answer alike
 			return
 		}
 		m := nodeToMap(node)
@@ -1386,13 +1387,13 @@ func newCreateContentHandler(a *App, auth AuthFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok || !HasRole(user.Roles, Editor) {
-			WriteError(w, r, ErrForbidden)
+			WriteError(w, r, problem(problemRoleInsufficient, ErrForbidden, nil))
 			return
 		}
 		typeName := r.PathValue("type")
 		desc := a.typeRegistry.Lookup(typeName)
 		if desc == nil || desc.Kind != "content" {
-			WriteError(w, r, ErrNotFound)
+			WriteError(w, r, problem(problemContentTypeNotFound, ErrNotFound, nil))
 			return
 		}
 		repo, err := a.DynamicContentRepo(desc.Name)
@@ -1402,7 +1403,7 @@ func newCreateContentHandler(a *App, auth AuthFunc) http.Handler {
 		}
 		var fields map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
-			WriteError(w, r, ErrBadRequest)
+			WriteError(w, r, problem(problemRequestMalformedBody, ErrBadRequest, nil))
 			return
 		}
 		// The caller authenticated above: carry them in a Context so the
@@ -1428,13 +1429,13 @@ func newUpdateContentHandler(a *App, auth AuthFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok || !HasRole(user.Roles, Editor) {
-			WriteError(w, r, ErrForbidden)
+			WriteError(w, r, problem(problemRoleInsufficient, ErrForbidden, nil))
 			return
 		}
 		typeName := r.PathValue("type")
 		desc := a.typeRegistry.Lookup(typeName)
 		if desc == nil || desc.Kind != "content" {
-			WriteError(w, r, ErrNotFound)
+			WriteError(w, r, problem(problemContentTypeNotFound, ErrNotFound, nil))
 			return
 		}
 		repo, err := a.DynamicContentRepo(desc.Name)
@@ -1445,7 +1446,7 @@ func newUpdateContentHandler(a *App, auth AuthFunc) http.Handler {
 		id := r.PathValue("id")
 		var patch map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			WriteError(w, r, ErrBadRequest)
+			WriteError(w, r, problem(problemRequestMalformedBody, ErrBadRequest, nil))
 			return
 		}
 		r = r.WithContext(context.WithValue(r.Context(), userContextKey, user))
@@ -1473,13 +1474,13 @@ func newSetStatusHandler(a *App, auth AuthFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok || !HasRole(user.Roles, Editor) {
-			WriteError(w, r, ErrForbidden)
+			WriteError(w, r, problem(problemRoleInsufficient, ErrForbidden, nil))
 			return
 		}
 		typeName := r.PathValue("type")
 		desc := a.typeRegistry.Lookup(typeName)
 		if desc == nil || desc.Kind != "content" {
-			WriteError(w, r, ErrNotFound)
+			WriteError(w, r, problem(problemContentTypeNotFound, ErrNotFound, nil))
 			return
 		}
 		repo, err := a.DynamicContentRepo(desc.Name)
@@ -1492,11 +1493,11 @@ func newSetStatusHandler(a *App, auth AuthFunc) http.Handler {
 			Status string `json:"status"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, r, ErrBadRequest)
+			WriteError(w, r, problem(problemRequestMalformedBody, ErrBadRequest, nil))
 			return
 		}
 		if body.Status == "" {
-			WriteError(w, r, ErrBadRequest)
+			WriteError(w, r, problem(problemTransitionStatusRequired, ErrBadRequest, nil))
 			return
 		}
 		st := Status(body.Status)
@@ -1513,7 +1514,7 @@ func newSetStatusHandler(a *App, auth AuthFunc) http.Handler {
 		if err := repo.setStatusVia(ctx, id, st, "", surfaceHTTP); err != nil {
 			switch {
 			case errors.Is(err, ErrNotFound):
-				WriteError(w, r, ErrNotFound)
+				WriteError(w, r, problem(problemItemNotFound, ErrNotFound, nil))
 			case errors.Is(err, ErrConflict), errors.Is(err, ErrForbidden), errors.Is(err, ErrBadRequest), errors.As(err, new(*ValidationError)):
 				WriteError(w, r, err)
 			default:
@@ -1673,19 +1674,19 @@ func nodeToMap(node *DynamicNode) map[string]any {
 func (a *App) adminReadScope(ctx context.Context, user User, authenticated bool, typeName string) (*ReadScope, error) {
 	if a.governance == nil {
 		if !authenticated || !HasRole(user.Roles, Editor) {
-			return nil, ErrForbidden
+			return nil, problem(problemRoleInsufficient, ErrForbidden, nil)
 		}
 		return AllReadScope(), nil
 	}
 	if !authenticated {
-		return nil, ErrForbidden
+		return nil, problem(problemRoleInsufficient, ErrForbidden, nil)
 	}
 	s, err := LoadReadScope(ctx, a.governance, user)
 	if err != nil {
 		return nil, err
 	}
 	if !s.TypeReadable(typeName) {
-		return nil, ErrForbidden
+		return nil, problem(problemScopeTypeNotReadable, ErrForbidden, nil)
 	}
 	return s, nil
 }

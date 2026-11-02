@@ -39,7 +39,7 @@ func (a *App) ReachabilityHandler(rs *RelationStore) {
 	a.mux.Handle("GET /reachability/{type}/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok {
-			WriteError(w, r, ErrUnauth)
+			WriteError(w, r, problem(problemAuthUnauthenticated, ErrUnauth, nil))
 			return
 		}
 		anchorType := r.PathValue("type")
@@ -49,7 +49,7 @@ func (a *App) ReachabilityHandler(rs *RelationStore) {
 		ctx := r.Context()
 		if a.governance == nil {
 			if !user.HasRole(Author) {
-				WriteError(w, r, ErrForbidden)
+				WriteError(w, r, problem(problemRoleInsufficient, ErrForbidden, nil))
 				return
 			}
 			ctx = TrustedRead(ctx)
@@ -60,7 +60,7 @@ func (a *App) ReachabilityHandler(rs *RelationStore) {
 				return
 			}
 			if !scope.TypeReadable(anchorType) {
-				WriteError(w, r, ErrForbidden)
+				WriteError(w, r, problem(problemScopeTypeNotReadable, ErrForbidden, nil))
 				return
 			}
 			ctx = WithReadScope(ctx, scope)
@@ -75,7 +75,7 @@ func (a *App) ReachabilityHandler(rs *RelationStore) {
 		if d := r.URL.Query().Get("depth"); d != "" {
 			v, err := strconv.Atoi(d)
 			if err != nil {
-				WriteError(w, r, ErrBadRequest)
+				WriteError(w, r, problem(problemRequestInvalidParam, ErrBadRequest, nil))
 				return
 			}
 			depth = v

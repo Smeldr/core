@@ -182,7 +182,8 @@ func (a *App) compileForConnection(ctx context.Context, owner, ident string) (*c
 			return nil, nil, err
 		}
 		if s.Delivery != DeliveryStream {
-			return nil, nil, fmt.Errorf("%w: subscription %s delivers to a webhook, not the stream", ErrBadRequest, s.Address)
+			return nil, nil, problem(problemSubscriptionWebhookNotStream, fmt.Errorf("%w: subscription %s delivers to a webhook, not the stream", ErrBadRequest, s.Address),
+				problemValues{"record": addressOrID(s.Address, s.ID)})
 		}
 		named, owner = s, s.Owner
 		subs = []Subscription{*s}

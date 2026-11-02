@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -144,8 +145,8 @@ func registerCoverageRule(app *App, db DB) {
 		if isUpdate && coverageRuleChanged(old, r) {
 			// D146 (T910): changing what a rule covers loosens or moves its
 			// Area's gate: ratify over the rule's Area.
-			if err := requireOperationOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "CoverageRule", ID: old.ID},
-				fmt.Sprintf("changing %s's pattern, repository or kind", ruleLabel(old)), old.Area, "D146"); err != nil {
+			if err := requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "CoverageRule", ID: old.ID},
+				fmt.Sprintf("changing %s's pattern, repository or kind", ruleLabel(old)), "change_coverage_rule", old.Area, "D146"); err != nil {
 				return err
 			}
 			// A changed rule goes back to not checked (T901): its count and
@@ -164,8 +165,8 @@ func registerCoverageRule(app *App, db DB) {
 		if err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_areas WHERE address = $1 OR id = $1`, r.Area).Scan(&areaID); err != nil {
 			return fmt.Errorf("%w: the Area %s of the new rule cannot be read: %s", ErrInternal, r.Area, err)
 		}
-		return requireOperationOver(ctx, app.governance, OperationApproveChange, AuthTarget{TypeName: "Area", ID: areaID},
-			"adding a coverage rule to "+r.Area, r.Area, "D146")
+		return requireActOver(ctx, app.governance, OperationApproveChange, AuthTarget{TypeName: "Area", ID: areaID},
+			"adding a coverage rule to "+r.Area, "add_coverage_rule", r.Area, "D146")
 	}
 	afterRefs := refs.after
 	refs.after = func(ctx Context, db DB, rs *RelationStore, existing, item any) {
@@ -183,8 +184,8 @@ func registerCoverageRule(app *App, db DB) {
 		At("/coverage-rules"), Repo(NewSQLRepo[*CoverageRule](db, Table("smeldr_coverage_rules"))), MCP(MCPRead, MCPWrite), withAddress(),
 		refs,
 		On[*CoverageRule](BeforeDelete, func(ctx Context, r *CoverageRule) error {
-			return requireOperationOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "CoverageRule", ID: r.ID},
-				"deleting "+ruleLabel(r), r.Area, "D146")
+			return requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "CoverageRule", ID: r.ID},
+				"deleting "+ruleLabel(r), "delete_coverage_rule", r.Area, "D146")
 		}),
 	))
 }
@@ -207,7 +208,8 @@ func normalizeCoverageRule(r *CoverageRule) error {
 		r.Kind = CoverageKindPath
 	}
 	if r.Kind != CoverageKindPath {
-		return Err("kind", fmt.Sprintf("must be %q: the only kind of coverage rule so far", CoverageKindPath))
+		return fieldErr(problemFieldNotInList, "kind", fmt.Sprintf("must be %q: the only kind of coverage rule so far", CoverageKindPath),
+			problemValues{"value": r.Kind, "allowed": CoverageKindPath})
 	}
 	repo, err := normalizeRepository(r.Repository)
 	if err != nil {
@@ -225,7 +227,7 @@ func normalizeCoverageRule(r *CoverageRule) error {
 func normalizeRepository(repo string) (string, error) {
 	repo = strings.TrimSpace(repo)
 	if !coverageRepositoryRe.MatchString(repo) {
-		return "", Err("repository", fmt.Sprintf("%q is not owner/name, for example acme/billing", repo))
+		return "", fieldErr(problemFieldInvalidFormat, "repository", fmt.Sprintf("%q is not owner/name, for example acme/billing", repo), problemValues{"value": repo})
 	}
 	return strings.ToLower(repo), nil
 }
@@ -243,24 +245,24 @@ func checkCoveragePattern(p string) error {
 func checkRepositoryPath(field, noun, example, p string, wildcards bool) error {
 	switch {
 	case p == "":
-		return Err(field, "is required: a path in the repository, for example "+example)
+		return fieldErr(problemFieldRequired, field, "is required: a path in the repository, for example "+example, nil)
 	case len(p) > coveragePatternMaxLen:
-		return Err(field, fmt.Sprintf("is longer than %d characters", coveragePatternMaxLen))
+		return fieldErr(problemFieldTooLong, field, fmt.Sprintf("is longer than %d characters", coveragePatternMaxLen), problemValues{"limit": strconv.Itoa(coveragePatternMaxLen)})
 	case strings.HasPrefix(p, "/"):
-		return Err(field, "starts with /: write it relative to the repository root, for example "+example)
+		return fieldErr(problemFieldInvalidFormat, field, "starts with /: write it relative to the repository root, for example "+example, problemValues{"value": p})
 	case strings.Contains(p, `\`):
-		return Err(field, `contains a backslash: separate segments with /`)
+		return fieldErr(problemFieldInvalidFormat, field, `contains a backslash: separate segments with /`, problemValues{"value": p})
 	case !wildcards && strings.ContainsAny(p, "*?"):
-		return Err(field, "contains * or ?: name one file, for example "+example)
+		return fieldErr(problemFieldInvalidFormat, field, "contains * or ?: name one file, for example "+example, problemValues{"value": p})
 	}
 	for _, seg := range strings.Split(p, "/") {
 		switch {
 		case seg == "":
-			return Err(field, "has an empty segment (//, or a trailing /)")
+			return fieldErr(problemFieldInvalidFormat, field, "has an empty segment (//, or a trailing /)", problemValues{"value": p})
 		case seg == "..":
-			return Err(field, "has a .. segment: "+noun+" stays inside the repository")
+			return fieldErr(problemFieldInvalidFormat, field, "has a .. segment: "+noun+" stays inside the repository", problemValues{"value": p})
 		case wildcards && seg != "**" && strings.Contains(seg, "**"):
-			return Err(field, "has ** inside a segment: ** stands alone between slashes")
+			return fieldErr(problemFieldInvalidFormat, field, "has ** inside a segment: ** stands alone between slashes", problemValues{"value": p})
 		}
 	}
 	return nil
@@ -516,7 +518,9 @@ func (a *App) DecisionsForPaths(ctx context.Context, q DecisionsForPathsQuery) (
 		return DecisionsForPathsResult{}, err
 	}
 	if len(q.Paths) > DecisionsForPathsMaxPaths {
-		return DecisionsForPathsResult{}, fmt.Errorf("%w: at most %d paths per call (GitHub's cap on a pull request); split the list, the results of separate calls add up", ErrBadRequest, DecisionsForPathsMaxPaths)
+		return DecisionsForPathsResult{}, problem(problemLimitPathsPerCall,
+			fmt.Errorf("%w: at most %d paths per call (GitHub's cap on a pull request); split the list, the results of separate calls add up", ErrBadRequest, DecisionsForPathsMaxPaths),
+			problemValues{"limit": strconv.Itoa(DecisionsForPathsMaxPaths)})
 	}
 	if a.cfg.DB == nil {
 		return DecisionsForPathsResult{}, fmt.Errorf("%w: DecisionsForPaths needs a database", ErrInternal)
@@ -821,7 +825,9 @@ func (a *App) CheckCoverage(ctx context.Context, q CheckCoverageQuery) (CheckCov
 		return CheckCoverageResult{}, err
 	}
 	if len(q.Paths) > CheckCoverageMaxPaths {
-		return CheckCoverageResult{}, fmt.Errorf("%w: at most %d paths (the size where GitHub's tree API truncates a repository's file list)", ErrBadRequest, CheckCoverageMaxPaths)
+		return CheckCoverageResult{}, problem(problemLimitPathsPerCall,
+			fmt.Errorf("%w: at most %d paths (the size where GitHub's tree API truncates a repository's file list)", ErrBadRequest, CheckCoverageMaxPaths),
+			problemValues{"limit": strconv.Itoa(CheckCoverageMaxPaths)})
 	}
 	if a.cfg.DB == nil {
 		return CheckCoverageResult{}, fmt.Errorf("%w: CheckCoverage needs a database", ErrInternal)
