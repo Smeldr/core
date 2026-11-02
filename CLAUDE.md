@@ -938,8 +938,7 @@ workflow", step 4), and every commit waits for the architect's approval of it.
 
 # Smeldr Agent Protocol
 
-<!-- common-template-version: 2026-10-16e -->
-<!-- source: smeldr/architect/AGENT_PROTOCOL.md (canonical) -->
+<!-- common-template-version: 2026-11-02a -->
 
 **This file is the canonical common template of D77.** Every role (core, site, cloud,
 devops, brand, orch) carries an embedded copy of it at the end of its own `CLAUDE.md`;
@@ -1477,9 +1476,26 @@ before starting, the Task's own scope substituting for a `task_plan` record, is 
 For every other case:
 
 1. **Plan.** `create_content(type_name="task_plan", fields={task_ref, band, body,
-   revision: 1, summary})`: the full implementation plan, including open questions, goes in
+   revision: 1, summary, repository, paths})`: the full implementation plan, including open questions, goes in
    `body` (free-form markdown, same shape as the old file); `summary` is the plan in a few
    lines, at most 300 characters. Do not write any code yet.
+   **Declare where the work lands (T1015, live on process.smeldr.dev since core v1.186.0,
+   2026-11-02):** `repository` is the one repository the commit goes to (`owner/name`, for
+   example `Smeldr/core`), and `paths` is the list of files or patterns the commit will touch,
+   in the coverage-rule language (`*` within one path segment, `?` one character, `**` any
+   number of segments; for example `["identity*.go", "pgx/**", "docs/REFERENCE.md"]`). When
+   the plan moves to `submitted` and again to `approved`, Smeldr records which Areas those
+   paths fall in and which Decisions in force apply, and shows them in the record's
+   `plan_time` (read it with `get_content`). Read it before you implement: a Decision listed
+   there binds the work. A plan names one repository. When one Task changes several (a core
+   feature with its mcp and cli parts), write one plan per repository with the same
+   `task_ref`, and each one gets its own review and its own record. Work
+   that ends in no commit (review, research, a deploy with no code change) sets
+   `no_commit: true` and declares neither field. A plan without them gets a
+   `plan_paths_missing` warning, and is refused once the instance sets its cutover date
+   (architect announces it in this protocol a week before). Keep `paths` as narrow as the
+   plan really is. If the work grows beyond the declared paths, revise the plan, and do not
+   commit outside them.
    Leave the record in `draft` while composing; edit freely via `update_content` before
    submitting.
 2. **`transition_item` the `task_plan` to `submitted`, and the Task to `plan-reviewing`.**
@@ -1754,6 +1770,33 @@ T274; the instance runs core v1.158.0 since the same morning).
   address of its type got a new one, and the old value is kept in `external_ref`.
   Examples: cloud's C26 to C51 are D118 to D135, and the two former A455 Amendments are
   A517 (cloud) and A518 (core). Read by the new address.
+
+---
+
+## Name the rev you read on governance writes (T1010)
+
+Live on process.smeldr.dev since core v1.186.0 (2026-11-02). A governance write names the
+`rev` of the record you read before you decided, so a change made by someone else in
+between is caught instead of overwritten. The writes:
+- `update_decision`, `update_amendment`, `update_organization`, `update_domain`,
+  `update_area` and `update_coverage_rule`;
+- `transition_item` on those six types, ratify and supersede included;
+- `assert_relation` when it re-asserts a live edge of a governance kind (`belongs_to_*`,
+  `grounded_in`, `contradicts`, `supersedes`), and `withdraw_relation`. The edge's `rev`
+  is in `get_relations` and `list_relations`. A first assert names none;
+- `answer_change_check` (the Check's rev) and `confirm_premise` (the resting Decision's);
+- `grant_role` and `revoke_grant` (the rev of the holder's identity, `identity_rev` in
+  `list_grants`), once mcp v1.74.0 is deployed.
+
+Pass the rev from your own read, never from a fresh read made just to have one: the point
+is the version your decision rested on. Without a rev the write goes through with a
+`rev_missing` warning until the instance sets its cutover date, which architect announces
+here a week before. After that it is refused.
+
+**On a `rev_conflict` (MCP -32002, HTTP 409):** read the record again. Apply your change
+again only if it still holds against the new version. If it does not, or you cannot tell,
+send a Signal to whoever owns the record. Never resend the same change unread, and never
+retry in a loop. A ratification that conflicts goes back to Peter with what changed.
 
 ---
 
