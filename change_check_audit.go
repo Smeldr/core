@@ -73,7 +73,7 @@ func (a *App) RecordMerge(ctx context.Context, in MergeInput) (MergeResult, erro
 	}
 	merge := strings.ToLower(strings.TrimSpace(in.MergeCommit))
 	if !changeCheckCommitRe.MatchString(merge) {
-		return MergeResult{}, Err("merge_commit", "must be a full 40-character commit SHA")
+		return MergeResult{}, fieldErr(problemFieldInvalidFormat, "merge_commit", "must be a full 40-character commit SHA", nil)
 	}
 	if err := a.authorizeCheckChange(ctx); err != nil {
 		return MergeResult{}, err
@@ -169,9 +169,11 @@ func (a *App) answerAuditArea(ctx context.Context, checkID, label, status string
 	db := a.cfg.DB
 	switch {
 	case status == ChangeCheckSuperseded:
-		return fmt.Errorf("%w: %s is superseded; answer for the change's live Check", ErrConflict, label)
+		return problem(problemChangeCheckSuperseded, fmt.Errorf("%w: %s is superseded; answer for the change's live Check", ErrConflict, label),
+			problemValues{"check": label})
 	case row.verdict != AreaVerdictCommented && row.verdict != AreaVerdictAwaitingAudit:
-		return fmt.Errorf("%w: Area %s already answered %s (%s)", ErrConflict, row.address, label, row.verdict)
+		return problem(problemChangeCheckAlreadyAnswered, fmt.Errorf("%w: Area %s already answered %s (%s)", ErrConflict, row.address, label, row.verdict),
+			problemValues{"area": row.address, "check": label, "verdict": string(row.verdict)})
 	}
 	verdict, text := AreaVerdictApproved, "approved"
 	if !approve {
@@ -189,7 +191,8 @@ func (a *App) answerAuditArea(ctx context.Context, checkID, label, status string
 		return fmt.Errorf("%w: record the answer for %s: %v", ErrInternal, row.address, err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("%w: Area %s of %s was answered at the same moment", ErrConflict, row.address, label)
+		return problem(problemChangeCheckAnswerRace, fmt.Errorf("%w: Area %s of %s was answered at the same moment", ErrConflict, row.address, label),
+			problemValues{"area": row.address, "check": label})
 	}
 	if row.signalID == "" {
 		return nil

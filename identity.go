@@ -156,7 +156,7 @@ func (a *App) Identity(ctx context.Context, ref string) (*Identity, error) {
 		return nil, err
 	}
 	if id == nil {
-		return nil, fmt.Errorf("%w: no identity %q", ErrNotFound, ref)
+		return nil, problem(problemIdentityNotFound, fmt.Errorf("%w: no identity %q", ErrNotFound, ref), problemValues{"identity": ref})
 	}
 	if !a.callerAdministers(ctx) {
 		id.Contact = ""
@@ -338,13 +338,17 @@ func (ts *TokenStore) joinableIdentity(ctx context.Context, ref string) (*Identi
 		return nil, err
 	}
 	if ident == nil {
-		return nil, fmt.Errorf("create token: %w: no identity %q", ErrNotFound, ref)
+		return nil, problem(problemIdentityNotFound, fmt.Errorf("create token: %w: no identity %q", ErrNotFound, ref), problemValues{"identity": ref})
 	}
 	if ident.Status != IdentityActive {
-		return nil, fmt.Errorf("create token: %w", Refused(fmt.Sprintf("identity %s is %s: it takes no new token", ident.Address, ident.Status)))
+		return nil, fmt.Errorf("create token: %w", refuse(problemTokenIdentityNotActive,
+			fmt.Sprintf("identity %s is %s: it takes no new token", ident.Address, ident.Status),
+			problemValues{"identity": ident.Address, "state": string(ident.Status)}))
 	}
 	if ident.Class == IdentityUnclassified {
-		return nil, fmt.Errorf("create token: %w", Refused(fmt.Sprintf("identity %s has no class: an unclassified identity takes no new token; create an identity with a class and retire this one", ident.Address)))
+		return nil, fmt.Errorf("create token: %w", refuse(problemTokenIdentityUnclassified,
+			fmt.Sprintf("identity %s has no class: an unclassified identity takes no new token; create an identity with a class and retire this one", ident.Address),
+			problemValues{"identity": ident.Address}))
 	}
 	return ident, nil
 }
@@ -369,7 +373,7 @@ func (ts *TokenStore) CreateForIdentity(ctx context.Context, identity, name, rol
 	switch Role(role) {
 	case Author, Editor, Admin:
 	default:
-		return "", Err("role", `must be "author", "editor" or "admin"`)
+		return "", fieldErr(problemFieldNotInList, "role", `must be "author", "editor" or "admin"`, problemValues{"allowed": "author, editor, admin"})
 	}
 	ident, err := ts.joinableIdentity(ctx, identity)
 	if err != nil {
@@ -417,9 +421,9 @@ func (ts *TokenStore) insertClassified(ctx context.Context, id, name, role strin
 		// Refuse rather than mint a token whose list entry would not say
 		// what it is: the signed payload would carry the class, the table
 		// would not.
-		return Err("actor_class", "smeldr_tokens has no actor_class column: run EnsureTokenActorClassColumn (and EnsureTokenUserIDColumn) before minting a classified token")
+		return fieldErr(problemIdentitySchemaNotReady, "actor_class", "smeldr_tokens has no actor_class column: run EnsureTokenActorClassColumn (and EnsureTokenUserIDColumn) before minting a classified token", nil)
 	case isNoSuchColumn(err, "identity_id"):
-		return Err("identity", "smeldr_tokens has no identity_id column: run EnsureIdentities after the token table exists")
+		return fieldErr(problemIdentitySchemaNotReady, "identity", "smeldr_tokens has no identity_id column: run EnsureIdentities after the token table exists", nil)
 	case err != nil:
 		return ErrInternal
 	}
@@ -490,7 +494,9 @@ func checkGrantee(ctx context.Context, db DB, grantee string) error {
 		return fmt.Errorf("%w: check the grantee: %s", ErrInternal, err)
 	}
 	if n == 0 {
-		return Err("token_id", fmt.Sprintf("%q is no identity: a grant is held by an identity (D165); mint a token for it first and grant to the id the mint returned", grantee))
+		return fieldErr(problemGrantGranteeNotIdentity, "token_id",
+			fmt.Sprintf("%q is no identity: a grant is held by an identity (D165); mint a token for it first and grant to the id the mint returned", grantee),
+			problemValues{"grantee": grantee})
 	}
 	return nil
 }
@@ -512,7 +518,8 @@ func (s *RoleStore) granteeRevRule(ctx context.Context, grantee, write string, r
 	ident := idents[grantee]
 	if ident == nil {
 		if rev != nil {
-			return false, nil, Err("rev", fmt.Sprintf("%q is no identity, so there is no rev to name: leave rev out", grantee))
+			return false, nil, fieldErr(problemRevNotApplicable, "rev", fmt.Sprintf("%q is no identity, so there is no rev to name: leave rev out", grantee),
+				problemValues{"grantee": grantee})
 		}
 		return false, nil, nil
 	}

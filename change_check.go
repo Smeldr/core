@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -172,13 +173,13 @@ func EnsureChangeCheckTables(ctx context.Context, db DB) error {
 func registerChangeCheck(app *App, db DB) {
 	registerFlows(app, changeCheckFlow())
 	refuse := func(Context, any, any) error {
-		return fmt.Errorf("%w: a ChangeCheck is made only by check_change (App.CheckChange) and moved only by core", ErrForbidden)
+		return problem(problemChangeCheckCoreOnly, fmt.Errorf("%w: a ChangeCheck is made only by check_change (App.CheckChange) and moved only by core", ErrForbidden), nil)
 	}
 	app.Content(NewModule[*ChangeCheck]((*ChangeCheck)(nil),
 		At("/change-checks"), Repo(NewSQLRepo[*ChangeCheck](db, Table("smeldr_change_checks"))), MCP(MCPRead), withAddress(),
 		saveHooksOption{prepare: refuse},
 		On[*ChangeCheck](BeforeDelete, func(Context, *ChangeCheck) error {
-			return fmt.Errorf("%w: a ChangeCheck is not deleted; how long Checks are kept is decided later (D143)", ErrForbidden)
+			return problem(problemChangeCheckNotDeletable, fmt.Errorf("%w: a ChangeCheck is not deleted; how long Checks are kept is decided later (D143)", ErrForbidden), nil)
 		}),
 	))
 }
@@ -239,20 +240,23 @@ func normalizeChangeInput(in ChangeInput) (ChangeInput, error) {
 	}
 	in.Repository = repo
 	if in.Number <= 0 {
-		return in, Err("number", "must be the change's number on the host, above 0")
+		return in, fieldErr(problemFieldOutOfRange, "number", "must be the change's number on the host, above 0", problemValues{"min": "1"})
 	}
 	in.HeadCommit = strings.ToLower(strings.TrimSpace(in.HeadCommit))
 	if !changeCheckCommitRe.MatchString(in.HeadCommit) {
-		return in, Err("head_commit", "must be a full 40-character commit SHA")
+		return in, fieldErr(problemFieldInvalidFormat, "head_commit", "must be a full 40-character commit SHA", nil)
 	}
 	if len(in.Paths) > DecisionsForPathsMaxPaths {
-		return in, fmt.Errorf("%w: at most %d paths per check (the most the host lists); give the first %d and files_total", ErrBadRequest, DecisionsForPathsMaxPaths, DecisionsForPathsMaxPaths)
+		return in, problem(problemLimitPathsPerCall,
+			fmt.Errorf("%w: at most %d paths per check (the most the host lists); give the first %d and files_total", ErrBadRequest, DecisionsForPathsMaxPaths, DecisionsForPathsMaxPaths),
+			problemValues{"limit": strconv.Itoa(DecisionsForPathsMaxPaths)})
 	}
 	if in.FilesTotal == 0 {
 		in.FilesTotal = len(in.Paths)
 	}
 	if in.FilesTotal < len(in.Paths) {
-		return in, Err("files_total", fmt.Sprintf("is %d, fewer than the %d paths given", in.FilesTotal, len(in.Paths)))
+		return in, fieldErr(problemFieldOutOfRange, "files_total", fmt.Sprintf("is %d, fewer than the %d paths given", in.FilesTotal, len(in.Paths)),
+			problemValues{"value": strconv.Itoa(in.FilesTotal), "min": strconv.Itoa(len(in.Paths))})
 	}
 	return in, nil
 }
@@ -265,7 +269,7 @@ func (a *App) authorizeCheckChange(ctx context.Context) error {
 	}
 	sc, ok := ctx.(Context)
 	if !ok {
-		return fmt.Errorf("%w: check_change needs a caller", ErrForbidden)
+		return problem(problemChangeCheckNoCaller, fmt.Errorf("%w: check_change needs a caller", ErrForbidden), nil)
 	}
 	return a.AuthorizeCapability(sc, ResourceItem, "check_change", AuthTarget{})
 }
@@ -510,7 +514,8 @@ func (a *App) claimSupersede(ctx context.Context, oldID, oldAddress, newestID, n
 		}
 		return true, nil
 	}
-	return false, fmt.Errorf("%w: %s kept changing while it was superseded", ErrConflict, oldAddress)
+	return false, problem(problemChangeCheckSupersedeRace, fmt.Errorf("%w: %s kept changing while it was superseded", ErrConflict, oldAddress),
+		problemValues{"check": oldAddress})
 }
 
 // supersedeOlderChecks leaves the newest Check of a change (the highest
@@ -705,7 +710,7 @@ func (a *App) ListChangeChecks(ctx context.Context, q ChangeCheckQuery) ([]Chang
 		return nil, fmt.Errorf("%w: ListChangeChecks needs a database", ErrInternal)
 	}
 	if q.Repository == "" && q.Area == "" && q.Decision == "" {
-		return nil, fmt.Errorf("%w: give a repository, an Area or a Decision: Checks are read by filter, never as one list", ErrBadRequest)
+		return nil, problem(problemChangeCheckFilterRequired, fmt.Errorf("%w: give a repository, an Area or a Decision: Checks are read by filter, never as one list", ErrBadRequest), nil)
 	}
 	switch {
 	case q.Limit <= 0:

@@ -35,7 +35,7 @@ type InstanceAdministrator struct {
 func (a *App) Administrators(ctx context.Context) ([]InstanceAdministrator, error) {
 	sc, ok := ctx.(Context)
 	if !ok || sc.User().ID == "" {
-		return nil, fmt.Errorf("%w: who administers here is answered to an authenticated caller", ErrForbidden)
+		return nil, problem(problemAdministratorsUnauthenticated, fmt.Errorf("%w: who administers here is answered to an authenticated caller", ErrForbidden), nil)
 	}
 	if a.cfg.DB == nil {
 		return nil, fmt.Errorf("%w: Administrators needs a database", ErrInternal)

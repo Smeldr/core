@@ -107,33 +107,41 @@ func encodeToken(user User, secret string, ttl time.Duration) (string, error) {
 	return payload + "." + sig, nil
 }
 
+// The refusals of a signed token that does not verify, built once: a bad
+// token is answered on every request that sends one, and carries no values.
+var (
+	errTokenInvalid        = problem(problemAuthTokenInvalid, ErrUnauth, nil)
+	errPreviewTokenInvalid = problem(problemAuthPreviewTokenInvalid, ErrNotFound, nil)
+	errUploadTokenInvalid  = problem(problemAuthUploadTokenInvalid, ErrUnauth, nil)
+)
+
 // decodeToken reverses encodeToken. Returns [ErrUnauth] if the token is missing,
 // malformed, or the HMAC signature does not match.
 func decodeToken(token, secret string) (User, error) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
-		return GuestUser, ErrUnauth
+		return GuestUser, errTokenInvalid
 	}
 	payload, sig := parts[0], parts[1]
 
 	expected := tokenHMAC(payload, secret)
 	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
-		return GuestUser, ErrUnauth
+		return GuestUser, errTokenInvalid
 	}
 
 	raw, err := base64.RawURLEncoding.DecodeString(payload)
 	if err != nil {
-		return GuestUser, ErrUnauth
+		return GuestUser, errTokenInvalid
 	}
 
 	var p tokenPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return GuestUser, ErrUnauth
+		return GuestUser, errTokenInvalid
 	}
 
 	// Reject expired tokens.
 	if p.Exp != 0 && time.Now().Unix() > p.Exp {
-		return GuestUser, ErrUnauth
+		return GuestUser, errTokenInvalid
 	}
 
 	roles := make([]Role, len(p.Roles))
@@ -186,28 +194,28 @@ func signPreviewPayload(body string, secret []byte, ttl time.Duration) string {
 func decodePreviewToken(token string, secret []byte) (prefix, slug, id string, err error) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
-		return "", "", "", ErrNotFound
+		return "", "", "", errPreviewTokenInvalid
 	}
 	payload, sig := parts[0], parts[1]
 
 	expected := tokenHMAC(payload, string(secret))
 	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
-		return "", "", "", ErrNotFound
+		return "", "", "", errPreviewTokenInvalid
 	}
 
 	raw, decErr := base64.RawURLEncoding.DecodeString(payload)
 	if decErr != nil {
-		return "", "", "", ErrNotFound
+		return "", "", "", errPreviewTokenInvalid
 	}
 	// payload is "prefix:slug:expUnix" or "prefix:slug:id:expUnix"; none of
 	// prefix, slug and ID holds a colon.
 	fields := strings.Split(string(raw), ":")
 	if len(fields) != 3 && len(fields) != 4 {
-		return "", "", "", ErrNotFound
+		return "", "", "", errPreviewTokenInvalid
 	}
 	expUnix, convErr := strconv.ParseInt(fields[len(fields)-1], 10, 64)
 	if convErr != nil || time.Now().Unix() > expUnix {
-		return "", "", "", ErrNotFound
+		return "", "", "", errPreviewTokenInvalid
 	}
 	if len(fields) == 4 {
 		id = fields[2]
@@ -233,22 +241,22 @@ func encodeUploadToken(secret []byte, ttl time.Duration) string {
 func decodeUploadToken(token string, secret []byte) error {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
-		return ErrUnauth
+		return errUploadTokenInvalid
 	}
 	payload, sig := parts[0], parts[1]
 
 	expected := tokenHMAC(payload, string(secret))
 	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
-		return ErrUnauth
+		return errUploadTokenInvalid
 	}
 
 	raw, err := base64.RawURLEncoding.DecodeString(payload)
 	if err != nil {
-		return ErrUnauth
+		return errUploadTokenInvalid
 	}
 	expUnix, convErr := strconv.ParseInt(string(raw), 10, 64)
 	if convErr != nil || time.Now().Unix() > expUnix {
-		return ErrUnauth
+		return errUploadTokenInvalid
 	}
 	return nil
 }
@@ -560,9 +568,11 @@ func (ts *TokenStore) createToken(ctx context.Context, name, role string, class 
 	if id, kind := actorFromContext(ctx); id != "" {
 		switch {
 		case kind == string(Job):
-			return "", "", fmt.Errorf("create token: %w", Refused("a job token never creates a token (D156)"))
+			return "", "", fmt.Errorf("create token: %w", refuse(problemTokenJobNeverMints, "a job token never creates a token (D156)", nil))
 		case kind == string(Agent) && class != Agent && class != Job:
-			return "", "", fmt.Errorf("create token: %w", Refused("an agent token mints only agent or job tokens (D142): the new token would be "+classLabel(string(class))))
+			return "", "", fmt.Errorf("create token: %w", refuse(problemTokenAgentMintsAutomatedOnly,
+				"an agent token mints only agent or job tokens (D142): the new token would be "+classLabel(string(class)),
+				problemValues{"token_class": classLabel(string(class))}))
 		}
 	}
 	// The permission role is always first: signals.go reads Roles[0] as the
@@ -694,12 +704,14 @@ func (ts *TokenStore) CreateClassifiedWithReason(ctx context.Context, name, role
 	}
 	if class != "" {
 		if class != Agent && class != Job && class != Human {
-			return "", "", Err("actor_class", `must be "agent", "job" or "human" (leave it empty for an unclassified token)`)
+			return "", "", fieldErr(problemFieldNotInList, "actor_class", `must be "agent", "job" or "human" (leave it empty for an unclassified token)`,
+				problemValues{"allowed": "agent, job, human"})
 		}
 		switch Role(role) {
 		case Author, Editor, Admin:
 		default:
-			return "", "", Err("role", `must be "author", "editor" or "admin" for a classified token`)
+			return "", "", fieldErr(problemFieldNotInList, "role", `must be "author", "editor" or "admin" for a classified token`,
+				problemValues{"allowed": "author, editor, admin"})
 		}
 	}
 	return ts.createToken(ctx, name, role, class, ttl, reason, mintActorStore, nil)

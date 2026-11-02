@@ -142,13 +142,14 @@ var signalReplacement = map[string]string{
 //     message after it.
 func CheckSignal(ctx context.Context, s *Signal, c SignalCutovers) ([]CreateWarning, error) {
 	if strings.TrimSpace(s.SignalType) == "" {
-		return nil, Err("signal_type", "signal_type is required")
+		return nil, fieldErr(problemFieldRequired, "signal_type", "signal_type is required", nil)
 	}
 	var warnings []CreateWarning
 	info, known := SignalTypeOf(s.SignalType)
 	switch {
 	case known && info.Kind == SignalCondition && !isSignalSystem(ctx):
-		return nil, fmt.Errorf("%w: signal_type %q is a condition: only the system creates it", ErrForbidden, s.SignalType)
+		return nil, problem(problemSignalConditionSystemOnly, fmt.Errorf("%w: signal_type %q is a condition: only the system creates it", ErrForbidden, s.SignalType),
+			problemValues{"signal_type": s.SignalType})
 	case !known:
 		msg := fmt.Sprintf("signal_type %q is history (D115): it is accepted until the instance's signal event cutover, then refused", s.SignalType)
 		if r, ok := signalReplacement[s.SignalType]; ok {

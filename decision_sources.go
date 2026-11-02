@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -112,7 +113,8 @@ func (s DecisionSources) MarshalJSON() ([]byte, error) {
 // refused.
 func normalizeDecisionSources(sources DecisionSources) (DecisionSources, error) {
 	if len(sources) > DecisionSourcesMax {
-		return nil, Err("sources", fmt.Sprintf("has %d sources; a Decision carries at most %d", len(sources), DecisionSourcesMax))
+		return nil, fieldErr(problemDecisionSourcesTooMany, "sources", fmt.Sprintf("has %d sources; a Decision carries at most %d", len(sources), DecisionSourcesMax),
+			problemValues{"count": strconv.Itoa(len(sources)), "limit": strconv.Itoa(DecisionSourcesMax)})
 	}
 	out := make(DecisionSources, 0, len(sources))
 	seen := map[[4]string]int{}
@@ -120,12 +122,13 @@ func normalizeDecisionSources(sources DecisionSources) (DecisionSources, error) 
 		field := func(name string) string { return fmt.Sprintf("sources[%d].%s", i, name) }
 		repo, err := normalizeRepository(src.Repository)
 		if err != nil {
-			return nil, Err(field("repository"), fmt.Sprintf("%q is not owner/name, for example acme/billing", strings.TrimSpace(src.Repository)))
+			return nil, fieldErr(problemFieldInvalidFormat, field("repository"), fmt.Sprintf("%q is not owner/name, for example acme/billing", strings.TrimSpace(src.Repository)),
+				problemValues{"value": strings.TrimSpace(src.Repository)})
 		}
 		src.Repository = repo
 		src.Commit = strings.ToLower(strings.TrimSpace(src.Commit))
 		if !decisionSourceCommitRe.MatchString(src.Commit) {
-			return nil, Err(field("commit"), "must be a full 40-character commit SHA, never a branch, a tag or a short SHA")
+			return nil, fieldErr(problemFieldInvalidFormat, field("commit"), "must be a full 40-character commit SHA, never a branch, a tag or a short SHA", nil)
 		}
 		src.Path = strings.TrimSpace(src.Path)
 		if err := checkRepositoryPath(field("path"), "a path", "docs/adr/0007-money.md", src.Path, false); err != nil {
@@ -134,21 +137,23 @@ func normalizeDecisionSources(sources DecisionSources) (DecisionSources, error) 
 		src.Anchor = strings.TrimSpace(src.Anchor)
 		switch {
 		case len(src.Anchor) > decisionSourceAnchorMax:
-			return nil, Err(field("anchor"), fmt.Sprintf("is longer than %d characters", decisionSourceAnchorMax))
+			return nil, fieldErr(problemFieldTooLong, field("anchor"), fmt.Sprintf("is longer than %d characters", decisionSourceAnchorMax),
+				problemValues{"limit": strconv.Itoa(decisionSourceAnchorMax)})
 		case strings.ContainsAny(src.Anchor, "\r\n"):
-			return nil, Err(field("anchor"), "must be one line: a heading or a line range")
+			return nil, fieldErr(problemFieldOneLine, field("anchor"), "must be one line: a heading or a line range", nil)
 		}
 		src.Role = strings.TrimSpace(src.Role)
 		if !slices.Contains(decisionSourceRoles, src.Role) {
-			return nil, Err(field("role"), "must be source, evidence or implementation")
+			return nil, fieldErr(problemFieldNotInList, field("role"), "must be source, evidence or implementation", problemValues{"allowed": "source, evidence, implementation"})
 		}
 		src.Hash = strings.ToLower(strings.TrimSpace(src.Hash))
 		if src.Hash != "" && !decisionSourceHashRe.MatchString(src.Hash) {
-			return nil, Err(field("hash"), "must be sha256: followed by 64 hex characters, the SHA-256 of the file at the commit")
+			return nil, fieldErr(problemFieldInvalidFormat, field("hash"), "must be sha256: followed by 64 hex characters, the SHA-256 of the file at the commit", nil)
 		}
 		key := [4]string{src.Repository, src.Commit, src.Path, src.Anchor}
 		if first, dup := seen[key]; dup {
-			return nil, Err(field("path"), fmt.Sprintf("is the same source as sources[%d]: the same repository, commit, path and anchor", first))
+			return nil, fieldErr(problemDecisionSourceDuplicate, field("path"), fmt.Sprintf("is the same source as sources[%d]: the same repository, commit, path and anchor", first),
+				problemValues{"index": strconv.Itoa(first)})
 		}
 		seen[key] = i
 		out = append(out, src)
@@ -183,9 +188,10 @@ func (app *App) prepareDecision(ctx Context, existing any, d *Decision) error {
 		return err
 	}
 	if !found {
-		return fmt.Errorf("%w: changing %s's sources needs ratify over its place, and it has none (D148)", ErrForbidden, label)
+		return problem(problemDecisionSourcesNeedPlace, fmt.Errorf("%w: changing %s's sources needs ratify over its place, and it has none (D148)", ErrForbidden, label),
+			problemValues{"decision": label})
 	}
 	place := recordLabel(ctx, db, placeTables[p.targetType], p.targetID)
-	return requireOperationOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: p.targetType, ID: p.targetID},
-		fmt.Sprintf("changing %s's sources", label), place, "D148")
+	return requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: p.targetType, ID: p.targetID},
+		fmt.Sprintf("changing %s's sources", label), "change_sources", place, "D148")
 }

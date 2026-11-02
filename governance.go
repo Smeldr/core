@@ -1051,7 +1051,7 @@ func (s *RoleStore) GetRole(ctx context.Context, name string) (RoleDefinition, e
 		   FROM smeldr_roles WHERE name = $1`, name,
 	).Scan(&def.Name, &opsJSON, &scopeMode, &relKind, &relDir, &def.TrustLevel, &selfApproval)
 	if err == sql.ErrNoRows {
-		return RoleDefinition{}, fmt.Errorf("smeldr: GetRole: role %q: %w", name, ErrNotFound)
+		return RoleDefinition{}, problem(problemRoleNotFound, fmt.Errorf("smeldr: GetRole: role %q: %w", name, ErrNotFound), problemValues{"role": name})
 	}
 	if err != nil {
 		return RoleDefinition{}, fmt.Errorf("smeldr: GetRole: query %q: %w", name, err)
@@ -1082,16 +1082,19 @@ func (s *RoleStore) normalizeStaticScope(ctx context.Context, patterns []string)
 	for _, p := range patterns {
 		typeName, ident, ok := strings.Cut(strings.TrimSpace(p), ":")
 		if !ok || typeName == "" || ident == "" {
-			return nil, Err("scope_static", fmt.Sprintf("pattern %q must be \"type:item\" or \"type:*\"", p))
+			return nil, fieldErr(problemFieldInvalidFormat, "scope_static", fmt.Sprintf("pattern %q must be \"type:item\" or \"type:*\"", p),
+				problemValues{"value": p})
 		}
 		norm := typeName + ":" + ident
 		if ident != "*" && s.resolveID != nil && !syntheticScopeTypes[typeName] {
 			id, err := s.resolveID(ctx, typeName, ident)
 			switch {
 			case errors.Is(err, ErrNotFound):
-				return nil, Err("scope_static", fmt.Sprintf("pattern %q names no %s record: name it by its address, slug or ID", p, typeName))
+				return nil, fieldErr(problemReferenceNotFound, "scope_static", fmt.Sprintf("pattern %q names no %s record: name it by its address, slug or ID", p, typeName),
+					problemValues{"value": p, "type": typeName})
 			case errors.Is(err, ErrBadRequest):
-				return nil, Err("scope_static", fmt.Sprintf("pattern %q names a type that is not registered", p))
+				return nil, fieldErr(problemFieldNotInList, "scope_static", fmt.Sprintf("pattern %q names a type that is not registered", p),
+					problemValues{"value": p})
 			case err != nil:
 				return nil, fmt.Errorf("smeldr: Grant: resolve scope pattern %q: %w", p, err)
 			}
@@ -1159,7 +1162,7 @@ func (s *RoleStore) GrantAt(ctx context.Context, grant RoleGrant, rev *int) (str
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT id FROM smeldr_roles WHERE name = $1`, grant.RoleName,
 	).Scan(&roleID); err == sql.ErrNoRows {
-		return "", nil, fmt.Errorf("smeldr: Grant: role %q: %w", grant.RoleName, ErrNotFound)
+		return "", nil, problem(problemRoleNotFound, fmt.Errorf("smeldr: Grant: role %q: %w", grant.RoleName, ErrNotFound), problemValues{"role": grant.RoleName})
 	} else if err != nil {
 		return "", nil, fmt.Errorf("smeldr: Grant: lookup role %q: %w", grant.RoleName, err)
 	}
@@ -1178,7 +1181,8 @@ func (s *RoleStore) GrantAt(ctx context.Context, grant RoleGrant, rev *int) (str
 		return "", nil, err
 	}
 	if grantorClass == string(Job) {
-		return "", nil, fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("a job token never grants a role (D156): role %q", grant.RoleName)))
+		return "", nil, fmt.Errorf("Grant: %w", refuse(problemGrantJobNeverGrants, fmt.Sprintf("a job token never grants a role (D156): role %q", grant.RoleName),
+			problemValues{"role": grant.RoleName}))
 	}
 	// D142 point 5 (T884): agent and job tokens never hold ratify, and hold
 	// approve-change only on an Area grant from a human with authority there,
@@ -1605,7 +1609,7 @@ func (s *RoleStore) GetGrant(ctx context.Context, grantID string) (RoleGrant, er
 	).Scan(&g.ID, &g.RoleName, &g.TokenID, &staticJSON, &anchorID,
 		nullTimeScanner{dst: &g.ExpiresAt}, &g.CreatedAt, &grantor)
 	if err == sql.ErrNoRows {
-		return RoleGrant{}, fmt.Errorf("smeldr: GetGrant: grant %q: %w", grantID, ErrNotFound)
+		return RoleGrant{}, problem(problemGrantNotFound, fmt.Errorf("smeldr: GetGrant: grant %q: %w", grantID, ErrNotFound), problemValues{"grant": grantID})
 	}
 	if err != nil {
 		return RoleGrant{}, fmt.Errorf("smeldr: GetGrant: query %q: %w", grantID, err)

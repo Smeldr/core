@@ -731,7 +731,7 @@ func TestQueryGoalContext(t *testing.T) {
 			t.Fatalf("CreateOrchestrationTables: %v", err)
 		}
 		_, err := QueryGoalContext(ctx, db, nil, "")
-		if err != ErrBadRequest {
+		if !errors.Is(err, ErrBadRequest) {
 			t.Errorf("err = %v, want ErrBadRequest", err)
 		}
 	})

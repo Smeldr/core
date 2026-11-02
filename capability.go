@@ -305,17 +305,18 @@ var typedReads = map[capabilityKey]bool{
 func (a *App) AuthorizeCapability(ctx Context, resource, verb string, target AuthTarget) error {
 	c, ok := capabilityIndex[capabilityKey{resource, verb}]
 	if !ok {
-		return fmt.Errorf("%w: unknown capability %q %q", ErrBadRequest, resource, verb)
+		return problem(problemCapabilityUnknown, fmt.Errorf("%w: unknown capability %q %q", ErrBadRequest, resource, verb),
+			problemValues{"resource": resource, "verb": verb})
 	}
 	user := ctx.User()
 	if a.governance == nil {
 		if floor, ok := legacyOperationFloor[c.Operation]; ok && user.HasRole(floor) {
 			return nil
 		}
-		return ErrForbidden
+		return problem(problemCapabilityDenied, ErrForbidden, nil)
 	}
 	if user.ID == "" {
-		return ErrForbidden
+		return problem(problemCapabilityDenied, ErrForbidden, nil)
 	}
 	needsScope := c.Operation == "read" || (target.TypeName != "" && target.ID != "")
 	var scope *ReadScope
@@ -330,7 +331,7 @@ func (a *App) AuthorizeCapability(ctx Context, resource, verb string, target Aut
 		return authorizeRead(scope, c, target)
 	}
 	if target.TypeName != "" && target.ID != "" && !scope.Readable(target.TypeName, target.ID) {
-		return ErrNotFound
+		return problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	ok, err := a.governance.Authorized(ctx, user.ID, c.Operation, target)
 	if err != nil {
@@ -338,7 +339,7 @@ func (a *App) AuthorizeCapability(ctx Context, resource, verb string, target Aut
 		return fmt.Errorf("%w: authorize %s %s: %s", ErrInternal, c.Resource, c.Verb, err)
 	}
 	if !ok {
-		return ErrForbidden
+		return problem(problemCapabilityDenied, ErrForbidden, nil)
 	}
 	return nil
 }
@@ -356,11 +357,11 @@ func authorizeRead(scope *ReadScope, c Capability, target AuthTarget) error {
 		if scope.All() || (typelessReadsAny[key] && scope.readsAny()) {
 			return nil
 		}
-		return ErrForbidden
+		return problem(problemCapabilityDenied, ErrForbidden, nil)
 	case !scope.TypeReadable(target.TypeName):
-		return ErrForbidden
+		return problem(problemCapabilityDenied, ErrForbidden, nil)
 	case target.ID != "" && !scope.Readable(target.TypeName, target.ID):
-		return ErrNotFound
+		return problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	return nil
 }

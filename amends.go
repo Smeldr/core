@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -131,7 +132,9 @@ func amendsBeforeSave(ctx Context, db DB, existing, item any) error {
 				return err
 			}
 			if canon != old.Amends {
-				return Err("amends", fmt.Sprintf("is write-once: this Amendment already amends %s; the link is changed through the relation once withdraw_relation exists", old.Amends))
+				return fieldErr(problemReferenceWriteOnce, "amends",
+					fmt.Sprintf("is write-once: this Amendment already amends %s; the link is changed through the relation once withdraw_relation exists", old.Amends),
+					problemValues{"record": old.Amends})
 			}
 		}
 		a.Amends = old.Amends
@@ -149,7 +152,7 @@ func amendsBeforeSave(ctx Context, db DB, existing, item any) error {
 		return err
 	}
 	if db == nil {
-		return Err("amends", "cannot be checked: no database is configured")
+		return fieldErr(problemAmendsNoDatabase, "amends", "cannot be checked: no database is configured", nil)
 	}
 	if _, err := resolveDecisionID(ctx, db, canon); err != nil {
 		return err
@@ -192,7 +195,7 @@ func canonicalDecisionNumber(s string) (string, error) {
 	if bareNumberRe.MatchString(s) {
 		return "D" + strings.TrimLeft(s, "0"), nil
 	}
-	return "", Err("amends", fmt.Sprintf("%q is not a Decision address (use the form D104)", s))
+	return "", fieldErr(problemFieldInvalidFormat, "amends", fmt.Sprintf("%q is not a Decision address (use the form D104)", s), problemValues{"value": s})
 }
 
 // resolveDecisionID finds the Decision whose address is canon ("D104"). A
@@ -228,12 +231,13 @@ func resolveDecisionID(ctx context.Context, db DB, canon string) (string, error)
 	}
 	switch len(ids) {
 	case 0:
-		return "", Err("amends", fmt.Sprintf("no Decision %s exists", canon))
+		return "", fieldErr(problemReferenceNotFound, "amends", fmt.Sprintf("no Decision %s exists", canon), problemValues{"value": canon, "type": "Decision"})
 	case 1:
 		noteDeprecatedUse(ctx, "Decision", "a lookup by a legacy value")
 		return ids[0], nil
 	}
-	return "", Err("amends", fmt.Sprintf("%s matches %d Decisions: it must name one", canon, len(ids)))
+	return "", fieldErr(problemIdentAmbiguous, "amends", fmt.Sprintf("%s matches %d Decisions: it must name one", canon, len(ids)),
+		problemValues{"value": canon, "count": strconv.Itoa(len(ids)), "type": "Decision"})
 }
 
 // assertAmendsEdge asserts the amends edge from the Amendment amendmentID to the
@@ -314,7 +318,7 @@ type AmendsBackfillReport struct {
 // wired ([App.Relations]).
 func (a *App) BackfillAmendsEdges(ctx context.Context, links []AmendsLink, dryRun bool) (*AmendsBackfillReport, error) {
 	if a.cfg.DB == nil || a.relationStore == nil {
-		return nil, fmt.Errorf("%w: BackfillAmendsEdges needs a database and the relation store (App.Relations)", ErrBadRequest)
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: BackfillAmendsEdges needs a database and the relation store (App.Relations)", ErrBadRequest), nil)
 	}
 	db := a.cfg.DB
 	rep := &AmendsBackfillReport{DryRun: dryRun}
@@ -391,7 +395,7 @@ func resolveAmendmentID(ctx context.Context, db DB, number string) (string, erro
 	}
 	err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_amendments WHERE amendment_number = $1 OR external_ref = $1`, strings.TrimSpace(number)).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", Err("amendment", fmt.Sprintf("no Amendment %s exists", number))
+		return "", fieldErr(problemReferenceNotFound, "amendment", fmt.Sprintf("no Amendment %s exists", number), problemValues{"value": number, "type": "Amendment"})
 	}
 	if err != nil {
 		// More than one row cannot reach here (QueryRow takes the first), so a
@@ -400,7 +404,8 @@ func resolveAmendmentID(ctx context.Context, db DB, number string) (string, erro
 	}
 	var n int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_amendments WHERE amendment_number = $1 OR external_ref = $1`, strings.TrimSpace(number)).Scan(&n); err == nil && n > 1 {
-		return "", Err("amendment", fmt.Sprintf("%s matches %d Amendments: it must name one", number, n))
+		return "", fieldErr(problemIdentAmbiguous, "amendment", fmt.Sprintf("%s matches %d Amendments: it must name one", number, n),
+			problemValues{"value": number, "count": strconv.Itoa(n), "type": "Amendment"})
 	}
 	noteDeprecatedUse(ctx, "Amendment", "a lookup by a legacy value")
 	return id, nil
@@ -423,7 +428,7 @@ var decisionMentionRe = regexp.MustCompile(`\bD(\d+)\b`)
 func (a *App) AmendsBackfillCandidates(ctx context.Context) ([]AmendsCandidate, error) {
 	db := a.cfg.DB
 	if db == nil {
-		return nil, fmt.Errorf("%w: AmendsBackfillCandidates needs a database", ErrBadRequest)
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: AmendsBackfillCandidates needs a database", ErrBadRequest), nil)
 	}
 	decisions := map[string]bool{}
 	drows, err := db.QueryContext(ctx, `SELECT decision_number FROM smeldr_decisions`)

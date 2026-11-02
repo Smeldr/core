@@ -195,7 +195,9 @@ func (a *App) legacyPlaceRows(ctx context.Context, db DB, tables map[string]bool
 		case err == nil && holder == r.id:
 			continue // moved by an earlier run
 		case err == nil:
-			return nil, Err("address", fmt.Sprintf("%s %s is already held by %s %s: resolve it before migrating", legacyPlaceTypes[compiled], r.address, compiled, holder))
+			return nil, fieldErr(problemPlacesMigrateAddressHeld, "address",
+				fmt.Sprintf("%s %s is already held by %s %s: resolve it before migrating", legacyPlaceTypes[compiled], r.address, compiled, holder),
+				problemValues{"type": legacyPlaceTypes[compiled], "record": r.address, "holder_type": compiled, "holder": holder})
 		case !errors.Is(err, sql.ErrNoRows):
 			return nil, fmt.Errorf("%w: MigratePlaces: check %s: %s", ErrInternal, table, err)
 		}

@@ -65,7 +65,7 @@ type GoalContext struct {
 // slices.
 func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID string) (*GoalContext, error) {
 	if goalID == "" {
-		return nil, ErrBadRequest
+		return nil, problem(problemRequestInvalidParam, ErrBadRequest, nil)
 	}
 	if db == nil {
 		return nil, ErrInternal
@@ -87,11 +87,11 @@ func QueryGoalContext(ctx context.Context, db DB, rs *RelationStore, goalID stri
 
 	// D110 order: address, slug, ID, then the transitional legacy goal_id.
 	var goal *Goal
-	err = ErrNotFound
+	err = problem(problemItemNotFound, ErrNotFound, nil)
 	for _, c := range identCandidates("Goal", goalID) {
 		goal, err = QueryOne[*Goal](ctx, db, `SELECT * FROM smeldr_goals WHERE `+quoteIdent(c[0])+` = $1`, c[1])
 		if err == nil && visible != nil && !visible(goal.ID) {
-			err = ErrNotFound // hidden: go on as a miss would
+			err = problem(problemItemNotFound, ErrNotFound, nil) // hidden: go on as a miss would
 		}
 		if !errors.Is(err, ErrNotFound) {
 			break
@@ -590,10 +590,12 @@ func authorizeDecisionScope(ctx context.Context, rs *RoleStore, actorID string, 
 	}
 	granted, err := rs.RoleGranted(ctx, actorID, role, AuthTarget{})
 	if err != nil {
-		return fmt.Errorf("%w: scope %q requires role %q: %s", ErrForbidden, d.Scope, role, err)
+		return problem(problemDecisionScopeRole, fmt.Errorf("%w: scope %q requires role %q: %s", ErrForbidden, d.Scope, role, err),
+			problemValues{"scope": d.Scope, "role": role})
 	}
 	if !granted {
-		return fmt.Errorf("%w: scope %q requires role %q", ErrForbidden, d.Scope, role)
+		return problem(problemDecisionScopeRole, fmt.Errorf("%w: scope %q requires role %q", ErrForbidden, d.Scope, role),
+			problemValues{"scope": d.Scope, "role": role})
 	}
 	return nil
 }
@@ -955,9 +957,11 @@ func createRecordTables(db DB, types []string, stmts []string) error {
 func requireRecordTable(ctx context.Context, db DB, table, typeName string) error {
 	if ok, err := tableExists(ctx, db, table); err == nil && !ok {
 		if orchestrationAddOnTypes[typeName] {
-			return fmt.Errorf("%w: %ss belong to the Orchestration add-on, which this instance does not run", ErrBadRequest, typeName)
+			return problem(problemAddonNotRun, fmt.Errorf("%w: %ss belong to the Orchestration add-on, which this instance does not run", ErrBadRequest, typeName),
+				problemValues{"type": typeName})
 		}
-		return fmt.Errorf("%w: this instance keeps no %s records", ErrBadRequest, typeName)
+		return problem(problemAddonNotRun, fmt.Errorf("%w: this instance keeps no %s records", ErrBadRequest, typeName),
+			problemValues{"type": typeName})
 	}
 	return nil
 }

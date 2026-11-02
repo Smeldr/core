@@ -466,7 +466,7 @@ func (a *App) ConfirmPremiseAt(ctx context.Context, decision, premise, reason st
 func (a *App) confirmPremise(ctx context.Context, decision, premise, reason string, rev *int, warnings *[]CreateWarning) error {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
-		return Err("reason", "is required: say why the Decision still holds")
+		return fieldErr(problemFieldRequired, "reason", "is required: say why the Decision still holds", nil)
 	}
 	if a.cfg.DB == nil {
 		return fmt.Errorf("%w: ConfirmPremise needs a database", ErrInternal)
@@ -489,8 +489,8 @@ func (a *App) confirmPremise(ctx context.Context, decision, premise, reason stri
 		return fmt.Errorf("%w: read %s: %v", ErrInternal, decision, err)
 	}
 	label := d.label(decisionID)
-	if err := requireOperationOver(ctx, a.governance, OperationRatify, AuthTarget{TypeName: "Decision", ID: decisionID},
-		"confirming the premise of "+label, label, "D149"); err != nil {
+	if err := requireActOver(ctx, a.governance, OperationRatify, AuthTarget{TypeName: "Decision", ID: decisionID},
+		"confirming the premise of "+label, "confirm_premise", label, "D149"); err != nil {
 		return err
 	}
 	row, err := readPremiseRow(ctx, db, decisionID, premiseID)
@@ -505,7 +505,8 @@ func (a *App) confirmPremise(ctx context.Context, decision, premise, reason stri
 		}
 	}
 	if len(open) == 0 {
-		return fmt.Errorf("%w: %s has no open premise-flagged condition for that premise", ErrConflict, label)
+		return problem(problemPremiseNoOpenFlag, fmt.Errorf("%w: %s has no open premise-flagged condition for that premise", ErrConflict, label),
+			problemValues{"decision": label})
 	}
 	if err := a.premiseDecisionRev(ctx, decisionID, label, rev, warnings); err != nil {
 		return err
@@ -550,7 +551,8 @@ func (a *App) confirmPremisePair(ctx context.Context, decisionID, premiseID, pre
 		return fmt.Errorf("%w: record the confirmation of %s: %v", ErrInternal, label, err)
 	}
 	if n, aerr := res.RowsAffected(); aerr == nil && n == 0 {
-		return fmt.Errorf("%w: the premise of %s was already confirmed for its current state", ErrConflict, label)
+		return problem(problemPremiseAlreadyConfirmed, fmt.Errorf("%w: the premise of %s was already confirmed for its current state", ErrConflict, label),
+			problemValues{"decision": label})
 	}
 	a.signalResolver().resolve(ctx, open, "confirmed by "+actor+": "+reason)
 	return nil
@@ -581,7 +583,7 @@ func (a *App) ConfirmPremiseConditionAt(ctx context.Context, condition, reason s
 func (a *App) confirmPremiseCondition(ctx context.Context, condition, reason string, rev *int, warnings *[]CreateWarning) error {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
-		return Err("reason", "is required: say why the Decision still holds")
+		return fieldErr(problemFieldRequired, "reason", "is required: say why the Decision still holds", nil)
 	}
 	if a.cfg.DB == nil {
 		return fmt.Errorf("%w: ConfirmPremiseCondition needs a database", ErrInternal)
@@ -591,7 +593,8 @@ func (a *App) confirmPremiseCondition(ctx context.Context, condition, reason str
 	if err != nil {
 		return err
 	}
-	notFound := fmt.Errorf("%w: no premise-flagged condition %q you can read", ErrNotFound, condition)
+	notFound := problem(problemPremiseConditionNotFound, fmt.Errorf("%w: no premise-flagged condition %q you can read", ErrNotFound, condition),
+		problemValues{"signal": condition})
 	_, signalID, _, status, err := a.lookupCompiledRecord(ctx, "Signal", condition, scope)
 	if errors.Is(err, ErrNotFound) {
 		return notFound
@@ -617,12 +620,13 @@ func (a *App) confirmPremiseCondition(ctx context.Context, condition, reason str
 		return fmt.Errorf("%w: read the condition %q: %v", ErrInternal, condition, err)
 	}
 	label := d.label(decisionID)
-	if err := requireOperationOver(ctx, a.governance, OperationRatify, AuthTarget{TypeName: "Decision", ID: decisionID},
-		"confirming the premise of "+label, label, "D149"); err != nil {
+	if err := requireActOver(ctx, a.governance, OperationRatify, AuthTarget{TypeName: "Decision", ID: decisionID},
+		"confirming the premise of "+label, "confirm_premise", label, "D149"); err != nil {
 		return err
 	}
 	if status != signalOpen {
-		return fmt.Errorf("%w: the condition %q is %s, not open", ErrConflict, condition, status)
+		return problem(problemPremiseConditionNotOpen, fmt.Errorf("%w: the condition %q is %s, not open", ErrConflict, condition, status),
+			problemValues{"signal": condition, "state": status})
 	}
 	p, err := readPremiseDecision(ctx, db, premiseID)
 	if err != nil {
@@ -633,7 +637,8 @@ func (a *App) confirmPremiseCondition(ctx context.Context, condition, reason str
 		return fmt.Errorf("%w: read the condition %q: %v", ErrInternal, condition, err)
 	}
 	if len(open) == 0 {
-		return fmt.Errorf("%w: the condition %q is no longer open", ErrConflict, condition)
+		return problem(problemPremiseConditionNotOpen, fmt.Errorf("%w: the condition %q is no longer open", ErrConflict, condition),
+			problemValues{"signal": condition})
 	}
 	if err := a.premiseDecisionRev(ctx, decisionID, label, rev, warnings); err != nil {
 		return err

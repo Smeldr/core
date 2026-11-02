@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -207,7 +208,7 @@ func (a *App) subscriptionCaller(ctx context.Context) (User, bool, error) {
 	c, ok := ctx.(Context)
 	if !ok {
 		if a.governance != nil {
-			return User{}, false, ErrForbidden
+			return User{}, false, problem(problemSubscriptionNoCaller, ErrForbidden, nil)
 		}
 		return User{}, true, nil
 	}
@@ -216,7 +217,7 @@ func (a *App) subscriptionCaller(ctx context.Context) (User, bool, error) {
 		return u, u.HasRole(Admin), nil
 	}
 	if u.ID == "" {
-		return u, false, ErrForbidden
+		return u, false, problem(problemSubscriptionNoCaller, ErrForbidden, nil)
 	}
 	ok, err := a.governance.Authorized(ctx, u.ID, "administer", AuthTarget{})
 	if err != nil {
@@ -256,10 +257,10 @@ func (a *App) CreateSubscription(ctx context.Context, spec SubscriptionSpec) (*S
 		owner = caller.ID
 	}
 	if owner == "" {
-		return nil, Err("owner", "is required when the caller has no identity")
+		return nil, fieldErr(problemFieldRequired, "owner", "is required when the caller has no identity", nil)
 	}
 	if owner != caller.ID && !admin {
-		return nil, fmt.Errorf("%w: a subscription for another token needs administer", ErrForbidden)
+		return nil, problem(problemSubscriptionNotOwner, fmt.Errorf("%w: a subscription for another token needs administer", ErrForbidden), nil)
 	}
 	if err := checkSubscriptionName(spec.Name); err != nil {
 		return nil, err
@@ -277,7 +278,8 @@ func (a *App) CreateSubscription(ctx context.Context, spec SubscriptionSpec) (*S
 		return nil, fmt.Errorf("%w: subscription count: %s", ErrInternal, err)
 	}
 	if n >= MaxSubscriptionsPerOwner {
-		return nil, fmt.Errorf("%w: an owner holds at most %d subscriptions", ErrBadRequest, MaxSubscriptionsPerOwner)
+		return nil, problem(problemSubscriptionOwnerLimit, fmt.Errorf("%w: an owner holds at most %d subscriptions", ErrBadRequest, MaxSubscriptionsPerOwner),
+			problemValues{"limit": strconv.Itoa(MaxSubscriptionsPerOwner)})
 	}
 	s := &Subscription{Name: spec.Name, Owner: owner, Filter: filter, Delivery: delivery,
 		IncludeOwn: spec.IncludeOwn, Paused: spec.Paused, LastActor: caller.ID}
@@ -332,11 +334,11 @@ func insertSubscription(ctx context.Context, db DB, s *Subscription) (ok bool, e
 func checkSubscriptionName(name string) error {
 	switch {
 	case strings.TrimSpace(name) == "":
-		return Err("name", "is required: a short label for the subscription")
+		return fieldErr(problemFieldRequired, "name", "is required: a short label for the subscription", nil)
 	case utf8.RuneCountInString(name) > TitleMaxLength:
-		return Err("name", fmt.Sprintf("is longer than %d characters", TitleMaxLength))
+		return fieldErr(problemFieldTooLong, "name", fmt.Sprintf("is longer than %d characters", TitleMaxLength), problemValues{"limit": strconv.Itoa(TitleMaxLength)})
 	case strings.ContainsAny(name, "\r\n"):
-		return Err("name", "is one line")
+		return fieldErr(problemFieldOneLine, "name", "is one line", nil)
 	}
 	return nil
 }
@@ -349,16 +351,16 @@ func (a *App) checkDelivery(ctx context.Context, delivery string, admin bool) (s
 		return DeliveryStream, nil
 	case strings.HasPrefix(delivery, deliveryWebhookPrefix):
 		if !admin {
-			return "", fmt.Errorf("%w: a webhook delivery needs administer", ErrForbidden)
+			return "", problem(problemSubscriptionWebhookNeedsAdmin, fmt.Errorf("%w: a webhook delivery needs administer", ErrForbidden), nil)
 		}
 		id := strings.TrimPrefix(delivery, deliveryWebhookPrefix)
 		var n int
 		if err := a.cfg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_webhook_endpoints WHERE id = $1`, id).Scan(&n); err != nil || n == 0 {
-			return "", Err("delivery", fmt.Sprintf("names no webhook endpoint %q", id))
+			return "", fieldErr(problemReferenceNotFound, "delivery", fmt.Sprintf("names no webhook endpoint %q", id), problemValues{"value": id})
 		}
 		return delivery, nil
 	}
-	return "", Err("delivery", `is "stream" or "webhook:<endpoint id>"`)
+	return "", fieldErr(problemFieldInvalidFormat, "delivery", `is "stream" or "webhook:<endpoint id>"`, nil)
 }
 
 // resolveFilter validates f and resolves its items and anchor to IDs under
@@ -366,31 +368,33 @@ func (a *App) checkDelivery(ctx context.Context, delivery string, admin bool) (s
 func (a *App) resolveFilter(ctx context.Context, owner string, f SubscriptionFilter) (SubscriptionFilter, error) {
 	for _, t := range f.Types {
 		if a.typeRegistry.Lookup(t) == nil {
-			return f, Err("filter", fmt.Sprintf("types: %q is not a registered type", t))
+			return f, fieldErr(problemFieldNotInList, "filter", fmt.Sprintf("types: %q is not a registered type", t), problemValues{"value": t})
 		}
 	}
 	for _, e := range f.Events {
 		if !subscriptionEventKinds[e] {
-			return f, Err("filter", fmt.Sprintf("events: %q is not an event kind", e))
+			return f, fieldErr(problemFieldNotInList, "filter", fmt.Sprintf("events: %q is not an event kind", e), problemValues{"value": e})
 		}
 	}
 	for _, n := range f.EventNames {
 		if !strings.Contains(n, ".") {
-			return f, Err("filter", fmt.Sprintf("event_names: %q is not an event name", n))
+			return f, fieldErr(problemFieldNotInList, "filter", fmt.Sprintf("event_names: %q is not an event name", n), problemValues{"value": n})
 		}
 	}
 	for _, k := range f.SignalKinds {
 		if k != SignalCondition && k != SignalRequest {
-			return f, Err("filter", fmt.Sprintf("signal_kinds: %q is not condition or request", k))
+			return f, fieldErr(problemFieldNotInList, "filter", fmt.Sprintf("signal_kinds: %q is not condition or request", k),
+				problemValues{"value": string(k), "allowed": "condition, request"})
 		}
 	}
 	for name := range f.Fields {
 		if !subscriptionFieldNames[name] && !a.isChannelField(name) {
-			return f, Err("filter", fmt.Sprintf("fields: %q is not a routing field", name))
+			return f, fieldErr(problemFieldNotInList, "filter", fmt.Sprintf("fields: %q is not a routing field", name), problemValues{"value": name})
 		}
 	}
 	if len(f.Items) > MaxSubscriptionItems {
-		return f, fmt.Errorf("%w: a subscription names at most %d items", ErrBadRequest, MaxSubscriptionItems)
+		return f, problem(problemSubscriptionItemLimit, fmt.Errorf("%w: a subscription names at most %d items", ErrBadRequest, MaxSubscriptionItems),
+			problemValues{"limit": strconv.Itoa(MaxSubscriptionItems)})
 	}
 	if len(f.Items) == 0 && f.RelatedTo == nil {
 		return f, nil
@@ -413,10 +417,10 @@ func (a *App) resolveFilter(ctx context.Context, owner string, f SubscriptionFil
 		switch anchor.Direction {
 		case "", "both", "incoming", "outgoing":
 		default:
-			return f, Err("filter", "related_to: direction is incoming, outgoing or both")
+			return f, fieldErr(problemFieldNotInList, "filter", "related_to: direction is incoming, outgoing or both", problemValues{"allowed": "incoming, outgoing, both"})
 		}
 		if strings.TrimSpace(anchor.Kind) == "" {
-			return f, Err("filter", "related_to: kind is required")
+			return f, fieldErr(problemFieldRequired, "filter", "related_to: kind is required", nil)
 		}
 		typ, id, err := a.resolveTypedItem(sctx, anchor.Anchor)
 		if err != nil {
@@ -448,10 +452,10 @@ func (a *App) isChannelField(name string) bool {
 func (a *App) resolveTypedItem(ctx context.Context, pair string) (string, string, error) {
 	typ, ident, ok := strings.Cut(pair, ":")
 	if !ok || typ == "" || ident == "" {
-		return "", "", Err("filter", fmt.Sprintf("%q is not Type:ident", pair))
+		return "", "", fieldErr(problemFieldInvalidFormat, "filter", fmt.Sprintf("%q is not Type:ident", pair), problemValues{"value": pair})
 	}
 	if a.typeRegistry.Lookup(typ) == nil {
-		return "", "", Err("filter", fmt.Sprintf("%q is not a registered type", typ))
+		return "", "", fieldErr(problemFieldNotInList, "filter", fmt.Sprintf("%q is not a registered type", typ), problemValues{"value": typ})
 	}
 	id, err := a.ResolveReadableID(ctx, typ, ident)
 	if err != nil {
@@ -489,13 +493,13 @@ func (a *App) loadSubscription(ctx context.Context, ident string) (*Subscription
 		ident, strings.ToUpper(ident))
 	s, err := scanSubscription(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, caller, admin, ErrNotFound
+		return nil, caller, admin, problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	if err != nil {
 		return nil, caller, admin, fmt.Errorf("%w: subscription: %s", ErrInternal, err)
 	}
 	if s.Owner != caller.ID && !admin {
-		return nil, caller, admin, ErrNotFound
+		return nil, caller, admin, problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	return s, caller, admin, nil
 }
@@ -523,7 +527,7 @@ func (a *App) ListSubscriptions(ctx context.Context, owner string) ([]Subscripti
 		owner = caller.ID
 	}
 	if owner != caller.ID && !admin {
-		return nil, ErrForbidden
+		return nil, problem(problemSubscriptionNotOwner, ErrForbidden, nil)
 	}
 	if err := a.ensureDefaultSubscriptions(ctx, owner); err != nil {
 		return nil, err
@@ -569,7 +573,7 @@ func (a *App) UpdateSubscription(ctx context.Context, ident string, u Subscripti
 	}
 	if u.Filter != nil {
 		if s.DefaultKind != "" {
-			return nil, fmt.Errorf("%w: a default subscription's filter is fixed; pause it instead", ErrConflict)
+			return nil, problem(problemSubscriptionDefaultFixed, fmt.Errorf("%w: a default subscription's filter is fixed; pause it instead", ErrConflict), nil)
 		}
 		f, err := a.resolveFilter(ctx, s.Owner, *u.Filter)
 		if err != nil {
@@ -602,7 +606,7 @@ func (a *App) DeleteSubscription(ctx context.Context, ident string) error {
 		return err
 	}
 	if s.DefaultKind != "" {
-		return fmt.Errorf("%w: a default subscription cannot be deleted; pause it instead", ErrConflict)
+		return problem(problemSubscriptionDefaultUndeletable, fmt.Errorf("%w: a default subscription cannot be deleted; pause it instead", ErrConflict), nil)
 	}
 	if _, err := a.cfg.DB.ExecContext(ctx, `DELETE FROM smeldr_subscriptions WHERE id = $1`, s.ID); err != nil {
 		return fmt.Errorf("%w: subscription delete: %s", ErrInternal, err)
@@ -739,17 +743,17 @@ type RoleSubscriptionSkip struct {
 // On a create failure the report holds what was created before it.
 func (a *App) SeedRoleSubscriptionsReport(ctx context.Context, owner string, d RoleDefaults) (*RoleSeedReport, error) {
 	if d.Band == "" && !d.Architect {
-		return nil, fmt.Errorf("%w: role defaults need a band or Architect", ErrBadRequest)
+		return nil, problem(problemSubscriptionRoleDefaultsNeedBand, fmt.Errorf("%w: role defaults need a band or Architect", ErrBadRequest), nil)
 	}
 	if strings.TrimSpace(owner) == "" {
-		return nil, Err("owner", "is required")
+		return nil, fieldErr(problemFieldRequired, "owner", "is required", nil)
 	}
 	_, admin, err := a.subscriptionCaller(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !admin {
-		return nil, fmt.Errorf("%w: seeding role subscriptions needs administer", ErrForbidden)
+		return nil, problem(problemSubscriptionSeedNeedsAdmin, fmt.Errorf("%w: seeding role subscriptions needs administer", ErrForbidden), nil)
 	}
 	if _, err := a.subscriptionDB(); err != nil {
 		return nil, err

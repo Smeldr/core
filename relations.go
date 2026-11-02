@@ -323,17 +323,18 @@ func (s *RelationStore) loadRegistry(ctx context.Context) error {
 // and valid JSON in type_pairs (if set).
 func ValidateRelationKindDef(def RelationKindDef) error {
 	if def.TypeName == "" {
-		return Err("type_name", "required")
+		return fieldErr(problemFieldRequired, "type_name", "required", nil)
 	}
 	switch def.Mode {
 	case "derived", "asserted", "inferable":
 	default:
-		return Err("mode", fmt.Sprintf("must be derived, asserted or inferable; got %q", def.Mode))
+		return fieldErr(problemFieldNotInList, "mode", fmt.Sprintf("must be derived, asserted or inferable; got %q", def.Mode),
+			problemValues{"value": def.Mode, "allowed": "derived, asserted, inferable"})
 	}
 	if len(def.TypePairs) > 0 {
 		var pairs []any
 		if err := json.Unmarshal(def.TypePairs, &pairs); err != nil {
-			return Err("type_pairs", "must be a valid JSON array")
+			return fieldErr(problemFieldInvalidFormat, "type_pairs", "must be a valid JSON array", nil)
 		}
 	}
 	return nil
@@ -465,10 +466,11 @@ func (s *RelationStore) RegisterReferenceType(ctx context.Context, typeName stri
 // The relation_kind must be registered and edge_class must be "asserted".
 func (s *RelationStore) Assert(ctx context.Context, edge RelationEdge) error {
 	if _, ok := s.GetKind(edge.RelationKind); !ok {
-		return Err("relation_kind", fmt.Sprintf("unknown relation kind %q", edge.RelationKind))
+		return fieldErr(problemRelationKindUnknownAssert, "relation_kind", fmt.Sprintf("unknown relation kind %q", edge.RelationKind),
+			problemValues{"kind": edge.RelationKind})
 	}
 	if edge.EdgeClass != "asserted" {
-		return Err("edge_class", "Assert only accepts edge_class=asserted")
+		return fieldErr(problemRelationEdgeClassNotAsserted, "edge_class", "Assert only accepts edge_class=asserted", problemValues{"allowed": "asserted"})
 	}
 	_, err := s.insertEdge(ctx, edge)
 	return err
@@ -494,8 +496,9 @@ func validateTypePairs(kind RelationKindDef, edge RelationEdge) error {
 			return nil
 		}
 	}
-	return Err("type_pairs", fmt.Sprintf("relation kind %q does not permit %s→%s",
-		edge.RelationKind, edge.SourceType, edge.TargetType))
+	return fieldErr(problemRelationPairNotPermitted, "type_pairs", fmt.Sprintf("relation kind %q does not permit %s→%s",
+		edge.RelationKind, edge.SourceType, edge.TargetType),
+		problemValues{"kind": edge.RelationKind, "source": edge.SourceType, "target": edge.TargetType})
 }
 
 // canonicalizeNonDirectional reorders edge's (source, target) when kind is
@@ -566,8 +569,9 @@ func writeEdgeRowAt(ctx context.Context, db DB, edge RelationEdge, expected *int
 			return RelationEdge{}, false, err
 		}
 		if err == nil && endedAt != nil && !endedAt.After(now) {
-			return RelationEdge{}, false, fmt.Errorf("%w: relation %s ended at %s; assert it again without an id to start a new row",
-				ErrConflict, edge.ID, endedAt.UTC().Format(time.RFC3339))
+			return RelationEdge{}, false, problem(problemRelationEnded, fmt.Errorf("%w: relation %s ended at %s; assert it again without an id to start a new row",
+				ErrConflict, edge.ID, endedAt.UTC().Format(time.RFC3339)),
+				problemValues{"relation": edge.ID, "ended_at": endedAt.UTC().Format(time.RFC3339)})
 		}
 	}
 	newRow := edge.ID == ""
@@ -737,6 +741,10 @@ func (s *RelationStore) insertEdgeAt(ctx context.Context, edge RelationEdge, exp
 	s.announceEdge(ctx, edge, newRow)
 	return edge, nil
 }
+
+// errRelationKindUnknown answers a relation call that names a kind that is not
+// registered, built once.
+var errRelationKindUnknown = problem(problemRelationKindUnknown, ErrNotFound, nil)
 
 // relationToItself is the refusal of a relation whose source and target are
 // one record, label, on field (T1054).
@@ -919,7 +927,7 @@ func (s *RelationStore) resolveEnds(ctx context.Context, sourceType, sourceID, t
 func (s *RelationStore) resolveRelationEnd(ctx context.Context, typeName, ident string) (string, error) {
 	id, err := s.resolveEnd(ctx, typeName, ident)
 	if errors.Is(err, ErrBadRequest) {
-		return "", ErrNotFound
+		return "", problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	return id, err
 }
@@ -935,7 +943,7 @@ func (s *RelationStore) MCPAssertRelation(ctx context.Context,
 	attributes json.RawMessage,
 ) (RelationEdge, error) {
 	if _, ok := s.GetKind(relationKind); !ok {
-		return RelationEdge{}, ErrNotFound
+		return RelationEdge{}, errRelationKindUnknown
 	}
 	edge, _, err := s.MCPAssertRelationAt(ctx, sourceType, sourceID, targetType, targetID, relationKind, confidence, validAt, invalidAt, attributes, nil)
 	return edge, err
@@ -953,7 +961,7 @@ func (s *RelationStore) MCPAssertRelationAt(ctx context.Context,
 	attributes json.RawMessage, rev *int,
 ) (RelationEdge, []CreateWarning, error) {
 	if _, ok := s.GetKind(relationKind); !ok {
-		return RelationEdge{}, nil, ErrNotFound
+		return RelationEdge{}, nil, errRelationKindUnknown
 	}
 	if planTimeEdge(sourceType, relationKind) {
 		return RelationEdge{}, nil, errPlanTimeEdge()
@@ -1019,7 +1027,7 @@ func (s *RelationStore) MCPProposeRelation(ctx context.Context,
 	attributes json.RawMessage,
 ) (RelationEdge, error) {
 	if _, ok := s.GetKind(relationKind); !ok {
-		return RelationEdge{}, ErrNotFound
+		return RelationEdge{}, errRelationKindUnknown
 	}
 	sourceID, targetID, err := s.resolveEnds(ctx, sourceType, sourceID, targetType, targetID)
 	if err != nil {
@@ -1054,7 +1062,7 @@ func (s *RelationStore) MCPObserveRelation(ctx context.Context,
 	attributes json.RawMessage,
 ) (RelationEdge, error) {
 	if _, ok := s.GetKind(relationKind); !ok {
-		return RelationEdge{}, ErrNotFound
+		return RelationEdge{}, errRelationKindUnknown
 	}
 	sourceID, targetID, err := s.resolveEnds(ctx, sourceType, sourceID, targetType, targetID)
 	if err != nil {

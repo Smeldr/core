@@ -164,7 +164,7 @@ func TestInsertEdge_ExecError(t *testing.T) {
 func TestMCPProposeRelation_UnknownKind(t *testing.T) {
 	store := setupMCPRelations(t)
 	_, err := store.MCPProposeRelation(context.Background(), "a", "1", "b", "2", "nonexistent", nil, nil, nil, nil)
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("want ErrNotFound for unknown kind, got %v", err)
 	}
 }

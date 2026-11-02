@@ -223,7 +223,7 @@ func (s *RelationStore) Withdraw(ctx context.Context, id, reason string) error {
 // none.
 func (s *RelationStore) WithdrawAt(ctx context.Context, id, reason string, rev *int) ([]CreateWarning, error) {
 	if strings.TrimSpace(reason) == "" {
-		return nil, Err("reason", "is required to withdraw a relation")
+		return nil, fieldErr(problemFieldRequired, "reason", "is required to withdraw a relation", nil)
 	}
 	var srcType, srcKind string
 	if err := s.db.QueryRowContext(ctx, "SELECT source_type, relation_kind FROM smeldr_relations WHERE id=$1", id).Scan(&srcType, &srcKind); err == nil && planTimeEdge(srcType, srcKind) {
@@ -266,7 +266,7 @@ func (s *RelationStore) withdraw(ctx context.Context, id, reason string, rev *in
 		Scan(nullTimeScanner{dst: &at}, &current)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return fmt.Errorf("%w: relation %s", ErrNotFound, id)
+		return problem(problemRelationNotFound, fmt.Errorf("%w: relation %s", ErrNotFound, id), problemValues{"relation": id})
 	case err != nil:
 		return fmt.Errorf("%w: withdraw relation %s: %s", ErrInternal, id, err)
 	case at == nil && rev != nil && current != *rev:
@@ -275,9 +275,10 @@ func (s *RelationStore) withdraw(ctx context.Context, id, reason string, rev *in
 	case at == nil:
 		// Live a moment ago and not ended by this call: lost a race with a
 		// concurrent re-assert of an explicit future end. Report it as ended.
-		return fmt.Errorf("%w: relation %s could not be withdrawn", ErrConflict, id)
+		return problem(problemRelationWithdrawFailed, fmt.Errorf("%w: relation %s could not be withdrawn", ErrConflict, id), problemValues{"relation": id})
 	}
-	return fmt.Errorf("%w: relation %s already ended at %s", ErrConflict, id, at.UTC().Format(time.RFC3339))
+	return problem(problemRelationAlreadyWithdrawn, fmt.Errorf("%w: relation %s already ended at %s", ErrConflict, id, at.UTC().Format(time.RFC3339)),
+		problemValues{"relation": id, "ended_at": at.UTC().Format(time.RFC3339)})
 }
 
 // withdrawVisible is Withdraw's per-item read check. A caller who cannot read
@@ -299,11 +300,11 @@ func (s *RelationStore) withdrawVisible(ctx context.Context, id string) error {
 		Scan(&e.SourceType, &e.SourceID, &e.TargetType, &e.TargetID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return fmt.Errorf("%w: relation %s", ErrNotFound, id)
+		return problem(problemRelationNotFound, fmt.Errorf("%w: relation %s", ErrNotFound, id), problemValues{"relation": id})
 	case err != nil:
 		return fmt.Errorf("%w: withdraw relation %s: %s", ErrInternal, id, err)
 	case !scope.Readable(e.SourceType, e.SourceID) || !scope.Readable(e.TargetType, e.TargetID):
-		return fmt.Errorf("%w: relation %s", ErrNotFound, id)
+		return problem(problemRelationNotFound, fmt.Errorf("%w: relation %s", ErrNotFound, id), problemValues{"relation": id})
 	}
 	return nil
 }

@@ -74,7 +74,7 @@ func revMissing(typeName, id, write string, cutover time.Time) (*CreateWarning, 
 func revMissingFor(id, write string, cutover time.Time) (*CreateWarning, error) {
 	msg := fmt.Sprintf("%s %s: send the rev you read, so a change made since is not overwritten unseen", write, id)
 	if !cutover.IsZero() && !time.Now().Before(cutover) {
-		return nil, Err("rev", msg+"; it is required")
+		return nil, fieldErr(problemRevMissing, "rev", msg+"; it is required", problemValues{"record": id, "write": write})
 	}
 	if !cutover.IsZero() {
 		msg += "; it is refused without one from " + cutover.UTC().Format(time.RFC3339)
@@ -98,7 +98,7 @@ func sentRev(fields map[string]any) (int, bool, error) {
 		case int64:
 			return int(n), true, nil
 		}
-		return 0, true, Err("rev", "must be a number: the rev you read")
+		return 0, true, fieldErr(problemFieldInvalidFormat, "rev", "must be a number: the rev you read", nil)
 	}
 	return 0, false, nil
 }

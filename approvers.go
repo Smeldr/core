@@ -51,7 +51,7 @@ type approverPlace struct {
 func (a *App) ApproversOf(ctx context.Context, place string) ([]PlaceApprover, error) {
 	place = strings.TrimSpace(place)
 	if place == "" {
-		return nil, fmt.Errorf("%w: name a place: an Organization, Domain or Area by address, slug or ID", ErrBadRequest)
+		return nil, problem(problemApproversPlaceRequired, fmt.Errorf("%w: name a place: an Organization, Domain or Area by address, slug or ID", ErrBadRequest), nil)
 	}
 	if a.cfg.DB == nil {
 		return nil, fmt.Errorf("%w: ApproversOf needs a database", ErrInternal)
@@ -65,7 +65,8 @@ func (a *App) ApproversOf(ctx context.Context, place string) ([]PlaceApprover, e
 		return nil, err
 	}
 	if p.id == "" || !scope.Readable(p.typeName, p.id) {
-		return nil, fmt.Errorf("%w: no place %q you can read (an Organization, Domain or Area by address, slug or ID)", ErrNotFound, place)
+		return nil, problem(problemPlaceNotFound, fmt.Errorf("%w: no place %q you can read (an Organization, Domain or Area by address, slug or ID)", ErrNotFound, place),
+			problemValues{"place": place})
 	}
 	out := []PlaceApprover{}
 	if a.governance == nil {

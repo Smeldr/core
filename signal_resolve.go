@@ -322,7 +322,7 @@ func validateSignalTransition(ctx context.Context, db DB, itemID, from, to strin
 	var signalType string
 	err := db.QueryRowContext(ctx, `SELECT signal_type FROM smeldr_signals WHERE id = $1`, itemID).Scan(&signalType)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+		return problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	if err != nil {
 		return fmt.Errorf("%w: signal transition: %s", ErrInternal, err)
@@ -331,14 +331,16 @@ func validateSignalTransition(ctx context.Context, db DB, itemID, from, to strin
 	switch to {
 	case signalResolved:
 		if !known || info.Kind != SignalCondition {
-			return fmt.Errorf("%w: a %q Signal is a request: it is answered or withdrawn, never resolved", ErrConflict, signalType)
+			return problem(problemSignalRequestNotResolvable, fmt.Errorf("%w: a %q Signal is a request: it is answered or withdrawn, never resolved", ErrConflict, signalType),
+				problemValues{"signal_type": signalType})
 		}
 		if !isSignalSystem(ctx) {
-			return fmt.Errorf("%w: a condition is resolved by the system when it ends", ErrForbidden)
+			return problem(problemSignalConditionSystemOnly, fmt.Errorf("%w: a condition is resolved by the system when it ends", ErrForbidden), nil)
 		}
 	case signalAnswered, signalWithdrawn:
 		if !known || info.Kind != SignalRequest {
-			return fmt.Errorf("%w: a %q Signal is a condition: it is resolved by the system when it ends, never answered or withdrawn", ErrConflict, signalType)
+			return problem(problemSignalConditionNotAnswerable, fmt.Errorf("%w: a %q Signal is a condition: it is resolved by the system when it ends, never answered or withdrawn", ErrConflict, signalType),
+				problemValues{"signal_type": signalType})
 		}
 	}
 	return nil
@@ -376,10 +378,10 @@ func validAnswerRef(ref string) bool {
 // closeSignalRequest is [App.AnswerSignal] and [App.WithdrawSignal].
 func (a *App) closeSignalRequest(ctx context.Context, ident, to, verb, field, text, ref string) error {
 	if strings.TrimSpace(text) == "" {
-		return Err(field, field+" is required")
+		return fieldErr(problemFieldRequired, field, field+" is required", nil)
 	}
 	if ref != "" && !validAnswerRef(ref) {
-		return Err("answer_ref", `answer_ref names the change as "Type:ID"`)
+		return fieldErr(problemFieldInvalidFormat, "answer_ref", `answer_ref names the change as "Type:ID"`, nil)
 	}
 	if a.cfg.DB == nil {
 		return fmt.Errorf("%w: %s signal requires Config.DB", ErrInternal, verb)
@@ -393,17 +395,17 @@ func (a *App) closeSignalRequest(ctx context.Context, ident, to, verb, field, te
 		return err
 	}
 	if !scope.Readable("Signal", id) {
-		return ErrNotFound
+		return problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	if sc, ok := ctx.(Context); ok {
 		if err := a.AuthorizeCapability(sc, ResourceSignal, verb, AuthTarget{TypeName: "Signal", ID: id}); err != nil {
 			return err
 		}
 	} else if a.governance != nil {
-		return ErrForbidden
+		return problem(problemSignalAnswerNotPermitted, ErrForbidden, nil)
 	}
 	if status != signalOpen {
-		return fmt.Errorf("%w: the Signal is %s, not open", ErrConflict, status)
+		return problem(problemSignalNotOpen, fmt.Errorf("%w: the Signal is %s, not open", ErrConflict, status), problemValues{"state": status})
 	}
 	// A Check's approval request is answered for its Area only (T918).
 	if err := refuseChangeCheckRequest(ctx, a.cfg.DB, id); err != nil {

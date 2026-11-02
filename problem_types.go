@@ -38,8 +38,8 @@ type ProblemTypeInfo struct {
 	// Values are the names of the values the type carries, a closed set like
 	// the ids: a name is never renamed or removed, and one may be added. A
 	// refusal sends those of them its message states, so any one may be
-	// absent. Each value says no more than the message does (see
-	// [ProblemValuesOf]).
+	// absent; an empty value is not sent. Each value says no more than the
+	// message does (see [ProblemValuesOf]).
 	Values []string `json:"values,omitempty"`
 }
 
@@ -494,13 +494,17 @@ func ProblemValuesOf(err error) map[string]string {
 	return nil
 }
 
-// copyValues copies v, nil when it is empty.
+// copyValues copies v without its empty values, so a site sends a name only
+// when it has a value for it; nil when none is left.
 func copyValues(v problemValues) map[string]string {
-	if len(v) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(v))
+	var out map[string]string
 	for k, x := range v {
+		if x == "" {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]string, len(v))
+		}
 		out[k] = x
 	}
 	return out

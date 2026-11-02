@@ -123,7 +123,7 @@ const relationDedupJob = "relation-dedup"
 func (a *App) MigrateRelationDuplicates(ctx context.Context, opts RelationDedupOptions) (*RelationDedupReport, error) {
 	s := a.relationStore
 	if s == nil {
-		return nil, fmt.Errorf("%w: MigrateRelationDuplicates needs relations (App.Relations)", ErrBadRequest)
+		return nil, problem(problemMigratePrecondition, fmt.Errorf("%w: MigrateRelationDuplicates needs relations (App.Relations)", ErrBadRequest), nil)
 	}
 	rep := &RelationDedupReport{DryRun: opts.DryRun, Duplicates: []RelationDuplicate{}}
 	rows, err := s.db.QueryContext(ctx, liveDuplicatesSQL)

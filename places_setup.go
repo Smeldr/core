@@ -33,7 +33,7 @@ const (
 func (a *App) EnsureOrganization(ctx context.Context, name string) (*OrganizationRecord, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, Err("name", "is required: the organization's name")
+		return nil, fieldErr(problemFieldRequired, "name", "is required: the organization's name", nil)
 	}
 	db := a.cfg.DB
 	if db == nil {
@@ -49,7 +49,9 @@ func (a *App) EnsureOrganization(ctx context.Context, name string) (*Organizatio
 	if held, err := heldByLegacyPlaceType(ctx, db, "Domain", coreAddressPrefixes["Domain"]); err != nil {
 		return nil, err
 	} else if held {
-		return nil, fmt.Errorf("%w: the runtime domain type still holds the DOM prefix; run migrate-places, which creates Organization", ErrConflict)
+		return nil, problem(problemPlacesDomainPrefixHeld,
+			fmt.Errorf("%w: the runtime domain type still holds the DOM prefix; run migrate-places, which creates Organization", ErrConflict),
+			problemValues{"prefix": "DOM"})
 	}
 	relations, err := tableExists(ctx, db, "smeldr_relations")
 	if err != nil {

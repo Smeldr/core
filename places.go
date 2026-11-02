@@ -162,8 +162,8 @@ func registerPlaceTypes(app *App, db DB) {
 		At("/areas"), Repo(NewSQLRepo[*Area](db, Table("smeldr_areas"))), MCP(MCPRead, MCPWrite), withAddress(),
 		saveHooksOption{prepare: func(ctx Context, existing, item any) error { return app.prepareArea(ctx, existing, item.(*Area)) }},
 		On[*Area](BeforeDelete, func(ctx Context, a *Area) error {
-			return requireOperationOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "Area", ID: a.ID},
-				"deleting "+areaLabel(a), areaLabel(a), "D146")
+			return requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "Area", ID: a.ID},
+				"deleting "+areaLabel(a), "delete_area", areaLabel(a), "D146")
 		}),
 	))
 	app.Content(NewModule[*Set]((*Set)(nil),
@@ -274,8 +274,11 @@ func requireDecisionPlace(ctx context.Context, db DB, id string) error {
 		return err
 	}
 	if !found {
-		return fmt.Errorf("%w: Decision %s has no place: place it before ratifying, with assert_relation belongs_to_domain (a Domain), belongs_to_area (an Area) or belongs_to_organization (Organization, for a Decision that spans Domains)",
-			ErrConflict, recordLabel(ctx, db, "smeldr_decisions", id))
+		label := recordLabel(ctx, db, "smeldr_decisions", id)
+		return problem(problemDecisionPlaceMissing,
+			fmt.Errorf("%w: Decision %s has no place: place it before ratifying, with assert_relation belongs_to_domain (a Domain), belongs_to_area (an Area) or belongs_to_organization (Organization, for a Decision that spans Domains)",
+				ErrConflict, label),
+			problemValues{"decision": label})
 	}
 	return nil
 }
@@ -295,9 +298,12 @@ func requireOnePlace(ctx context.Context, db DB, edge RelationEdge) error {
 	if p.kind == edge.RelationKind && p.targetID == edge.TargetID {
 		return nil
 	}
-	return fmt.Errorf("%w: Decision %s already has a place (%s %s): a Decision has exactly one place; withdraw that relation first",
-		ErrConflict, recordLabel(ctx, db, "smeldr_decisions", edge.SourceID), p.kind,
-		recordLabel(ctx, db, placeTables[p.targetType], p.targetID))
+	decision := recordLabel(ctx, db, "smeldr_decisions", edge.SourceID)
+	place := recordLabel(ctx, db, placeTables[p.targetType], p.targetID)
+	return problem(problemDecisionPlaceExists,
+		fmt.Errorf("%w: Decision %s already has a place (%s %s): a Decision has exactly one place; withdraw that relation first",
+			ErrConflict, decision, p.kind, place),
+		problemValues{"decision": decision, "kind": p.kind, "place": place})
 }
 
 // recordLabel is the address of the record id in table, or id when it has
@@ -322,7 +328,9 @@ func normalizeApprovalMode(a *Area) error {
 		a.ApprovalMode = ApprovalModeCommentOnly
 	case ApprovalModeCommentOnly, ApprovalModeRequiresApproval, ApprovalModeAuditAfterMerge:
 	default:
-		return Err("approval_mode", fmt.Sprintf("must be %q, %q or %q", ApprovalModeCommentOnly, ApprovalModeRequiresApproval, ApprovalModeAuditAfterMerge))
+		return fieldErr(problemFieldNotInList, "approval_mode",
+			fmt.Sprintf("must be %q, %q or %q", ApprovalModeCommentOnly, ApprovalModeRequiresApproval, ApprovalModeAuditAfterMerge),
+			problemValues{"allowed": strings.Join([]string{ApprovalModeCommentOnly, ApprovalModeRequiresApproval, ApprovalModeAuditAfterMerge}, ", ")})
 	}
 	return nil
 }
@@ -348,14 +356,14 @@ func (s *RelationStore) requirePlaceAuthority(ctx context.Context, edge Relation
 	}
 	source := recordLabel(ctx, s.db, sourceTable, edge.SourceID)
 	place := recordLabel(ctx, s.db, placeTables[edge.TargetType], edge.TargetID)
-	act := fmt.Sprintf("placing %s in %s", source, place)
+	act, code := fmt.Sprintf("placing %s in %s", source, place), "place"
 	switch {
 	case leaving:
-		act = fmt.Sprintf("moving %s out of %s", source, place)
+		act, code = fmt.Sprintf("moving %s out of %s", source, place), "unplace"
 	case edge.SourceType == "Area":
-		act = fmt.Sprintf("moving %s into %s", source, place)
+		act, code = fmt.Sprintf("moving %s into %s", source, place), "move"
 	}
-	return requireOperationOver(ctx, rs, OperationRatify, AuthTarget{TypeName: edge.TargetType, ID: edge.TargetID}, act, place, "D145")
+	return requireActOver(ctx, rs, OperationRatify, AuthTarget{TypeName: edge.TargetType, ID: edge.TargetID}, act, code, place, "D145")
 }
 
 // requireOperationOver is the check D145 and D146 share: the actor in ctx
@@ -364,24 +372,36 @@ func (s *RelationStore) requirePlaceAuthority(ctx context.Context, edge Relation
 // done and over the place, for the refusal; decision names the Decision that
 // requires it. No governance (rs nil) skips the check; no actor is refused;
 // an agent or job token is refused for ratify whatever its grants (T884),
-// not for approve-change, which an agent may hold on an Area grant.
+// not for approve-change, which an agent may hold on an Area grant. Its
+// refusals carry no act code; [requireActOver] gives one.
 func requireOperationOver(ctx context.Context, rs *RoleStore, op string, target AuthTarget, act, over, decision string) error {
+	return requireActOver(ctx, rs, op, target, act, "", over, decision)
+}
+
+// requireActOver is [requireOperationOver] whose refusals also carry code,
+// a short name for the act (place, move, unplace, ...) that a UI keys its
+// text on, never the English phrase act.
+func requireActOver(ctx context.Context, rs *RoleStore, op string, target AuthTarget, act, code, over, decision string) error {
 	if rs == nil {
 		return nil
 	}
 	actor, kind := actorFromContext(ctx)
 	switch {
 	case actor == "":
-		return fmt.Errorf("%w: %s needs %s over %s, and no actor is known", ErrForbidden, act, op, over)
+		return problem(problemPlaceNoActor, fmt.Errorf("%w: %s needs %s over %s, and no actor is known", ErrForbidden, act, op, over),
+			problemValues{"act": code, "operation": op, "place": over})
 	case op == OperationRatify && automatedClass(kind):
-		return fmt.Errorf("%w: an %s token never ratifies, so it cannot do this: %s needs ratify over %s (%s)", ErrForbidden, kind, act, over, decision)
+		return problem(problemRatifyAutomatedClass,
+			fmt.Errorf("%w: an %s token never ratifies, so it cannot do this: %s needs ratify over %s (%s)", ErrForbidden, kind, act, over, decision),
+			problemValues{"token_class": string(kind), "act": code, "place": over})
 	}
 	ok, err := rs.authorizedOver(ctx, actor, op, target, true)
 	if err != nil {
 		return fmt.Errorf("%w: the authority over %s cannot be read: %s", ErrInternal, over, err)
 	}
 	if !ok {
-		return fmt.Errorf("%w: %s needs %s over %s (%s)", ErrForbidden, act, op, over, decision)
+		return problem(problemPlaceAuthorityRequired, fmt.Errorf("%w: %s needs %s over %s (%s)", ErrForbidden, act, op, over, decision),
+			problemValues{"act": code, "operation": op, "place": over})
 	}
 	return nil
 }
@@ -400,7 +420,8 @@ func (s *RelationStore) placeGated(ctx context.Context, edge RelationEdge, leavi
 		case errors.Is(err, sql.ErrNoRows):
 			// Fail closed: the Go API takes the source as given, so an
 			// address or slug here would otherwise skip the check.
-			return false, "", fmt.Errorf("%w: no Decision with ID %q; a place edge names its Decision by ID", ErrNotFound, edge.SourceID)
+			return false, "", problem(problemPlaceNotFound, fmt.Errorf("%w: no Decision with ID %q; a place edge names its Decision by ID", ErrNotFound, edge.SourceID),
+				problemValues{"decision": edge.SourceID})
 		case err != nil:
 			return false, "", fmt.Errorf("%w: the state of Decision %s cannot be read: %s", ErrInternal, edge.SourceID, err)
 		}
@@ -414,7 +435,8 @@ func (s *RelationStore) placeGated(ctx context.Context, edge RelationEdge, leavi
 			return false, "", fmt.Errorf("%w: Area %s cannot be read: %s", ErrInternal, edge.SourceID, err)
 		}
 		if n == 0 {
-			return false, "", fmt.Errorf("%w: no Area with ID %q; a place edge names its Area by ID", ErrNotFound, edge.SourceID)
+			return false, "", problem(problemPlaceNotFound, fmt.Errorf("%w: no Area with ID %q; a place edge names its Area by ID", ErrNotFound, edge.SourceID),
+				problemValues{"area": edge.SourceID})
 		}
 		if leaving {
 			return true, "smeldr_areas", nil
@@ -482,6 +504,6 @@ func (app *App) prepareArea(ctx Context, existing any, a *Area) error {
 	if before == a.ApprovalMode {
 		return nil
 	}
-	return requireOperationOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "Area", ID: old.ID},
-		fmt.Sprintf("changing %s's approval mode", areaLabel(old)), areaLabel(old), "D146")
+	return requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "Area", ID: old.ID},
+		fmt.Sprintf("changing %s's approval mode", areaLabel(old)), "change_approval_mode", areaLabel(old), "D146")
 }

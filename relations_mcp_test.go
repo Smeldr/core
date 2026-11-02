@@ -3,6 +3,7 @@ package smeldr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -43,7 +44,7 @@ func TestMCPAssertRelation_UnknownKind(t *testing.T) {
 	store := setupMCPRelations(t)
 
 	_, err := store.MCPAssertRelation(context.Background(), "article", "art-1", "tag", "tag-1", "nonexistent", nil, nil, nil, nil)
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("want ErrNotFound, got %v", err)
 	}
 }
@@ -110,7 +111,7 @@ func TestMCPObserveRelation_UnknownKind(t *testing.T) {
 	store := setupMCPRelations(t)
 
 	_, err := store.MCPObserveRelation(context.Background(), "article", "art-1", "tag", "tag-1", "nonexistent", nil, nil, nil, nil)
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("want ErrNotFound, got %v", err)
 	}
 }

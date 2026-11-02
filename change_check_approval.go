@@ -58,7 +58,8 @@ var errRequestTaken = errors.New("smeldr: the Area's request is already open")
 // (the agent rule's exception for this role).
 func (s *RoleStore) checkItemChangeApproverGrant(ctx context.Context, grant RoleGrant) error {
 	if len(grant.ScopeStatic) != 1 || !strings.HasPrefix(grant.ScopeStatic[0], "ChangeCheck:") {
-		return fmt.Errorf("%w: Grant: %s names exactly one ChangeCheck (ChangeCheck:<id>)", ErrForbidden, RoleItemChangeApprover)
+		return problem(problemGrantItemApproverScope, fmt.Errorf("%w: Grant: %s names exactly one ChangeCheck (ChangeCheck:<id>)", ErrForbidden, RoleItemChangeApprover),
+			problemValues{"role": RoleItemChangeApprover})
 	}
 	// The scope is normalized before this check, which refuses a pattern
 	// naming no ChangeCheck record.
@@ -68,14 +69,17 @@ func (s *RoleStore) checkItemChangeApproverGrant(ctx context.Context, grant Role
 		grantor = s.actorTokenID
 	}
 	if grantor == "" {
-		return fmt.Errorf("%w: Grant: %s needs a human grantor, and none is known", ErrForbidden, RoleItemChangeApprover)
+		return problem(problemGrantItemApproverNeedsHumanGrantor, fmt.Errorf("%w: Grant: %s needs a human grantor, and none is known", ErrForbidden, RoleItemChangeApprover),
+			problemValues{"role": RoleItemChangeApprover})
 	}
 	class, err := actorClass(ctx, s.db, grantor)
 	if err != nil {
-		return fmt.Errorf("%w: Grant: the class of the grantor %s cannot be read: %s", ErrForbidden, grantor, err)
+		return problem(problemGrantAuthorityUnreadable, fmt.Errorf("%w: Grant: the class of the grantor %s cannot be read: %s", ErrForbidden, grantor, err),
+			problemValues{"grantor": grantor})
 	}
 	if class != string(Human) {
-		return fmt.Errorf("%w: Grant: %s must come from a human token; the grantor is %s", ErrForbidden, RoleItemChangeApprover, classLabel(class))
+		return problem(problemGrantItemApproverNeedsHumanGrantor, fmt.Errorf("%w: Grant: %s must come from a human token; the grantor is %s", ErrForbidden, RoleItemChangeApprover, classLabel(class)),
+			problemValues{"role": RoleItemChangeApprover, "grantor_class": classLabel(class)})
 	}
 	// The role counts for every Area of the Check that requires approval, so
 	// its grantor must hold approve-change over each of them (S3154): an
@@ -83,7 +87,7 @@ func (s *RoleStore) checkItemChangeApproverGrant(ctx context.Context, grant Role
 	rows, err := s.db.QueryContext(ctx, `SELECT c.area_id, a.address FROM smeldr_change_check_areas c JOIN smeldr_areas a ON a.id = c.area_id
 		WHERE c.check_id = $1 AND c.approval_mode = $2`, checkID, ApprovalModeRequiresApproval)
 	if err != nil {
-		return fmt.Errorf("%w: Grant: the Areas of the Check cannot be read: %s", ErrForbidden, err)
+		return problem(problemGrantAuthorityUnreadable, fmt.Errorf("%w: Grant: the Areas of the Check cannot be read: %s", ErrForbidden, err), nil)
 	}
 	type area struct{ id, address string }
 	var areas []area
@@ -91,21 +95,23 @@ func (s *RoleStore) checkItemChangeApproverGrant(ctx context.Context, grant Role
 		var x area
 		if err := rows.Scan(&x.id, &x.address); err != nil {
 			rows.Close()
-			return fmt.Errorf("%w: Grant: the Areas of the Check cannot be read: %s", ErrForbidden, err)
+			return problem(problemGrantAuthorityUnreadable, fmt.Errorf("%w: Grant: the Areas of the Check cannot be read: %s", ErrForbidden, err), nil)
 		}
 		areas = append(areas, x)
 	}
 	rows.Close()
 	if len(areas) == 0 {
-		return fmt.Errorf("%w: Grant: the Check has no Area that requires approval; there is nothing to delegate", ErrForbidden)
+		return problem(problemGrantCheckHasNoApprovalArea, fmt.Errorf("%w: Grant: the Check has no Area that requires approval; there is nothing to delegate", ErrForbidden), nil)
 	}
 	for _, x := range areas {
 		ok, err := s.authorizedOver(ctx, grantor, OperationApproveChange, AuthTarget{TypeName: "Area", ID: x.id}, true)
 		if err != nil {
-			return fmt.Errorf("%w: Grant: the grantor's authority over Area %s cannot be read: %s", ErrForbidden, x.address, err)
+			return problem(problemGrantAuthorityUnreadable, fmt.Errorf("%w: Grant: the grantor's authority over Area %s cannot be read: %s", ErrForbidden, x.address, err),
+				problemValues{"area": x.address})
 		}
 		if !ok {
-			return fmt.Errorf("%w: Grant: the grantor holds no approve-change over Area %s of the Check, so cannot delegate approval of it", ErrForbidden, x.address)
+			return problem(problemGrantGrantorLacksAreaAuthority, fmt.Errorf("%w: Grant: the grantor holds no approve-change over Area %s of the Check, so cannot delegate approval of it", ErrForbidden, x.address),
+				problemValues{"area": x.address})
 		}
 	}
 	return nil
@@ -233,7 +239,7 @@ func refuseChangeCheckRequest(ctx context.Context, db DB, id string) error {
 		return fmt.Errorf("%w: read the request %s: %v", ErrInternal, id, err)
 	}
 	if subjectType == "ChangeCheck" && signalType == changeCheckSignalType {
-		return fmt.Errorf("%w: this request is a Check's approval for one Area: answer it with answer_change_check (App.AnswerChangeCheck), which checks the answerer's authority over that Area", ErrConflict)
+		return problem(problemChangeCheckUseAnswerChangeCheck, fmt.Errorf("%w: this request is a Check's approval for one Area: answer it with answer_change_check (App.AnswerChangeCheck), which checks the answerer's authority over that Area", ErrConflict), nil)
 	}
 	return nil
 }
@@ -278,7 +284,7 @@ func (a *App) AnswerChangeCheckAt(ctx context.Context, check, area string, appro
 func (a *App) answerChangeCheck(ctx context.Context, check, area string, approve bool, reason string, rev *int, warnings *[]CreateWarning) error {
 	reason = strings.TrimSpace(reason)
 	if !approve && reason == "" {
-		return Err("reason", "is required when the change is not approved: say why")
+		return fieldErr(problemFieldRequired, "reason", "is required when the change is not approved: say why", nil)
 	}
 	if a.cfg.DB == nil {
 		return fmt.Errorf("%w: AnswerChangeCheck needs a database", ErrInternal)
@@ -299,12 +305,12 @@ func (a *App) answerChangeCheck(ctx context.Context, check, area string, approve
 	err = db.QueryRowContext(ctx, `SELECT id, address FROM smeldr_areas WHERE address = $1 OR slug = $1 OR id = $1 LIMIT 1`, area).Scan(&row.areaID, &row.address)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return fmt.Errorf("%w: no Area %q you can read", ErrNotFound, area)
+		return problem(problemPlaceNotFound, fmt.Errorf("%w: no Area %q you can read", ErrNotFound, area), problemValues{"area": area})
 	case err != nil:
 		return fmt.Errorf("%w: read the Area %q: %v", ErrInternal, area, err)
 	}
 	if !scope.Readable("Area", row.areaID) {
-		return fmt.Errorf("%w: no Area %q you can read", ErrNotFound, area)
+		return problem(problemPlaceNotFound, fmt.Errorf("%w: no Area %q you can read", ErrNotFound, area), problemValues{"area": area})
 	}
 	if err := a.authorizeChangeCheckAnswer(ctx, checkID, row.areaID, row.address); err != nil {
 		return err
@@ -336,7 +342,7 @@ func (a *App) answerChangeCheck(ctx context.Context, check, area string, approve
 	}
 	if row.mode == ApprovalModeAuditAfterMerge {
 		if !approve && reason == "" {
-			return Err("reason", "is required when the change is not approved: say why")
+			return fieldErr(problemFieldRequired, "reason", "is required when the change is not approved: say why", nil)
 		}
 		if err := claimRev(); err != nil {
 			return err
@@ -345,13 +351,17 @@ func (a *App) answerChangeCheck(ctx context.Context, check, area string, approve
 	}
 	switch {
 	case row.mode == "":
-		return fmt.Errorf("%w: %s does not touch Area %s", ErrConflict, label, row.address)
+		return problem(problemChangeCheckAreaNotTouched, fmt.Errorf("%w: %s does not touch Area %s", ErrConflict, label, row.address),
+			problemValues{"check": label, "area": row.address})
 	case row.mode != ApprovalModeRequiresApproval:
-		return fmt.Errorf("%w: Area %s only comments on %s (%s); there is nothing to approve", ErrConflict, row.address, label, row.mode)
+		return problem(problemChangeCheckAreaCommentOnly, fmt.Errorf("%w: Area %s only comments on %s (%s); there is nothing to approve", ErrConflict, row.address, label, row.mode),
+			problemValues{"area": row.address, "check": label, "approval_mode": row.mode})
 	case status != ChangeCheckAwaitingApproval:
-		return fmt.Errorf("%w: %s is %s, not awaiting approval", ErrConflict, label, status)
+		return problem(problemChangeCheckNotAwaiting, fmt.Errorf("%w: %s is %s, not awaiting approval", ErrConflict, label, status),
+			problemValues{"check": label, "state": status})
 	case row.verdict != AreaVerdictAwaiting:
-		return fmt.Errorf("%w: Area %s already answered %s (%s)", ErrConflict, row.address, label, row.verdict)
+		return problem(problemChangeCheckAlreadyAnswered, fmt.Errorf("%w: Area %s already answered %s (%s)", ErrConflict, row.address, label, row.verdict),
+			problemValues{"area": row.address, "check": label, "verdict": string(row.verdict)})
 	}
 	if err := claimRev(); err != nil {
 		return err
@@ -369,7 +379,8 @@ func (a *App) answerChangeCheck(ctx context.Context, check, area string, approve
 		return fmt.Errorf("%w: record the answer for %s: %v", ErrInternal, row.address, err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("%w: Area %s of %s was answered at the same moment", ErrConflict, row.address, label)
+		return problem(problemChangeCheckAnswerRace, fmt.Errorf("%w: Area %s of %s was answered at the same moment", ErrConflict, row.address, label),
+			problemValues{"area": row.address, "check": label})
 	}
 	if row.signalID != "" {
 		if err := a.closeChangeCheckRequest(ctx, row.signalID, signalAnswered, text, "ChangeCheck:"+checkID); err != nil {
@@ -405,7 +416,8 @@ func (a *App) authorizeChangeCheckAnswer(ctx context.Context, checkID, areaID, a
 	}
 	actor, kind := actorFromContext(ctx)
 	if actor == "" {
-		return fmt.Errorf("%w: answering for Area %s needs approve-change over it, and no actor is known", ErrForbidden, areaAddress)
+		return problem(problemChangeCheckAnswerAuthority, fmt.Errorf("%w: answering for Area %s needs approve-change over it, and no actor is known", ErrForbidden, areaAddress),
+			problemValues{"area": areaAddress})
 	}
 	areaTarget := AuthTarget{TypeName: "Area", ID: areaID}
 	checkTarget := AuthTarget{TypeName: "ChangeCheck", ID: checkID}
@@ -426,7 +438,8 @@ func (a *App) authorizeChangeCheckAnswer(ctx context.Context, checkID, areaID, a
 		return fmt.Errorf("%w: the authority over Area %s cannot be read: %s", ErrInternal, areaAddress, err)
 	}
 	if !ok {
-		return fmt.Errorf("%w: answering for Area %s needs approve-change over it (its area-approver, its domain-approver or an approver) or %s on the Check (D144)", ErrForbidden, areaAddress, RoleItemChangeApprover)
+		return problem(problemChangeCheckAnswerAuthority, fmt.Errorf("%w: answering for Area %s needs approve-change over it (its area-approver, its domain-approver or an approver) or %s on the Check (D144)", ErrForbidden, areaAddress, RoleItemChangeApprover),
+			problemValues{"area": areaAddress, "role": RoleItemChangeApprover})
 	}
 	return nil
 }

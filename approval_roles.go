@@ -327,11 +327,14 @@ func (s *RoleStore) checkAgentGrant(ctx context.Context, grant RoleGrant, roleID
 		if ratify {
 			op = OperationRatify
 		}
-		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an agent token never grants a role that ratifies or approves changes (D142): role %q holds %s", grant.RoleName, op)))
+		return fmt.Errorf("Grant: %w", refuse(problemGrantAgentGrantsApprovalRole,
+			fmt.Sprintf("an agent token never grants a role that ratifies or approves changes (D142): role %q holds %s", grant.RoleName, op),
+			problemValues{"role": grant.RoleName, "operation": op}))
 	}
 	class, err := actorClass(ctx, s.db, grant.TokenID)
 	if err != nil {
-		return fmt.Errorf("%w: Grant: the class of %s cannot be read: %s", ErrForbidden, grant.TokenID, err)
+		return problem(problemGrantAuthorityUnreadable, fmt.Errorf("%w: Grant: the class of %s cannot be read: %s", ErrForbidden, grant.TokenID, err),
+			problemValues{"grantee": grant.TokenID})
 	}
 	if !automatedClass(class) {
 		return nil
@@ -340,36 +343,47 @@ func (s *RoleStore) checkAgentGrant(ctx context.Context, grant RoleGrant, roleID
 	// anchor) and the classes involved, so they carry their reason
 	// (RefusalError, T971).
 	if ratify {
-		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an %s token never holds ratify (D142): role %q holds it", class, grant.RoleName)))
+		return fmt.Errorf("Grant: %w", refuse(problemGrantAutomatedHoldsRatify,
+			fmt.Sprintf("an %s token never holds ratify (D142): role %q holds it", class, grant.RoleName),
+			problemValues{"token_class": class, "role": grant.RoleName}))
 	}
 	if ScopeMode(r.scopeMode) != ScopeDynamic || r.relationKind != "belongs_to_area" || grant.ScopeAnchorID == "" {
-		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an %s token holds approve-change only within one Area: role %q is not an Area role anchored on an Area (use %s)", class, grant.RoleName, RoleAreaApprover)))
+		return fmt.Errorf("Grant: %w", refuse(problemGrantAutomatedApproveChangeNotArea,
+			fmt.Sprintf("an %s token holds approve-change only within one Area: role %q is not an Area role anchored on an Area (use %s)", class, grant.RoleName, RoleAreaApprover),
+			problemValues{"token_class": class, "role": grant.RoleName, "suggested_role": RoleAreaApprover}))
 	}
 	grantor, _ := actorFromContext(ctx)
 	if grantor == "" {
 		grantor = s.actorTokenID
 	}
 	if grantor == "" {
-		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an %s token's %s grant needs a human grantor, and none is known", class, grant.RoleName)))
+		return fmt.Errorf("Grant: %w", refuse(problemGrantAutomatedNeedsHumanGrantor,
+			fmt.Sprintf("an %s token's %s grant needs a human grantor, and none is known", class, grant.RoleName),
+			problemValues{"token_class": class, "role": grant.RoleName}))
 	}
 	if grantorClass != string(Human) {
-		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("an %s token's %s grant must come from a human token; the grantor is %s", class, grant.RoleName, classLabel(grantorClass))))
+		return fmt.Errorf("Grant: %w", refuse(problemGrantAutomatedNeedsHumanGrantor,
+			fmt.Sprintf("an %s token's %s grant must come from a human token; the grantor is %s", class, grant.RoleName, classLabel(grantorClass)),
+			problemValues{"token_class": class, "role": grant.RoleName, "grantor_class": classLabel(grantorClass)}))
 	}
 	// A missing Area and an Area the grantor holds no approve-change over
 	// are refused with one text, so the refusal is no existence oracle
 	// (T971): the grantor learns only that it cannot delegate this anchor.
 	var n int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_areas WHERE id = $1`, grant.ScopeAnchorID).Scan(&n); err != nil {
-		return fmt.Errorf("%w: Grant: the anchor of an %s token's %s grant cannot be read: %s", ErrForbidden, class, grant.RoleName, err)
+		return problem(problemGrantAuthorityUnreadable, fmt.Errorf("%w: Grant: the anchor of an %s token's %s grant cannot be read: %s", ErrForbidden, class, grant.RoleName, err),
+			problemValues{"token_class": class, "role": grant.RoleName})
 	}
 	ok := false
 	if n > 0 {
 		if ok, err = s.Authorized(ctx, grantor, OperationApproveChange, AuthTarget{TypeName: "Area", ID: grant.ScopeAnchorID}); err != nil {
-			return fmt.Errorf("%w: Grant: the grantor's authority over the Area cannot be read: %s", ErrForbidden, err)
+			return problem(problemGrantAuthorityUnreadable, fmt.Errorf("%w: Grant: the grantor's authority over the Area cannot be read: %s", ErrForbidden, err), nil)
 		}
 	}
 	if !ok {
-		return fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("the grantor holds no approve-change over Area %s, so cannot delegate it to an %s token", grant.ScopeAnchorID, class)))
+		return fmt.Errorf("Grant: %w", refuse(problemGrantGrantorLacksAreaAuthority,
+			fmt.Sprintf("the grantor holds no approve-change over Area %s, so cannot delegate it to an %s token", grant.ScopeAnchorID, class),
+			problemValues{"area": grant.ScopeAnchorID, "token_class": class}))
 	}
 	return nil
 }
@@ -388,7 +402,8 @@ func (s *RoleStore) grantorClass(ctx context.Context) (string, error) {
 	}
 	class, err := actorClass(ctx, s.db, grantor)
 	if err != nil {
-		return "", fmt.Errorf("%w: Grant: the class of the grantor %s cannot be read: %s", ErrForbidden, grantor, err)
+		return "", problem(problemGrantAuthorityUnreadable, fmt.Errorf("%w: Grant: the class of the grantor %s cannot be read: %s", ErrForbidden, grantor, err),
+			problemValues{"grantor": grantor})
 	}
 	return class, nil
 }
@@ -409,7 +424,9 @@ func refuseAutomatedRatify(ctx context.Context, requiredOperation string) error 
 		return nil
 	}
 	if _, kind := actorFromContext(ctx); automatedClass(kind) {
-		return Refused(fmt.Sprintf("an %s token never ratifies, supersedes or amends a Decision (D142); a human approver does", kind))
+		return refuse(problemRatifyAutomatedClass,
+			fmt.Sprintf("an %s token never ratifies, supersedes or amends a Decision (D142); a human approver does", kind),
+			problemValues{"token_class": string(kind)})
 	}
 	return nil
 }
@@ -426,7 +443,7 @@ const founderReason = "founder of the organization (D142)"
 // [*ValidationError].
 func (a *App) GrantFounder(ctx context.Context, userID string) error {
 	if userID == "" {
-		return Err("user_id", "is required: the founder's user ID")
+		return fieldErr(problemFieldRequired, "user_id", "is required: the founder's user ID", nil)
 	}
 	rs := a.governance
 	if rs == nil {

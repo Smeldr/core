@@ -245,8 +245,9 @@ func (a *App) RegisterFlow(flow StateFlow) error {
 	}
 	for _, s := range flow.States {
 		if s.Standing != "" && s.Standing != StandingHolds {
-			return fmt.Errorf("%w: smeldr: RegisterFlow %q: state %q: Standing %q is not a legal tag (only %q or empty)",
-				ErrBadRequest, flow.Name, s.Name, s.Standing, StandingHolds)
+			return problem(problemFlowStandingInvalid, fmt.Errorf("%w: smeldr: RegisterFlow %q: state %q: Standing %q is not a legal tag (only %q or empty)",
+				ErrBadRequest, flow.Name, s.Name, s.Standing, StandingHolds),
+				problemValues{"flow": flow.Name, "state": s.Name, "value": string(s.Standing), "allowed": string(StandingHolds)})
 		}
 	}
 	db := a.cfg.DB
@@ -627,14 +628,15 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, rels *Relatio
 		`SELECT COUNT(*) FROM smeldr_states WHERE flow_id = $1 AND name = $2`,
 		flowID, toStatus,
 	).Scan(&targetExists); err == nil && targetExists == 0 {
-		return fmt.Errorf("%w: %q is not a valid target state for type %q",
-			ErrConflict, toStatus, typeName)
+		return problem(problemTransitionUnknownTarget, fmt.Errorf("%w: %q is not a valid target state for type %q",
+			ErrConflict, toStatus, typeName), problemValues{"type": typeName, "to": toStatus})
 	}
 
 	// ── FAIL-OPEN structural boundary ────────────────────────────────────────
 	requiredOperation, requiredReason, strict, edgeFound, gateErr := lookupTransitionGate(ctx, db, flowID, fromStatus, toStatus)
 	if !edgeFound && gateErr == nil {
-		return fmt.Errorf("%w: transition %s→%s is not permitted for type %q", ErrConflict, fromStatus, toStatus, typeName)
+		return problem(problemTransitionNotPermitted, fmt.Errorf("%w: transition %s→%s is not permitted for type %q", ErrConflict, fromStatus, toStatus, typeName),
+			problemValues{"type": typeName, "from": fromStatus, "to": toStatus})
 	}
 	if gateErr != nil {
 		// D34: fail closed globally — this branch fires before the strict
@@ -665,7 +667,8 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, rels *Relatio
 	// Unconditional — does not depend on governance or actorID, since "did the
 	// caller supply a reason" is a fact about the call itself, not an identity.
 	if requiredReason && reason == "" {
-		return fmt.Errorf("%w: transition %s→%s requires a reason", ErrBadRequest, fromStatus, toStatus)
+		return problem(problemTransitionReasonRequired, fmt.Errorf("%w: transition %s→%s requires a reason", ErrBadRequest, fromStatus, toStatus),
+			problemValues{"from": fromStatus, "to": toStatus})
 	}
 
 	// ── FAIL-CLOSED authorization boundary ───────────────────────────────────
@@ -679,8 +682,9 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, rels *Relatio
 	}
 	if rs == nil {
 		if strict {
-			return fmt.Errorf("%w: transition %s→%s requires operation %q but governance is not wired",
-				ErrForbidden, fromStatus, toStatus, requiredOperation)
+			return problem(problemTransitionGateUnwired, fmt.Errorf("%w: transition %s→%s requires operation %q but governance is not wired",
+				ErrForbidden, fromStatus, toStatus, requiredOperation),
+				problemValues{"from": fromStatus, "to": toStatus, "operation": requiredOperation})
 		}
 		return nil // governance not wired — skip required_operation check (non-strict, unchanged)
 	}
@@ -690,19 +694,22 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, rels *Relatio
 		// unless this transition is strict (D34), in which case an absent
 		// actor cannot satisfy an operation gate and is rejected instead.
 		if strict {
-			return fmt.Errorf("%w: transition %s→%s requires operation %q but no actor is present",
-				ErrForbidden, fromStatus, toStatus, requiredOperation)
+			return problem(problemTransitionNoActor, fmt.Errorf("%w: transition %s→%s requires operation %q but no actor is present",
+				ErrForbidden, fromStatus, toStatus, requiredOperation),
+				problemValues{"from": fromStatus, "to": toStatus, "operation": requiredOperation})
 		}
 		return nil
 	}
 	ok, err := rs.Authorized(ctx, actorID, requiredOperation, AuthTarget{TypeName: typeName, ID: itemID})
 	if err != nil {
-		return fmt.Errorf("%w: transition %s→%s requires operation %q: %s",
-			ErrForbidden, fromStatus, toStatus, requiredOperation, err)
+		return problem(problemTransitionGate, fmt.Errorf("%w: transition %s→%s requires operation %q: %s",
+			ErrForbidden, fromStatus, toStatus, requiredOperation, err),
+			problemValues{"type": typeName, "from": fromStatus, "to": toStatus, "operation": requiredOperation})
 	}
 	if !ok {
-		return fmt.Errorf("%w: transition %s→%s requires operation %q",
-			ErrForbidden, fromStatus, toStatus, requiredOperation)
+		return problem(problemTransitionGate, fmt.Errorf("%w: transition %s→%s requires operation %q",
+			ErrForbidden, fromStatus, toStatus, requiredOperation),
+			problemValues{"type": typeName, "from": fromStatus, "to": toStatus, "operation": requiredOperation})
 	}
 	return nil
 }
@@ -796,8 +803,8 @@ func validateInitialState(ctx context.Context, db DB, typeName, statusName strin
 		return nil // structural error — fail open
 	}
 	if count == 0 {
-		return fmt.Errorf("%w: %q is not a valid state in the registered flow for type %q",
-			ErrConflict, statusName, typeName)
+		return problem(problemStateUnknownInitial, fmt.Errorf("%w: %q is not a valid state in the registered flow for type %q",
+			ErrConflict, statusName, typeName), problemValues{"type": typeName, "state": statusName})
 	}
 	return nil
 }
@@ -1196,7 +1203,8 @@ func conflictRejectCheck(ctx context.Context, db DB, typeName, activeState, tabl
 		return nil // fail-open
 	}
 	if count > 0 {
-		return fmt.Errorf("%w: type %q already has an item in state %q", ErrConflict, typeName, activeState)
+		return problem(problemTransitionSingletonState, fmt.Errorf("%w: type %q already has an item in state %q", ErrConflict, typeName, activeState),
+			problemValues{"type": typeName, "state": activeState})
 	}
 	return nil
 }
@@ -1488,7 +1496,7 @@ func (a *App) lookupCompiledRecord(ctx context.Context, typeName, ident string, 
 		).Scan(&id, &slug, &status)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", "", "", ErrNotFound
+		return "", "", "", "", problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
@@ -1572,7 +1580,7 @@ func tablePublishedSlugConflict(ctx context.Context, db DB, table, prefix, slug,
 func (a *App) ResolveReadableID(ctx context.Context, typeName, ident string) (string, error) {
 	desc := a.typeRegistry.Lookup(typeName)
 	if desc == nil {
-		return "", fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName)
+		return "", problem(problemTypeNotRegistered, fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName), problemValues{"type": typeName})
 	}
 	scope, err := scopeFor(ctx, a.governance)
 	if err != nil {
@@ -1604,7 +1612,7 @@ func (a *App) ResolveReadableID(ctx context.Context, typeName, ident string) (st
 func (a *App) resolveItemID(ctx context.Context, typeName, ident string) (string, error) {
 	desc := a.typeRegistry.Lookup(typeName)
 	if desc == nil {
-		return "", fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName)
+		return "", problem(problemTypeNotRegistered, fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName), problemValues{"type": typeName})
 	}
 	if desc.Kind == "content" {
 		repo, err := a.DynamicContentRepo(typeName)
@@ -1661,7 +1669,7 @@ func (a *App) TransitionItemAt(ctx context.Context, surface, typeName, slug, toS
 func (a *App) transitionItem(ctx context.Context, surface, typeName, slug, toState, reason string, expected *int) (map[string]any, error) {
 	desc := a.typeRegistry.Lookup(typeName)
 	if desc == nil {
-		return nil, fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName)
+		return nil, problem(problemTypeNotRegistered, fmt.Errorf("%w: content type %q not registered", ErrBadRequest, typeName), problemValues{"type": typeName})
 	}
 	// Per-item read rules: the scope is loaded before the lookup, and an item
 	// the caller may not read is answered as missing, before any transition
@@ -1709,7 +1717,7 @@ func (a *App) transitionItem(ctx context.Context, surface, typeName, slug, toSta
 		return nil, err
 	}
 	if !scope.Readable(typeName, id) {
-		return nil, ErrNotFound
+		return nil, problem(problemItemNotFound, ErrNotFound, nil)
 	}
 	// T1010: a governance record's move names the rev the caller read.
 	var warnings []CreateWarning

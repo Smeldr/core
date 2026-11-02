@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -98,13 +99,14 @@ func planPathsRule(node *DynamicNode, cutover time.Time) (*CreateWarning, error)
 		return nil, nil
 	}
 	if len(d.Paths) > DecisionsForPathsMaxPaths {
-		return nil, Err("paths", fmt.Sprintf("at most %d patterns", DecisionsForPathsMaxPaths))
+		return nil, fieldErr(problemFieldTooMany, "paths", fmt.Sprintf("at most %d patterns", DecisionsForPathsMaxPaths),
+			problemValues{"limit": strconv.Itoa(DecisionsForPathsMaxPaths)})
 	}
 	for _, p := range d.Paths {
 		if err := checkCoveragePattern(p); err != nil {
 			var ve *ValidationError
 			if errors.As(err, &ve) {
-				return nil, Err("paths", fmt.Sprintf("%q is not a valid pattern: %s", p, err.Error()))
+				return nil, fieldErr(problemFieldInvalidFormat, "paths", fmt.Sprintf("%q is not a valid pattern: %s", p, err.Error()), problemValues{"value": p})
 			}
 			return nil, err
 		}
@@ -125,7 +127,7 @@ func planPathsRule(node *DynamicNode, cutover time.Time) (*CreateWarning, error)
 	}
 	msg := "repository and paths are required to submit a plan whose work ends in a commit: the Areas and Decisions it rests on are recorded from them; set no_commit for work that ends in none"
 	if !cutover.IsZero() && !time.Now().Before(cutover) {
-		return nil, Err(field, msg)
+		return nil, fieldErr(problemPlanRepositoryPathsRequired, field, msg, nil)
 	}
 	return &CreateWarning{Code: "plan_paths_missing", Field: field, Message: msg}, nil
 }
@@ -336,7 +338,7 @@ func planTimeEdge(sourceType, kind string) bool {
 
 // errPlanTimeEdge refuses an author's write of a plan-time edge.
 func errPlanTimeEdge() error {
-	return Refused("a plan's belongs_to_area and checked_against relations are recorded by Smeldr at submit and approve, from the plan's repository and paths; change those instead")
+	return refuse(problemPlanRelationsCoreOwned, "a plan's belongs_to_area and checked_against relations are recorded by Smeldr at submit and approve, from the plan's repository and paths; change those instead", nil)
 }
 
 // planPathsCutover is the App's [Config.PlanPathsCutover], zero without one.
