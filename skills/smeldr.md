@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.188.0 · smeldr.dev/mcp v1.74.0 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.37.0 · smeldr.dev/github v0.1.1 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.189.0 · smeldr.dev/mcp v1.74.0 · smeldr.dev/oauth v0.6.0 · smeldr.dev/media v1.7.0 · smeldr.dev/cli v0.37.0 · smeldr.dev/github v0.1.1 · smeldr.dev/social v0.11.0 · smeldr.dev/agent v0.9.2 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
@@ -850,6 +850,7 @@ Config: `SMELDR_URL`, `SMELDR_TOKEN`, `SMELDR_MCP_URL` (or `.smeldr-cli.env`; le
 ## Common gotchas
 
 - **go.mod line 1** must be `module smeldr.dev/mcp` — not a github.com path
+- **Compare core errors with `errors.Is`, never `==`** (core v1.189.0, T1061): every core refusal is a typed wrapper of its sentinel with the same text, so `err == smeldr.ErrNotFound` is false. Branch on why with `smeldr.ProblemTypeOf(err)` (a stable id, docs/PROBLEM_TYPES.md) and read its values with `smeldr.ProblemValuesOf(err)`; `ProblemTypeInfo.AlwaysValues` names the values always sent
 - **Verify go.mod deps before tagging** — `grep smeldr.dev go.mod`; run `go mod tidy`
 - **Module proxy caches permanently** — bad tag requires a new patch tag, no fix
 - **smeldr.Table()** — use when type name pluralises incorrectly (Story → storys)
