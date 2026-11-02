@@ -99,6 +99,24 @@ func TestPG_Identities(t *testing.T) {
 	if _, err := rs.Grant(ctx, smeldr.RoleGrant{TokenID: "nobody", RoleName: "editor"}); !errors.As(err, &ve) {
 		t.Errorf("grant to no identity: %v; want a ValidationError", err)
 	}
+	// T1010 part c: a grant names the identity's rev, compared and advanced
+	// in the grant's transaction on Postgres.
+	bot, err = app.Identity(ctx, botID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev := int(bot.Rev)
+	grantID, _, err := rs.GrantAt(ctx, smeldr.RoleGrant{TokenID: botID, RoleName: "author"}, &rev)
+	if err != nil {
+		t.Fatalf("GrantAt with the identity's rev: %v", err)
+	}
+	if _, _, err := rs.GrantAt(ctx, smeldr.RoleGrant{TokenID: botID, RoleName: "admin"}, &rev); !errors.Is(err, smeldr.ErrRevConflict) {
+		t.Errorf("a stale GrantAt: %v; want ErrRevConflict", err)
+	}
+	next := rev + 1
+	if _, err := rs.RevokeWithReasonAt(ctx, grantID, "", &next); err != nil {
+		t.Errorf("RevokeWithReasonAt with the identity's rev: %v", err)
+	}
 
 	ps := smeldr.NewProvenanceStore(db)
 	actor := smeldr.NewTestContext(smeldr.User{ID: botID, TokenID: "fp-bot"})

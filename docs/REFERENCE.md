@@ -2020,7 +2020,15 @@ The same rule covers three more governance writes (T1010 part b):
 - **A change check answer** names the rev of the Check the approver read (`App.AnswerChangeCheckAt`, `answer_change_check`). Every answer advances the Check's rev, so a stale answer records nothing.
 - **A premise confirmation** names the rev of the Decision the person read (`App.ConfirmPremiseAt`, `App.ConfirmPremiseConditionAt`, `confirm_premise`). Two confirmations of the same premise state cannot both be recorded.
 
-A `rev` that is not a number is a validation error on `rev`. Grants (`grant_role`, `revoke_grant`) are not covered yet. They move from the token to the identity in G31 (D165) and will name the identity's rev then.
+A `rev` that is not a number is a validation error on `rev`.
+
+**Grants (T1010 part c, D165).** A grant or a revoke changes an identity's set of grants, so it names **the rev of the grantee's identity** the caller read. `RoleStore.GrantAt(ctx, grant, rev)` and `RoleStore.RevokeWithReasonAt(ctx, grantID, reason, rev)` compare it and advance it in the write's transaction; a stale rev is a `RevConflictError` and nothing is granted or revoked. Without a rev, a grant or revoke for an identity returns a `rev_missing` warning until `Config.RevCutover`, then a validation error. A grantee that is not an identity (a token not yet migrated, see Identities) names no rev; naming one is a validation error. `Grant`, `Revoke` and `RevokeWithReason` are unchanged and name none. mcp: `grant_role` and `revoke_grant` take `rev`; `list_grants` with `token_id` returns `identity_rev`, the rev to send, and `grant_role` returns the identity's new `identity_rev`.
+
+```go
+ident, _ := app.Identity(ctx, "IDN4")
+rev := int(ident.Rev)
+grantID, warnings, err := roles.GrantAt(ctx, smeldr.RoleGrant{TokenID: ident.ID, RoleName: "editor"}, &rev)
+```
 
 ### The plan-time record (G30 phase 1, T1015)
 

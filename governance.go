@@ -852,6 +852,10 @@ type RoleStore struct {
 	// so every token), after the change commits; set by [App.Governance] so
 	// cached read scopes reload (D116). Nil does nothing.
 	onGrantChange func(tokenID string)
+	// revCutover is [Config.RevCutover], set by [App.Governance]: a grant or
+	// revoke for an identity that names no rev warns before it and is
+	// refused after it (T1010).
+	revCutover time.Time
 }
 
 // NewRoleStore returns a new [RoleStore] backed by db.
@@ -1126,54 +1130,74 @@ func (s *RoleStore) normalizeStaticScope(ctx context.Context, patterns []string)
 // Returns an error when grant.TokenID or grant.RoleName is empty, the named role
 // does not exist, or any DB operation fails.
 func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) {
+	id, _, err := s.GrantAt(ctx, grant, nil)
+	return id, err
+}
+
+// GrantAt is [RoleStore.Grant] naming rev, the rev of the grantee's identity
+// the caller read (T1010, D165): a grant is a change to the identity's set of
+// grants, so a decision made on a stale view of it is refused with a
+// [*RevConflictError]. Every grant advances the identity's rev. Without a rev
+// a grant to an identity returns a rev_missing warning until
+// [Config.RevCutover] and is refused after it. A grantee that is not an
+// identity (a token not yet migrated) names no rev, as before.
+//
+//	ident, _ := app.Identity(ctx, "IDN4")
+//	id, warnings, err := roles.GrantAt(ctx, smeldr.RoleGrant{TokenID: ident.ID, RoleName: "editor"}, &ident.Rev)
+func (s *RoleStore) GrantAt(ctx context.Context, grant RoleGrant, rev *int) (string, []CreateWarning, error) {
 	reason, err := actReason(grant.Reason)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if grant.TokenID == "" {
-		return "", fmt.Errorf("smeldr: Grant: TokenID must not be empty")
+		return "", nil, fmt.Errorf("smeldr: Grant: TokenID must not be empty")
 	}
 	if grant.RoleName == "" {
-		return "", fmt.Errorf("smeldr: Grant: RoleName must not be empty")
+		return "", nil, fmt.Errorf("smeldr: Grant: RoleName must not be empty")
 	}
 	var roleID string
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT id FROM smeldr_roles WHERE name = $1`, grant.RoleName,
 	).Scan(&roleID); err == sql.ErrNoRows {
-		return "", fmt.Errorf("smeldr: Grant: role %q: %w", grant.RoleName, ErrNotFound)
+		return "", nil, fmt.Errorf("smeldr: Grant: role %q: %w", grant.RoleName, ErrNotFound)
 	} else if err != nil {
-		return "", fmt.Errorf("smeldr: Grant: lookup role %q: %w", grant.RoleName, err)
+		return "", nil, fmt.Errorf("smeldr: Grant: lookup role %q: %w", grant.RoleName, err)
 	}
 	// D165: a grant is held by an identity.
 	if err := checkGrantee(ctx, s.db, grant.TokenID); err != nil {
-		return "", err
+		return "", nil, err
+	}
+	// T1010 part c: the grantee's identity is the version this grant changes.
+	ruled, warning, err := s.granteeRevRule(ctx, grant.TokenID, "grant_role", rev)
+	if err != nil {
+		return "", nil, err
 	}
 	// D156 point 1 (T986): a job token never grants a role, whatever it is.
 	grantorClass, err := s.grantorClass(ctx)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if grantorClass == string(Job) {
-		return "", fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("a job token never grants a role (D156): role %q", grant.RoleName)))
+		return "", nil, fmt.Errorf("Grant: %w", Refused(fmt.Sprintf("a job token never grants a role (D156): role %q", grant.RoleName)))
 	}
 	// D142 point 5 (T884): agent and job tokens never hold ratify, and hold
 	// approve-change only on an Area grant from a human with authority there,
 	// or on one ChangeCheck through the one-item role (T918), checked below.
 	if grant.RoleName != RoleItemChangeApprover {
 		if err := s.checkAgentGrant(ctx, grant, roleID, grantorClass); err != nil {
-			return "", err
+			return "", nil, err
 		}
 	}
 
 	scopeStatic, err := s.normalizeStaticScope(ctx, grant.ScopeStatic)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if grant.RoleName == RoleItemChangeApprover {
 		named := grant
 		named.ScopeStatic = scopeStatic
 		if err := s.checkItemChangeApproverGrant(ctx, named); err != nil {
-			return "", err
+			return "", nil, err
 		}
 	}
 	staticJSON, _ := json.Marshal(scopeStatic) // []string marshal never fails
@@ -1188,10 +1212,15 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 	// audit append when possible, see beginAuditWrite.
 	w, err := s.beginAuditWrite(ctx)
 	if err != nil {
-		return "", fmt.Errorf("smeldr: Grant: begin tx: %w", err)
+		return "", nil, fmt.Errorf("smeldr: Grant: begin tx: %w", err)
 	}
 	defer w.rollback()
 	exec := w.exec
+	if ruled {
+		if _, _, err := bumpRev(ctx, exec, "smeldr_identities", "Identity", grant.TokenID, rev); err != nil {
+			return "", nil, err
+		}
+	}
 
 	// Stored in UTC (T916): on SQLite the column is text, compared as text
 	// with a UTC now, so a time in another zone would expire at the wrong
@@ -1214,7 +1243,7 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 		newID, grant.TokenID, roleID, string(staticJSON), anchorID, expiresAt, now,
 		grant.TokenID, roleID, anchorID, string(staticJSON),
 	); err != nil {
-		return "", fmt.Errorf("smeldr: Grant: insert: %w", err)
+		return "", nil, fmt.Errorf("smeldr: Grant: insert: %w", err)
 	}
 
 	// Re-query to find the canonical grant ID (new or pre-existing). scope_static
@@ -1229,14 +1258,14 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 			`SELECT id FROM smeldr_role_grants WHERE token_id=$1 AND role_id=$2 AND scope_anchor_id=$3 AND scope_static=$4`,
 			grant.TokenID, roleID, *anchorID, string(staticJSON),
 		).Scan(&grantID); err != nil {
-			return "", fmt.Errorf("smeldr: Grant: resolve grant id: %w", err)
+			return "", nil, fmt.Errorf("smeldr: Grant: resolve grant id: %w", err)
 		}
 	} else {
 		if err := exec.QueryRowContext(ctx,
 			`SELECT id FROM smeldr_role_grants WHERE token_id=$1 AND role_id=$2 AND scope_anchor_id IS NULL AND scope_static=$3`,
 			grant.TokenID, roleID, string(staticJSON),
 		).Scan(&grantID); err != nil {
-			return "", fmt.Errorf("smeldr: Grant: resolve grant id: %w", err)
+			return "", nil, fmt.Errorf("smeldr: Grant: resolve grant id: %w", err)
 		}
 	}
 	if s.auditStore != nil {
@@ -1267,17 +1296,17 @@ func (s *RoleStore) Grant(ctx context.Context, grant RoleGrant) (string, error) 
 			CreatedAt:    time.Now().UTC(),
 		}
 		if appendErr := s.appendAudit(ctx, w, rec); appendErr != nil {
-			return "", fmt.Errorf("smeldr: Grant: audit: %w", appendErr)
+			return "", nil, fmt.Errorf("smeldr: Grant: audit: %w", appendErr)
 		}
 	}
 	if err := w.commit(); err != nil {
-		return "", fmt.Errorf("smeldr: Grant: commit: %w", err)
+		return "", nil, fmt.Errorf("smeldr: Grant: commit: %w", err)
 	}
 	s.recordGrantProvenance(ctx, grantID, "assert", reason)
 	if s.onGrantChange != nil {
 		s.onGrantChange(grant.TokenID)
 	}
-	return grantID, nil
+	return grantID, warningList(warning), nil
 }
 
 // recordGrantProvenance records a ProvenanceRecord for a Grant or Revoke
@@ -1321,12 +1350,32 @@ func (s *RoleStore) Revoke(ctx context.Context, grantID string) error {
 // secret in it. It is trimmed; longer than 1000 characters is a
 // [*ValidationError] and nothing is revoked.
 func (s *RoleStore) RevokeWithReason(ctx context.Context, grantID, reason string) error {
+	_, err := s.RevokeWithReasonAt(ctx, grantID, reason, nil)
+	return err
+}
+
+// RevokeWithReasonAt is [RoleStore.RevokeWithReason] naming rev, the rev of
+// the identity holding the grant, as the caller read it (T1010, D165): the
+// same rule as [RoleStore.GrantAt]. Every revoke advances the identity's rev.
+func (s *RoleStore) RevokeWithReasonAt(ctx context.Context, grantID, reason string, rev *int) ([]CreateWarning, error) {
 	reason, err := actReason(reason)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if grantID == "" {
-		return fmt.Errorf("smeldr: Revoke: grantID must not be empty")
+		return nil, fmt.Errorf("smeldr: Revoke: grantID must not be empty")
+	}
+	// T1010 part c: the holder's identity is the version this revoke changes.
+	var holder string
+	if err := s.db.QueryRowContext(ctx, `SELECT token_id FROM smeldr_role_grants WHERE id = $1`, grantID).Scan(&holder); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("smeldr: Revoke: read the grant: %w", err)
+	}
+	var ruled bool
+	var warning *CreateWarning
+	if holder != "" {
+		if ruled, warning, err = s.granteeRevRule(ctx, holder, "revoke_grant", rev); err != nil {
+			return nil, err
+		}
 	}
 	beforeJSON := "{}"
 	if s.auditStore != nil {
@@ -1342,7 +1391,7 @@ func (s *RoleStore) RevokeWithReason(ctx context.Context, grantID, reason string
 			   FROM smeldr_role_grants WHERE id = $1`, grantID,
 		).Scan(&eid, &etok, &erol, &eanch, &estatic)
 		if err != nil && err != sql.ErrNoRows {
-			return fmt.Errorf("smeldr: Revoke: audit before-state: %w", err)
+			return nil, fmt.Errorf("smeldr: Revoke: audit before-state: %w", err)
 		}
 		if err == nil {
 			var anchorVal any
@@ -1363,14 +1412,19 @@ func (s *RoleStore) RevokeWithReason(ctx context.Context, grantID, reason string
 	// possible, see beginAuditWrite.
 	w, err := s.beginAuditWrite(ctx)
 	if err != nil {
-		return fmt.Errorf("smeldr: Revoke: begin tx: %w", err)
+		return nil, fmt.Errorf("smeldr: Revoke: begin tx: %w", err)
 	}
 	defer w.rollback()
+	if ruled {
+		if _, _, err := bumpRev(ctx, w.exec, "smeldr_identities", "Identity", holder, rev); err != nil {
+			return nil, err
+		}
+	}
 
 	if _, err := w.exec.ExecContext(ctx,
 		`DELETE FROM smeldr_role_grants WHERE id = $1`, grantID,
 	); err != nil {
-		return fmt.Errorf("smeldr: Revoke: %w", err)
+		return nil, fmt.Errorf("smeldr: Revoke: %w", err)
 	}
 	if s.auditStore != nil {
 		rec := GovernanceAuditRecord{
@@ -1384,17 +1438,17 @@ func (s *RoleStore) RevokeWithReason(ctx context.Context, grantID, reason string
 			CreatedAt:    time.Now().UTC(),
 		}
 		if appendErr := s.appendAudit(ctx, w, rec); appendErr != nil {
-			return fmt.Errorf("smeldr: Revoke: audit: %w", appendErr)
+			return nil, fmt.Errorf("smeldr: Revoke: audit: %w", appendErr)
 		}
 	}
 	if err := w.commit(); err != nil {
-		return fmt.Errorf("smeldr: Revoke: commit: %w", err)
+		return nil, fmt.Errorf("smeldr: Revoke: commit: %w", err)
 	}
 	s.recordGrantProvenance(ctx, grantID, "invalidate", reason)
 	if s.onGrantChange != nil {
 		s.onGrantChange("")
 	}
-	return nil
+	return warningList(warning), nil
 }
 
 // ListGrants returns the grants bound to the given token. If tokenID is empty,
@@ -2127,6 +2181,7 @@ func (a *App) Governance(store *RoleStore) error {
 		return fmt.Errorf("smeldr: Governance: %w", err)
 	}
 	store.resolveID = a.resolveItemID
+	store.revCutover = a.cfg.RevCutover
 	registerGovernance(a.cfg.DB, store)
 	if a.relationStore != nil {
 		registerGovernance(a.relationStore.db, store)

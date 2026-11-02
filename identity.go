@@ -494,3 +494,40 @@ func checkGrantee(ctx context.Context, db DB, grantee string) error {
 	}
 	return nil
 }
+
+// granteeRevRule applies the rev rule to a grant or revoke for grantee (T1010
+// part c): when grantee is an identity, ruled is true and the caller's rev is
+// compared and advanced in the write's transaction; without a rev it is a
+// rev_missing warning, or a [ValidationError] after cutover. A grantee that
+// is not an identity names no rev; naming one is a [ValidationError]. Inside
+// a transaction, where the probe may not run, nothing is ruled.
+func (s *RoleStore) granteeRevRule(ctx context.Context, grantee, write string, rev *int) (ruled bool, warning *CreateWarning, err error) {
+	if _, inTx := s.db.(*sql.Tx); inTx {
+		return false, nil, nil
+	}
+	idents, err := identitiesOf(ctx, s.db, []string{grantee})
+	if err != nil {
+		return false, nil, err
+	}
+	ident := idents[grantee]
+	if ident == nil {
+		if rev != nil {
+			return false, nil, Err("rev", fmt.Sprintf("%q is no identity, so there is no rev to name: leave rev out", grantee))
+		}
+		return false, nil, nil
+	}
+	if rev == nil {
+		if warning, err = revMissingFor(ident.Address, write, s.revCutover); err != nil {
+			return false, nil, err
+		}
+	}
+	return true, warning, nil
+}
+
+// warningList is w as a list: none for nil.
+func warningList(w *CreateWarning) []CreateWarning {
+	if w == nil {
+		return nil
+	}
+	return []CreateWarning{*w}
+}
