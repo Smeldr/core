@@ -70,6 +70,10 @@
 //	                      characters is refused (default: warnings only, D114)
 //	SIGNAL_EVENT_CUTOVER  RFC3339 time after which a history signal_type is refused
 //	                      (default: warnings only, D115)
+//	PLAN_PATHS_CUTOVER    RFC3339 time after which a commit plan without repository and
+//	                      paths is refused (default: warnings only, T1015)
+//	REV_CUTOVER           RFC3339 time after which a governance write without a rev is
+//	                      refused (default: warnings only, T1010)
 //	ENABLE_STANDING_DRIFT_CHECK  wire a scheduled standing drift check (report-only: compares
 //	                             each item's stored standing with its state's tag, records a Finding
 //	                             per mismatch; requires governance records; default off)
@@ -183,6 +187,12 @@ type ServerConfig struct {
 	// D115); empty means warnings only.
 	SignalMessageCutover string
 	SignalEventCutover   string
+	// PlanPathsCutover (PLAN_PATHS_CUTOVER, T1015) is when a commit plan
+	// without repository and paths is refused, and RevCutover (REV_CUTOVER,
+	// T1010) when a governance write without a rev is; both RFC3339, empty
+	// means warnings only.
+	PlanPathsCutover string
+	RevCutover       string
 	// EnableGitHub (ENABLE_GITHUB) mounts the pull request check's GitHub
 	// adapter, configured by the GITHUB_* variables (T940).
 	EnableGitHub bool
@@ -207,6 +217,8 @@ func parseConfig() ServerConfig {
 		TitleCutover:             os.Getenv("TITLE_CUTOVER"),
 		SignalMessageCutover:     os.Getenv("SIGNAL_MESSAGE_CUTOVER"),
 		SignalEventCutover:       os.Getenv("SIGNAL_EVENT_CUTOVER"),
+		PlanPathsCutover:         os.Getenv("PLAN_PATHS_CUTOVER"),
+		RevCutover:               os.Getenv("REV_CUTOVER"),
 		Port:                     port,
 		Addr:                     envOr("ADDR", "127.0.0.1:"+port),
 		EnableTokens:             os.Getenv("ENABLE_TOKENS") != "",
@@ -331,6 +343,8 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		TitleCutover:         checks.titleCutover,
 		SignalMessageCutover: checks.signalMessageCutover,
 		SignalEventCutover:   checks.signalEventCutover,
+		PlanPathsCutover:     checks.planPathsCutover,
+		RevCutover:           checks.revCutover,
 	})
 
 	var roleStore *smeldr.RoleStore

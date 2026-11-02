@@ -724,6 +724,42 @@ func TestBuildApp_GovernanceRecordsOnly(t *testing.T) {
 	}
 }
 
+// PLAN_PATHS_CUTOVER and REV_CUTOVER reach the App's Config (T1049); unset,
+// both are the zero time (warnings only).
+func TestBuildApp_Cutovers(t *testing.T) {
+	planPaths := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	rev := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name           string
+		planPaths, rev time.Time
+	}{{"set", planPaths, rev}, {"unset", time.Time{}, time.Time{}}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SECRET", "test-secret-that-is-at-least-32-bytes")
+			t.Setenv("BASE_URL", "https://cms.example.com")
+			t.Setenv("PLAN_PATHS_CUTOVER", "")
+			t.Setenv("REV_CUTOVER", "")
+			if !tc.planPaths.IsZero() {
+				t.Setenv("PLAN_PATHS_CUTOVER", tc.planPaths.Format(time.RFC3339))
+				t.Setenv("REV_CUTOVER", tc.rev.Format(time.RFC3339))
+			}
+			db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "smeldr.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			res, err := buildApp(parseConfig(), db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer res.StopAll()
+			cfg := res.App.Config()
+			if !cfg.PlanPathsCutover.Equal(tc.planPaths) || !cfg.RevCutover.Equal(tc.rev) {
+				t.Errorf("cutovers = %v, %v; want %v, %v", cfg.PlanPathsCutover, cfg.RevCutover, tc.planPaths, tc.rev)
+			}
+		})
+	}
+}
+
 // ORGANIZATION_FOUNDER gets admin and approver at boot (D142, T884), and a
 // second boot grants nothing twice.
 func TestBuildApp_OrganizationFounder(t *testing.T) {

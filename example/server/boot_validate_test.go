@@ -75,6 +75,8 @@ func TestBoot_RefusalWritesNoSchema(t *testing.T) {
 		{"title cutover", func(c *ServerConfig) { c.TitleCutover = "yesterday" }, "TITLE_CUTOVER: want an RFC3339 time"},
 		{"signal message cutover", func(c *ServerConfig) { c.SignalMessageCutover = "soon" }, "SIGNAL_MESSAGE_CUTOVER: want an RFC3339 time"},
 		{"signal event cutover", func(c *ServerConfig) { c.SignalEventCutover = "later" }, "SIGNAL_EVENT_CUTOVER: want an RFC3339 time"},
+		{"plan paths cutover", func(c *ServerConfig) { c.PlanPathsCutover = "monday" }, "PLAN_PATHS_CUTOVER: want an RFC3339 time"},
+		{"rev cutover", func(c *ServerConfig) { c.RevCutover = "soon" }, "REV_CUTOVER: want an RFC3339 time"},
 		{"check deps", func(c *ServerConfig) { c.EnableCheck = true; records(c) }, "ENABLE_CHECK requires ENABLE_AUTHORITY"},
 		{"event log deps", func(c *ServerConfig) { c.EnableEventLog = true }, "ENABLE_EVENT_LOG requires ENABLE_EVENT_STREAM"},
 		{"sweep deps", func(c *ServerConfig) { c.EnableStructuralSweep = true }, "ENABLE_STRUCTURAL_SWEEP requires ENABLE_RELATIONS"},

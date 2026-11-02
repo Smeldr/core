@@ -24,6 +24,8 @@ type bootChecks struct {
 	titleCutover         time.Time
 	signalMessageCutover time.Time
 	signalEventCutover   time.Time
+	planPathsCutover     time.Time
+	revCutover           time.Time
 	gitHubKey            []byte // the App's private key, when ENABLE_GITHUB
 }
 
@@ -49,6 +51,12 @@ func validateBoot(cfg ServerConfig) (bootChecks, error) {
 		return checks, err
 	}
 	if checks.signalEventCutover, err = parseCutover("SIGNAL_EVENT_CUTOVER", cfg.SignalEventCutover); err != nil {
+		return checks, err
+	}
+	if checks.planPathsCutover, err = parseCutover("PLAN_PATHS_CUTOVER", cfg.PlanPathsCutover); err != nil {
+		return checks, err
+	}
+	if checks.revCutover, err = parseCutover("REV_CUTOVER", cfg.RevCutover); err != nil {
 		return checks, err
 	}
 	switch {
