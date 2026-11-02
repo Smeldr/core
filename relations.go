@@ -238,6 +238,12 @@ CREATE INDEX IF NOT EXISTS idx_relations_target
 		return err
 	}
 
+	// One live row per relation (T1019), made only when there are no live
+	// duplicates; otherwise migrate-relation-dedup makes it.
+	if err := ensureLiveRelationIndex(ctx, db); err != nil {
+		return err
+	}
+
 	// ListRelations pages the whole table in this order.
 	if _, err := db.ExecContext(ctx, `
 CREATE INDEX IF NOT EXISTS idx_relations_created
@@ -514,8 +520,21 @@ func canonicalizeNonDirectional(kind RelationKindDef, edge RelationEdge) Relatio
 // identical row or inserts a new one, on db, and reports whether the row is new.
 // It writes nothing else (no provenance, no event), so a create can call it on
 // its own transaction and announce the edge after the commit (D113).
+//
+// For these internal writers (jobs, sweeps, migrations) a relation another
+// writer recorded at the same moment is already recorded: the existing live
+// row is returned as not new, with no error (T1019).
 func writeEdgeRow(ctx context.Context, db DB, edge RelationEdge) (RelationEdge, bool, error) {
-	return writeEdgeRowAt(ctx, db, edge, nil)
+	written, isNew, err := writeEdgeRowAt(ctx, db, edge, nil)
+	var exists *liveRelationExists
+	if errors.As(err, &exists) {
+		edge.ID = exists.ID
+		if rerr := db.QueryRowContext(ctx, "SELECT rev FROM smeldr_relations WHERE id=$1", edge.ID).Scan(&edge.Rev); rerr != nil {
+			return RelationEdge{}, false, rerr
+		}
+		return edge, false, nil
+	}
+	return written, isNew, err
 }
 
 // writeEdgeRowAt is [writeEdgeRow] with the rev the caller read (T1010): a
@@ -601,6 +620,24 @@ func writeEdgeRowAt(ctx context.Context, db DB, edge RelationEdge, expected *int
 		edge.Confidence, edge.ValidAt, edge.InvalidAt,
 		edge.CreatedByJob, edge.CreatedBy, string(edge.Attributes),
 		edge.CreatedAt, edge.UpdatedAt}
+	if newRow {
+		// A new row (T1019): the live-tuple index refuses a second live row
+		// of the same relation. DO NOTHING keeps a surrounding Postgres
+		// transaction usable; no row inserted means another writer recorded
+		// the relation between the lookup above and here.
+		res, err := db.ExecContext(ctx, `
+INSERT INTO smeldr_relations (`+relationInsertColumns+`)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+ON CONFLICT DO NOTHING`, args...)
+		if err != nil {
+			return RelationEdge{}, false, err
+		}
+		if n, aerr := res.RowsAffected(); aerr == nil && n == 0 {
+			return RelationEdge{}, false, liveRelationLost(ctx, db, edge, now)
+		}
+		edge.Rev = 0
+		return edge, true, nil
+	}
 	revGuard := ""
 	if expected != nil {
 		revGuard = "\nWHERE smeldr_relations.rev = $16"

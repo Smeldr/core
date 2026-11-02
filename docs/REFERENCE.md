@@ -6360,6 +6360,17 @@ A row of `smeldr_relations` is **one life** of a relation: `created_at` is when 
 - **Reading it.** Current-state readers read live rows (reachability, `GetLive*`, `preview_impact`, the cascade, goal context, context packets, governance). History readers read every row: `GetBySource`/`GetByTarget` and `get_relations` return rows **in creation order**, and on `get_relations` (`RelationStore.MCPGetRelations`) every ended row carries `RelationEdge.Ended` (`EdgeEnd{Cause, At, Reason, ActorKind, ActorID}`; MCP `ended: {cause, at, reason, actor_kind, actor_id}`), read in one batched query. The actor is shown to every caller who passes the tool (D101 members audience). A remote reader tells a withdrawn relation from a swept one by `cause`, never from timing.
 - **No schema change.** The cause lives in the provenance record. Without a provenance store wired, ends are still kept but every one reads `not-recorded`.
 
+### One live row per relation (T1019)
+
+A relation (source, target, kind and edge class) has at most one live row. The assert path already reused a live row it found, but two first asserts at the same moment could both miss it and both insert; a partial unique index now refuses the second.
+
+- **The index:** `idx_relations_live_tuple` on `(source_type, source_id, target_type, target_id, relation_kind, edge_class) WHERE invalid_at IS NULL`, SQLite and Postgres. `CreateRelationTables` makes it on boot **when there are no live duplicates**; with duplicates it logs a warning naming `migrate-relation-dedup` and boot goes on.
+- **A first assert that loses the race** (`assert_relation`, `observe_relation`, `propose_relation`, an explicit new id for a live relation) is `ErrConflict`, "relation already exists as <id>": read it, and re-assert it with its rev if the change was meant for it. A new row is inserted with `ON CONFLICT DO NOTHING`, so a surrounding Postgres transaction stays usable.
+- **Internal writers** (references, the change check, premise and contradiction flags, places, plan-time records, signal resolution, sweep repair, migrations; everything through `writeEdgeRow`) treat it as already recorded: they get the live row and go on, with no error and no log.
+- **A row with a future `invalid_at`** is live to the app but outside the index; no path writes one on a first assert.
+- **Migration:** `App.MigrateRelationDuplicates(ctx, smeldr.RelationDedupOptions{DryRun: true})`, and `smeldr-server migrate-relation-dedup [--apply] [--report=file]` (dry run by default): for each relation with more than one live row it keeps the oldest (created_at, then id), ends the others with the cause `deduplicated` (`EdgeEndDeduplicated`, recorded in provenance by the job `relation-dedup`, the kept id in the reason), merges nothing, then makes the index. The report names each relation (source and target by address where they have one), the kept and ended ids, the rows ended and whether the index exists. Idempotent. Rollback: restore the backup, or `DROP INDEX idx_relations_live_tuple`; the ended rows are history and stay readable.
+- process.smeldr.dev had no live duplicates on 2026-11-02 (4138 relations read), so the index is made on its first boot with this release.
+
 ### The whole graph, paged: `RelationStore.ListRelations` (A464, v1.142.0)
 
 One paged read of every relation on the instance, for a client that holds the graph in memory (an org-level snapshot) instead of reading per item.

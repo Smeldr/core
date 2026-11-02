@@ -33,6 +33,9 @@ const (
 	// EdgeEndMoved: an open condition's place edge, ended because the record
 	// it is about moved to another place, and the condition with it (T925).
 	EdgeEndMoved = "moved"
+	// EdgeEndDeduplicated: a second live row of the same relation, ended by
+	// [App.MigrateRelationDuplicates] in favour of the oldest (T1019).
+	EdgeEndDeduplicated = "deduplicated"
 	// EdgeEndNotRecorded: the row has ended but no record says how. Every end
 	// before relation history (core v1.128.0) reads this way; nothing is
 	// backfilled or invented.

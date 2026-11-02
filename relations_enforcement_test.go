@@ -3,6 +3,8 @@ package smeldr
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -252,18 +254,21 @@ func TestInsertEdge_ExplicitID_BypassesDedupLookup(t *testing.T) {
 	if err := store.Assert(ctx, e1); err != nil {
 		t.Fatalf("first Assert (explicit id): %v", err)
 	}
+	// The explicit id skips the lookup, but since T1019 the live-tuple index
+	// refuses a second live row of the same relation: already exists.
 	e2 := base
 	e2.ID = NewID()
-	if err := store.Assert(ctx, e2); err != nil {
-		t.Fatalf("second Assert (different explicit id): %v", err)
+	err := store.Assert(ctx, e2)
+	if !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), e1.ID) {
+		t.Fatalf("second Assert (different explicit id): %v; want ErrConflict naming %s", err, e1.ID)
 	}
 
 	got, err := store.GetBySource(ctx, "Task", "t1", "derives_from")
 	if err != nil {
 		t.Fatalf("GetBySource: %v", err)
 	}
-	if len(got) != 2 {
-		t.Errorf("want 2 rows — explicit edge.ID must bypass the dedup lookup entirely, got %d", len(got))
+	if len(got) != 1 {
+		t.Errorf("want 1 live row, got %d", len(got))
 	}
 }
 

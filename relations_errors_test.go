@@ -96,11 +96,20 @@ func TestCreateRelationTables_ExecError7(t *testing.T) {
 	}
 }
 
-// TestCreateRelationTables_NoEighthExec pins that the seven calls above are all of
-// them: a failure injected at an eighth call never fires.
-func TestCreateRelationTables_NoEighthExec(t *testing.T) {
-	if err := CreateRelationTables(&failOnNthExecDB{failAt: 8}); err != nil {
-		t.Errorf("an eighth ExecContext call exists: %v", err)
+// TestCreateRelationTables_ExecError8 pins the live-tuple unique index (T1019),
+// the eighth call: the duplicate check before it is a query, answered empty.
+func TestCreateRelationTables_ExecError8(t *testing.T) {
+	err := CreateRelationTables(&failOnNthExecDB{failAt: 8})
+	if err == nil {
+		t.Error("want error on eighth ExecContext, got nil")
+	}
+}
+
+// TestCreateRelationTables_NoNinthExec pins that the eight calls above are all of
+// them: a failure injected at a ninth call never fires.
+func TestCreateRelationTables_NoNinthExec(t *testing.T) {
+	if err := CreateRelationTables(&failOnNthExecDB{failAt: 9}); err != nil {
+		t.Errorf("a ninth ExecContext call exists: %v", err)
 	}
 }
 
