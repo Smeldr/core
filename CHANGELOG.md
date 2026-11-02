@@ -27,6 +27,11 @@ cross-referenced below by their Amendment ID.
 ### Changed
 
 - Compare core's errors with `errors.Is`, not `==`: governance sites now return typed wrappers of the sentinels.
+- For those caller mistakes, `RoleStore.DefineRole`, `RoleStore.Grant`, `RoleStore.RevokeWithReason`, `App.DefineContentType`, `ValidateSchemaDef`, `App.RegisterFlow` and `RelationStore.RegisterReferenceType` now return `*ValidationError` rather than a plain error.
+
+### Fixed
+
+- **Caller mistakes answer 422 on their field, not 500 (T1051, A638).** Several calls that refuse a caller's bad input returned a plain error, so HTTP and MCP answered 500 "Internal server error" even though the caller had sent something wrong. These calls now return a `*ValidationError` naming the field and a type (`field.required`, `field.not_in_list`, `field.invalid_format` or `schema.field_invalid`), and the caller gets 422. The calls are `RoleStore.DefineRole`, `RoleStore.Grant`, `RoleStore.RevokeWithReason`, `App.DefineContentType`, `ValidateSchemaDef`, `App.RegisterFlow` and `RelationStore.RegisterReferenceType`. `trust_level` is now checked strictly: before, only 1 was refused, so 3 and 7 were accepted although the message asked for 0 or 2; any value other than 0 or 2 is refused now, and no role on process.smeldr.dev used another value. The field message keeps its old wording without the "smeldr: Func:" prefix, and `Error()` now reads `validation failed: <field>: <message>`.
 
 ---
 

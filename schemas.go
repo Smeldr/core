@@ -386,10 +386,11 @@ var reservedContentFieldNames = map[string]bool{
 // address_no or external_ref (D110), which the server sets itself.
 func ValidateSchemaDef(schema *ContentTypeSchema) error {
 	if schema.TypeName == "" {
-		return fmt.Errorf("smeldr: schema TypeName is required")
+		return fieldErr(problemFieldRequired, "type_name", "schema TypeName is required", nil)
 	}
 	if schema.URLPrefix != "" && !strings.HasPrefix(schema.URLPrefix, "/") {
-		return fmt.Errorf("smeldr: URLPrefix must start with \"/\", got %q", schema.URLPrefix)
+		return fieldErr(problemFieldInvalidFormat, "url_prefix", fmt.Sprintf("URLPrefix must start with \"/\", got %q", schema.URLPrefix),
+			problemValues{"value": schema.URLPrefix})
 	}
 	if len(schema.Fields) == 0 {
 		return nil
@@ -409,7 +410,7 @@ func ValidateSchemaDef(schema *ContentTypeSchema) error {
 	channels := 0
 	for _, f := range fields {
 		if f.Name == "" {
-			return fmt.Errorf("smeldr: schema field Name is required")
+			return fieldErr(problemSchemaFieldInvalid, "fields", "schema field Name is required", nil)
 		}
 		if schema.Kind == "content" && reservedContentFieldNames[strings.ToLower(f.Name)] {
 			return Err("fields", fmt.Sprintf("%q is a reserved name: the server sets id, slug, status, address, address_no and external_ref itself", f.Name))

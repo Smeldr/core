@@ -238,10 +238,10 @@ type TransitionTrigger struct {
 // and before the application starts serving.
 func (a *App) RegisterFlow(flow StateFlow) error {
 	if flow.Name == "" {
-		return fmt.Errorf("smeldr: RegisterFlow: StateFlow.Name is required")
+		return fieldErr(problemFieldRequired, "name", "StateFlow.Name is required", nil)
 	}
 	if flow.TypeName == "" {
-		return fmt.Errorf("smeldr: RegisterFlow: StateFlow.TypeName is required")
+		return fieldErr(problemFieldRequired, "type_name", "StateFlow.TypeName is required", nil)
 	}
 	for _, s := range flow.States {
 		if s.Standing != "" && s.Standing != StandingHolds {

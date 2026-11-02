@@ -450,7 +450,7 @@ ON CONFLICT (type_name) DO UPDATE SET
 // never consulted.
 func (s *RelationStore) RegisterReferenceType(ctx context.Context, typeName string) error {
 	if typeName == "" {
-		return fmt.Errorf("smeldr: RegisterReferenceType: typeName must not be empty")
+		return fieldErr(problemFieldRequired, "type_name", "typeName must not be empty", nil)
 	}
 	if _, err := s.db.ExecContext(ctx,
 		`INSERT INTO smeldr_reference_types (type_name, created_at) VALUES ($1, $2)

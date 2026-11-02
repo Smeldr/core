@@ -975,7 +975,7 @@ func (a *App) DefineContentType(ctx context.Context, schema *ContentTypeSchema) 
 		return nil, fmt.Errorf("smeldr: DefineContentType requires Config.DB")
 	}
 	if schema.TypeName == "" {
-		return nil, fmt.Errorf("smeldr: DefineContentType: TypeName is required")
+		return nil, fieldErr(problemFieldRequired, "type_name", "TypeName is required", nil)
 	}
 	schema.Kind = "content"
 	if len(schema.Fields) == 0 {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -602,8 +603,8 @@ type RoleDefinition struct {
 	// ScopeDirection is "outgoing", "incoming", or "both" when ScopeMode is
 	// [ScopeDynamic]. Empty for global/static modes.
 	ScopeDirection string
-	// TrustLevel is 0 (direct execute), 1 (auto-verify), or 2 (plan required).
-	// Default 0.
+	// TrustLevel is 0 (direct execute) or 2 (plan required). Default 0. 1
+	// (auto-verify) is reserved and refused, like any other value.
 	TrustLevel int
 	// AllowSelfApproval permits the grant's proposer to also review/approve their
 	// own Plans. Only meaningful when TrustLevel is 2. Default false.
@@ -911,10 +912,12 @@ func (s *RoleStore) WithAudit(actorTokenID string, log GovernanceAuditStore) *Ro
 // Returns an error when role.Name is empty or any DB statement fails.
 func (s *RoleStore) DefineRole(ctx context.Context, role RoleDefinition) error {
 	if role.Name == "" {
-		return fmt.Errorf("smeldr: DefineRole: role.Name must not be empty")
+		return fieldErr(problemFieldRequired, "name", "role.Name must not be empty", nil)
 	}
-	if role.TrustLevel == 1 {
-		return fmt.Errorf("smeldr: DefineRole: trust_level 1 is not yet defined — use 0 (direct) or 2 (plan required)")
+	if role.TrustLevel != 0 && role.TrustLevel != 2 {
+		return fieldErr(problemFieldNotInList, "trust_level",
+			fmt.Sprintf("trust_level %d is not defined: use 0 (direct) or 2 (plan required)", role.TrustLevel),
+			problemValues{"value": strconv.Itoa(role.TrustLevel), "allowed": "0, 2"})
 	}
 	ops := role.Operations
 	if ops == nil {
@@ -1153,10 +1156,10 @@ func (s *RoleStore) GrantAt(ctx context.Context, grant RoleGrant, rev *int) (str
 		return "", nil, err
 	}
 	if grant.TokenID == "" {
-		return "", nil, fmt.Errorf("smeldr: Grant: TokenID must not be empty")
+		return "", nil, fieldErr(problemFieldRequired, "token_id", "TokenID must not be empty", nil)
 	}
 	if grant.RoleName == "" {
-		return "", nil, fmt.Errorf("smeldr: Grant: RoleName must not be empty")
+		return "", nil, fieldErr(problemFieldRequired, "role_name", "RoleName must not be empty", nil)
 	}
 	var roleID string
 	if err := s.db.QueryRowContext(ctx,
@@ -1367,7 +1370,7 @@ func (s *RoleStore) RevokeWithReasonAt(ctx context.Context, grantID, reason stri
 		return nil, err
 	}
 	if grantID == "" {
-		return nil, fmt.Errorf("smeldr: Revoke: grantID must not be empty")
+		return nil, fieldErr(problemFieldRequired, "grant_id", "grantID must not be empty", nil)
 	}
 	// T1010 part c: the holder's identity is the version this revoke changes.
 	var holder string

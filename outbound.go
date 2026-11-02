@@ -181,6 +181,8 @@ func (p *workerPool) Stop() {
 // it up. Callers should set job.ID (via NewID) before calling.
 func (p *workerPool) Enqueue(ctx context.Context, job OutboundJob) error {
 	u, err := url.Parse(job.TargetURL)
+	// Not a caller refusal: the delivery path, with a stored endpoint's URL
+	// (creating the endpoint already refuses it, T1051).
 	if err != nil || u.Scheme != "https" {
 		return fmt.Errorf("smeldr: webhook: target_url must use https scheme")
 	}
@@ -640,6 +642,7 @@ func ssrfSafeDialContext() func(ctx context.Context, network, addr string) (net.
 
 		for _, a := range addrs {
 			if isPrivate(a.IP) {
+				// Not a caller refusal: the SSRF guard at delivery time (T1051).
 				return nil, fmt.Errorf("smeldr: webhook: target resolves to a private/reserved address")
 			}
 		}
