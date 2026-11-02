@@ -185,7 +185,8 @@ authenticated user of the system.
 
 **Smeldr Core — open source (AGPL)**
 Content lifecycle engine. MCP-native API. AI-first content negotiation.
-Zero dependencies. The trust anchor: inspectable, self-hostable, fully
+No third-party code in the core package, and nothing to install beside the
+binary. The trust anchor: inspectable, self-hostable, fully
 ownable. For regulated industries, compliance-constrained organisations,
 and developers who want full control of their stack.
 

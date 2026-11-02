@@ -1833,7 +1833,7 @@ Smeldr accepts any database connection that satisfies the `smeldr.DB` interface 
 which `*sql.DB` and any pgx adapter already implement.
 You write SQL. Smeldr handles scanning and mapping.
 
-Smeldr core has zero dependencies. The driver is always your choice.
+The smeldr package imports only the standard library. The driver is always your choice.
 Performance is the default recommendation — zero-dependency is the alternative.
 
 ### Choosing a driver

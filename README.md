@@ -6,7 +6,7 @@ A searchable graph of your decisions: who decided, what is in force, and what bu
 
 Governance is set per domain and area: a domain's people ratify its decisions, an area's people approve changes to its files. Built for coding. Enforceable as merge gates when you want it.
 
-Self-hosted. Open source. No runtime dependencies.
+Self-hosted. Open source. Nothing to install beside it: SQLite is built in (pure Go, [modernc.org/sqlite](https://gitlab.com/cznic/sqlite)).
 
 [![Go Reference](https://pkg.go.dev/badge/smeldr.dev/core.svg)](https://pkg.go.dev/smeldr.dev/core)
 [![codecov](https://codecov.io/gh/Smeldr/core/graph/badge.svg)](https://codecov.io/gh/Smeldr/core)
@@ -227,6 +227,14 @@ Web docs: [smeldr.dev/docs](https://smeldr.dev/docs)
 
 For full token management reference (create, list, revoke) see [REFERENCE.md: Token management](docs/REFERENCE.md#token-management).  
 For draft preview tokens see [REFERENCE.md: Draft preview](docs/REFERENCE.md#draft-preview).
+
+---
+
+## Dependencies
+
+- **The `smeldr` package imports only the Go standard library.** Its [go.mod](go.mod) lists `modernc.org/sqlite` and the modules it brings because the package's own tests use SQLite; a program that imports `smeldr.dev/core` does not compile them in.
+- **The release binary `smeldr-server`** is built without cgo from [example/server](example/server/go.mod), with SQLite compiled in (pure Go, modernc.org/sqlite) and the Smeldr modules. Nothing has to be installed beside it; the database is a file.
+- **Postgres is optional:** the separate module `smeldr.dev/core/pgx`, with its own dependencies ([pgx/go.mod](pgx/go.mod)). It is not in the release binary.
 
 ---
 

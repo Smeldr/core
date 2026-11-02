@@ -1,6 +1,6 @@
 # Smeldr — Agent Instructions
 
-This is the Smeldr project — a Go AI-Native content backend. Zero dependencies. AI-first. Production-ready by default.
+This is the Smeldr project — a Go AI-Native content backend. Zero third-party dependencies in the core package. AI-first. Production-ready by default.
 
 The full current Smeldr Agent Protocol (D77) is embedded verbatim below, under
 the horizontal rule near the end of this file. This section above covers what
