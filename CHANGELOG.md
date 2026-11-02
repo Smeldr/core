@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.188.0] - 2026-11-02
+
 ### Added
 
 - **smeldr-server reads the plan-paths and rev cutovers from the environment (T1049, A632).** The `smeldr-server` binary reads `PLAN_PATHS_CUTOVER` and `REV_CUTOVER` as RFC3339 times and sets `Config.PlanPathsCutover` and `Config.RevCutover` from them: after the first, a commit plan without `repository` and `paths` is refused, and after the second, a governance write without a rev is refused. A malformed value stops the server at boot and names the variable, before anything is written, as `TITLE_CUTOVER` does. Left unset, both rules stay warnings only.
