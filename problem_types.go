@@ -43,7 +43,9 @@ type ProblemTypeInfo struct {
 	Values []string `json:"values,omitempty"`
 	// AlwaysValues are the names of Values that every refusal of the type
 	// sends (T1061): a UI's text may rely on them, and must read without any
-	// other. A test holds the list to what every site writes.
+	// other. A test holds the list to what every site writes. Over HTTP and
+	// MCP a 401, 403 or 404 without a reason sends no values at all (T1066):
+	// values are absent as a whole, or hold every one of these.
 	AlwaysValues []string `json:"always_values,omitempty"`
 }
 
@@ -474,7 +476,9 @@ type problemValued interface{ problemValues() problemValues }
 // or nil when it carries none. Each name is one its type declares
 // ([ProblemTypeInfo.Values]); each value is a string (a record as its
 // address, a number in decimal, a list joined with ", ") and never says more
-// than the message does. A UI fills its own text from them.
+// than the message does. A UI fills its own text from them. Over HTTP and
+// MCP they are sent only where the message shown carries the detail: a bare
+// 401, 403 or 404 sends none (T1066), while Go code reads them all here.
 //
 //	smeldr.ProblemValuesOf(err)["decision"] // "D118"
 func ProblemValuesOf(err error) map[string]string {

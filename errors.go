@@ -300,7 +300,11 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 			generic500 := newSentinel(http.StatusInternalServerError, "internal_error", "Internal server error")
 			respond(w, r, http.StatusInternalServerError, requestID, generic500, "", nil, format)
 		} else {
-			respond(w, r, fe.HTTPStatus(), requestID, fe, ProblemTypeOf(err), ProblemValuesOf(err), format)
+			var values map[string]string
+			if valuesShown(fe) {
+				values = ProblemValuesOf(err)
+			}
+			respond(w, r, fe.HTTPStatus(), requestID, fe, ProblemTypeOf(err), values, format)
 		}
 
 	default:
@@ -311,6 +315,21 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 		generic500 := newSentinel(http.StatusInternalServerError, "internal_error", "Internal server error")
 		respond(w, r, http.StatusInternalServerError, requestID, generic500, "", nil, format)
 	}
+}
+
+// valuesShown reports whether a refusal answered as fe may send its values
+// (T1066): only where the message the caller sees carries the detail they
+// state. A reason, a field message and a rev conflict show it; a 400 or 409
+// keeps its values as mcp shows its text (A640). A bare 401, 403, 404 or
+// other status hides the text, since it could name an item the caller may
+// not read (T971), so its values are hidden too; its type is still sent.
+func valuesShown(fe Error) bool {
+	switch fe.(type) {
+	case *RefusalError, *ValidationError, *RevConflictError:
+		return true
+	}
+	s := fe.HTTPStatus()
+	return s == http.StatusBadRequest || s == http.StatusConflict
 }
 
 // problemJSON is the RFC 9457 media type, which a client asks for in Accept.

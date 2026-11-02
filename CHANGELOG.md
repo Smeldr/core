@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Changed
+
+- **Refusals send values only where the caller can see the detail (T1066, D171, D174, A641).** Over HTTP, `WriteError` sends a typed refusal's values only when the message shows the detail: a reason, validation fields, a rev conflict, a 400 or a 409. A 401, 403 or 404 without a reason still sends type, id, class and rule, but no values, in both the JSON envelope and problem+json. Its message stays bare, since it could name an item the caller may not read (T971). v1.189.0 sent values on every typed error, but it was never deployed live. 22 types lose their values on the wire, for example `transition.gate` and `relation.not_found`, so a UI must treat values as absent as a whole, or holding every value docs/PROBLEM_TYPES.md marks bold. Go's `ProblemValuesOf` is unchanged and still returns all values. Matches smeldr.dev/mcp v1.75.0.
+
 ---
 
 ## [1.189.0] - 2026-11-02

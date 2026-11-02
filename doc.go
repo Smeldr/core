@@ -271,7 +271,8 @@
 //     ([ProblemTypeOf], the closed list [ProblemTypes]) that a UI keys its text
 //     on, with a class and named values ([ProblemValuesOf], D174); over HTTP
 //     they are in the error envelope, and RFC 9457 problem+json is served on
-//     Accept: application/problem+json.
+//     Accept: application/problem+json. A 401, 403 or 404 without a reason
+//     sends its type but no values (T1066).
 //   - Webhooks ([WebhookStore], [WebhookEndpoint], [WebhookEventPayload]) —
 //     outbound delivery on lifecycle events, created with [NewWebhookStore].
 //   - The event stream ([App.EventStream]) and its durable log
