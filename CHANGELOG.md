@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.186.0] - 2026-11-02
+
 ### Added
 
 - **Grants name the rev of the grantee's identity (T1010 part c, D165, A625).** A grant or a revoke changes an identity's set of grants, but it named no version, so two administrators could each decide on a stale view of the same identity's grants. The new `RoleStore.GrantAt(ctx, grant, rev)` and `RoleStore.RevokeWithReasonAt(ctx, grantID, reason, rev)` take the rev of the grantee's identity the caller read. They compare it and advance it in the same transaction as the grant or revoke. A stale rev is refused with `RevConflictError` (`rev_conflict`, MCP -32002), and nothing is granted or revoked. Without a rev, a grant or revoke for an identity returns a `rev_missing` warning until `Config.RevCutover`, then a validation error. A grantee that is not an identity yet names no rev, and naming one is a validation error. `Grant`, `Revoke` and `RevokeWithReason` keep their signatures and name no rev. This completes T1010.
