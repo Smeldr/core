@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -28,8 +27,7 @@ import (
 // unresolved lists every value that names no record, left as it is. Run it
 // after migrate-signal-kinds.
 func runMigrateReferences(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("migrate-references", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("migrate-references", stderr)
 	apply := fs.Bool("apply", false, "apply the migration (default: dry run, nothing written)")
 	reportPath := fs.String("report", "", "also write the JSON report to this file")
 	refFields := map[string]string{}
@@ -44,7 +42,11 @@ func runMigrateReferences(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	cfg := parseConfig()
+	cfg, err := commandConfig("migrate-references")
+	if err != nil {
+		fmt.Fprintf(stderr, "migrate-references: %v\n", err)
+		return 1
+	}
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")
 	db, err := sql.Open("sqlite", sqliteDSN(dbPath, maintenanceBusyTimeout))
 	if err != nil {
@@ -53,6 +55,10 @@ func runMigrateReferences(args []string, stdout, stderr io.Writer) int {
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
+	if err := checkLoadedTypes(context.Background(), db, "migrate-references", cfg); err != nil {
+		fmt.Fprintf(stderr, "migrate-references: %v\n", err)
+		return 1
+	}
 	result, err := buildCommandApp(cfg, db)
 	if err != nil {
 		fmt.Fprintf(stderr, "migrate-references: %v\n", err)

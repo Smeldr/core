@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -26,14 +25,17 @@ import (
 // transaction (duration_ms in the report); stop the server for --apply unless a
 // dry run showed that time is short.
 func runMigrateAddresses(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("migrate-addresses", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("migrate-addresses", stderr)
 	apply := fs.Bool("apply", false, "apply the migration (default: dry run, nothing written)")
 	reportPath := fs.String("report", "", "also write the JSON report to this file")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	cfg := parseConfig()
+	cfg, err := commandConfig("migrate-addresses")
+	if err != nil {
+		fmt.Fprintf(stderr, "migrate-addresses: %v\n", err)
+		return 1
+	}
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")
 	db, err := sql.Open("sqlite", sqliteDSN(dbPath, maintenanceBusyTimeout))
 	if err != nil {
@@ -42,6 +44,10 @@ func runMigrateAddresses(args []string, stdout, stderr io.Writer) int {
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
+	if err := checkLoadedTypes(context.Background(), db, "migrate-addresses", cfg); err != nil {
+		fmt.Fprintf(stderr, "migrate-addresses: %v\n", err)
+		return 1
+	}
 	result, err := buildCommandApp(cfg, db)
 	if err != nil {
 		fmt.Fprintf(stderr, "migrate-addresses: %v\n", err)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -23,14 +22,17 @@ import (
 // its own state flow, or the next sweep ends the restored edges again. A
 // restore sends no event and opens no condition.
 func runRepairSweptEdges(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("repair-swept-edges", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("repair-swept-edges", stderr)
 	apply := fs.Bool("apply", false, "restore the edges (default: dry run, nothing written)")
 	reportPath := fs.String("report", "", "also write the JSON report to this file")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	cfg := parseConfig()
+	cfg, err := commandConfig("repair-swept-edges")
+	if err != nil {
+		fmt.Fprintf(stderr, "repair-swept-edges: %v\n", err)
+		return 1
+	}
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")
 	db, err := sql.Open("sqlite", sqliteDSN(dbPath, maintenanceBusyTimeout))
 	if err != nil {

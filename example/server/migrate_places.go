@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -24,14 +23,17 @@ import (
 //
 // Take the database backup first. Rollback: REFERENCE, "Places".
 func runMigratePlaces(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("migrate-places", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("migrate-places", stderr)
 	apply := fs.Bool("apply", false, "apply the migration (default: dry run, nothing written)")
 	reportPath := fs.String("report", "", "also write the JSON report to this file")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	cfg := parseConfig()
+	cfg, err := commandConfig("migrate-places")
+	if err != nil {
+		fmt.Fprintf(stderr, "migrate-places: %v\n", err)
+		return 1
+	}
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")
 	db, err := sql.Open("sqlite", sqliteDSN(dbPath, maintenanceBusyTimeout))
 	if err != nil {

@@ -22,6 +22,11 @@ cross-referenced below by their Amendment ID.
 
 - **smeldr-server reads the plan-paths and rev cutovers from the environment (T1049, A632).** The `smeldr-server` binary reads `PLAN_PATHS_CUTOVER` and `REV_CUTOVER` as RFC3339 times and sets `Config.PlanPathsCutover` and `Config.RevCutover` from them: after the first, a commit plan without `repository` and `paths` is refused, and after the second, a governance write without a rev is refused. A malformed value stops the server at boot and names the variable, before anything is written, as `TITLE_CUTOVER` does. Left unset, both rules stay warnings only.
 
+### Fixed
+
+- **smeldr-server sets the SQLite busy timeout before WAL (T1041, A634).** The DSN now sets `busy_timeout`, then `journal_mode(WAL)`, then `_txlock=immediate`. The pragmas run in order when a connection opens, so before this the WAL pragma ran with no busy timeout and could fail at once with SQLITE_BUSY while another process held a lock.
+- **The maintenance subcommands need only what they read (T1041, A634).** The nine subcommands that boot the App, from `migrate-identities` to `seed-role-subscriptions`, need only `DATABASE_PATH` and the `ENABLE_*` flags whose tables or types they read; `SECRET` and `BASE_URL` are optional (without them a subcommand uses a random secret for its own process and `http://localhost`, since it signs nothing that outlives it). A missing flag is refused before the database is opened, in one error naming every missing variable, and `-h` lists what each one reads. The subcommands that read every loaded type refuse when the database holds Task, Goal or Run records without `ENABLE_ORCHESTRATION`, or runtime types without `ENABLE_DYNAMIC_CONTENT`, instead of quietly skipping them. Before this, `migrate-identities` would not start without `SECRET`, `BASE_URL` and the server's whole set of `ENABLE_*` flags.
+
 ---
 
 ## [1.187.0] - 2026-11-02

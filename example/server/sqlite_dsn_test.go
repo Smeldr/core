@@ -19,6 +19,12 @@ func TestSQLiteDSN(t *testing.T) {
 			t.Errorf("sqliteDSN = %q; missing %q", got, want)
 		}
 	}
+	// The pragmas run in order: busy_timeout before WAL, so the WAL pragma
+	// waits for another process's lock (T1041).
+	busy, wal, txlock := strings.Index(got, "busy_timeout"), strings.Index(got, "journal_mode"), strings.Index(got, "_txlock")
+	if busy >= wal || wal >= txlock {
+		t.Errorf("sqliteDSN = %q; want busy_timeout, then journal_mode(WAL), then _txlock", got)
+	}
 }
 
 // openPair opens the same new file twice, as two processes would: the first

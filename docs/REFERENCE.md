@@ -1984,7 +1984,18 @@ app.Content(m)
 
 **Creates run in one transaction (D110).** Every create (the compiled MCP create and HTTP POST, dynamic content creates, and Signals) runs its pre-save check and INSERT in one transaction when the database handle supports BeginTx. Events, standing, provenance and the after-save step run only after commit, so nothing is announced for a row that rolled back. Dynamic content creates open one transaction per slug attempt, because Postgres aborts a transaction after a failed INSERT. A database handle without BeginTx runs the same statements without a transaction, as before. A Repository that is not an SQLRepo (MemoryRepo, or your own) is used as is.
 
-**SQLite: open the file with `?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_txlock=immediate`** (modernc.org/sqlite). Without a busy timeout, a write fails at once while another process holds the write lock; without `_txlock=immediate`, a transaction that reads and then writes fails at once on a stale WAL snapshot after another process wrote, which no timeout prevents. smeldr-server uses this DSN since core v1.183.3 (T1013); see SELF_HOSTING.md, "SQLite settings".
+**SQLite: open the file with `?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate`** (modernc.org/sqlite). The pragmas run in this order when a connection opens, so busy_timeout comes first: the WAL pragma then waits for a lock another process holds (T1041). Without a busy timeout, a write fails at once while another process holds the write lock; without `_txlock=immediate`, a transaction that reads and then writes fails at once on a stale WAL snapshot after another process wrote, which no timeout prevents. smeldr-server uses this DSN since core v1.183.3 (T1013); see SELF_HOSTING.md, "SQLite settings".
+
+**What the maintenance subcommands need (T1041).** Each smeldr-server subcommand that boots the App reads only `DATABASE_PATH` (default `smeldr.db`) and the flags whose tables or types it reads, and refuses before opening the database, naming every one it lacks. `SECRET` and `BASE_URL` are optional: without them a subcommand uses `http://localhost` and a random secret for its own process, since it signs nothing that outlives it (an entry marked as signing requires `SECRET`). `-h` lists what each one reads.
+
+| Subcommand | Needs |
+|---|---|
+| `migrate-identities` | `ENABLE_TOKENS` |
+| `migrate-relation-dedup`, `repair-swept-edges` | `ENABLE_RELATIONS` |
+| `migrate-places`, `migrate-signal-kinds` | `ENABLE_RELATIONS`, `ENABLE_GOVERNANCE_RECORDS` (or `ENABLE_ORCHESTRATION`) |
+| `migrate-references`, `migrate-record-shape`, `migrate-addresses`, `seed-role-subscriptions` | the same, and every loaded type: `ENABLE_ORCHESTRATION` when the database holds Task, Goal or Run records, `ENABLE_DYNAMIC_CONTENT` when it defines runtime types |
+
+A subcommand of the last row refuses rather than quietly skipping records of a type it would not load. `migrate-webhook-subscriptions` needs only the database. A test runs each subcommand with exactly this environment against a database a full server boot made, and checks its report equals a run with the server's whole environment.
 
 `ParseTimestamp(v any) (time.Time, error)` reads any stored time value into a UTC `time.Time` (A505). It accepts a `time.Time`, an `int64` of Unix seconds, or a `string` or `[]byte` in RFC3339Nano, RFC3339 or Go's `time.Time.String` form, which is what SQLite drivers write for a `TIMESTAMPTZ` column. `nil` returns the zero time. It is the one parser for every stored form, so a surface that reads a time column as text can return it as RFC3339, like every other record (D114 point 4). `smeldr.dev/mcp`'s `list_signals` uses it from its next release.
 

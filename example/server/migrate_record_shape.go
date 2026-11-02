@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -31,8 +30,7 @@ import (
 // without it: the same map is refused, since each Amendment it names now has
 // a valid type.
 func runMigrateRecordShape(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("migrate-record-shape", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("migrate-record-shape", stderr)
 	apply := fs.Bool("apply", false, "apply the migration (default: dry run, nothing written)")
 	reportPath := fs.String("report", "", "also write the JSON report to this file")
 	typeMapPath := fs.String("type-map", "", "JSON file mapping Amendment address or number to amendment_type")
@@ -51,7 +49,11 @@ func runMigrateRecordShape(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	cfg := parseConfig()
+	cfg, err := commandConfig("migrate-record-shape")
+	if err != nil {
+		fmt.Fprintf(stderr, "migrate-record-shape: %v\n", err)
+		return 1
+	}
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")
 	db, err := sql.Open("sqlite", sqliteDSN(dbPath, maintenanceBusyTimeout))
 	if err != nil {
@@ -60,6 +62,10 @@ func runMigrateRecordShape(args []string, stdout, stderr io.Writer) int {
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
+	if err := checkLoadedTypes(context.Background(), db, "migrate-record-shape", cfg); err != nil {
+		fmt.Fprintf(stderr, "migrate-record-shape: %v\n", err)
+		return 1
+	}
 	result, err := buildCommandApp(cfg, db)
 	if err != nil {
 		fmt.Fprintf(stderr, "migrate-record-shape: %v\n", err)

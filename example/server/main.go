@@ -209,10 +209,19 @@ type ServerResult struct {
 }
 
 // parseConfig reads all server configuration from environment variables.
+// The server requires SECRET.
 func parseConfig() ServerConfig {
+	cfg := readConfig()
+	cfg.Secret = requireEnv("SECRET")
+	return cfg
+}
+
+// readConfig reads the configuration as parseConfig does, without requiring
+// SECRET: the maintenance subcommands decide that themselves (commandConfig).
+func readConfig() ServerConfig {
 	port := envOr("PORT", "8080")
 	return ServerConfig{
-		Secret:                   requireEnv("SECRET"),
+		Secret:                   os.Getenv("SECRET"),
 		BaseURL:                  os.Getenv("BASE_URL"),
 		TitleCutover:             os.Getenv("TITLE_CUTOVER"),
 		SignalMessageCutover:     os.Getenv("SIGNAL_MESSAGE_CUTOVER"),

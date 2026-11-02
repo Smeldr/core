@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 
@@ -22,8 +21,7 @@ import (
 //	smeldr-server seed-role-subscriptions --owner=<token user id> --band=core
 //	smeldr-server seed-role-subscriptions --owner=<token user id> --architect
 func runSeedRoleSubscriptions(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("seed-role-subscriptions", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("seed-role-subscriptions", stderr)
 	owner := fs.String("owner", "", "the role token's user ID (required)")
 	band := fs.String("band", "", "the role's band: core, site, cloud, devops, brand")
 	architect := fs.Bool("architect", false, "add the architect's review subscriptions")
@@ -34,7 +32,11 @@ func runSeedRoleSubscriptions(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "seed-role-subscriptions: --owner and --band or --architect are required")
 		return 2
 	}
-	cfg := parseConfig()
+	cfg, err := commandConfig("seed-role-subscriptions")
+	if err != nil {
+		fmt.Fprintf(stderr, "seed-role-subscriptions: %v\n", err)
+		return 1
+	}
 	dbPath := envOr("DATABASE_PATH", "smeldr.db")
 	db, err := sql.Open("sqlite", sqliteDSN(dbPath, maintenanceBusyTimeout))
 	if err != nil {
@@ -43,6 +45,10 @@ func runSeedRoleSubscriptions(args []string, stdout, stderr io.Writer) int {
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
+	if err := checkLoadedTypes(context.Background(), db, "seed-role-subscriptions", cfg); err != nil {
+		fmt.Fprintf(stderr, "seed-role-subscriptions: %v\n", err)
+		return 1
+	}
 	result, err := buildCommandApp(cfg, db)
 	if err != nil {
 		fmt.Fprintf(stderr, "seed-role-subscriptions: %v\n", err)

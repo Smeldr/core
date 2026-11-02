@@ -17,10 +17,13 @@ const (
 )
 
 // sqliteDSN is how smeldr-server and its maintenance subcommands open the
-// SQLite file (T1013): WAL, so readers never block the writer; busy_timeout,
-// so a writer waits up to busy for another process's write lock instead of
-// failing at once; and _txlock=immediate, so a transaction takes the write
-// lock at BEGIN and cannot fail mid-way on a stale WAL snapshot.
+// SQLite file (T1013): busy_timeout, so a writer waits up to busy for another
+// process's write lock instead of failing at once; WAL, so readers never block
+// the writer; and _txlock=immediate, so a transaction takes the write lock at
+// BEGIN and cannot fail mid-way on a stale WAL snapshot. The pragmas run in
+// order when a connection opens, so busy_timeout comes first: the WAL pragma
+// then waits for a lock another process holds instead of failing with
+// SQLITE_BUSY (T1041).
 func sqliteDSN(path string, busy time.Duration) string {
-	return path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(" + strconv.FormatInt(busy.Milliseconds(), 10) + ")&_txlock=immediate"
+	return path + "?_pragma=busy_timeout(" + strconv.FormatInt(busy.Milliseconds(), 10) + ")&_pragma=journal_mode(WAL)&_txlock=immediate"
 }

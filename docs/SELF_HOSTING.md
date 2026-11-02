@@ -140,8 +140,10 @@ WantedBy=multi-user.target
 smeldr-server opens its file with three settings (since core v1.183.3, T1013):
 
 ```
-smeldr.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_txlock=immediate
+smeldr.db?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate
 ```
+
+The pragmas run in this order on every new connection, so `busy_timeout` comes first: the WAL pragma then waits for a lock another process holds instead of failing at once (T1041).
 
 - **`journal_mode(WAL)`**: readers never block the writer, so a backup (`.backup`, `VACUUM INTO`) can run against the live file.
 - **`busy_timeout(5000)`**: a write that meets another process's write lock waits up to 5 seconds instead of failing at once with `database is locked`. The maintenance subcommands (`migrate-*`, `repair-swept-edges`, `seed-role-subscriptions`) open the same file from a second process while the server runs, and wait up to 10 seconds.
