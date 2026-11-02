@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.189.0] - 2026-11-02
+
 ### Added
 
 - **Stable refusal types: the list and the mechanism (T1039 phase 1, D171, D174, A635).** A refusal can now carry a stable type, an id such as `decision.place_missing` (area, then reason) that stays the same when the English message changes, so a UI can key its own text on it. Each type also has a class (refusal, correction, conflict or failure) saying where a UI shows it, and declares the names of the values it carries (for example `transition.gate`: `type`, `from`, `to`, `operation`): strings that never say more than the message does, sent when the message states them. The closed list of 167 types, with class, status, audience, values, rule and meaning, is `docs/PROBLEM_TYPES.md`, generated from `problem_types.go`. The Go API adds `smeldr.ProblemTypeOf(err)`, `smeldr.ProblemValuesOf(err)`, `smeldr.ProblemTypes()` (each `ProblemTypeInfo` with its `Class` and `Values`) and `ProblemType.URI()`. Over HTTP a typed error's JSON envelope gains `type`, `id`, `class`, `rule` and `values` (and each field its own `type`, `id` and `values`), and `Accept: application/problem+json` gets an RFC 9457 body; an untyped error's body is unchanged. This is phase 1: core's own sites are typed area by area in the next phases, and a test holds every new site to a listed type and its declared value names. Messages, `Refused`, `Err` and every sentinel are unchanged.
