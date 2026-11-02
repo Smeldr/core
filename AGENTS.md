@@ -458,6 +458,9 @@ correct wiring order — some calls have load-bearing ordering constraints (e.g.
 - `smeldr.DB` is an interface, not `*sql.DB`
 - All errors must implement `smeldr.Error` — never raw `errors.New`
 - Read `ERROR_HANDLING.md` before writing any error-handling code
+- To branch on why core refused, use `smeldr.ProblemTypeOf(err)` (a stable id such as
+  `decision.place_missing`, listed in `docs/PROBLEM_TYPES.md`) and read its named values
+  with `smeldr.ProblemValuesOf(err)`, never the message text
 - Never use `smeldr.SignToken` in `main()` when `TokenStore` is wired —
   stateless HMAC tokens are rejected by `VerifyBearerToken` when a store is configured
 - Put write validation in `smeldr.On(smeldr.BeforeCreate/BeforeUpdate/BeforeDelete, ...)`:

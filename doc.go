@@ -267,6 +267,11 @@
 //     at most [TitleMaxLength] characters, warned about first and refused after
 //     [Config.TitleCutover]; amendment_type is the closed list [AmendmentTypes];
 //     [MigrateRecordShape] brings existing records to that shape.
+//   - Refusal types (D171): every refusal carries a stable id
+//     ([ProblemTypeOf], the closed list [ProblemTypes]) that a UI keys its text
+//     on, with a class and named values ([ProblemValuesOf], D174); over HTTP
+//     they are in the error envelope, and RFC 9457 problem+json is served on
+//     Accept: application/problem+json.
 //   - Webhooks ([WebhookStore], [WebhookEndpoint], [WebhookEventPayload]) —
 //     outbound delivery on lifecycle events, created with [NewWebhookStore].
 //   - The event stream ([App.EventStream]) and its durable log

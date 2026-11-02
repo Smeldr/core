@@ -2506,6 +2506,18 @@ smeldr.On(smeldr.BeforeCreate, func(ctx smeldr.Context, p *BlogPost) error {
 
 HTML error pages are rendered from `templates/errors/{status}.html` if present.
 
+### Error types: a stable id per refusal (T1039, D171)
+
+Every refusal core answers with is getting a stable **type**: an id such as `decision.place_missing` (area, then reason) that never changes when the English message does. A UI keys its own text on the id; the message stays the API's own words and is not editorial text (D171). The closed list, with each type's class, status, audience, values, rule and meaning, is [docs/PROBLEM_TYPES.md](PROBLEM_TYPES.md), generated from `problem_types.go`.
+
+- **Class and values (D174).** Each type has a **class** that says where a UI shows it: `refusal` (a rule says no), `correction` (fix the input, at the field), `conflict` (the record moved: read it again) or `failure` (outside the caller's reach). A UI with no text yet for an id shows its class's shared text. Each type also declares the names of its **values**, a closed set like the ids (for example `transition.gate`: `type`, `from`, `to`, `operation`): strings a UI fills its own text from, a record as its address, a number in decimal, a list joined with ", ". A type lists every name its refusals use; one refusal sends those its message states, so a UI's text must read without any one of them. A value never says more than the message does and never carries an item's title or text. A value name is never renamed or removed; one may be added.
+- **In the JSON envelope** a typed error adds, beside `code` and `message`: `type` (the RFC 9457 URI `https://smeldr.dev/problems/<id>`), `id` (the bare id), `class`, `rule` (the Decision or Task it enforces) and `values` (omitted when empty). Each entry of `fields` carries its own `type`, `id` and `values`. An untyped error's body is unchanged.
+- **RFC 9457 problem+json** when the request sends `Accept: application/problem+json`: `{type, id, title, status, detail, code, class, rule, values, request_id, fields}`, with `detail` the public message. An untyped error is `about:blank`; a 5xx never carries a type.
+- **In Go:** `smeldr.ProblemTypeOf(err) ProblemType` returns the id ("" when untyped), looking through wrapped errors; `smeldr.ProblemValuesOf(err) map[string]string` returns the values (a copy, nil when none); `smeldr.ProblemTypes() []ProblemTypeInfo` returns the list, with each type's `Class` and `Values`. `ErrRevConflict` (and `*RevConflictError`) is `rev.conflict`, `ErrLastAdmin` is `token.last_admin`.
+- **A ValidationError** with one field has that field's type and values; with several it is `validation.failed`, with no values of its own, and each field keeps its own.
+- **Rules:** an id is never renamed or reused; one that goes out of use is retired (kept in the list with the version and its replacement). Types that differ only in whether a hidden item exists are one type, so a type is never an existence oracle (the rule T971 applies to a reason).
+- **Rollout:** phase 1 (this) brings the list, `ProblemTypeOf` and both response shapes; core's own sites are typed area by area in the following phases, governance refusals first, and a test keeps every new site typed. `smeldr.Refused` and `smeldr.Err` stay as they are, untyped, for your own code.
+
 ### Request tracing
 
 Every request gets a `X-Request-ID` header (UUID v7).

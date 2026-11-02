@@ -101,6 +101,11 @@ var (
 type RefusalError struct {
 	// Reason says why, in words safe to show the caller.
 	Reason string
+	// typ is its refusal type, set by core's own sites (T1039); a
+	// RefusalError made with Refused has none.
+	typ ProblemType
+	// values are its named values (D174), set with typ.
+	values problemValues
 }
 
 // Refused returns a [*RefusalError] with reason.
@@ -121,11 +126,16 @@ func (e *RefusalError) Public() string { return e.Reason }
 // Is reports whether target is [ErrForbidden].
 func (e *RefusalError) Is(target error) bool { return target == ErrForbidden }
 
+func (e *RefusalError) problemType() ProblemType     { return e.typ }
+func (e *RefusalError) problemValues() problemValues { return e.values }
+
 // fieldError holds a single field-level validation failure. Unexported — only
 // used as input to the JSON encoder and within ValidationError.
 type fieldError struct {
 	field   string
 	message string
+	typ     ProblemType   // set by core's own sites (T1039); none for Err
+	values  problemValues // its named values (D174), set with typ
 }
 
 // ValidationError is returned when one or more fields fail validation.
@@ -140,11 +150,41 @@ func (e *ValidationError) HTTPStatus() int { return http.StatusUnprocessableEnti
 func (e *ValidationError) Code() string    { return "validation_failed" }
 func (e *ValidationError) Public() string  { return "Validation failed" }
 
+// problemType is the field's type when there is one field, and
+// "validation.failed" when there are several and any is typed: each field
+// then carries its own.
+func (e *ValidationError) problemType() ProblemType {
+	if len(e.fields) == 1 {
+		return e.fields[0].typ
+	}
+	for _, f := range e.fields {
+		if f.typ != "" {
+			return problemValidationFailed
+		}
+	}
+	return ""
+}
+
+// problemValues are the field's values when there is one field, and none
+// when there are several: each field then carries its own.
+func (e *ValidationError) problemValues() problemValues {
+	if len(e.fields) == 1 {
+		return e.fields[0].values
+	}
+	return nil
+}
+
 // FieldError is one field's validation failure, as a [ValidationError]
 // holds it and as [WriteError] writes it in the JSON "fields" array.
 type FieldError struct {
 	Field   string `json:"field"`
 	Message string `json:"message"`
+	// Type is the field's refusal type as an RFC 9457 type URI, and ID the
+	// bare id (T1039); both are empty for an untyped field.
+	Type string      `json:"type,omitempty"`
+	ID   ProblemType `json:"id,omitempty"`
+	// Values are the field's named values (D174), omitted when it has none.
+	Values map[string]string `json:"values,omitempty"`
 }
 
 // Fields returns the field failures in order, as a copy, so a caller reads
@@ -156,7 +196,10 @@ func (e *ValidationError) Fields() []FieldError {
 	}
 	out := make([]FieldError, len(e.fields))
 	for i, f := range e.fields {
-		out[i] = FieldError{Field: f.field, Message: f.message}
+		out[i] = FieldError{Field: f.field, Message: f.message, ID: f.typ, Values: copyValues(f.values)}
+		if f.typ != "" {
+			out[i].Type = f.typ.URI()
+		}
 	}
 	return out
 }
@@ -232,14 +275,21 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 		w.Header().Set("X-Request-ID", requestID)
 	}
 
-	wantsHTML := strings.Contains(r.Header.Get("Accept"), "text/html")
+	accept := r.Header.Get("Accept")
+	format := formatJSON
+	switch {
+	case strings.Contains(accept, problemJSON):
+		format = formatProblem
+	case strings.Contains(accept, "text/html"):
+		format = formatHTML
+	}
 
 	var ve *ValidationError
 	var fe Error
 
 	switch {
 	case errors.As(err, &ve):
-		respond(w, r, http.StatusUnprocessableEntity, requestID, ve, wantsHTML)
+		respond(w, r, http.StatusUnprocessableEntity, requestID, ve, ProblemTypeOf(err), ProblemValuesOf(err), format)
 
 	case errors.As(err, &fe):
 		if fe.HTTPStatus() >= 500 {
@@ -248,9 +298,9 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 				"request_id", requestID,
 			)
 			generic500 := newSentinel(http.StatusInternalServerError, "internal_error", "Internal server error")
-			respond(w, r, http.StatusInternalServerError, requestID, generic500, wantsHTML)
+			respond(w, r, http.StatusInternalServerError, requestID, generic500, "", nil, format)
 		} else {
-			respond(w, r, fe.HTTPStatus(), requestID, fe, wantsHTML)
+			respond(w, r, fe.HTTPStatus(), requestID, fe, ProblemTypeOf(err), ProblemValuesOf(err), format)
 		}
 
 	default:
@@ -259,9 +309,21 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 			"request_id", requestID,
 		)
 		generic500 := newSentinel(http.StatusInternalServerError, "internal_error", "Internal server error")
-		respond(w, r, http.StatusInternalServerError, requestID, generic500, wantsHTML)
+		respond(w, r, http.StatusInternalServerError, requestID, generic500, "", nil, format)
 	}
 }
+
+// problemJSON is the RFC 9457 media type, which a client asks for in Accept.
+const problemJSON = "application/problem+json"
+
+// errorFormat is the shape of an error response.
+type errorFormat int
+
+const (
+	formatJSON    errorFormat = iota // the {"error": ...} envelope (the default)
+	formatProblem                    // RFC 9457 problem+json, on Accept
+	formatHTML                       // a page, on Accept: text/html
+)
 
 // errorTemplateLookup is set by [bindErrorTemplates] when modules with
 // template directories are registered. It searches for errors/{status}.html
@@ -296,9 +358,11 @@ func runErrorTemplateLookup(status int) *template.Template {
 	return fn(status)
 }
 
-// respond writes a JSON or minimal HTML error response.
-func respond(w http.ResponseWriter, _ *http.Request, status int, requestID string, err Error, wantsHTML bool) {
-	if wantsHTML {
+// respond writes an error response in format: the JSON envelope, RFC 9457
+// problem+json, or a minimal HTML page. t is the refusal type, "" for none,
+// and values its named values.
+func respond(w http.ResponseWriter, _ *http.Request, status int, requestID string, err Error, t ProblemType, values map[string]string, format errorFormat) {
+	if format == formatHTML {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(status)
 		if tpl := runErrorTemplateLookup(status); tpl != nil {
@@ -313,22 +377,66 @@ func respond(w http.ResponseWriter, _ *http.Request, status int, requestID strin
 		return
 	}
 
+	var fields []FieldError
+	var veFields *ValidationError
+	if errors.As(err, &veFields) {
+		fields = veFields.Fields()
+	}
+
+	if format == formatProblem {
+		w.Header().Set("Content-Type", problemJSON)
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(problemDetails{
+			Type:      t.URI(),
+			ID:        t,
+			Title:     problemTitle(t, status),
+			Status:    status,
+			Detail:    err.Public(),
+			Code:      err.Code(),
+			Class:     problemClass(t),
+			Rule:      problemRule(t),
+			Values:    values,
+			RequestID: requestID,
+			Fields:    fields,
+		})
+		return
+	}
+
 	body := errorResponse{
 		Error: errorBody{
 			Code:      err.Code(),
 			Message:   err.Public(),
 			RequestID: requestID,
+			Fields:    fields,
+			ID:        t,
+			Class:     problemClass(t),
+			Rule:      problemRule(t),
+			Values:    values,
 		},
 	}
-
-	var veFields *ValidationError
-	if errors.As(err, &veFields) {
-		body.Error.Fields = veFields.Fields()
+	if t != "" {
+		body.Error.Type = t.URI()
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// problemDetails is an RFC 9457 problem+json body, with Smeldr's extension
+// members: the bare id, the code, the class, the rule, the named values, the
+// request ID and the fields.
+type problemDetails struct {
+	Type      string            `json:"type"`
+	ID        ProblemType       `json:"id,omitempty"`
+	Title     string            `json:"title"`
+	Status    int               `json:"status"`
+	Detail    string            `json:"detail"`
+	Code      string            `json:"code"`
+	Class     string            `json:"class,omitempty"`
+	Rule      string            `json:"rule,omitempty"`
+	Values    map[string]string `json:"values,omitempty"`
+	RequestID string            `json:"request_id"`
+	Fields    []FieldError      `json:"fields,omitempty"`
 }
 
 // errorResponse is the top-level JSON envelope for all error responses.
@@ -342,6 +450,16 @@ type errorBody struct {
 	Message   string       `json:"message"`
 	RequestID string       `json:"request_id"`
 	Fields    []FieldError `json:"fields,omitempty"`
+	// Type is the refusal type's RFC 9457 URI, ID the bare id, Class where
+	// a UI shows it, Rule the rule it enforces (T1039) and Values its named
+	// values (D174). All are left out for an untyped error, so its body is
+	// byte for byte what it was; a client reading code and message is
+	// unaffected either way.
+	Type   string            `json:"type,omitempty"`
+	ID     ProblemType       `json:"id,omitempty"`
+	Class  string            `json:"class,omitempty"`
+	Rule   string            `json:"rule,omitempty"`
+	Values map[string]string `json:"values,omitempty"`
 }
 
 // htmlErrorPage is a minimal fallback HTML template used when Accept: text/html
