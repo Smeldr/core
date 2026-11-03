@@ -4,7 +4,7 @@
 
 A searchable graph of your decisions: who decided, what is in force, and what builds on what. Kept apart from the context the reasoning came from.
 
-Governance is set per domain and area: a domain's people ratify its decisions, an area's people approve changes to its files. Built for coding. Enforceable as merge gates when you want it.
+Governance is set per domain and area: a domain's people ratify its decisions, an area's people approve changes to its files. Made for software teams that work with AI agents. Enforceable as merge gates when you want it.
 
 Self-hosted. Open source. Nothing to install beside it: SQLite is built in (pure Go, [modernc.org/sqlite](https://gitlab.com/cznic/sqlite)).
 
