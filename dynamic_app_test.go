@@ -770,14 +770,16 @@ func TestAdminSetStatus_OperationGate(t *testing.T) {
 		name     string
 		gate     string // "none" | "operation" | "strict" | "reason"
 		granted  bool
+		unread   bool // the caller holds no read of the item (T1067)
 		wantCode int
 	}{
-		{"no gate, no grant", "none", false, http.StatusOK},
-		{"operation gate, no grant is forbidden", "operation", false, http.StatusForbidden},
-		{"operation gate, with grant", "operation", true, http.StatusOK},
-		{"strict gate, no grant is forbidden not 500", "strict", false, http.StatusForbidden},
-		{"strict gate, with grant", "strict", true, http.StatusOK},
-		{"required reason, none supplied is bad request not 500", "reason", false, http.StatusBadRequest},
+		{"no gate, no grant", "none", false, false, http.StatusOK},
+		{"operation gate, no grant is forbidden", "operation", false, false, http.StatusForbidden},
+		{"operation gate, with grant", "operation", true, false, http.StatusOK},
+		{"strict gate, no grant is forbidden not 500", "strict", false, false, http.StatusForbidden},
+		{"strict gate, with grant", "strict", true, false, http.StatusOK},
+		{"required reason, none supplied is bad request not 500", "reason", false, false, http.StatusBadRequest},
+		{"an item the caller cannot read is not found, not forbidden", "operation", false, true, http.StatusNotFound},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -810,6 +812,18 @@ func TestAdminSetStatus_OperationGate(t *testing.T) {
 					t.Fatalf("RegisterFlow: %v", err)
 				}
 			}
+			// Under governance the route reads the item under the caller's
+			// scope first (T1067): "u1" reads every recipe unless the row says not.
+			if !tc.unread {
+				if err := rs.DefineRole(t.Context(), smeldr.RoleDefinition{
+					Name: "recipe-reader", Operations: []string{"read"}, ScopeMode: smeldr.ScopeGlobal,
+				}); err != nil {
+					t.Fatalf("DefineRole: %v", err)
+				}
+				if _, err := rs.Grant(t.Context(), smeldr.RoleGrant{TokenID: "u1", RoleName: "recipe-reader"}); err != nil {
+					t.Fatalf("Grant: %v", err)
+				}
+			}
 			if tc.granted {
 				if err := rs.DefineRole(t.Context(), smeldr.RoleDefinition{
 					Name: "recipe-approver", Operations: []string{"approve"}, ScopeMode: smeldr.ScopeGlobal,
@@ -831,6 +845,21 @@ func TestAdminSetStatus_OperationGate(t *testing.T) {
 				map[string]any{"status": "published"}, bearerToken(t, smeldr.Editor))
 			if w.Code != tc.wantCode {
 				t.Fatalf("status = %d, want %d, body: %s", w.Code, tc.wantCode, w.Body.String())
+			}
+			if w.Code == http.StatusForbidden {
+				// transition.gate shows its reason and values (T1067).
+				var body struct {
+					Error struct {
+						ID      string            `json:"id"`
+						Message string            `json:"message"`
+						Values  map[string]string `json:"values"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body.Error.ID != "transition.gate" ||
+					body.Error.Message != `transition draft→published on recipe requires operation "approve"` ||
+					body.Error.Values["from"] != "draft" || body.Error.Values["operation"] != "approve" {
+					t.Errorf("forbidden body %s; want transition.gate with its reason and values", w.Body.String())
+				}
 			}
 			got, err := repo.GetByID(t.Context(), node.ID)
 			if err != nil {

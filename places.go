@@ -163,7 +163,7 @@ func registerPlaceTypes(app *App, db DB) {
 		saveHooksOption{prepare: func(ctx Context, existing, item any) error { return app.prepareArea(ctx, existing, item.(*Area)) }},
 		On[*Area](BeforeDelete, func(ctx Context, a *Area) error {
 			return requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "Area", ID: a.ID},
-				"deleting "+areaLabel(a), "delete_area", areaLabel(a), "D146")
+				placeAct{act: "deleting " + areaLabel(a), code: "delete_area", over: areaLabel(a), place: readableRecord("Area", a.ID), actRead: true, decision: "D146"})
 		}),
 	))
 	app.Content(NewModule[*Set]((*Set)(nil),
@@ -363,19 +363,42 @@ func (s *RelationStore) requirePlaceAuthority(ctx context.Context, edge Relation
 	case edge.SourceType == "Area":
 		act, code = fmt.Sprintf("moving %s into %s", source, place), "move"
 	}
-	return requireActOver(ctx, rs, OperationRatify, AuthTarget{TypeName: edge.TargetType, ID: edge.TargetID}, act, code, place, "D145")
+	return requireActOver(ctx, rs, OperationRatify, AuthTarget{TypeName: edge.TargetType, ID: edge.TargetID},
+		placeAct{act: act, code: code, over: place, place: readableRecord(edge.TargetType, edge.TargetID), actRead: true, decision: "D145"})
+}
+
+// placeAct is what [requireActOver] says when it refuses. act names what is
+// being done in English and code its short name (place, move, unplace, ...)
+// that a UI keys its text on; over is the place's label. place reports
+// whether the caller may read the place, asked only on a refusal; actRead is
+// true when act names only records the caller has read. decision names the
+// Decision that requires the authority.
+type placeAct struct {
+	act, code, over, decision string
+	place                     func(*ReadScope) bool
+	actRead                   bool
+}
+
+// readableRecord is a [placeAct] place check for a record known by type and
+// ID.
+func readableRecord(typeName, id string) func(*ReadScope) bool {
+	return func(s *ReadScope) bool { return s.Readable(typeName, id) }
 }
 
 // requireActOver is the check D145 and D146 share: the actor in ctx must
 // hold op over target, the anchor of a dynamic grant counting (a
-// domain-approver holds it over its own Domain). act names what is being
-// done and over the place, for the refusal; code is the act's short name
-// (place, move, unplace, ...) that a UI keys its text on, never the English
-// phrase; decision names the Decision that requires it. No governance (rs
+// domain-approver holds it over its own Domain). p says what is being done
+// and over which place, for the refusal (see [placeAct]). No governance (rs
 // nil) skips the check; no actor is refused; an agent or job token is refused
 // for ratify whatever its grants (T884), not for approve-change, which an
 // agent may hold on an Area grant.
-func requireActOver(ctx context.Context, rs *RoleStore, op string, target AuthTarget, act, code, over, decision string) error {
+//
+// A refusal for lack of authority shows its reason and values (T1067): the
+// place only when the caller may read it, and the English act only when it
+// also names nothing else the caller has not read. Otherwise the reason says
+// "this" and "its place", and no place value is sent.
+func requireActOver(ctx context.Context, rs *RoleStore, op string, target AuthTarget, p placeAct) error {
+	act, code, over, decision := p.act, p.code, p.over, p.decision
 	if rs == nil {
 		return nil
 	}
@@ -394,7 +417,15 @@ func requireActOver(ctx context.Context, rs *RoleStore, op string, target AuthTa
 		return fmt.Errorf("%w: the authority over %s cannot be read: %s", ErrInternal, over, err)
 	}
 	if !ok {
-		return problem(problemPlaceAuthorityRequired, fmt.Errorf("%w: %s needs %s over %s (%s)", ErrForbidden, act, op, over, decision),
+		scope, err := scopeFor(ctx, rs)
+		if err != nil || !p.place(scope) {
+			return refuse(problemPlaceAuthorityRequired, fmt.Sprintf("this needs %s over its place (%s)", op, decision),
+				problemValues{"act": code, "operation": op})
+		}
+		if !p.actRead {
+			act = "this"
+		}
+		return refuse(problemPlaceAuthorityRequired, fmt.Sprintf("%s needs %s over %s (%s)", act, op, over, decision),
 			problemValues{"act": code, "operation": op, "place": over})
 	}
 	return nil
@@ -499,5 +530,6 @@ func (app *App) prepareArea(ctx Context, existing any, a *Area) error {
 		return nil
 	}
 	return requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "Area", ID: old.ID},
-		fmt.Sprintf("changing %s's approval mode", areaLabel(old)), "change_approval_mode", areaLabel(old), "D146")
+		placeAct{act: fmt.Sprintf("changing %s's approval mode", areaLabel(old)), code: "change_approval_mode", over: areaLabel(old),
+			place: readableRecord("Area", old.ID), actRead: true, decision: "D146"})
 }

@@ -707,8 +707,12 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, rels *Relatio
 			problemValues{"type": typeName, "from": fromStatus, "to": toStatus, "operation": requiredOperation})
 	}
 	if !ok {
-		return problem(problemTransitionGate, fmt.Errorf("%w: transition %s→%s requires operation %q",
-			ErrForbidden, fromStatus, toStatus, requiredOperation),
+		// A reason safe to show (T1067): every wire path reads the item under
+		// the caller's scope first, so from is the state of an item the caller
+		// can read, type and to are what it sent, and the operation is the
+		// flow's, which ValidTransitions shows anyone.
+		return refuse(problemTransitionGate, fmt.Sprintf("transition %s→%s on %s requires operation %q",
+			fromStatus, toStatus, typeName, requiredOperation),
 			problemValues{"type": typeName, "from": fromStatus, "to": toStatus, "operation": requiredOperation})
 	}
 	return nil

@@ -18,6 +18,14 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Changed
+
+- **Authority refusals now show their reason and values (T1067, D171, D174, A642).** Since v1.189.1 a bare 403 sent no values, so a UI could not fill its text. `transition.gate` now returns a `*RefusalError` whose reason reads, for example, `transition draft→published on recipe requires operation "approve"`, with the values `type`, `from`, `to` and `operation`. This is safe because every HTTP and MCP route reads the item under the caller's read scope first. The branch where the authority check itself fails stays bare. `place.authority_required` shows its reason and the values `act`, `operation` and `place` only when the caller may read the place. Otherwise the reason says "this needs ratify over its place (D146)" and no `place` value is sent, so `place` is no longer an always-sent value (docs/PROBLEM_TYPES.md). `errors.Is(err, smeldr.ErrForbidden)` still holds and the status stays 403, but `Error()` now starts with "forbidden: " before the reason. Go applications that pass a `DynamicTypeRepo.SetStatus` error to `WriteError` show the reason too, under their own route's read rule.
+
+### Fixed
+
+- **The dynamic status route answers 404 for items the caller cannot read (T1067, A642).** `POST /_content/{type}/{id}/status` now reads the item under the caller's read scope before the transition, when governance is wired, as `transition_item` already does. An item the caller may not read answers 404 `item.not_found`. Before, an Editor who could not read the item got 403, which told them the item exists.
+
 ---
 
 ## [1.189.1] - 2026-11-02

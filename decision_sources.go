@@ -193,5 +193,6 @@ func (app *App) prepareDecision(ctx Context, existing any, d *Decision) error {
 	}
 	place := recordLabel(ctx, db, placeTables[p.targetType], p.targetID)
 	return requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: p.targetType, ID: p.targetID},
-		fmt.Sprintf("changing %s's sources", label), "change_sources", place, "D148")
+		placeAct{act: fmt.Sprintf("changing %s's sources", label), code: "change_sources", over: place,
+			place: readableRecord(p.targetType, p.targetID), actRead: true, decision: "D148"})
 }

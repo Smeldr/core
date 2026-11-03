@@ -146,7 +146,8 @@ func registerCoverageRule(app *App, db DB) {
 			// D146 (T910): changing what a rule covers loosens or moves its
 			// Area's gate: ratify over the rule's Area.
 			if err := requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "CoverageRule", ID: old.ID},
-				fmt.Sprintf("changing %s's pattern, repository or kind", ruleLabel(old)), "change_coverage_rule", old.Area, "D146"); err != nil {
+				placeAct{act: fmt.Sprintf("changing %s's pattern, repository or kind", ruleLabel(old)), code: "change_coverage_rule", over: old.Area,
+					place: readableArea(ctx, db, old.Area), actRead: true, decision: "D146"}); err != nil {
 				return err
 			}
 			// A changed rule goes back to not checked (T901): its count and
@@ -166,7 +167,8 @@ func registerCoverageRule(app *App, db DB) {
 			return fmt.Errorf("%w: the Area %s of the new rule cannot be read: %s", ErrInternal, r.Area, err)
 		}
 		return requireActOver(ctx, app.governance, OperationApproveChange, AuthTarget{TypeName: "Area", ID: areaID},
-			"adding a coverage rule to "+r.Area, "add_coverage_rule", r.Area, "D146")
+			placeAct{act: "adding a coverage rule to " + r.Area, code: "add_coverage_rule", over: r.Area,
+				place: readableRecord("Area", areaID), actRead: true, decision: "D146"})
 	}
 	afterRefs := refs.after
 	refs.after = func(ctx Context, db DB, rs *RelationStore, existing, item any) {
@@ -185,7 +187,8 @@ func registerCoverageRule(app *App, db DB) {
 		refs,
 		On[*CoverageRule](BeforeDelete, func(ctx Context, r *CoverageRule) error {
 			return requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "CoverageRule", ID: r.ID},
-				"deleting "+ruleLabel(r), "delete_coverage_rule", r.Area, "D146")
+				placeAct{act: "deleting " + ruleLabel(r), code: "delete_coverage_rule", over: r.Area,
+					place: readableArea(ctx, db, r.Area), actRead: true, decision: "D146"})
 		}),
 	))
 }
@@ -907,6 +910,19 @@ func (a *App) resolveCoverageCondition(ctx context.Context, id, resolution strin
 		}
 	}
 	resolver.resolve(ctx, sigs, resolution)
+}
+
+// readableArea is a [placeAct] place check for the Area a coverage rule
+// names by address or ID (T1067): the caller may read the rule, not always
+// its Area. An Area that cannot be found is not readable.
+func readableArea(ctx context.Context, db DB, ref string) func(*ReadScope) bool {
+	return func(s *ReadScope) bool {
+		var id string
+		if err := db.QueryRowContext(ctx, `SELECT id FROM smeldr_areas WHERE address = $1 OR id = $1`, ref).Scan(&id); err != nil {
+			return false
+		}
+		return s.Readable("Area", id)
+	}
 }
 
 // ruleLabel is a rule's address, or its ID before it has one.

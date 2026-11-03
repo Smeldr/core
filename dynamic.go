@@ -1511,6 +1511,19 @@ func newSetStatusHandler(a *App, auth AuthFunc) http.Handler {
 		// last_actor and the provenance record carried no actor.
 		r = r.WithContext(context.WithValue(r.Context(), userContextKey, user))
 		ctx := ContextFrom(w, r)
+		// Per-item read rules (T1067): an item the caller may not read is
+		// answered as missing before any transition check, as transition_item
+		// does, so a forbidden (and its reason, with the item's state) only
+		// reaches a caller who can read the item.
+		scope, err := scopeFor(ctx, a.governance)
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		if !scope.Readable(desc.Name, id) {
+			WriteError(w, r, problem(problemItemNotFound, ErrNotFound, nil))
+			return
+		}
 		if err := repo.setStatusVia(ctx, id, st, "", surfaceHTTP); err != nil {
 			switch {
 			case errors.Is(err, ErrNotFound):

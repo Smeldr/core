@@ -33,7 +33,7 @@ Every refusal and validation error Smeldr core answers with carries a stable **t
 | `transition.gate` | refusal | 403 | person | **`type`**, **`from`**, **`to`**, **`operation`** | D34, D40 | The actor does not hold the operation a transition requires (or the check itself failed, fail closed) |  |
 | `transition.gate_unwired` | failure | 403 | person | **`from`**, **`to`**, **`operation`** | D142, T884 | A strict gated transition runs with no governance wired |  |
 | `transition.no_actor` | refusal | 403 | person | **`from`**, **`to`**, **`operation`** | D34 | A strict gated transition is attempted with no actor in context |  |
-| `place.authority_required` | refusal | 403 | person | **`act`**, **`operation`**, **`place`** | D145, D146 | Placing or moving a Decision/Area needs ratify over the place and the actor lacks it |  |
+| `place.authority_required` | refusal | 403 | person | **`act`**, **`operation`**, `place` | D145, D146 | Placing or moving a Decision/Area needs ratify over the place and the actor lacks it |  |
 | `place.no_actor` | refusal | 403 | person | **`act`**, **`operation`**, **`place`** | D145, D146 | A place act needing authority runs with no actor known |  |
 | `decision.scope_role` | refusal | 403 | person | **`scope`**, **`role`** |  | A Decision's scope maps to a required role the actor is not granted (or the grant lookup failed) |  |
 | `decision.sources_need_place` | refusal | 403 | person | **`decision`** | D148 | Changing a Decision's sources when it has no place to hold ratify over |  |
