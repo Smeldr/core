@@ -85,8 +85,9 @@ ENABLE_WEBHOOKS       wire outbound webhook delivery (creates its tables at boot
 ENABLE_EVENT_STREAM   wire GET /_events/stream (the agent event push, T269)
 ENABLE_EVENT_LOG      keep a durable event log behind the stream; ?after=<event id>
                       resumes (D117; requires ENABLE_EVENT_STREAM)
-EVENT_LOG_RETENTION_DAYS  days the event log keeps an event (default: 30; a value that
-                      is not a whole number falls back to 30 without an error)
+EVENT_LOG_RETENTION_DAYS  days the event log keeps an event, a whole number of 1 or
+                      more (default: 30); any other value stops the boot when
+                      ENABLE_EVENT_LOG is set
 ENABLE_SUBSCRIPTIONS  subscription records on the event stream (D116): a connection
                       without ?channel= delivers its token's subscriptions
 ENABLE_STRUCTURAL_SWEEP  scheduled relation-staleness sweep, recorded as sweep runs

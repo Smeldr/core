@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,7 +27,8 @@ type bootChecks struct {
 	signalEventCutover   time.Time
 	planPathsCutover     time.Time
 	revCutover           time.Time
-	gitHubKey            []byte // the App's private key, when ENABLE_GITHUB
+	eventLogRetention    time.Duration // 0: core's default
+	gitHubKey            []byte        // the App's private key, when ENABLE_GITHUB
 }
 
 // validateBoot checks every refusal that depends on the configuration alone:
@@ -58,6 +60,11 @@ func validateBoot(cfg ServerConfig) (bootChecks, error) {
 	}
 	if checks.revCutover, err = parseCutover("REV_CUTOVER", cfg.RevCutover); err != nil {
 		return checks, err
+	}
+	if cfg.EnableEventLog {
+		if checks.eventLogRetention, err = parseRetentionDays("EVENT_LOG_RETENTION_DAYS", cfg.EventLogRetentionDays); err != nil {
+			return checks, err
+		}
 	}
 	switch {
 	case cfg.governanceRecords() && !cfg.EnableRelations:
@@ -96,6 +103,20 @@ func validateBoot(cfg ServerConfig) (bootChecks, error) {
 		}
 	}
 	return checks, nil
+}
+
+// parseRetentionDays parses a number of days (T1094): empty is 0, so core's
+// default applies; a whole number of 1 or more is that many days; anything
+// else is refused, naming the variable, as parseCutover does.
+func parseRetentionDays(name, value string) (time.Duration, error) {
+	if value == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%s: want a whole number of days, 1 or more, not %q", name, value)
+	}
+	return time.Duration(n) * 24 * time.Hour, nil
 }
 
 // scheduleOr returns schedule, or def when it is empty.

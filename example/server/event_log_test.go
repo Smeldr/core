@@ -21,7 +21,7 @@ func TestEventLogToggle(t *testing.T) {
 	}
 
 	cfg.EnableEventStream = true
-	cfg.EventLogRetentionDays = 7
+	cfg.EventLogRetentionDays = "7"
 	cfg.EnableWebhooks = true
 	cfg.EnableSubscriptions = true
 	ts := buildTestServer(t, cfg)

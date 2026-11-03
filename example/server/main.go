@@ -55,7 +55,9 @@
 //	ENABLE_EVENT_STREAM   wire GET /_events/stream (opt-in agent event push, T269)
 //	ENABLE_EVENT_LOG      keep a durable event log behind the stream (requires
 //	                      ENABLE_EVENT_STREAM; ?after=<event id> resumes, D117)
-//	EVENT_LOG_RETENTION_DAYS  days the event log keeps an event (default: 30)
+//	EVENT_LOG_RETENTION_DAYS  days the event log keeps an event, a whole number of 1 or
+//	                      more (default: 30); any other value refuses the boot when
+//	                      ENABLE_EVENT_LOG is set
 //	ENABLE_SUBSCRIPTIONS  subscription records on the event stream (D116): a connection
 //	                      without ?channel= delivers its token's subscriptions
 //	ENABLE_STRUCTURAL_SWEEP  wire a scheduled relation-staleness sweep (requires
@@ -121,7 +123,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"strconv"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -166,7 +167,7 @@ type ServerConfig struct {
 	EnableWebhooks           bool
 	EnableEventStream        bool
 	EnableEventLog           bool
-	EventLogRetentionDays    int
+	EventLogRetentionDays    string
 	EnableSubscriptions      bool
 	EnableStructuralSweep    bool
 	StructuralSweepSchedule  string
@@ -258,7 +259,7 @@ func readConfig() ServerConfig {
 		EnableWebhooks:           os.Getenv("ENABLE_WEBHOOKS") != "",
 		EnableEventStream:        os.Getenv("ENABLE_EVENT_STREAM") != "",
 		EnableEventLog:           os.Getenv("ENABLE_EVENT_LOG") != "",
-		EventLogRetentionDays:    envIntOr("EVENT_LOG_RETENTION_DAYS", 0),
+		EventLogRetentionDays:    os.Getenv("EVENT_LOG_RETENTION_DAYS"),
 		EnableSubscriptions:      os.Getenv("ENABLE_SUBSCRIPTIONS") != "",
 		EnableStructuralSweep:    os.Getenv("ENABLE_STRUCTURAL_SWEEP") != "",
 		StructuralSweepSchedule:  envOr("STRUCTURAL_SWEEP_SCHEDULE", "0 * * * *"),
@@ -681,7 +682,7 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		if err := smeldr.CreateEventLogTable(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create event log: %w", err)
 		}
-		app.EventLog(smeldr.EventLogOptions{Retention: time.Duration(cfg.EventLogRetentionDays) * 24 * time.Hour})
+		app.EventLog(smeldr.EventLogOptions{Retention: checks.eventLogRetention})
 	}
 	if cfg.EnableSubscriptions {
 		// D116: the table is created at boot, as for every Create* table.
@@ -1057,19 +1058,4 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
-}
-
-// envIntOr reads an integer environment variable, falling back to def when
-// unset or unparseable — an unparseable value is treated the same as unset
-// rather than failing startup, matching envOr's own permissive convention.
-func envIntOr(key string, def int) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return def
-	}
-	return n
 }

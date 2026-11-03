@@ -79,6 +79,15 @@ func TestBoot_RefusalWritesNoSchema(t *testing.T) {
 		{"rev cutover", func(c *ServerConfig) { c.RevCutover = "soon" }, "REV_CUTOVER: want an RFC3339 time"},
 		{"check deps", func(c *ServerConfig) { c.EnableCheck = true; records(c) }, "ENABLE_CHECK requires ENABLE_AUTHORITY"},
 		{"event log deps", func(c *ServerConfig) { c.EnableEventLog = true }, "ENABLE_EVENT_LOG requires ENABLE_EVENT_STREAM"},
+		{"event log retention not a number", func(c *ServerConfig) {
+			c.EnableEventStream, c.EnableEventLog, c.EventLogRetentionDays = true, true, "thirty"
+		}, `EVENT_LOG_RETENTION_DAYS: want a whole number of days, 1 or more, not "thirty"`},
+		{"event log retention zero", func(c *ServerConfig) {
+			c.EnableEventStream, c.EnableEventLog, c.EventLogRetentionDays = true, true, "0"
+		}, "EVENT_LOG_RETENTION_DAYS: want a whole number of days"},
+		{"event log retention negative", func(c *ServerConfig) {
+			c.EnableEventStream, c.EnableEventLog, c.EventLogRetentionDays = true, true, "-5"
+		}, "EVENT_LOG_RETENTION_DAYS: want a whole number of days"},
 		{"sweep deps", func(c *ServerConfig) { c.EnableStructuralSweep = true }, "ENABLE_STRUCTURAL_SWEEP requires ENABLE_RELATIONS"},
 		{"eval queue deps", func(c *ServerConfig) { c.EnableEvalQueueDrain = true }, "ENABLE_EVAL_QUEUE_DRAIN requires ENABLE_GOVERNANCE_RECORDS"},
 		{"drift deps", func(c *ServerConfig) { c.EnableStandingDriftCheck = true }, "ENABLE_STANDING_DRIFT_CHECK requires ENABLE_GOVERNANCE_RECORDS"},
@@ -160,5 +169,34 @@ func TestBoot_ScheduleCheckLeavesNoGoroutine(t *testing.T) {
 	}
 	if n := runtime.NumGoroutine(); n > before+2 {
 		t.Errorf("goroutines: %d before 60 schedule checks, %d after", before, n)
+	}
+}
+
+// TestParseRetentionDays (T1094): empty is core's default, a whole number of
+// 1 or more is days, anything else is refused; the value is not trimmed.
+func TestParseRetentionDays(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  time.Duration
+		ok    bool
+	}{
+		{"", 0, true},
+		{"7", 7 * 24 * time.Hour, true},
+		{"1", 24 * time.Hour, true},
+		{" 7", 0, false},
+		{"0", 0, false},
+		{"-1", 0, false},
+		{"7.5", 0, false},
+		{"x", 0, false},
+	} {
+		got, err := parseRetentionDays("EVENT_LOG_RETENTION_DAYS", tc.value)
+		if (err == nil) != tc.ok || got != tc.want {
+			t.Errorf("parseRetentionDays(%q) = %v, %v; want %v, ok %v", tc.value, got, err, tc.want, tc.ok)
+		}
+	}
+	// A malformed value is not read while the event log is off.
+	cfg := ServerConfig{Secret: gitHubBase().Secret, BaseURL: "https://8.8.8.8", InstanceName: "test", EventLogRetentionDays: "thirty"}
+	if _, err := validateBoot(cfg); err != nil {
+		t.Errorf("event log off: %v", err)
 	}
 }
