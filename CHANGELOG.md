@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.189.3] - 2026-11-03
+
 ### Fixed
 
 - **The event log retention setting is checked at boot (T1094).** When `ENABLE_EVENT_LOG` is set, `EVENT_LOG_RETENTION_DAYS` must be a whole number of days, 1 or more. Unset keeps the 30-day default. Any other value, such as text, 0 or a negative number, now stops `smeldr-server` before anything is written, with an error that names the variable. Before, such a value fell back to 30 days silently. A server that booted with a malformed value now refuses to boot, so check the variable before upgrading.
