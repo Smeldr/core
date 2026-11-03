@@ -23,6 +23,8 @@
 //	ENABLE_RELATIONS      wire the relation graph store
 //	ENABLE_DYNAMIC_CONTENT wire the runtime content type system and schema store
 //	ENABLE_BLOCKS         wire the block/composition system MCP tools
+//	ENABLE_SCHEMA_TOOLS   wire the schema store and its discovery MCP tools without the
+//	                      rest of the block tools (ENABLE_BLOCKS includes them)
 //	ENABLE_GOVERNANCE_RECORDS wire core governance records (Signal, Decision,
 //	                      Amendment, their flows and relation kinds) without the
 //	                      Orchestration add-on. Records, not access: roles and
@@ -66,6 +68,9 @@
 //	EVAL_QUEUE_DRAIN_SCHEDULE  5-field cron expression for the drain (default: "*/5 * * * *")
 //	ENABLE_SIGNAL_EXPIRY_SWEEP  retired (D115): nothing expires; when set, boot logs that
 //	                      it does nothing
+//	TITLE_CUTOVER         RFC3339 time after which a Decision, Task, Goal or Amendment
+//	                      without a title, or with one over 120 characters, is refused
+//	                      (default: warnings only, D112)
 //	SIGNAL_MESSAGE_CUTOVER  RFC3339 time after which a Signal message over 500
 //	                      characters is refused (default: warnings only, D114)
 //	SIGNAL_EVENT_CUTOVER  RFC3339 time after which a history signal_type is refused
