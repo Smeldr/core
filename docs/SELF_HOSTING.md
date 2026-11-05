@@ -49,6 +49,9 @@ SECRET   HMAC signing secret (min 32 bytes in production) — required
 ```
 BASE_URL              canonical origin (e.g. "https://cms.example.com")
 DATABASE_PATH         path to the SQLite database (default: smeldr.db)
+SMELDR_CONFIG         path of a config file merged under these variables (default: ./smeldr.config);
+                      a missing file is skipped, one that cannot be read or holds an
+                      invalid value stops the boot
 PORT                  HTTP listen port (default: 8080)
 ADDR                  full listen address (default: 127.0.0.1:PORT)
 
@@ -115,6 +118,8 @@ ENABLE_PROVENANCE     wire transition-provenance recording (App.Provenance)
 ENABLE_AGENTS         wire the agent job system (connects to this server's own /mcp endpoint)
 AGENT_MCP_URL         agent MCP endpoint (default: http://127.0.0.1:PORT/mcp/message)
 AGENT_MCP_TOKEN       bearer token for agent MCP calls
+ANTHROPIC_API_KEY     read by the Anthropic SDK when an agent job runs; not checked at boot,
+                      a missing key fails the run, not the boot
 OAUTH_ISSUER          enable OAuth 2.1; set to canonical issuer URL (requires ENABLE_TOKENS)
 OAUTH_DB_PATH         path to the OAuth SQLite database (default: ./oauth.db)
 ENABLE_GITHUB         mount the GitHub adapter of the pull request check (gated merges):
@@ -165,7 +170,9 @@ boot, but only when its `ENABLE_*` flag is set; otherwise it is not read.
 
 A boot refused for a flag or a variable (a missing dependency, a value that
 does not parse, a GitHub variable) exits before it writes anything to the
-database, so a refused deploy leaves nothing to roll back (T955).
+database, so a refused deploy leaves nothing to roll back (T955). A boot
+refused for the configuration exits before the database is opened, so it
+creates no file either (T1117).
 
 This list is `example/server/main.go`'s own doc comment, kept in sync
 by hand — if the two ever disagree, the source is correct and this

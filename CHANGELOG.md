@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Fixed
+
+- **smeldr-server checks its configuration before it creates the database (T1117).** The database at `DATABASE_PATH` is opened only after the boot checks pass. Before, a boot refused for its configuration still left an empty 4096-byte `smeldr.db` behind, although no schema was written. With `ENABLE_GITHUB` set and no database file yet, the boot is refused with the unknown adapter token error, and no file is created. A boot that succeeds is unchanged. `docs/SELF_HOSTING.md` and the server's doc comment now also list `SMELDR_CONFIG` and `ANTHROPIC_API_KEY`.
+
 ---
 
 ## [1.189.3] - 2026-11-03

@@ -15,6 +15,9 @@
 //
 //	BASE_URL              canonical origin (e.g. "https://cms.example.com")
 //	DATABASE_PATH         path to the SQLite database (default: smeldr.db)
+//	SMELDR_CONFIG         path of a config file merged under these variables (default: ./smeldr.config);
+//	                      a missing file is skipped, one that cannot be read or holds an
+//	                      invalid value stops the boot
 //	PORT                  HTTP listen port (default: 8080)
 //	ADDR                  full listen address (default: 127.0.0.1:PORT)
 //
@@ -95,6 +98,8 @@
 //	ENABLE_AGENTS         wire the agent job system (connects to this server's own /mcp endpoint)
 //	AGENT_MCP_URL         agent MCP endpoint (default: http://127.0.0.1:PORT/mcp/message)
 //	AGENT_MCP_TOKEN       bearer token for agent MCP calls
+//	ANTHROPIC_API_KEY     read by the Anthropic SDK when an agent job runs; not checked at boot,
+//	                      a missing key fails the run, not the boot
 //	OAUTH_ISSUER          enable OAuth 2.1; set to canonical issuer URL (requires ENABLE_TOKENS)
 //	OAUTH_DB_PATH         path to the OAuth SQLite database (default: ./oauth.db)
 //	ENABLE_GITHUB         mount the pull request check's GitHub adapter (smeldr.dev/github) on
@@ -979,15 +984,10 @@ func main() {
 		os.Exit(runSeedRoleSubscriptions(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	cfg := parseConfig()
-	dbPath := envOr("DATABASE_PATH", "smeldr.db")
-	db, err := sql.Open("sqlite", sqliteDSN(dbPath, serverBusyTimeout))
+	db, err := openDatabase(cfg, envOr("DATABASE_PATH", "smeldr.db"))
 	if err != nil {
-		log.Fatalf("smeldr-server: open db: %v", err)
+		log.Fatalf("smeldr-server: %v", err)
 	}
-	if err := db.Ping(); err != nil {
-		log.Fatalf("smeldr-server: ping db: %v", err)
-	}
-	db.SetMaxOpenConns(1)
 	defer db.Close()
 
 	result, err := buildApp(cfg, db)
@@ -1009,6 +1009,37 @@ func main() {
 	if err := result.App.RunListener(ln); err != nil {
 		log.Fatalf("smeldr-server: %v", err)
 	}
+}
+
+// errNoAdapterToken is checkGitHubToken's refusal for a token_id no live
+// token has; openDatabase gives it without opening a database that does not
+// exist yet, which has no tokens.
+var errNoAdapterToken = errors.New("ENABLE_GITHUB: GITHUB_ADAPTER_TOKEN_ID: no live token has that token_id (the one create_token returned)")
+
+// openDatabase opens the SQLite database at path only after the config has
+// passed validateBoot, so a refused boot creates no file (T1117): opening
+// with the WAL pragma writes the file's header page. With ENABLE_GITHUB and
+// no file at path, the adapter's token cannot exist, so it refuses as
+// checkGitHubToken would, without creating one.
+func openDatabase(cfg ServerConfig, path string) (*sql.DB, error) {
+	if _, err := validateBoot(cfg); err != nil {
+		return nil, err
+	}
+	if cfg.EnableGitHub {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			return nil, errNoAdapterToken
+		}
+	}
+	db, err := sql.Open("sqlite", sqliteDSN(path, serverBusyTimeout))
+	if err != nil {
+		return nil, fmt.Errorf("open db: %w", err)
+	}
+	if err := db.Ping(); err != nil {
+		db.Close() //nolint:errcheck
+		return nil, fmt.Errorf("ping db: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	return db, nil
 }
 
 // listenAndAnnounce opens the listener on addr and only then logs the ready

@@ -172,7 +172,7 @@ func checkGitHubToken(ctx context.Context, tokens *smeldr.TokenStore, userID str
 	}
 	switch {
 	case token == nil:
-		return errors.New("ENABLE_GITHUB: GITHUB_ADAPTER_TOKEN_ID: no live token has that token_id (the one create_token returned)")
+		return errNoAdapterToken
 	case token.ActorClass != "job":
 		return errors.New("ENABLE_GITHUB: GITHUB_ADAPTER_TOKEN_ID: the token is not of class job; create the adapter's token with class job")
 	}

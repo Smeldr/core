@@ -2,11 +2,15 @@ package main
 
 import (
 	"database/sql"
+	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	smeldr "smeldr.dev/core"
 )
 
 // schemaOf lists every schema object in db: a refused boot leaves it as it
@@ -198,5 +202,100 @@ func TestParseRetentionDays(t *testing.T) {
 	cfg := ServerConfig{Secret: gitHubBase().Secret, BaseURL: "https://8.8.8.8", InstanceName: "test", EventLogRetentionDays: "thirty"}
 	if _, err := validateBoot(cfg); err != nil {
 		t.Errorf("event log off: %v", err)
+	}
+}
+
+// TestOpenDatabase_RefusedCreatesNoFile: a boot refused for its
+// configuration exits before the database is opened, so no file is created
+// at DATABASE_PATH (T1117).
+func TestOpenDatabase_RefusedCreatesNoFile(t *testing.T) {
+	badConfig := filepath.Join(t.TempDir(), "smeldr.config")
+	if err := os.WriteFile(badConfig, []byte("https = maybe\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key := testRSAKeyPEM(t)
+	for _, tc := range []struct {
+		name string
+		edit func(*ServerConfig)
+		env  map[string]string
+		want string
+	}{
+		{"base url missing", func(c *ServerConfig) { c.BaseURL = "" }, nil, "BASE_URL: Config.BaseURL is required"},
+		{"cutover", func(c *ServerConfig) { c.TitleCutover = "yesterday" }, nil, "TITLE_CUTOVER: want an RFC3339 time"},
+		{"config file", func(*ServerConfig) {}, map[string]string{"SMELDR_CONFIG": badConfig}, "SMELDR_CONFIG"},
+		{"github, no database yet", func(c *ServerConfig) {
+			*c = gitHubBase()
+			c.EnableGitHub = true
+			c.GitHub = gitHubConfig{AppID: "12345", PrivateKey: key, WebhookSecret: testGitHubWebhookSecret, AdapterTokenID: "adapter"}
+		}, nil, errNoAdapterToken.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			cfg := ServerConfig{Secret: gitHubBase().Secret, BaseURL: "https://8.8.8.8", InstanceName: "test"}
+			tc.edit(&cfg)
+			path := filepath.Join(t.TempDir(), "smeldr.db")
+			db, err := openDatabase(cfg, path)
+			if err == nil {
+				db.Close()
+				t.Fatal("openDatabase opened a database for a refused config")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+			if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("a refused boot created %s (stat: %v)", path, statErr)
+			}
+		})
+	}
+}
+
+// TestOpenDatabase_NoAdapterTokenMessage: the refusal openDatabase gives
+// without a database is checkGitHubToken's own for an unknown token_id.
+func TestOpenDatabase_NoAdapterTokenMessage(t *testing.T) {
+	f := newGitHubFixture(t, smeldr.Job, true)
+	cfg := f.config()
+	cfg.GitHub.AdapterTokenID = "no-such-user"
+	_, _, err := f.boot(t, cfg)
+	if err == nil || err.Error() != errNoAdapterToken.Error() {
+		t.Fatalf("checkGitHubToken: %v, want %q", err, errNoAdapterToken)
+	}
+}
+
+// TestOpenDatabase_Opens: a valid config opens the database, creates the
+// file and allows one connection; with ENABLE_GITHUB an existing file is
+// opened.
+func TestOpenDatabase_Opens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "smeldr.db")
+	db, err := openDatabase(ServerConfig{Secret: gitHubBase().Secret, BaseURL: "https://8.8.8.8"}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := db.Stats().MaxOpenConnections; got != 1 {
+		t.Errorf("MaxOpenConnections = %d, want 1", got)
+	}
+	db.Close()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("no database file: %v", err)
+	}
+	db, err = openDatabase(gitHubBase(), path)
+	if err != nil {
+		t.Fatalf("github with an existing file: %v", err)
+	}
+	db.Close()
+}
+
+// TestOpenDatabase_OpenFails: a path the driver cannot open is an error and
+// no database.
+func TestOpenDatabase_OpenFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "no-such-dir", "smeldr.db")
+	db, err := openDatabase(ServerConfig{Secret: gitHubBase().Secret, BaseURL: "https://8.8.8.8"}, path)
+	if err == nil {
+		db.Close()
+		t.Fatal("openDatabase opened a database in a missing directory")
+	}
+	if !strings.Contains(err.Error(), "ping db") && !strings.Contains(err.Error(), "open db") {
+		t.Errorf("err = %v, want open db or ping db", err)
 	}
 }
