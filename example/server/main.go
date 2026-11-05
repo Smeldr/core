@@ -1,7 +1,7 @@
 // Package main is a generic Smeldr server with no custom content types.
 // All content types are defined at runtime via define_content_type MCP tool.
 // Optional subsystems are gated by environment variables; the binary compiles
-// and runs with only SECRET set — all other features are opt-in.
+// and runs with only SECRET and BASE_URL set, and all other features are opt-in.
 //
 // Run with:
 //
@@ -10,14 +10,15 @@
 // Required environment variables:
 //
 //	SECRET   HMAC signing secret (min 32 bytes in production)
+//	BASE_URL canonical origin (e.g. "https://cms.example.com"); in the environment or
+//	         as base_url in smeldr.config
 //
 // Optional environment variables:
 //
-//	BASE_URL              canonical origin (e.g. "https://cms.example.com")
 //	DATABASE_PATH         path to the SQLite database (default: smeldr.db)
 //	SMELDR_CONFIG         path of a config file merged under these variables (default: ./smeldr.config);
-//	                      a missing file is skipped, one that cannot be read or holds an
-//	                      invalid value stops the boot
+//	                      a missing file is skipped; an unknown key, a line that is not
+//	                      "key = value", the key secret or an invalid value stops the boot
 //	PORT                  HTTP listen port (default: 8080)
 //	ADDR                  full listen address (default: 127.0.0.1:PORT)
 //

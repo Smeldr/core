@@ -49,20 +49,24 @@ CGO_ENABLED=0 go build -o smeldr-server .
 
 ## Configuration
 
-Every setting is an environment variable — there is no config file.
-`SECRET` is the only one that's required; the binary starts and runs
-with nothing else set, every other subsystem is opt-in.
+The server reads two sources: environment variables, and an optional
+`smeldr.config` file (see [The config file](#the-config-file) below).
+Two settings are required: `SECRET`, always from the environment, and
+`BASE_URL`, from the environment or as `base_url` in the file. Without
+either, the boot is refused and the error names it. Every subsystem is
+opt-in through the `ENABLE_*` variables below.
 
 ```
-SECRET   HMAC signing secret (min 32 bytes in production) — required
+SECRET   HMAC signing secret (at least 16 bytes; use 32 or more in production), required
+BASE_URL canonical origin (e.g. "https://cms.example.com"), required: here or as base_url
+         in smeldr.config
 ```
 
 ```
-BASE_URL              canonical origin (e.g. "https://cms.example.com")
 DATABASE_PATH         path to the SQLite database (default: smeldr.db)
 SMELDR_CONFIG         path of a config file merged under these variables (default: ./smeldr.config);
-                      a missing file is skipped, one that cannot be read or holds an
-                      invalid value stops the boot
+                      a missing file is skipped; an unknown key, a line that is not
+                      "key = value", the key secret or an invalid value stops the boot
 PORT                  HTTP listen port (default: 8080)
 ADDR                  full listen address (default: 127.0.0.1:PORT)
 
@@ -189,6 +193,42 @@ This list is `example/server/main.go`'s own doc comment, kept in sync
 by hand — if the two ever disagree, the source is correct and this
 file is stale; read the doc comment directly rather than assume this
 copy is current.
+
+### The config file
+
+The server reads `./smeldr.config`, or the file `SMELDR_CONFIG` names.
+A missing file is skipped. The format is one `key = value` per line.
+Blank lines and lines starting with `#` are ignored. Keys and values are
+trimmed, and only the first `=` separates them, so a value may contain
+`=`.
+
+| Key | Value |
+|---|---|
+| `base_url` | canonical origin, e.g. `https://cms.example.com` |
+| `https` | `true` or `false`: redirect HTTP to HTTPS |
+| `nav_mode` | `db` or `code` |
+| `org_name` | JSON-LD organisation name |
+| `org_type` | JSON-LD organisation type |
+| `twitter_site` | Twitter/X site handle, e.g. `@mysite` |
+| `og_image` | site-level OG image URL; a root-relative path is resolved against `base_url` |
+| `media_path` | upload directory for smeldr.dev/media (default `./media`) |
+| `media_max_size` | maximum upload size in bytes, a whole number (default `5242880`) |
+| `dev` | `true` or `false`: development mode |
+
+The boot is refused, and the error names the line, for:
+- a key that is not in this table (the error lists the accepted keys, D178);
+- a line that is not `key = value`;
+- a value that is not allowed;
+- the key `secret`, which never belongs in a file: set `SECRET` in the
+  environment.
+
+**Which source wins:** `SECRET` comes from the environment only. For
+`base_url`, a `BASE_URL` set in the environment wins, and the file's
+value is used only when the variable is empty. The other keys have no
+environment variable in this server, so the file is where they are set.
+Two limits of today's merge: `og_image` from the file wins over a value
+set in Go code, and `https` and `dev` set to `true` in the file cannot be
+turned back off by anything else.
 
 ## Running it
 

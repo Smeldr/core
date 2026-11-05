@@ -8,15 +8,21 @@ import (
 	"strings"
 )
 
+// configFileKeys are the keys a smeldr.config file accepts, in the order its
+// refusal of an unknown key lists them (D178).
+var configFileKeys = []string{"base_url", "https", "nav_mode", "org_name", "org_type", "twitter_site", "og_image", "media_path", "media_max_size", "dev"}
+
 // loadConfigFile parses a smeldr.config file at path and returns the values as
 // a [Config]. Keys not present in the file are left as zero values. If the file
-// does not exist, a zero Config and nil error are returned. Panics immediately
-// if the file contains the key "secret".
+// does not exist, a zero Config and nil error are returned.
 //
 // File format: one "key = value" pair per line. Lines beginning with "#" and
 // blank lines are ignored. Keys and values are whitespace-trimmed. Values may
-// contain "=" — only the first "=" is used as the separator. Unknown keys are
-// silently ignored for forward compatibility.
+// contain "=": only the first "=" is used as the separator. Every other line
+// is an error naming its line number (D178): a line that is not "key = value",
+// an unknown key (the error lists [configFileKeys]), an invalid value, and the
+// key "secret", which never belongs in a file. An error never contains the
+// value of "secret".
 func loadConfigFile(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -39,14 +45,14 @@ func loadConfigFile(path string) (Config, error) {
 		}
 		idx := strings.IndexByte(line, '=')
 		if idx < 0 {
-			continue
+			return Config{}, fmt.Errorf("smeldr.config line %d: want \"key = value\"", lineNum)
 		}
 		key := strings.TrimSpace(line[:idx])
 		value := strings.TrimSpace(line[idx+1:])
 
 		switch key {
 		case "secret":
-			panic("smeldr.config: \"secret\" must not be stored in a config file — use an environment variable or inject it directly in Go code")
+			return Config{}, fmt.Errorf("smeldr.config line %d: \"secret\" must not be stored in a config file; set the SECRET environment variable or Config.Secret in Go code", lineNum)
 		case "base_url":
 			cfg.BaseURL = value
 		case "https":
@@ -96,7 +102,8 @@ func loadConfigFile(path string) (Config, error) {
 			default:
 				return Config{}, fmt.Errorf("smeldr.config line %d: invalid value %q for key \"dev\" — expected \"true\" or \"false\"", lineNum, value)
 			}
-			// unknown keys are silently ignored (forward compatibility)
+		default:
+			return Config{}, fmt.Errorf("smeldr.config line %d: unknown key %q (accepted: %s)", lineNum, key, strings.Join(configFileKeys, ", "))
 		}
 	}
 

@@ -213,6 +213,10 @@ func TestOpenDatabase_RefusedCreatesNoFile(t *testing.T) {
 	if err := os.WriteFile(badConfig, []byte("https = maybe\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	unknownKeyConfig := filepath.Join(t.TempDir(), "smeldr.config")
+	if err := os.WriteFile(unknownKeyConfig, []byte("base_ur = https://typo.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	key := testRSAKeyPEM(t)
 	for _, tc := range []struct {
 		name string
@@ -223,6 +227,7 @@ func TestOpenDatabase_RefusedCreatesNoFile(t *testing.T) {
 		{"base url missing", func(c *ServerConfig) { c.BaseURL = "" }, nil, "BASE_URL: Config.BaseURL is required"},
 		{"cutover", func(c *ServerConfig) { c.TitleCutover = "yesterday" }, nil, "TITLE_CUTOVER: want an RFC3339 time"},
 		{"config file", func(*ServerConfig) {}, map[string]string{"SMELDR_CONFIG": badConfig}, "SMELDR_CONFIG"},
+		{"config file unknown key", func(*ServerConfig) {}, map[string]string{"SMELDR_CONFIG": unknownKeyConfig}, `SMELDR_CONFIG: smeldr.config line 1: unknown key "base_ur"`},
 		{"github, no database yet", func(c *ServerConfig) {
 			*c = gitHubBase()
 			c.EnableGitHub = true

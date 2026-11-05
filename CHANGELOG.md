@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Changed
+
+- **A mistake in smeldr.config now stops the boot, naming the line (T1127, D178).** `smeldr.config` (the default `./smeldr.config`, or the file `SMELDR_CONFIG` names) now refuses three things, with an error that names the line: an unknown key (the error lists the accepted keys), a line that is not `key = value`, and the key `secret`. The `secret` error never shows the value. Before, an unknown key and a line without `=` were ignored silently, and `secret` caused a panic. An error in the default `./smeldr.config` now refuses the boot too. Before, any error in that file made Smeldr drop the whole file silently, so none of its keys applied. A missing file is still skipped. `ValidateConfig` returns these errors on the `smeldr_config` field, `MustConfig` panics with them, and `smeldr-server` names `SMELDR_CONFIG` in its message. `docs/SELF_HOSTING.md` now documents the config file, its keys, which source wins, and that `BASE_URL` is required alongside `SECRET`. This is a minor release because a config that boots today can stop booting after the upgrade: a `smeldr.config` with a stale or misspelled key, a stray line, or an invalid value in the default file now stops the boot. Check the file before upgrading.
+
 ### Fixed
 
 - **The agent jobs table is created at boot (T1129).** With `ENABLE_AGENTS` set on a fresh database, `smeldr-server` did not create the `agent_jobs` table. The boot logged `scheduler init failed: load jobs: no such table: agent_jobs`, and every agent job call failed, although the server started. The server now creates the table (`CREATE TABLE IF NOT EXISTS`) before it starts the agent module, after the boot checks, so a refused boot still writes nothing. A database that already has the table is not changed.

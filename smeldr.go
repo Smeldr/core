@@ -230,17 +230,18 @@ func ValidateConfig(cfg Config) (Config, error) {
 // field at fault and MustConfig's message for it, or an empty field.
 func checkConfig(cfg Config) (Config, string, string) {
 	// D30: load smeldr.config (or the path in SMELDR_CONFIG) and merge file
-	// values into cfg. Go-code fields always take precedence.
-	if path := os.Getenv("SMELDR_CONFIG"); path != "" {
-		fc, err := loadConfigFile(path)
-		if err != nil {
-			return cfg, "smeldr_config", err.Error()
-		}
-		cfg = mergeFileConfig(cfg, fc)
-	} else {
-		fc, _ := loadConfigFile("smeldr.config") // missing file is not an error
-		cfg = mergeFileConfig(cfg, fc)
+	// values into cfg. Go-code fields always take precedence. A missing file
+	// is not an error; any other error in the file refuses, the default file
+	// included (D178).
+	path := os.Getenv("SMELDR_CONFIG")
+	if path == "" {
+		path = "smeldr.config"
 	}
+	fc, err := loadConfigFile(path)
+	if err != nil {
+		return cfg, "smeldr_config", err.Error()
+	}
+	cfg = mergeFileConfig(cfg, fc)
 	if cfg.BaseURL == "" {
 		return cfg, "base_url", `Config.BaseURL is required (e.g. "https://example.com")`
 	}

@@ -3143,10 +3143,16 @@ in the `SMELDR_CONFIG` environment variable) at startup. Fields set in Go code
 take precedence over file values — with one deliberate exception: `og_image`
 overrides the Go-code `OGDefaults.Image.URL` so operators can update the site
 OG image without a rebuild (see below). The file format is one `key = value`
-pair per line; lines starting with `#` are comments.
+pair per line; blank lines and lines starting with `#` are ignored. A missing
+file is skipped.
 
-The `secret` key is forbidden in config files — it must be supplied as an
-environment variable or directly in Go code.
+Every other mistake in the file is an error that names its line (D178): a key
+not in the table below (the error lists the accepted keys), a line that is not
+`key = value`, a value that is not allowed, and the `secret` key, which must be
+supplied as an environment variable or in Go code and is never shown in the
+error. This holds for the default `./smeldr.config` as well as for the file
+`SMELDR_CONFIG` names: `ValidateConfig` returns it on `smeldr_config`, and
+`MustConfig` panics with it.
 
 `MustConfig` merges the file, then requires an absolute `BaseURL` and a
 `Secret` of at least 16 bytes, and panics otherwise. `ValidateConfig` applies

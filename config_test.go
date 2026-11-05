@@ -1,6 +1,7 @@
 package smeldr
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,14 +120,33 @@ func TestLoadConfigFile_navMode_invalid(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFile_unknownKeys(t *testing.T) {
-	path := writeConfig(t, "future_feature = on\nanother_unknown = value\n")
-	cfg, err := loadConfigFile(path)
-	if err != nil {
-		t.Fatalf("unknown keys should be silently ignored, got error: %v", err)
+// TestLoadConfigFile_unknownKeyRefused: an unknown key is an error naming
+// its line and the key, and listing the accepted keys (D178).
+func TestLoadConfigFile_unknownKeyRefused(t *testing.T) {
+	path := writeConfig(t, "# comment\nbase_url = https://example.com\nbase_ur = https://typo.example\n")
+	_, err := loadConfigFile(path)
+	if err == nil {
+		t.Fatal("an unknown key was accepted")
 	}
-	if cfg.BaseURL != "" || cfg.HTTPS || cfg.NavMode != 0 {
-		t.Errorf("unexpected non-zero Config from unknown keys: %+v", cfg)
+	for _, want := range []string{"line 3", `unknown key "base_ur"`, "accepted: base_url, https, nav_mode"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+}
+
+// TestLoadConfigFile_everyAcceptedKeyParses: each key the unknown-key
+// refusal lists is one the parser accepts, so the list and the switch agree.
+func TestLoadConfigFile_everyAcceptedKeyParses(t *testing.T) {
+	valid := map[string]string{"https": "true", "nav_mode": "db", "media_max_size": "10", "dev": "true"}
+	for _, key := range configFileKeys {
+		value, ok := valid[key]
+		if !ok {
+			value = "x"
+		}
+		if _, err := loadConfigFile(writeConfig(t, key+" = "+value+"\n")); err != nil {
+			t.Errorf("%s: %v", key, err)
+		}
 	}
 }
 
@@ -143,14 +163,20 @@ func TestLoadConfigFile_valueContainsEquals(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFile_secret_panics(t *testing.T) {
-	path := writeConfig(t, "secret = supersecret\n")
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for 'secret' key in config file")
-		}
-	}()
-	loadConfigFile(path) //nolint:errcheck
+// TestLoadConfigFile_secretRefused: the key "secret" is an error naming its
+// line, never a panic, and the error does not contain the value (D178).
+func TestLoadConfigFile_secretRefused(t *testing.T) {
+	path := writeConfig(t, "base_url = https://example.com\nsecret = supersecret\n")
+	_, err := loadConfigFile(path)
+	if err == nil {
+		t.Fatal("the secret key was accepted")
+	}
+	if !strings.Contains(err.Error(), "line 2") || !strings.Contains(err.Error(), "SECRET environment variable") {
+		t.Errorf("error = %q", err)
+	}
+	if strings.Contains(err.Error(), "supersecret") {
+		t.Errorf("error shows the secret: %q", err)
+	}
 }
 
 func TestLoadConfigFile_missingFile(t *testing.T) {
@@ -402,15 +428,45 @@ func TestLoadConfigFile_mediaMaxSize_invalid(t *testing.T) {
 	}
 }
 
+// TestLoadConfigFile_noEqualsLine: a line that is not "key = value" is an
+// error naming its line (D178).
 func TestLoadConfigFile_noEqualsLine(t *testing.T) {
-	// A line with no "=" is silently skipped — covers "if idx < 0 { continue }".
-	path := writeConfig(t, "noequalsline\nbase_url = https://example.com\n")
-	cfg, err := loadConfigFile(path)
-	if err != nil {
+	path := writeConfig(t, "base_url = https://example.com\nbase_url https://typo.example\n")
+	_, err := loadConfigFile(path)
+	if err == nil || !strings.Contains(err.Error(), `line 2: want "key = value"`) {
+		t.Fatalf("err = %v, want line 2 refused", err)
+	}
+}
+
+// TestLoadConfigFile_unreadable: a path that cannot be read as a file is an
+// error, unlike a missing one.
+func TestLoadConfigFile_unreadable(t *testing.T) {
+	_, err := loadConfigFile(t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "cannot read") {
+		t.Fatalf("err = %v, want cannot read", err)
+	}
+}
+
+// TestValidateConfig_defaultFile: without SMELDR_CONFIG, an error in
+// ./smeldr.config refuses as smeldr_config (D178), while a missing default
+// file is skipped.
+func TestValidateConfig_defaultFile(t *testing.T) {
+	t.Setenv("SMELDR_CONFIG", "")
+	ok := Config{BaseURL: "https://example.com", Secret: []byte("0123456789abcdef")}
+	t.Chdir(t.TempDir())
+	if _, err := ValidateConfig(ok); err != nil {
+		t.Fatalf("missing default file: %v", err)
+	}
+	if err := os.WriteFile("smeldr.config", []byte("nav_mod = db\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.BaseURL != "https://example.com" {
-		t.Errorf("BaseURL: want %q, got %q", "https://example.com", cfg.BaseURL)
+	_, err := ValidateConfig(ok)
+	var ve *ValidationError
+	if !errors.As(err, &ve) || len(ve.Fields()) != 1 || ve.Fields()[0].Field != "smeldr_config" {
+		t.Fatalf("err = %v, want a ValidationError on smeldr_config", err)
+	}
+	if !strings.Contains(err.Error(), `unknown key "nav_mod"`) {
+		t.Errorf("err = %v", err)
 	}
 }
 
