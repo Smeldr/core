@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The agent jobs table is created at boot (T1129).** With `ENABLE_AGENTS` set on a fresh database, `smeldr-server` did not create the `agent_jobs` table. The boot logged `scheduler init failed: load jobs: no such table: agent_jobs`, and every agent job call failed, although the server started. The server now creates the table (`CREATE TABLE IF NOT EXISTS`) before it starts the agent module, after the boot checks, so a refused boot still writes nothing. A database that already has the table is not changed.
+
 ---
 
 ## [1.189.4] - 2026-11-05

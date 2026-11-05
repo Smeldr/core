@@ -887,6 +887,10 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 
 	// ENABLE_AGENTS must register before mcp.New so AgentJob appears in MCP tools.
 	if cfg.EnableAgents {
+		// agentflow.New needs the agent_jobs table to exist (T1129).
+		if err := agentflow.CreateTable(db); err != nil {
+			return ServerResult{}, fmt.Errorf("agent jobs table: %w", err)
+		}
 		agentMod := agentflow.New(db, agentflow.Config{
 			MCPURL:         cfg.AgentMCPURL,
 			MCPToken:       cfg.AgentMCPToken,
