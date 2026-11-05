@@ -22,11 +22,22 @@ curl -LO https://github.com/Smeldr/core/releases/download/vX.Y.Z/smeldr-server-l
 chmod +x smeldr-server-linux-amd64
 ```
 
-Only Linux amd64 is built today — the platform this project's own
-instance runs on, and the one every manual build this project has
-ever done has targeted. If you need another platform, build from
-source instead (below); say so if you need it attached to releases
-going forward.
+The other binaries download the same way: change the name in the URL.
+Check a download against `SHA256SUMS` from the same release:
+
+```bash
+# Linux (GNU coreutils)
+sha256sum -c SHA256SUMS --ignore-missing
+# macOS: compare the printed hash with the file's line in SHA256SUMS
+shasum -a 256 smeldr-server-darwin-arm64
+```
+
+```powershell
+# Windows: compare the printed hash with the file's line in SHA256SUMS
+(Get-FileHash smeldr-server-windows-amd64.exe -Algorithm SHA256).Hash.ToLower()
+```
+
+For any other platform, build from source (below).
 
 ### Or build from source
 
