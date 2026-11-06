@@ -895,8 +895,21 @@ PowerShell — backticks are escape sequences and will corrupt the release notes
 Always write the section to a file and use `--notes-file`.
 
 ```powershell
-gh release create <tag> --title "<title>" --notes-file release-notes.tmp
+gh release create <tag> --draft --title "<title>" --notes-file release-notes.tmp
 ```
+
+**Create the release as a draft (T1172).** A repo with a "Release binaries"
+workflow (core and cli) attaches the binaries and SHA256SUMS, checks every asset
+with `sha256sum -c`, and only then publishes the draft. So `releases/latest`
+never points at a release without its downloads. A repo without that workflow
+(mcp, media, social, oauth, agent) has no assets: publish its draft yourself
+with `gh release edit <tag> --draft=false --latest`. If the workflow fails, the
+release stays a draft: fix the cause and re-run the workflow. Never publish a
+core or cli draft by hand without its assets.
+
+**A core or cli release is done only when** `gh release view <tag> --json isDraft,assets`
+shows `isDraft: false` and the five binaries plus `SHA256SUMS`. Check it after the
+workflow, before the proxy check.
 
 | Tag | Repo | Release title format |
 |-----|------|----------------------|
@@ -914,7 +927,7 @@ $cl = Get-Content CHANGELOG.md -Raw
 $start = $cl.IndexOf('## [X.Y.Z]')
 $end = $cl.IndexOf('## [', $start + 1)
 $cl.Substring($start, $end - $start).TrimEnd() | Set-Content -Encoding utf8 release-notes.tmp
-gh release create <tag> --title "<title>" --notes-file release-notes.tmp
+gh release create <tag> --draft --title "<title>" --notes-file release-notes.tmp
 Remove-Item release-notes.tmp
 ```
 

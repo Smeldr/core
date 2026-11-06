@@ -57,7 +57,7 @@ $cl = Get-Content CHANGELOG.md -Raw
 $start = $cl.IndexOf('## [X.Y.Z]')
 $end = $cl.IndexOf('## [', $start + 1)
 $cl.Substring($start, $end - $start).TrimEnd() | Set-Content -Encoding utf8 release-notes.tmp
-gh release create vX.Y.Z --title "<title>" --notes-file release-notes.tmp
+gh release create vX.Y.Z --draft --title "<title>" --notes-file release-notes.tmp
 Remove-Item release-notes.tmp
 ```
 
@@ -65,6 +65,22 @@ Title format: `Smeldr vX.Y.Z — {release name}` for core,
 `smeldr.dev/<module> vX.Y.Z — {release name}` for a standalone module.
 The release name is the same short (2-4 word) phrase used in the tag
 message.
+
+The release starts as a **draft** (T1172), so it is not `releases/latest`
+before its downloads exist.
+
+**3b. Publish the draft.** In core and cli, the "Release binaries" workflow
+attaches the five binaries and SHA256SUMS, checks them with `sha256sum -c`,
+and publishes the draft itself. Wait for it, then confirm:
+
+```powershell
+gh release view vX.Y.Z --json isDraft,assets --jq '{draft: .isDraft, assets: [.assets[].name]}'
+```
+
+It must show `draft: false` and the five binaries plus `SHA256SUMS`. If the
+workflow failed, the release is still a draft: fix the cause and re-run the
+workflow. A module with no such workflow (mcp, media, social, oauth, agent)
+has no assets: publish it with `gh release edit vX.Y.Z --draft=false --latest`.
 
 **4. Proxy-verify — check the exact version, not just `@latest`:**
 
@@ -78,6 +94,9 @@ enough — it has been observed to lag the specific version's own endpoint
 by a few minutes.
 
 ## Never
+
+- Publish a core or cli draft by hand before its binaries and SHA256SUMS
+  are attached.
 
 - Tag before `go test ./...` is green.
 - Tag before `CHANGELOG.md` has an entry for the version.

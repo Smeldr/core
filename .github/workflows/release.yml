@@ -39,13 +39,15 @@ jobs:
         working-directory: example/server/dist
         run: sha256sum smeldr-server-* > SHA256SUMS
 
+      # Release prep creates the release as a draft (T1172), so it is not
+      # releases/latest until every asset below is attached and checked.
       - name: Confirm the release exists before attaching to it
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for i in $(seq 1 20); do
-            if gh release view ${{ github.ref_name }} --json tagName >/dev/null 2>&1; then
-              echo "Release ${{ github.ref_name }} found on attempt $i/20."
+            if state=$(gh release view ${{ github.ref_name }} --json isDraft --jq .isDraft 2>/dev/null); then
+              echo "Release ${{ github.ref_name }} found on attempt $i/20 (draft: $state)."
               exit 0
             fi
             echo "Release ${{ github.ref_name }} not found yet (attempt $i/20), retrying in 5s..."
@@ -58,3 +60,31 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload ${{ github.ref_name }} example/server/dist/*
+
+      - name: Verify every asset is attached and matches SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          want="SHA256SUMS smeldr-server-darwin-amd64 smeldr-server-darwin-arm64 smeldr-server-linux-amd64 smeldr-server-linux-arm64 smeldr-server-windows-amd64.exe"
+          got=$(gh release view ${{ github.ref_name }} --json assets --jq '[.assets[] | select(.size > 0) | .name] | sort | join(" ")')
+          if [ "$got" != "$want" ]; then
+            echo "::error::Release assets are \"$got\", want \"$want\". The release stays a draft."
+            exit 1
+          fi
+          dir=$(mktemp -d)
+          gh release download ${{ github.ref_name }} --dir "$dir"
+          (cd "$dir" && sha256sum -c SHA256SUMS)
+
+      # --latest is right while every release is on the newest line. A patch
+      # to an older line must not take latest: publish that one without it.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "$(gh release view ${{ github.ref_name }} --json isDraft --jq .isDraft)" = "true" ]; then
+            gh release edit ${{ github.ref_name }} --draft=false --latest
+            echo "Published ${{ github.ref_name }}."
+          else
+            echo "Release ${{ github.ref_name }} was already published; nothing to do."
+          fi
