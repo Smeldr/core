@@ -56,6 +56,8 @@
 //   - [Feed] — enables an Atom/RSS feed at the module's URL prefix.
 //   - [Templates] — registers HTML templates for server-side rendering.
 //   - [SitemapConfig] — controls whether this module contributes to /sitemap.xml.
+//     Pages an application serves from its own handlers join the same index
+//     through [App.SitemapFragment].
 //   - [AIIndex] — enables /llms.txt and /llms-full.txt AI content indexes.
 //   - [MCP] — exposes the module via the Model Context Protocol.
 //   - [Social] — connects the module to Smeldr's social posting schedule.

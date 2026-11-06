@@ -6,8 +6,10 @@ package smeldr
 // as a sitemap index. See Decision 9.
 
 import (
+	"context"
 	"encoding/xml"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -242,21 +244,65 @@ func WriteSitemapIndex(w io.Writer, fragmentURLs []string, lastMod time.Time) er
 type SitemapStore struct {
 	mu        sync.RWMutex
 	fragments map[string][]byte
+	// sources are the application fragments of [App.SitemapFragment]: their
+	// entries are computed on each request (T1168).
+	sources map[string]sitemapSource
+}
+
+// sitemapSource is one application fragment: its entries function and the
+// base URL a relative Loc is joined to.
+type sitemapSource struct {
+	entries func(ctx context.Context) ([]SitemapEntry, error)
+	baseURL string
 }
 
 // NewSitemapStore returns an initialised, empty [SitemapStore].
 func NewSitemapStore() *SitemapStore {
-	return &SitemapStore{fragments: make(map[string][]byte)}
+	return &SitemapStore{fragments: make(map[string][]byte), sources: make(map[string]sitemapSource)}
 }
 
 // Set stores a copy of data keyed by path (e.g. "/posts/sitemap.xml").
-// Subsequent calls replace the previous value for the same path.
+// Subsequent calls replace the previous value for the same path. A path that
+// is an application fragment ([App.SitemapFragment]) is not replaced: the
+// write is dropped with a warning, so a runtime-defined type whose prefix
+// clashes cannot take the application's fragment over.
 func (s *SitemapStore) Set(path string, data []byte) {
 	cp := make([]byte, len(data))
 	copy(cp, data)
 	s.mu.Lock()
-	s.fragments[path] = cp
+	_, isSource := s.sources[path]
+	if !isSource {
+		s.fragments[path] = cp
+	}
 	s.mu.Unlock()
+	if isSource {
+		slog.Warn("smeldr: sitemap fragment not stored: the path is an application fragment (App.SitemapFragment)", "path", path)
+	}
+}
+
+// setSource registers an application fragment at path. It reports false when
+// path is already a source.
+func (s *SitemapStore) setSource(path string, src sitemapSource) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.sources[path]; ok {
+		return false
+	}
+	s.sources[path] = src
+	delete(s.fragments, path)
+	return true
+}
+
+// sourcePaths returns the application fragment paths, sorted.
+func (s *SitemapStore) sourcePaths() []string {
+	s.mu.RLock()
+	paths := make([]string, 0, len(s.sources))
+	for p := range s.sources {
+		paths = append(paths, p)
+	}
+	s.mu.RUnlock()
+	slices.Sort(paths)
+	return paths
 }
 
 // Get returns the stored bytes for path and whether the path exists.
@@ -267,12 +313,16 @@ func (s *SitemapStore) Get(path string) ([]byte, bool) {
 	return v, ok
 }
 
-// Paths returns a sorted slice of all stored fragment paths. Used by
-// [SitemapStore.IndexHandler] to enumerate fragments when building the index.
+// Paths returns a sorted slice of all stored fragment paths and application
+// fragment paths. Used by [SitemapStore.IndexHandler] to enumerate fragments
+// when building the index.
 func (s *SitemapStore) Paths() []string {
 	s.mu.RLock()
-	paths := make([]string, 0, len(s.fragments))
+	paths := make([]string, 0, len(s.fragments)+len(s.sources))
 	for p := range s.fragments {
+		paths = append(paths, p)
+	}
+	for p := range s.sources {
 		paths = append(paths, p)
 	}
 	s.mu.RUnlock()
@@ -281,10 +331,18 @@ func (s *SitemapStore) Paths() []string {
 }
 
 // Handler returns an [http.Handler] that serves stored fragment bytes by
-// request path. Responds with 404 when the path has no stored fragment.
+// request path. An application fragment is computed for the request.
+// Responds with 404 when the path has no fragment.
 // Content-Type is set to application/xml; charset=utf-8.
 func (s *SitemapStore) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.RLock()
+		src, isSource := s.sources[r.URL.Path]
+		s.mu.RUnlock()
+		if isSource {
+			serveSitemapSource(w, r, src)
+			return
+		}
 		data, ok := s.Get(r.URL.Path)
 		if !ok {
 			WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
@@ -294,6 +352,28 @@ func (s *SitemapStore) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		w.Write(data) //nolint:errcheck
 	})
+}
+
+// serveSitemapSource writes an application fragment: its entries for this
+// request, a relative Loc joined to the base URL. An entries error is a 500,
+// so a crawler tries again; the cause is logged, not shown.
+func serveSitemapSource(w http.ResponseWriter, r *http.Request, src sitemapSource) {
+	entries, err := src.entries(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "smeldr: sitemap fragment entries", "path", r.URL.Path, "err", err)
+		WriteError(w, r, ErrInternal)
+		return
+	}
+	base := strings.TrimRight(src.baseURL, "/")
+	for i := range entries {
+		if strings.HasPrefix(entries[i].Loc, "/") {
+			entries[i].Loc = base + entries[i].Loc
+		}
+	}
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	if err := WriteSitemapFragment(w, entries); err != nil {
+		slog.ErrorContext(r.Context(), "smeldr: sitemap fragment write", "path", r.URL.Path, "err", err)
+	}
 }
 
 // IndexHandler returns an [http.Handler] that generates the sitemap index

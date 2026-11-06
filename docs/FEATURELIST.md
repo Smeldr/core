@@ -43,6 +43,7 @@ Last full label review: 2026-09-29, no label changes.
 - Detail route — `GET /{prefix}/{slug}` returns a single Published item
 - RSS feed — `GET /{prefix}/feed.xml` plus aggregate `GET /feed.xml`
 - Sitemap entries — `GET /{prefix}/sitemap.xml` merged into `GET /sitemap.xml`; regenerated on every publish, update, and delete — never stale, no cron
+- Application sitemap fragments: `App.SitemapFragment` adds pages your app serves to `GET /sitemap.xml`; `entries` runs on every request, so the list is never stale, no cron
 - SEO meta tags — `<title>`, `<meta description>`, canonical URL in every `<head>`
 - Per-path SEO overrides — `PageMetaStore` layer between item `Head()` and global defaults; managed via 4 Admin MCP tools; auto-applied to list pages when no `ListHeadFunc` is configured
 - Open Graph tags — `og:title`, `og:image`, `og:type`, `article:published_time` and more

@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -310,6 +311,7 @@ type App struct {
 	middleware             []func(http.Handler) http.Handler
 	sitemapStore           *SitemapStore                       // non-nil when at least one module has SitemapConfig
 	sitemapIndexRegistered bool                                // true once GET /sitemap.xml is registered
+	sitemapSourcesMounted  map[string]bool                     // application fragments (App.SitemapFragment) mounted on the mux
 	seo                    seoState                            // app-level SEO configuration set via SEO()
 	robotsTxtRegistered    bool                                // true once GET /robots.txt is registered
 	templateModules        []templateParser                    // modules with HTML templates; parsed at Run() time
@@ -1549,6 +1551,7 @@ func (a *App) Handler() http.Handler {
 		a.sitemapIndexRegistered = true
 		a.mux.Handle("GET /sitemap.xml", a.sitemapStore.IndexHandler(a.cfg.BaseURL))
 	}
+	a.mountSitemapFragments()
 	if a.seo.robots != nil && !a.robotsTxtRegistered {
 		a.robotsTxtRegistered = true
 		a.mux.Handle("GET /robots.txt", RobotsTxtHandler(*a.seo.robots, a.cfg.BaseURL))
@@ -1818,6 +1821,72 @@ func (a *App) Handler() http.Handler {
 		mws = append([]func(http.Handler) http.Handler{httpsRedirect()}, mws...)
 	}
 	return Chain(a.mux, mws...)
+}
+
+// SitemapFragment adds an application fragment at path to the sitemap index,
+// for pages the application serves from its own handlers (a home page, topic
+// pages). entries is called on each request for the fragment, with the
+// request's context, so the list follows the application's data: a page that
+// appears is listed at the next crawl, with nothing to refresh.
+//
+//	app.SitemapFragment("/pages/sitemap.xml", func(ctx context.Context) ([]smeldr.SitemapEntry, error) {
+//		return []smeldr.SitemapEntry{{Loc: "/", ChangeFreq: smeldr.Weekly, Priority: 1}}, nil
+//	})
+//
+// /sitemap.xml stays one index, listing module fragments and application
+// fragments together. A Loc that starts with "/" is joined to
+// [Config.BaseURL]; an absolute Loc is written as given. An error from
+// entries answers the fragment with a 500 (the cause is logged), so a crawler
+// tries again. Core does not split an application fragment: keeping it within
+// the sitemap protocol's 50,000 URLs and 50 MB is the application's job.
+//
+// path must start with "/", end in ".xml", and be neither "/sitemap.xml" nor
+// an application fragment already added; entries must not be nil. A path that
+// a module's own fragment uses (a [SitemapConfig] module's
+// "<prefix>/sitemap.xml") is refused when [App.Handler] runs, whichever was
+// registered first. Each refusal panics with the reason, at setup. Call
+// SitemapFragment before [App.Handler] or [App.Run].
+func (a *App) SitemapFragment(path string, entries func(ctx context.Context) ([]SitemapEntry, error)) {
+	switch {
+	case !strings.HasPrefix(path, "/"):
+		panic("smeldr: SitemapFragment: path " + strconv.Quote(path) + " must start with /")
+	case !strings.HasSuffix(path, ".xml"):
+		panic("smeldr: SitemapFragment: path " + strconv.Quote(path) + " must end in .xml")
+	case path == "/sitemap.xml":
+		panic("smeldr: SitemapFragment: /sitemap.xml is the index; choose another path")
+	case entries == nil:
+		panic("smeldr: SitemapFragment: entries for " + path + " is nil")
+	}
+	if a.sitemapStore == nil {
+		a.sitemapStore = NewSitemapStore()
+	}
+	if !a.sitemapStore.setSource(path, sitemapSource{entries: entries, baseURL: a.cfg.BaseURL}) {
+		panic("smeldr: SitemapFragment: " + path + " is already an application fragment")
+	}
+}
+
+// mountSitemapFragments mounts each application fragment on the mux, once. A
+// fragment whose path a module already serves (a [SitemapConfig] module's
+// own fragment route) is refused here, where both are known whatever order
+// they were registered in (T1168).
+func (a *App) mountSitemapFragments() {
+	if a.sitemapStore == nil {
+		return
+	}
+	for _, path := range a.sitemapStore.sourcePaths() {
+		if a.sitemapSourcesMounted[path] {
+			continue
+		}
+		pattern := "GET " + path
+		if _, got := a.mux.Handler(&http.Request{Method: http.MethodGet, URL: &url.URL{Path: path}}); got == pattern {
+			panic("smeldr: SitemapFragment: " + path + " is also a module's sitemap fragment; give the application fragment another path")
+		}
+		if a.sitemapSourcesMounted == nil {
+			a.sitemapSourcesMounted = map[string]bool{}
+		}
+		a.sitemapSourcesMounted[path] = true
+		a.mux.Handle(pattern, a.sitemapStore.Handler())
+	}
 }
 
 // SEO applies one or more app-level SEO options. Valid SEOOption types are:

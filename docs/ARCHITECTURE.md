@@ -307,6 +307,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-11-02 | A639 (Task T1061 phase 3, D171, D174, Level 2, task_plan P320): the remaining 260 refusal sites in 49 files are typed (the content stack, references and addresses, coverage and webhooks, the read surfaces, migrations); every refusal in the package now carries its type. problem_types.go: `ProblemTypeInfo.AlwaysValues` (the names every site of a type writes, held to the computed set by a test; bold in docs/PROBLEM_TYPES.md). places.go: `requireOperationOver` retired, every act over a place goes through `requireActOver` with a code (coverage adds `add_coverage_rule`, `change_coverage_rule`, `delete_coverage_rule`). storage.go: `errItemNotFound`, built once, for a repository miss. problem_types_sites_test.go: the AST check is strict (no allowlist, no not-yet-used list). |
 | 2026-11-02 | A641 (Task T1066, D171, D174, Level 2, task_plan P322): errors.go `valuesShown(fe)` decides whether `WriteError` sends a typed refusal's `values`: yes for a `*RefusalError`, a `*ValidationError`, a `*RevConflictError`, a 400 or a 409; no for a bare 401, 403, 404 or other status, which still sends `type`, `id`, `class` and `rule`. `ProblemValuesOf` is unchanged. The godoc of `AlwaysValues` and `ProblemValuesOf`, and the generated header of docs/PROBLEM_TYPES.md, state the rule. problem_wire_test.go (new). |
 | 2026-11-02 | A642 (Task T1067, D171, D174, Level 2, task_plan P323): state.go `validateTransition` refuses a lacking operation with `refuse(transition.gate, reason, values)`, a reason safe to show. places.go `requireActOver` takes a `placeAct` (act, code, place label, a lazy `place` read check, `actRead`, decision) and refuses with `refuse(place.authority_required, ...)`, naming the place only when the caller may read it; `readableRecord` and coverage.go `readableArea` are its place checks. dynamic.go `newSetStatusHandler` reads the item under the caller's scope first (404 when unreadable). `place` leaves the type's `AlwaysValues`. refusal_reason_safe_test.go (new). |
+| 2026-11-06 | A673 (Task T1168, Level 2, task_plan P376): smeldr.go `App.SitemapFragment(path, entries func(ctx) ([]SitemapEntry, error))` adds an application fragment to the one sitemap index; `mountSitemapFragments` (from `App.Handler`) mounts each once and refuses a path a module's own fragment route uses, whichever was registered first. sitemap.go: `SitemapStore` keeps application sources next to stored fragments; `Paths` lists both; `Handler` computes a source per request (`serveSitemapSource`: relative Loc joined to BaseURL, an entries error is a 500); `Set` drops a write to a source path with a warning (a runtime type cannot take it over). sitemap_fragment_test.go (new); `ExampleApp_SitemapFragment`. |
 
 ---
 
@@ -1242,6 +1243,7 @@ smeldr.dev/
 │                     standaloneDispatcher internal interface (A101),
 │                     graceful shutdown via SIGINT/SIGTERM;
 │                     SitemapStore wiring in Content+Handler (Amendment A4);
+│                     App.SitemapFragment + mountSitemapFragments in Handler (T1168);
 │                     SEO option loop, robotsTxtRegistered guard in Handler (Amendment A5);
 │                     LLMsStore wiring in Content+Handler, llmsTxtRegistered +
                       llmsFullTxtRegistered guards (Amendment A13);
@@ -1287,7 +1289,10 @@ smeldr.dev/
                       AppSchema (SEOOption), renderAppSchema (Amendment A61)
 └── sitemap.go        SitemapConfig, ChangeFreq, SitemapEntry, SitemapNode,
                       SitemapPrioritiser, SitemapStore, SitemapEntries[T],
-                      WriteSitemapFragment, WriteSitemapIndex
+                      WriteSitemapFragment, WriteSitemapIndex; SitemapStore
+                      application sources (sitemapSource, setSource,
+                      sourcePaths, serveSitemapSource) for
+                      App.SitemapFragment (T1168)
 └── robots.go         CrawlerPolicy (Allow/Disallow/AskFirst), RobotsConfig,
                       RobotsTxt, RobotsTxtHandler
 └── templatedata.go   TemplateData[T] (embeds PageHead; Content, User, Request, SiteName, Extra),

@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **Application pages can now be listed in the sitemap with `App.SitemapFragment` (T1168).** Before, only content modules with `SitemapConfig` had sitemap fragments, so a home page or topic page served by the application's own handlers could not be listed. `SitemapFragment` adds a fragment at a path you choose, and `/sitemap.xml` lists it next to the module fragments. The `entries` function runs on each request, so a new page is listed at the next crawl. A `Loc` that starts with `/` is joined to `Config.BaseURL`.
+
 ---
 
 ## [1.190.1] - 2026-11-06

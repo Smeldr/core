@@ -1483,6 +1483,20 @@ Each module owns its fragment (e.g. `/posts/sitemap.xml`).
 Smeldr merges all fragments into `/sitemap.xml` automatically.
 Sitemaps regenerate on every publish/unpublish — never stale, never on-demand.
 
+**Application pages (core v1.191.0, T1168).** Use `app.SitemapFragment` to list pages your application serves from its own handlers, such as a home page or topic pages. The `entries` function runs on each request with the request's context, so the list follows your data and a new page is listed at the next crawl. The fragment is merged into the one `/sitemap.xml` index with the module fragments, sorted by path.
+
+```go
+app.SitemapFragment("/docs/topics/sitemap.xml", func(ctx context.Context) ([]smeldr.SitemapEntry, error) {
+    out := []smeldr.SitemapEntry{{Loc: "/", ChangeFreq: smeldr.Weekly, Priority: 1}}
+    for _, t := range publishedTopics(ctx) { // your own data
+        out = append(out, smeldr.SitemapEntry{Loc: "/docs/topics/" + t.Slug, LastMod: t.UpdatedAt})
+    }
+    return out, nil
+})
+```
+
+If `entries` returns an error, the fragment answers HTTP 500 and the cause is logged, not shown, so the crawler tries again. A `Loc` that starts with `/` is joined to `Config.BaseURL`, and an absolute `Loc` is written as given. Core does not split a fragment, so keep it within the sitemap limit of 50,000 URLs and 50 MB yourself. A path that does not start with `/` or end in `.xml`, that is `/sitemap.xml`, that is added twice, that has a nil `entries`, or that clashes with a module fragment (`<prefix>/sitemap.xml`) panics with the reason; the clash is detected when `App.Handler` runs. Call `SitemapFragment` before `App.Handler` or `App.Run`.
+
 ### Robots
 
 ```go

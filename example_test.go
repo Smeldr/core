@@ -11,6 +11,7 @@ package smeldr
 // full AI/feed/sitemap wiring in App.Content is exercised.
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -333,4 +334,20 @@ func ExampleRenderMarkdown() {
 func ExampleStripMarkdown() {
 	fmt.Println(StripMarkdown("Use **snake_case** names, see [the guide](/guide)."))
 	// Output: Use snake_case names, see the guide.
+}
+
+// ExampleApp_SitemapFragment adds pages the application serves itself (the
+// home page, topic pages) to the one sitemap index. The entries are computed
+// on each request for the fragment, so they follow the data (T1168).
+func ExampleApp_SitemapFragment() {
+	app := New(MustConfig(Config{BaseURL: "https://example.com", Secret: []byte("16bytessecretkey")}))
+	topics := []string{"storage", "auth"} // the application's own data
+	app.SitemapFragment("/docs/topics/sitemap.xml", func(ctx context.Context) ([]SitemapEntry, error) {
+		out := []SitemapEntry{{Loc: "/", ChangeFreq: Weekly, Priority: 1}}
+		for _, slug := range topics {
+			out = append(out, SitemapEntry{Loc: "/docs/topics/" + slug})
+		}
+		return out, nil
+	})
+	_ = app.Handler()
 }
