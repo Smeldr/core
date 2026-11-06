@@ -340,11 +340,50 @@ func (p *workerPool) fetchDueJobs(ctx context.Context) ([]OutboundJob, error) {
 	return out, rows.Err()
 }
 
-// processJob decrypts the secret, checks the circuit breaker, delivers the
-// payload, logs the result, and updates the job status.
+// OutboundClaimSQL is the statement a webhook worker claims a due job with
+// before it delivers it (T1146). It exists so the Postgres integration test
+// runs the same text the worker runs; it is not meant for callers.
+//
+// $1 is the end of the lease, $2 the job ID, $3 the time the worker read as
+// now, and $4 the attempts the worker saw when it fetched the job. Of several
+// workers that fetched the same due job, exactly one gets a row: the first
+// moves next_retry_at past now, so the others no longer match. A worker whose
+// fetch is stale (the job was attempted and became due again since) matches
+// nothing either, because attempts changed. A claimed job whose worker dies
+// becomes due again when the lease ends.
+const OutboundClaimSQL = `UPDATE smeldr_outbound_jobs
+	SET next_retry_at = $1
+	WHERE id = $2 AND status = 'pending' AND next_retry_at <= $3 AND attempts = $4`
+
+// outboundLease is how long a claimed job stays out of other workers' reach:
+// well over one delivery, which outboundClientTimeout bounds.
+const outboundLease = 4 * outboundClientTimeout
+
+// claimJob claims job for this worker with [OutboundClaimSQL]. It reports
+// false, and no error, when another worker has it or the row changed since
+// the fetch.
+func (p *workerPool) claimJob(ctx context.Context, job OutboundJob) (bool, error) {
+	now := p.clock.Now()
+	res, err := p.db.ExecContext(ctx, OutboundClaimSQL, now.Add(outboundLease), job.ID, now, job.Attempts)
+	if err != nil {
+		return false, fmt.Errorf("smeldr: webhook: claim job %s: %w", job.ID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("smeldr: webhook: claim job %s: %w", job.ID, err)
+	}
+	return n == 1, nil
+}
+
+// processJob checks the circuit breaker, claims the job, decrypts the
+// secret, delivers the payload, logs the result, and updates the job status.
+// A job another worker claimed is skipped (T1146).
 func (p *workerPool) processJob(ctx context.Context, job OutboundJob, rng *rand.Rand) error {
 	if !p.circuitAllows(job.EndpointID) {
 		return nil // circuit open — skip silently; job retains pending status
+	}
+	if claimed, err := p.claimJob(ctx, job); err != nil || !claimed {
+		return err
 	}
 
 	secret, err := p.secrets.decryptSecret(job.SecretEnc)
@@ -651,12 +690,15 @@ func ssrfSafeDialContext() func(ctx context.Context, network, addr string) (net.
 	}
 }
 
+// outboundClientTimeout bounds one webhook delivery.
+const outboundClientTimeout = 30 * time.Second
+
 // outboundClient is the HTTP client used for all webhook deliveries.
 // It enforces a 30-second timeout, blocks all redirects to prevent
 // redirect-based SSRF bypass, and uses a custom dialer that rejects
 // connections to private and reserved IP ranges.
 var outboundClient = &http.Client{
-	Timeout: 30 * time.Second,
+	Timeout: outboundClientTimeout,
 	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	},

@@ -558,3 +558,166 @@ func TestEnqueueHTTPSValidation(t *testing.T) {
 		t.Errorf("Enqueue: unexpected error for https:// target: %v", err)
 	}
 }
+
+// enqueueDueJob stores one pending job due at the pool clock's now and
+// returns it as a worker would fetch it.
+func enqueueDueJob(t *testing.T, pool *workerPool, store *WebhookStore) OutboundJob {
+	t.Helper()
+	enc, _ := store.encryptSecret([]byte("secret"))
+	now := pool.clock.Now()
+	job := OutboundJob{
+		ID: NewID(), EndpointID: "ep-claim", TargetURL: "https://example.com/hook", SecretEnc: enc,
+		Payload: []byte(`{}`), Event: "post.created", NextRetryAt: now, CreatedAt: now,
+		ExpiresAt: now.Add(24 * time.Hour), Status: "pending",
+	}
+	if err := pool.Enqueue(context.Background(), job); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	return job
+}
+
+// jobRow reads a job's attempts and delivery log count.
+func jobRow(t *testing.T, pool *workerPool, id string) (attempts, logs int) {
+	t.Helper()
+	ctx := context.Background()
+	if err := pool.db.QueryRowContext(ctx, `SELECT attempts FROM smeldr_outbound_jobs WHERE id = $1`, id).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_delivery_logs WHERE job_id = $1`, id).Scan(&logs); err != nil {
+		t.Fatal(err)
+	}
+	return attempts, logs
+}
+
+// TestWorkerPool_OneWorkerPerJob: ten workers and one due job give one
+// delivery, one delivery log and one attempt, for a receiver that succeeds
+// and one that fails (T1146). Before the claim, every worker delivered it.
+func TestWorkerPool_OneWorkerPerJob(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{{"success", nil}, {"failure", &webhookHTTPError{statusCode: 503}}} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool, store := outboundTestDB(t)
+			pool.workers = 10
+			var delivered int32
+			pool.deliver = func(context.Context, OutboundJob, []byte) error {
+				atomic.AddInt32(&delivered, 1)
+				time.Sleep(50 * time.Millisecond) // every worker has fetched by now
+				return tc.err
+			}
+			job := enqueueDueJob(t, pool, store)
+			pool.Start(context.Background())
+			deadline := time.Now().Add(2 * time.Second)
+			for atomic.LoadInt32(&delivered) == 0 && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			time.Sleep(300 * time.Millisecond) // room for any duplicate
+			pool.Stop()
+			if n := atomic.LoadInt32(&delivered); n != 1 {
+				t.Errorf("delivered %d times, want 1", n)
+			}
+			if attempts, logs := jobRow(t, pool, job.ID); attempts != 1 || logs != 1 {
+				t.Errorf("attempts %d, logs %d, want 1 and 1", attempts, logs)
+			}
+		})
+	}
+}
+
+// TestWorkerPool_ClaimOnce: of two claims of the same fetched job, the first
+// gets it and the second gets nothing.
+func TestWorkerPool_ClaimOnce(t *testing.T) {
+	pool, store := outboundTestDB(t)
+	pool.clock = newFakeClock(time.Now().UTC())
+	job := enqueueDueJob(t, pool, store)
+	ctx := context.Background()
+	if ok, err := pool.claimJob(ctx, job); err != nil || !ok {
+		t.Fatalf("first claim: %v %v", ok, err)
+	}
+	if ok, err := pool.claimJob(ctx, job); err != nil || ok {
+		t.Fatalf("second claim: %v %v, want false", ok, err)
+	}
+}
+
+// TestWorkerPool_ClaimLeaseExpires: a claimed job whose worker never finishes
+// is not due during the lease and is due again after it, attempts unchanged.
+func TestWorkerPool_ClaimLeaseExpires(t *testing.T) {
+	pool, store := outboundTestDB(t)
+	clk := newFakeClock(time.Now().UTC())
+	pool.clock = clk
+	job := enqueueDueJob(t, pool, store)
+	ctx := context.Background()
+	if ok, err := pool.claimJob(ctx, job); err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	if due, err := pool.fetchDueJobs(ctx); err != nil || len(due) != 0 {
+		t.Fatalf("during the lease: %d due, %v", len(due), err)
+	}
+	clk.Advance(outboundLease + time.Second)
+	due, err := pool.fetchDueJobs(ctx)
+	if err != nil || len(due) != 1 || due[0].Attempts != 0 {
+		t.Fatalf("after the lease: %v %v", due, err)
+	}
+}
+
+// TestWorkerPool_StaleSnapshotNotClaimed: a worker whose fetch is older than
+// an attempt cannot claim the job when it is due again; the next fetch, with
+// the current attempts, can.
+func TestWorkerPool_StaleSnapshotNotClaimed(t *testing.T) {
+	pool, store := outboundTestDB(t)
+	clk := newFakeClock(time.Now().UTC())
+	pool.clock = clk
+	pool.deliver = func(context.Context, OutboundJob, []byte) error { return &webhookHTTPError{statusCode: 503} }
+	stale := enqueueDueJob(t, pool, store)
+	ctx := context.Background()
+	if err := pool.processJob(ctx, stale, rand.New(rand.NewSource(1))); err != nil {
+		t.Fatalf("first attempt: %v", err)
+	}
+	clk.Advance(time.Hour) // past the retry delay: due again
+	if ok, err := pool.claimJob(ctx, stale); err != nil || ok {
+		t.Fatalf("stale claim: %v %v, want false", ok, err)
+	}
+	due, err := pool.fetchDueJobs(ctx)
+	if err != nil || len(due) != 1 || due[0].Attempts != 1 {
+		t.Fatalf("fresh fetch: %v %v", due, err)
+	}
+	if ok, err := pool.claimJob(ctx, due[0]); err != nil || !ok {
+		t.Fatalf("fresh claim: %v %v", ok, err)
+	}
+}
+
+// TestWorkerPool_CircuitOpenDoesNotClaim: with the endpoint's circuit open,
+// the job is not claimed and stays due.
+func TestWorkerPool_CircuitOpenDoesNotClaim(t *testing.T) {
+	pool, store := outboundTestDB(t)
+	pool.clock = newFakeClock(time.Now().UTC())
+	job := enqueueDueJob(t, pool, store)
+	for i := 0; i < 5; i++ {
+		pool.recordCircuitResult(job.EndpointID, false)
+	}
+	ctx := context.Background()
+	if err := pool.processJob(ctx, job, rand.New(rand.NewSource(1))); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := pool.fetchDueJobs(ctx); err != nil || len(due) != 1 {
+		t.Fatalf("after an open circuit: %d due, %v", len(due), err)
+	}
+}
+
+// TestWorkerPool_ClaimError: a claim that cannot run is an error, and nothing
+// is delivered.
+func TestWorkerPool_ClaimError(t *testing.T) {
+	pool, store := outboundTestDB(t)
+	job := enqueueDueJob(t, pool, store)
+	var delivered int32
+	pool.deliver = func(context.Context, OutboundJob, []byte) error { atomic.AddInt32(&delivered, 1); return nil }
+	if _, err := pool.db.ExecContext(context.Background(), `DROP TABLE smeldr_outbound_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.processJob(context.Background(), job, rand.New(rand.NewSource(1))); err == nil {
+		t.Fatal("processJob with no jobs table returned nil")
+	}
+	if atomic.LoadInt32(&delivered) != 0 {
+		t.Error("a job that could not be claimed was delivered")
+	}
+}

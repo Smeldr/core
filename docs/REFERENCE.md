@@ -3672,6 +3672,8 @@ webhook subscriber cannot distinguish the two by event name.
 - **Backoff:** `4^attempt` seconds ± 20% jitter, capped at 1 hour.
 - **Circuit breaker:** endpoint skipped after 5 consecutive failures for 5 minutes.
 - **Dead-letter:** job marked `"dead"` after 7 attempts.
+- **One worker per attempt:** a worker claims a due job before it delivers it, so one attempt is one delivery, one delivery log row and one count for the circuit breaker, on SQLite and Postgres alike. A claim holds the job for 2 minutes; if the worker stops before it finishes, the job is due again after that, with its attempts unchanged (core v1.190.1, T1146).
+- **At least once:** a delivery can still arrive twice (a worker that stopped after the receiver answered, then the lease ended), so deduplicate on `X-Smeldr-Delivery`.
 
 ### MCP webhook tools (Admin role)
 
@@ -3688,11 +3690,12 @@ Available when `App.Webhooks(store)` is configured:
 ### smeldr.dev/cli webhook commands
 
 ```
-forge webhook create --url https://example.com/hook --events post.published,post.updated
-forge webhook list
-forge webhook delete <endpoint-id>
-forge webhook deliveries <job-id>
-forge webhook retry <job-id>
+smeldr-cli webhook create --url https://example.com/hook --events post.published,post.updated
+smeldr-cli webhook list
+smeldr-cli webhook delete <endpoint-id>
+smeldr-cli webhook deliveries --job <job-id>
+smeldr-cli webhook deliveries --endpoint <endpoint-id>
+smeldr-cli webhook retry <job-id>
 ```
 
 ---
