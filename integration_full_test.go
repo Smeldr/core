@@ -2724,7 +2724,9 @@ func TestFull_G27_RetryOnTransientFailure(t *testing.T) {
 	pool.Start(ctx)
 
 	enc, _ := store.encryptSecret([]byte("g27-secret"))
-	now := time.Now().UTC()
+	// The fake clock's now, not a second wall-clock read: a tick between the
+	// two would leave the job not yet due at the fake now (T1169).
+	now := clock.Now()
 	job := OutboundJob{
 		ID:          NewID(),
 		EndpointID:  "ep-g27",
@@ -2792,7 +2794,9 @@ func TestFull_G28_DeadLetterAfterMaxAttempts(t *testing.T) {
 	pool.Start(ctx)
 
 	enc, _ := store.encryptSecret([]byte("g28-secret"))
-	now := time.Now().UTC()
+	// The fake clock's now, not a second wall-clock read: a tick between the
+	// two would leave the job not yet due at the fake now (T1169).
+	now := clock.Now()
 	job := OutboundJob{
 		ID:          NewID(),
 		EndpointID:  "ep-g28",
@@ -2859,7 +2863,9 @@ func TestFull_G29_CircuitBreakerOpens(t *testing.T) {
 	pool.Start(ctx)
 
 	enc, _ := store.encryptSecret([]byte("g29-secret"))
-	now := time.Now().UTC()
+	// The fake clock's now, not a second wall-clock read: a tick between the
+	// two would leave the job not yet due at the fake now (T1169).
+	now := clock.Now()
 
 	// Enqueue 6 jobs - 5 to trip the circuit, 1 to verify it's now open.
 	const total = 6
