@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.190.1] - 2026-11-06
+
 ### Fixed
 
 - **Outbound webhook deliveries are no longer duplicated by parallel workers (T1146).** The default pool of 10 workers read the same due jobs without claiming them, so a receiver could get one delivery up to 10 times with the same `X-Smeldr-Delivery`. The delivery log, the delivery stats and the circuit breaker counted every copy too, so a failing job showed one attempt after several hits and the breaker could open early. A worker now claims a due job with one conditional update before it delivers, on SQLite and Postgres, and a worker whose read of the job is out of date does not claim it. A claim holds the job for 2 minutes; a job whose worker stops is due again after that, with its attempt count unchanged. Delivery is still at least once, so receivers should deduplicate on `X-Smeldr-Delivery`. The new exported constant `OutboundClaimSQL` exists only for the Postgres integration test. `docs/REFERENCE.md` now shows `smeldr-cli webhook` commands instead of the old `forge webhook` ones.
