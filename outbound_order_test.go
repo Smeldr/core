@@ -65,3 +65,33 @@ func TestWorkerPool_StoppedWorkerReturnsAtOnce(t *testing.T) {
 		t.Fatal("a stopped worker did not return")
 	}
 }
+
+// TestWorkerPool_CircuitBoundWithWorkers keeps circuitAllows's documented
+// bound under test: with n workers and a failing endpoint, deliveries reach
+// at least circuitOpenThreshold and at most circuitOpenThreshold+n-1 before
+// the circuit skips the endpoint (T1170). No exact count, so no flake.
+func TestWorkerPool_CircuitBoundWithWorkers(t *testing.T) {
+	pool, store := outboundTestDB(t)
+	clock := newFakeClock(time.Now().UTC()) // never advanced: the circuit stays open
+	pool.clock = clock
+	pool.workers = 2
+	var n int32
+	pool.deliver = func(context.Context, OutboundJob, []byte) error {
+		atomic.AddInt32(&n, 1)
+		return &webhookHTTPError{statusCode: 503}
+	}
+	for i := 0; i < 2*circuitOpenThreshold; i++ {
+		enqueueDueJob(t, pool, store)
+	}
+	pool.Start(context.Background())
+	deadline := time.Now().Add(5 * time.Second)
+	for atomic.LoadInt32(&n) < circuitOpenThreshold && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond) // room for any delivery that was in flight
+	pool.Stop()
+	got, max := int(atomic.LoadInt32(&n)), circuitOpenThreshold+pool.workers-1
+	if got < circuitOpenThreshold || got > max {
+		t.Errorf("deliveries = %d; want %d to %d with %d workers", got, circuitOpenThreshold, max, pool.workers)
+	}
+}

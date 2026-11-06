@@ -572,6 +572,11 @@ func (p *workerPool) DeliveryStats(ctx context.Context, endpointID string) (tota
 // circuitAllows returns true when the circuit for endpointID permits a delivery
 // attempt. A circuit is opened after circuitOpenThreshold consecutive failures
 // and transitions to half-open after circuitOpenDuration.
+//
+// The breaker counts results, not attempts: a delivery that passed this check
+// before the circuit opened still completes. With n workers, up to n-1 more
+// attempts than circuitOpenThreshold can reach a failing endpoint before it
+// is skipped, once per opening (T1170).
 func (p *workerPool) circuitAllows(endpointID string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()

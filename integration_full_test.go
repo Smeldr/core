@@ -2848,6 +2848,11 @@ func TestFull_G28_DeadLetterAfterMaxAttempts(t *testing.T) {
 // "circuit open") rather than attempting delivery.
 func TestFull_G29_CircuitBreakerOpens(t *testing.T) {
 	pool, store := outboundTestDB(t)
+	// One worker: the breaker counts results, so with more workers a delivery
+	// already past the check can still run when the circuit opens, and the
+	// count is exact only with one (T1170). The bound for several workers is
+	// TestWorkerPool_CircuitBoundWithWorkers.
+	pool.workers = 1
 
 	clock := newFakeClock(time.Now().UTC())
 	pool.clock = clock
