@@ -96,12 +96,13 @@ ENABLE_PAGE_META      wire per-path SEO override store
 ENABLE_MEDIA          wire local media upload and management
 MEDIA_STORE_BACKEND   media backend (default: local; only "local" supported)
 ENABLE_SOCIAL         wire social publishing (Mastodon, LinkedIn, X); configure each
-                      platform at runtime with create_platform_config (Admin)
-MASTODON_CLIENT_ID    optional, deprecated fallback for create_platform_config:
-MASTODON_CLIENT_SECRET Mastodon OAuth client ID, secret and instance base URL. With
-MASTODON_INSTANCE_URL  neither these nor a stored config, the server boots, but a
-                      Mastodon credential is refused and a Mastodon post fails with
-                      "Mastodon is not configured on this server"
+                      platform at runtime with create_platform_config (Admin). With
+                      neither a stored config nor the MASTODON_* fallback, the server
+                      boots, but a Mastodon credential is refused and a Mastodon post
+                      fails with "Mastodon is not configured on this server"
+MASTODON_CLIENT_ID    deprecated fallback: Mastodon OAuth client ID; see ENABLE_SOCIAL
+MASTODON_CLIENT_SECRET deprecated fallback: Mastodon OAuth client secret; see ENABLE_SOCIAL
+MASTODON_INSTANCE_URL  deprecated fallback: Mastodon instance base URL; see ENABLE_SOCIAL
 ENABLE_WEBHOOKS       wire outbound webhook delivery (creates its tables at boot)
 ENABLE_EVENT_STREAM   wire GET /_events/stream (the agent event push, T269)
 ENABLE_EVENT_LOG      keep a durable event log behind the stream; ?after=<event id>
