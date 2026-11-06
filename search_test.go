@@ -539,3 +539,37 @@ func findModuleB[T any](b *testing.B, app *App) *Module[T] {
 	b.Fatalf("no module for %T", *new(T))
 	return nil
 }
+
+// fixedHitsModule is a searchableModule that returns set hits, so a test
+// controls UpdatedAt exactly (T1160).
+type fixedHitsModule struct {
+	name string
+	hits []SearchHit
+}
+
+func (f fixedHitsModule) searchTypeName() string { return f.name }
+func (f fixedHitsModule) searchRecords(context.Context, *searchPlan) ([]SearchHit, error) {
+	return f.hits, nil
+}
+
+// TestSearch_TieBreakOrder: hits with the same UpdatedAt are ordered by type,
+// then ID, every run; the clock's resolution no longer decides whether the
+// tie-break runs (T1160).
+func TestSearch_TieBreakOrder(t *testing.T) {
+	app := New(Config{BaseURL: "https://example.com", Secret: []byte("supersecretkey16")})
+	at := time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
+	app.addSearchModule(fixedHitsModule{name: "Zeta", hits: []SearchHit{{Type: "Zeta", ID: "z1", UpdatedAt: at}}})
+	app.addSearchModule(fixedHitsModule{name: "Alpha", hits: []SearchHit{
+		{Type: "Alpha", ID: "a2", UpdatedAt: at},
+		{Type: "Alpha", ID: "a1", UpdatedAt: at},
+		{Type: "Alpha", ID: "a0", UpdatedAt: at.Add(-time.Hour)},
+	}})
+	res, err := app.Search(authorCtx(), SearchQuery{Types: []string{"Alpha", "Zeta"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(hitIDs(res), ",")
+	if got != "a1,a2,z1,a0" {
+		t.Errorf("order = %s; want a1,a2,z1,a0", got)
+	}
+}

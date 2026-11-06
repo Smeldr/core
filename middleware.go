@@ -513,6 +513,11 @@ func storableResponse(h http.Header) bool {
 	return true
 }
 
+// cacheSweepInterval is how often the background goroutines of
+// [NewInMemoryCache] and a [Cache] module sweep expired entries. A variable
+// so a test can make a sweep happen in milliseconds (T1160).
+var cacheSweepInterval = 60 * time.Second
+
 // NewInMemoryCache returns a GET-response caching middleware and a stop function.
 // The stop function terminates the background sweep goroutine; call it in tests
 // via defer or t.Cleanup to avoid goroutine leaks. stop is idempotent.
@@ -528,9 +533,10 @@ func NewInMemoryCache(ttl time.Duration, opts ...Option) (func(http.Handler) htt
 	cache := NewCacheStore(ttl, max)
 	stop := make(chan struct{})
 	done := make(chan struct{})
+	interval := cacheSweepInterval // read here, not in the goroutine (race-free for tests)
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(60 * time.Second)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {

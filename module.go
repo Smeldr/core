@@ -742,8 +742,9 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 
 	// Background sweep for module cache.
 	if m.cache != nil {
+		interval := cacheSweepInterval // read here, not in the goroutine (race-free for tests)
 		go func() {
-			ticker := time.NewTicker(60 * time.Second)
+			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			for {
 				select {

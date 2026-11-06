@@ -178,8 +178,11 @@ When in doubt: Level 2.
 - `smeldr.DB` is an interface, not `*sql.DB` (Decision 22)
 - Go version: the one `go.mod` names (`go 1.26.5` today); read it there, do not assume, and use no feature newer than it
 - Coverage gate: a commit that drops test coverage below 96.0% must not be merged.
-  Verify before every commit:
-  `go test -coverprofile=coverage.out ./... ; go tool cover -func=coverage.out | Select-String "total:"`
+  Verify before every commit, with the exact ratio (T1160):
+  `go test -coverprofile=coverage.out ./... ; go -C scripts/covercheck run . ../../coverage.out`
+  It prints `coverage: <covered>/<total> = <pct> %` and exits 1 below 96.0 %. Quote
+  that line. Do not read the gate from `go tool cover -func`'s `total:` line: it rounds,
+  so 95.9996 % shows as 96.0 % there.
 - `gofmt` always — no exceptions
 - godoc comments on every exported symbol
 - A fix or improvement that changes a file **other than** the current step's file
@@ -852,6 +855,9 @@ The detail belongs in the submodule's own file.
    **Quote that line in every commit review request** whose change touches what pgx covers
    (stores, read scope, relations, migrations, capabilities, search): architect answers a
    request without it with feedback.
+2b. Core's coverage gate passes on the commit being tagged:
+   `go test -coverprofile=coverage.out ./... ; go -C scripts/covercheck run . ../../coverage.out`
+   exits 0 (T1160).
 3. `CHANGELOG.md` (root) and each changed submodule's `CHANGELOG.md` has an entry for the
    version being tagged
 4. For standalone modules that depend on smeldr.dev/core (smeldr.dev/mcp, smeldr.dev/media, smeldr.dev/cli),
