@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.191.1] - 2026-11-11
+
 ### Security
 
 - **Behaviour change: on an App with a TokenStore, a bearer token signed with `smeldr.SignToken` but never stored is now refused on HTTP routes too (T1176).** MCP already refused such a token. To keep working, mint bearer tokens through the store: `TokenStore.Create`, `TokenStore.CreateClassified`, `smeldr-cli token create`, or the `create_token` MCP tool.
