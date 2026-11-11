@@ -451,9 +451,7 @@ smeldr.On(smeldr.BeforeCreate, func(ctx smeldr.Context, p *BlogPost) error {
 
 > ✅ **Available**
 
-`TokenStore` adds server-side named bearer tokens with revocation. When
-configured, every request validates the token against the database — a revoked
-or expired token is rejected immediately, even if the HMAC signature is valid.
+`TokenStore` adds server-side named bearer tokens with revocation. When configured, every HTTP route that authenticates a bearer token checks the token against the store, the same check MCP makes (since v1.191.1; before, HTTP routes checked only the signature and expiry). A revoked token, a token whose identity is suspended or retired, and a token the store does not hold are refused at once, even if the HMAC signature is valid.
 
 ### Wiring
 

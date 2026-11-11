@@ -18,6 +18,11 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Security
+
+- **Behaviour change: on an App with a TokenStore, a bearer token signed with `smeldr.SignToken` but never stored is now refused on HTTP routes too (T1176).** MCP already refused such a token. To keep working, mint bearer tokens through the store: `TokenStore.Create`, `TokenStore.CreateClassified`, `smeldr-cli token create`, or the `create_token` MCP tool.
+- **HTTP routes now check bearer tokens against the TokenStore, so a revoked token is refused at once (T1176).** Before this fix, a revoked token could still read, and write on record routes, until its signed expiry. When the App has a `Config.TokenStore`, every route that authenticates a bearer token asks the store, the same check MCP makes. That covers the App middleware (so every module's record routes), `/packet`, `/reachability`, `/_content`, `/_audit`, `/_logs`, `/_stats`, the first connect of `/_events/stream`, and the AuthFunc given to `App.CookiesManifestAuth` and `App.RedirectManifestAuth`. A revoked token, a token whose identity is suspended or retired, and a token the store does not hold are refused like a bad signature. If the store query fails, the token is refused. Not changed: an App without a TokenStore, session cookies (`CookieSession`), custom AuthFuncs, `?preview=` tokens, and upload tokens. A request with a revoked bearer token is refused even if it also carries a valid session cookie. Cost: one SHA-256 and one primary-key query per request that carries a bearer token signed with the App's secret. There is no cache, so a revocation takes effect on the next request.
+
 ---
 
 ## [1.191.0] - 2026-11-06

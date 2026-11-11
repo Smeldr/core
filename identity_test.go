@@ -19,7 +19,7 @@ type identityFixture struct {
 	store *TokenStore
 }
 
-func newIdentityFixture(t *testing.T) identityFixture {
+func newIdentityFixture(t testing.TB) identityFixture {
 	t.Helper()
 	ctx := context.Background()
 	db := newSQLiteDB(t)

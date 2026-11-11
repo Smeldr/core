@@ -127,10 +127,7 @@ func (a *App) Stats(ctx context.Context) (SiteStats, error) {
 //	app.StatsHandler()
 //	// GET /_stats (Admin bearer token) → {"content":[...],"generated_at":"..."}
 func (a *App) StatsHandler() {
-	auth := a.cfg.Auth
-	if auth == nil {
-		auth = BearerHMAC(string(a.cfg.Secret))
-	}
+	auth := a.requestAuth
 	a.mux.Handle("GET /_stats", newStatsHandler(auth, a))
 }
 

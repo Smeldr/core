@@ -308,6 +308,7 @@ type standaloneDispatcher interface {
 type App struct {
 	cfg                    Config
 	mux                    *http.ServeMux
+	requestAuth            AuthFunc // cfg.Auth (or BearerHMAC), store-checked when cfg.TokenStore is set (T1176)
 	middleware             []func(http.Handler) http.Handler
 	sitemapStore           *SitemapStore                       // non-nil when at least one module has SitemapConfig
 	sitemapIndexRegistered bool                                // true once GET /sitemap.xml is registered
@@ -437,9 +438,13 @@ func New(cfg Config) *App {
 	if auth == nil {
 		auth = BearerHMAC(string(cfg.Secret))
 	}
+	// With a token store, a bearer token is checked against it on every
+	// HTTP route, as on MCP (T1176).
+	auth = withStoreCheck(auth, string(cfg.Secret), cfg.TokenStore)
 	app := &App{
 		cfg:           cfg,
 		mux:           http.NewServeMux(),
+		requestAuth:   auth,
 		middleware:    []func(http.Handler) http.Handler{Authenticate(auth)},
 		redirectStore: NewRedirectStore(),
 		tokenStore:    cfg.TokenStore,
@@ -1590,10 +1595,7 @@ func (a *App) Handler() http.Handler {
 	}
 	if a.dynamicContentEnabled && !a.dynamicContentReg {
 		a.dynamicContentReg = true
-		dynAuth := a.cfg.Auth
-		if dynAuth == nil {
-			dynAuth = BearerHMAC(string(a.cfg.Secret))
-		}
+		dynAuth := a.requestAuth
 		a.mux.Handle("POST /_content/types", newDefineTypeHandler(a, dynAuth))
 		a.mux.Handle("GET /_content/{type}", newAdminListHandler(a, dynAuth))
 		a.mux.Handle("GET /_content/{type}/{id}", newAdminGetHandler(a, dynAuth))
@@ -1695,18 +1697,12 @@ func (a *App) Handler() http.Handler {
 	}
 	if a.auditStore != nil && !a.auditHandlerReg {
 		a.auditHandlerReg = true
-		auditAuth := a.cfg.Auth
-		if auditAuth == nil {
-			auditAuth = BearerHMAC(string(a.cfg.Secret))
-		}
+		auditAuth := a.requestAuth
 		a.mux.Handle("GET /_audit", newAuditHandler(auditAuth, a.auditStore, a.filterAuditRecords))
 	}
 	if a.logRing != nil && !a.logsHandlerReg {
 		a.logsHandlerReg = true
-		logsAuth := a.cfg.Auth
-		if logsAuth == nil {
-			logsAuth = BearerHMAC(string(a.cfg.Secret))
-		}
+		logsAuth := a.requestAuth
 		a.mux.Handle("GET /_logs", newLogsHandler(logsAuth, a.logRing))
 	}
 	// D116: cached read scopes reload on grant, revocation and relation
@@ -1715,10 +1711,7 @@ func (a *App) Handler() http.Handler {
 	a.wireWebhookSubscriptions()
 	if a.eventBroadcaster != nil && !a.eventStreamHandlerReg {
 		a.eventStreamHandlerReg = true
-		esAuth := a.cfg.Auth
-		if esAuth == nil {
-			esAuth = BearerHMAC(string(a.cfg.Secret))
-		}
+		esAuth := a.requestAuth
 		a.eventBroadcaster.canon = a.canonicalTypeName
 		a.startEventLog()
 		var revoked func(context.Context, string) (bool, error)
@@ -1939,11 +1932,13 @@ func (a *App) Cookies(decls ...Cookie) {
 }
 
 // CookiesManifestAuth sets the [AuthFunc] that guards /.well-known/cookies.json.
-// Call before [App.Handler] or [App.Run].
+// Call before [App.Handler] or [App.Run]. On an App with a [Config.TokenStore],
+// a bearer token signed with [Config.Secret] is also checked against the
+// store, as on every other route: a revoked token is refused.
 //
-//	app.CookiesManifestAuth(smeldr.BearerHMAC(secret, smeldr.Editor))
+//	app.CookiesManifestAuth(smeldr.BearerHMAC(secret))
 func (a *App) CookiesManifestAuth(auth AuthFunc) {
-	a.cookieManifestOpts = append(a.cookieManifestOpts, ManifestAuth(auth))
+	a.cookieManifestOpts = append(a.cookieManifestOpts, ManifestAuth(a.storeChecked(auth)))
 }
 
 // Redirect registers a manual redirect rule. Chain collapse is applied
@@ -2004,11 +1999,20 @@ func (a *App) Redirects(db DB) error {
 func (a *App) RedirectDB() DB { return a.redirectDB }
 
 // RedirectManifestAuth sets the [AuthFunc] that guards /.well-known/redirects.json.
-// Call before [App.Handler] or [App.Run].
+// Call before [App.Handler] or [App.Run]. On an App with a [Config.TokenStore],
+// a bearer token signed with [Config.Secret] is also checked against the
+// store, as on every other route: a revoked token is refused.
 //
-//	app.RedirectManifestAuth(smeldr.BearerHMAC(secret, smeldr.Editor))
+//	app.RedirectManifestAuth(smeldr.BearerHMAC(secret))
 func (a *App) RedirectManifestAuth(auth AuthFunc) {
-	a.redirectManifestOpts = append(a.redirectManifestOpts, ManifestAuth(auth))
+	a.redirectManifestOpts = append(a.redirectManifestOpts, ManifestAuth(a.storeChecked(auth)))
+}
+
+// storeChecked wraps an application-supplied [AuthFunc] in the same store
+// check as [App.requestAuth], so a route guarded by it refuses a revoked
+// bearer token too (T1176).
+func (a *App) storeChecked(auth AuthFunc) AuthFunc {
+	return withStoreCheck(auth, string(a.cfg.Secret), a.cfg.TokenStore)
 }
 
 // ServeDynamicContent activates the dynamic content substrate. It creates the

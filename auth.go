@@ -332,6 +332,60 @@ func VerifyBearerToken(r *http.Request, secret []byte, store *TokenStore) (User,
 	return user, true
 }
 
+// storeCheckedAuth is the App's request [AuthFunc] when it has a
+// [TokenStore] (T1176): inner as configured, and then, for a request whose
+// bearer token is signed with the App's secret, the store's check that
+// [VerifyBearerToken] makes on MCP. A revoked token, a token the store does
+// not hold and a token of an identity that is not active are refused like a
+// bad signature, on every HTTP route. Other credentials (a session cookie, a
+// custom AuthFunc's own token, an upload token) are not touched.
+type storeCheckedAuth struct {
+	inner  AuthFunc
+	secret string
+	store  *TokenStore
+}
+
+func (s *storeCheckedAuth) authenticate(r *http.Request) (User, bool) {
+	user, ok := s.inner.authenticate(r)
+	if !ok {
+		return user, ok
+	}
+	hdr := r.Header.Get("Authorization")
+	if !strings.HasPrefix(hdr, "Bearer ") {
+		return user, ok
+	}
+	token := strings.TrimPrefix(hdr, "Bearer ")
+	signed, err := decodeToken(token, s.secret)
+	if err != nil {
+		// Not a token of this App's secret: another AuthFunc accepted the
+		// request on its own credential.
+		return user, ok
+	}
+	// One query, as on MCP: revocation and the identity's status (D165).
+	// No cache, so a revocation takes effect on the next request.
+	return s.store.verifyStored(r.Context(), token, signed)
+}
+
+func (s *storeCheckedAuth) warnIfProduction(w io.Writer) {
+	if pw, ok := s.inner.(productionWarner); ok {
+		pw.warnIfProduction(w)
+	}
+}
+
+func (s *storeCheckedAuth) csrfEnabled() bool {
+	ca, ok := s.inner.(csrfAware)
+	return ok && ca.csrfEnabled()
+}
+
+// withStoreCheck is auth as the App authenticates requests: wrapped in
+// [storeCheckedAuth] when store is set, unchanged otherwise.
+func withStoreCheck(auth AuthFunc, secret string, store *TokenStore) AuthFunc {
+	if store == nil {
+		return auth
+	}
+	return &storeCheckedAuth{inner: auth, secret: secret, store: store}
+}
+
 // VerifyTokenString verifies a raw bearer token string without requiring an
 // [http.Request]. It is otherwise identical to [VerifyBearerToken]: it decodes
 // the HMAC signature, optionally checks the token fingerprint against the

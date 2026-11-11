@@ -32,10 +32,7 @@ import (
 // access to at least one item of the anchor's type, and the walk holds only
 // what the caller may read (per-item read rules).
 func (a *App) ReachabilityHandler(rs *RelationStore) {
-	auth := a.cfg.Auth
-	if auth == nil {
-		auth = BearerHMAC(string(a.cfg.Secret))
-	}
+	auth := a.requestAuth
 	a.mux.Handle("GET /reachability/{type}/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.authenticate(r)
 		if !ok {

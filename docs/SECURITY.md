@@ -36,8 +36,7 @@ Smeldr enforces the following security properties automatically:
 - **Role-based access control (RBAC)** — every HTTP and MCP operation is gated
   by the `Guest → Author → Editor → Admin` hierarchy. Roles are enforced per
   module, per operation.
-- **Token validation** — Bearer HMAC tokens are verified on every request.
-  When `TokenStore` is configured, revocation is checked on every call.
+- **Token validation**: Bearer HMAC tokens are verified on every request. When `TokenStore` is configured, every call checks the token against the store, including revocation and whether its identity is suspended or retired. This applies to every HTTP route and to MCP (HTTP routes since v1.191.1).
 - **SSRF-safe outbound** — webhook endpoints must be HTTPS and must not resolve
   to private/loopback addresses. Validation runs at registration and at delivery.
 - **Webhook HMAC signing** — all outbound webhook payloads are signed with
@@ -74,8 +73,7 @@ Smeldr cannot protect against:
 - **`ensureBootstrap`** — on first start, if no admin token exists, Smeldr
   automatically creates one and prints it to stdout. Copy it immediately —
   it cannot be retrieved again.
-- **Token revocation** — `TokenStore.Revoke(id)` is effective immediately.
-  Revocation is permanent; a revoked token cannot be restored.
+- **Token revocation**: `TokenStore.Revoke(id)` is effective on the next request, on every HTTP route and on MCP (since v1.191.1; before, HTTP routes did not check it). Suspending or retiring an identity refuses all of its tokens the same way. Revocation is permanent; a revoked token cannot be restored.
 - **ErrLastAdmin guard** — Smeldr refuses to revoke the last active admin token.
   Create a replacement before revoking.
 
