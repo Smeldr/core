@@ -681,8 +681,12 @@ func TestEventsAfter_PagesPastHiddenEvents(t *testing.T) {
 	if len(first.Events) != 0 || !first.More || !strings.HasPrefix(first.Next, eventContinuationPrefix) {
 		t.Errorf("first page = %+v, want empty, more, and a continuation", first)
 	}
-	if strings.Contains(first.Next, "e-") {
-		t.Errorf("the continuation names an event: %q", first.Next)
+	// The continuation is a sealed log position, not an event: it opens to
+	// the sequence number where the scan stopped (T1192; searching the
+	// random base64 for "e-" failed now and then).
+	seq, ok, err := app.openEventContinuation(first.Next)
+	if err != nil || !ok || seq != 500 {
+		t.Errorf("the continuation opens to %d (ok %v, %v), want the log position 500", seq, ok, err)
 	}
 }
 
