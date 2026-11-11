@@ -2,7 +2,7 @@ module example/blog
 
 go 1.26.5
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	modernc.org/sqlite v1.50.1

@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Security
+
+- **Core now builds with the Go toolchain go1.26.11, which fixes GO-2026-6859 in net/http (T1191).** govulncheck reported GO-2026-6859 against core, and go1.26.11 fixes it in the standard library's `net/http`. The `toolchain` line in go.mod and in the example modules now names go1.26.11 instead of go1.26.10. The release binaries of this version are built with go1.26.11. The `go 1.26.5` line is unchanged, so consumers need no newer Go.
+
 ---
 
 ## [1.191.1] - 2026-11-11
