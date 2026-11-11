@@ -1,5 +1,7 @@
 # Design's six needs from core, answered (T1114)
 
+**Superseded as the current assessment by [design-needs-v2.md](design-needs-v2.md) (T1178, 11 November 2026).** This file stays as the record of what core answered on 5 November.
+
 Report, 5 November 2026. It answers brand's note `smeldr/brand/drafts/design-needs-for-core-v1.md` (T1113, commit 78b96f6). Core read at main 62fde15 (core v1.189.3), MCP at smeldr.dev/mcp v1.75.1. Nothing here is built; architect turns the "to build" rows into Tasks after the D157 review of design v1.
 
 ## How to read the verdicts
