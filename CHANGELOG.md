@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Date-based re-evaluation of Decisions now queues on SQLite (T1196).** Ratifying a Decision with `next_eval_at` set never queued its re-evaluation on SQLite. The `schedule-eval` trigger read the field into a `sql.NullTime`, which fails on SQLite because the driver returns the `TIMESTAMPTZ` column as a string. The trigger now uses core's shared time scanner, which accepts either form, so the Decision is queued in `smeldr_eval_queue` and moves to `pending-re-evaluation` once its time has passed. The warning is now two messages, "eval_field unreadable" (with the error) and "eval_field empty"; PostgreSQL was not affected, and Decisions ratified on SQLite before this fix need a one-time backfill.
+
 ### Security
 
 - **Core now builds with the Go toolchain go1.26.11, which fixes GO-2026-6859 in net/http (T1191).** govulncheck reported GO-2026-6859 against core, and go1.26.11 fixes it in the standard library's `net/http`. The `toolchain` line in go.mod and in the example modules now names go1.26.11 instead of go1.26.10. The release binaries of this version are built with go1.26.11. The `go 1.26.5` line is unchanged, so consumers need no newer Go.

@@ -2394,18 +2394,26 @@ func fireAsyncTriggers(ctx context.Context, db DB, typeName, fromState, toState,
 					return
 				}
 				table := resolveItemTable(ctx, db, typeName)
-				var evalAt sql.NullTime
+				// nullTimeScanner reads both drivers: SQLite returns a
+				// TIMESTAMPTZ column (smeldr_decisions.next_eval_at) as a
+				// string, which sql.NullTime cannot scan (T1196).
+				var evalAt *time.Time
 				if err := db.QueryRowContext(ctx,
 					"SELECT "+cfg.EvalField+" FROM "+quoteIdent(table)+" WHERE id = $1", itemID,
-				).Scan(&evalAt); err != nil || !evalAt.Valid || evalAt.Time.IsZero() {
-					slog.WarnContext(ctx, "smeldr: schedule-eval: eval_field unreadable or empty",
+				).Scan(nullTimeScanner{dst: &evalAt}); err != nil {
+					slog.WarnContext(ctx, "smeldr: schedule-eval: eval_field unreadable",
+						"item_id", itemID, "eval_field", cfg.EvalField, "error", err)
+					return
+				}
+				if evalAt == nil || evalAt.IsZero() {
+					slog.WarnContext(ctx, "smeldr: schedule-eval: eval_field empty",
 						"item_id", itemID, "eval_field", cfg.EvalField)
 					return
 				}
 				if _, err := db.ExecContext(ctx,
 					`INSERT INTO smeldr_eval_queue (id, type_name, item_id, to_state, eval_at)
 					 VALUES ($1, $2, $3, $4, $5) ON CONFLICT (type_name, item_id, to_state) DO NOTHING`,
-					NewID(), typeName, itemID, cfg.ToState, evalAt.Time.UTC(),
+					NewID(), typeName, itemID, cfg.ToState, evalAt.UTC(),
 				); err != nil {
 					slog.WarnContext(ctx, "smeldr: schedule-eval: INSERT failed",
 						"item_id", itemID, "error", err)

@@ -3688,15 +3688,16 @@ func setupEvalQueueFlow(t *testing.T, db *sql.DB) (typeName, itemID string) {
 	t.Helper()
 	ctx := context.Background()
 	typeName = "EvalItem"
-	// camelToSnake("EvalItem")+"s" = "eval_items"
+	// camelToSnake("EvalItem")+"s" = "eval_items". next_eval_at is TIMESTAMPTZ and
+	// holds a Go time, as on smeldr_decisions: SQLite returns it as a string (T1196).
 	if _, err := db.ExecContext(ctx,
-		`CREATE TABLE IF NOT EXISTS eval_items (id TEXT PRIMARY KEY, status TEXT NOT NULL, next_eval_at DATETIME, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+		`CREATE TABLE IF NOT EXISTS eval_items (id TEXT PRIMARY KEY, status TEXT NOT NULL, next_eval_at TIMESTAMPTZ, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
 	); err != nil {
 		t.Fatalf("create eval_items: %v", err)
 	}
 	itemID = NewID()
 	if _, err := db.ExecContext(ctx,
-		`INSERT INTO eval_items (id, status, next_eval_at) VALUES (?, 'ratified', datetime('now', '+1 day'))`, itemID,
+		`INSERT INTO eval_items (id, status, next_eval_at) VALUES (?, 'ratified', ?)`, itemID, time.Now().UTC().Add(24*time.Hour),
 	); err != nil {
 		t.Fatalf("insert eval_items: %v", err)
 	}
@@ -3793,7 +3794,7 @@ func TestFireAsyncTriggers_scheduleEval_noItemID(t *testing.T) {
 }
 
 func TestFireAsyncTriggers_scheduleEval_emptyEvalField(t *testing.T) {
-	// Item has next_eval_at = NULL → sql.NullTime.Valid = false → warn and return.
+	// Item has next_eval_at = NULL: the field is empty, warn and return.
 	db := newMigratedDB(t)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx,
@@ -3828,8 +3829,35 @@ func TestFireAsyncTriggers_scheduleEval_emptyEvalField(t *testing.T) {
 	fireAsyncTriggers(ctx, db, "NullEvalItem", "draft", "ratified", itemID)
 	time.Sleep(50 * time.Millisecond)
 
-	if !strings.Contains(buf.String(), "eval_field unreadable or empty") {
-		t.Errorf("null eval: expected 'eval_field unreadable or empty' in log, got:\n%s", buf.String())
+	if !strings.Contains(buf.String(), "eval_field empty") {
+		t.Errorf("null eval: expected 'eval_field empty' in log, got:\n%s", buf.String())
+	}
+}
+
+// TestFireAsyncTriggers_scheduleEval_unreadableFieldLogged: a value no time
+// scanner reads is logged with its error, apart from an empty field, and
+// nothing is queued (T1196).
+func TestFireAsyncTriggers_scheduleEval_unreadableFieldLogged(t *testing.T) {
+	db := newMigratedDB(t)
+	typeName, itemID := setupEvalQueueFlow(t, db)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `UPDATE eval_items SET next_eval_at = 'not a time' WHERE id = ?`, itemID); err != nil {
+		t.Fatal(err)
+	}
+	prev := slog.Default()
+	t.Cleanup(func() { restoreDefaultLogging(prev) })
+	var buf safeBuf
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	fireAsyncTriggers(ctx, db, typeName, "draft", "ratified", itemID)
+	time.Sleep(50 * time.Millisecond)
+
+	if out := buf.String(); !strings.Contains(out, "eval_field unreadable") || !strings.Contains(out, "error=") {
+		t.Errorf("expected the unreadable warning with its error, got:\n%s", out)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_eval_queue WHERE item_id = ?`, itemID).Scan(&count); err != nil || count != 0 {
+		t.Errorf("queued %d (%v), want 0", count, err)
 	}
 }
 
@@ -5512,5 +5540,45 @@ func TestDynamicContentRepo_WithRelations_Wired(t *testing.T) {
 	}
 	if repo.relStore != store {
 		t.Error("DynamicContentRepo should auto-wire WithRelations when App.relationStore is set")
+	}
+}
+
+// TestScheduleEval_RealDecisionTable: on the real smeldr_decisions table,
+// whose next_eval_at is TIMESTAMPTZ and comes back from SQLite as a string,
+// ratifying a Decision with next_eval_at set queues it, and the drain moves it
+// to pending-re-evaluation once due (T1196, docs' S3867).
+func TestScheduleEval_RealDecisionTable(t *testing.T) {
+	app, db, rs := setupTransitionItemApp(t)
+	ctx := stewardContext(t, db, rs)
+	insertDecision(t, db, "dec-e", "dec-e-slug", "proposed")
+	due := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	if _, err := db.Exec(`UPDATE smeldr_decisions SET next_eval_at = $1 WHERE id = 'dec-e'`, due); err != nil {
+		t.Fatal(err)
+	}
+	placeEdge(t, db, "dec-e", "Domain", "place-1", "belongs_to_domain", "asserted", nil)
+	if _, err := app.TransitionItemVia(ctx, "mcp", "Decision", "dec-e-slug", "ratified", ""); err != nil {
+		t.Fatalf("ratify: %v", err)
+	}
+	var queuedAt any
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		err := db.QueryRow(`SELECT eval_at FROM smeldr_eval_queue WHERE item_id = 'dec-e' AND to_state = 'pending-re-evaluation'`).Scan(&queuedAt)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("nothing queued for the ratified Decision: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if at, err := ParseTimestamp(queuedAt); err != nil || !at.Equal(due) {
+		t.Errorf("queued for %v (%v), want %v", at, err, due)
+	}
+	if _, triggered, _, err := app.DrainEvalQueue(context.Background()); err != nil || triggered != 1 {
+		t.Fatalf("drain: triggered %d, %v", triggered, err)
+	}
+	var status string
+	if err := db.QueryRow(`SELECT status FROM smeldr_decisions WHERE id = 'dec-e'`).Scan(&status); err != nil || status != "pending-re-evaluation" {
+		t.Errorf("status = %q (%v), want pending-re-evaluation", status, err)
 	}
 }
