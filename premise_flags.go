@@ -491,7 +491,7 @@ func (a *App) confirmPremise(ctx context.Context, decision, premise, reason stri
 	label := d.label(decisionID)
 	if err := requireActOver(ctx, a.governance, OperationRatify, AuthTarget{TypeName: "Decision", ID: decisionID},
 		placeAct{act: "confirming the premise of " + label, code: "confirm_premise", over: label,
-			place: readableRecord("Decision", decisionID), actRead: true, decision: "D149"}); err != nil {
+			place: readableRecord("Decision", decisionID), actRead: true}); err != nil {
 		return err
 	}
 	row, err := readPremiseRow(ctx, db, decisionID, premiseID)
@@ -625,7 +625,7 @@ func (a *App) confirmPremiseCondition(ctx context.Context, condition, reason str
 	// names it only when the caller can read it (T1067).
 	if err := requireActOver(ctx, a.governance, OperationRatify, AuthTarget{TypeName: "Decision", ID: decisionID},
 		placeAct{act: "confirming the premise of " + label, code: "confirm_premise", over: label,
-			place: readableRecord("Decision", decisionID), actRead: scope.Readable("Decision", decisionID), decision: "D149"}); err != nil {
+			place: readableRecord("Decision", decisionID), actRead: scope.Readable("Decision", decisionID)}); err != nil {
 		return err
 	}
 	if status != signalOpen {

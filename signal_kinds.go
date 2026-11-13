@@ -166,7 +166,7 @@ func CheckSignal(ctx context.Context, s *Signal, c SignalCutovers) ([]CreateWarn
 		return nil, problem(problemSignalConditionSystemOnly, fmt.Errorf("%w: signal_type %q is a condition: only the system creates it", ErrForbidden, s.SignalType),
 			problemValues{"signal_type": s.SignalType})
 	case !known:
-		msg := fmt.Sprintf("signal_type %q is history (D115): it is accepted until the instance's signal event cutover, then refused", s.SignalType)
+		msg := fmt.Sprintf("signal_type %q is a history type: it is accepted until the instance's signal event cutover, then refused", s.SignalType)
 		if r, ok := signalReplacement[s.SignalType]; ok {
 			msg += "; " + r
 		}

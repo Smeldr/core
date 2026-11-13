@@ -223,7 +223,7 @@ func TestReferences_SignalModule(t *testing.T) {
 
 	// The binding (task_plan item-c087cdf5): the refusal says what to send.
 	_, err = f.signals.MCPCreate(f.global, map[string]any{"sender": "core", "receiver": "architect", "signal_type": "question", "task_ref": "A185"})
-	wantFieldError(t, err, "task_ref", `no Task "A185" you can read; send a Task's address (T273), slug or ID in task_ref, and name any other record in subject_type and subject_id`)
+	wantFieldError(t, err, "task_ref", `no Task "A185" you can read; send a Task's address (a T followed by a number), slug or ID in task_ref, and name any other record in subject_type and subject_id`)
 
 	_, err = f.signals.MCPCreate(f.global, map[string]any{"sender": "core", "receiver": "architect", "signal_type": "question", "subject_type": "Task"})
 	wantFieldError(t, err, "subject_id", "is required with subject_type")
@@ -247,7 +247,7 @@ func TestReferences_InsertSignal(t *testing.T) {
 		t.Errorf("internal insert: subject %q task_ref %q edges %v", s.SubjectID, s.TaskRef, f.liveEdges(t, "Signal", s.ID, "about"))
 	}
 	err := InsertSignal(context.Background(), f.db, &Signal{Sender: "core", Receiver: "architect", SignalType: "question", TaskRef: "A185"})
-	wantFieldError(t, err, "task_ref", "send a Task's address (T273)")
+	wantFieldError(t, err, "task_ref", "send a Task's address (a T followed by a number)")
 
 	// A caller with an identity is held to its read scope: hidden is missing.
 	f.grant(t, "Task:"+task.ID, "Signal:*")

@@ -209,8 +209,8 @@ func legacyFieldWarning(field, sent, address, externalRef string) CreateWarning 
 	return CreateWarning{
 		Code:  "deprecated_field",
 		Field: field,
-		Message: fmt.Sprintf("%s is deprecated (D110): the server assigns the address (%s) and returns it in the result; %s. "+
-			"%s will be removed at the D110 cut; send your own numbering as external_ref.", field, address, what, field),
+		Message: fmt.Sprintf("%s is deprecated: the server assigns the address (%s) and returns it in the result; %s. "+
+			"%s will be removed at the instance's address cutover; send your own numbering as external_ref.", field, address, what, field),
 		Address: address,
 	}
 }
@@ -263,7 +263,7 @@ func RetiredFieldGuidance(field string) (message string, data map[string]any, ok
 	default:
 		return "", nil, false
 	}
-	return fmt.Sprintf("%s is no longer accepted: addresses are assigned by the server (D110), and the new item's address is returned in the result. To keep your own number, send it as external_ref.", field),
+	return fmt.Sprintf("%s is no longer accepted: addresses are assigned by the server, and the new item's address is returned in the result. To keep your own number, send it as external_ref.", field),
 		map[string]any{"field": field, "replacement": "external_ref", "decision": "D110"}, true
 }
 

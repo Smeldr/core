@@ -17,7 +17,7 @@ func TestRequireActOver_ReasonSafeToShow(t *testing.T) {
 	f := newAreaGateFixture(t)
 	// A human with no grants: lacks ratify over every place.
 	actor := actorCtx("no-grants", Human)
-	place := placeAct{act: "deleting ARE1", code: "delete_area", over: "ARE1", place: readableRecord("Area", f.area), actRead: true, decision: "D146"}
+	place := placeAct{act: "deleting ARE1", code: "delete_area", over: "ARE1", place: readableRecord("Area", f.area), actRead: true}
 	unread := place
 	unread.actRead = false
 
@@ -28,11 +28,11 @@ func TestRequireActOver_ReasonSafeToShow(t *testing.T) {
 		reason string
 		values map[string]string
 	}{
-		{"place readable", AllReadScope(), place, "deleting ARE1 needs ratify over ARE1 (D146)",
+		{"place readable", AllReadScope(), place, "deleting ARE1 needs ratify over ARE1",
 			map[string]string{"act": "delete_area", "operation": "ratify", "place": "ARE1"}},
-		{"place readable, act names an unread record", AllReadScope(), unread, "this needs ratify over ARE1 (D146)",
+		{"place readable, act names an unread record", AllReadScope(), unread, "this needs ratify over ARE1",
 			map[string]string{"act": "delete_area", "operation": "ratify", "place": "ARE1"}},
-		{"place not readable", &ReadScope{}, place, "this needs ratify over its place (D146)",
+		{"place not readable", &ReadScope{}, place, "this needs ratify over its place",
 			map[string]string{"act": "delete_area", "operation": "ratify"}},
 	}
 	for _, tc := range tests {

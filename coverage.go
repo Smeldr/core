@@ -147,7 +147,7 @@ func registerCoverageRule(app *App, db DB) {
 			// Area's gate: ratify over the rule's Area.
 			if err := requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "CoverageRule", ID: old.ID},
 				placeAct{act: fmt.Sprintf("changing %s's pattern, repository or kind", ruleLabel(old)), code: "change_coverage_rule", over: old.Area,
-					place: readableArea(ctx, db, old.Area), actRead: true, decision: "D146"}); err != nil {
+					place: readableArea(ctx, db, old.Area), actRead: true}); err != nil {
 				return err
 			}
 			// A changed rule goes back to not checked (T901): its count and
@@ -168,7 +168,7 @@ func registerCoverageRule(app *App, db DB) {
 		}
 		return requireActOver(ctx, app.governance, OperationApproveChange, AuthTarget{TypeName: "Area", ID: areaID},
 			placeAct{act: "adding a coverage rule to " + r.Area, code: "add_coverage_rule", over: r.Area,
-				place: readableRecord("Area", areaID), actRead: true, decision: "D146"})
+				place: readableRecord("Area", areaID), actRead: true})
 	}
 	afterRefs := refs.after
 	refs.after = func(ctx Context, db DB, rs *RelationStore, existing, item any) {
@@ -188,7 +188,7 @@ func registerCoverageRule(app *App, db DB) {
 		On[*CoverageRule](BeforeDelete, func(ctx Context, r *CoverageRule) error {
 			return requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "CoverageRule", ID: r.ID},
 				placeAct{act: "deleting " + ruleLabel(r), code: "delete_coverage_rule", over: r.Area,
-					place: readableArea(ctx, db, r.Area), actRead: true, decision: "D146"})
+					place: readableArea(ctx, db, r.Area), actRead: true})
 		}),
 	))
 }

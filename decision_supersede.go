@@ -155,7 +155,7 @@ func (a *App) requireRatifyOver(ctx context.Context, d decisionRef, act, code st
 	}
 	over := recordLabel(ctx, a.cfg.DB, placeTables[d.place.targetType], d.place.targetID)
 	return requireActOver(ctx, a.governance, OperationRatify, AuthTarget{TypeName: d.place.targetType, ID: d.place.targetID},
-		placeAct{act: act, code: code, over: over, place: readableRecord(d.place.targetType, d.place.targetID), actRead: true, decision: "D189"})
+		placeAct{act: act, code: code, over: over, place: readableRecord(d.place.targetType, d.place.targetID), actRead: true})
 }
 
 // requireDecisionGovernance refuses an act gated on ratify when no governance

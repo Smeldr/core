@@ -436,7 +436,7 @@ func ValidateSchemaDef(schema *ContentTypeSchema) error {
 				problemValues{"schema_field": f.Name, "type": f.References, "field_type": f.Type})
 		}
 		if f.Role == "title" && f.MaxLength > TitleMaxLength {
-			return fieldErr(problemSchemaFieldInvalid, "fields", fmt.Sprintf("%q is the title and has max_length %d: a title is at most %d characters (D112)", f.Name, f.MaxLength, TitleMaxLength),
+			return fieldErr(problemSchemaFieldInvalid, "fields", fmt.Sprintf("%q is the title and has max_length %d: a title is at most %d characters", f.Name, f.MaxLength, TitleMaxLength),
 				problemValues{"schema_field": f.Name, "value": strconv.Itoa(f.MaxLength), "limit": strconv.Itoa(TitleMaxLength)})
 		}
 		if f.Role == "channel" {

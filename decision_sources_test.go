@@ -165,7 +165,7 @@ func TestDecisionSources_WhoMayChange(t *testing.T) {
 		}
 		return f.app.prepareDecision(c, &old, &next)
 	}
-	wantGateRefusal(t, change(actorCtx("plain-1"), ratified, "docs/other.md"), "sources needs ratify over DOM1 (D148)")
+	wantGateRefusal(t, change(actorCtx("plain-1"), ratified, "docs/other.md"), "sources needs ratify over DOM1")
 	wantGateRefusal(t, change(actorCtx("agent-1", Agent), ratified, "docs/other.md"), "never ratifies")
 	if err := change(actorCtx("plain-1"), ratified, "docs/money.md"); err != nil {
 		t.Errorf("unchanged sources: %v", err)

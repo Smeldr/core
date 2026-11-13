@@ -223,7 +223,7 @@ func TestPhaseThreeF_Cutovers(t *testing.T) {
 	t.Run("signal history type refused", func(t *testing.T) {
 		_, err := CheckSignal(ctx, &Signal{SignalType: "plan-ready", Message: "x"}, SignalCutovers{Event: past})
 		wantTypedF(t, err, problemSignalHistoryTypeRefused, nil)
-		wantTypedFField(t, err, "signal_type", `validation failed: signal_type: signal_type "plan-ready" is history (D115): it is accepted until the instance's signal event cutover, then refused`)
+		wantTypedFField(t, err, "signal_type", `validation failed: signal_type: signal_type "plan-ready" is a history type: it is accepted until the instance's signal event cutover, then refused`)
 	})
 	t.Run("signal message too long", func(t *testing.T) {
 		msg := strings.Repeat("m", SignalMessageMaxLength+1)
@@ -238,7 +238,7 @@ func TestPhaseThreeF_AmendmentTypeNotInList(t *testing.T) {
 	err := checkAmendmentType(nil, &Amendment{AmendmentType: "feat"})
 	allowed := strings.Join(AmendmentTypes, ", ")
 	wantTypedF(t, err, problemAmendmentTypeNotInList, map[string]string{"value": "feat", "allowed": allowed})
-	wantTypedFField(t, err, "amendment_type", `validation failed: amendment_type: "feat" is not an amendment type: use one of `+allowed+" (D112)")
+	wantTypedFField(t, err, "amendment_type", `validation failed: amendment_type: "feat" is not an amendment type: use one of `+allowed)
 }
 
 // A custom role registered again at another level.

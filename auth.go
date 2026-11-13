@@ -622,10 +622,10 @@ func (ts *TokenStore) createToken(ctx context.Context, name, role string, class 
 	if id, kind := actorFromContext(ctx); id != "" {
 		switch {
 		case kind == string(Job):
-			return "", "", fmt.Errorf("create token: %w", refuse(problemTokenJobNeverMints, "a job token never creates a token (D156)", nil))
+			return "", "", fmt.Errorf("create token: %w", refuse(problemTokenJobNeverMints, "a job token never creates a token", nil))
 		case kind == string(Agent) && class != Agent && class != Job:
 			return "", "", fmt.Errorf("create token: %w", refuse(problemTokenAgentMintsAutomatedOnly,
-				"an agent token mints only agent or job tokens (D142): the new token would be "+classLabel(string(class)),
+				"an agent token mints only agent or job tokens: the new token would be "+classLabel(string(class)),
 				problemValues{"token_class": classLabel(string(class))}))
 		}
 	}

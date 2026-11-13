@@ -495,7 +495,7 @@ func checkGrantee(ctx context.Context, db DB, grantee string) error {
 	}
 	if n == 0 {
 		return fieldErr(problemGrantGranteeNotIdentity, "token_id",
-			fmt.Sprintf("%q is no identity: a grant is held by an identity (D165); mint a token for it first and grant to the id the mint returned", grantee),
+			fmt.Sprintf("%q is no identity: a grant is held by an identity; mint a token for it first and grant to the id the mint returned", grantee),
 			problemValues{"grantee": grantee})
 	}
 	return nil

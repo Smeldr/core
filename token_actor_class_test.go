@@ -300,8 +300,8 @@ func TestActorKindFor_Precedence(t *testing.T) {
 // a human or unclassified token it minted could ratify for it. A human,
 // unclassified or absent caller mints any class (D156 point 4).
 func TestCreateToken_ClassRules(t *testing.T) {
-	const agentRule = "an agent token mints only agent or job tokens (D142): the new token would be "
-	const jobRule = "a job token never creates a token (D156)"
+	const agentRule = "an agent token mints only agent or job tokens: the new token would be "
+	const jobRule = "a job token never creates a token"
 	for _, tc := range []struct {
 		name   string
 		caller context.Context

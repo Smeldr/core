@@ -141,7 +141,7 @@ A Decision has to be placed before it can be ratified. Ask for both in one go:
 
 The agent places it (Decision D1 to the organization ORG1, `belongs_to_organization`), then tries to ratify and is refused:
 
-    {"code": -32001, "message": "forbidden: an agent token never ratifies, supersedes or amends a Decision (D142); a human approver does"}
+    {"code": -32001, "message": "forbidden: an agent token never ratifies, supersedes or amends a Decision; a human approver does"}
 
 That is the model at work: an AI agent proposes, a person decides. Now you ratify it:
 

@@ -440,7 +440,7 @@ func (a *App) authorizeChangeCheckAnswer(ctx context.Context, checkID, areaID, a
 		return fmt.Errorf("%w: the authority over Area %s cannot be read: %s", ErrInternal, areaAddress, err)
 	}
 	if !ok {
-		return problem(problemChangeCheckAnswerAuthority, fmt.Errorf("%w: answering for Area %s needs approve-change over it (its area-approver, its domain-approver or an approver) or %s on the Check (D144)", ErrForbidden, areaAddress, RoleItemChangeApprover),
+		return problem(problemChangeCheckAnswerAuthority, fmt.Errorf("%w: answering for Area %s needs approve-change over it (its area-approver, its domain-approver or an approver) or %s on the Check", ErrForbidden, areaAddress, RoleItemChangeApprover),
 			problemValues{"area": areaAddress, "role": RoleItemChangeApprover})
 	}
 	return nil

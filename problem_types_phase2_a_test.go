@@ -91,12 +91,12 @@ func TestPhaseTwoA_ApprovalAndGovernance(t *testing.T) {
 			err: grant(as("agent-1", Agent), RoleGrant{TokenID: "human-2", RoleName: RoleApprover}),
 			typ: problemGrantAgentGrantsApprovalRole, values: map[string]string{"role": RoleApprover, "operation": OperationRatify},
 			sentinel: ErrForbidden,
-			msg:      `Grant: forbidden: an agent token never grants a role that ratifies or approves changes (D142): role "approver" holds ratify`},
+			msg:      `Grant: forbidden: an agent token never grants a role that ratifies or approves changes: role "approver" holds ratify`},
 		{name: "automated holds ratify",
 			err: grant(human, RoleGrant{TokenID: "agent-1", RoleName: RoleApprover}),
 			typ: problemGrantAutomatedHoldsRatify, values: map[string]string{"token_class": "agent", "role": RoleApprover},
 			sentinel: ErrForbidden,
-			msg:      `Grant: forbidden: an agent token never holds ratify (D142): role "approver" holds it`},
+			msg:      `Grant: forbidden: an agent token never holds ratify: role "approver" holds it`},
 		{name: "automated approve-change not on an Area",
 			err:      grant(human, RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover}),
 			typ:      problemGrantAutomatedApproveChangeNotArea,
@@ -118,7 +118,7 @@ func TestPhaseTwoA_ApprovalAndGovernance(t *testing.T) {
 			err: grant(as("job-1", Job), RoleGrant{TokenID: "human-2", RoleName: "editor"}),
 			typ: problemGrantJobNeverGrants, values: map[string]string{"role": "editor"},
 			sentinel: ErrForbidden,
-			msg:      `Grant: forbidden: a job token never grants a role (D156): role "editor"`},
+			msg:      `Grant: forbidden: a job token never grants a role: role "editor"`},
 		{name: "grant of an unknown role",
 			err: grant(human, RoleGrant{TokenID: "human-2", RoleName: "nope"}),
 			typ: problemRoleNotFound, values: map[string]string{"role": "nope"},
@@ -165,7 +165,7 @@ func TestPhaseTwoA_RatifyAutomatedClass(t *testing.T) {
 	wantTypedA(t, err, problemRatifyAutomatedClass, map[string]string{"token_class": "agent"})
 	var re *RefusalError
 	if !errors.Is(err, ErrForbidden) || !errors.As(err, &re) ||
-		re.Reason != "an agent token never ratifies, supersedes or amends a Decision (D142); a human approver does" {
+		re.Reason != "an agent token never ratifies, supersedes or amends a Decision; a human approver does" {
 		t.Errorf("err = %v; want the D142 refusal", err)
 	}
 	if !strings.Contains(err.Error(), "forbidden: "+re.Reason) {
@@ -251,12 +251,12 @@ func TestPhaseTwoA_IdentityAndTokens(t *testing.T) {
 			values: map[string]string{"allowed": "agent, job, human"},
 			field:  "actor_class", msg: `validation failed: actor_class: must be "agent", "job" or "human" (leave it empty for an unclassified token)`},
 		{name: "job mints", err: mint(as("j-9", Job), "editor", Agent), typ: problemTokenJobNeverMints, values: nil,
-			sentinel: ErrForbidden, msg: "create token: forbidden: a job token never creates a token (D156)"},
+			sentinel: ErrForbidden, msg: "create token: forbidden: a job token never creates a token"},
 		{name: "agent mints a human", err: mint(as("a-9", Agent), "editor", Human), typ: problemTokenAgentMintsAutomatedOnly,
 			values: map[string]string{"token_class": "human"}, sentinel: ErrForbidden,
-			msg: "create token: forbidden: an agent token mints only agent or job tokens (D142): the new token would be human"},
+			msg: "create token: forbidden: an agent token mints only agent or job tokens: the new token would be human"},
 		{name: "grant to no identity", err: granteeErr, typ: problemGrantGranteeNotIdentity, values: map[string]string{"grantee": "nobody"},
-			field: "token_id", msg: `validation failed: token_id: "nobody" is no identity: a grant is held by an identity (D165); mint a token for it first and grant to the id the mint returned`},
+			field: "token_id", msg: `validation failed: token_id: "nobody" is no identity: a grant is held by an identity; mint a token for it first and grant to the id the mint returned`},
 		{name: "rev for no identity", err: revErr, typ: problemRevNotApplicable, values: map[string]string{"grantee": plainID},
 			field: "rev", msg: fmt.Sprintf("validation failed: rev: %q is no identity, so there is no rev to name: leave rev out", plainID)},
 	}

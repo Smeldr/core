@@ -56,7 +56,7 @@ func taskReferences() []referenceField {
 			return RelationEdge{SourceType: "Task", SourceID: item.(*Task).ID, TargetType: targetType, TargetID: targetID, RelationKind: kind}
 		},
 		refusal: func(v string) string {
-			return fmt.Sprintf("no Decision or Goal %q you can read; name the one this Task implements by address (D113, G12), slug or ID", v)
+			return fmt.Sprintf("no Decision or Goal %q you can read; name the one this Task implements by its address (D or G followed by a number), slug or ID", v)
 		},
 	}}
 }
@@ -77,7 +77,7 @@ func amendmentReferences() []referenceField {
 // no readable Task. Agents send Signals all day, so it says what to send
 // instead (task_plan item-c087cdf5).
 func signalTaskRefRefusal(v string) string {
-	return fmt.Sprintf("no Task %q you can read; send a Task's address (T273), slug or ID in task_ref, and name any other record in subject_type and subject_id", v)
+	return fmt.Sprintf("no Task %q you can read; send a Task's address (a T followed by a number), slug or ID in task_ref, and name any other record in subject_type and subject_id", v)
 }
 
 // orchestrationAddOnTypes are the record types of the Orchestration add-on

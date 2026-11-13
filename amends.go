@@ -195,7 +195,7 @@ func canonicalDecisionNumber(s string) (string, error) {
 	if bareNumberRe.MatchString(s) {
 		return "D" + strings.TrimLeft(s, "0"), nil
 	}
-	return "", fieldErr(problemFieldInvalidFormat, "amends", fmt.Sprintf("%q is not a Decision address (use the form D104)", s), problemValues{"value": s})
+	return "", fieldErr(problemFieldInvalidFormat, "amends", fmt.Sprintf("%q is not a Decision address: a D followed by a number", s), problemValues{"value": s})
 }
 
 // resolveDecisionID finds the Decision whose address is canon ("D104"). A

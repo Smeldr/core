@@ -31,7 +31,7 @@ func TitleFieldWarnings(schema *ContentTypeSchema) []CreateWarning {
 		}
 	}
 	return []CreateWarning{{Code: "title_field_missing", Field: "fields",
-		Message: fmt.Sprintf("record type %q declares no title field: give one string field the role \"title\" (D112), at most %d characters", schema.TypeName, TitleMaxLength)}}
+		Message: fmt.Sprintf("record type %q declares no title field: give one string field the role \"title\", at most %d characters", schema.TypeName, TitleMaxLength)}}
 }
 
 // dynamicFieldWarnings returns the title and length warnings of a dynamic

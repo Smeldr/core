@@ -175,15 +175,15 @@ func TestAreaGate_CoverageRules(t *testing.T) {
 // The shared check: no governance skips, no actor is refused, a failed read
 // is internal.
 func TestRequireOperationOver(t *testing.T) {
-	if err := requireActOver(context.Background(), nil, OperationRatify, AuthTarget{}, placeAct{act: "x", code: "test", over: "y", decision: "D146"}); err != nil {
+	if err := requireActOver(context.Background(), nil, OperationRatify, AuthTarget{}, placeAct{act: "x", code: "test", over: "y"}); err != nil {
 		t.Errorf("no governance: %v", err)
 	}
 	f := newAreaGateFixture(t)
-	wantGateRefusal(t, requireActOver(context.Background(), f.rs, OperationRatify, AuthTarget{TypeName: "Area", ID: f.area}, placeAct{act: "x", code: "test", over: "ARE1", place: readableRecord("Area", f.area), decision: "D146"}), "no actor is known")
+	wantGateRefusal(t, requireActOver(context.Background(), f.rs, OperationRatify, AuthTarget{TypeName: "Area", ID: f.area}, placeAct{act: "x", code: "test", over: "ARE1", place: readableRecord("Area", f.area)}), "no actor is known")
 	if _, err := f.db.Exec(`ALTER TABLE smeldr_role_grants RENAME TO grants_gone`); err != nil {
 		t.Fatal(err)
 	}
-	if err := requireActOver(actorCtx("human-1", Human), f.rs, OperationRatify, AuthTarget{TypeName: "Area", ID: f.area}, placeAct{act: "x", code: "test", over: "ARE1", place: readableRecord("Area", f.area), decision: "D146"}); !errors.Is(err, ErrInternal) {
+	if err := requireActOver(actorCtx("human-1", Human), f.rs, OperationRatify, AuthTarget{TypeName: "Area", ID: f.area}, placeAct{act: "x", code: "test", over: "ARE1", place: readableRecord("Area", f.area)}); !errors.Is(err, ErrInternal) {
 		t.Errorf("grant read fails: %v", err)
 	}
 }

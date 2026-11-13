@@ -18,6 +18,13 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Changed
+
+- **Error and warning messages no longer name records of Smeldr's own instance by address (T1211).** Before this change, 22 messages ended with a record address such as "(D142)", "(D156)", "(D112)" or "(T273)", and the place-authority refusals (`ratify.automated_class`, `place.authority_required`) appended "(D145)", "(D146)", "(D148)", "(D149)" or "(D189)". Those addresses name records on smeldr.dev's own instance, so on any other instance they point at other records or at nothing. Each message still says what is refused and what to do. Examples of the form now describe the record in words (for example, "a D followed by a number") instead of citing it. Messages are not part of the API contract (the problem type id is), so this changes no API. Code that matched message text should match the problem type id instead (`smeldr.ProblemTypeOf`).
+- **Refusals of job tokens now read "a job token" instead of "an job token" (T1211).** This is a grammar fix in the refusal text only. There is no behaviour change.
+- **`ProblemTypeInfo.Rule`, the `rule` wire field and `docs/PROBLEM_TYPES.md` now say what `rule` means (T1211).** `rule` names the records of Smeldr's own design (Decisions and Tasks on smeldr.dev's instance) that a refusal rests on. It does not name records on the instance that answered, and it is not meant for end users; the type URI remains the stable name for users. The field stays and is not deprecated. The value `decision` sent by the D110 refusal of a server-assigned number field is documented the same way.
+- **A test now fails when a message names a record address (T1211).** `TestMessagesNameNoRecordAddresses` reads the calls that build messages (errors, refusals, warnings) and fails on a new message that cites a record address.
+
 ---
 
 ## [1.193.0] - 2026-11-13

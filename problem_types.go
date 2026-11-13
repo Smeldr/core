@@ -21,7 +21,11 @@ type ProblemTypeInfo struct {
 	Status int `json:"status"`
 	// Title is a short English summary, the RFC 9457 title.
 	Title string `json:"title"`
-	// Rule names the Decision or Task the refusal enforces, when it has one.
+	// Rule names the records of Smeldr's own design that the refusal rests
+	// on (Decisions and Tasks on smeldr.dev's instance), when it has any.
+	// They are not records on the instance that answers, and not meant for
+	// users: the type's id and URI name the refusal for them (T1211). The
+	// field stays on the wire and is not deprecated.
 	Rule string `json:"rule,omitempty"`
 	// Audience is who meets it: "person" (shown in a UI), "developer" (a
 	// program calling the API wrongly) or "operator" (running a migration).

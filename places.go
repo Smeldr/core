@@ -163,7 +163,7 @@ func registerPlaceTypes(app *App, db DB) {
 		saveHooksOption{prepare: func(ctx Context, existing, item any) error { return app.prepareArea(ctx, existing, item.(*Area)) }},
 		On[*Area](BeforeDelete, func(ctx Context, a *Area) error {
 			return requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "Area", ID: a.ID},
-				placeAct{act: "deleting " + areaLabel(a), code: "delete_area", over: areaLabel(a), place: readableRecord("Area", a.ID), actRead: true, decision: "D146"})
+				placeAct{act: "deleting " + areaLabel(a), code: "delete_area", over: areaLabel(a), place: readableRecord("Area", a.ID), actRead: true})
 		}),
 	))
 	app.Content(NewModule[*Set]((*Set)(nil),
@@ -364,19 +364,18 @@ func (s *RelationStore) requirePlaceAuthority(ctx context.Context, edge Relation
 		act, code = fmt.Sprintf("moving %s into %s", source, place), "move"
 	}
 	return requireActOver(ctx, rs, OperationRatify, AuthTarget{TypeName: edge.TargetType, ID: edge.TargetID},
-		placeAct{act: act, code: code, over: place, place: readableRecord(edge.TargetType, edge.TargetID), actRead: true, decision: "D145"})
+		placeAct{act: act, code: code, over: place, place: readableRecord(edge.TargetType, edge.TargetID), actRead: true})
 }
 
 // placeAct is what [requireActOver] says when it refuses. act names what is
 // being done in English and code its short name (place, move, unplace, ...)
 // that a UI keys its text on; over is the place's label. place reports
 // whether the caller may read the place, asked only on a refusal; actRead is
-// true when act names only records the caller has read. decision names the
-// Decision that requires the authority.
+// true when act names only records the caller has read.
 type placeAct struct {
-	act, code, over, decision string
-	place                     func(*ReadScope) bool
-	actRead                   bool
+	act, code, over string
+	place           func(*ReadScope) bool
+	actRead         bool
 }
 
 // readableRecord is a [placeAct] place check for a record known by type and
@@ -398,7 +397,7 @@ func readableRecord(typeName, id string) func(*ReadScope) bool {
 // also names nothing else the caller has not read. Otherwise the reason says
 // "this" and "its place", and no place value is sent.
 func requireActOver(ctx context.Context, rs *RoleStore, op string, target AuthTarget, p placeAct) error {
-	act, code, over, decision := p.act, p.code, p.over, p.decision
+	act, code, over := p.act, p.code, p.over
 	if rs == nil {
 		return nil
 	}
@@ -409,7 +408,7 @@ func requireActOver(ctx context.Context, rs *RoleStore, op string, target AuthTa
 			problemValues{"act": code, "operation": op, "place": over})
 	case op == OperationRatify && automatedClass(kind):
 		return problem(problemRatifyAutomatedClass,
-			fmt.Errorf("%w: an %s token never ratifies, so it cannot do this: %s needs ratify over %s (%s)", ErrForbidden, kind, act, over, decision),
+			fmt.Errorf("%w: %s never ratifies, so it cannot do this: %s needs ratify over %s", ErrForbidden, tokenWithArticle(string(kind)), act, over),
 			problemValues{"token_class": string(kind), "act": code, "place": over})
 	}
 	ok, err := rs.authorizedOver(ctx, actor, op, target, true)
@@ -419,16 +418,26 @@ func requireActOver(ctx context.Context, rs *RoleStore, op string, target AuthTa
 	if !ok {
 		scope, err := scopeFor(ctx, rs)
 		if err != nil || !p.place(scope) {
-			return refuse(problemPlaceAuthorityRequired, fmt.Sprintf("this needs %s over its place (%s)", op, decision),
+			return refuse(problemPlaceAuthorityRequired, fmt.Sprintf("this needs %s over its place", op),
 				problemValues{"act": code, "operation": op})
 		}
 		if !p.actRead {
 			act = "this"
 		}
-		return refuse(problemPlaceAuthorityRequired, fmt.Sprintf("%s needs %s over %s (%s)", act, op, over, decision),
+		return refuse(problemPlaceAuthorityRequired, fmt.Sprintf("%s needs %s over %s", act, op, over),
 			problemValues{"act": code, "operation": op, "place": over})
 	}
 	return nil
+}
+
+// tokenWithArticle is "an agent token", "a job token": a token class with
+// its article, for a message (S3895: "an job token").
+func tokenWithArticle(class string) string {
+	switch class {
+	case "agent", "unclassified":
+		return "an " + class + " token"
+	}
+	return "a " + class + " token"
 }
 
 // placeGated reports whether D145 gates a place edge: from a Decision that is
@@ -531,5 +540,5 @@ func (app *App) prepareArea(ctx Context, existing any, a *Area) error {
 	}
 	return requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: "Area", ID: old.ID},
 		placeAct{act: fmt.Sprintf("changing %s's approval mode", areaLabel(old)), code: "change_approval_mode", over: areaLabel(old),
-			place: readableRecord("Area", old.ID), actRead: true, decision: "D146"})
+			place: readableRecord("Area", old.ID), actRead: true})
 }

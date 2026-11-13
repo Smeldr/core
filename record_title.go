@@ -19,7 +19,7 @@ const TitleMaxLength = 120
 // TitleGuidance is the guided text of a title error, after
 // [Config.TitleCutover]: what the field must hold, so a caller (or a model)
 // can correct its call.
-const TitleGuidance = "a title is required: one line of at most 120 characters, a short statement of what the record is (D112)"
+const TitleGuidance = "a title is required: one line of at most 120 characters, a short statement of what the record is"
 
 // AmendmentTypes is the closed list of [Amendment.AmendmentType] values (D112).
 var AmendmentTypes = []string{"feature", "fix", "docs", "chore", "test", "ci", "refactor", "release"}
@@ -99,7 +99,7 @@ func retiredFieldWarnings(item any, fields map[string]any) []CreateWarning {
 	for k := range fields {
 		if strings.EqualFold(k, "pilot") {
 			return []CreateWarning{{Code: "deprecated_field", Field: "pilot",
-				Message: "pilot is retired (D112) and was not stored: band and actor say who did the work"}}
+				Message: "pilot is retired and was not stored: band and actor say who did the work"}}
 		}
 	}
 	return nil
@@ -119,7 +119,7 @@ func checkAmendmentType(existing, item *Amendment) error {
 	if slices.Contains(AmendmentTypes, item.AmendmentType) {
 		return nil
 	}
-	return fieldErr(problemAmendmentTypeNotInList, "amendment_type", fmt.Sprintf("%q is not an amendment type: use one of %s (D112)",
+	return fieldErr(problemAmendmentTypeNotInList, "amendment_type", fmt.Sprintf("%q is not an amendment type: use one of %s",
 		item.AmendmentType, strings.Join(AmendmentTypes, ", ")), problemValues{"value": item.AmendmentType, "allowed": strings.Join(AmendmentTypes, ", ")})
 }
 

@@ -89,7 +89,7 @@ func TestPhaseTwoC_ChangeCheckWrites(t *testing.T) {
 
 	err = m.MCPDelete(f.ops, res.Check.Slug)
 	wantTypedC(t, err, problemChangeCheckNotDeletable, nil)
-	wantSentinelC(t, err, ErrForbidden, ErrForbidden.Error()+": a ChangeCheck is not deleted; how long Checks are kept is decided later (D143)")
+	wantSentinelC(t, err, ErrForbidden, ErrForbidden.Error()+": a ChangeCheck is not deleted; how long Checks are kept is not decided yet")
 }
 
 func TestPhaseTwoC_SupersedeRace(t *testing.T) {
@@ -137,7 +137,7 @@ func TestPhaseTwoC_AnswerChangeCheck(t *testing.T) {
 	err := f.app.AnswerChangeCheck(human("ops-1"), c.Address, f.a2.Address, true, "")
 	wantTypedC(t, err, problemChangeCheckAnswerAuthority, map[string]string{"area": f.a2.Address, "role": RoleItemChangeApprover})
 	wantSentinelC(t, err, ErrForbidden, ErrForbidden.Error()+": answering for Area "+f.a2.Address+
-		" needs approve-change over it (its area-approver, its domain-approver or an approver) or item-change-approver on the Check (D144)")
+		" needs approve-change over it (its area-approver, its domain-approver or an approver) or item-change-approver on the Check")
 
 	other, err := f.areas.MCPCreate(TrustedRead(authorCtx()).(Context), map[string]any{"name": "Elsewhere"})
 	if err != nil {

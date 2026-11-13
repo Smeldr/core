@@ -179,7 +179,7 @@ func registerChangeCheck(app *App, db DB) {
 		At("/change-checks"), Repo(NewSQLRepo[*ChangeCheck](db, Table("smeldr_change_checks"))), MCP(MCPRead), withAddress(),
 		saveHooksOption{prepare: refuse},
 		On[*ChangeCheck](BeforeDelete, func(Context, *ChangeCheck) error {
-			return problem(problemChangeCheckNotDeletable, fmt.Errorf("%w: a ChangeCheck is not deleted; how long Checks are kept is decided later (D143)", ErrForbidden), nil)
+			return problem(problemChangeCheckNotDeletable, fmt.Errorf("%w: a ChangeCheck is not deleted; how long Checks are kept is not decided yet", ErrForbidden), nil)
 		}),
 	))
 }

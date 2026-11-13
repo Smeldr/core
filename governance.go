@@ -1193,7 +1193,7 @@ func (s *RoleStore) GrantAt(ctx context.Context, grant RoleGrant, rev *int) (str
 		return "", nil, err
 	}
 	if grantorClass == string(Job) {
-		return "", nil, fmt.Errorf("Grant: %w", refuse(problemGrantJobNeverGrants, fmt.Sprintf("a job token never grants a role (D156): role %q", grant.RoleName),
+		return "", nil, fmt.Errorf("Grant: %w", refuse(problemGrantJobNeverGrants, fmt.Sprintf("a job token never grants a role: role %q", grant.RoleName),
 			problemValues{"role": grant.RoleName}))
 	}
 	// D142 point 5 (T884): agent and job tokens never hold ratify, and hold

@@ -328,7 +328,7 @@ func (s *RoleStore) checkAgentGrant(ctx context.Context, grant RoleGrant, roleID
 			op = OperationRatify
 		}
 		return fmt.Errorf("Grant: %w", refuse(problemGrantAgentGrantsApprovalRole,
-			fmt.Sprintf("an agent token never grants a role that ratifies or approves changes (D142): role %q holds %s", grant.RoleName, op),
+			fmt.Sprintf("an agent token never grants a role that ratifies or approves changes: role %q holds %s", grant.RoleName, op),
 			problemValues{"role": grant.RoleName, "operation": op}))
 	}
 	class, err := actorClass(ctx, s.db, grant.TokenID)
@@ -344,7 +344,7 @@ func (s *RoleStore) checkAgentGrant(ctx context.Context, grant RoleGrant, roleID
 	// (RefusalError, T971).
 	if ratify {
 		return fmt.Errorf("Grant: %w", refuse(problemGrantAutomatedHoldsRatify,
-			fmt.Sprintf("an %s token never holds ratify (D142): role %q holds it", class, grant.RoleName),
+			fmt.Sprintf("%s never holds ratify: role %q holds it", tokenWithArticle(string(class)), grant.RoleName),
 			problemValues{"token_class": class, "role": grant.RoleName}))
 	}
 	if ScopeMode(r.scopeMode) != ScopeDynamic || r.relationKind != "belongs_to_area" || grant.ScopeAnchorID == "" {
@@ -425,7 +425,7 @@ func refuseAutomatedRatify(ctx context.Context, requiredOperation string) error 
 	}
 	if _, kind := actorFromContext(ctx); automatedClass(kind) {
 		return refuse(problemRatifyAutomatedClass,
-			fmt.Sprintf("an %s token never ratifies, supersedes or amends a Decision (D142); a human approver does", kind),
+			fmt.Sprintf("%s never ratifies, supersedes or amends a Decision; a human approver does", tokenWithArticle(string(kind))),
 			problemValues{"token_class": string(kind)})
 	}
 	return nil

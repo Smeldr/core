@@ -188,11 +188,11 @@ func (app *App) prepareDecision(ctx Context, existing any, d *Decision) error {
 		return err
 	}
 	if !found {
-		return problem(problemDecisionSourcesNeedPlace, fmt.Errorf("%w: changing %s's sources needs ratify over its place, and it has none (D148)", ErrForbidden, label),
+		return problem(problemDecisionSourcesNeedPlace, fmt.Errorf("%w: changing %s's sources needs ratify over its place, and it has none: place it first", ErrForbidden, label),
 			problemValues{"decision": label})
 	}
 	place := recordLabel(ctx, db, placeTables[p.targetType], p.targetID)
 	return requireActOver(ctx, app.governance, OperationRatify, AuthTarget{TypeName: p.targetType, ID: p.targetID},
 		placeAct{act: fmt.Sprintf("changing %s's sources", label), code: "change_sources", over: place,
-			place: readableRecord(p.targetType, p.targetID), actRead: true, decision: "D148"})
+			place: readableRecord(p.targetType, p.targetID), actRead: true})
 }

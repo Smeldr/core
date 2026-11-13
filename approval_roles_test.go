@@ -162,7 +162,7 @@ func TestRatify_AgentNeverRatifies(t *testing.T) {
 			}
 			// The D142 refusal carries its reason (T971).
 			var re *RefusalError
-			if tc.want != nil && (!errors.As(err, &re) || !strings.Contains(re.Reason, "never ratifies, supersedes or amends a Decision (D142)")) {
+			if tc.want != nil && (!errors.As(err, &re) || !strings.Contains(re.Reason, "never ratifies, supersedes or amends a Decision")) {
 				t.Errorf("err = %v, want a RefusalError with the D142 reason", err)
 			}
 		})
@@ -204,7 +204,7 @@ func TestGrant_AgentRule(t *testing.T) {
 		{"agent area-approver on a Domain", human, RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.domain}, "holds no approve-change over Area"},
 		{"no grantor", context.Background(), RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "needs a human grantor"},
 		{"agent grantor", as("agent-1", Agent), RoleGrant{TokenID: "job-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "an agent token never grants a role that ratifies or approves changes"},
-		{"job grantor of an Area grant", as("job-1", Job), RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "a job token never grants a role (D156)"},
+		{"job grantor of an Area grant", as("job-1", Job), RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "a job token never grants a role"},
 		{"unclassified grantor", as("plain-1"), RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "the grantor is unclassified"},
 		{"human grantor without authority", as("human-2", Human), RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, "holds no approve-change"},
 		{"human domain-approver delegates the Area", human, RoleGrant{TokenID: "agent-1", RoleName: RoleAreaApprover, ScopeAnchorID: f.area}, ""},
@@ -580,7 +580,7 @@ func TestGrant_AgentGrantor(t *testing.T) {
 				return
 			}
 			var re *RefusalError
-			if !errors.Is(err, ErrForbidden) || !errors.As(err, &re) || !strings.Contains(re.Reason, "an agent token never grants a role that ratifies or approves changes (D142)") || !strings.Contains(re.Reason, tc.want) {
+			if !errors.Is(err, ErrForbidden) || !errors.As(err, &re) || !strings.Contains(re.Reason, "an agent token never grants a role that ratifies or approves changes") || !strings.Contains(re.Reason, tc.want) {
 				t.Fatalf("err = %v; want a RefusalError with %q", err, tc.want)
 			}
 		})
@@ -619,7 +619,7 @@ func TestGrant_JobGrantor(t *testing.T) {
 	} {
 		_, err := f.rs.Grant(job, g)
 		var re *RefusalError
-		if !errors.Is(err, ErrForbidden) || !errors.As(err, &re) || re.Reason != fmt.Sprintf("a job token never grants a role (D156): role %q", g.RoleName) {
+		if !errors.Is(err, ErrForbidden) || !errors.As(err, &re) || re.Reason != fmt.Sprintf("a job token never grants a role: role %q", g.RoleName) {
 			t.Errorf("%s: err = %v; want the D156 refusal", g.RoleName, err)
 		}
 	}
