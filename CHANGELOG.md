@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.193.0] - 2026-11-13
+
 ### Added
 
 - **`App.SupersedeDecision` replaces a Decision in one write (D189, T1187).** It takes a `SupersedeRequest` and returns a `SupersedeResult`, in one transaction or not at all: the Decisions, the place and the relation commit together, and standing is recorded after the commit, as on any transition. The move is written only while the replaced Decision is still in the state the checks read, so two overlapping supersedes cannot both commit, with or without a rev; the later one is refused with `decision.replacement_state`. Exactly one of `SupersedeRequest.Replacement` (an existing, ratified Decision) and `SupersedeRequest.New` (a replacement this write creates, places where the replaced Decision is placed and ratifies) must be set. The relation is asserted and the replaced Decision moves to `superseded` in the same write. **New requirement:** with an existing replacement, the caller needs `ratify` over the replacement's place as well as the replaced Decision's; asserting `supersedes` alone never required it. `App.SupersedeDecisionVia` names the surface. Capability `item supersede`.
