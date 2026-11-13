@@ -7,7 +7,7 @@ toolchain go1.26.11
 require (
 	modernc.org/sqlite v1.50.1
 	smeldr.dev/core v1.192.0
-	smeldr.dev/mcp v1.75.2
+	smeldr.dev/mcp v1.76.0
 )
 
 require (
@@ -20,7 +20,7 @@ require (
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	smeldr.dev/oauth v0.6.0 // indirect
+	smeldr.dev/oauth v0.6.1 // indirect
 )
 
 replace smeldr.dev/core => ../..
