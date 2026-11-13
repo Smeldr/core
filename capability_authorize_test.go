@@ -182,6 +182,7 @@ var readDecisions = map[capabilityKey]string{
 	{ResourceItem, "administrators"}:        "authenticated: names and classes of the administrators, for any member (D154)",
 	{ResourceItem, "rest_counts"}:           "reads any: RestCounts and StoredRestCounts apply the read rules per item",
 	{ResourceItem, "confirm_premise"}:       "reads any: App.ConfirmPremise checks the read and ratify over the place",
+	{ResourceItem, "premise_flags"}:         "reads any: App.PremiseFlags reads the Decision and names a premise only when readable",
 	{ResourceItem, "answer_change_check"}:   "reads any: App.AnswerChangeCheck checks the Area's read and approve-change",
 	{ResourceItem, "change_checks"}:         "reads any: ChangeCheckOf and ListChangeChecks filter by the read rules",
 	{ResourceRelation, VerbGet}:             "typed: the relations of one item, filtered by both ends",
@@ -228,7 +229,7 @@ func TestCapabilities_ReadDecisions(t *testing.T) {
 			t.Errorf("typedReads %s %s is not a read capability", key.resource, key.verb)
 		}
 	}
-	if len(typelessReadsAny) != 12 || !typelessReadsAny[capabilityKey{ResourceOps, VerbList}] || !typelessReadsAny[capabilityKey{ResourceItem, "rest_counts"}] || !typelessReadsAny[capabilityKey{ResourceItem, "confirm_premise"}] || !typelessReadsAny[capabilityKey{ResourceItem, "change_checks"}] || !typelessReadsAny[capabilityKey{ResourceItem, "answer_change_check"}] || !typelessReadsAny[capabilityKey{ResourceItem, "decisions_for_paths"}] || !typelessReadsAny[capabilityKey{ResourceItem, "approvers_of"}] || !typelessReadsAny[capabilityKey{ResourceItem, "search"}] || !typelessReadsAny[capabilityKey{ResourceSignal, VerbList}] || !typelessReadsAny[capabilityKey{ResourceRelation, VerbList}] ||
+	if len(typelessReadsAny) != 13 || !typelessReadsAny[capabilityKey{ResourceItem, "premise_flags"}] || !typelessReadsAny[capabilityKey{ResourceOps, VerbList}] || !typelessReadsAny[capabilityKey{ResourceItem, "rest_counts"}] || !typelessReadsAny[capabilityKey{ResourceItem, "confirm_premise"}] || !typelessReadsAny[capabilityKey{ResourceItem, "change_checks"}] || !typelessReadsAny[capabilityKey{ResourceItem, "answer_change_check"}] || !typelessReadsAny[capabilityKey{ResourceItem, "decisions_for_paths"}] || !typelessReadsAny[capabilityKey{ResourceItem, "approvers_of"}] || !typelessReadsAny[capabilityKey{ResourceItem, "search"}] || !typelessReadsAny[capabilityKey{ResourceSignal, VerbList}] || !typelessReadsAny[capabilityKey{ResourceRelation, VerbList}] ||
 		!typelessReadsAny[capabilityKey{ResourceSubscription, VerbGet}] || !typelessReadsAny[capabilityKey{ResourceSubscription, VerbList}] {
 		t.Errorf("typelessReadsAny = %v; want exactly item search, decisions_for_paths and approvers_of, signal list, relation list and subscription get and list", typelessReadsAny)
 	}
@@ -372,7 +373,7 @@ func TestVisibleCapabilities_PerItemReader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"item get", "item list", "item search", "item decisions_for_paths", "item answer_change_check", "item change_checks", "item approvers_of", "item administrators", "item rest_counts", "item confirm_premise", "relation get", "relation list", "signal list", "ops list", "subscription get", "subscription list"}
+	want := []string{"item get", "item list", "item search", "item decisions_for_paths", "item answer_change_check", "item change_checks", "item approvers_of", "item administrators", "item rest_counts", "item confirm_premise", "item premise_flags", "relation get", "relation list", "signal list", "ops list", "subscription get", "subscription list"}
 	if !slices.Equal(capabilityNames(got), want) {
 		t.Errorf("per-item reader sees %v; want %v", capabilityNames(got), want)
 	}

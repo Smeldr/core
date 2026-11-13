@@ -336,3 +336,32 @@ func TestSweepRestCounts_Dangling(t *testing.T) {
 		t.Errorf("a = %+v", got.ThisRestsOn)
 	}
 }
+
+// TestStoredRestCounts_Ratified (T1183): the sweep stores how many closed
+// items are ratified, summed over the same buckets; unknown before a sweep
+// and when a covered row was stored before the column existed.
+func TestStoredRestCounts_Ratified(t *testing.T) {
+	f := newStoredRestFixture(t)
+	if got := storedOf(t, f, allReader(), "a"); got.Ratified != (StoredRatified{}) {
+		t.Errorf("before a sweep: %+v", got.Ratified)
+	}
+	if _, err := f.app.SweepRestCounts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Every closed item in the fixture is ratified.
+	if got := storedOf(t, f, allReader(), "a"); got.Ratified != (StoredRatified{Known: true, ThisRestsOn: 6}) {
+		t.Errorf("reads everything: %+v", got.Ratified)
+	}
+	if got := storedOf(t, f, placeReader("a", "Area:A1"), "a"); got.Ratified != (StoredRatified{Known: true, ThisRestsOn: 2}) {
+		t.Errorf("area-reader of A1: %+v", got.Ratified)
+	}
+	// A row stored before the column existed: the split is unknown.
+	mustExecDB(t, f.db, `UPDATE smeldr_rest_counts SET ratified_count = NULL WHERE item_id = 'a' AND bucket_type = 'Area' AND bucket_id = 'A1'`)
+	if got := storedOf(t, f, allReader(), "a"); got.Ratified.Known || got.ThisRestsOn != (RestCount{Open: 2, Closed: 6}) {
+		t.Errorf("with an old row: %+v %+v", got.Ratified, got.ThisRestsOn)
+	}
+	// A reader whose buckets skip that row still knows its split.
+	if got := storedOf(t, f, placeReader("a", "Area:B1"), "a"); got.Ratified != (StoredRatified{Known: true, ThisRestsOn: 1}) {
+		t.Errorf("area-reader of B1: %+v", got.Ratified)
+	}
+}

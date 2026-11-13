@@ -26,6 +26,19 @@ type PlaceApprover struct {
 	// Organization for an approver, the Domain, the Area), or empty when the
 	// caller may not read that place.
 	AnchorAddress string `json:"anchor_address"`
+	// IsCaller is true when the holder is the caller's own identity (D165):
+	// every live token of that identity holds the grant's key, so it is true
+	// whichever of them called.
+	IsCaller bool `json:"is_caller"`
+}
+
+// callerIdentity is the caller's identity ID, the key a grant is held under,
+// or "" for a context with no authenticated user.
+func callerIdentity(ctx context.Context) string {
+	if sc, ok := ctx.(Context); ok {
+		return sc.User().ID
+	}
+	return ""
 }
 
 // approverRoleOrder is the order [App.ApproversOf] lists the roles in.
@@ -110,6 +123,7 @@ func (a *App) ApproversOf(ctx context.Context, place string) ([]PlaceApprover, e
 	if err != nil {
 		return nil, err
 	}
+	caller := callerIdentity(ctx)
 	seen := map[string]bool{}
 	for _, h := range holders {
 		tok, ok := tokens[h.holder]
@@ -121,7 +135,7 @@ func (a *App) ApproversOf(ctx context.Context, place string) ([]PlaceApprover, e
 		if h.role != RoleApprover {
 			anchor = anchors[h.anchorID]
 		}
-		e := PlaceApprover{Name: tok.name, Role: h.role, Class: tok.class}
+		e := PlaceApprover{Name: tok.name, Role: h.role, Class: tok.class, IsCaller: caller != "" && h.holder == caller}
 		if anchor.id != "" && scope.Readable(anchor.typeName, anchor.id) {
 			e.AnchorAddress = anchor.address
 		}

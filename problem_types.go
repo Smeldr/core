@@ -183,6 +183,8 @@ const (
 	problemSearchQueryInvalid                 ProblemType = "search.query_invalid"
 	problemChangeCheckFilterRequired          ProblemType = "change_check.filter_required"
 	problemApproversPlaceRequired             ProblemType = "approvers.place_required"
+	problemRestCountsLimitInvalid             ProblemType = "rest_counts.limit_invalid"
+	problemPremiseDecisionRequired            ProblemType = "premise.decision_required"
 	problemEventstreamParamsConflict          ProblemType = "eventstream.params_conflict"
 	problemEventstreamNoSubscriptions         ProblemType = "eventstream.no_subscriptions"
 	problemEventLogNotEnabled                 ProblemType = "event_log.not_enabled"
@@ -354,6 +356,8 @@ var problemTypeList = []ProblemTypeInfo{
 	{ID: problemSearchQueryInvalid, Status: 400, Title: "Search has no text or filter, text length out of bounds, negative limit/offset, or an unsearchable type", Audience: "person", Class: problemClassCorrection, Values: []string{"min", "max", "length", "type"}},
 	{ID: problemChangeCheckFilterRequired, Status: 400, Title: "Listing Checks without a repository, Area or Decision filter", Audience: "person", Class: problemClassCorrection},
 	{ID: problemApproversPlaceRequired, Status: 400, Title: "approvers_of is called without naming a place", Audience: "person", Class: problemClassCorrection},
+	{ID: problemRestCountsLimitInvalid, Status: 400, Title: "A rest count's limit or address page is out of bounds", Rule: "D150", Audience: "person", Class: problemClassCorrection, Values: []string{"field", "max"}, AlwaysValues: []string{"field", "max"}},
+	{ID: problemPremiseDecisionRequired, Status: 400, Title: "The premise read is called without naming the resting Decision", Rule: "D149", Audience: "person", Class: problemClassCorrection},
 	{ID: problemEventstreamParamsConflict, Status: 400, Title: "?subscription= and ?channel= combined", Rule: "D116", Audience: "person", Class: problemClassCorrection},
 	{ID: problemEventstreamNoSubscriptions, Status: 400, Title: "?subscription= on an instance that keeps no subscriptions", Rule: "D116", Audience: "person", Class: problemClassFailure},
 	{ID: problemEventLogNotEnabled, Status: 400, Title: "?after= or an event page is asked for on an instance without the event log", Rule: "D117", Audience: "person", Class: problemClassFailure},

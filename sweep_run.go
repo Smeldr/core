@@ -3,6 +3,8 @@ package smeldr
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -126,7 +128,91 @@ func CreateSweepRunTable(db DB) error {
 	if err := EnsureColumn(ctx, db, "smeldr_sweep_runs", "actor_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return EnsureColumn(ctx, db, "smeldr_sweep_runs", "actor_id", "TEXT NOT NULL DEFAULT ''")
+	if err := EnsureColumn(ctx, db, "smeldr_sweep_runs", "actor_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	// Each detector's newest run is read by its own key (T1183): Last and
+	// LatestSweepRuns.
+	_, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_smeldr_sweep_runs_latest ON smeldr_sweep_runs (detector, ran_at, id)`)
+	return err
+}
+
+// latestSweepRunIDsQuery is the first of [LatestSweepRuns]' two reads: a
+// loose index scan over (detector, ran_at, id). The recursive part steps from
+// one detector to the next with one index probe each, and each detector's
+// newest run id is one more probe, read from the index alone.
+const latestSweepRunIDsQuery = `WITH RECURSIVE d(detector) AS (
+		     SELECT MIN(detector) FROM smeldr_sweep_runs
+		     UNION ALL
+		     SELECT (SELECT MIN(detector) FROM smeldr_sweep_runs WHERE detector > d.detector)
+		       FROM d WHERE d.detector IS NOT NULL)
+		 SELECT (SELECT x.id FROM smeldr_sweep_runs x WHERE x.detector = d.detector
+		          ORDER BY x.ran_at DESC, x.id DESC LIMIT 1)
+		   FROM d WHERE d.detector IS NOT NULL`
+
+// LatestSweepRuns returns the newest record of every detector that has run,
+// sorted by detector: what each sweep last did, its skipped count and its
+// error included (T1183). It reads db's smeldr_sweep_runs directly, so it
+// serves every [SweepRunStore] built by [NewSweepRunStore]. A database with
+// no sweep run table (no sweep was ever wired) gives an empty list. A failed
+// read is [ErrInternal].
+func LatestSweepRuns(ctx context.Context, db DB) ([]SweepRunRecord, error) {
+	out := []SweepRunRecord{}
+	if db == nil {
+		return out, nil
+	}
+	ok, err := tableExists(ctx, db, "smeldr_sweep_runs")
+	if err != nil {
+		return nil, fmt.Errorf("%w: the sweep runs: %v", ErrInternal, err)
+	}
+	if !ok {
+		return out, nil
+	}
+	// Two reads whose work follows the number of detectors, never the
+	// number of runs the table holds: the newest id of each detector from the
+	// index, then those rows by their primary key. One joined query let
+	// PostgreSQL hash the whole table instead.
+	rows, err := db.QueryContext(ctx, latestSweepRunIDsQuery)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the sweep runs: %v", ErrInternal, err)
+	}
+	var ids []any
+	var marks []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("%w: the sweep runs: %v", ErrInternal, err)
+		}
+		ids = append(ids, id)
+		marks = append(marks, "$"+strconv.Itoa(len(ids)))
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, fmt.Errorf("%w: the sweep runs: %v", ErrInternal, err)
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err = db.QueryContext(ctx,
+		`SELECT id, detector, ran_at, interval, walked, flagged, skipped, err, actor_kind, actor_id
+		   FROM smeldr_sweep_runs WHERE id IN (`+strings.Join(marks, ", ")+`) ORDER BY detector`, ids...)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the sweep runs: %v", ErrInternal, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		r, err := scanSweepRunRecord(rows)
+		if err != nil {
+			return nil, fmt.Errorf("%w: the sweep runs: %v", ErrInternal, err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: the sweep runs: %v", ErrInternal, err)
+	}
+	return out, nil
 }
 
 // Append persists r to the smeldr_sweep_runs table.

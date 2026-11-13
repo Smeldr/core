@@ -311,6 +311,7 @@ Read DECISIONS.md first. This document explains *how* — DECISIONS.md explains 
 | 2026-11-11 | A680 (Task T1176, Level 2, task_plan P383, security fix): smeldr.go `App.requestAuth` (set in `New`: `cfg.Auth` or `BearerHMAC`, wrapped by `withStoreCheck` when `cfg.TokenStore` is set) is the App middleware's AuthFunc and the one used by `/packet` (context_packet.go), `/reachability` (reachability_handler.go), `/_content`, `/_audit`, `/_logs`, the first connect of `/_events/stream` (smeldr.go) and `/_stats` (stats.go), replacing six copies of the `cfg.Auth`/`BearerHMAC` fallback. `App.CookiesManifestAuth` and `App.RedirectManifestAuth` wrap the AuthFunc they are given the same way (`App.storeChecked`). auth.go `storeCheckedAuth`: after the inner AuthFunc accepts, a bearer token signed with the App's secret goes through `TokenStore.verifyStored` (revoked, not stored, identity not active, or a store error: refused like a bad signature); other credentials pass unchanged; forwards `productionWarner` and `csrfAware`. auth_store_routes_test.go (new). |
 | 2026-11-11 | A683 (Task T1191, Level 1, task_plan P391): go.mod and example/api, example/blog, example/docs, example/server go.mod: `toolchain go1.26.11` (was go1.26.10), for GO-2026-6859 in `net/http`; the `go 1.26.5` line is unchanged. No code change. |
 | 2026-11-11 | A684 (Task T1196, Level 2, task_plan P390, fix; docs' S3867): state.go `fireAsyncTriggers`, case `schedule-eval`, reads the eval field through `nullTimeScanner` (storage.go) instead of `sql.NullTime`: SQLite returns a `TIMESTAMPTZ` column (`smeldr_decisions.next_eval_at`) as a string, so date-based re-evaluation never queued there. The warning is split into `eval_field unreadable` (with the error) and `eval_field empty`. |
+| 2026-11-11 | A692 (Task T1183, Level 2, task_plan P387 with mcp P388; D149, D150, D165, D183): additions to existing reads, none renamed. signal_kinds.go: `SignalHistory`, `SignalKindOf`. approvers.go: `PlaceApprover.IsCaller` (`callerIdentity`: the caller's identity ID, the grant key); administrators.go: `InstanceAdministrator.IsCaller`. rest_counts.go: `RestCountOptions`, `RestCountDetail`, `RestCountsDetail`, `App.RestCountsWith` (`RestCounts` delegates with zero options; the walk sorts each ring and returns the ratified count and the reached items; `restStates.addresses` reads a page's addresses per type), `RestCountDefaultAddressLimit`, `RestCountMaxAddressLimit`; `RestCount` unchanged so it stays comparable. rest_counts_stored.go: nullable `ratified_count` (`EnsureRestCountTable`), `StoredRestCounts.Ratified`, `StoredRatified`. search_narrow.go (new): `SearchQuery.Narrow`/`After`, `SearchHit.ExternalRef`/`MatchReason`, `SearchResult.AtLeast`/`Next`, `SearchNarrowCountCeiling` (200, D183), `SearchMatch*`; unexported `narrowPlan` (letters and digits to `address_no` ranges from the counter registry), `narrowKey` (opaque cursor), `Module.narrowRecords`, `App.narrowDynamic`, `App.searchNarrow` (address phase then reference phase, at most 201 rows per type and phase, cut at the smallest last key of a full source), `narrowRefExpr`/`narrowIDExpr`/`asciiLower` (the reference phase in one byte order: the C collation on PostgreSQL), and `dbIsPostgres` (the one dialect probe, cached per DB only once settled). address.go: `ensureNarrowSearchIndexes` (`idx_<table>_address_no`, `idx_<table>_narrow_ref`, not partial). premise_read.go (new): `App.PremiseFlags`, `PremiseFlag` (`ConditionOpen`; `Signal` only to a reader of the Signal), `PremiseRef`, `PremiseConfirmation`. sweep_run.go: `LatestSweepRuns` (a loose index scan, then rows by key), `idx_smeldr_sweep_runs_latest`. capability.go: `item premise_flags`. governance.go: tool policies `list_sweep_runs`, `get_premise_flags` (read). problem_types.go: `rest_counts.limit_invalid`, `premise.decision_required`. |
 
 ---
 
@@ -2158,6 +2159,15 @@ This means switching drivers requires changing exactly one value in `smeldr.Conf
 
 The `pgx` adapter lives at `smeldr.dev/core/pgx` — a separate
 module. It imports both `smeldr` and `pgx/v5`. Smeldr core never imports pgx.
+
+**Indexes on expressions are not partial (T1183).** PostgreSQL keeps no
+statistics on the expressions of a partial index (`CREATE INDEX ... (lower(x))
+WHERE ...`), so it misjudges how many rows a range on that expression matches
+and plans a sort of every match instead of reading the index in order. An
+index that serves an `ORDER BY ... LIMIT` on an expression is created without
+a `WHERE` predicate, as `idx_<table>_narrow_ref` is; the query keeps its own
+filter. A text key that must sort the same in Go and in both databases is
+compared in byte order: under `COLLATE "C"` on PostgreSQL, BINARY on SQLite.
 
 ---
 

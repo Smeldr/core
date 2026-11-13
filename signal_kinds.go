@@ -20,6 +20,11 @@ const (
 	// SignalRequest is an ask from one actor to another: it is open until it is
 	// answered or withdrawn, and never resolved by the system.
 	SignalRequest SignalKind = "request"
+	// SignalHistory is a signal_type that is not in the catalog: an older
+	// hand-off type (plan-ready, notice and the rest) that is read, then
+	// acknowledged, and never opened or resolved (D115). [SignalKindOf]
+	// returns it; no catalog entry has it.
+	SignalHistory SignalKind = "history"
 )
 
 // SignalTypeInfo describes one signal_type in the catalog (D115): its kind and
@@ -70,6 +75,16 @@ func SignalTypes() []SignalTypeInfo {
 func SignalTypeOf(t string) (SignalTypeInfo, bool) {
 	info, ok := signalTypeIndex[t]
 	return info, ok
+}
+
+// SignalKindOf returns the kind of a Signal of type t: the catalog entry's
+// [SignalCondition] or [SignalRequest], or [SignalHistory] when t is not in
+// the catalog. It follows [SignalTypeOf], so the two never disagree.
+func SignalKindOf(t string) SignalKind {
+	if info, ok := signalTypeIndex[t]; ok {
+		return info.Kind
+	}
+	return SignalHistory
 }
 
 // SignalMessageMaxLength is the most characters a Signal's message may hold

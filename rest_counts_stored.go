@@ -4,6 +4,7 @@ package smeldr
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 	"strings"
@@ -28,6 +29,19 @@ type StoredRestCounts struct {
 	// CountedAt is when the sweep that stored them finished; zero when no
 	// sweep has counted the item.
 	CountedAt time.Time `json:"counted_at,omitzero"`
+	// Ratified is how many of each direction's closed items are ratified
+	// (T1183), summed over the same buckets.
+	Ratified StoredRatified `json:"ratified"`
+}
+
+// StoredRatified is the ratified part of a [StoredRestCounts]' closed counts
+// (T1183). Known is false when a bucket it would sum was stored before the
+// split existed, or no sweep has counted the item: the numbers are then zero
+// and mean nothing.
+type StoredRatified struct {
+	Known       bool `json:"known"`
+	RestsOnThis int  `json:"rests_on_this"`
+	ThisRestsOn int  `json:"this_rests_on"`
 }
 
 // RestCountRun is one run of [App.SweepRestCounts].
@@ -74,6 +88,11 @@ func EnsureRestCountTable(ctx context.Context, db DB) error {
 		if _, err := db.ExecContext(ctx, ddl); err != nil {
 			return fmt.Errorf("smeldr: EnsureRestCountTable: %w", err)
 		}
+	}
+	// How many of the closed items are ratified (T1183). Nullable: a row a
+	// sweep stored before the column existed does not know it.
+	if err := EnsureColumn(ctx, db, "smeldr_rest_counts", "ratified_count", "INTEGER"); err != nil {
+		return fmt.Errorf("smeldr: EnsureRestCountTable: %w", err)
 	}
 	return nil
 }
@@ -161,7 +180,7 @@ func (a *App) SweepRestCounts(ctx context.Context) (RestCountRun, error) {
 	return run, nil
 }
 
-// restInsertBatch is how many rows one insert carries (10 values each).
+// restInsertBatch is how many rows one insert carries (11 values each).
 const restInsertBatch = 50
 
 // insertRestCounts writes rows in batches.
@@ -169,14 +188,14 @@ func insertRestCounts(ctx context.Context, exec DB, g *restGraph, rows []restRow
 	for start := 0; start < len(rows); start += restInsertBatch {
 		batch := rows[start:min(start+restInsertBatch, len(rows))]
 		var b strings.Builder
-		b.WriteString(`INSERT INTO smeldr_rest_counts (item_type, item_id, direction, bucket_type, bucket_id, bucket_domain, open_count, closed_count, capped, counted_at) VALUES `)
-		args := make([]any, 0, len(batch)*10)
+		b.WriteString(`INSERT INTO smeldr_rest_counts (item_type, item_id, direction, bucket_type, bucket_id, bucket_domain, open_count, closed_count, capped, counted_at, ratified_count) VALUES `)
+		args := make([]any, 0, len(batch)*11)
 		for i, r := range batch {
 			if i > 0 {
 				b.WriteString(", ")
 			}
 			n := len(args)
-			fmt.Fprintf(&b, "($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)", n+1, n+2, n+3, n+4, n+5, n+6, n+7, n+8, n+9, n+10)
+			fmt.Fprintf(&b, "($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)", n+1, n+2, n+3, n+4, n+5, n+6, n+7, n+8, n+9, n+10, n+11)
 			node := g.nodes[r.item]
 			bucketType, bucketID := "Organization", ""
 			switch {
@@ -185,7 +204,7 @@ func insertRestCounts(ctx context.Context, exec DB, g *restGraph, rows []restRow
 			case r.place.domain != "":
 				bucketType, bucketID = "Domain", r.place.domain
 			}
-			args = append(args, node.typ, node.id, r.direction, bucketType, bucketID, r.place.domain, r.open, r.closed, r.capped, countedAt)
+			args = append(args, node.typ, node.id, r.direction, bucketType, bucketID, r.place.domain, r.open, r.closed, r.capped, countedAt, r.ratified)
 		}
 		if _, err := exec.ExecContext(ctx, b.String(), args...); err != nil {
 			return err
@@ -196,12 +215,13 @@ func insertRestCounts(ctx context.Context, exec DB, g *restGraph, rows []restRow
 
 // restGraph is the rest graph in memory, for one sweep.
 type restGraph struct {
-	nodes  []reachabilityNode
-	open   []bool
-	place  []restPlace
-	out    [][]int32 // rest edges from source to target
-	in     [][]int32 // the same edges, target to source
-	walked int
+	nodes    []reachabilityNode
+	open     []bool
+	ratified []bool // closed and in the state ratified (T1183)
+	place    []restPlace
+	out      [][]int32 // rest edges from source to target
+	in       [][]int32 // the same edges, target to source
+	walked   int
 }
 
 // restRow is one stored count: an item, a direction and a bucket.
@@ -210,6 +230,7 @@ type restRow struct {
 	direction    string
 	place        restPlace
 	open, closed int
+	ratified     int // of closed, how many are ratified
 	capped       bool
 	first        bool // the walk's first row, so a capped walk counts once
 }
@@ -279,6 +300,7 @@ func loadRestGraph(ctx context.Context, db DB) (*restGraph, error) {
 		index[n] = int32(len(g.nodes))
 		g.nodes = append(g.nodes, n)
 		g.open = append(g.open, open)
+		g.ratified = append(g.ratified, !open && st == restRatifiedState)
 	}
 	g.out = make([][]int32, len(g.nodes))
 	g.in = make([][]int32, len(g.nodes))
@@ -436,9 +458,13 @@ func (g *restGraph) buckets(item int32, direction string, reached []int32, label
 			at[p] = i
 			rows = append(rows, restRow{item: item, direction: direction, place: p, capped: capped, first: i == 0})
 		}
-		if g.open[r] {
+		switch {
+		case g.open[r]:
 			rows[i].open++
-		} else {
+		case g.ratified[r]:
+			rows[i].closed++
+			rows[i].ratified++
+		default:
 			rows[i].closed++
 		}
 	}
@@ -488,6 +514,9 @@ func (a *App) StoredRestCounts(ctx context.Context, items []ItemRef) ([]StoredRe
 	if err != nil || !swept {
 		return out, err
 	}
+	// A swept item's split is known until a covered row stored before the
+	// column existed says otherwise (T1183).
+	unknown := map[ItemRef]bool{}
 	byType := map[string][]string{}
 	var types []string
 	for _, n := range nodes {
@@ -506,20 +535,25 @@ func (a *App) StoredRestCounts(ctx context.Context, items []ItemRef) ([]StoredRe
 				args = append(args, id)
 				ph[i] = fmt.Sprintf("$%d", len(args))
 			}
-			if err := sumStoredRestCounts(ctx, db, scope, typ, `SELECT item_id, direction, bucket_type, bucket_id, bucket_domain, open_count, closed_count, capped FROM smeldr_rest_counts
-				WHERE item_type = $1 AND item_id IN (`+strings.Join(ph, ", ")+`)`, args, at, out); err != nil {
+			if err := sumStoredRestCounts(ctx, db, scope, typ, `SELECT item_id, direction, bucket_type, bucket_id, bucket_domain, open_count, closed_count, capped, ratified_count FROM smeldr_rest_counts
+				WHERE item_type = $1 AND item_id IN (`+strings.Join(ph, ", ")+`)`, args, at, out, unknown); err != nil {
 				return nil, err
 			}
 		}
 	}
 	for i := range out {
 		out[i].CountedAt = countedAt
+		if unknown[out[i].ItemRef] {
+			out[i].Ratified = StoredRatified{}
+		} else {
+			out[i].Ratified.Known = true
+		}
 	}
 	return out, nil
 }
 
 // sumStoredRestCounts adds the covered rows of one query to out.
-func sumStoredRestCounts(ctx context.Context, db DB, scope *ReadScope, typ, query string, args []any, at map[ItemRef]int, out []StoredRestCounts) error {
+func sumStoredRestCounts(ctx context.Context, db DB, scope *ReadScope, typ, query string, args []any, at map[ItemRef]int, out []StoredRestCounts, unknown map[ItemRef]bool) error {
 	fail := func(err error) error { return fmt.Errorf("%w: StoredRestCounts: %v", ErrInternal, err) }
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -530,19 +564,27 @@ func sumStoredRestCounts(ctx context.Context, db DB, scope *ReadScope, typ, quer
 		var id, direction, bucketType, bucketID, bucketDomain string
 		var open, closed int
 		var capped bool
-		if err := rows.Scan(&id, &direction, &bucketType, &bucketID, &bucketDomain, &open, &closed, &capped); err != nil {
+		var ratified sql.NullInt64
+		if err := rows.Scan(&id, &direction, &bucketType, &bucketID, &bucketDomain, &open, &closed, &capped, &ratified); err != nil {
 			return fail(err)
 		}
 		if !scope.coversRestBucket(bucketType, bucketID, bucketDomain) {
 			continue
 		}
-		c := &out[at[ItemRef{typ, id}]].RestsOnThis
+		ref := ItemRef{typ, id}
+		item := &out[at[ref]]
+		c, r := &item.RestsOnThis, &item.Ratified.RestsOnThis
 		if direction == restThisRestsOn {
-			c = &out[at[ItemRef{typ, id}]].ThisRestsOn
+			c, r = &item.ThisRestsOn, &item.Ratified.ThisRestsOn
 		}
 		c.Open += open
 		c.Closed += closed
 		c.AtLeast = c.AtLeast || capped
+		if ratified.Valid {
+			*r += int(ratified.Int64)
+		} else {
+			unknown[ref] = true
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return fail(err)

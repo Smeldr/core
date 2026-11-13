@@ -75,6 +75,14 @@ type SearchQuery struct {
 	// Limit is the page size: zero is [SearchDefaultLimit], and it is capped
 	// at [SearchMaxLimit]. Offset skips that many hits.
 	Limit, Offset int
+	// Narrow matches the record's address and its external_ref only, from
+	// one character ([SearchTextMinLength] is for text), as index reads
+	// (T1183). Text is required. Hits are ordered by address (type, then
+	// number), then by reference; each carries its [SearchHit.MatchReason].
+	Narrow bool
+	// After continues a narrow search after the [SearchResult.Next] of an
+	// earlier one; Offset then counts from there.
+	After string
 }
 
 // SearchHit is one record a search found.
@@ -91,6 +99,11 @@ type SearchHit struct {
 	// Snippet is the text around the match, at most 160 runes.
 	Snippet   string    `json:"snippet,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// ExternalRef is the record's own reference; set on a narrow search.
+	ExternalRef string `json:"external_ref,omitempty"`
+	// MatchReason is why a narrow hit matched: [SearchMatchAddress],
+	// [SearchMatchAddressPrefix] or [SearchMatchReference].
+	MatchReason string `json:"match_reason,omitempty"`
 }
 
 // SearchResult is a page of hits and the total number of hits the caller may
@@ -98,6 +111,14 @@ type SearchHit struct {
 type SearchResult struct {
 	Hits  []SearchHit `json:"hits"`
 	Total int         `json:"total"`
+	// AtLeast is set on a narrow search that read [SearchNarrowCountCeiling]
+	// candidates and stopped (D183): Total counts what was read, and there
+	// are more after Next.
+	AtLeast bool `json:"at_least,omitempty"`
+	// Next continues a narrow search that stopped: pass it as
+	// [SearchQuery.After]. Empty means there is nothing more, so a short page
+	// with a Next is not the end.
+	Next string `json:"next,omitempty"`
 }
 
 // searchPlan is a validated [SearchQuery] as each type's search runs it.
@@ -107,6 +128,7 @@ type searchPlan struct {
 	states []Status          // empty is any state
 	keepID func(string) bool // the place filter; nil is any place
 	scope  *ReadScope
+	narrow *narrowPlan // set on a narrow search
 }
 
 // searchableModule is a compiled module [App.Search] can search: every
@@ -134,6 +156,9 @@ func (a *App) Search(ctx Context, q SearchQuery) (SearchResult, error) {
 	compiled, dynamic, err := a.searchTargets(q.Types)
 	if err != nil {
 		return SearchResult{}, err
+	}
+	if p.narrow != nil {
+		return a.searchNarrow(ctx, q, p, compiled, dynamic)
 	}
 	var hits []SearchHit
 	for _, m := range compiled {
@@ -188,9 +213,21 @@ func (a *App) planSearch(ctx Context, q SearchQuery) (*searchPlan, error) {
 	if text == "" && len(q.Types) == 0 && len(q.States) == 0 && q.Place == "" {
 		return nil, problem(problemSearchQueryInvalid, fmt.Errorf("%w: search needs text or at least one filter (types, states, place)", ErrBadRequest), nil)
 	}
-	if n := utf8.RuneCountInString(text); text != "" && (n < SearchTextMinLength || n > SearchTextMaxLength) {
-		return nil, problem(problemSearchQueryInvalid, fmt.Errorf("%w: search text must be %d to %d characters, got %d", ErrBadRequest, SearchTextMinLength, SearchTextMaxLength, n),
-			problemValues{"min": strconv.Itoa(SearchTextMinLength), "max": strconv.Itoa(SearchTextMaxLength), "length": strconv.Itoa(n)})
+	minLength := SearchTextMinLength
+	if q.Narrow {
+		// The narrow form reads an index, so one character is enough (T1183).
+		minLength = 1
+		if text == "" {
+			return nil, problem(problemSearchQueryInvalid, fmt.Errorf("%w: a narrow search needs text: an address or a reference, or its start", ErrBadRequest),
+				problemValues{"min": "1", "max": strconv.Itoa(SearchTextMaxLength), "length": "0"})
+		}
+	}
+	if n := utf8.RuneCountInString(text); text != "" && (n < minLength || n > SearchTextMaxLength) {
+		return nil, problem(problemSearchQueryInvalid, fmt.Errorf("%w: search text must be %d to %d characters, got %d", ErrBadRequest, minLength, SearchTextMaxLength, n),
+			problemValues{"min": strconv.Itoa(minLength), "max": strconv.Itoa(SearchTextMaxLength), "length": strconv.Itoa(n)})
+	}
+	if q.After != "" && !q.Narrow {
+		return nil, problem(problemSearchQueryInvalid, fmt.Errorf("%w: after continues a narrow search only", ErrBadRequest), nil)
 	}
 	if q.Limit < 0 || q.Offset < 0 {
 		return nil, problem(problemSearchQueryInvalid, fmt.Errorf("%w: search limit and offset must not be negative", ErrBadRequest), nil)
@@ -200,7 +237,12 @@ func (a *App) planSearch(ctx Context, q SearchQuery) (*searchPlan, error) {
 		return nil, err
 	}
 	p := &searchPlan{scope: scope}
-	if text != "" {
+	switch {
+	case q.Narrow:
+		if p.narrow, err = a.planNarrow(ctx, text, q.After); err != nil {
+			return nil, err
+		}
+	case text != "":
 		p.needle = lowerRunes(text)
 		p.ascii = longestASCIIRun(p.needle)
 	}

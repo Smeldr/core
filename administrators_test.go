@@ -83,8 +83,13 @@ func TestAdministrators(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := f.app.Administrators(tc.ctx)
-			if err != nil || !reflect.DeepEqual(got, want) {
-				t.Errorf("= %+v %v, want %+v", got, err, want)
+			wantHere := append([]InstanceAdministrator(nil), want...)
+			for i := range wantHere {
+				// The caller sees itself marked (T1183).
+				wantHere[i].IsCaller = tc.name == "an administrator" && wantHere[i].Name == "fp-human-3"
+			}
+			if err != nil || !reflect.DeepEqual(got, wantHere) {
+				t.Errorf("= %+v %v, want %+v", got, err, wantHere)
 			}
 			if err := f.app.AuthorizeCapability(tc.ctx.(Context), ResourceItem, "administrators", AuthTarget{}); err != nil {
 				t.Errorf("capability: %v", err)

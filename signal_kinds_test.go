@@ -198,3 +198,18 @@ func TestSignalModuleCreate(t *testing.T) {
 		t.Errorf("open questions = %d, want 1", n)
 	}
 }
+
+// TestSignalKindOf: every catalog type has its catalog kind, and a type that
+// is not in the catalog is history (T1183).
+func TestSignalKindOf(t *testing.T) {
+	for _, info := range SignalTypes() {
+		if got := SignalKindOf(info.Type); got != info.Kind {
+			t.Errorf("SignalKindOf(%q) = %q; want %q", info.Type, got, info.Kind)
+		}
+	}
+	for _, typ := range []string{"plan-ready", "notice", ""} {
+		if got := SignalKindOf(typ); got != SignalHistory {
+			t.Errorf("SignalKindOf(%q) = %q; want history", typ, got)
+		}
+	}
+}

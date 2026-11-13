@@ -60,6 +60,16 @@ func TestPG_RestCounts(t *testing.T) {
 	if got, err := app.RestCounts(all, "RcDec", "base"); err != nil || got.RestsOnThis != (smeldr.RestCount{Open: 100, Closed: 401}) {
 		t.Errorf("RestCounts(base) = %+v %v", got, err)
 	}
+	// T1183: the ratified part, a caller's limit, and a page of addresses
+	// (this table has no address column: type:id).
+	d, err := app.RestCountsWith(all, "RcDec", "hub", smeldr.RestCountOptions{Limit: 10, Addresses: true, AddressLimit: 3})
+	if err != nil || !d.RestsOnThis.AtLeast || d.RestsOnThis.Open+d.RestsOnThis.Closed != 10 || d.RestsOnThisDetail.AddressesTotal != 10 ||
+		fmt.Sprint(d.RestsOnThisDetail.Addresses) != "[RcDec:n000 RcDec:n001 RcDec:n002]" {
+		t.Errorf("RestCountsWith(hub, 10) = %+v %v", d, err)
+	}
+	if d, err := app.RestCountsWith(all, "RcDec", "hub", smeldr.RestCountOptions{}); err != nil || d.RestsOnThisDetail.Ratified != 400 || d.ThisRestsOnDetail.Ratified != 1 {
+		t.Errorf("ratified = %+v %v", d, err)
+	}
 	for i := 500; i < smeldr.RestCountLimit+10; i++ {
 		id := fmt.Sprintf("m%04d", i)
 		insertItem(t, db, "rc_decs", id, "ratified")

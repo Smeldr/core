@@ -235,3 +235,81 @@ func TestSortNodes(t *testing.T) {
 		t.Errorf("sortNodes = %v", nodes)
 	}
 }
+
+// TestRestCountsWith_Options (T1183): the ratified part of closed, the
+// caller's limit, and a page of addresses; bad options are refused.
+func TestRestCountsWith_Options(t *testing.T) {
+	f := newRestFixture(t)
+	for id, st := range map[string]string{"a": "ratified", "b": "proposed", "c": "ratified", "d": "superseded"} {
+		f.item(t, id, st)
+	}
+	// a rests on b, b on c, c on d: rings of one, nearest first.
+	f.edge(t, "a", "grounded_in", "b", false)
+	f.edge(t, "b", "addresses", "c", false)
+	f.edge(t, "c", "amends", "d", false)
+	ctx := allReader()
+
+	got, err := f.app.RestCountsWith(ctx, "RcDec", "a", RestCountOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ThisRestsOn != (RestCount{Open: 1, Closed: 2}) || got.ThisRestsOnDetail.Ratified != 1 || got.ThisRestsOnDetail.Addresses != nil {
+		t.Errorf("zero options = %+v", got)
+	}
+	plain, err := f.app.RestCounts(ctx, "RcDec", "a")
+	if err != nil || plain != got.RestCounts {
+		t.Errorf("RestCounts = %+v %v; RestCountsWith's counts are %+v", plain, err, got.RestCounts)
+	}
+
+	// A limit of 2 stops in the second ring.
+	got, err = f.app.RestCountsWith(ctx, "RcDec", "a", RestCountOptions{Limit: 2})
+	if err != nil || got.ThisRestsOn != (RestCount{Open: 1, Closed: 1, AtLeast: true}) || got.ThisRestsOnDetail.Ratified != 1 {
+		t.Errorf("limit 2 = %+v %v", got, err)
+	}
+
+	// Addresses, paged; this table has no address column, so type:id.
+	got, err = f.app.RestCountsWith(ctx, "RcDec", "a", RestCountOptions{Addresses: true, AddressOffset: 1, AddressLimit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := got.ThisRestsOnDetail; d.AddressesTotal != 3 || len(d.Addresses) != 1 || d.Addresses[0] != "RcDec:c" {
+		t.Errorf("page = %+v", d)
+	}
+	// With an address column, the address.
+	mustExecDB(t, f.db, `ALTER TABLE smeldr_dynamic_content ADD COLUMN address TEXT NOT NULL DEFAULT ''`)
+	mustExecDB(t, f.db, `UPDATE smeldr_dynamic_content SET address = 'RC' || id WHERE id <> 'd'`)
+	got, err = f.app.RestCountsWith(ctx, "RcDec", "a", RestCountOptions{Addresses: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := got.ThisRestsOnDetail; d.AddressesTotal != 3 || fmt.Sprint(d.Addresses) != "[RCb RCc RcDec:d]" {
+		t.Errorf("addresses = %+v", d)
+	}
+	if d := got.RestsOnThisDetail; d.AddressesTotal != 0 || len(d.Addresses) != 0 {
+		t.Errorf("nothing rests on a: %+v", d)
+	}
+	// An offset past the end is an empty page.
+	if got, err := f.app.RestCountsWith(ctx, "RcDec", "a", RestCountOptions{Addresses: true, AddressOffset: 9}); err != nil || len(got.ThisRestsOnDetail.Addresses) != 0 {
+		t.Errorf("past the end = %+v %v", got.ThisRestsOnDetail, err)
+	}
+
+	for name, opt := range map[string]RestCountOptions{
+		"limit too high":     {Limit: RestCountLimit + 1},
+		"negative limit":     {Limit: -1},
+		"page too large":     {AddressLimit: RestCountMaxAddressLimit + 1},
+		"negative page size": {AddressLimit: -1},
+		"negative offset":    {AddressOffset: -1},
+		"offset too far":     {AddressOffset: RestCountLimit + 1},
+	} {
+		_, err := f.app.RestCountsWith(ctx, "RcDec", "a", opt)
+		if !errors.Is(err, ErrBadRequest) || ProblemTypeOf(err) != problemRestCountsLimitInvalid {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// A failed address read is ErrInternal.
+	w := &restWalk{ctx: ctx, db: &sweepRunQueryFailDB{DB: f.db}, states: newRestStates(ctx, &sweepRunQueryFailDB{DB: f.db})}
+	w.states.tables["RcDec"] = "smeldr_dynamic_content"
+	if err := w.addressPage(&RestCountDetail{}, []reachabilityNode{{"RcDec", "b"}}, RestCountOptions{}); !errors.Is(err, ErrInternal) {
+		t.Errorf("failed address read: %v", err)
+	}
+}

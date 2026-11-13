@@ -125,6 +125,8 @@ Every refusal and validation error Smeldr core answers with carries a stable **t
 | `search.query_invalid` | correction | 400 | person | `min`, `max`, `length`, `type` |  | Search has no text or filter, text length out of bounds, negative limit/offset, or an unsearchable type |  |
 | `change_check.filter_required` | correction | 400 | person |  |  | Listing Checks without a repository, Area or Decision filter |  |
 | `approvers.place_required` | correction | 400 | person |  |  | approvers_of is called without naming a place |  |
+| `rest_counts.limit_invalid` | correction | 400 | person | **`field`**, **`max`** | D150 | A rest count's limit or address page is out of bounds |  |
+| `premise.decision_required` | correction | 400 | person |  | D149 | The premise read is called without naming the resting Decision |  |
 | `eventstream.params_conflict` | correction | 400 | person |  | D116 | ?subscription= and ?channel= combined |  |
 | `eventstream.no_subscriptions` | failure | 400 | person |  | D116 | ?subscription= on an instance that keeps no subscriptions |  |
 | `event_log.not_enabled` | failure | 400 | person |  | D117 | ?after= or an event page is asked for on an instance without the event log |  |

@@ -3,6 +3,8 @@ package smeldr
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -304,5 +306,129 @@ func TestCreateSweepRunTable_MigratesActorColumns(t *testing.T) {
 	if got2.ActorKind != "job" || got2.ActorID != "sweep-structural" {
 		t.Errorf("post-migration row: ActorKind/ActorID = %q/%q, want job/sweep-structural",
 			got2.ActorKind, got2.ActorID)
+	}
+}
+
+// TestLatestSweepRuns: the newest run of each detector, sorted by detector,
+// with skipped and err; no table is an empty list; a failed read is
+// ErrInternal (T1183).
+func TestLatestSweepRuns(t *testing.T) {
+	ctx := context.Background()
+	db := newSQLiteDB(t)
+	got, err := LatestSweepRuns(ctx, db)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("no table: %+v %v", got, err)
+	}
+	createSweepRunTableHelper(t, db)
+	store := NewSweepRunStore(db)
+	base := time.Date(2026, 11, 11, 10, 0, 0, 0, time.UTC)
+	for _, r := range []SweepRunRecord{
+		{ID: "s-1", Detector: "structural", RanAt: base, Walked: 1},
+		{ID: "s-2", Detector: "structural", RanAt: base.Add(time.Hour), Walked: 2, Skipped: 3, Err: "one source failed"},
+		{ID: "r-1", Detector: "rest-counts", RanAt: base, Walked: 7},
+		{ID: "r-2", Detector: "rest-counts", RanAt: base, Walked: 8}, // same second: the newer id wins
+	} {
+		if err := store.Append(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err = LatestSweepRuns(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != "r-2" || got[1].ID != "s-2" {
+		t.Fatalf("got %+v", got)
+	}
+	if got[1].Skipped != 3 || got[1].Err != "one source failed" || !got[1].RanAt.Equal(base.Add(time.Hour)) {
+		t.Errorf("structural = %+v", got[1])
+	}
+	if _, err := LatestSweepRuns(ctx, &sweepRunQueryFailDB{DB: db}); !errors.Is(err, ErrInternal) {
+		t.Errorf("failed read: %v, want ErrInternal", err)
+	}
+	if got, err := LatestSweepRuns(ctx, nil); err != nil || len(got) != 0 {
+		t.Errorf("nil DB: %+v %v", got, err)
+	}
+}
+
+// TestLatestSweepRuns_ReadsByIndex: with 10,000 runs of six detectors the
+// read finds each detector's newest run, and its plan reads the table only
+// through the (detector, ran_at, id) index, so its work follows the number of
+// detectors and not the number of runs (T1183 review, change 3).
+func TestLatestSweepRuns_ReadsByIndex(t *testing.T) {
+	ctx := context.Background()
+	db := newSQLiteDB(t)
+	createSweepRunTableHelper(t, db)
+	store := NewSweepRunStore(db)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	detectors := []string{"a", "b", "c", "d", "e", "f"}
+	for i := range 10000 {
+		r := SweepRunRecord{ID: fmt.Sprintf("run-%05d", i), Detector: detectors[i%len(detectors)], RanAt: base.Add(time.Duration(i) * time.Minute), Walked: i}
+		if err := store.Append(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := LatestSweepRuns(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(detectors) {
+		t.Fatalf("got %d detectors", len(got))
+	}
+	for i, r := range got {
+		if r.Detector != detectors[i] || r.Walked < 10000-len(detectors) {
+			t.Errorf("%s: newest walked %d", r.Detector, r.Walked)
+		}
+	}
+	rows, err := db.QueryContext(ctx, `EXPLAIN QUERY PLAN `+latestSweepRunIDsQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	for _, line := range plan {
+		if strings.HasPrefix(line, "SCAN ") && strings.Contains(line, "smeldr_sweep_runs") && !strings.Contains(line, "INDEX") {
+			t.Errorf("a full scan of the runs: %q in %q", line, plan)
+		}
+	}
+	t.Logf("plan: %q", plan)
+}
+
+// sweepRunRowsFailDB fails only the queries that contain failOn.
+type sweepRunRowsFailDB struct {
+	DB
+	failOn string
+}
+
+func (d *sweepRunRowsFailDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	if strings.Contains(q, d.failOn) {
+		return nil, errRepoError
+	}
+	return d.DB.QueryContext(ctx, q, args...)
+}
+
+// TestLatestSweepRuns_EmptyAndSecondReadFails: a table with no runs is an
+// empty list, and a failure of either read is ErrInternal.
+func TestLatestSweepRuns_EmptyAndSecondReadFails(t *testing.T) {
+	ctx := context.Background()
+	db := newSQLiteDB(t)
+	createSweepRunTableHelper(t, db)
+	if got, err := LatestSweepRuns(ctx, db); err != nil || len(got) != 0 {
+		t.Fatalf("empty table: %+v %v", got, err)
+	}
+	if err := NewSweepRunStore(db).Append(ctx, SweepRunRecord{ID: "s-1", Detector: "structural", RanAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, failOn := range []string{"WITH RECURSIVE", "WHERE id IN"} {
+		if _, err := LatestSweepRuns(ctx, &sweepRunRowsFailDB{DB: db, failOn: failOn}); !errors.Is(err, ErrInternal) {
+			t.Errorf("failed read %q: %v, want ErrInternal", failOn, err)
+		}
 	}
 }

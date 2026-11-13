@@ -442,6 +442,12 @@ var builtInToolPolicies = []toolPolicy{
 	// as the two rows above — get_sweep_run reads SweepRunStore directly,
 	// no MCPModule backs it.
 	{"get_sweep_run", "read"},
+	// Every detector's latest run (T1183), from LatestSweepRuns: no module.
+	{"list_sweep_runs", "read"},
+	// The premise read (T1183), from App.PremiseFlags: no module. It answers
+	// only for a Decision the caller reads, and names a premise only when
+	// the caller reads it too (D149).
+	{"get_premise_flags", "read"},
 	// Stewardship inbox tool (Author+, smeldr.dev/mcp v1.35.0+). Same
 	// "not module-generated" reason as the three rows above —
 	// get_stewardship_inbox reads RoleStore.StewardshipInbox directly, no

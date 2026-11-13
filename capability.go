@@ -125,6 +125,9 @@ var capabilityTable = []Capability{
 	// Confirming a premise (D149): core authorizes it by ratify over the
 	// Decision's place (App.ConfirmPremise), so the gate is a read.
 	{ResourceItem, "confirm_premise", "read", ReasonNotTaken, true},
+	// Reading a Decision's premise flags (D149, T1183): the read rules on the
+	// Decision and on each premise apply inside App.PremiseFlags.
+	{ResourceItem, "premise_flags", "read", ReasonNotTaken, true},
 
 	{ResourceType, VerbGet, "read", ReasonNotTaken, false},
 	{ResourceType, VerbList, "read", ReasonNotTaken, false},
@@ -250,6 +253,7 @@ var typelessReadsAny = map[capabilityKey]bool{
 	{ResourceItem, "approvers_of"}:        true, // App.ApproversOf answers only for a readable place
 	{ResourceItem, "rest_counts"}:         true, // RestCounts and StoredRestCounts apply the read rules per item
 	{ResourceItem, "confirm_premise"}:     true, // App.ConfirmPremise checks the read and ratify over the place
+	{ResourceItem, "premise_flags"}:       true, // App.PremiseFlags reads the Decision and names a premise only when readable
 	{ResourceItem, "answer_change_check"}: true, // App.AnswerChangeCheck checks the Area's read and approve-change
 	{ResourceItem, "change_checks"}:       true, // ChangeCheckOf and ListChangeChecks filter by the read rules
 	// App.ListFindings shows a finding only when its subject is readable

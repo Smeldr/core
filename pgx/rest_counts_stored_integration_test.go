@@ -86,4 +86,14 @@ func TestPG_StoredRestCounts(t *testing.T) {
 	if err != nil || all[0].ThisRestsOn != (smeldr.RestCount{Open: 1, Closed: 1}) {
 		t.Errorf("reads everything = %+v %v", all, err)
 	}
+	// T1183: the ratified part of closed, stored as a nullable integer.
+	if all[0].Ratified != (smeldr.StoredRatified{Known: true, ThisRestsOn: 1}) {
+		t.Errorf("ratified = %+v", all[0].Ratified)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE smeldr_rest_counts SET ratified_count = NULL WHERE item_id = 'a' AND direction = 'this_rests_on'`); err != nil {
+		t.Fatal(err)
+	}
+	if all, err := app.StoredRestCounts(smeldr.WithReadScope(ctx, smeldr.AllReadScope()), []smeldr.ItemRef{{Type: "RcDec", ID: "a"}}); err != nil || all[0].Ratified.Known {
+		t.Errorf("a row without the split = %+v %v", all, err)
+	}
 }

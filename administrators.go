@@ -18,6 +18,9 @@ type InstanceAdministrator struct {
 	Name string `json:"name"`
 	// Class is the holder's token class: human, agent, job or unclassified.
 	Class string `json:"class"`
+	// IsCaller is true when the holder is the caller's own identity (D165),
+	// whichever of its live tokens called.
+	IsCaller bool `json:"is_caller"`
 }
 
 // Administrators returns who administers the instance (D154): the holders of
@@ -54,7 +57,7 @@ func (a *App) Administrators(ctx context.Context) ([]InstanceAdministrator, erro
 	}
 	for _, h := range holders {
 		if tok, ok := tokens[h]; ok {
-			out = append(out, InstanceAdministrator{Name: tok.name, Class: tok.class})
+			out = append(out, InstanceAdministrator{Name: tok.name, Class: tok.class, IsCaller: h == sc.User().ID})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {

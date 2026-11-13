@@ -89,8 +89,13 @@ func TestApproversOf(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("got  %+v\nwant %+v", got, tc.want)
+			want := append([]PlaceApprover(nil), tc.want...)
+			for i := range want {
+				// The caller sees itself marked (T1183): human-1 holds approver.
+				want[i].IsCaller = tc.ctx == admin && want[i].Name == "fp-human-1"
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("got  %+v\nwant %+v", got, want)
 			}
 		})
 	}
@@ -112,14 +117,14 @@ func TestApproversOf(t *testing.T) {
 	if _, err := f.app.ApproversOf(reader, "  "); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("empty place: %v", err)
 	}
-	// Exactly the four keys.
+	// Exactly the five keys (is_caller added by T1183).
 	got, err := f.app.ApproversOf(admin, "ARE1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(got[0])
 	var keys map[string]any
-	if err := json.Unmarshal(raw, &keys); err != nil || len(keys) != 4 {
+	if err := json.Unmarshal(raw, &keys); err != nil || len(keys) != 5 {
 		t.Errorf("keys: %s", raw)
 	}
 }
@@ -204,5 +209,45 @@ func TestApproversOf_Edges(t *testing.T) {
 	}
 	if _, err := h.app.ApproversOf(ctx, "DOM1"); !errors.Is(err, ErrInternal) {
 		t.Errorf("grants: %v, want internal", err)
+	}
+}
+
+// TestApproversOf_IsCallerAcrossTokens: is_caller is about the identity. The
+// identity two-1 holds domain-approver on DOM1 under its key and has two live
+// tokens; whichever of them calls, its holder row is the caller's, and no one
+// else's is (T1183).
+func TestApproversOf_IsCallerAcrossTokens(t *testing.T) {
+	f := newApproversFixture(t)
+	if _, err := f.rs.Grant(context.Background(), RoleGrant{TokenID: "two-1", RoleName: "domain-reader", ScopeAnchorID: f.domain}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tokenID := range []string{"two-old", "two-new"} {
+		ctx := NewTestContext(User{ID: "two-1", TokenID: tokenID, Roles: []Role{Editor, Human}})
+		got, err := f.app.ApproversOf(ctx, "DOM1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		mine := 0
+		for _, h := range got {
+			if h.IsCaller {
+				mine++
+				if h.Name != "two-new" || h.Role != RoleDomainApprover {
+					t.Errorf("token %s: caller row = %+v", tokenID, h)
+				}
+			}
+		}
+		if mine != 1 {
+			t.Errorf("token %s: %d rows marked as the caller, want 1: %+v", tokenID, mine, got)
+		}
+	}
+	// Another identity sees no row of its own.
+	got, err := f.app.ApproversOf(as("reader-1"), "DOM1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range got {
+		if h.IsCaller {
+			t.Errorf("reader-1 is marked on %+v", h)
+		}
 	}
 }

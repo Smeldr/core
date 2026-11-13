@@ -137,6 +137,36 @@ func ensureAddressStorage(ctx context.Context, db DB, table string, scopeByType 
 		// address is unique by a database constraint, so boot stops without it.
 		return fmt.Errorf("%w: smeldr: the unique address index on %s was not created: %s", ErrInternal, table, err)
 	}
+	return ensureNarrowSearchIndexes(ctx, db, table, scopeByType)
+}
+
+// ensureNarrowSearchIndexes adds the two indexes the narrow search reads
+// (T1183): the address number, for ranges, and the reference key with the
+// id, for a prefix, the cursor and the order. A prefix on text is only an
+// exact range in byte order, so the key is in byte order on both databases:
+// on PostgreSQL under the C collation whatever the database's own collation,
+// on SQLite by default ([narrowRefExpr]). The reference index is not
+// partial: PostgreSQL keeps no statistics on the expressions of a partial
+// index, and without them it plans a sort of every match instead of reading
+// the index in order (T1183 review).
+func ensureNarrowSearchIndexes(ctx context.Context, db DB, table string, scopeByType bool) error {
+	lead := ""
+	if scopeByType {
+		lead = "type_name, "
+	}
+	pg, err := dbIsPostgres(ctx, db)
+	if err != nil {
+		return fmt.Errorf("smeldr: narrow search index on %s: the database kind: %w", table, err)
+	}
+	ref := narrowRefExpr(pg) + ", " + narrowIDExpr(pg)
+	for _, ddl := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_` + table + `_address_no ON ` + table + ` (` + lead + `address_no) WHERE address <> ''`,
+		`CREATE INDEX IF NOT EXISTS idx_` + table + `_narrow_ref ON ` + table + ` (` + lead + ref + `)`,
+	} {
+		if _, err := db.ExecContext(ctx, ddl); err != nil {
+			return fmt.Errorf("smeldr: narrow search index on %s: %w", table, err)
+		}
+	}
 	return nil
 }
 
