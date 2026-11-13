@@ -1236,7 +1236,7 @@ Cost: a read with an attached scope runs no query and does not allocate. Otherwi
 | `ErrNotFound` | a read of an item the caller cannot read in a readable type; any other operation on an item the caller cannot read |
 | `ErrInternal` | the scope or the grants could not be loaded |
 
-Over smeldr.dev/mcp these map to -32001 for `ErrForbidden`, -32000 for `ErrNotFound` (since mcp v1.61.0), -32602 for `ErrBadRequest`, and -32603 for `ErrInternal`.
+Over smeldr.dev/mcp these map to -32001 for `ErrForbidden`, -32000 for `ErrNotFound` (since mcp v1.61.0), -32602 for `ErrBadRequest`, and -32603 for `ErrInternal`. Since mcp v1.77.1, the tool gate in smeldr.dev/mcp answers its refusals with -32001 `forbidden` and a `data` object naming `capability.denied` (with no `values`). A failed lookup inside the gate stays a bare -32001 `forbidden` with no `data`, and an item the caller may not read stays -32000 `not found`.
 
 **A refusal with a reason (T971).** Most forbiddens stay the bare `ErrForbidden`, because a reason could name an item the caller may not read. A refusal whose reason is safe to show is a `*RefusalError`:
 
