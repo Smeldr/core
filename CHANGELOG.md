@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.192.0] - 2026-11-13
+
 ### Added
 
 - **`SignalHistory` and `SignalKindOf` classify every signal type (T1183).** `SignalHistory` is a new `SignalKind` constant next to `SignalCondition` and `SignalRequest`. `SignalKindOf(t string) SignalKind` returns the catalog kind of a signal type, or `SignalHistory` for a type that is not in the catalog. It follows `SignalTypeOf`, so the two never disagree.
