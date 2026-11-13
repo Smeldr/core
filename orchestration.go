@@ -1683,6 +1683,9 @@ func orchDecisionFlow() StateFlow {
 			{Name: "ratified", Locked: true, Standing: StandingHolds},
 			{Name: "pending-re-evaluation", Locked: true, Standing: StandingHolds, AwaitsAction: true},
 			{Name: "superseded", IsTerminal: true, Locked: true},
+			// D189 point 4: out of force with no replacement, a final state of
+			// its own, never "superseded".
+			{Name: decisionRetired, IsTerminal: true, Locked: true},
 			{Name: "archived", IsTerminal: true, Locked: true},
 		},
 		Transitions: []Transition{
@@ -1707,6 +1710,14 @@ func orchDecisionFlow() StateFlow {
 			{From: "pending-re-evaluation", To: "superseded", RequiredOperation: decisionRatifyOperation, Strict: true},
 			{From: "ratified", To: "superseded", RequiredOperation: decisionRatifyOperation, Strict: true},
 			{From: "superseded", To: "archived"},
+			// D189 point 4: retiring takes a Decision out of force without a
+			// replacement, with a reason, under ratify. From superseded it is
+			// the repair of one superseded with no replacement recorded
+			// (point 5); validateTransition refuses it when one is.
+			{From: "ratified", To: decisionRetired, RequiredOperation: decisionRatifyOperation, Strict: true, RequiredReason: true},
+			{From: "pending-re-evaluation", To: decisionRetired, RequiredOperation: decisionRatifyOperation, Strict: true, RequiredReason: true},
+			{From: "superseded", To: decisionRetired, RequiredOperation: decisionRatifyOperation, Strict: true, RequiredReason: true},
+			{From: decisionRetired, To: "archived"},
 		},
 		Triggers: []TransitionTrigger{
 			{

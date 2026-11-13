@@ -3407,24 +3407,74 @@ func stampPublishedAt(item any) {
 }
 
 func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
+	item, prep, err := m.prepareCreate(ctx, fields)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.createInTx(ctx, item); err != nil {
+		return nil, err
+	}
+	if err := m.announceCreate(ctx, item, surfaceMCP, ""); err != nil {
+		return nil, err
+	}
+	var warnings []CreateWarning
+	if prep.slugAdjusted {
+		warnings = append(warnings, CreateWarning{
+			Code:    "slug_adjusted",
+			Field:   "slug",
+			Message: fmt.Sprintf("the slug %q is taken, so the server set %q; the address (%s) is the record's identity", prep.supplied, nodeSlugOf(item), addressOf(item)),
+			Address: addressOf(item),
+		})
+	}
+	if prep.legacySent != "" {
+		noteDeprecatedUse(ctx, m.contentTypeName, prep.legacyField)
+		warnings = append(warnings, legacyFieldWarning(prep.legacyField, prep.legacySent, addressOf(item), externalRefOf(item)))
+	}
+	warnings = append(warnings, addressedWarnings(item, prep.titleWarns)...)
+	warnings = append(warnings, addressedWarnings(item, retiredFieldWarnings(item, fields))...)
+	if len(warnings) > 0 {
+		return withCreateWarnings(item, warnings), nil
+	}
+	return item, nil
+}
+
+// createPrep is what [Module.prepareCreate] learned that the create's result
+// reports: the slug as supplied and whether it was changed, the title
+// warnings, and a legacy human-ID field that was sent.
+type createPrep struct {
+	supplied, legacyField, legacySent string
+	slugAdjusted                      bool
+	titleWarns                        []CreateWarning
+}
+
+// prepareCreate is a create up to its transaction: the item built from fields
+// with its ID, slug, default status, last actor and published time; the
+// validation, title and Signal checks; the initial state; the URL check; the
+// public BeforeCreate hooks; and the module's prepareSave. Nothing is written.
+// [Module.MCPCreate] and [App.SupersedeDecision] (a new replacement, D189)
+// share it, so both create on the same rules.
+func (m *Module[T]) prepareCreate(ctx Context, fields map[string]any) (T, createPrep, error) {
+	var zero T
+	var prep createPrep
 	pv, elemType := m.newItemPtr()
 	coerceSliceFields(fields, elemType)
 	data, err := json.Marshal(fields)
 	if err != nil {
-		return nil, problem(problemRequestMalformedBody, ErrBadRequest, nil)
+		return zero, prep, problem(problemRequestMalformedBody, ErrBadRequest, nil)
 	}
 	if err := json.Unmarshal(data, pv.Interface()); err != nil {
-		return nil, problem(problemRequestMalformedBody, ErrBadRequest, nil)
+		return zero, prep, problem(problemRequestMalformedBody, ErrBadRequest, nil)
 	}
 
 	f := getNodeFields(elemType)
 	id := NewID()
 	pv.Elem().FieldByIndex(f.id).SetString(id)
-	supplied := pv.Elem().FieldByIndex(f.slug).String()
-	slug, slugAdjusted, err := m.newSlug(ctx, supplied, autoSlug(pv.Elem()), id)
+	prep.supplied = pv.Elem().FieldByIndex(f.slug).String()
+	slug, slugAdjusted, err := m.newSlug(ctx, prep.supplied, autoSlug(pv.Elem()), id)
 	if err != nil {
-		return nil, err
+		return zero, prep, err
 	}
+	prep.slugAdjusted = slugAdjusted
 	pv.Elem().FieldByIndex(f.slug).SetString(slug)
 	applyDefaultStatus(ctx, m.db, m.contentTypeName, pv, f)
 	applyDefaultPriority(m.contentTypeName, fields, pv)
@@ -3433,70 +3483,57 @@ func (m *Module[T]) MCPCreate(ctx Context, fields map[string]any) (any, error) {
 	item := ptrToT[T](pv, m.proto)
 	stampPublishedAt(item)
 	if err := RunValidation(item); err != nil {
-		return nil, err
+		return zero, prep, err
 	}
 	titleWarns, err := titleCheck(item, m.titleCutover)
 	if err != nil {
-		return nil, err
+		return zero, prep, err
 	}
 	signalWarns, err := m.signalCreateCheck(ctx, item)
 	if err != nil {
-		return nil, err
+		return zero, prep, err
 	}
-	titleWarns = append(titleWarns, signalWarns...)
+	prep.titleWarns = append(titleWarns, signalWarns...)
 	if s := string(nodeStatusOf(item)); s != "" {
 		if err := validateInitialState(ctx, m.db, m.contentTypeName, s); err != nil {
-			return nil, err
+			return zero, prep, err
 		}
 	}
 	// Created straight into Published or Scheduled: the URL is checked now, as
 	// on any publish; a draft reserves none.
 	if st := nodeStatusOf(item); st == Published || st == Scheduled {
 		if err := m.checkSlugCollision(ctx, item); err != nil {
-			return nil, err
+			return zero, prep, err
 		}
 	}
 	// The public BeforeCreate hooks run before the transaction (they take no
 	// db); the type's own check and the INSERT run inside it (createInTx).
 	if err := dispatchBefore(ctx, m.signals[BeforeCreate], item); err != nil {
-		return nil, err
+		return zero, prep, err
 	}
 	if err := m.prepareSave(ctx, nil, item); err != nil {
-		return nil, err
+		return zero, prep, err
 	}
 	// D110 7.1: note a value sent in a legacy human-ID field before the create
 	// mirrors the address into it, for the warning in the result.
-	legacyField, legacySent := m.legacySent(item)
-	if err := m.createInTx(ctx, item); err != nil {
-		return nil, err
-	}
+	prep.legacyField, prep.legacySent = m.legacySent(item)
+	return item, prep, nil
+}
+
+// announceCreate is a committed create's announcement, the same on every
+// path that writes one: the synchronous save hook, the after-save step, the
+// AfterCreate events and the cache. A failing save hook is returned, as
+// [Module.MCPCreate] always returned it.
+func (m *Module[T]) announceCreate(ctx Context, item T, surface, reason string) error {
 	if m.syncSaveHook != nil {
 		if err := m.syncSaveHook(ctx, m.contentTypeName, nodeIDOf(item), item); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	m.runSaveAfter(ctx, nil, item)
-	m.notifyAfter(ctx, AfterCreate, "", surfaceMCP, "", item)
+	m.notifyAfter(ctx, AfterCreate, "", surface, reason, item)
 	m.invalidateCache()
-	var warnings []CreateWarning
-	if slugAdjusted {
-		warnings = append(warnings, CreateWarning{
-			Code:    "slug_adjusted",
-			Field:   "slug",
-			Message: fmt.Sprintf("the slug %q is taken, so the server set %q; the address (%s) is the record's identity", supplied, slug, addressOf(item)),
-			Address: addressOf(item),
-		})
-	}
-	if legacySent != "" {
-		noteDeprecatedUse(ctx, m.contentTypeName, legacyField)
-		warnings = append(warnings, legacyFieldWarning(legacyField, legacySent, addressOf(item), externalRefOf(item)))
-	}
-	warnings = append(warnings, addressedWarnings(item, titleWarns)...)
-	warnings = append(warnings, addressedWarnings(item, retiredFieldWarnings(item, fields))...)
-	if len(warnings) > 0 {
-		return withCreateWarnings(item, warnings), nil
-	}
-	return item, nil
+	return nil
 }
 
 // addressedWarnings returns ws with each warning's Address set to item's.

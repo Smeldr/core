@@ -448,6 +448,9 @@ var builtInToolPolicies = []toolPolicy{
 	// only for a Decision the caller reads, and names a premise only when
 	// the caller reads it too (D149).
 	{"get_premise_flags", "read"},
+	{"supersede_decision", "read"},
+	{"retire_decision", "read"},
+	{"repair_superseded", "read"},
 	// Stewardship inbox tool (Author+, smeldr.dev/mcp v1.35.0+). Same
 	// "not module-generated" reason as the three rows above —
 	// get_stewardship_inbox reads RoleStore.StewardshipInbox directly, no

@@ -23,7 +23,7 @@ var d109Open = map[string][]string{
 // d109Closed names every closed state, so a state added to a flow later fails
 // the table test until it is classified.
 var d109Closed = map[string][]string{
-	"Decision":  {"ratified", "superseded", "archived"},
+	"Decision":  {"ratified", "superseded", "retired", "archived"},
 	"Task":      {"done", "deferred", "resolved"},
 	"Amendment": {"merged", "rejected"},
 	"Goal":      {"done", "resolved"},

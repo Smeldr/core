@@ -128,6 +128,12 @@ var capabilityTable = []Capability{
 	// Reading a Decision's premise flags (D149, T1183): the read rules on the
 	// Decision and on each premise apply inside App.PremiseFlags.
 	{ResourceItem, "premise_flags", "read", ReasonNotTaken, true},
+	// Supersede, retire and repair (D189, T1187): core authorizes each by
+	// ratify over the places involved (App.SupersedeDecision, App.RetireDecision,
+	// App.RepairSuperseded), so the gate is a read.
+	{ResourceItem, "supersede", "read", ReasonNotTaken, true},
+	{ResourceItem, "retire", "read", ReasonNotTaken, true},
+	{ResourceItem, "repair_superseded", "read", ReasonNotTaken, true},
 
 	{ResourceType, VerbGet, "read", ReasonNotTaken, false},
 	{ResourceType, VerbList, "read", ReasonNotTaken, false},
@@ -254,6 +260,9 @@ var typelessReadsAny = map[capabilityKey]bool{
 	{ResourceItem, "rest_counts"}:         true, // RestCounts and StoredRestCounts apply the read rules per item
 	{ResourceItem, "confirm_premise"}:     true, // App.ConfirmPremise checks the read and ratify over the place
 	{ResourceItem, "premise_flags"}:       true, // App.PremiseFlags reads the Decision and names a premise only when readable
+	{ResourceItem, "supersede"}:           true, // App.SupersedeDecision checks the reads and ratify over each place
+	{ResourceItem, "retire"}:              true, // App.RetireDecision is a gated transition (ratify over the place)
+	{ResourceItem, "repair_superseded"}:   true, // App.RepairSuperseded checks the reads and ratify over each place
 	{ResourceItem, "answer_change_check"}: true, // App.AnswerChangeCheck checks the Area's read and approve-change
 	{ResourceItem, "change_checks"}:       true, // ChangeCheckOf and ListChangeChecks filter by the read rules
 	// App.ListFindings shows a finding only when its subject is readable

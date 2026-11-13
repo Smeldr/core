@@ -75,6 +75,9 @@ Every refusal and validation error Smeldr core answers with carries a stable **t
 | `decision.place_missing` | refusal | 409 | person | **`decision`** | D142 pt 4, T883, D83 | Ratifying a Decision that has no place |  |
 | `decision.place_exists` | refusal | 409 | person | **`decision`**, **`kind`**, **`place`** | D142 | Placing a Decision that already has a place |  |
 | `decision.replacement_state` | refusal | 409 | person | **`decision`**, **`replacement`**, **`state`** | T1054 | Replacing a Decision needs a ratified replacement, and the replaced Decision at ratified or pending-re-evaluation |  |
+| `decision.replacement_required` | refusal | 409 | person | **`decision`**, **`date`** | D189 pt 3, T1187 | Moving a Decision to superseded with no live supersedes relation pointing at it, after the deprecation date |  |
+| `decision.repair_not_needed` | refusal | 409 | person | **`decision`**, `replacement` | D189 pt 5, T1187 | Repairing or retiring a superseded Decision that already has its replacement recorded |  |
+| `decision.supersede_form` | correction | 400 | developer | **`act`** | D189 pt 2, T1187 | A supersede or repair names neither or both of its two forms (an existing replacement, or a new one / retiring) |  |
 | `places.domain_prefix_held` | refusal | 409 | person | **`prefix`** |  | Setup of places while the runtime domain type still holds the DOM prefix |  |
 | `change_check.supersede_race` | conflict | 409 | person | **`check`** | T918 | A Check kept changing while being superseded |  |
 | `change_check.use_answer_change_check` | correction | 409 | person |  | D144 | A Check's per-Area approval request is answered via answer_signal instead of answer_change_check |  |

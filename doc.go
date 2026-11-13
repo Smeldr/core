@@ -188,6 +188,12 @@
 //   - Pinned sources (D148): [Decision].Sources lists the external files a
 //     Decision rests on, each at a full commit SHA with a role
 //     ([DecisionSource]); set while proposed, frozen once ratified.
+//   - Replacing a Decision (D189): [App.SupersedeDecision] asserts the
+//     supersedes relation and moves the replaced Decision to superseded in
+//     one write, naming an existing ratified replacement or creating,
+//     placing and ratifying a new one; [App.RetireDecision] takes a Decision
+//     out of force with no replacement; [App.RepairSuperseded] repairs one
+//     superseded with no replacement recorded.
 //   - Custom state flows ([StateFlow], [State], [Transition],
 //     [TransitionTrigger]) — a data-driven state machine registered per
 //     content type via [App.RegisterFlow], for lifecycles beyond the built-in

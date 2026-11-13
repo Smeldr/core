@@ -463,9 +463,11 @@ correct wiring order — some calls have load-bearing ordering constraints (e.g.
   with `smeldr.ProblemValuesOf(err)`, never the message text. Every core refusal carries
   a type; compare core errors with `errors.Is`, never `==`
 - A relation never runs from a record to itself (`relation.to_itself`). To replace a
-  Decision, assert `supersedes` from its ratified replacement while the old one is
-  still ratified or pending re-evaluation, then move it to superseded
-  (`decision.replacement_state`, T1054)
+  Decision, use `App.SupersedeDecision` (MCP `supersede_decision`): one write that
+  records the replacement, asserts `supersedes` and moves the old one to superseded.
+  To take one out of force without a replacement, use `App.RetireDecision`
+  (`retire_decision`). A plain move to superseded with no replacement recorded is
+  deprecated (a warning, then `decision.replacement_required`; D189, T1187)
 - Never use `smeldr.SignToken` in `main()` when `TokenStore` is wired —
   stateless HMAC tokens are rejected by `VerifyBearerToken` when a store is configured
 - Put write validation in `smeldr.On(smeldr.BeforeCreate/BeforeUpdate/BeforeDelete, ...)`:

@@ -85,6 +85,9 @@ var builtInToolCapability = map[string]capabilityRef{
 	"get_sweep_run":         {ResourceOps, VerbGet},
 	"list_sweep_runs":       {ResourceOps, VerbGet}, // as get_sweep_run: no subject to filter by, so not ops list
 	"get_premise_flags":     {ResourceItem, "premise_flags"},
+	"supersede_decision":    {ResourceItem, "supersede"},
+	"retire_decision":       {ResourceItem, "retire"},
+	"repair_superseded":     {ResourceItem, "repair_superseded"},
 	"get_stewardship_inbox": {ResourceOps, VerbGet},
 	"get_check_status":      {ResourceOps, VerbGet},
 	"list_findings":         {ResourceOps, VerbList},

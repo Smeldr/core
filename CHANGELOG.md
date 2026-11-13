@@ -18,6 +18,19 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Added
+
+- **`App.SupersedeDecision` replaces a Decision in one write (D189, T1187).** It takes a `SupersedeRequest` and returns a `SupersedeResult`, in one transaction or not at all: the Decisions, the place and the relation commit together, and standing is recorded after the commit, as on any transition. The move is written only while the replaced Decision is still in the state the checks read, so two overlapping supersedes cannot both commit, with or without a rev; the later one is refused with `decision.replacement_state`. Exactly one of `SupersedeRequest.Replacement` (an existing, ratified Decision) and `SupersedeRequest.New` (a replacement this write creates, places where the replaced Decision is placed and ratifies) must be set. The relation is asserted and the replaced Decision moves to `superseded` in the same write. **New requirement:** with an existing replacement, the caller needs `ratify` over the replacement's place as well as the replaced Decision's; asserting `supersedes` alone never required it. `App.SupersedeDecisionVia` names the surface. Capability `item supersede`.
+- **`retired` is a new final state on the Decision flow (D189, T1187).** It marks a Decision taken out of force with no replacement. Standing ceases. A Decision moves into `retired` from `ratified`, `pending-re-evaluation` or `superseded`, and needs `ratify` over its place and a reason. A retired Decision can move to `archived`.
+- **`App.RetireDecision` and `App.RetireDecisionVia` move a Decision to `retired` (D189, T1187).** A reason is required. Agents and jobs are refused. From `superseded`, the call is refused with `decision.repair_not_needed` when the replacement is already recorded. Capability `item retire`.
+- **`App.RepairSuperseded` and `App.RepairSupersededVia` repair a superseded Decision with no replacement recorded (D189, T1187).** The request is a `RepairRequest`. The caller either names a replacement, and the relation is asserted onto the superseded Decision with the reason in provenance, or retires the Decision. Capability `item repair_superseded`.
+- **`App.SweepStructural` runs a new detector, `decision-replacement` (D189, T1187).** It records a finding for a Decision superseded with no replacement recorded, and for one still in force under a live `supersedes` relation. Findings are deleted once they stop firing, and `flagged` counts them.
+- **New problem types (D189, T1187).** `decision.replacement_required` (409), `decision.repair_not_needed` (409) and `decision.supersede_form` (400). No HTTP route is added in this release: the acts are Go functions and MCP tools, and their HTTP door comes with the application-layer authorization work (T1185).
+
+### Deprecated
+
+- **A plain transition to `superseded` with no live `supersedes` relation (D189, T1187).** Until 2027-02-15 the transition still works, and its result carries the warning `decision.supersede_without_replacement`, which names that date. From 2027-02-15 it is refused with `decision.replacement_required`. Use `SupersedeDecision` or `RetireDecision` instead. A plain transition to `superseded` is unchanged when the `supersedes` relation is already recorded.
+
 ---
 
 ## [1.192.0] - 2026-11-13

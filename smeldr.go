@@ -1266,6 +1266,11 @@ func typeHasOwnFlow(ctx context.Context, db DB, typeName string) (bool, error) {
 // It fires [AfterRelationCascade] for each stale source edge via [App.emitSignal].
 // Returns (0, 0, 0, nil) immediately if no [RelationStore] is configured.
 //
+// It also runs the decision-replacement detector (D189 point 5): a Decision
+// superseded with no live supersedes relation pointing at it, or still in
+// force under one, is a finding, and its finding is deleted once it no longer
+// fires. flagged counts those findings too.
+//
 // walked is the total relation rows examined this run (T223) — record it
 // alongside flagged/skipped via a [SweepRunStore] so a clean sweep leaves a
 // trace distinguishable from no sweep having run at all; see
@@ -1299,7 +1304,14 @@ func (a *App) SweepStructural(ctx context.Context) (walked, flagged, skipped int
 			}
 		}
 	}
-	return rs.SweepStructural(ctx, check, onStale)
+	walked, flagged, skipped, err = rs.SweepStructural(ctx, check, onStale)
+	if err != nil {
+		return walked, flagged, skipped, err
+	}
+	// D189 point 5: a Decision superseded with no replacement recorded, or
+	// still in force under a live supersedes relation, is a finding.
+	n, err := a.sweepDecisionReplacement(ctx)
+	return walked, flagged + n, skipped, err
 }
 
 // Audit wires store as the audit trail for this application. It subscribes to

@@ -133,6 +133,9 @@ const (
 	problemDecisionPlaceMissing               ProblemType = "decision.place_missing"
 	problemDecisionPlaceExists                ProblemType = "decision.place_exists"
 	problemDecisionReplacementState           ProblemType = "decision.replacement_state"
+	problemDecisionReplacementRequired        ProblemType = "decision.replacement_required"
+	problemDecisionRepairNotNeeded            ProblemType = "decision.repair_not_needed"
+	problemDecisionSupersedeForm              ProblemType = "decision.supersede_form"
 	problemPlacesDomainPrefixHeld             ProblemType = "places.domain_prefix_held"
 	problemChangeCheckSupersedeRace           ProblemType = "change_check.supersede_race"
 	problemChangeCheckUseAnswerChangeCheck    ProblemType = "change_check.use_answer_change_check"
@@ -306,6 +309,9 @@ var problemTypeList = []ProblemTypeInfo{
 	{ID: problemDecisionPlaceMissing, Status: 409, Title: "Ratifying a Decision that has no place", Rule: "D142 pt 4, T883, D83", Audience: "person", Class: problemClassRefusal, Values: []string{"decision"}, AlwaysValues: []string{"decision"}},
 	{ID: problemDecisionPlaceExists, Status: 409, Title: "Placing a Decision that already has a place", Rule: "D142", Audience: "person", Class: problemClassRefusal, Values: []string{"decision", "kind", "place"}, AlwaysValues: []string{"decision", "kind", "place"}},
 	{ID: problemDecisionReplacementState, Status: 409, Title: "Replacing a Decision needs a ratified replacement, and the replaced Decision at ratified or pending-re-evaluation", Rule: "T1054", Audience: "person", Class: problemClassRefusal, Values: []string{"decision", "replacement", "state"}, AlwaysValues: []string{"decision", "replacement", "state"}},
+	{ID: problemDecisionReplacementRequired, Status: 409, Title: "Moving a Decision to superseded with no live supersedes relation pointing at it, after the deprecation date", Rule: "D189 pt 3, T1187", Audience: "person", Class: problemClassRefusal, Values: []string{"decision", "date"}, AlwaysValues: []string{"decision", "date"}},
+	{ID: problemDecisionRepairNotNeeded, Status: 409, Title: "Repairing or retiring a superseded Decision that already has its replacement recorded", Rule: "D189 pt 5, T1187", Audience: "person", Class: problemClassRefusal, Values: []string{"decision", "replacement"}, AlwaysValues: []string{"decision"}},
+	{ID: problemDecisionSupersedeForm, Status: 400, Title: "A supersede or repair names neither or both of its two forms (an existing replacement, or a new one / retiring)", Rule: "D189 pt 2, T1187", Audience: "developer", Class: problemClassCorrection, Values: []string{"act"}, AlwaysValues: []string{"act"}},
 	{ID: problemPlacesDomainPrefixHeld, Status: 409, Title: "Setup of places while the runtime domain type still holds the DOM prefix", Audience: "person", Class: problemClassRefusal, Values: []string{"prefix"}, AlwaysValues: []string{"prefix"}},
 	{ID: problemChangeCheckSupersedeRace, Status: 409, Title: "A Check kept changing while being superseded", Rule: "T918", Audience: "person", Class: problemClassConflict, Values: []string{"check"}, AlwaysValues: []string{"check"}},
 	{ID: problemChangeCheckUseAnswerChangeCheck, Status: 409, Title: "A Check's per-Area approval request is answered via answer_signal instead of answer_change_check", Rule: "D144", Audience: "person", Class: problemClassCorrection},

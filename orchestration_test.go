@@ -380,11 +380,11 @@ func TestDecisionFlow_definition(t *testing.T) {
 	if f.TypeName != "Decision" {
 		t.Errorf("TypeName = %q, want %q", f.TypeName, "Decision")
 	}
-	if len(f.States) != 5 {
-		t.Errorf("state count = %d, want 5", len(f.States))
+	if len(f.States) != 6 {
+		t.Errorf("state count = %d, want 6 (retired added by D189)", len(f.States))
 	}
-	if len(f.Transitions) != 7 {
-		t.Errorf("transition count = %d, want 7", len(f.Transitions))
+	if len(f.Transitions) != 11 {
+		t.Errorf("transition count = %d, want 11 (four into and out of retired, D189)", len(f.Transitions))
 	}
 	if got := initialState(f); got != "proposed" {
 		t.Errorf("initial = %q, want %q", got, "proposed")

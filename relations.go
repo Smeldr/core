@@ -826,7 +826,14 @@ func (s *RelationStore) requireReplacementState(ctx context.Context, edge Relati
 // announceEdge records the assert provenance of an edge already written and
 // sends its relation event (and, for contradicts, the conflict condition).
 func (s *RelationStore) announceEdge(ctx context.Context, edge RelationEdge, newRow bool) {
-	s.recordAssertProvenance(ctx, edge)
+	s.announceEdgeFor(ctx, edge, newRow, "", "")
+}
+
+// announceEdgeFor is [RelationStore.announceEdge] for an act that has a reason
+// and a surface (a supersede or a repair, D189): both are kept in the assert's
+// provenance record.
+func (s *RelationStore) announceEdgeFor(ctx context.Context, edge RelationEdge, newRow bool, surface, reason string) {
+	s.recordAssertProvenance(ctx, edge, surface, reason)
 	s.emitRelationEvent(ctx, eventRelationAsserted, edge, &newRow, assertEnding(ctx, edge))
 	if edge.RelationKind == "contradicts" {
 		s.emitConflictDetectedSignal(ctx, edge)
@@ -879,7 +886,7 @@ func (s *RelationStore) signalResolver() signalResolver {
 // original smeldr.Context through unwrapped, so the type assertion recovers it
 // in practice without requiring any change to these methods' public signatures.
 // See design/transition-provenance.md §5.2 for the full reasoning.
-func (s *RelationStore) recordAssertProvenance(ctx context.Context, edge RelationEdge) {
+func (s *RelationStore) recordAssertProvenance(ctx context.Context, edge RelationEdge, surface, reason string) {
 	if s.provenanceStore == nil {
 		return
 	}
@@ -900,6 +907,8 @@ func (s *RelationStore) recordAssertProvenance(ctx context.Context, edge Relatio
 		Verb:        "assert",
 		ActorKind:   actorKind,
 		ActorID:     actorID,
+		Surface:     surface,
+		Reason:      reason,
 	})
 }
 

@@ -662,6 +662,17 @@ func validateTransition(ctx context.Context, db DB, rs *RoleStore, rels *Relatio
 			return err
 		}
 	}
+	// D189 points 3 and 5: the bare move to superseded with no replacement is
+	// refused from the cutover date (the warning before it is the caller's,
+	// see transitionItem), and a superseded Decision with its replacement
+	// recorded is never retired. Before the authorization check, so the
+	// refusal says what to do instead.
+	if _, err := bareSupersedeCheck(ctx, db, typeName, itemID, fromStatus, toStatus); err != nil {
+		return err
+	}
+	if err := repairGuard(ctx, db, typeName, itemID, fromStatus, toStatus); err != nil {
+		return err
+	}
 
 	// ── FAIL-CLOSED: required_reason ─────────────────────────────────────────
 	// Unconditional — does not depend on governance or actorID, since "did the
@@ -1740,6 +1751,13 @@ func (a *App) transitionItem(ctx context.Context, surface, typeName, slug, toSta
 	actorID, _ := actorFromContext(ctx)
 	if err := validateTransition(ctx, db, a.governance, a.relationStore, actorID, id, typeName, currentStatus, toState, reason); err != nil {
 		return nil, err
+	}
+	// D189 point 3: the bare move to superseded works with a warning until
+	// the cutover date (validateTransition refuses it from then on).
+	if w, err := bareSupersedeCheck(ctx, db, typeName, id, currentStatus, toState); err != nil {
+		return nil, err
+	} else if w != nil {
+		warnings = append(warnings, *w)
 	}
 	if toState == string(Scheduled) && currentStatus != toState {
 		if err := requireTableScheduledTime(ctx, db, table, typeName, id); err != nil {
