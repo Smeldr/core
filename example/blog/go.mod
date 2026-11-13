@@ -6,8 +6,8 @@ toolchain go1.26.11
 
 require (
 	modernc.org/sqlite v1.50.1
-	smeldr.dev/core v1.192.0
-	smeldr.dev/mcp v1.76.0
+	smeldr.dev/core v1.193.0
+	smeldr.dev/mcp v1.77.0
 )
 
 require (
