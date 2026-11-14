@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.193.1] - 2026-11-14
+
 ### Changed
 
 - **Error and warning messages no longer name records of Smeldr's own instance by address (T1211).** Before this change, 22 messages ended with a record address such as "(D142)", "(D156)", "(D112)" or "(T273)", and the place-authority refusals (`ratify.automated_class`, `place.authority_required`) appended "(D145)", "(D146)", "(D148)", "(D149)" or "(D189)". Those addresses name records on smeldr.dev's own instance, so on any other instance they point at other records or at nothing. Each message still says what is refused and what to do. Examples of the form now describe the record in words (for example, "a D followed by a number") instead of citing it. Messages are not part of the API contract (the problem type id is), so this changes no API. Code that matched message text should match the problem type id instead (`smeldr.ProblemTypeOf`).
