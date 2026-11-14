@@ -18,6 +18,11 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dynamic grant anchors are resolved on write (T1213).** `RoleStore.Grant` and `GrantAt` now resolve a dynamic grant's anchor (`RoleGrant.ScopeAnchorID`) to the item's ID, whether the caller gives the ID, the address (such as an Area's `ARE1`) or the slug. Before this, the anchor was stored as given, so an address or slug was accepted and the grant then read nothing, with no error. When the candidate types hold no match, the grant is refused with the new problem type `grant.anchor_not_found` (422, with the values `anchor`, `role` and `types`), and a slug that matches in two candidate types is refused with `ident.ambiguous`. When the role's relation kind can anchor any type, only an address with a registered prefix is resolved, and any other anchor is kept as given. The agent rule's Area check uses the same resolution. Existing grants are not rewritten: a grant made before this release with an address or slug as anchor still reads nothing, so revoke it and grant it again.
+- **Corrects an article in five agent-rule refusals (T1213).** Five refusals of the agent rule said "an job token" for a job grantee; they now say "a job token".
+
 ---
 
 ## [1.193.1] - 2026-11-14

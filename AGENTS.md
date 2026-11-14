@@ -663,16 +663,16 @@ steward" and "what currently touches authority I steward" — see
 
 **Approval roles (D142, T884).** Two operations: `ratify` (ratify, supersede or amend a Decision; the four Decision doors require it) and `approve-change` (approve a change, such as a pull request, against the Decisions in force; no core gate requires it yet). `approve` is retired: a boot migration gives every role that held it the two new words, and renames the roles. The roles, granted with `grant_role`:
 - **`approver`** (was `decision-steward`): `ratify`, `approve-change`, `review`, over the whole organization. `admin` holds no approval operation: whoever ratifies needs this role or one of the next ones explicitly.
-- **`domain-approver`** (was `decision-domain-admin`): `ratify`, `approve-change`, with `scope_anchor_id` a Domain's ID. It covers the Decisions placed in that Domain, its Areas and what is placed in them (the place hierarchy).
-- **`area-approver`** (new): `approve-change` only, with `scope_anchor_id` an Area's ID.
+- **`domain-approver`** (was `decision-domain-admin`): `ratify`, `approve-change`, with `scope_anchor_id` a Domain (its ID, address or slug, stored as the ID, T1213). It covers the Decisions placed in that Domain, its Areas and what is placed in them (the place hierarchy).
+- **`area-approver`** (new): `approve-change` only, with `scope_anchor_id` an Area (its ID, address or slug).
 - `item-approver` (one item, `delegate_item`) holds `ratify`, `approve-change`, `read`.
 
 **The agent rule (D142, fail closed).** A token of class `agent` or `job` (D105) never ratifies: `transition_item` to `ratified` or `superseded` by such a token is refused `ErrForbidden` whatever its grants, and `grant_role` of a role that holds `ratify` to such a token is refused. It may hold `approve-change` only on an `area-approver` grant anchored on an Area, given by a token of class `human` that itself holds `approve-change` over that Area; any other approval grant to it is refused. A token of class `agent` also never grants a role that holds `ratify` or `approve-change` to anyone (`grant_role` is refused, whatever the grantee's class), and `create_token` by such a token mints only `agent` or `job` tokens (T984). A token of class `job` never creates a token and never grants any role (D156, T986). The person who created the organization gets `admin` and `approver` (`App.GrantFounder`, example/server `ORGANIZATION_FOUNDER`). See [docs/REFERENCE.md](docs/REFERENCE.md#approval-roles-d142-t884).
 
 **Read access to some records, not all (core v1.146.0, A494).** Two built-in reader roles, ops exactly `["read"]`, registered when `ENABLE_GOVERNANCE` is set:
 - **`scoped-reader`** (static): `grant_role` with `scope_static` patterns such as `["Decision:D12", "Task:*"]`. The item may be named by its address, slug or ID; the grant stores its ID. A pattern that names no record is refused.
-- **`domain-reader`** (dynamic): `scope_anchor_id` set to a Domain's ID reads the Domain itself, the Areas in it, and every item placed in either (`belongs_to_domain`, `belongs_to_area`; the place hierarchy, D142).
-- **`area-reader`** (dynamic): `scope_anchor_id` set to an Area's ID reads the Area and every item placed in it (`belongs_to_area`).
+- **`domain-reader`** (dynamic): `scope_anchor_id` set to a Domain (ID, address or slug) reads the Domain itself, the Areas in it, and every item placed in either (`belongs_to_domain`, `belongs_to_area`; the place hierarchy, D142).
+- **`area-reader`** (dynamic): `scope_anchor_id` set to an Area (ID, address or slug) reads the Area and every item placed in it (`belongs_to_area`).
 
 Since core v1.147.0 (A495) the item surfaces apply them:
 - get, list, update, publish, archive, delete, transitions and the `/_content` routes show a scoped reader only what it may read;

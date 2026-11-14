@@ -634,8 +634,10 @@ type RoleGrant struct {
 	// Matched against target.TypeName+":"+target.ID. Only used when the role's
 	// ScopeMode is [ScopeStatic].
 	ScopeStatic []string
-	// ScopeAnchorID is the anchor item's ID for dynamic scope.
-	// Only used when the role's ScopeMode is [ScopeDynamic].
+	// ScopeAnchorID is the anchor item for dynamic scope: on input to Grant
+	// its ID, address or slug, resolved and stored as the ID (T1213); in a
+	// grant read back, the ID. Only used when the role's ScopeMode is
+	// [ScopeDynamic].
 	ScopeAnchorID string
 	// ExpiresAt is when this grant stops matching in [RoleStore.Authorized],
 	// [RoleStore.RoleGranted], and [RoleStore.StewardedRuleTypes] — nil means a
@@ -1170,10 +1172,11 @@ func (s *RoleStore) GrantAt(ctx context.Context, grant RoleGrant, rev *int) (str
 	if grant.RoleName == "" {
 		return "", nil, fieldErr(problemFieldRequired, "role_name", "RoleName must not be empty", nil)
 	}
-	var roleID string
+	var roleID, scopeMode string
+	var relKind, relDir sql.NullString
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT id FROM smeldr_roles WHERE name = $1`, grant.RoleName,
-	).Scan(&roleID); err == sql.ErrNoRows {
+		`SELECT id, scope_mode, scope_relation_kind, scope_direction FROM smeldr_roles WHERE name = $1`, grant.RoleName,
+	).Scan(&roleID, &scopeMode, &relKind, &relDir); err == sql.ErrNoRows {
 		return "", nil, problem(problemRoleNotFound, fmt.Errorf("smeldr: Grant: role %q: %w", grant.RoleName, ErrNotFound), problemValues{"role": grant.RoleName})
 	} else if err != nil {
 		return "", nil, fmt.Errorf("smeldr: Grant: lookup role %q: %w", grant.RoleName, err)
@@ -1215,6 +1218,17 @@ func (s *RoleStore) GrantAt(ctx context.Context, grant RoleGrant, rev *int) (str
 		if err := s.checkItemChangeApproverGrant(ctx, named); err != nil {
 			return "", nil, err
 		}
+	}
+	// T1213: a dynamic grant's anchor is the item's ID, resolved here from
+	// an ID, an address or a slug, so a grant never names an item it cannot
+	// find and then reads nothing. After the agent rule, whose refusals do
+	// not depend on whether the anchor exists.
+	if ScopeMode(scopeMode) == ScopeDynamic && strings.TrimSpace(grant.ScopeAnchorID) != "" {
+		id, err := s.resolveGrantAnchor(ctx, grant.RoleName, relKind.String, relDir.String, grant.ScopeAnchorID)
+		if err != nil {
+			return "", nil, err
+		}
+		grant.ScopeAnchorID = id
 	}
 	staticJSON, _ := json.Marshal(scopeStatic) // []string marshal never fails
 	var anchorID *string
@@ -2245,4 +2259,155 @@ func (s *RoleStore) ToolPolicy(ctx context.Context, toolName string) (requiredOp
 		return "", false, fmt.Errorf("smeldr: RoleStore.ToolPolicy: %w", err)
 	}
 	return op, true, nil
+}
+
+// resolveGrantAnchor resolves a dynamic grant's anchor, given as an ID, an
+// address or a slug, to the ID of the one item it names (T1213, D113).
+//
+// When the role's relation kind names the types it can anchor (a place kind,
+// or the kind's type pairs) and their tables exist, the anchor is looked up
+// among them: an address with the type's prefix, a slug, an ID. Nothing found
+// is grant.anchor_not_found. When the kind can anchor any type, only an
+// address with a registered prefix is resolved (to that type's item, or
+// grant.anchor_not_found); any other anchor is kept as given, as before
+// T1213, since an item of a type core does not list cannot be looked up.
+//
+// It resolves among every record, not the caller's read scope: a grant is
+// an act of administering who may read and do what (grant_role needs
+// administer, whose holder can grant itself any read), and the authority to
+// delegate over a place (approve-change over an Area) does not include
+// reading it. A missing anchor and an unknown one are one answer,
+// grant.anchor_not_found.
+func (s *RoleStore) resolveGrantAnchor(ctx context.Context, role, kind, direction, anchor string) (string, error) {
+	anchor = strings.TrimSpace(anchor)
+	types, anyType, err := s.anchorTypes(ctx, role, kind, direction)
+	if err != nil {
+		return "", err
+	}
+	if anyType {
+		t, err := s.addressedType(ctx, role, anchor)
+		if err != nil || t == "" {
+			return anchor, err // not an address: kept as given
+		}
+		types = []string{t}
+	}
+	type hit struct{ typeName, id string }
+	var hits []hit
+	checked := 0
+	for _, t := range types {
+		rt, err := recordTableOf(ctx, s.db, t)
+		if err != nil {
+			return "", fmt.Errorf("%w: Grant: resolve anchor %q: %s", ErrInternal, anchor, err)
+		}
+		if rt.name == "" {
+			continue
+		}
+		if ok, err := tableExists(ctx, s.db, rt.name); err != nil {
+			return "", fmt.Errorf("%w: Grant: resolve anchor %q: %s", ErrInternal, anchor, err)
+		} else if !ok {
+			continue
+		}
+		checked++
+		id, _, err := rt.lookup(ctx, s.db, anchor)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			continue
+		case err != nil && ProblemTypeOf(err) == problemIdentAmbiguous:
+			return "", err
+		case err != nil:
+			return "", fmt.Errorf("%w: Grant: resolve anchor %q: %s", ErrInternal, anchor, err)
+		}
+		hits = append(hits, hit{t, id})
+	}
+	if checked == 0 {
+		return anchor, nil // no table to check against (a store without these types): kept as given
+	}
+	switch len(hits) {
+	case 1:
+		return hits[0].id, nil
+	case 0:
+		return "", fieldErr(problemGrantAnchorNotFound, "scope_anchor_id",
+			fmt.Sprintf("no %s %q to anchor role %q on; name it by its address, slug or ID", strings.Join(types, " or "), anchor, role),
+			problemValues{"anchor": anchor, "role": role, "types": strings.Join(types, ", ")})
+	}
+	names := make([]string, len(hits))
+	for i, h := range hits {
+		names[i] = h.typeName
+	}
+	return "", fieldErr(problemIdentAmbiguous, "scope_anchor_id",
+		fmt.Sprintf("%q names a record in more than one of %s; name it by its address or ID", anchor, strings.Join(names, ", ")),
+		problemValues{"value": anchor, "count": strconv.Itoa(len(hits)), "type": strings.Join(names, ", ")})
+}
+
+// addressedType is the type whose registered address prefix anchor carries,
+// or "" when anchor is not an address of a registered prefix.
+func (s *RoleStore) addressedType(ctx context.Context, role, anchor string) (string, error) {
+	prefix, _, ok := ParseAddress(anchor)
+	if !ok {
+		return "", nil
+	}
+	var t string
+	err := s.db.QueryRowContext(ctx, `SELECT type_name FROM smeldr_address_counters WHERE prefix = $1`, prefix).Scan(&t)
+	switch {
+	case errors.Is(err, sql.ErrNoRows) || isNoSuchTable(err):
+		return "", nil
+	case err != nil:
+		return "", fmt.Errorf("%w: Grant: the anchor of role %q: %s", ErrInternal, role, err)
+	}
+	return t, nil
+}
+
+// anchorTypes is the types an anchor of a dynamic role on kind and direction
+// can be: the place type for a place kind read incoming, and the kind's type
+// pairs (incoming: the target, outgoing: the source, both: either). anyType
+// is true when the kind can anchor any type (no pairs, a "*" or empty side,
+// or no such kind registered) and no place type applies.
+func (s *RoleStore) anchorTypes(ctx context.Context, role, kind, direction string) (types []string, anyType bool, err error) {
+	seen := map[string]bool{}
+	add := func(t string) {
+		if t != "" && t != "*" && !seen[t] {
+			seen[t] = true
+			types = append(types, t)
+		}
+	}
+	incoming := direction == "incoming" || direction == "both"
+	outgoing := direction == "outgoing" || direction == "both"
+	if place, ok := placeKindTargets[kind]; ok && incoming {
+		add(place)
+		if !outgoing {
+			return types, false, nil
+		}
+	}
+	var raw string
+	qerr := s.db.QueryRowContext(ctx, `SELECT type_pairs FROM smeldr_relation_kinds WHERE type_name = $1`, kind).Scan(&raw)
+	switch {
+	case errors.Is(qerr, sql.ErrNoRows) || isNoSuchTable(qerr):
+		raw = ""
+	case qerr != nil:
+		return nil, false, fmt.Errorf("%w: Grant: the anchor types of role %q: %s", ErrInternal, role, qerr)
+	}
+	open := raw == "" || raw == "[]"
+	if !open {
+		var pairs []struct {
+			SourceType string `json:"source_type"`
+			TargetType string `json:"target_type"`
+		}
+		if err := json.Unmarshal([]byte(raw), &pairs); err != nil {
+			return nil, false, fmt.Errorf("%w: Grant: the anchor types of role %q: type_pairs of %q: %s", ErrInternal, role, kind, err)
+		}
+		for _, p := range pairs {
+			if incoming {
+				open = open || p.TargetType == "" || p.TargetType == "*"
+				add(p.TargetType)
+			}
+			if outgoing {
+				open = open || p.SourceType == "" || p.SourceType == "*"
+				add(p.SourceType)
+			}
+		}
+	}
+	if open && len(seen) > 0 && placeKindTargets[kind] != "" {
+		return types, false, nil // a place kind read both ways: its place type is known
+	}
+	return types, open, nil
 }

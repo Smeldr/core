@@ -23,6 +23,7 @@ Every refusal and validation error Smeldr core answers with carries a stable **t
 | `grant.automated_needs_human_grantor` | refusal | 403 | person | **`token_class`**, **`role`**, `grantor_class` | D142, T971 | An agent/job token's approval-role grant has no known grantor, or the grantor is not a human token |  |
 | `grant.grantor_lacks_area_authority` | refusal | 403 | person | **`area`**, `token_class` | T971, D144 | The grantor holds no approve-change over the Area it tries to delegate (Area role, or item-change-approver for a Check's Area) |  |
 | `grant.authority_unreadable` | failure | 403 | person | `grantee`, `grantor`, `token_class`, `role`, `area` | D142, T971 | A grant check fails closed because the grantee/grantor class, the anchor, or the grantor's authority/Areas cannot be read |  |
+| `grant.anchor_not_found` | correction | 422 | person | **`anchor`**, **`role`**, **`types`** | T1213, D113 | A dynamic grant's anchor names no item, among the types the role's relation kind can anchor, that the granter may read |  |
 | `grant.job_never_grants` | refusal | 403 | person | **`role`** | D156, T986 | A job token tries to grant any role |  |
 | `grant.item_approver_scope` | correction | 403 | person | **`role`** | D144 | An item-change-approver grant does not name exactly one ChangeCheck |  |
 | `grant.item_approver_needs_human_grantor` | refusal | 403 | person | **`role`**, `grantor_class` | D144 | An item-change-approver grant has no known grantor, or the grantor is not human |  |

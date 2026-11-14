@@ -70,6 +70,11 @@ func TestPG_StoredRestCounts(t *testing.T) {
 	if err := smeldr.RegisterDomainReaderRole(ctx, store); err != nil {
 		t.Fatal(err)
 	}
+	// The anchor is a Domain that exists: a grant's anchor is resolved on
+	// write (T1213).
+	if _, err := db.ExecContext(ctx, `INSERT INTO smeldr_domains (id, slug, name, created_at, updated_at) VALUES ('D1', 'd1', 'D1', now(), now())`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.Grant(ctx, smeldr.RoleGrant{TokenID: "reader", RoleName: "domain-reader", ScopeAnchorID: "D1"}); err != nil {
 		t.Fatal(err)
 	}

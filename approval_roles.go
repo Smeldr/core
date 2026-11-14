@@ -349,7 +349,7 @@ func (s *RoleStore) checkAgentGrant(ctx context.Context, grant RoleGrant, roleID
 	}
 	if ScopeMode(r.scopeMode) != ScopeDynamic || r.relationKind != "belongs_to_area" || grant.ScopeAnchorID == "" {
 		return fmt.Errorf("Grant: %w", refuse(problemGrantAutomatedApproveChangeNotArea,
-			fmt.Sprintf("an %s token holds approve-change only within one Area: role %q is not an Area role anchored on an Area (use %s)", class, grant.RoleName, RoleAreaApprover),
+			fmt.Sprintf("%s holds approve-change only within one Area: role %q is not an Area role anchored on an Area (use %s)", tokenWithArticle(string(class)), grant.RoleName, RoleAreaApprover),
 			problemValues{"token_class": class, "role": grant.RoleName, "suggested_role": RoleAreaApprover}))
 	}
 	grantor, _ := actorFromContext(ctx)
@@ -358,31 +358,35 @@ func (s *RoleStore) checkAgentGrant(ctx context.Context, grant RoleGrant, roleID
 	}
 	if grantor == "" {
 		return fmt.Errorf("Grant: %w", refuse(problemGrantAutomatedNeedsHumanGrantor,
-			fmt.Sprintf("an %s token's %s grant needs a human grantor, and none is known", class, grant.RoleName),
+			fmt.Sprintf("%s's %s grant needs a human grantor, and none is known", tokenWithArticle(string(class)), grant.RoleName),
 			problemValues{"token_class": class, "role": grant.RoleName}))
 	}
 	if grantorClass != string(Human) {
 		return fmt.Errorf("Grant: %w", refuse(problemGrantAutomatedNeedsHumanGrantor,
-			fmt.Sprintf("an %s token's %s grant must come from a human token; the grantor is %s", class, grant.RoleName, classLabel(grantorClass)),
+			fmt.Sprintf("%s's %s grant must come from a human token; the grantor is %s", tokenWithArticle(string(class)), grant.RoleName, classLabel(grantorClass)),
 			problemValues{"token_class": class, "role": grant.RoleName, "grantor_class": classLabel(grantorClass)}))
 	}
 	// A missing Area and an Area the grantor holds no approve-change over
 	// are refused with one text, so the refusal is no existence oracle
 	// (T971): the grantor learns only that it cannot delegate this anchor.
-	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_areas WHERE id = $1`, grant.ScopeAnchorID).Scan(&n); err != nil {
-		return problem(problemGrantAuthorityUnreadable, fmt.Errorf("%w: Grant: the anchor of an %s token's %s grant cannot be read: %s", ErrForbidden, class, grant.RoleName, err),
+	// The anchor is resolved as the grant stores it (T1213): an address, a
+	// slug or an ID of an Area, among every Area, so "missing" stays the same
+	// answer as "no authority" here.
+	areaID, err := s.resolveGrantAnchor(ctx, grant.RoleName, "belongs_to_area", "incoming", grant.ScopeAnchorID)
+	found := err == nil
+	if err != nil && ProblemTypeOf(err) != problemGrantAnchorNotFound {
+		return problem(problemGrantAuthorityUnreadable, fmt.Errorf("%w: Grant: the anchor of %s's %s grant cannot be read: %s", ErrForbidden, tokenWithArticle(string(class)), grant.RoleName, err),
 			problemValues{"token_class": class, "role": grant.RoleName})
 	}
 	ok := false
-	if n > 0 {
-		if ok, err = s.Authorized(ctx, grantor, OperationApproveChange, AuthTarget{TypeName: "Area", ID: grant.ScopeAnchorID}); err != nil {
+	if found {
+		if ok, err = s.Authorized(ctx, grantor, OperationApproveChange, AuthTarget{TypeName: "Area", ID: areaID}); err != nil {
 			return problem(problemGrantAuthorityUnreadable, fmt.Errorf("%w: Grant: the grantor's authority over the Area cannot be read: %s", ErrForbidden, err), nil)
 		}
 	}
 	if !ok {
 		return fmt.Errorf("Grant: %w", refuse(problemGrantGrantorLacksAreaAuthority,
-			fmt.Sprintf("the grantor holds no approve-change over Area %s, so cannot delegate it to an %s token", grant.ScopeAnchorID, class),
+			fmt.Sprintf("the grantor holds no approve-change over Area %s, so cannot delegate it to %s", grant.ScopeAnchorID, tokenWithArticle(string(class))),
 			problemValues{"area": grant.ScopeAnchorID, "token_class": class}))
 	}
 	return nil
