@@ -68,6 +68,11 @@ that discipline being enforced consistently.
   another tool's siblings. No operator workflow needs this from a
   terminal; it exists for AI assistants navigating the tool catalog
   programmatically.
+- `smeldr-cli hook pre-edit` (cli v0.39.0, T1207), the other way round: a
+  CLI command with no MCP tool of its own. It is a client-side adapter for
+  Claude Code's PreToolUse hook around reads that MCP already has
+  (`decisions_for_paths`, `get_decision`), not an admin operation, so
+  there is nothing for MCP to add.
 
 ## Not a gap (resolved during this review)
 

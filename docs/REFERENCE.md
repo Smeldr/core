@@ -6395,6 +6395,34 @@ Every refusal comes before any write. An unknown or unreadable Decision is `ErrN
 
 MCP: `decisions_for_paths` (Author, capability `item decisions_for_paths`, filtered by the read rules) and `check_coverage` (Editor, capability `item check_coverage`, operation `manage`). CLI: `smeldr-cli decisions-for-paths --repo owner/name [--stdin] [--no-organization]` and `smeldr-cli coverage check --repo owner/name --stdin`.
 
+#### Make Claude Code ask before it edits (cli v0.39.0, T1207)
+
+`smeldr-cli hook pre-edit` is a Claude Code PreToolUse hook. It holds back edits to files that an Area covers until the agent has been shown the Decisions in force for that file. Add this to the project's `.claude/settings.json`:
+
+```json
+{"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit",
+  "hooks": [{"type": "command", "command": "smeldr-cli hook pre-edit --repo acme/app", "timeout": 30}]}]}}
+```
+
+The hook reads Claude Code's PreToolUse JSON on stdin and writes its decision on stdout. For each edit, it asks `decisions_for_paths` about the file, relative to `--root` (default `$CLAUDE_PROJECT_DIR`, else the session's directory). The outcomes are:
+
+- **A file an Area covers:** the first edit of that file in a session is denied. The reason lists the Areas and the Decisions in force, with the text of each Decision (its first 600 characters, for the first 10 Decisions). It tells the agent to make the same edit again if its change keeps to them, and to stop and ask the user if it would go against one. The same edit again is allowed. A new Area or Decision on the file denies once more. A Decision text that could not be read, or not in time, is marked on its line.
+- **A file the answer lists as uncovered:** the edit is allowed, and the agent is told that Smeldr named no Area for it to this token. An Area the token may not read is left out.
+- **No usable answer** (no config, no answer within `--timeout`, a refusal, or an answer of a shape the hook does not know): the edit is denied with the reason. With `--on-error allow`, it is allowed with a warning instead. `--timeout` (default 10s) is the budget of the whole run.
+
+**What is enforced, and what not.** Claude Code enforces this, not the agent. An edit with Claude Code's Edit, Write, MultiEdit or NotebookEdit tool to a file an Area covers is held back until the agent has been shown the Decisions in force for that file in this session. The hook does not check the change against those Decisions, and it does not see files written through the Bash tool. A subagent's edits go through it too, with the session's ID. Tested with Claude Code 2.1.245 in permission modes acceptEdits and bypassPermissions. Smeldr does not verify code against Decisions.
+
+Add this passage to the project's CLAUDE.md. The agent is told to follow it; it is not enforced.
+
+```markdown
+Before you change a file, ask Smeldr which Decisions apply to it
+(`decisions_for_paths` with this repository and the paths). Read the
+Decisions in force, and say in your plan how the change keeps to them. If a
+change would go against one, stop and ask instead of editing.
+```
+
+The hook reads `SMELDR_URL` and `SMELDR_TOKEN` from the environment, or from `.smeldr-cli.env` in the project. The token needs the Author role and read on the places that matter. The hook always exits 0 with a decision, and the token never appears in its output.
+
 ### References between records (D113, A521)
 
 A reference field names another record. Core checks the name when the record is written and writes the relation edge for it in the same transaction, so the trace is complete by construction.

@@ -110,7 +110,7 @@ You should see:
 
     OK  connected to http://localhost:8080
     OK  token "<you>" created (class human, admin, 365 days)
-    OK  grants: admin, approver (founder of the organization, D142): this token can ratify Decisions
+    OK  grants: admin, approver (founder of the organization): this token can ratify Decisions
     OK  .smeldr-cli.env written (mode 600; keep it out of version control: add it to .gitignore)
     OK  verification passed: the new token acts as admin
 
