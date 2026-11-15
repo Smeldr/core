@@ -93,6 +93,11 @@ jobs:
             os_arch: darwin-amd64
     runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 30
+    env:
+      # Use the Go that setup-go installed (1.26.5, from the runner's go.mod)
+      # and never download the toolchain core's root go.mod names: a DNS blip
+      # on that download failed a job before the runner started (T1269).
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
 
