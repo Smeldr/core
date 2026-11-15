@@ -66,7 +66,7 @@ In PowerShell:
 
 The server listens on `127.0.0.1:8080`. If that port is taken, set `PORT=8090` and `BASE_URL=http://localhost:8090` (in PowerShell, `$env:PORT` and `$env:BASE_URL`), and use that URL in step 2. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) for every setting.
 
-We have run these steps end to end on Linux (2026-10-28) and on Windows 11 in PowerShell and in Git Bash (2026-10-31). Not yet on macOS.
+We have run these steps end to end on Linux (2026-10-28) and on Windows 11 in PowerShell and in Git Bash (2026-10-31). On macOS, CI runs them on the release binaries after every release and every week, on Apple silicon (macOS 26) and Intel (macOS 15), first on 2026-11-15 with core v1.193.2 and cli v0.38.1. CI makes the tool calls an agent would make; no AI client reads the prompts there.
 
 You should see the bootstrap admin token, shown once, and then the ready line:
 
