@@ -19,11 +19,11 @@ Download it from the release's own page:
 
 ```bash
 curl -LO https://github.com/Smeldr/core/releases/download/vX.Y.Z/smeldr-server-linux-amd64
-chmod +x smeldr-server-linux-amd64
 ```
 
 The other binaries download the same way: change the name in the URL.
-Check a download against `SHA256SUMS` from the same release:
+Check a download against `SHA256SUMS` from the same release, before you
+rename it:
 
 ```bash
 # Linux (GNU coreutils)
@@ -35,6 +35,15 @@ shasum -a 256 smeldr-server-darwin-arm64
 ```powershell
 # Windows: compare the printed hash with the file's line in SHA256SUMS
 (Get-FileHash smeldr-server-windows-amd64.exe -Algorithm SHA256).Hash.ToLower()
+```
+
+Then give it the name every page uses, `smeldr-server`
+(`smeldr-server.exe` on Windows), as the README's "Start in three minutes"
+does:
+
+```bash
+mv smeldr-server-linux-amd64 smeldr-server
+chmod +x smeldr-server
 ```
 
 For any other platform, build from source (below).
@@ -240,7 +249,7 @@ turned back off by anything else.
 SECRET="$(openssl rand -hex 32)" \
 BASE_URL="https://your-domain.example" \
 DATABASE_PATH="/var/lib/smeldr/smeldr.db" \
-./smeldr-server-linux-amd64
+./smeldr-server
 ```
 
 ### systemd
@@ -254,7 +263,7 @@ Description=Smeldr server
 After=network.target
 
 [Service]
-ExecStart=/opt/smeldr/smeldr-server-linux-amd64
+ExecStart=/opt/smeldr/smeldr-server
 WorkingDirectory=/opt/smeldr
 EnvironmentFile=/opt/smeldr/smeldr.env
 Restart=on-failure

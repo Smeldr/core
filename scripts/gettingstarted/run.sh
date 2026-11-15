@@ -15,7 +15,8 @@
 # README's: curl -LO, curl -sL | grep | the check, mv, chmod, the server's
 # environment, init, token create, grant, transition):
 #   - the hash check is the one the README gives the platform: shasum -a 256
-#     -c on macOS (README line 45), sha256sum -c elsewhere (lines 30-31);
+#     -c in its macOS block (README lines 38 and 104), sha256sum -c in its
+#     Linux and Git Bash blocks (lines 31, 45, 97 and 111);
 #   - PORT can be set (the README's default, 8080, otherwise);
 #   - the server runs in the background with its log in a file, and the
 #     bootstrap token is read from that log instead of copied by hand;
@@ -81,10 +82,10 @@ print("" if r is None else r)' "$1"
 }
 
 # The check the README gives the reader of this platform (T1253), chosen by
-# OS_ARCH and never by what is installed: on macOS the README's macOS bullet
-# (README.md line 45) says shasum -a 256 -c; everywhere else its bash form
-# (lines 30-31 and 80-81) says sha256sum -c. If that tool is missing, the
-# check fails, because the README is then wrong for the platform.
+# OS_ARCH and never by what is installed: the README's macOS block (README.md
+# lines 38 and 104) says shasum -a 256 -c; its Linux and Git Bash blocks
+# (lines 31, 45, 97 and 111) say sha256sum -c (T1246). If that tool is
+# missing, the check fails, because the README is then wrong for the platform.
 case $OS_ARCH in
 darwin-*) sumcheck() { shasum -a 256 -c; } ; SUMCHECK="shasum -a 256 -c" ;;
 *) sumcheck() { sha256sum -c; } ; SUMCHECK="sha256sum -c" ;;
@@ -178,7 +179,8 @@ probe_hash_tools
 STEP=1
 note "download the server and start it"
 download core "smeldr-server-$OS_ARCH$ext" "$CORE_VERSION"
-mv "smeldr-server-$OS_ARCH$ext" "smeldr-server$ext" && chmod +x "smeldr-server$ext"
+mv "smeldr-server-$OS_ARCH$ext" "smeldr-server$ext"
+[ -n "$ext" ] || chmod +x "smeldr-server"
 SECRET=$(openssl rand -hex 32) BASE_URL=$URL PORT=$PORT \
 	ENABLE_TOKENS=1 ENABLE_GOVERNANCE=1 ENABLE_RELATIONS=1 ENABLE_GOVERNANCE_RECORDS=1 \
 	"./smeldr-server$ext" >server.log 2>&1 &
@@ -198,7 +200,8 @@ grep -v -F "$BOOT" server.log
 STEP=2
 note "download the CLI, init, and make the agent's token"
 download cli "smeldr-cli-$OS_ARCH$ext" "$CLI_VERSION"
-mv "smeldr-cli-$OS_ARCH$ext" "smeldr-cli$ext" && chmod +x "smeldr-cli$ext"
+mv "smeldr-cli-$OS_ARCH$ext" "smeldr-cli$ext"
+[ -n "$ext" ] || chmod +x "smeldr-cli"
 docs_check core "smeldr-server-$OS_ARCH$ext" "$CORE_VERSION" SHA256SUMS
 docs_check cli "smeldr-cli-$OS_ARCH$ext" "$CLI_VERSION" cli-SHA256SUMS
 cli() { "./smeldr-cli$ext" "$@"; }

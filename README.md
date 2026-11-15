@@ -23,33 +23,44 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 **1. Run the server.**
 
-Download the server for your system from the newest release and check it against the release's checksums.
+Download the server for your system from the newest release, check it against the release's checksums, and name it `smeldr-server` (`smeldr-server.exe` on Windows).
 
-In bash (Linux, macOS, Git Bash on Windows, WSL):
+On Linux and in WSL, in bash:
 
     curl -LO https://github.com/Smeldr/core/releases/latest/download/smeldr-server-linux-amd64
     curl -sL https://github.com/Smeldr/core/releases/latest/download/SHA256SUMS | grep smeldr-server-linux-amd64 | sha256sum -c
+    mv smeldr-server-linux-amd64 smeldr-server
+    chmod +x smeldr-server
+
+On macOS, in a terminal (Apple silicon; on an Intel Mac, write `darwin-amd64` for `darwin-arm64` in all four lines):
+
+    curl -LO https://github.com/Smeldr/core/releases/latest/download/smeldr-server-darwin-arm64
+    curl -sL https://github.com/Smeldr/core/releases/latest/download/SHA256SUMS | grep smeldr-server-darwin-arm64 | shasum -a 256 -c
+    mv smeldr-server-darwin-arm64 smeldr-server
+    chmod +x smeldr-server
+
+In Git Bash on Windows:
+
+    curl -LO https://github.com/Smeldr/core/releases/latest/download/smeldr-server-windows-amd64.exe
+    curl -sL https://github.com/Smeldr/core/releases/latest/download/SHA256SUMS | grep smeldr-server-windows-amd64.exe | sha256sum -c
+    mv smeldr-server-windows-amd64.exe smeldr-server.exe
 
 In PowerShell (Windows):
 
     $u = 'https://github.com/Smeldr/core/releases/latest/download'
-    Invoke-WebRequest "$u/smeldr-server-windows-amd64.exe" -OutFile smeldr-server.exe
+    Invoke-WebRequest "$u/smeldr-server-windows-amd64.exe" -OutFile smeldr-server-windows-amd64.exe
     Invoke-WebRequest "$u/SHA256SUMS" -OutFile server-SHA256SUMS
-    (Get-FileHash smeldr-server.exe).Hash -eq (Select-String smeldr-server-windows-amd64.exe server-SHA256SUMS).Line.Split(' ')[0]
+    (Get-FileHash smeldr-server-windows-amd64.exe).Hash -eq (Select-String smeldr-server-windows-amd64.exe server-SHA256SUMS).Line.Split(' ')[0]
+    Rename-Item smeldr-server-windows-amd64.exe smeldr-server.exe
 
-Only go on if the check prints `smeldr-server-linux-amd64: OK` (bash) or `True` (PowerShell). If it prints `FAILED` or `False`, delete the file and do not run it.
+The check line prints `smeldr-server-<system>: OK` in bash and on macOS, or `True` in PowerShell. Only go on if it does. If it prints `FAILED` or `False`, delete `smeldr-server` (`smeldr-server.exe` on Windows) and do not run it.
 
-On another system, use the matching file from the release instead of `linux-amd64`:
-
-- **Linux on ARM:** `linux-arm64`.
-- **macOS:** `darwin-arm64` (Apple silicon) or `darwin-amd64`. Check with `shasum -a 256 -c`. A file downloaded in a browser is blocked by Gatekeeper until you run `xattr -d com.apple.quarantine <file>`.
-- **Git Bash on Windows:** the `windows-amd64.exe` files, renamed to `smeldr-server.exe` and `smeldr-cli.exe`. Git Bash still runs them as `./smeldr-server` and `./smeldr-cli`. In WSL, use the `linux-amd64` files as shown.
+On Linux on ARM, write `linux-arm64` for `linux-amd64`. Git Bash runs the Windows file as `./smeldr-server`. The darwin builds are not code-signed: a file downloaded in a browser instead is blocked by Gatekeeper until you run `xattr -d com.apple.quarantine <file>`.
 
 The `.exe` files are not code-signed. If you download one in a browser instead, Windows may warn about it. We have not tested that path, so use the download command above, and check the file either way. cmd.exe is not covered: use PowerShell or Git Bash.
 
-Then start the server. In bash:
+Then start the server. In bash (Linux, WSL, macOS, Git Bash):
 
-    mv smeldr-server-linux-amd64 smeldr-server && chmod +x smeldr-server
     SECRET=$(openssl rand -hex 32) BASE_URL=http://localhost:8080 \
       ENABLE_TOKENS=1 ENABLE_GOVERNANCE=1 ENABLE_RELATIONS=1 ENABLE_GOVERNANCE_RECORDS=1 \
       ./smeldr-server
@@ -78,25 +89,40 @@ The ready line appears only once the port is really bound. Leave it running.
 
 **2. Make a token for yourself, and one for your AI agent.**
 
-In a second terminal, in the same directory, download the CLI the same way and check it.
+In a second terminal, in the same directory, download the CLI the same way, check it and name it `smeldr-cli` (`smeldr-cli.exe` on Windows).
 
-In bash:
+On Linux and in WSL, in bash:
 
     curl -LO https://github.com/Smeldr/cli/releases/latest/download/smeldr-cli-linux-amd64
     curl -sL https://github.com/Smeldr/cli/releases/latest/download/SHA256SUMS | grep smeldr-cli-linux-amd64 | sha256sum -c
+    mv smeldr-cli-linux-amd64 smeldr-cli
+    chmod +x smeldr-cli
 
-In PowerShell:
+On macOS, in a terminal (Apple silicon; on an Intel Mac, write `darwin-amd64` for `darwin-arm64` in all four lines):
+
+    curl -LO https://github.com/Smeldr/cli/releases/latest/download/smeldr-cli-darwin-arm64
+    curl -sL https://github.com/Smeldr/cli/releases/latest/download/SHA256SUMS | grep smeldr-cli-darwin-arm64 | shasum -a 256 -c
+    mv smeldr-cli-darwin-arm64 smeldr-cli
+    chmod +x smeldr-cli
+
+In Git Bash on Windows:
+
+    curl -LO https://github.com/Smeldr/cli/releases/latest/download/smeldr-cli-windows-amd64.exe
+    curl -sL https://github.com/Smeldr/cli/releases/latest/download/SHA256SUMS | grep smeldr-cli-windows-amd64.exe | sha256sum -c
+    mv smeldr-cli-windows-amd64.exe smeldr-cli.exe
+
+In PowerShell (Windows):
 
     $u = 'https://github.com/Smeldr/cli/releases/latest/download'
-    Invoke-WebRequest "$u/smeldr-cli-windows-amd64.exe" -OutFile smeldr-cli.exe
+    Invoke-WebRequest "$u/smeldr-cli-windows-amd64.exe" -OutFile smeldr-cli-windows-amd64.exe
     Invoke-WebRequest "$u/SHA256SUMS" -OutFile cli-SHA256SUMS
-    (Get-FileHash smeldr-cli.exe).Hash -eq (Select-String smeldr-cli-windows-amd64.exe cli-SHA256SUMS).Line.Split(' ')[0]
+    (Get-FileHash smeldr-cli-windows-amd64.exe).Hash -eq (Select-String smeldr-cli-windows-amd64.exe cli-SHA256SUMS).Line.Split(' ')[0]
+    Rename-Item smeldr-cli-windows-amd64.exe smeldr-cli.exe
 
-Only go on if the check prints `smeldr-cli-linux-amd64: OK` (bash) or `True` (PowerShell). If it prints `FAILED` or `False`, delete the file and do not run it.
+The check line prints `smeldr-cli-<system>: OK` in bash and on macOS, or `True` in PowerShell. Only go on if it does. If it prints `FAILED` or `False`, delete `smeldr-cli` (`smeldr-cli.exe` on Windows) and do not run it.
 
 Then run `init` with the bootstrap token from step 1. In bash:
 
-    mv smeldr-cli-linux-amd64 smeldr-cli && chmod +x smeldr-cli
     SMELDR_BOOTSTRAP_TOKEN=<TOKEN> ./smeldr-cli init --url http://localhost:8080 --name <you>
 
 In PowerShell:

@@ -20,6 +20,14 @@ cross-referenced below by their Amendment ID.
 
 ### Docs
 
+- **The README names the downloaded files `smeldr-server` and `smeldr-cli` in every shell, and macOS gets a block of its own (T1246).** In "Start in three minutes", each step downloads under the release name, checks it, and renames it. There is one block each for:
+  - Linux and WSL (`sha256sum -c`, `mv`, `chmod +x`);
+  - macOS (`darwin-arm64`, with the Intel file named; `shasum -a 256 -c`);
+  - Git Bash (the `windows-amd64.exe` file, `sha256sum -c`, `mv` to `.exe`);
+  - PowerShell (download, check, then `Rename-Item`).
+
+  Every later command uses the one name, as the /docs pages do. `docs/SELF_HOSTING.md` renames after its check, and its run line and systemd unit use `smeldr-server`. `scripts/gettingstarted/run.sh` follows the README's line numbers and its Git Bash form, which has no `chmod`.
+
 - **REFERENCE and the skill file describe the Claude Code hook, `smeldr-cli hook pre-edit` (cli v0.39.0, T1207).** Before an agent's first edit of a file an Area covers in a session, the hook shows it the Decisions in force there and their text. The docs give the `.claude/settings.json` block, what Claude Code enforces and what it does not, and a CLAUDE.md passage. `docs/CLI_MCP_PARITY.md` notes that the command has no MCP counterpart, since it is a client-side adapter around existing reads. The README's `init` output line no longer names a record address, as cli v0.39.0 prints it.
 
 ### CI
