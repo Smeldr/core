@@ -1,0 +1,10 @@
+# Blocks a page means to be refused: <slug> <block> exit=<status> contains="<text>"
+# Blocks are numbered from 1 among the page's bash blocks. Every block not
+# listed here must exit 0 and answer no JSON-RPC error. A listed block must
+# exit with the status named and print the text named. A page change that moves
+# one of these blocks changes this file in the same commit.
+getting-started      10 exit=0 contains="item.locked_state"
+an-agent-is-refused   6 exit=0 contains="ratify.automated_class"
+an-agent-is-refused   7 exit=0 contains="transition.gate"
+an-agent-is-refused   8 exit=1 contains="an agent token never holds ratify"
+an-agent-is-refused   9 exit=0 contains="grant.automated_holds_ratify"

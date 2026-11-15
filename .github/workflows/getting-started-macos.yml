@@ -11,6 +11,7 @@ on:
     paths:
       - README.md
       - scripts/gettingstarted/**
+      - scripts/run-pages/**
       - .github/workflows/getting-started-macos.yml
   # Every core release, once its binaries are attached and published.
   workflow_run:
@@ -70,3 +71,61 @@ jobs:
           name: server-log-${{ matrix.os_arch }}
           path: ${{ runner.temp }}/getting-started/server-redacted.log
           if-no-files-found: ignore
+
+  # Fetches the published /docs pages from smeldr.dev and runs their bash
+  # blocks with docs' runner, scripts/run-pages (T1253 part 2). It runs text
+  # from a live site, so this workflow holds no secret and no write permission,
+  # and this job uploads nothing: the runner's work directory holds the run's
+  # tokens in clear, and only the runner's own masked output reaches the log.
+  # The guard step runs after checkout and before anything is fetched or run,
+  # and fails the job if any of that stops being true.
+  docs-pages:
+    name: /docs ${{ matrix.seq }} on ${{ matrix.platform.os_arch }}
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        seq: [getting-started, deploy, connect-an-agent, which-decisions-apply]
+        platform:
+          - runner: macos-latest
+            os_arch: darwin-arm64
+          - runner: macos-15-intel
+            os_arch: darwin-amd64
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # The patterns are written so that they do not match their own lines.
+      - name: Guard (no secret, no write permission, no upload in this job)
+        run: |
+          f=.github/workflows/getting-started-macos.yml
+          bad=0
+          check() { if grep -nE "$2" "$3"; then echo "::error::$f: $1"; bad=1; fi; }
+          check "names a secret" 'secrets[.]' "$f"
+          check "grants a write permission" ':[[:space:]]*(write|write-all)([[:space:]]|$)' "$f"
+          check "runs on a runner that is not GitHub's" 'self[-]hosted' "$f"
+          check "pushes or releases" 'git[[:space:]]+push|gh[[:space:]]+release|action-gh[-]release' "$f"
+          # Only this job: getting-started uploads its own redacted log.
+          awk '/^  docs-pages:/{on=1; print; next} on && /^  [A-Za-z0-9_-]+:[[:space:]]*$/{on=0} on' "$f" >"$RUNNER_TEMP/docs-pages-job.yml"
+          [ -s "$RUNNER_TEMP/docs-pages-job.yml" ] || { echo "::error::$f: the docs-pages job was not found"; bad=1; }
+          check "uploads from the docs-pages job" 'upload[-]artifact' "$RUNNER_TEMP/docs-pages-job.yml"
+          exit $bad
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: scripts/run-pages/go.mod
+
+      - name: The runner's own tests
+        working-directory: scripts/run-pages
+        env:
+          GOWORK: 'off'
+        run: go test ./...
+
+      - name: Run the pages of ${{ matrix.seq }}
+        working-directory: scripts/run-pages
+        env:
+          GOWORK: 'off'
+        run: |
+          sw_vers
+          go run . -seq ${{ matrix.seq }} -os-arch ${{ matrix.platform.os_arch }} -work "$RUNNER_TEMP/run-pages"
