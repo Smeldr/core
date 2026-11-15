@@ -3,7 +3,7 @@
 Smeldr is a Go content framework. This skill covers what you need to work
 with Smeldr as a developer or agent.
 
-Current versions: smeldr.dev/core v1.193.1 · smeldr.dev/mcp v1.77.2 · smeldr.dev/oauth v0.6.1 · smeldr.dev/media v1.7.3 · smeldr.dev/cli v0.38.0 · smeldr.dev/github v0.1.2 · smeldr.dev/social v0.11.2 · smeldr.dev/agent v0.9.3 · smeldr.dev/core/pgx v0.3.0
+Current versions: smeldr.dev/core v1.193.2 · smeldr.dev/mcp v1.77.3 · smeldr.dev/oauth v0.6.1 · smeldr.dev/media v1.7.3 · smeldr.dev/cli v0.38.1 · smeldr.dev/github v0.1.2 · smeldr.dev/social v0.11.2 · smeldr.dev/agent v0.9.3 · smeldr.dev/core/pgx v0.3.0
 
 ---
 
