@@ -314,28 +314,6 @@ func TestArgs_WorkWithQuote(t *testing.T) {
 	wantErr(t, r, "holds a single quote")
 }
 
-// The real wda.sh against a stand-in mcp: a refused call fails the setup and
-// names the call.
-func TestSetup_RefusedCallFails(t *testing.T) {
-	stub := `mcp() { printf '%s\n' 'data: {"jsonrpc":"2.0","id":1,"error":{"code":-32001,"message":"forbidden"}}'; }`
-	r := run(t, map[string]page{"p": md(fence(stub))}, []Item{{Slug: "p"}, {Setup: "wda.sh"}}, nil, nil,
-		func(c *Config) { c.Setups = os.DirFS("setup") })
-	wantErr(t, r, "setup wda.sh: exit 1")
-	if !strings.Contains(r.out, "setup: create_decision was refused") {
-		t.Fatalf("the refused call is not named:\n%s", r.out)
-	}
-}
-
-func TestSetup_WrongAddress(t *testing.T) {
-	stub := `mcp() { printf '%s\n' 'data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"text":"{\"address\":\"D7\"}","type":"text"}],"isError":false}}'; }`
-	r := run(t, map[string]page{"p": md(fence(stub))}, []Item{{Slug: "p"}, {Setup: "wda.sh"}}, nil, nil,
-		func(c *Config) { c.Setups = os.DirFS("setup") })
-	wantErr(t, r, "setup wda.sh: exit 1")
-	if !strings.Contains(r.out, "setup: create_decision did not create D5") {
-		t.Fatalf("the wrong address is not named:\n%s", r.out)
-	}
-}
-
 // draftFile writes dir/<slug>.md with a header comment and the body after it.
 func draftFile(t *testing.T, dir, slug, text string) {
 	t.Helper()

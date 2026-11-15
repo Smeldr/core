@@ -35,7 +35,10 @@ import (
 	"time"
 )
 
-//go:embed setup/*.sh
+// The setups a sequence may name (setup/README.md says what they are for).
+// The whole directory is embedded, so it compiles with no setup in it.
+//
+//go:embed setup
 var setupFS embed.FS
 
 //go:embed expect.txt

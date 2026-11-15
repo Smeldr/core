@@ -579,7 +579,7 @@ var sequences = map[string][]Item{
 	"connect-an-agent": {{Slug: "getting-started"}, {Slug: "example-places"},
 		{Slug: "connect-an-agent"}},
 	"which-decisions-apply": {{Slug: "getting-started"}, {Slug: "example-places"},
-		{Setup: "wda.sh"}, {Slug: "which-decisions-apply"}},
+		{Slug: "which-decisions-apply"}},
 	"decisions-before-an-edit": {{Slug: "getting-started"}, {Slug: "example-places"},
 		{Slug: "decisions-before-an-edit", To: 2}, {Slug: "decisions-before-an-edit", From: 5}},
 }
