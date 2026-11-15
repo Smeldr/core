@@ -11,6 +11,21 @@
 # README's wording does not fail this script unless the server's answers
 # change too.
 #
+# Where it departs from the README, and why (every other command is the
+# README's: curl -LO, curl -sL | grep | the check, mv, chmod, the server's
+# environment, init, token create, grant, transition):
+#   - the hash check is the one the README gives the platform: shasum -a 256
+#     -c on macOS (README line 45), sha256sum -c elsewhere (lines 30-31);
+#   - PORT can be set (the README's default, 8080, otherwise);
+#   - the server runs in the background with its log in a file, and the
+#     bootstrap token is read from that log instead of copied by hand;
+#   - init --name ci stands for --name <you>;
+#   - grant and transition get --rev, which cli asks for at a terminal;
+#   - the agent's prompts are the tool calls behind them (mcp(), with the
+#     agent's token, over curl to /mcp/message);
+#   - a report-only probe of the hash tools, and the /docs pages' check
+#     line, run beside the README's steps and never fail the job.
+#
 # Environment:
 #   OS_ARCH       the release file suffix: darwin-arm64, darwin-amd64,
 #                 linux-amd64, linux-arm64 or windows-amd64 (required)
@@ -65,22 +80,67 @@ r = find(json.load(sys.stdin), sys.argv[1])
 print("" if r is None else r)' "$1"
 }
 
-if command -v shasum >/dev/null; then sumcheck() { shasum -a 256 -c; }; else sumcheck() { sha256sum -c; }; fi
+# The check the README gives the reader of this platform (T1253), chosen by
+# OS_ARCH and never by what is installed: on macOS the README's macOS bullet
+# (README.md line 45) says shasum -a 256 -c; everywhere else its bash form
+# (lines 30-31 and 80-81) says sha256sum -c. If that tool is missing, the
+# check fails, because the README is then wrong for the platform.
+case $OS_ARCH in
+darwin-*) sumcheck() { shasum -a 256 -c; } ; SUMCHECK="shasum -a 256 -c" ;;
+*) sumcheck() { sha256sum -c; } ; SUMCHECK="sha256sum -c" ;;
+esac
 
-# download REPO FILE: fetches FILE from REPO's release and checks it the way
-# the README does.
-download() {
-	local repo=$1 file=$2 version=$3 base
-	if [ "$version" = latest ]; then
-		base=https://github.com/Smeldr/$repo/releases/latest/download
+# release_base REPO VERSION: the README's download URL, latest/download, or
+# download/vX.Y.Z for a fixed version as the README says.
+release_base() {
+	if [ "$2" = latest ]; then
+		echo "https://github.com/Smeldr/$1/releases/latest/download"
 	else
-		base=https://github.com/Smeldr/$repo/releases/download/$version
+		echo "https://github.com/Smeldr/$1/releases/download/$2"
 	fi
-	curl -fsSLO "$base/$file" || fail "download $base/$file"
-	local out
-	out=$(curl -fsSL "$base/SHA256SUMS" | grep "$file" | sumcheck) || fail "checksum of $file: $out"
-	[ "$out" = "$file: OK" ] || fail "checksum of $file printed \"$out\", want \"$file: OK\""
+}
+
+# download REPO FILE VERSION: the README's two lines, as written: curl -LO the
+# file, then curl -sL SHA256SUMS | grep FILE | the platform's check. A failed
+# download is caught by the check, as it would be for the reader.
+download() {
+	local file=$2 base out
+	base=$(release_base "$1" "$3")
+	curl -LO "$base/$file" || fail "curl -LO $base/$file"
+	out=$(curl -sL "$base/SHA256SUMS" | grep "$file" | sumcheck 2>&1) || fail "curl -sL $base/SHA256SUMS | grep $file | $SUMCHECK printed: $out"
+	[ "$out" = "$file: OK" ] || fail "the check printed \"$out\", want \"$file: OK\""
 	echo "$out"
+}
+
+# notice TEXT: a line on the run's summary page on GitHub Actions, a plain
+# line elsewhere. Report only: nothing that calls it fails the job.
+notice() { if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::notice::$*"; else echo "notice: $*"; fi; }
+
+# probe_hash_tools: what sha256sum and shasum are on this machine (T1253).
+probe_hash_tools() {
+	local t p
+	for t in sha256sum shasum; do
+		if p=$(command -v "$t"); then
+			notice "$OS_ARCH: $t is $(ls -l "$p" 2>&1 | tr -s ' ' | cut -d' ' -f9-); --version: $("$t" --version 2>&1 | head -1)"
+		else
+			notice "$OS_ARCH: $t is missing"
+		fi
+	done
+}
+
+# docs_check REPO FILE VERSION SUMS: the /docs pages' check, in its own
+# directory: curl -LO the file, curl -L -o SUMS, sha256sum --ignore-missing
+# -c SUMS. Reported, never failing (T1253 asks what it does on macOS).
+docs_check() {
+	local base out code
+	base=$(release_base "$1" "$3")
+	mkdir -p docs-check && (
+		cd docs-check
+		curl -sLO "$base/$2"
+		curl -sL -o "$4" "$base/SHA256SUMS"
+		out=$(sha256sum --ignore-missing -c "$4" 2>&1) && code=0 || code=$?
+		notice "$OS_ARCH: docs' line 'sha256sum --ignore-missing -c $4' exited $code: $(echo "$out" | tr '\n' ' ')"
+	) || true
 }
 
 # mcp TOKEN TOOL ARGS: one tools/call, printing the JSON-RPC response.
@@ -111,6 +171,10 @@ finish() {
 }
 trap finish EXIT
 
+STEP=0
+note "hash tools on this machine (report only)"
+probe_hash_tools
+
 STEP=1
 note "download the server and start it"
 download core "smeldr-server-$OS_ARCH$ext" "$CORE_VERSION"
@@ -135,6 +199,8 @@ STEP=2
 note "download the CLI, init, and make the agent's token"
 download cli "smeldr-cli-$OS_ARCH$ext" "$CLI_VERSION"
 mv "smeldr-cli-$OS_ARCH$ext" "smeldr-cli$ext" && chmod +x "smeldr-cli$ext"
+docs_check core "smeldr-server-$OS_ARCH$ext" "$CORE_VERSION" SHA256SUMS
+docs_check cli "smeldr-cli-$OS_ARCH$ext" "$CLI_VERSION" cli-SHA256SUMS
 cli() { "./smeldr-cli$ext" "$@"; }
 out=$(SMELDR_BOOTSTRAP_TOKEN=$BOOT cli init --url "$URL" --name ci 2>&1) || fail "init: $out"
 echo "$out"
