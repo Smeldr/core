@@ -18,8 +18,8 @@ work around it in a PR.
 ## Contributor License Agreement
 
 Before your first PR is merged, you will be asked to sign a CLA via
-cla-assistant.io. This is a one-time step. See COMMERCIAL.md for why
-this is necessary.
+cla-assistant.io. This is a one-time step. The text you sign is in
+[CLA.md](CLA.md). See COMMERCIAL.md for why this is necessary.
 
 ---
 
