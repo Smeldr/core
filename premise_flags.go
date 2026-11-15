@@ -24,7 +24,7 @@ const premiseKind = "grounded_in"
 
 // notPremiseReason is why an open condition that came from an addresses edge
 // resolves (D153).
-const notPremiseReason = "addresses is not a premise relation (D153)"
+const notPremiseReason = "addresses is not a premise relation"
 
 // isPremiseKind reports whether kind is the premise relation.
 func isPremiseKind(kind string) bool {

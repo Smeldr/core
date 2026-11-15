@@ -150,7 +150,7 @@ func auditApprovalRename(ctx context.Context, db DB, audit bool, roleID, from, t
 		return nil
 	}
 	before, _ := json.Marshal(map[string]string{"name": from})
-	after, _ := json.Marshal(map[string]string{"name": to, "reason": "D142 approval roles (T884)"})
+	after, _ := json.Marshal(map[string]string{"name": to, "reason": "renamed to the approval roles (approver, domain-approver)"})
 	return appendAuditRecord(ctx, db, GovernanceAuditRecord{
 		ID: NewID(), ActorTokenID: "system", Action: "rename", TargetKind: "role", TargetID: roleID,
 		Before: string(before), After: string(after), CreatedAt: time.Now().UTC(),
@@ -436,11 +436,11 @@ func refuseAutomatedRatify(ctx context.Context, requiredOperation string) error 
 }
 
 // founderReason is the reason recorded on the founder's grants.
-const founderReason = "founder of the organization (D142)"
+const founderReason = "founder of the organization"
 
 // GrantFounder gives userID, the person who created the organization, the
 // admin and approver roles (D142 point 6), each grant recorded with the reason
-// "founder of the organization (D142)" in its provenance, by the actor in ctx.
+// "founder of the organization" in its provenance, by the actor in ctx.
 // It defines the approver role when the instance has not yet. Idempotent: a
 // grant the user already holds is not repeated. Call it once the Organization exists
 // ([App.EnsureOrganization]). Needs [App.Governance]; an empty userID is a

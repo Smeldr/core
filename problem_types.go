@@ -426,7 +426,7 @@ var problemTypeList = []ProblemTypeInfo{
 	{ID: problemFieldNotInList, Status: 422, Title: "The value is not one of a closed list or a registered set", Audience: "person", Class: problemClassCorrection, Values: []string{"allowed", "value", "schema_field"}},
 	{ID: problemFieldTypeMismatch, Status: 422, Title: "A dynamic field's JSON value has the wrong type", Audience: "person", Class: problemClassCorrection, Values: []string{"expected"}, AlwaysValues: []string{"expected"}},
 	{ID: problemFieldUnknown, Status: 422, Title: "A dynamic item names a field the schema does not have", Audience: "person", Class: problemClassCorrection},
-	{ID: problemSchemaFieldInvalid, Status: 422, Title: "A content type definition has an illegal field (reserved name, bad max_length, max_length on non-string, reference on non-string, title over the D112 limit)", Audience: "person", Class: problemClassCorrection, Values: []string{"schema_field", "value", "field_type", "type", "limit"}},
+	{ID: problemSchemaFieldInvalid, Status: 422, Title: "A content type definition has an illegal field (reserved name, bad max_length, max_length on non-string, reference on non-string, title over the 120-character limit)", Audience: "person", Class: problemClassCorrection, Values: []string{"schema_field", "value", "field_type", "type", "limit"}},
 }
 
 // problemTypeIndex finds an entry by id.

@@ -52,7 +52,7 @@ func EnsureTaskPlanFields(ctx context.Context, app *App) error {
 	for _, f := range []SchemaField{
 		{Name: "repository", Type: "string", Description: "The repository the plan's work changes, owner/name. Required to submit a plan whose work ends in a commit."},
 		{Name: "paths", Type: "array", Description: "The paths the plan's work touches, as patterns in the coverage-rule language (* within a segment, ? one character, ** any number of segments). Required to submit a plan whose work ends in a commit."},
-		{Name: "no_commit", Type: "boolean", Description: "True when the plan's work ends in no commit (a review, an investigation, D88): then repository and paths are not needed and no plan-time record is made."},
+		{Name: "no_commit", Type: "boolean", Description: "True when the plan's work ends in no commit (a review, an investigation): then repository and paths are not needed and no plan-time record is made."},
 	} {
 		if !have[f.Name] {
 			fields = append(fields, f)
@@ -68,7 +68,7 @@ func EnsureTaskPlanFields(ctx context.Context, app *App) error {
 	}
 	schema := *desc.Schema
 	schema.Fields = raw
-	if _, err := app.RedefineContentType(ctx, &schema, "G30 phase 1 (T1015): plans declare repository, paths and no_commit"); err != nil {
+	if _, err := app.RedefineContentType(ctx, &schema, "plans declare repository, paths and no_commit"); err != nil {
 		return fmt.Errorf("smeldr: EnsureTaskPlanFields: %w", err)
 	}
 	return nil

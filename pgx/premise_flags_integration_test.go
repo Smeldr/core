@@ -151,7 +151,7 @@ func TestPG_PremiseFlagged(t *testing.T) {
 	}
 	var because int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM smeldr_signals WHERE signal_type = 'premise-flagged' AND status = 'resolved' AND resolution = $1`,
-		"addresses is not a premise relation (D153)").Scan(&because); err != nil || because != 1 {
+		"addresses is not a premise relation").Scan(&because); err != nil || because != 1 {
 		t.Errorf("resolved with the D153 reason: %d %v", because, err)
 	}
 	if sweep, err := app.SweepPremiseFlags(ctx); err != nil || sweep.Opened != 0 {

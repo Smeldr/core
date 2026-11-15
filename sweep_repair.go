@@ -179,7 +179,7 @@ func (a *App) repairEdge(ctx context.Context, db DB, e RelationEdge, now time.Ti
 	recordProvenance(ctx, a.provenanceStore, ProvenanceRecord{
 		SubjectType: "RelationEdge", SubjectID: edge.ID, Verb: "assert",
 		ActorKind: "job", ActorID: sweepRepairJob,
-		Reason: "restored: ended by the structural sweep while its end was alive (T932)",
+		Reason: "restored: ended by the structural sweep while its end was alive",
 	})
 	return "restored", nil
 }

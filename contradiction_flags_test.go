@@ -230,7 +230,7 @@ func TestSweepContradictions_Legacy(t *testing.T) {
 		t.Errorf("live row placed at %v", places)
 	}
 	var reason string
-	if err := f.db.QueryRow(`SELECT reason FROM smeldr_provenance WHERE subject_id = $1 AND verb = 'update'`, live).Scan(&reason); err != nil || !strings.Contains(reason, "T928") {
+	if err := f.db.QueryRow(`SELECT reason FROM smeldr_provenance WHERE subject_id = $1 AND verb = 'update'`, live).Scan(&reason); err != nil || reason != "reworded: names only its own Decision" {
 		t.Errorf("provenance = %q %v", reason, err)
 	}
 	var message string

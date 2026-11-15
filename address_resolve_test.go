@@ -269,8 +269,8 @@ func TestTransitionPeriod_SchemaAndGuidance(t *testing.T) {
 	for _, f := range m.MCPSchema() {
 		if f.JSONName == "decision_number" {
 			found = true
-			if !f.Deprecated || !strings.HasPrefix(f.Description, "Deprecated (D110):") {
-				t.Errorf("decision_number field = %+v, want Deprecated and the D110 description", f)
+			if !f.Deprecated || !strings.HasPrefix(f.Description, "Deprecated: the server assigns the address") {
+				t.Errorf("decision_number field = %+v, want Deprecated and its description", f)
 			}
 		}
 		if f.JSONName == "title" && f.Deprecated {

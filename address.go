@@ -470,7 +470,7 @@ type RecordAddress struct {
 	// AddressNo is the number alone (110), for numeric order.
 	AddressNo int64 `json:"address_no" db:"address_no" smeldr:"readonly"`
 	// ExternalRef is the caller's own reference for the record, free text.
-	ExternalRef string `json:"external_ref" db:"external_ref" smeldr_description:"Your own reference or numbering for this record, free text. The address (for example D110) is assigned by the server and returned in the result; do not send one."`
+	ExternalRef string `json:"external_ref" db:"external_ref" smeldr_description:"Your own reference or numbering for this record, free text. The address (such as D1) is assigned by the server and returned in the result; do not send one."`
 }
 
 // assignAddress sets the address the server allocated.

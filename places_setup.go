@@ -84,7 +84,7 @@ func (a *App) EnsureOrganization(ctx context.Context, name string) (*Organizatio
 	for _, rec := range []struct{ typeName, id string }{{"Organization", root.ID}, {"Domain", domain.ID}} {
 		recordProvenance(ctx, a.provenanceStore, ProvenanceRecord{
 			SubjectType: rec.typeName, SubjectID: rec.id, Verb: "create",
-			ActorKind: "job", ActorID: placesSetupActor, Reason: "the organization's Organization and default Domain (D142)",
+			ActorKind: "job", ActorID: placesSetupActor, Reason: "the organization's Organization and default Domain",
 		})
 	}
 	if a.relationStore != nil && edge.ID != "" {

@@ -348,7 +348,7 @@ func TestRecordShape_MCPSchema(t *testing.T) {
 	if !slices.Equal(fields["amendment_type"].Enum, AmendmentTypes) || fields["amendment_type"].Required {
 		t.Errorf("amendment_type = %+v; want the enum, not required by tag", fields["amendment_type"])
 	}
-	if !fields["pilot"].Deprecated || !strings.HasPrefix(fields["pilot"].Description, "Deprecated (D112):") {
+	if !fields["pilot"].Deprecated || !strings.HasPrefix(fields["pilot"].Description, "Deprecated: retired") {
 		t.Errorf("pilot = %+v; want deprecated", fields["pilot"])
 	}
 	for _, m := range []interface{ MCPSchema() []MCPField }{e.tasks, e.goals, e.decisions} {

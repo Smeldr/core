@@ -21,9 +21,9 @@ type Goal struct {
 	// statement of what it is (D112). A create or update without one, or with
 	// a longer one, gets a title warning, and is refused after
 	// [Config.TitleCutover].
-	Title string `json:"title" db:"title" smeldr_search:"text" smeldr_description:"Required (D112): one line, at most 120 characters, a short statement of what the record is. Missing or longer: a warning now, refused after the instance's title cutover."`
+	Title string `json:"title" db:"title" smeldr_search:"text" smeldr_description:"Required: one line, at most 120 characters, a short statement of what the record is. Missing or longer: a warning now, refused after the instance's title cutover."`
 	// GoalID is the canonical identifier (e.g. "T114").
-	GoalID string `json:"goal_id" db:"goal_id" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
+	GoalID string `json:"goal_id" db:"goal_id" smeldr_deprecated:"true" smeldr_description:"Deprecated: the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the address cut, announced before it; send your own numbering as external_ref."`
 	// Priority is the scheduling priority. Lower values are higher priority.
 	// A create call that omits this field entirely gets defaultPriority (5),
 	// not 0 — 0 is reserved for a deliberate escalation (see
@@ -268,9 +268,9 @@ type Task struct {
 	// statement of what it is (D112). A create or update without one, or with
 	// a longer one, gets a title warning, and is refused after
 	// [Config.TitleCutover].
-	Title string `json:"title" db:"title" smeldr_search:"text" smeldr_description:"Required (D112): one line, at most 120 characters, a short statement of what the record is. Missing or longer: a warning now, refused after the instance's title cutover."`
+	Title string `json:"title" db:"title" smeldr_search:"text" smeldr_description:"Required: one line, at most 120 characters, a short statement of what the record is. Missing or longer: a warning now, refused after the instance's title cutover."`
 	// TaskID is the canonical task identifier (e.g. "T23").
-	TaskID string `json:"task_id" db:"task_id" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
+	TaskID string `json:"task_id" db:"task_id" smeldr_deprecated:"true" smeldr_description:"Deprecated: the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the address cut, announced before it; send your own numbering as external_ref."`
 	// Priority is the scheduling priority. Lower values are higher priority.
 	// A create call that omits this field entirely gets defaultPriority (5),
 	// not 0 — 0 is reserved for a deliberate escalation (see
@@ -307,7 +307,7 @@ type Decision struct {
 	Node
 	RecordAddress
 	// DecisionNumber is the canonical identifier (e.g. "D22" or "A183").
-	DecisionNumber string `json:"decision_number" db:"decision_number" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
+	DecisionNumber string `json:"decision_number" db:"decision_number" smeldr_deprecated:"true" smeldr_description:"Deprecated: the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the address cut, announced before it; send your own numbering as external_ref."`
 	// Title is a short, human-readable display title, independent of
 	// Body's own Markdown content — added because scraping Body's first
 	// heading for a title (Cloud's prior approach) produced
@@ -358,7 +358,7 @@ type Decision struct {
 	// at a full commit SHA, with a role. The claim stays in the Decision's own
 	// text; a source says where it came from. On a Decision that is no longer
 	// proposed, changing them needs ratify over its place.
-	Sources DecisionSources `json:"sources" db:"sources" smeldr_description:"Pinned external sources (D148), at most 20: each {repository: owner/name, commit: a full 40-character SHA (never a branch), path: one file, anchor: optional heading or line range, role: source|evidence|implementation, hash: optional sha256:<64 hex> of the file at the commit}. An update replaces the whole list. On a Decision that is no longer proposed, changing it needs ratify over its place."`
+	Sources DecisionSources `json:"sources" db:"sources" smeldr_description:"Pinned external sources, at most 20: each {repository: owner/name, commit: a full 40-character SHA (never a branch), path: one file, anchor: optional heading or line range, role: source|evidence|implementation, hash: optional sha256:<64 hex> of the file at the commit}. An update replaces the whole list. On a Decision that is no longer proposed, changing it needs ratify over its place."`
 	// LastActor is the actor ID of this item's most recent writer (D78;
 	// Option A, 2026-10-08): whoever created it, last changed its content or
 	// last moved it. Set by the server, never from a request body. Empty when
@@ -631,11 +631,11 @@ type Amendment struct {
 	Node
 	RecordAddress
 	// AmendmentNumber is the canonical identifier (e.g. "A183").
-	AmendmentNumber string `json:"amendment_number" db:"amendment_number" smeldr_deprecated:"true" smeldr_description:"Deprecated (D110): the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the D110 cut, announced before it; send your own numbering as external_ref."`
+	AmendmentNumber string `json:"amendment_number" db:"amendment_number" smeldr_deprecated:"true" smeldr_description:"Deprecated: the server assigns the address and returns it; a value sent here is not used as the address. It is kept in external_ref when it differs from the address, and this field holds the address. Removed at the address cut, announced before it; send your own numbering as external_ref."`
 	// AmendmentType classifies the change: one of [AmendmentTypes] (D112). A
 	// create needs one of them, and an update that changes it too; an older
 	// row with another value still updates when the field is not changed.
-	AmendmentType string `json:"amendment_type" db:"amendment_type" smeldr_enum:"feature|fix|docs|chore|test|ci|refactor|release" smeldr_description:"Required on create (D112): one of feature, fix, docs, chore, test, ci, refactor, release."`
+	AmendmentType string `json:"amendment_type" db:"amendment_type" smeldr_enum:"feature|fix|docs|chore|test|ci|refactor|release" smeldr_description:"Required on create: one of feature, fix, docs, chore, test, ci, refactor, release."`
 	// Version is the smeldr.dev/core semver shipped with this amendment.
 	Version string `json:"version"`
 	// CommitHash is the git SHA of the squash commit.
@@ -646,7 +646,7 @@ type Amendment struct {
 	// the work. A value sent is not stored, the field is not emitted in JSON,
 	// and an MCP create or update that sends it gets a deprecated_field
 	// warning. The column stays, so older rows keep their value.
-	Pilot string `json:"pilot" smeldr_deprecated:"true" smeldr_description:"Deprecated (D112): retired, not stored. Band and actor say who did the work."`
+	Pilot string `json:"pilot" smeldr_deprecated:"true" smeldr_description:"Deprecated: retired, not stored. Band and actor say who did the work."`
 	// Summary is a one-line description of what the amendment changes.
 	Summary string `json:"summary" smeldr_search:"text"`
 	// Body is the full amendment text in Markdown, including rationale —
@@ -1631,7 +1631,7 @@ func orchTaskFlow() StateFlow {
 	return StateFlow{
 		Name:        "agent-task",
 		TypeName:    "Task",
-		Description: "Task lifecycle. done: the work was carried out. resolved: it closed without being carried out (superseded, declined, or found to be already built); a reason is required (D112).",
+		Description: "Task lifecycle. done: the work was carried out. resolved: it closed without being carried out (superseded, declined, or found to be already built); a reason is required.",
 		States: []State{
 			{Name: "backlog", IsInitial: true, AwaitsAction: true},
 			{Name: "active", AwaitsAction: true},
@@ -1786,7 +1786,7 @@ func orchGoalFlow() StateFlow {
 	return StateFlow{
 		Name:        "goal-lifecycle",
 		TypeName:    "Goal",
-		Description: "Goal lifecycle. done: the work was carried out. resolved: it closed without being carried out (superseded, declined, or found to be already built); a reason is required (D112).",
+		Description: "Goal lifecycle. done: the work was carried out. resolved: it closed without being carried out (superseded, declined, or found to be already built); a reason is required.",
 		States: []State{
 			{Name: "open", IsInitial: true, AwaitsAction: true},
 			{Name: "in-progress", AwaitsAction: true},

@@ -338,7 +338,7 @@ func (a *App) rewordContradiction(ctx context.Context, id, subject, status, reso
 	}
 	recordProvenance(ctx, a.provenanceStore, ProvenanceRecord{
 		SubjectType: "Signal", SubjectID: id, Verb: "update", FromState: status, ToState: status,
-		ActorKind: "job", ActorID: "contradictions", Reason: "reworded: names only its own Decision (T928)",
+		ActorKind: "job", ActorID: "contradictions", Reason: "reworded: names only its own Decision",
 	})
 	if _, err := db.ExecContext(ctx, `INSERT INTO smeldr_contradiction_flags (source_id, target_id, subject_id, signal_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
 		source, target, subject, id); err != nil {

@@ -188,4 +188,4 @@ Every refusal and validation error Smeldr core answers with carries a stable **t
 | `field.not_in_list` | correction | 422 | person | `allowed`, `value`, `schema_field` |  | The value is not one of a closed list or a registered set |  |
 | `field.type_mismatch` | correction | 422 | person | **`expected`** |  | A dynamic field's JSON value has the wrong type |  |
 | `field.unknown` | correction | 422 | person |  |  | A dynamic item names a field the schema does not have |  |
-| `schema.field_invalid` | correction | 422 | person | `schema_field`, `value`, `field_type`, `type`, `limit` |  | A content type definition has an illegal field (reserved name, bad max_length, max_length on non-string, reference on non-string, title over the D112 limit) |  |
+| `schema.field_invalid` | correction | 422 | person | `schema_field`, `value`, `field_type`, `type`, `limit` |  | A content type definition has an illegal field (reserved name, bad max_length, max_length on non-string, reference on non-string, title over the 120-character limit) |  |
