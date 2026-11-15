@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An agent or a job refused on a Decision's or an Area's place now gets the reason, not a bare `forbidden` (T1236).** Supersede (either form), repair, placing or moving a Decision or an Area, deleting an Area, changing an approval mode, a coverage rule or sources, and confirm_premise all refuse an agent or a job with `ratify.automated_class`. They used to send it as a plain forbidden whose text named the place. MCP therefore answered only `forbidden`, with the type but no values, and the cli showed only that word, while retire showed its reason. The refusal is now a `RefusalError` with a reason that names no item ("an agent token never ratifies, so it cannot supersede; a person with ratify over the place does") and the values `token_class` and `act`. `errors.Is(err, ErrForbidden)` still holds. Nothing a caller saw before is removed: over MCP the old answer carried no values at all, and the `place` value it had in Go is left out because the place may be one the caller cannot read.
+
 ### Docs
 
 - **The README names the downloaded files `smeldr-server` and `smeldr-cli` in every shell, and macOS gets a block of its own (T1246).** In "Start in three minutes", each step downloads under the release name, checks it, and renames it. There is one block each for:

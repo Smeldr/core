@@ -407,9 +407,12 @@ func requireActOver(ctx context.Context, rs *RoleStore, op string, target AuthTa
 		return problem(problemPlaceNoActor, fmt.Errorf("%w: %s needs %s over %s, and no actor is known", ErrForbidden, act, op, over),
 			problemValues{"act": code, "operation": op, "place": over})
 	case op == OperationRatify && automatedClass(kind):
-		return problem(problemRatifyAutomatedClass,
-			fmt.Errorf("%w: %s never ratifies, so it cannot do this: %s needs ratify over %s", ErrForbidden, tokenWithArticle(string(kind)), act, over),
-			problemValues{"token_class": string(kind), "act": code, "place": over})
+		// A refusal whose reason names no item, so MCP and the cli show it,
+		// as the transition path's does (T1236); the place may be one the
+		// caller cannot read, so it is neither in the reason nor a value.
+		return refuse(problemRatifyAutomatedClass,
+			fmt.Sprintf("%s never ratifies, so it cannot %s; a person with ratify over the place does", tokenWithArticle(string(kind)), strings.ReplaceAll(code, "_", " ")),
+			problemValues{"token_class": string(kind), "act": code})
 	}
 	ok, err := rs.authorizedOver(ctx, actor, op, target, true)
 	if err != nil {
