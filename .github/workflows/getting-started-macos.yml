@@ -85,7 +85,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        seq: [getting-started, deploy, connect-an-agent, which-decisions-apply]
+        seq: [getting-started, deploy, connect-an-agent, which-decisions-apply, decisions-before-an-edit]
         platform:
           - runner: macos-latest
             os_arch: darwin-arm64

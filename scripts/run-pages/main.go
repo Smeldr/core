@@ -17,7 +17,12 @@
 // -port other than 8080 moves the port. It uses no credentials, masks every
 // token it sees, fails a block that prints one, and writes only under -work.
 //
+// With -drafts <dir> it reads each page from <dir>/<slug>.md instead, the body
+// after the draft's header comment, so a changed page is run before it is
+// published (T1272).
+//
 //	go run . -seq getting-started -os-arch darwin-arm64
+//	go run . -seq connect-an-agent -drafts ../../drafts
 package main
 
 import (
@@ -40,12 +45,22 @@ func main() {
 	seq := flag.String("seq", "", "the sequence to run: "+strings.Join(sequenceNames(), ", "))
 	osArch := flag.String("os-arch", "linux-amd64", "the release file suffix for this system: "+strings.Join(OSArchs, ", "))
 	site := flag.String("site", "https://smeldr.dev", "the site the pages are fetched from")
+	drafts := flag.String("drafts", "", "instead of the site, read each page from <dir>/<slug>.md, a draft before it is published")
 	port := flag.Int("port", 8080, "the server's port")
 	work := flag.String("work", "", "the directory to run in (default: a new temporary one)")
 	bash := flag.String("bash", "bash", "the bash to run the blocks with")
 	blockTimeout := flag.Duration("block-timeout", 2*time.Minute, "how long one block may take")
 	runTimeout := flag.Duration("run-timeout", 20*time.Minute, "how long the whole run may take")
 	flag.Parse()
+	// -drafts replaces the site's default; given together with -site, Run
+	// refuses the pair.
+	if *drafts != "" {
+		siteSet := false
+		flag.Visit(func(f *flag.Flag) { siteSet = siteSet || f.Name == "site" })
+		if !siteSet {
+			*site = ""
+		}
+	}
 
 	items, err := lookupSequence(*seq)
 	if err != nil {
@@ -61,7 +76,7 @@ func main() {
 		}
 	}
 	setups, _ := fs.Sub(setupFS, "setup")
-	err = Run(Config{Site: *site, OSArch: *osArch, Port: *port, Work: *work, Bash: *bash,
+	err = Run(Config{Site: *site, Drafts: *drafts, OSArch: *osArch, Port: *port, Work: *work, Bash: *bash,
 		BlockTimeout: *blockTimeout, RunTimeout: *runTimeout, Seq: items, Setups: setups,
 		Expect: expect, Out: os.Stdout})
 	if err != nil {

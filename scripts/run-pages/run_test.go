@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -313,24 +314,107 @@ func TestArgs_WorkWithQuote(t *testing.T) {
 	wantErr(t, r, "holds a single quote")
 }
 
-// The real places.sh against a stand-in mcp: a refused call fails the setup
-// and names the call.
+// The real wda.sh against a stand-in mcp: a refused call fails the setup and
+// names the call.
 func TestSetup_RefusedCallFails(t *testing.T) {
 	stub := `mcp() { printf '%s\n' 'data: {"jsonrpc":"2.0","id":1,"error":{"code":-32001,"message":"forbidden"}}'; }`
-	r := run(t, map[string]page{"p": md(fence(stub))}, []Item{{Slug: "p"}, {Setup: "places.sh"}}, nil, nil,
+	r := run(t, map[string]page{"p": md(fence(stub))}, []Item{{Slug: "p"}, {Setup: "wda.sh"}}, nil, nil,
 		func(c *Config) { c.Setups = os.DirFS("setup") })
-	wantErr(t, r, "setup places.sh: exit 1")
-	if !strings.Contains(r.out, "setup: create_domain was refused") {
+	wantErr(t, r, "setup wda.sh: exit 1")
+	if !strings.Contains(r.out, "setup: create_decision was refused") {
 		t.Fatalf("the refused call is not named:\n%s", r.out)
 	}
 }
 
 func TestSetup_WrongAddress(t *testing.T) {
-	stub := `mcp() { printf '%s\n' 'data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"text":"{\"address\":\"DOM5\"}","type":"text"}],"isError":false}}'; }`
-	r := run(t, map[string]page{"p": md(fence(stub))}, []Item{{Slug: "p"}, {Setup: "places.sh"}}, nil, nil,
+	stub := `mcp() { printf '%s\n' 'data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"text":"{\"address\":\"D7\"}","type":"text"}],"isError":false}}'; }`
+	r := run(t, map[string]page{"p": md(fence(stub))}, []Item{{Slug: "p"}, {Setup: "wda.sh"}}, nil, nil,
 		func(c *Config) { c.Setups = os.DirFS("setup") })
-	wantErr(t, r, "setup places.sh: exit 1")
-	if !strings.Contains(r.out, "setup: create_domain did not create DOM2") {
+	wantErr(t, r, "setup wda.sh: exit 1")
+	if !strings.Contains(r.out, "setup: create_decision did not create D5") {
 		t.Fatalf("the wrong address is not named:\n%s", r.out)
+	}
+}
+
+// draftFile writes dir/<slug>.md with a header comment and the body after it.
+func draftFile(t *testing.T, dir, slug, text string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, slug+".md"), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// fromDrafts reads the pages from dir instead of the test site.
+func fromDrafts(dir string) func(*Config) {
+	return func(c *Config) { c.Site = ""; c.Drafts = dir }
+}
+
+func TestDrafts_DirMissing(t *testing.T) {
+	r := run(t, nil, []Item{{Slug: "p"}}, nil, nil, fromDrafts(filepath.Join(t.TempDir(), "none")))
+	wantErr(t, r, "not a directory")
+}
+
+func TestDrafts_PageMissing(t *testing.T) {
+	r := run(t, nil, []Item{{Slug: "p"}}, nil, nil, fromDrafts(t.TempDir()))
+	wantErr(t, r, "draft p:")
+}
+
+func TestDrafts_NoBody(t *testing.T) {
+	dir := t.TempDir()
+	draftFile(t, dir, "p", "slug: p\n\n"+fence("true"))
+	r := run(t, nil, []Item{{Slug: "p"}}, nil, nil, fromDrafts(dir))
+	wantErr(t, r, "no header comment ending in -->")
+}
+
+func TestDrafts_WithSite(t *testing.T) {
+	dir := t.TempDir()
+	draftFile(t, dir, "p", "<!-- header -->\n"+fence("true"))
+	r := run(t, map[string]page{"p": md(fence("true"))}, []Item{{Slug: "p"}}, nil, nil,
+		func(c *Config) { c.Drafts = dir })
+	wantErr(t, r, "-drafts and -site both given")
+}
+
+func TestDrafts_SlugOutsideDir(t *testing.T) {
+	_, err := ReadDraft(t.TempDir(), "../p")
+	if err == nil || !strings.Contains(err.Error(), "not a page name") {
+		t.Fatalf("error = %v, want one saying the name is not a page name", err)
+	}
+}
+
+// A draft is read as the publishing scripts take it: the header comment and
+// the blank lines after it are not part of the page, and a CRLF file reads the
+// same as an LF one.
+func TestDrafts_Body(t *testing.T) {
+	dir := t.TempDir()
+	draftFile(t, dir, "p", "slug: p\r\n\r\n<!-- the header,\r\nover lines -->\r\n\r\nText.\r\n"+strings.ReplaceAll(fence("echo from-the-draft"), "\n", "\r\n"))
+	body, err := ReadDraft(dir, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(body, "Text.\n```bash\n") {
+		t.Fatalf("body = %q, want it to start after the header comment", body)
+	}
+	r := run(t, nil, []Item{{Slug: "p"}}, nil, nil, fromDrafts(dir))
+	if r.err != nil {
+		t.Fatalf("run: %v\n%s", r.err, r.out)
+	}
+	if !strings.Contains(r.out, "page p (draft):") || !strings.Contains(r.out, "from-the-draft") {
+		t.Fatalf("the draft was not run:\n%s", r.out)
+	}
+}
+
+// Every setup a sequence names is embedded, so a sequence never fails at its
+// first setup for a file that is gone.
+func TestSequences_SetupExists(t *testing.T) {
+	setups, _ := fs.Sub(setupFS, "setup")
+	for name, items := range sequences {
+		for _, it := range items {
+			if it.Setup == "" {
+				continue
+			}
+			if _, err := fs.Stat(setups, it.Setup); err != nil {
+				t.Errorf("sequence %s names setup %s, which is not embedded", name, it.Setup)
+			}
+		}
 	}
 }

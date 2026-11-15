@@ -43,6 +43,7 @@ type Expectation struct {
 // Config is one run.
 type Config struct {
 	Site         string        // the site the pages are fetched from, such as https://smeldr.dev
+	Drafts       string        // instead of Site: a directory of drafts, <slug>.md, read before they are published
 	OSArch       string        // the release file suffix the reader's system uses
 	Port         int           // the server's port; 8080 is the pages' own
 	Work         string        // the directory the run writes to
@@ -118,6 +119,32 @@ func Fetch(ctx context.Context, site, slug string) (string, error) {
 		return "", fmt.Errorf("fetch %s: %w", url, err)
 	}
 	return string(b), nil
+}
+
+// draftSlug is what a page name may be, so a draft is always a file directly
+// inside the drafts directory.
+var draftSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// ReadDraft reads a page's body from dir/<slug>.md, as the publishing scripts
+// take it: the text after the line that ends the header comment ("-->"),
+// with the blank lines before it removed. It reads no file outside dir.
+func ReadDraft(dir, slug string) (string, error) {
+	if !draftSlug.MatchString(slug) {
+		return "", fmt.Errorf("draft %q: not a page name", slug)
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return "", fmt.Errorf("-drafts %s: not a directory", dir)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, slug+".md"))
+	if err != nil {
+		return "", fmt.Errorf("draft %s: %w", slug, err)
+	}
+	text := strings.ReplaceAll(string(b), "\r\n", "\n")
+	i := strings.Index(text, "-->\n")
+	if i < 0 {
+		return "", fmt.Errorf("draft %s: no header comment ending in -->, so no body", slug)
+	}
+	return strings.TrimLeft(text[i+len("-->\n"):], "\n"), nil
 }
 
 // Extract returns a page's fenced bash blocks in page order, also those
@@ -390,6 +417,9 @@ func Run(cfg Config) (err error) {
 	if strings.Contains(cfg.Work, "'") {
 		return fmt.Errorf("-work %q holds a single quote, which the runner does not quote", cfg.Work)
 	}
+	if cfg.Drafts != "" && cfg.Site != "" {
+		return errors.New("-drafts and -site both given: the pages come from one of them")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.RunTimeout)
 	defer cancel()
 	for _, d := range []string{"pages", "blocks", "out", "run"} {
@@ -417,12 +447,19 @@ func Run(cfg Config) (err error) {
 		if it.Slug == "" || blocks[it.Slug] != nil {
 			continue
 		}
-		body, err := Fetch(ctx, cfg.Site, it.Slug)
+		var body, from string
+		var err error
+		if cfg.Drafts != "" {
+			body, err = ReadDraft(cfg.Drafts, it.Slug)
+			from = " (draft)"
+		} else {
+			body, err = Fetch(ctx, cfg.Site, it.Slug)
+		}
 		if err != nil {
 			return err
 		}
 		os.WriteFile(filepath.Join(cfg.Work, "pages", it.Slug+".md"), []byte(body), 0o644)
-		fmt.Fprintf(out, "page %s: %d bytes, sha256 %x\n", it.Slug, len(body), sha256.Sum256([]byte(body)))
+		fmt.Fprintf(out, "page %s%s: %d bytes, sha256 %x\n", it.Slug, from, len(body), sha256.Sum256([]byte(body)))
 		b := Extract(body)
 		if len(b) == 0 {
 			return fmt.Errorf("page %s has no bash block", it.Slug)
@@ -531,16 +568,20 @@ func Run(cfg Config) (err error) {
 	return nil
 }
 
-// sequences are the runs, named. A sequence that needs Getting started's
-// server takes its first five blocks (download, settings, start, init,
-// status) and the setups.
+// sequences are the runs, named. A page that shows the example places runs
+// after Getting started and Set up the example places, as a reader does
+// (T1272). decisions-before-an-edit stops before the two blocks that need the
+// server stopped (blocks 3 and 4), which the runner does not do, and runs the
+// block after them.
 var sequences = map[string][]Item{
 	"getting-started": {{Slug: "getting-started"}, {Slug: "an-agent-is-refused"}},
 	"deploy":          {{Slug: "deploy-and-first-start"}},
-	"connect-an-agent": {{Slug: "getting-started", To: 5}, {Setup: "mcp.sh"}, {Setup: "places.sh"},
+	"connect-an-agent": {{Slug: "getting-started"}, {Slug: "example-places"},
 		{Slug: "connect-an-agent"}},
-	"which-decisions-apply": {{Slug: "getting-started", To: 5}, {Setup: "mcp.sh"}, {Setup: "places.sh"},
+	"which-decisions-apply": {{Slug: "getting-started"}, {Slug: "example-places"},
 		{Setup: "wda.sh"}, {Slug: "which-decisions-apply"}},
+	"decisions-before-an-edit": {{Slug: "getting-started"}, {Slug: "example-places"},
+		{Slug: "decisions-before-an-edit", To: 2}, {Slug: "decisions-before-an-edit", From: 5}},
 }
 
 // lookupSequence returns the named sequence.
