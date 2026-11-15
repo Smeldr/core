@@ -104,13 +104,40 @@ function Set-LastId([string]$id) {
     }
 }
 
+# The token is read with a parser that keeps keys case-sensitive (T1260).
+# ConvertFrom-Json in Windows PowerShell 5.1 refuses a file with two keys that
+# differ only in case, and .claude.json got two project keys like that on
+# 2026-11-15 (.../Code/Smeldr and .../code/Smeldr): the watcher then failed on
+# every connect, on stderr only. Same form as architect's watcher.
+Add-Type -AssemblyName System.Web.Extensions
 function Get-ProcessToken {
-    $cfg = Get-Content -Raw $ConfigFile | ConvertFrom-Json
-    $node = $cfg.projects.$ProjectKey
-    if (-not $node) { $node = $cfg.$ProjectKey }
-    $auth = $node.mcpServers.process.headers.Authorization
+    $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+    $ser.MaxJsonLength = [int]::MaxValue
+    $cfg = $ser.DeserializeObject((Get-Content -Raw -Encoding UTF8 $ConfigFile))
+    $node = $null
+    if ($cfg.ContainsKey('projects') -and $cfg['projects'].ContainsKey($ProjectKey)) {
+        $node = $cfg['projects'][$ProjectKey]
+    } elseif ($cfg.ContainsKey($ProjectKey)) {
+        $node = $cfg[$ProjectKey]
+    }
+    $auth = $null
+    try { $auth = $node['mcpServers']['process']['headers']['Authorization'] } catch {}
     if (-not $auth) { throw "no process.smeldr.dev token found for $ProjectKey in $ConfigFile" }
     return $auth -replace '^Bearer ', ''
+}
+
+# A failure that keeps the watcher from connecting is printed on stdout too,
+# once when it starts and then every ten minutes, so the Monitor shows it as an
+# event: the Monitor sees stdout only, and silence must never look like a
+# healthy stream (T1260). The text never holds the token or the cursor.
+$script:lastFailureShown = [datetime]::MinValue
+function Show-Failure([string]$text) {
+    [Console]::Error.WriteLine("ERROR: $text")
+    if (((Get-Date) - $script:lastFailureShown).TotalMinutes -ge 10) {
+        [Console]::Out.WriteLine("WATCHER NOT CONNECTED: $text")
+        [Console]::Out.Flush()
+        $script:lastFailureShown = Get-Date
+    }
 }
 
 $backoff = 2
@@ -121,7 +148,7 @@ while ($true) {
     try {
         $token = Get-ProcessToken
     } catch {
-        [Console]::Error.WriteLine("ERROR: could not extract process.smeldr.dev token: $_")
+        Show-Failure "could not extract process.smeldr.dev token: $_"
         Start-Sleep -Seconds 5
         continue
     }
@@ -131,6 +158,7 @@ while ($true) {
     if ($lastId) { $Url = "${BaseUrl}?after=$lastId" }
 
     $connectedAt = Get-Date
+    $script:gotLine = $false
     $client = [System.Net.Http.HttpClient]::new()
     $client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
     $client.DefaultRequestHeaders.Authorization = `
@@ -139,7 +167,7 @@ while ($true) {
     try {
         $response = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
         if (-not $response.IsSuccessStatusCode) {
-            [Console]::Error.WriteLine("ERROR: HTTP $([int]$response.StatusCode) from $Url")
+            Show-Failure "HTTP $([int]$response.StatusCode) from $BaseUrl"
             if ($lastId -and [int]$response.StatusCode -eq 400) {
                 Remove-Item -Force -ErrorAction SilentlyContinue $StateFile
             }
@@ -150,6 +178,7 @@ while ($true) {
                 while (-not $reader.EndOfStream) {
                     $line = $reader.ReadLine()
                     if ($null -eq $line) { break }
+                    $script:gotLine = $true
                     if ($line -match '"type":"(ping|caught_up)"') { continue }
                     if ($line -match '^\{"id":"([^"]+)"') {
                         $id = $Matches[1]
@@ -168,7 +197,13 @@ while ($true) {
             }
         }
     } catch {
-        [Console]::Error.WriteLine("ERROR: connection dropped: $_")
+        # A drop after a working connection is normal and reconnects; one that
+        # never delivered a line means the watcher is not connected.
+        if ($script:gotLine) {
+            [Console]::Error.WriteLine("ERROR: connection dropped: $_")
+        } else {
+            Show-Failure "could not connect to ${BaseUrl}: $($_.Exception.Message)"
+        }
     } finally {
         $client.Dispose()
     }
