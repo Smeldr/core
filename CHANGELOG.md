@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### CI
+
+- **README's "Start in three minutes" runs on macOS in CI (T1207).** `scripts/gettingstarted/run.sh` follows the README's steps on the release binaries. It downloads the server and smeldr-cli for the platform, checks each against SHA256SUMS as the README does, starts the server and runs `smeldr-cli init`. It then makes the agent's token and grant, and makes the tool calls an agent would make with the agent's token. No AI agent runs. Without a terminal, `grant` and `transition` need `--rev`, so the script reads the rev first, which a terminal would ask for. The script stops at the first answer that differs from the README. The workflow `.github/workflows/getting-started-macos.yml` runs it on Apple silicon (darwin-arm64) and Intel (darwin-amd64): after every core release, on pushes that touch README.md or the script, weekly on Mondays, and by hand. On failure it uploads the server log with the bootstrap token removed. The script also runs in Git Bash on Windows, and was run there on core v1.193.2 and cli v0.38.1. The README and the script are kept in step by hand.
+
 ---
 
 ## [1.193.2] - 2026-11-14

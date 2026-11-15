@@ -1,0 +1,72 @@
+name: Getting started on macOS
+
+# Runs README.md's "Start in three minutes" on macOS with the release
+# binaries a reader downloads (T1207). No AI agent runs: the steps that ask an
+# agent are the tool calls an agent would make, with the agent's own token.
+# The script, scripts/gettingstarted/run.sh, says what it covers and what not.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - scripts/gettingstarted/**
+      - .github/workflows/getting-started-macos.yml
+  # Every core release, once its binaries are attached and published.
+  workflow_run:
+    workflows: [Release binaries]
+    types: [completed]
+  schedule:
+    - cron: '30 6 * * 1' # every Monday 06:30 UTC, after Pin currency
+  workflow_dispatch:
+    inputs:
+      core_version:
+        description: 'core tag (vX.Y.Z), or latest'
+        default: latest
+      cli_version:
+        description: 'cli tag (vX.Y.Z), or latest'
+        default: latest
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  getting-started:
+    name: Getting started on ${{ matrix.os_arch }} (release binaries, no AI agent)
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            os_arch: darwin-arm64
+          - runner: macos-15-intel
+            os_arch: darwin-amd64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the README's steps
+        env:
+          OS_ARCH: ${{ matrix.os_arch }}
+          # A release run checks the release it follows; otherwise latest.
+          CORE_VERSION: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || inputs.core_version || 'latest' }}
+          CLI_VERSION: ${{ inputs.cli_version || 'latest' }}
+          WORK: ${{ runner.temp }}/getting-started
+        run: |
+          mkdir -p "$WORK"
+          sw_vers
+          bash scripts/gettingstarted/run.sh
+
+      # The log is from a throwaway instance that dies with the runner, and
+      # the script removes the bootstrap token from this copy.
+      - name: Upload the server log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log-${{ matrix.os_arch }}
+          path: ${{ runner.temp }}/getting-started/server-redacted.log
+          if-no-files-found: ignore
