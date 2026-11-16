@@ -32,11 +32,18 @@ cross-referenced below by their Amendment ID.
 
 ### Fixed
 
+- **A PUT cannot clear `PublishedAt` (T1300).** A PUT whose body had no `PublishedAt` saved the zero time, also on an item that stayed published: RSS showed it as 1 January 0001 and sorted it last, the sitemap gave it year 1, and the AI doc left out its "Published:" line. A PUT now keeps the stored time when the body has none, and keeps a time the body sends. The move into `published` still stamps now.
+- **An `OnSignal` handler registered after `App.Run` runs (T1300).** With no handler, listener or event stream at start, no module got the signal hook, so a handler added later never ran; with one, it did. The hook is now always set; a write with nothing listening costs about half a microsecond and three small allocations. `AddSignalListener` still belongs before `App.Handler` or `App.Run`, as its doc comment now says.
+
 - **A webhook retry never makes two workers deliver one job (T1304).** A worker's claim only moved `next_retry_at`, so a job a worker held looked like one in its backoff: retrying it made it due, a second worker claimed it, both delivered, and the first then wrote over the row. Now the claim names its holder (`claim_id`) and its lease (`claimed_until`), the holder's update after its attempt applies only while its own claim is on the row, and a retry of a held job only leaves a request (`retry_requested`): the job is due now right after the attempt in flight if that attempt fails, and not sent again if it succeeds. If the holder dies, the next worker to claim the job after the lease honours the request. A job table without the new columns works as before.
 
 ### Added
 
 - **`EnsureOutboundJobClaimColumns(ctx, db)` and `OutboundClaimHolderSQL` (T1304).** The function adds `claim_id`, `claimed_until` and `retry_requested` to a job table from before them; `CreateWebhookTables` calls it, so example/server's boot adds them. `OutboundClaimHolderSQL` is the worker pool's claim with a holder; `OutboundClaimSQL` is unchanged.
+
+### Docs
+
+- **What a PUT keeps, and who the scheduler is (T1300).** `updateHandler`'s doc comment and REFERENCE say a PUT keeps the stored ID, slug and address, so a `Slug` in the body is ignored with a 200 (a PATCH refuses it), and keeps `PublishedAt` when the body has none. `SignalEvent.ActorRole` is `guest` also for a system path with no actor, such as the scheduler's publish: `ActorID` is empty and `Surface` is `trigger`.
 
 ---
 

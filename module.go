@@ -2643,7 +2643,11 @@ func (m *Module[T]) createHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, item)
 }
 
-// updateHandler serves PUT /{prefix}/{slug}.
+// updateHandler serves PUT /{prefix}/{slug}: the body replaces the item's
+// fields, except what the stored item owns. ID, Slug and the address are
+// always kept: a Slug in the body is ignored, not refused (a PATCH that names
+// slug is refused, since a slug is set once). PublishedAt is kept when the
+// body has none, so a PUT cannot clear it (T1300).
 func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := ContextFrom(w, r)
 
@@ -2680,6 +2684,14 @@ func (m *Module[T]) updateHandler(w http.ResponseWriter, r *http.Request) {
 	pv.Elem().FieldByIndex(f.slug).SetString(nodeSlugOf(existing))
 	keepStoredAddress(pv, existing)
 	stampLastActor(ctx, pv, existing)
+	// A body without PublishedAt keeps the stored time (T1300): it is when
+	// the item was first published, which no edit changes. A sent time is
+	// kept, as on create.
+	if nodePublishedAtOf(pv.Interface()).IsZero() {
+		if t := nodePublishedAtOf(existing); !t.IsZero() {
+			setNodeTime(pv.Interface(), "PublishedAt", t)
+		}
+	}
 
 	item := ptrToT[T](pv, m.proto)
 

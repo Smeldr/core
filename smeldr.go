@@ -1403,6 +1403,10 @@ func (a *App) WebhookPool() WebhookJobQueue {
 // AddSignalListener is the low-level hook used by mcp to implement
 // resource subscription notifications. Application code can also use it to
 // build custom event pipelines.
+//
+// Register listeners before [App.Handler] or [App.Run]: the list is read
+// without a lock while signals fire. A handler added later belongs in
+// [App.OnSignal], which may be called at any time.
 func (a *App) AddSignalListener(fn func(LifecycleEvent, string, any)) {
 	a.signalListeners = append(a.signalListeners, fn)
 }
@@ -1414,6 +1418,9 @@ func (a *App) AddSignalListener(fn func(LifecycleEvent, string, any)) {
 // The bus wraps the context with [context.WithoutCancel] and enforces a 100 ms
 // per-handler deadline. Handler errors and deadline exceeded are logged with
 // [slog.Warn] and never propagated to the caller that triggered the signal.
+//
+// A handler may be registered before or after [App.Run]; it runs for every
+// signal fired after it was registered, never for earlier ones (T1300).
 //
 // Use OnSignal to build custom delivery pipelines that react to content
 // lifecycle events:
@@ -1512,13 +1519,11 @@ func (a *App) emitSignal(ctx context.Context, sig LifecycleEvent, ev SignalEvent
 // listeners exist, as long as a broadcaster is configured — otherwise
 // EventStream() alone (no OnSignal/Webhooks) would never see a single
 // content-lifecycle event, defeating its own decoupling from App.Webhooks.
+//
+// The hook is set even when nothing listens yet (T1300), so a handler or
+// listener added after [App.Run] runs for every later signal; with none, a
+// write costs one [SignalEvent] built and a map read.
 func (a *App) wireSignalBus() {
-	a.busMu.RLock()
-	hasBus := len(a.busHandlers) > 0
-	a.busMu.RUnlock()
-	if !hasBus && len(a.signalListeners) == 0 && a.eventBroadcaster == nil {
-		return
-	}
 	fn := a.signalBus
 
 	for _, m := range a.hookableModules {

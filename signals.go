@@ -290,7 +290,9 @@ type SignalEvent struct {
 	PreviousState string
 
 	// ActorRole is the role of the authenticated user who triggered the signal.
-	// "guest" for unauthenticated requests.
+	// "guest" for unauthenticated requests, and also for a system path with
+	// no actor, such as the scheduler's publish: tell them apart by
+	// ActorID == "" with Surface == "trigger" (T1300).
 	ActorRole string
 
 	// NodeID is the stable UUID of the content item. Populated for all signals
@@ -315,7 +317,8 @@ type SignalEvent struct {
 	ActorRoles []Role
 
 	// Surface is which entry point dispatched this signal — "http", "mcp", or
-	// "trigger" (T243/provenance-visibility-brief.md §2.3). "cli" is a valid
+	// "trigger" (T243/provenance-visibility-brief.md §2.3). The scheduler's
+	// publish is a "trigger", with no actor. "cli" is a valid
 	// value in principle but has no current producer: nothing in this codebase
 	// can distinguish a smeldr-cli-originated HTTP request from any other HTTP
 	// caller, since both terminate in the same handlers. Empty for hand-built

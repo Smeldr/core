@@ -57,7 +57,7 @@ app.Run(":8080")
 - `GET /posts` — list published posts (JSON or HTML)
 - `GET /posts/{slug}` — single post
 - `POST /posts` — create (Author+)
-- `PUT /posts/{slug}` — update, full replace (Author+)
+- `PUT /posts/{slug}` — update, full replace (Author+). What the stored item owns is kept: the ID, the slug and the address, so a `Slug` in the body is ignored and the answer is 200 with the stored slug (unlike PATCH below, which refuses it), and `PublishedAt` when the body has none, so a PUT cannot clear it (T1300). A `PublishedAt` the body sends is kept.
 - `PATCH /posts/{slug}` — update, partial — a field omitted from the body keeps its existing value (Author+, same tier as `PUT`) (T242). A `status`, `slug` or `id` in the body that differs from the stored value is refused with 422 and the field named (held, version pending): a status changes through `PUT`, `transition_item` or the lifecycle tools, and an update never changes the slug or the ID. Before, PATCH and MCP `update_{type}` dropped those keys and reported success. The same value as stored is accepted.
 - `DELETE /posts/{slug}` — delete (Author+)
 - `GET /posts/sitemap.xml` — auto-generated, always fresh
@@ -3520,6 +3520,8 @@ type SignalEvent struct {
 }
 ```
 
+`ActorRole` is `"guest"` both for an unauthenticated request and for a system path with no actor, such as the scheduler's publish. Tell them apart by `ActorID == ""` with `Surface == "trigger"` (the scheduler and other triggers). Webhooks, the event stream and provenance show such an event with no actor too (T1300).
+
 ### `App.OnSignal`
 
 ```go
@@ -3529,7 +3531,11 @@ func (a *App) OnSignal(sig LifecycleEvent, h func(context.Context, SignalEvent) 
 Registers `h` to fire whenever `sig` is dispatched. Returns `*App` for chaining.
 The handler receives a `context.Context` with a 100 ms timeout, detached from the
 originating HTTP request (via `context.WithoutCancel`). Handler errors are logged
-at Warn level; subsequent handlers still fire.
+at Warn level; subsequent handlers still fire. A handler may be registered
+before or after `App.Run`: it runs for every signal fired after it was
+registered (T1300; before, a handler added after `Run` never ran when no
+handler existed at start). `AddSignalListener` is different: register it
+before `App.Handler` or `App.Run`.
 
 ```go
 app.OnSignal(smeldr.AfterPublish, func(ctx context.Context, ev smeldr.SignalEvent) error {
