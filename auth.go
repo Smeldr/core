@@ -575,7 +575,8 @@ func (ts *TokenStore) probeTable(ctx context.Context) error {
 // Called at startup by [App.Handler] after a successful [TokenStore.probeTable].
 // When the table already contains at least one row (any token, revoked or not)
 // this is a no-op. The raw token is emitted via [log/slog] at Warn level and
-// is never persisted — copy it immediately.
+// is never persisted — copy it immediately. It is never kept by
+// [App.CaptureLogs] or served at /_logs.
 //
 // Returns the created token's User.ID and true when a token was actually
 // created, so [App.Handler] can additionally grant it the admin RoleStore
@@ -594,7 +595,9 @@ func (ts *TokenStore) ensureBootstrap(ctx context.Context) (userID string, creat
 		slog.Warn("smeldr: failed to create bootstrap admin token", "err", err)
 		return "", false
 	}
-	slog.Warn("smeldr: smeldr_tokens is empty: bootstrap admin token created (copy now, shown once):\n\t" + raw)
+	// The same line on the same handler as always, never kept by CaptureLogs
+	// or served at /_logs (T1299).
+	slog.WarnContext(withoutCapture(ctx), "smeldr: smeldr_tokens is empty: bootstrap admin token created (copy now, shown once):\n\t"+raw)
 	return uid, true
 }
 

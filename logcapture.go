@@ -111,16 +111,34 @@ func (h *teeHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 // Handle forwards rec to the inner handler (honouring the inner handler's own
-// level), and independently captures it into the ring when rec.Level >= minLevel.
+// level), and independently captures it into the ring when rec.Level >= minLevel
+// and its context is not marked by withoutCapture.
 func (h *teeHandler) Handle(ctx context.Context, rec slog.Record) error {
 	var ierr error
 	if h.inner.Enabled(ctx, rec.Level) {
 		ierr = h.inner.Handle(ctx, rec)
 	}
-	if rec.Level >= h.minLevel {
+	if rec.Level >= h.minLevel && !uncaptured(ctx) {
 		h.ring.append(h.entry(rec))
 	}
 	return ierr
+}
+
+// noCaptureKey marks a context whose records never enter the capture ring.
+type noCaptureKey struct{}
+
+// withoutCapture marks ctx so a record logged with it reaches the existing
+// destination (standard error) unchanged but never the ring that GET /_logs
+// serves: for a line that holds a secret, the bootstrap admin token (T1299).
+// Only core marks a record: the key is unexported.
+func withoutCapture(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noCaptureKey{}, true)
+}
+
+// uncaptured reports whether ctx is marked by withoutCapture.
+func uncaptured(ctx context.Context) bool {
+	marked, _ := ctx.Value(noCaptureKey{}).(bool)
+	return marked
 }
 
 // WithAttrs returns a handler that adds attrs to both the inner handler and the

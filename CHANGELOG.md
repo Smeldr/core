@@ -20,6 +20,7 @@ cross-referenced below by their Amendment ID.
 
 ### Security
 
+- **The bootstrap admin token is no longer kept by `CaptureLogs` or served at `/_logs` (T1299).** It still shows once on standard error at start, unchanged. This affected a Go program that calls `CaptureLogs` before the token store creates the bootstrap token; the release binary does not call `CaptureLogs`.
 - **What core needs so that an OAuth access token stands for exactly the Smeldr token pasted at sign-in (D195, T1287).** This is the core part. The fix lands with smeldr.dev/oauth and smeldr.dev/mcp, and their CHANGELOGs say what a client and a server must do.
   - `TokenStore.ActingUser` reads a stored token by its fingerprint: the user it acts as, its role and class, and whether it is still valid.
   - `User.Via` and `ProvenanceRecord.Via` note the client a request came through, beside the token's own signature. `CreateProvenanceTable` adds the `via` column.

@@ -3374,7 +3374,8 @@ app.CaptureLogs(
 
 `CaptureLogs` tees: every record still reaches the existing handler (typically
 stderr) **and** records at or above the capture level are stored in the ring. It
-never narrows what stderr receives.
+never narrows what stderr receives. The bootstrap admin token is never captured:
+its start line reaches stderr as always, and never the ring or `/_logs` (T1299).
 
 **Ordering constraint:** `CaptureLogs` wraps `slog.Default().Handler()` at the
 moment it is called and then calls `slog.SetDefault`. Call it **after** any
