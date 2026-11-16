@@ -132,6 +132,9 @@ ENABLE_STANDING_DRIFT_CHECK  scheduled standing drift check, report-only: record
                       Finding per item whose stored standing differs from its
                       state's (requires governance records)
 STANDING_DRIFT_CHECK_SCHEDULE  cron for the check (default: "30 3 * * *", daily)
+CHANGE_CHECK_RECHECK_SCHEDULE  cron for the re-check of open pull request Checks
+                      (default: "*/5 * * * *"); runs whenever governance records
+                      are on, and once at start (D196)
 ENABLE_SIGNAL_EXPIRY_SWEEP  retired (D115): nothing expires; when set, boot logs that
                       it does nothing
 ENABLE_CONTEXT_PACKET wire GET /packet/{type}/{slug} (Editor role; only with
@@ -192,10 +195,12 @@ RFC3339 time stops the boot, with an error that names the variable.
 
 ### Schedules
 
-The three schedulers (`STRUCTURAL_SWEEP_SCHEDULE`, `EVAL_QUEUE_DRAIN_SCHEDULE`,
-`STANDING_DRIFT_CHECK_SCHEDULE`) take a 5-field cron expression, run in UTC,
-and have the defaults listed above. A schedule that does not parse stops the
-boot, but only when its `ENABLE_*` flag is set; otherwise it is not read.
+The four schedulers (`STRUCTURAL_SWEEP_SCHEDULE`, `EVAL_QUEUE_DRAIN_SCHEDULE`,
+`STANDING_DRIFT_CHECK_SCHEDULE`, `CHANGE_CHECK_RECHECK_SCHEDULE`) take a 5-field
+cron expression, run in UTC, and have the defaults listed above. A schedule
+that does not parse stops the boot, naming it, before any write, but only when
+what it schedules is on (its `ENABLE_*` flag, or governance records for
+`CHANGE_CHECK_RECHECK_SCHEDULE`); otherwise it is not read.
 
 A boot refused for a flag or a variable (a missing dependency, a value that
 does not parse, a GitHub variable) exits before it writes anything to the

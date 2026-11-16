@@ -131,6 +131,10 @@ type RelationStore struct {
 	// onRelationChange is told both ends of a relation that began or ended,
 	// so cached read scopes anchored there reload (D116). Nil does nothing.
 	onRelationChange func(sourceID, targetID string)
+	// onDecisionPlaced is told a Decision whose place edge began or ended,
+	// so the open Checks it concerns are re-checked (D196, T1294). Nil does
+	// nothing.
+	onDecisionPlaced func(ctx context.Context, decisionID string)
 	webhookStore     *WebhookStore
 	webhookPool      *workerPool
 	eventBroadcaster *eventBroadcaster

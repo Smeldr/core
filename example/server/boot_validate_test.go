@@ -74,6 +74,7 @@ func TestBoot_RefusalWritesNoSchema(t *testing.T) {
 		{"base url missing", func(c *ServerConfig) { c.BaseURL = "" }, `BASE_URL: Config.BaseURL is required`},
 		{"base url relative", func(c *ServerConfig) { c.BaseURL = "/x" }, `BASE_URL: Config.BaseURL "/x" is not a valid absolute URL`},
 		{"secret short", func(c *ServerConfig) { c.Secret = "short" }, "SECRET: Config.Secret must be at least 16 bytes"},
+		{"recheck schedule", func(c *ServerConfig) { records(c); c.ChangeCheckRecheckSchedule = "every five" }, "CHANGE_CHECK_RECHECK_SCHEDULE"},
 		{"records without relations", func(c *ServerConfig) { c.EnableGovernanceRecords = true }, "ENABLE_GOVERNANCE_RECORDS requires ENABLE_RELATIONS"},
 		{"orchestration without relations", func(c *ServerConfig) { c.EnableOrchestration = true }, "ENABLE_ORCHESTRATION requires ENABLE_RELATIONS"},
 		{"title cutover", func(c *ServerConfig) { c.TitleCutover = "yesterday" }, "TITLE_CUTOVER: want an RFC3339 time"},

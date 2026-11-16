@@ -585,7 +585,7 @@ func (a *App) DecisionsForPaths(ctx context.Context, q DecisionsForPathsQuery) (
 		// Decision applies only through a covered path.
 		return res, nil
 	}
-	domains, err := a.areaDomains(ctx, order)
+	domains, decisions, err := a.inForceForAreas(ctx, scope, order, !q.ExcludeOrganization)
 	if err != nil {
 		return DecisionsForPathsResult{}, err
 	}
@@ -596,12 +596,26 @@ func (a *App) DecisionsForPaths(ctx context.Context, q DecisionsForPathsQuery) (
 		}
 		res.Areas = append(res.Areas, *ca)
 	}
-	decisions, err := a.decisionsInPlaces(ctx, scope, order, domains, !q.ExcludeOrganization)
-	if err != nil {
-		return DecisionsForPathsResult{}, err
-	}
 	res.Decisions = decisions
 	return res, nil
+}
+
+// inForceForAreas returns the Domain of each of the Areas and the Decisions
+// in force for them, through the Areas, their Domains and (when organization
+// is set) the Organization, as scope may read them. It is the one source of
+// a Check's checked_against: [App.CheckChange] reaches it through
+// [App.DecisionsForPaths], and the re-check (D196) calls it with the same
+// arguments, so the two never differ without a change.
+func (a *App) inForceForAreas(ctx context.Context, scope *ReadScope, areaIDs []string, organization bool) (map[string]placeRef, []AppliedDecision, error) {
+	domains, err := a.areaDomains(ctx, areaIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	decisions, err := a.decisionsInPlaces(ctx, scope, areaIDs, domains, organization)
+	if err != nil {
+		return nil, nil, err
+	}
+	return domains, decisions, nil
 }
 
 // containsString reports whether list holds s.

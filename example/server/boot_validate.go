@@ -15,9 +15,10 @@ import (
 // Default cron schedules, used when ServerConfig is built by hand rather than
 // by parseConfig, whose envOr defaults are the same.
 const (
-	defaultStructuralSweepSchedule = "0 * * * *"
-	defaultEvalQueueDrainSchedule  = "*/5 * * * *"
-	defaultStandingDriftSchedule   = "30 3 * * *"
+	defaultStructuralSweepSchedule    = "0 * * * *"
+	defaultEvalQueueDrainSchedule     = "*/5 * * * *"
+	defaultStandingDriftSchedule      = "30 3 * * *"
+	defaultChangeCheckRecheckSchedule = "*/5 * * * *"
 )
 
 // bootChecks holds what validateBoot parsed, so buildApp parses nothing twice.
@@ -90,6 +91,7 @@ func validateBoot(cfg ServerConfig) (bootChecks, error) {
 		{cfg.EnableStructuralSweep, scheduleOr(cfg.StructuralSweepSchedule, defaultStructuralSweepSchedule), "structural sweep scheduler"},
 		{cfg.EnableEvalQueueDrain, scheduleOr(cfg.EvalQueueDrainSchedule, defaultEvalQueueDrainSchedule), "eval queue drain scheduler"},
 		{cfg.EnableStandingDriftCheck, scheduleOr(cfg.StandingDriftSchedule, defaultStandingDriftSchedule), "standing drift check scheduler"},
+		{cfg.governanceRecords(), scheduleOr(cfg.ChangeCheckRecheckSchedule, defaultChangeCheckRecheckSchedule), "CHANGE_CHECK_RECHECK_SCHEDULE"},
 	} {
 		if s.on {
 			if err := checkSchedule(s.schedule); err != nil {

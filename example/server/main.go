@@ -187,15 +187,19 @@ type ServerConfig struct {
 	EnableSignalExpirySweep  bool
 	EnableStandingDriftCheck bool
 	StandingDriftSchedule    string
-	EnableContextPacket      bool
-	EnableReachability       bool
-	EnableProvenance         bool
-	EnableAgents             bool
-	AgentMCPURL              string
-	AgentMCPToken            string
-	OAuthIssuer              string
-	OAuthDBPath              string
-	InstanceName             string
+	// ChangeCheckRecheckSchedule is when the open Checks are compared with
+	// the Decisions in force again (D196, T1294): with governance records on,
+	// whatever else is switched.
+	ChangeCheckRecheckSchedule string
+	EnableContextPacket        bool
+	EnableReachability         bool
+	EnableProvenance           bool
+	EnableAgents               bool
+	AgentMCPURL                string
+	AgentMCPToken              string
+	OAuthIssuer                string
+	OAuthDBPath                string
+	InstanceName               string
 	// TitleCutover (TITLE_CUTOVER, RFC3339) is when a record's title rule
 	// (D112) turns from a warning into a refusal; empty means warnings only.
 	TitleCutover string
@@ -238,58 +242,59 @@ func parseConfig() ServerConfig {
 func readConfig() ServerConfig {
 	port := envOr("PORT", "8080")
 	return ServerConfig{
-		Secret:                   os.Getenv("SECRET"),
-		BaseURL:                  os.Getenv("BASE_URL"),
-		TitleCutover:             os.Getenv("TITLE_CUTOVER"),
-		SignalMessageCutover:     os.Getenv("SIGNAL_MESSAGE_CUTOVER"),
-		SignalEventCutover:       os.Getenv("SIGNAL_EVENT_CUTOVER"),
-		PlanPathsCutover:         os.Getenv("PLAN_PATHS_CUTOVER"),
-		RevCutover:               os.Getenv("REV_CUTOVER"),
-		Port:                     port,
-		Addr:                     envOr("ADDR", "127.0.0.1:"+port),
-		EnableTokens:             os.Getenv("ENABLE_TOKENS") != "",
-		EnableGovernance:         os.Getenv("ENABLE_GOVERNANCE") != "",
-		EnableRelations:          os.Getenv("ENABLE_RELATIONS") != "",
-		EnableDynamicContent:     os.Getenv("ENABLE_DYNAMIC_CONTENT") != "",
-		EnableBlocks:             os.Getenv("ENABLE_BLOCKS") != "",
-		EnableOrchestration:      os.Getenv("ENABLE_ORCHESTRATION") != "",
-		EnableGovernanceRecords:  os.Getenv("ENABLE_GOVERNANCE_RECORDS") != "",
-		OrganizationName:         envOr("ORGANIZATION_NAME", envOr("INSTANCE_NAME", "smeldr")),
-		OrganizationFounder:      os.Getenv("ORGANIZATION_FOUNDER"),
-		EnableAuthority:          os.Getenv("ENABLE_AUTHORITY") != "",
-		EnableCheck:              os.Getenv("ENABLE_CHECK") != "",
-		EnableRedirects:          os.Getenv("ENABLE_REDIRECTS") != "",
-		EnablePageMeta:           os.Getenv("ENABLE_PAGE_META") != "",
-		EnableSchemaTools:        os.Getenv("ENABLE_SCHEMA_TOOLS") != "",
-		EnableMedia:              os.Getenv("ENABLE_MEDIA") != "",
-		MediaBackend:             envOr("MEDIA_STORE_BACKEND", "local"),
-		EnableSocial:             os.Getenv("ENABLE_SOCIAL") != "",
-		MastodonClientID:         os.Getenv("MASTODON_CLIENT_ID"),
-		MastodonClientSecret:     os.Getenv("MASTODON_CLIENT_SECRET"),
-		MastodonInstanceURL:      os.Getenv("MASTODON_INSTANCE_URL"),
-		EnableWebhooks:           os.Getenv("ENABLE_WEBHOOKS") != "",
-		EnableEventStream:        os.Getenv("ENABLE_EVENT_STREAM") != "",
-		EnableEventLog:           os.Getenv("ENABLE_EVENT_LOG") != "",
-		EventLogRetentionDays:    os.Getenv("EVENT_LOG_RETENTION_DAYS"),
-		EnableSubscriptions:      os.Getenv("ENABLE_SUBSCRIPTIONS") != "",
-		EnableStructuralSweep:    os.Getenv("ENABLE_STRUCTURAL_SWEEP") != "",
-		StructuralSweepSchedule:  envOr("STRUCTURAL_SWEEP_SCHEDULE", "0 * * * *"),
-		EnableEvalQueueDrain:     os.Getenv("ENABLE_EVAL_QUEUE_DRAIN") != "",
-		EvalQueueDrainSchedule:   envOr("EVAL_QUEUE_DRAIN_SCHEDULE", "*/5 * * * *"),
-		EnableSignalExpirySweep:  os.Getenv("ENABLE_SIGNAL_EXPIRY_SWEEP") != "",
-		EnableStandingDriftCheck: os.Getenv("ENABLE_STANDING_DRIFT_CHECK") != "",
-		StandingDriftSchedule:    envOr("STANDING_DRIFT_CHECK_SCHEDULE", "30 3 * * *"),
-		EnableContextPacket:      os.Getenv("ENABLE_CONTEXT_PACKET") != "",
-		EnableReachability:       os.Getenv("ENABLE_REACHABILITY") != "",
-		EnableProvenance:         os.Getenv("ENABLE_PROVENANCE") != "",
-		EnableAgents:             os.Getenv("ENABLE_AGENTS") != "",
-		AgentMCPURL:              envOr("AGENT_MCP_URL", "http://127.0.0.1:"+port+"/mcp/message"),
-		AgentMCPToken:            os.Getenv("AGENT_MCP_TOKEN"),
-		OAuthIssuer:              os.Getenv("OAUTH_ISSUER"),
-		OAuthDBPath:              envOr("OAUTH_DB_PATH", "./oauth.db"),
-		InstanceName:             envOr("INSTANCE_NAME", "smeldr"),
-		EnableGitHub:             os.Getenv("ENABLE_GITHUB") != "",
-		GitHub:                   parseGitHubConfig(os.Getenv),
+		Secret:                     os.Getenv("SECRET"),
+		BaseURL:                    os.Getenv("BASE_URL"),
+		TitleCutover:               os.Getenv("TITLE_CUTOVER"),
+		SignalMessageCutover:       os.Getenv("SIGNAL_MESSAGE_CUTOVER"),
+		SignalEventCutover:         os.Getenv("SIGNAL_EVENT_CUTOVER"),
+		PlanPathsCutover:           os.Getenv("PLAN_PATHS_CUTOVER"),
+		RevCutover:                 os.Getenv("REV_CUTOVER"),
+		Port:                       port,
+		Addr:                       envOr("ADDR", "127.0.0.1:"+port),
+		EnableTokens:               os.Getenv("ENABLE_TOKENS") != "",
+		EnableGovernance:           os.Getenv("ENABLE_GOVERNANCE") != "",
+		EnableRelations:            os.Getenv("ENABLE_RELATIONS") != "",
+		EnableDynamicContent:       os.Getenv("ENABLE_DYNAMIC_CONTENT") != "",
+		EnableBlocks:               os.Getenv("ENABLE_BLOCKS") != "",
+		EnableOrchestration:        os.Getenv("ENABLE_ORCHESTRATION") != "",
+		EnableGovernanceRecords:    os.Getenv("ENABLE_GOVERNANCE_RECORDS") != "",
+		OrganizationName:           envOr("ORGANIZATION_NAME", envOr("INSTANCE_NAME", "smeldr")),
+		OrganizationFounder:        os.Getenv("ORGANIZATION_FOUNDER"),
+		EnableAuthority:            os.Getenv("ENABLE_AUTHORITY") != "",
+		EnableCheck:                os.Getenv("ENABLE_CHECK") != "",
+		EnableRedirects:            os.Getenv("ENABLE_REDIRECTS") != "",
+		EnablePageMeta:             os.Getenv("ENABLE_PAGE_META") != "",
+		EnableSchemaTools:          os.Getenv("ENABLE_SCHEMA_TOOLS") != "",
+		EnableMedia:                os.Getenv("ENABLE_MEDIA") != "",
+		MediaBackend:               envOr("MEDIA_STORE_BACKEND", "local"),
+		EnableSocial:               os.Getenv("ENABLE_SOCIAL") != "",
+		MastodonClientID:           os.Getenv("MASTODON_CLIENT_ID"),
+		MastodonClientSecret:       os.Getenv("MASTODON_CLIENT_SECRET"),
+		MastodonInstanceURL:        os.Getenv("MASTODON_INSTANCE_URL"),
+		EnableWebhooks:             os.Getenv("ENABLE_WEBHOOKS") != "",
+		EnableEventStream:          os.Getenv("ENABLE_EVENT_STREAM") != "",
+		EnableEventLog:             os.Getenv("ENABLE_EVENT_LOG") != "",
+		EventLogRetentionDays:      os.Getenv("EVENT_LOG_RETENTION_DAYS"),
+		EnableSubscriptions:        os.Getenv("ENABLE_SUBSCRIPTIONS") != "",
+		EnableStructuralSweep:      os.Getenv("ENABLE_STRUCTURAL_SWEEP") != "",
+		StructuralSweepSchedule:    envOr("STRUCTURAL_SWEEP_SCHEDULE", "0 * * * *"),
+		EnableEvalQueueDrain:       os.Getenv("ENABLE_EVAL_QUEUE_DRAIN") != "",
+		EvalQueueDrainSchedule:     envOr("EVAL_QUEUE_DRAIN_SCHEDULE", "*/5 * * * *"),
+		EnableSignalExpirySweep:    os.Getenv("ENABLE_SIGNAL_EXPIRY_SWEEP") != "",
+		EnableStandingDriftCheck:   os.Getenv("ENABLE_STANDING_DRIFT_CHECK") != "",
+		StandingDriftSchedule:      envOr("STANDING_DRIFT_CHECK_SCHEDULE", "30 3 * * *"),
+		ChangeCheckRecheckSchedule: envOr("CHANGE_CHECK_RECHECK_SCHEDULE", defaultChangeCheckRecheckSchedule),
+		EnableContextPacket:        os.Getenv("ENABLE_CONTEXT_PACKET") != "",
+		EnableReachability:         os.Getenv("ENABLE_REACHABILITY") != "",
+		EnableProvenance:           os.Getenv("ENABLE_PROVENANCE") != "",
+		EnableAgents:               os.Getenv("ENABLE_AGENTS") != "",
+		AgentMCPURL:                envOr("AGENT_MCP_URL", "http://127.0.0.1:"+port+"/mcp/message"),
+		AgentMCPToken:              os.Getenv("AGENT_MCP_TOKEN"),
+		OAuthIssuer:                os.Getenv("OAUTH_ISSUER"),
+		OAuthDBPath:                envOr("OAUTH_DB_PATH", "./oauth.db"),
+		InstanceName:               envOr("INSTANCE_NAME", "smeldr"),
+		EnableGitHub:               os.Getenv("ENABLE_GITHUB") != "",
+		GitHub:                     parseGitHubConfig(os.Getenv),
 	}
 }
 
@@ -303,6 +308,10 @@ func (c ServerConfig) organizationName() string {
 	}
 	return "smeldr"
 }
+
+// recheckChangeChecks is App.RecheckChangeChecks, a variable so a test can
+// make the run at start fail.
+var recheckChangeChecks = (*smeldr.App).RecheckChangeChecks
 
 // schemaTools reports whether the schema discovery tools are listed:
 // ENABLE_SCHEMA_TOOLS, or ENABLE_DYNAMIC_CONTENT, since a server that defines
@@ -862,6 +871,28 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		}
 		drain.Start()
 		stopFuncs = append(stopFuncs, drain.Stop)
+	}
+
+	if cfg.governanceRecords() {
+		// The re-check of open Checks (D196, T1294) is the guarantee behind
+		// the reopen a Decision change makes at once: it runs whenever the
+		// change check exists, on its own schedule, and once at start. A
+		// failed run is logged; the server starts and the next run retries.
+		if r, err := recheckChangeChecks(app, context.Background()); err != nil {
+			slog.Warn("smeldr-server: change check re-check at start failed; the next run retries", "error", err)
+		} else if r.Reopened > 0 || r.Failed > 0 {
+			slog.Info("smeldr-server: change check re-check at start", "checked", r.Checked, "reopened", r.Reopened, "failed", r.Failed)
+		}
+		recheck, err := agent.NewSweepScheduler(scheduleOr(cfg.ChangeCheckRecheckSchedule, defaultChangeCheckRecheckSchedule), "UTC",
+			func(ctx context.Context) (int, int, int, error) {
+				r, err := recheckChangeChecks(app, ctx)
+				return r.Checked, r.Reopened, r.Failed, err
+			})
+		if err != nil {
+			return ServerResult{}, fmt.Errorf("CHANGE_CHECK_RECHECK_SCHEDULE: %w", err)
+		}
+		recheck.Start()
+		stopFuncs = append(stopFuncs, recheck.Stop)
 	}
 
 	if cfg.EnableSignalExpirySweep {

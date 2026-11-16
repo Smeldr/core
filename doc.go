@@ -185,6 +185,9 @@
 //   - The pull request check (D143, D144): [App.CheckChange] checks one
 //     commit of a proposed change against the Decisions in force for its
 //     paths and records it as a [ChangeCheck]; core never calls the host.
+//     When the Decisions in force for a touched Area change, an open Check
+//     is checked again (D196): [App.RecheckChangeChecks] is the sweep behind
+//     it, and [App.RecordMerge] and [App.RecordClose] end a change.
 //   - Pinned sources (D148): [Decision].Sources lists the external files a
 //     Decision rests on, each at a full commit SHA with a role
 //     ([DecisionSource]); set while proposed, frozen once ratified.

@@ -130,9 +130,11 @@ var changeCheckTableStmts = []string{
 		files_checked  INTEGER NOT NULL DEFAULT 0,
 		checked_partly BOOLEAN NOT NULL DEFAULT FALSE,
 		setting        TEXT NOT NULL DEFAULT '',
-		last_actor     TEXT NOT NULL DEFAULT ''
+		last_actor     TEXT NOT NULL DEFAULT '',
+		round          INTEGER NOT NULL DEFAULT 0,
+		reopenable     BOOLEAN NOT NULL DEFAULT FALSE
 	)`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_smeldr_change_checks_commit ON smeldr_change_checks (repository, number, head_commit)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_smeldr_change_checks_round ON smeldr_change_checks (repository, number, head_commit, round)`,
 	`CREATE INDEX IF NOT EXISTS idx_smeldr_change_checks_change ON smeldr_change_checks (repository, number, status)`,
 	`CREATE TABLE IF NOT EXISTS smeldr_change_check_areas (
 		check_id      TEXT NOT NULL,
@@ -145,6 +147,7 @@ var changeCheckTableStmts = []string{
 		signal_id     TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (check_id, area_id)
 	)`,
+	changeEndsTableStmt,
 }
 
 // EnsureChangeCheckTables creates the tables of the pull request check
@@ -152,10 +155,30 @@ var changeCheckTableStmts = []string{
 // address storage (CHK). Fresh installs get them from
 // [CreateGovernanceTables]. Idempotent, safe to call on every boot.
 func EnsureChangeCheckTables(ctx context.Context, db DB) error {
-	for _, stmt := range changeCheckTableStmts {
+	// The table first, then the columns a table made before them lacks, so
+	// the round index below has its column (D196, T1294).
+	if _, err := db.ExecContext(ctx, changeCheckTableStmts[0]); err != nil {
+		return fmt.Errorf("smeldr: EnsureChangeCheckTables: %w", err)
+	}
+	for _, col := range [][2]string{
+		{"round", "INTEGER NOT NULL DEFAULT 0"},
+		// A Check made before the reopen rule is never reopened by it: its
+		// change may have been merged without core knowing (D196, T1294).
+		{"reopenable", "BOOLEAN NOT NULL DEFAULT FALSE"},
+	} {
+		if err := EnsureColumn(ctx, db, "smeldr_change_checks", col[0], col[1]); err != nil {
+			return fmt.Errorf("smeldr: EnsureChangeCheckTables: %w", err)
+		}
+	}
+	for _, stmt := range changeCheckTableStmts[1:] {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("smeldr: EnsureChangeCheckTables: %w", err)
 		}
+	}
+	// The round index holds every Check the commit index held, so the old one
+	// goes only after the new one exists.
+	if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS idx_smeldr_change_checks_commit`); err != nil {
+		return fmt.Errorf("smeldr: EnsureChangeCheckTables: %w", err)
 	}
 	if err := registerCoreAddresses(ctx, db, "ChangeCheck"); err != nil {
 		return fmt.Errorf("smeldr: EnsureChangeCheckTables: %w", err)
@@ -299,6 +322,12 @@ func (a *App) CheckChange(ctx context.Context, in ChangeInput) (ChangeCheckResul
 		return ChangeCheckResult{}, fmt.Errorf("%w: CheckChange needs a database", ErrInternal)
 	}
 	sys := WithReadScope(ctx, AllReadScope())
+	// A change checked is open: one closed without a merge and opened again
+	// is open again (D196, T1294).
+	reopened, err := reopenClosedChange(sys, a.cfg.DB, in.Repository, in.Number)
+	if err != nil {
+		return ChangeCheckResult{}, err
+	}
 	res, err := a.DecisionsForPaths(sys, DecisionsForPathsQuery{Repository: in.Repository, Paths: in.Paths})
 	if err != nil {
 		return ChangeCheckResult{}, err
@@ -327,6 +356,13 @@ func (a *App) CheckChange(ctx context.Context, in ChangeInput) (ChangeCheckResul
 	if err := a.settleChangeCheck(sys, check); err != nil {
 		return ChangeCheckResult{}, err
 	}
+	if reopened {
+		// While it was closed its requests were withdrawn, and the Decisions
+		// in force may have changed: check it again, or ask again.
+		if check, err = a.afterChangeReopened(sys, check); err != nil {
+			return ChangeCheckResult{}, err
+		}
+	}
 	out, err := a.changeCheckView(sys, check.ID)
 	if err != nil {
 		return ChangeCheckResult{}, err
@@ -343,10 +379,11 @@ func (a *App) CheckChange(ctx context.Context, in ChangeInput) (ChangeCheckResul
 	return out, nil
 }
 
-// findChangeCheck returns the Check of repository, number and commit, or nil.
+// findChangeCheck returns the newest Check of repository, number and commit
+// (a reopen makes another of the same commit, D196), or nil.
 func (a *App) findChangeCheck(ctx context.Context, repo string, number int, commit string) (*ChangeCheck, error) {
 	c, err := QueryOne[*ChangeCheck](ctx, a.cfg.DB,
-		`SELECT * FROM smeldr_change_checks WHERE repository = $1 AND number = $2 AND head_commit = $3`, repo, number, commit)
+		`SELECT * FROM smeldr_change_checks WHERE repository = $1 AND number = $2 AND head_commit = $3 ORDER BY address_no DESC LIMIT 1`, repo, number, commit)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return nil, nil
@@ -385,8 +422,8 @@ func (a *App) insertChangeCheck(ctx context.Context, in ChangeInput, res Decisio
 		c.assignAddress(address, no)
 		r, err := exec.ExecContext(ctx,
 			`INSERT INTO smeldr_change_checks (id, slug, status, created_at, updated_at, rev, repository, number, head_commit,
-				files_total, files_checked, checked_partly, setting, last_actor, address, address_no, external_ref)
-			 SELECT $1, $2, $3, $4, $5, 0, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ''
+				files_total, files_checked, checked_partly, setting, last_actor, address, address_no, external_ref, round, reopenable)
+			 SELECT $1, $2, $3, $4, $5, 0, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, '', 0, TRUE
 			 WHERE NOT EXISTS (SELECT 1 FROM smeldr_change_checks WHERE repository = $6 AND number = $7 AND head_commit = $8)`,
 			c.ID, c.Slug, c.Status, now, now, c.Repository, c.Number, c.HeadCommit,
 			c.FilesTotal, c.FilesChecked, c.CheckedPartly, c.Setting, c.LastActor, address, no)
@@ -465,10 +502,15 @@ func (a *App) insertChangeCheck(ctx context.Context, in ChangeInput, res Decisio
 // After the commit it records the change, announces it and the edge, and
 // withdraws the Check's open requests (part 2).
 func (a *App) claimSupersede(ctx context.Context, oldID, oldAddress, newestID, newestAddress string) (bool, error) {
+	return a.claimSupersedeWith(ctx, oldID, oldAddress, newestID, newestAddress, "superseded by "+addressOrID(newestAddress, newestID))
+}
+
+// claimSupersedeWith is [App.claimSupersede] with the reason recorded on the
+// move and on the withdrawn requests: a reopen (D196) says why.
+func (a *App) claimSupersedeWith(ctx context.Context, oldID, oldAddress, newestID, newestAddress, reason string) (bool, error) {
 	oldAddress, newestAddress = addressOrID(oldAddress, oldID), addressOrID(newestAddress, newestID)
 	db := a.cfg.DB
 	actor, kind := actorFromContext(ctx)
-	reason := "superseded by " + newestAddress
 	job := "change-check"
 	for range 3 {
 		var from string

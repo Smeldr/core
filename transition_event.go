@@ -89,6 +89,13 @@ func (a *App) afterStatusChange(ctx context.Context, t statusTransition) {
 	})
 	// The conditions this change ends or starts (D115), fail-open.
 	a.resolveSignalsFor(ctx, t)
+	// A Decision whose state moved may have entered or left force (its
+	// standing follows its state): the open Checks it concerns are compared
+	// again (D196, T1294). Quiet when nothing changed; fail-open, the sweep
+	// is the guarantee.
+	if t.typeName == "Decision" {
+		a.recheckForDecision(ctx, t.id)
+	}
 
 	busy := a.hasBusWork()
 	if busy && t.item == nil {

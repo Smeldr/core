@@ -83,6 +83,11 @@ func (a *App) RecordMerge(ctx context.Context, in MergeInput) (MergeResult, erro
 	}
 	db := a.cfg.DB
 	sys := WithReadScope(ctx, AllReadScope())
+	// The change ended (D196, T1294): it is never reopened. Written first, so
+	// a failure opens no audit and the adapter's retry does both.
+	if err := recordChangeEnd(sys, db, norm.Repository, norm.Number, norm.HeadCommit, changeEndMerged, merge); err != nil {
+		return MergeResult{}, err
+	}
 	c, err := QueryOne[*ChangeCheck](sys, db,
 		`SELECT * FROM smeldr_change_checks WHERE repository = $1 AND number = $2 AND status <> $3 ORDER BY address_no DESC LIMIT 1`,
 		norm.Repository, norm.Number, ChangeCheckSuperseded)

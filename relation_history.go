@@ -171,6 +171,9 @@ func (s *RelationStore) emitRelationEvent(ctx context.Context, eventName string,
 	if s.onRelationChange != nil {
 		s.onRelationChange(edge.SourceID, edge.TargetID)
 	}
+	if s.onDecisionPlaced != nil && edge.SourceType == "Decision" && placeKindTargets[edge.RelationKind] != "" {
+		s.onDecisionPlaced(ctx, edge.SourceID)
+	}
 	if s.eventBroadcaster == nil && (s.webhookStore == nil || s.webhookPool == nil) {
 		return
 	}

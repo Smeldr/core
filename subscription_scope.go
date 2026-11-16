@@ -150,6 +150,7 @@ func (a *App) wireScopeHooks() {
 	}
 	if a.relationStore != nil {
 		a.relationStore.onRelationChange = a.relationChanged
+		a.relationStore.onDecisionPlaced = a.recheckForDecision
 	}
 }
 

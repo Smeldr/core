@@ -26,6 +26,13 @@ cross-referenced below by their Amendment ID.
 
 ### Changed
 
+- **A change in the Decisions in force reopens the open pull request Checks of the Area (D196, T1294).** Before, an approved Check stayed approved when a Decision for one of its Areas was superseded, retired or newly ratified, so a pull request could merge on an approval given against a Decision that no longer held. Now:
+  - Every open Check of the Area is checked again as a new Check of the same commit. Where an Area requires approval it waits again, with new requests to its approvers.
+  - The old Check is superseded, and its answers stay readable.
+  - The host's status goes from passing to waiting.
+  - It happens in the call that changed the Decision, and a sweep is the guarantee (`App.RecheckChangeChecks`; the example server runs it on `CHANGE_CHECK_RECHECK_SCHEDULE`, default every 5 minutes, whenever governance records are on). After a failed step, an approval can stand until the next sweep.
+  - Checks made before this release are not reopened, since their changes may have been merged without core knowing.
+  - **Update smeldr.dev/github with core.** Until then, a pull request closed without a merge is not reported, and its Check can be reopened when a Decision of its Area changes, asking approvers about a change nobody will merge.
 - **The release binary lists the schema tools with `ENABLE_DYNAMIC_CONTENT` (T1292).** Before, a server could define a runtime type but not show its schema without `ENABLE_SCHEMA_TOOLS` too, so `smeldr-cli content-type get` answered `unknown tool: get_content_type_schema`. Now `get_content_type_schema` and `list_content_type_schemas` are listed whenever `ENABLE_DYNAMIC_CONTENT` is on. They only read, and their role requirement is unchanged. Nothing is removed: `ENABLE_SCHEMA_TOOLS` and `ENABLE_BLOCKS` list them as before.
 - **The three approval roles read the place they approve in (D191, T1247).** Before, a `domain-approver` or `area-approver` with no reader grant beside it was refused the Decisions and Checks it was meant to approve, so an `area-approver` alone could not answer its change checks.
   - `domain-approver` and `area-approver` now hold `read` over their place, as `domain-reader` and `area-reader` do.
@@ -37,6 +44,9 @@ cross-referenced below by their Amendment ID.
 
 ### Added
 
+- **`App.RecordClose` and `App.RecheckChangeChecks` (D196, T1294).**
+  - `RecordClose(ctx, CloseInput)` records that a change was closed without a merge (capability `item check_change`). Its Check is no longer reopened, and its open requests are withdrawn.
+  - `RecheckChangeChecks(ctx)` is the sweep behind the reopen, returning `RecheckResult{Checked, Reopened, Failed}`. Call it every few minutes if you use the change check.
 - `ContradictionSweep.Stale`: how many open contradiction rows written since T928 the sweep resolved because their contradiction no longer holds (T1242).
 
 ### Fixed
