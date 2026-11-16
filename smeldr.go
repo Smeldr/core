@@ -609,8 +609,10 @@ func (a *App) MustParseTemplate(path string) *template.Template {
 //
 // If v does not implement [Registrator], Content calls [NewModule][any](v,
 // opts...) and registers the result. In this case smeldr.Repo must be supplied
-// as a repoOption[any] — type safety is lost. Prefer the [Registrator] path
-// for all production code.
+// as a repoOption[any] — type safety is lost. A typed Repo
+// (smeldr.Repo(smeldr.NewMemoryRepo[*Post]())) panics with what to write
+// instead: app.Content(smeldr.NewModule(&Post{}, smeldr.Repo(...), ...)).
+// Prefer the [Registrator] path for all production code.
 func (a *App) Content(v any, opts ...Option) {
 	// Extract any redirect options regardless of Registrator path.
 	for _, o := range opts {
@@ -791,6 +793,18 @@ func (a *App) Content(v any, opts ...Option) {
 	}
 	// NewModule is called with an any-typed value — type assertion to any loses
 	// generic type safety. See App.Content godoc for the preferred Registrator path.
+	// A typed Repo cannot reach a Module[any]: say what to write instead of
+	// the module's own "requires a Repository" (T1295).
+	for _, o := range opts {
+		if tr, ok := o.(interface{ typedRepo() bool }); ok && tr.typedRepo() {
+			// Written as Go: &pkg.T{} for a pointer, pkg.T{} for a value.
+			name := fmt.Sprintf("%T{}", v)
+			if strings.HasPrefix(name, "*") {
+				name = "&" + name[1:]
+			}
+			panic("smeldr: App.Content(" + name + ", smeldr.Repo(...)) cannot use a typed Repo: write app.Content(smeldr.NewModule(" + name + ", smeldr.Repo(...), smeldr.At(...)))")
+		}
+	}
 	m := NewModule(v, opts...)
 	m.Register(a.mux)
 }
@@ -1620,9 +1634,11 @@ func (a *App) Handler() http.Handler {
 	// the redirect store is reached via a consistent path regardless of whether
 	// standalone modules are present.
 	//
-	// GET /{slug}/aidoc is only registered when standalone modules exist; the
-	// 2-segment literal-wildcard pattern conflicts with per-module patterns
-	// like GET /posts/{slug} registered by non-standalone modules.
+	// A Standalone item's AI doc (/{slug}/aidoc) is served by the catch-all
+	// below, not by a GET /{slug}/aidoc pattern: that pattern conflicts with
+	// every module's GET /{prefix}/{slug} in the mux (T1295). In the
+	// catch-all, a module whose prefix matches has already won by the mux's
+	// own precedence, so /posts/aidoc stays the posts item with slug aidoc.
 	if !a.standaloneReg {
 		a.standaloneReg = true
 		sds := a.standaloneModules
@@ -1636,21 +1652,10 @@ func (a *App) Handler() http.Handler {
 			}
 			rs.handler().ServeHTTP(w, r)
 		}))
-		if len(sds) > 0 {
-			a.mux.Handle("GET /{slug}/aidoc", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				slug := r.PathValue("slug")
-				for _, sd := range sds {
-					if sd.findAndServeAIDoc(w, r, slug) {
-						return
-					}
-				}
-				WriteError(w, r, problem(problemRouteNotFound, ErrNotFound, nil))
-			}))
-		}
 	}
 	if !a.redirectFallbackReg {
 		a.redirectFallbackReg = true
-		a.mux.Handle("/", a.redirectStore.handler())
+		a.mux.Handle("/", standaloneAIDocFirst(a.standaloneModules, a.redirectStore.handler()))
 	}
 	// D30: auto-apply Config.AppSchema and Config.OGDefaults loaded from
 	// smeldr.config. App.SEO() calls take precedence (applied only when nil).
@@ -2362,4 +2367,27 @@ func (a *App) serve(ctx context.Context, ln net.Listener, shutdownTimeout time.D
 		sp.Stop()
 	}
 	return err
+}
+
+// standaloneAIDocFirst is the catch-all handler: a GET or HEAD of exactly
+// /<slug>/aidoc is offered to the Standalone modules first (a Standalone
+// item's AI doc wins over a redirect rule for the same path), and every
+// other request, or one no Standalone item serves, goes to next, the
+// redirect store (T1295).
+func standaloneAIDocFirst(sds []standaloneDispatcher, next http.Handler) http.Handler {
+	if len(sds) == 0 {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			if slug, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/"), "/aidoc"); ok && slug != "" && !strings.Contains(slug, "/") {
+				for _, sd := range sds {
+					if sd.findAndServeAIDoc(w, r, slug) {
+						return
+					}
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }

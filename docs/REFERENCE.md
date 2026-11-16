@@ -360,6 +360,8 @@ Rules:
 - If no module has the slug, the request falls through to the redirect
   handler (which 404s if no redirect rule matches).
 - Draft items are not served to guests via the top-level `/{slug}` route.
+- A Standalone module shares a program with default, `APIOnly` and `SingleInstance` modules (T1295). Its items' AI docs are served at `/{slug}/aidoc` (GET and HEAD) when the module has `AIIndex(AIDoc)`.
+- **When a path matches both, a module's own route wins:** `/posts/aidoc` is the item `aidoc` of a module at `/posts`, not the AI doc of a Standalone item `posts`. A Standalone item's AI doc wins over a redirect rule for the same path.
 - If the module also uses `smeldr.AIIndex(smeldr.AIDoc)`, AI doc is served
   at `GET /{slug}/aidoc` rather than `GET /{prefix}/{slug}/aidoc`.
 

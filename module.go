@@ -177,6 +177,14 @@ type repoOption[T any] struct{ repo Repository[T] }
 
 func (repoOption[T]) isOption() {}
 
+// typedRepo reports whether the Repo is for a type other than any: such an
+// option reaches only a Module of that type, never the Module[any] that
+// App.Content builds from a bare value (T1295).
+func (repoOption[T]) typedRepo() bool {
+	_, isAny := any((*T)(nil)).(*any)
+	return !isAny
+}
+
 // Repo returns an [Option] that provides the [Repository] for a [Module].
 // This is called internally by App.Content. In unit tests pass a [MemoryRepo]:
 //
@@ -704,7 +712,7 @@ func NewModule[T any](proto T, opts ...Option) *Module[T] {
 	}
 
 	if !repoFound {
-		panic("smeldr: Module[T] requires a Repository; use smeldr.Repo(...) or App.Content")
+		panic("smeldr: Module[T] requires a Repository: pass smeldr.Repo(...) to smeldr.NewModule")
 	}
 
 	// A36: detect capability mismatches at startup — programmer errors caught
