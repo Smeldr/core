@@ -877,6 +877,12 @@ The detail belongs in the submodule's own file.
    `ci.yml` (cli's runs `go test -coverprofile=coverage.out ./...`), so a failure CI
    would show is seen before the push. cli's CI was red from 6 November 2026 on every
    push, and five cli releases were tagged on it, because no step read CI.
+   Since T1297, core's and cli's release workflows also refuse to build when `ci.yml`
+   is not green on the tagged commit. That gate reads `ci.yml` only (not the macOS
+   getting-started or pin-currency workflows), and it covers only a tag on a commit
+   that carries it: a tag on an older commit runs the old workflow, ungated. So this
+   item stays, for every repository, before every tag (see OPERATIONAL_NOTES, release
+   practice rule 11).
 
 **Tag and push sequence:**
 ```powershell

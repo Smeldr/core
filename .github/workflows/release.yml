@@ -5,8 +5,26 @@ on:
     tags: ['v*']
 
 jobs:
+  # Nothing is built or published unless ci.yml is green on the tagged commit
+  # (T1297). The gate reads ci.yml only. It is in the tagged commit's own
+  # workflow, so a tag on a commit from before it is not gated.
+  ci-green:
+    name: CI is green on the tagged commit
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for ci.yml on this commit, and stop unless it is green
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/ci-green.sh "${{ github.repository }}" "${{ github.sha }}"
+
   build-and-attach:
     name: Build example/server and attach to the release
+    needs: ci-green
     runs-on: ubuntu-latest
     permissions:
       contents: write

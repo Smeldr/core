@@ -27,6 +27,7 @@ cross-referenced below by their Amendment ID.
 
 ### Changed
 
+- **The release workflow builds nothing unless `ci.yml` is green on the tagged commit (T1297).** A first job, `ci-green`, runs `scripts/ci-green.sh` with the workflow's own token (`actions: read`): green passes; red stops; a run still going is waited for up to 45 minutes; no run is waited for up to 10 minutes, then stops. When it stops, nothing is built or attached and the release stays a draft. It reads `ci.yml` only, not the macOS getting-started or pin-currency workflows. It gates a tag on a commit that carries it; a tag on an older commit runs that commit's workflow, ungated. A release on a green commit builds the same five binaries and `SHA256SUMS` and publishes as before. cli's release workflow has the same gate.
 - **A change in the Decisions in force reopens the open pull request Checks of the Area (D196, T1294).** Before, an approved Check stayed approved when a Decision for one of its Areas was superseded, retired or newly ratified, so a pull request could merge on an approval given against a Decision that no longer held. Now:
   - Every open Check of the Area is checked again as a new Check of the same commit. Where an Area requires approval it waits again, with new requests to its approvers.
   - The old Check is superseded, and its answers stay readable.

@@ -284,3 +284,24 @@ carries the incident that produced it.
 10. **CI result from the conclusion, not the watch exit code.** Before tagging,
     confirm the run with `gh run list --json databaseId,headSha,status,conclusion`
     (see "CI" above): `gh run watch --exit-status` alone is not proof.
+11. **The release workflow's CI gate (T1297).** In core and cli, `release.yml`'s first
+    job, `ci-green`, runs `scripts/ci-green.sh` (the same file in both repositories)
+    and the build needs it. It reads the newest `ci.yml` run from a push on the
+    tagged commit: green passes; red stops; still running is waited for up to 45
+    minutes; no run is waited for up to 10 minutes, then stops. When it stops,
+    nothing is built or attached and the release stays a draft.
+    - **It reads `ci.yml` only.** In core, `getting-started-macos.yml`,
+      `pin-currency.yml` and `release.yml` itself are not read, so a green gate does
+      not mean every workflow is green.
+    - **It gates only a tag on a commit that carries it.** A tag push runs the
+      workflow as it is in the tagged commit, so a tag on a commit from before the
+      gate runs the old workflow, with no gate; a manual re-run of the release
+      workflow on such a tag is not gated either. The check before tagging (rule 10,
+      and the pre-tag item in CLAUDE.md) covers that case, and stays the only check
+      in mcp, media, oauth, social, agent and runner, which have no release workflow.
+    - **After a stop:** red means fix CI and tag a new commit. Still running or no
+      run means re-run the release workflow once CI is green; the gate reads the
+      newest run again.
+    - The bounds are `WAIT_MINUTES`, `MISSING_MINUTES` and `POLL_SECONDS`, so the
+      script can be run locally against any commit:
+      `bash scripts/ci-green.sh Smeldr/core <full sha>`.
