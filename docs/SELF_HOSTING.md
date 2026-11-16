@@ -85,7 +85,8 @@ ENABLE_RELATIONS      wire the relation graph store
 ENABLE_DYNAMIC_CONTENT wire the runtime content type system and schema store
 ENABLE_BLOCKS         wire the block/composition system MCP tools
 ENABLE_SCHEMA_TOOLS   wire the schema store and its discovery MCP tools without the
-                      rest of the block tools (ENABLE_BLOCKS includes them)
+                      rest of the block tools (ENABLE_BLOCKS and ENABLE_DYNAMIC_CONTENT
+                      include them)
 ENABLE_GOVERNANCE_RECORDS  wire core governance records (Signal, Decision, Amendment,
                       their flows and relation kinds) without the Orchestration add-on;
                       records, not access: roles and grants are ENABLE_GOVERNANCE

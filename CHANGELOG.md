@@ -26,6 +26,7 @@ cross-referenced below by their Amendment ID.
 
 ### Changed
 
+- **The release binary lists the schema tools with `ENABLE_DYNAMIC_CONTENT` (T1292).** Before, a server could define a runtime type but not show its schema without `ENABLE_SCHEMA_TOOLS` too, so `smeldr-cli content-type get` answered `unknown tool: get_content_type_schema`. Now `get_content_type_schema` and `list_content_type_schemas` are listed whenever `ENABLE_DYNAMIC_CONTENT` is on. They only read, and their role requirement is unchanged. Nothing is removed: `ENABLE_SCHEMA_TOOLS` and `ENABLE_BLOCKS` list them as before.
 - **The three approval roles read the place they approve in (D191, T1247).** Before, a `domain-approver` or `area-approver` with no reader grant beside it was refused the Decisions and Checks it was meant to approve, so an `area-approver` alone could not answer its change checks.
   - `domain-approver` and `area-approver` now hold `read` over their place, as `domain-reader` and `area-reader` do.
   - `approver` reads every place and what is placed in it: every Organization's hierarchy, not every record.

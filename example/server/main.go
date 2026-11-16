@@ -28,7 +28,8 @@
 //	ENABLE_DYNAMIC_CONTENT wire the runtime content type system and schema store
 //	ENABLE_BLOCKS         wire the block/composition system MCP tools
 //	ENABLE_SCHEMA_TOOLS   wire the schema store and its discovery MCP tools without the
-//	                      rest of the block tools (ENABLE_BLOCKS includes them)
+//	                      rest of the block tools (ENABLE_BLOCKS and ENABLE_DYNAMIC_CONTENT
+//	                      include them)
 //	ENABLE_GOVERNANCE_RECORDS wire core governance records (Signal, Decision,
 //	                      Amendment, their flows and relation kinds) without the
 //	                      Orchestration add-on. Records, not access: roles and
@@ -303,6 +304,14 @@ func (c ServerConfig) organizationName() string {
 	return "smeldr"
 }
 
+// schemaTools reports whether the schema discovery tools are listed:
+// ENABLE_SCHEMA_TOOLS, or ENABLE_DYNAMIC_CONTENT, since a server that defines
+// runtime types also shows their schemas (T1292). ENABLE_BLOCKS lists them
+// through mcp.WithBlocks.
+func (c ServerConfig) schemaTools() bool {
+	return c.EnableSchemaTools || c.EnableDynamicContent
+}
+
 // governanceRecords reports whether core governance records are wired:
 // ENABLE_GOVERNANCE_RECORDS, or ENABLE_ORCHESTRATION, which implies it (T881).
 func (c ServerConfig) governanceRecords() bool {
@@ -434,7 +443,7 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	// 2026-09-26: this table was never created at all on this boot path, so
 	// schema discovery would have failed with "no such table" even under the
 	// pre-existing EnableBlocks-only route.
-	if cfg.EnableSchemaTools || cfg.EnableBlocks {
+	if cfg.schemaTools() || cfg.EnableBlocks {
 		if err := smeldr.CreateSchemaTable(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create schema table: %w", err)
 		}
@@ -930,7 +939,7 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 	if cfg.EnableBlocks {
 		mcpOptions = append(mcpOptions, mcp.WithBlocks())
-	} else if cfg.EnableSchemaTools {
+	} else if cfg.schemaTools() {
 		// WithBlocks already wires the same schema store as one of its own
 		// effects — only reach for the narrower option when blocks aren't
 		// already on, so schema discovery works without also exposing the

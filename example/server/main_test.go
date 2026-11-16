@@ -460,6 +460,24 @@ func TestServerToggles(t *testing.T) {
 		}
 	})
 
+	t.Run("on/dynamicContentListsSchemaTools", func(t *testing.T) {
+		// T1292: a server that defines runtime types shows their schemas, so
+		// smeldr-cli content-type get works with ENABLE_DYNAMIC_CONTENT alone.
+		cfg := baseConfig()
+		cfg.EnableDynamicContent = true
+		ts := buildTestServer(t, cfg)
+		token := createToken(t, ts, "author", "author")
+		tools := toolsList(t, ts.URL, token)
+		for _, want := range []string{"get_content_type_schema", "list_content_type_schemas"} {
+			if !slices.Contains(tools, want) {
+				t.Errorf("%s missing from tools/list when ENABLE_DYNAMIC_CONTENT=true", want)
+			}
+		}
+		if slices.Contains(tools, "create_node") {
+			t.Error("create_node present with ENABLE_DYNAMIC_CONTENT alone (no ENABLE_BLOCKS)")
+		}
+	})
+
 	t.Run("on/contextPacket", func(t *testing.T) {
 		// All three of ENABLE_RELATIONS, ENABLE_ORCHESTRATION, and (T159/A283)
 		// ENABLE_CONTEXT_PACKET must be set for the packet endpoint to mount.
