@@ -153,25 +153,24 @@ func seedIfEmpty(ctx context.Context, repo smeldr.Repository[*Post]) error {
 
 	posts := []postSpec{
 		{
-			slug:  "why-smeldr-has-zero-dependencies",
-			title: "Why Smeldr Has Zero Dependencies",
+			slug:  "why-the-smeldr-package-imports-only-the-standard-library",
+			title: "Why the Smeldr Package Imports Only the Standard Library",
 			body: `When we started building Smeldr, the first architectural decision we locked was
-simple: zero third-party dependencies in the core package. Every Go developer
-has seen it — a promising framework that pulls in a dependency graph the size of
-a small city, pins you to one logging library, one router, one database layer.
+simple: the smeldr package imports only the Go standard library. Every Go
+developer has seen it: a promising framework that pulls in a dependency graph
+the size of a small city, pins you to one logging library, one router, one
+database layer.
 
 Go's standard library is remarkably complete. net/http gives you a
 production-ready HTTP server. html/template handles safe rendering.
 encoding/xml covers RSS. database/sql abstracts every relational database.
-We asked ourselves what third-party code would add that justified the cost —
-version conflicts, supply chain risk, upgrade treadmills — and answered:
+We asked ourselves what third-party code would add that justified the cost
+(version conflicts, supply chain risk, upgrade treadmills) and answered:
 nothing we actually needed.
 
-The constraint paid dividends immediately. Smeldr builds in under two seconds.
-go test ./... runs in under a second with no network fetches. You can vendor it
-with a single go mod vendor and never worry about left-pad moments. Zero
-dependencies is not a marketing claim; it is a design principle that makes
-every downstream project more maintainable.`,
+The module's go.mod does list one third-party module, modernc.org/sqlite, with
+the modules it brings, because the package's own tests use SQLite. A program
+that imports smeldr.dev/core does not compile it in.`,
 			status:    smeldr.Published,
 			published: now.Add(-84 * 24 * time.Hour),
 		},
@@ -263,23 +262,19 @@ on slugs would complicate the URL scheme without benefit.
 Using the standard mux also means zero extra import, zero compatibility risk
 with future Go versions, and instant familiarity for any Go developer who reads
 the framework source. When the answer is already in the standard library,
-adding a dependency is not a trade-off — it is a mistake.`,
+we see no reason to add a dependency for it.`,
 			status:    smeldr.Published,
 			published: now.Add(-28 * 24 * time.Hour),
 		},
 		{
 			slug:  "smeldr-v1-release",
-			title: "Smeldr v1.0.0: Production-Ready, Zero Dependencies",
-			body: `Today we are tagging Smeldr v1.0.0. The API is stable. The test suite covers
-87% of production code paths. Benchmarks confirm that the hot paths — token
-validation, redirect lookup, HTML template rendering — all run in single-digit
-microseconds with zero or near-zero allocations on the critical path.
+			title: "Smeldr v1.0.0: a Stable API",
+			body: `Today we are tagging Smeldr v1.0.0, which declares the API stable.
 
-Milestone 9 added systematic benchmark coverage across all eight milestone
-layers, a godoc pass ensuring every exported symbol has a doc comment, three
-example applications (blog, docs, API), and a CHANGELOG tracing every decision
-from v0.1.0 to v1.0.0. The result is a framework you can read end-to-end in an
-afternoon and trust in production on day one.`,
+The last milestone added benchmarks for the hot paths (token validation,
+redirect lookup, HTML template rendering), a godoc pass so that every exported
+symbol has a doc comment, three example applications (blog, docs, API), and a
+CHANGELOG that records the notable changes from v0.1.0 to v1.0.0.`,
 			status:    smeldr.Published,
 			published: now.Add(-14 * 24 * time.Hour),
 		},

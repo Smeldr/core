@@ -1958,10 +1958,12 @@ func (a *App) CookiesManifestAuth(auth AuthFunc) {
 	a.cookieManifestOpts = append(a.cookieManifestOpts, ManifestAuth(a.storeChecked(auth)))
 }
 
-// Redirect registers a manual redirect rule. Chain collapse is applied
-// automatically: if from already redirects to an intermediate path and this
-// call adds a rule for that intermediate path, the chain is collapsed (A→B
-// + B→C = A→C). Maximum collapse depth is 10 (Decision 24).
+// Redirect registers a manual redirect rule. If to is already the from of a
+// stored rule, the chain is followed forward and from is stored with the end
+// of the chain (B→C stored, then A→B: A→C), up to 10 hops (Decision 24); a
+// Gone rule ends the walk. Rules stored earlier are not rewritten: with A→B
+// stored first, a later B→C leaves A→B, and a request to A is redirected
+// twice. Register the destination legs first to get one hop.
 //
 // To issue a 301 Moved Permanently:
 //

@@ -62,6 +62,8 @@ cross-referenced below by their Amendment ID.
 
 ### Docs
 
+- **`App.Redirect`'s doc comment says the chain is followed forward (T1282).** If `to` is already a stored rule's `from`, the new rule is stored with the end of the chain (B→C stored, then A→B gives A→C). A rule stored earlier is not rewritten: with A→B stored first, a later B→C leaves A→B, and a request to A is redirected twice. The comment described the second order as collapsed, which the code never did; the code, `RedirectStore.Add`'s comment and Decision 24 are unchanged.
+- **The blog example's sample posts say what README verifies about dependencies (T1282).** The post "Why Smeldr Has Zero Dependencies" is now "Why the Smeldr Package Imports Only the Standard Library": the package imports only the standard library, and go.mod's `modernc.org/sqlite` is there for the package's own tests. Its unverified timings are gone, and the v1.0.0 post drops "Zero Dependencies" and its figures. `example/blog/smeldr-pattern.md` writes the JSON keys as the blog does (`Slug`, `Title`, `PublishedAt`, `Body`).
 - **The README names the downloaded files `smeldr-server` and `smeldr-cli` in every shell, and macOS gets a block of its own (T1246).** In "Start in three minutes", each step downloads under the release name, checks it, and renames it. There is one block each for:
   - Linux and WSL (`sha256sum -c`, `mv`, `chmod +x`);
   - macOS (`darwin-arm64`, with the Intel file named; `shasum -a 256 -c`);
