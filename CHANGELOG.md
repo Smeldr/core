@@ -29,6 +29,7 @@ cross-referenced below by their Amendment ID.
   - `OAUTH_ISSUER` without `ENABLE_TOKENS` is refused, since an access token stands for a Smeldr token.
   - Public http, user info and a trailing slash still start, each with a warning from smeldr.dev/oauth.
   - An issuer on another origin than `BASE_URL` starts, with one Info line naming both values.
+- **The taken-URL condition names the item by its address (T1308).** Its message said `Decision 01a1... is scheduled, but its URL "about" is taken`; it now names the item's address where its type has one (`Decision D9 ...`), and its ID otherwise. The type, the receiver and the values are unchanged; a message written before stays as it is.
 
 ### Fixed
 
@@ -39,6 +40,7 @@ cross-referenced below by their Amendment ID.
 
 ### Added
 
+- **`App.SignalsAddressedTo(ctx, state, limit, offset)` lists the Signals addressed to the caller (T1308).** It returns the Signals whose receiver is one of the caller's routing names, newest first, and the total: its `User.ID`, the operations it holds under governance (such as `ratify`) and the receivers its subscriptions name (a role subscription names its band), the same names the `addressed_to_me` subscription filter matches. So a caller can list what waits on it without knowing the receiver words. `state` empty means open and pending together, as `list_signals`. The read scope applies before the page and the total: a holder of `ratify` over one Domain sees that Domain's ratification conditions, not another's. One query over the names, on SQLite and Postgres.
 - **`EnsureOutboundJobClaimColumns(ctx, db)` and `OutboundClaimHolderSQL` (T1304).** The function adds `claim_id`, `claimed_until` and `retry_requested` to a job table from before them; `CreateWebhookTables` calls it, so example/server's boot adds them. `OutboundClaimHolderSQL` is the worker pool's claim with a holder; `OutboundClaimSQL` is unchanged.
 
 ### Docs

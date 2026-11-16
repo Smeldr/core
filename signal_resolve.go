@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 )
@@ -276,11 +278,14 @@ func (a *App) signalSlugBlocked(ctx context.Context, typeName, id, slug string) 
 	if slugConditionOpen(open) {
 		return true
 	}
+	// The message names the item by its address where its type has one (a
+	// core type's table, else the dynamic content table), by its ID otherwise.
+	label := addressOrID(lookupAddressByID(ctx, a.cfg.DB, typeName, id, true), id)
 	err = r.emit(ctx, &Signal{
 		Sender:            "system",
 		Receiver:          "manage",
 		SignalType:        "conflict-detected",
-		Message:           fmt.Sprintf("%s %s is scheduled, but its URL %q is taken: it stays scheduled until its slug changes or the URL is free", typeName, id, slug),
+		Message:           fmt.Sprintf("%s %s is scheduled, but its URL %q is taken: it stays scheduled until its slug changes or the URL is free", typeName, label, slug),
 		SubjectType:       typeName,
 		SubjectID:         id,
 		FromState:         string(Scheduled),
@@ -521,4 +526,106 @@ func (a *App) OpenSignalsOlderThan(ctx context.Context, age time.Duration, limit
 		out = append(out, *s)
 	}
 	return out, nil
+}
+
+// SignalsAddressedTo returns the Signals addressed to the caller, newest
+// first, and how many there are in all: those whose receiver is one of the
+// caller's routing names, the same names the "addressed to me" subscription
+// filter matches. They are the caller's User.ID, every operation it holds
+// under governance (such as "ratify"), and the receiver values its
+// subscriptions name (a role subscription names its band).
+//
+// state "" means what awaits action, open and pending together, as
+// list_signals; any other value is that state only. limit 0 or less means 50,
+// and more than 500 is 500; offset below 0 is 0. The caller's read scope
+// applies before the page and the total are cut: a Signal the caller may not
+// read, or whose subject it may not read, is neither listed nor counted.
+//
+// [ErrForbidden] for a caller with no identity; [ErrInternal] on a store
+// failure. Without Config.DB, or before the Signals table exists, the list is
+// empty.
+func (a *App) SignalsAddressedTo(ctx Context, state string, limit, offset int) ([]Signal, int, error) {
+	owner := ctx.User().ID
+	if owner == "" {
+		return nil, 0, fmt.Errorf("%w: SignalsAddressedTo needs a caller with an identity", ErrForbidden)
+	}
+	if a.cfg.DB == nil {
+		return []Signal{}, 0, nil
+	}
+	switch {
+	case limit <= 0:
+		limit = 50
+	case limit > 500:
+		limit = 500
+	}
+	offset = max(offset, 0)
+	subs, err := listSubscriptions(ctx, a.cfg.DB, owner)
+	// No subscriptions table (subscriptions never set up): no receivers from
+	// subscriptions, the rest of the names still hold.
+	if err != nil && !isNoSuchTable(err) {
+		return nil, 0, err
+	}
+	names, err := a.routingNames(ctx, owner, subs)
+	if err != nil {
+		return nil, 0, err
+	}
+	scope, err := scopeFor(ctx, a.governance)
+	if err != nil {
+		return nil, 0, err
+	}
+	// One query: the state, then the names as numbered placeholders, which
+	// SQLite and Postgres both read.
+	args := make([]any, 0, len(names)+1)
+	where := `status IN ('open', 'pending')`
+	if state != "" {
+		args = append(args, state)
+		where = `status = $1`
+	}
+	placeholders := make([]string, 0, len(names))
+	for _, n := range slices.Sorted(maps.Keys(names)) {
+		args = append(args, n)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+	}
+	rows, err := a.cfg.DB.QueryContext(ctx,
+		`SELECT id, subject_type, subject_id FROM smeldr_signals
+		 WHERE `+where+` AND receiver IN (`+strings.Join(placeholders, ", ")+`)
+		 ORDER BY created_at DESC, id DESC`, args...)
+	if isNoSuchTable(err) {
+		return []Signal{}, 0, nil
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("%w: SignalsAddressedTo: %s", ErrInternal, err)
+	}
+	var ids []string
+	total := 0
+	for rows.Next() {
+		var id, subjectType, subjectID string
+		if err := rows.Scan(&id, &subjectType, &subjectID); err != nil {
+			rows.Close()
+			return nil, 0, fmt.Errorf("%w: SignalsAddressedTo: %s", ErrInternal, err)
+		}
+		if !scope.Readable("Signal", id) || !signalSubjectVisible(scope, subjectType, subjectID) {
+			continue
+		}
+		if total >= offset && len(ids) < limit {
+			ids = append(ids, id)
+		}
+		total++
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, 0, fmt.Errorf("%w: SignalsAddressedTo: %s", ErrInternal, err)
+	}
+	// Collected before these reads: SQLite allows one active statement.
+	repo := NewSQLRepo[*Signal](a.cfg.DB, Table("smeldr_signals"))
+	out := make([]Signal, 0, len(ids))
+	for _, id := range ids {
+		s, err := repo.FindByID(ctx, id)
+		if err != nil {
+			return nil, 0, fmt.Errorf("%w: SignalsAddressedTo: %s", ErrInternal, err)
+		}
+		out = append(out, *s)
+	}
+	return out, total, nil
 }

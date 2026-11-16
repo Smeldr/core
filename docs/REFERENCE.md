@@ -4582,6 +4582,13 @@ A Signal's `receiver` and `sender` are **routing names, not identities**. They a
 - `age` of 0 or less means `DefaultOpenSignalAge` (14 days);
 - `limit` of 0 or less means 50, and more than 500 is 500.
 
+**Signals addressed to the caller.** `App.SignalsAddressedTo(ctx Context, state string, limit, offset int) ([]Signal, int, error)` returns the Signals whose `receiver` is one of the caller's routing names, newest first, and the total:
+- the routing names are the ones the `addressed_to_me` subscription filter matches: the caller's `User.ID`, every operation it holds under governance (such as `ratify` or `approve-change`), and the `receiver` values its subscriptions name (a role subscription names its band). Without governance there are no operations;
+- `state` empty means what awaits action, `open` and `pending` together, as `list_signals`; any other value is that state only;
+- `limit` of 0 or less means 50, and more than 500 is 500; an `offset` below 0 is 0;
+- the read scope applies before the page and the total are cut: a Signal the caller may not read, or whose subject it may not read, is neither listed nor counted. A holder of `ratify` over one Domain sees that Domain's `ratification-required` conditions, not another Domain's;
+- `ErrForbidden` for a caller with no identity, `ErrInternal` on a store failure. Without `Config.DB`, or before the Signals table exists, the list is empty.
+
 **Columns.** `resolution`, `answer` and `answer_ref` are added by `EnsureOrchestrationSignalColumns`, which also creates the open-subject index.
 
 **Migration.** `smeldr.MigrateSignalKinds(ctx, db, SignalMigrationOptions{Apply bool}) (*SignalMigrationReport, error)` (also `App.MigrateSignalKinds`) runs in one transaction and is idempotent. Without `Apply` it is a dry run that rolls back.
