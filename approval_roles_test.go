@@ -65,8 +65,8 @@ func TestApprovalRoles_Definitions(t *testing.T) {
 	f := newApprovalFixture(t)
 	for name, want := range map[string]string{
 		RoleApprover:       `["ratify","approve-change","review"]`,
-		RoleDomainApprover: `["ratify","approve-change"]`,
-		RoleAreaApprover:   `["approve-change"]`,
+		RoleDomainApprover: `["ratify","approve-change","read"]`,
+		RoleAreaApprover:   `["approve-change","read"]`,
 		"item-approver":    `["ratify","approve-change","read"]`,
 	} {
 		var ops string

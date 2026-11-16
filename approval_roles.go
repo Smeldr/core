@@ -463,3 +463,75 @@ func (a *App) GrantFounder(ctx context.Context, userID string) error {
 	}
 	return nil
 }
+
+// approverReadsPlaces reports whether g is a grant of the built-in global
+// approver role, which reads every place and what is placed in it (D191,
+// T1247). Adding read to its operations would read every record; a custom
+// role is not touched (D191 point 4).
+func approverReadsPlaces(g authorizedGrant) bool {
+	return g.roleName == RoleApprover && ScopeMode(g.scopeMode) == ScopeGlobal
+}
+
+// organizationIDs returns every Organization's ID; none when the table does
+// not exist.
+func organizationIDs(ctx context.Context, db DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id FROM smeldr_organizations ORDER BY id`)
+	if err != nil {
+		if isNoSuchTable(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// approverReads reports whether target is an Organization or lies in an
+// Organization's place hierarchy. A read that fails is logged and denies,
+// fail closed.
+func (s *RoleStore) approverReads(ctx context.Context, target AuthTarget) bool {
+	if target.ID == "" {
+		return false
+	}
+	orgs, err := organizationIDs(ctx, s.db)
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: approver read: organizations not read", "error", err)
+		return false
+	}
+	for _, org := range orgs {
+		ok, err := s.relationExists(ctx, "belongs_to_organization", "incoming", target.ID, org, true)
+		if err != nil {
+			slog.WarnContext(ctx, "smeldr: approver read: place walk failed", "organization", org, "error", err)
+			return false
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
+// loadApproverPlaces adds every Organization's place hierarchy to s. A read
+// that fails is logged and adds nothing more, fail closed; it never reads
+// everything.
+func (s *ReadScope) loadApproverPlaces(ctx context.Context, db DB) {
+	orgs, err := organizationIDs(ctx, db)
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: approver read: organizations not read", "error", err)
+		return
+	}
+	for _, org := range orgs {
+		if err := s.loadAnchor(ctx, db, "belongs_to_organization", "incoming", org); err != nil {
+			slog.WarnContext(ctx, "smeldr: approver read: place walk failed", "organization", org, "error", err)
+			return
+		}
+	}
+}

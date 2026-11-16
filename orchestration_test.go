@@ -1827,8 +1827,8 @@ func TestRegisterDomainApproverRole_RoundTrip(t *testing.T) {
 	).Scan(&ops, &scopeMode, &relKind, &relDir); err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if ops != `["ratify","approve-change"]` {
-		t.Errorf("operations: got %q, want %q", ops, `["ratify","approve-change"]`)
+	if ops != `["ratify","approve-change","read"]` {
+		t.Errorf("operations: got %q, want %q", ops, `["ratify","approve-change","read"]`)
 	}
 	if scopeMode != "dynamic" {
 		t.Errorf("scope_mode: got %q, want %q", scopeMode, "dynamic")

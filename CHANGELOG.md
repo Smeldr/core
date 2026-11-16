@@ -18,6 +18,16 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Changed
+
+- **The three approval roles read the place they approve in (D191, T1247).** Before, a `domain-approver` or `area-approver` with no reader grant beside it was refused the Decisions and Checks it was meant to approve, so an `area-approver` alone could not answer its change checks.
+  - `domain-approver` and `area-approver` now hold `read` over their place, as `domain-reader` and `area-reader` do.
+  - `approver` reads every place and what is placed in it: every Organization's hierarchy, not every record.
+  - Nothing else widens: no write, manage or administer, and no read outside the place.
+  - **At the upgrade, existing grants of these roles read their place from the first boot.** A token's event subscriptions may then deliver events they did not deliver before, because delivery follows read. To see who holds the three roles first, use `approvers_of` or `smeldr-cli approvers <place>`.
+  - D97: nothing is removed. A call that was refused is answered.
+  - A role you register yourself with `ratify` or `approve-change` is unchanged, and needs `read` to be usable.
+
 ### Added
 
 - `ContradictionSweep.Stale`: how many open contradiction rows written since T928 the sweep resolved because their contradiction no longer holds (T1242).

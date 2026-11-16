@@ -118,7 +118,7 @@ func (s *ReadScope) load(ctx context.Context, rs *RoleStore, tokenID string) err
 	var grants []authorizedGrant
 	for rows.Next() {
 		var g authorizedGrant
-		if err := rows.Scan(&g.staticJSON, &g.anchorID, &g.opsJSON, &g.scopeMode, &g.relKind, &g.relDir); err != nil {
+		if err := rows.Scan(&g.staticJSON, &g.anchorID, &g.opsJSON, &g.scopeMode, &g.relKind, &g.relDir, &g.roleName); err != nil {
 			rows.Close()
 			return fmt.Errorf("scan grant: %w", err)
 		}
@@ -131,6 +131,10 @@ func (s *ReadScope) load(ctx context.Context, rs *RoleStore, tokenID string) err
 	rows.Close()
 
 	for _, g := range grants {
+		if approverReadsPlaces(g) {
+			s.loadApproverPlaces(ctx, rs.db)
+			continue
+		}
 		var ops []string
 		if json.Unmarshal([]byte(g.opsJSON), &ops) != nil || !slices.Contains(ops, "read") {
 			continue // malformed or no read: skipped, as Authorized does

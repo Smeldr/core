@@ -695,10 +695,16 @@ Two operations decide who approves: `smeldr.OperationRatify` (`"ratify"`: ratify
 
 | Role (constant) | Operations | Scope | Register with |
 |---|---|---|---|
-| `approver` (`RoleApprover`, was `decision-steward`) | ratify, approve-change, review | global | `RegisterApproverRole` |
-| `domain-approver` (`RoleDomainApprover`, was `decision-domain-admin`) | ratify, approve-change | dynamic, `belongs_to_domain`, incoming, anchored on a Domain | `RegisterDomainApproverRole` |
-| `area-approver` (`RoleAreaApprover`) | approve-change | dynamic, `belongs_to_area`, incoming, anchored on an Area | `RegisterAreaApproverRole` |
+| `approver` (`RoleApprover`, was `decision-steward`) | ratify, approve-change, review; reads every place (D191) | global | `RegisterApproverRole` |
+| `domain-approver` (`RoleDomainApprover`, was `decision-domain-admin`) | ratify, approve-change, read | dynamic, `belongs_to_domain`, incoming, anchored on a Domain | `RegisterDomainApproverRole` |
+| `area-approver` (`RoleAreaApprover`) | approve-change, read | dynamic, `belongs_to_area`, incoming, anchored on an Area | `RegisterAreaApproverRole` |
 | `item-approver` | ratify, approve-change, read | static, one item | `RegisterItemApproverRole` |
+
+**An approval role reads the place it approves in (D191, T1247).**
+- `domain-approver` and `area-approver` hold `read`, with the reach of `domain-reader` and `area-reader`: the place, its Areas for a Domain, and what is placed in them.
+- `approver` is global, so `read` in its operations would read every record. Instead, the read scope gives it the place hierarchy of every Organization: every Organization, Domain and Area, and what is placed in them. A record with no place is not read through it.
+- The approver's read fails closed: if the Organizations or a place walk cannot be read, it adds nothing, and is logged.
+- A role you register yourself with `ratify` or `approve-change` is not changed. Give it `read` as well, or its holder cannot read what it is asked to approve.
 
 A dynamic place grant follows the place hierarchy (D142, T882): a domain-approver anchored on a Domain covers the Decisions placed in it, the Areas in it and what is placed in them. `admin` holds no approval operation (01a0e3f9-2); a token that ratifies holds one of these roles explicitly. A Decision is ratified only with a place (T883), so its place decides which domain-approver may act.
 

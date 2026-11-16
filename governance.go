@@ -1708,13 +1708,14 @@ type authorizedGrant struct {
 	scopeMode  string
 	relKind    sql.NullString
 	relDir     sql.NullString
+	roleName   string
 }
 
 // tokenGrantsQuery loads a token's unexpired grants with their role's
 // operations and scope. [RoleStore.Authorized], [ReadScope] loading and
 // [RoleStore.grantedOperations] share it, so the three cannot drift.
 const tokenGrantsQuery = `SELECT g.scope_static, g.scope_anchor_id, r.operations,
-        r.scope_mode, r.scope_relation_kind, r.scope_direction
+        r.scope_mode, r.scope_relation_kind, r.scope_direction, r.name
    FROM smeldr_role_grants g
    JOIN smeldr_roles r ON r.id = g.role_id
   WHERE g.token_id = $1 AND (g.expires_at IS NULL OR g.expires_at > $2)`
@@ -1731,7 +1732,7 @@ func (s *RoleStore) grantedOperations(ctx context.Context, tokenID string) (map[
 	ops := map[string]bool{}
 	for rows.Next() {
 		var g authorizedGrant
-		if err := rows.Scan(&g.staticJSON, &g.anchorID, &g.opsJSON, &g.scopeMode, &g.relKind, &g.relDir); err != nil {
+		if err := rows.Scan(&g.staticJSON, &g.anchorID, &g.opsJSON, &g.scopeMode, &g.relKind, &g.relDir, &g.roleName); err != nil {
 			return nil, fmt.Errorf("smeldr: grantedOperations: scan: %w", err)
 		}
 		var words []string
@@ -1787,7 +1788,7 @@ func (s *RoleStore) authorizedOver(ctx context.Context, tokenID, op string, targ
 	var grants []authorizedGrant
 	for rows.Next() {
 		var g authorizedGrant
-		if err := rows.Scan(&g.staticJSON, &g.anchorID, &g.opsJSON, &g.scopeMode, &g.relKind, &g.relDir); err != nil {
+		if err := rows.Scan(&g.staticJSON, &g.anchorID, &g.opsJSON, &g.scopeMode, &g.relKind, &g.relDir, &g.roleName); err != nil {
 			rows.Close()
 			return false, fmt.Errorf("smeldr: Authorized: scan: %w", err)
 		}
@@ -1804,6 +1805,14 @@ func (s *RoleStore) authorizedOver(ctx context.Context, tokenID, op string, targ
 		var ops []string
 		if err := json.Unmarshal([]byte(g.opsJSON), &ops); err != nil {
 			continue // malformed operations — skip, do not block
+		}
+		// D191: the built-in approver reads every place and what is placed
+		// in it, not every record.
+		if op == "read" && approverReadsPlaces(g) {
+			if s.approverReads(ctx, target) {
+				return true, nil
+			}
+			continue
 		}
 		if !slices.Contains(ops, op) {
 			continue

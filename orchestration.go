@@ -442,7 +442,7 @@ func RegisterApproverRole(ctx context.Context, rs *RoleStore) error {
 func RegisterDomainApproverRole(ctx context.Context, rs *RoleStore) error {
 	return rs.DefineRole(ctx, RoleDefinition{
 		Name:              RoleDomainApprover,
-		Operations:        []string{OperationRatify, OperationApproveChange},
+		Operations:        []string{OperationRatify, OperationApproveChange, "read"},
 		ScopeMode:         ScopeDynamic,
 		ScopeRelationKind: "belongs_to_domain",
 		ScopeDirection:    "incoming",
@@ -458,7 +458,7 @@ func RegisterDomainApproverRole(ctx context.Context, rs *RoleStore) error {
 func RegisterAreaApproverRole(ctx context.Context, rs *RoleStore) error {
 	return rs.DefineRole(ctx, RoleDefinition{
 		Name:              RoleAreaApprover,
-		Operations:        []string{OperationApproveChange},
+		Operations:        []string{OperationApproveChange, "read"},
 		ScopeMode:         ScopeDynamic,
 		ScopeRelationKind: "belongs_to_area",
 		ScopeDirection:    "incoming",
