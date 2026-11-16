@@ -157,6 +157,7 @@ func registerPlaceTypes(app *App, db DB) {
 	))
 	app.Content(NewModule[*Domain]((*Domain)(nil),
 		At("/domains"), Repo(NewSQLRepo[*Domain](db, Table("smeldr_domains"))), MCP(MCPRead, MCPWrite), withAddress(),
+		saveHooksOption{before: app.domainInOrganization, after: app.announceDomainPlace},
 	))
 	app.Content(NewModule[*Area]((*Area)(nil),
 		At("/areas"), Repo(NewSQLRepo[*Area](db, Table("smeldr_areas"))), MCP(MCPRead, MCPWrite), withAddress(),

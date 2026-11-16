@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -20,6 +21,116 @@ const (
 	defaultDomainSlug = "general"
 	defaultDomainName = "General"
 )
+
+// domainOrganizationEdge is the edge that places Domain id in Organization org,
+// written by the setup job.
+func domainOrganizationEdge(id, org string) RelationEdge {
+	job := placesSetupActor
+	return RelationEdge{
+		SourceType: "Domain", SourceID: id, TargetType: "Organization", TargetID: org,
+		RelationKind: "belongs_to_organization", EdgeClass: "asserted", CreatedByJob: &job, Attributes: json.RawMessage("{}"),
+	}
+}
+
+// domainInOrganization places a new Domain in the instance's Organization
+// (D142, T1321): it writes belongs_to_organization on the create's own
+// transaction, so the Domain is never stored outside the Organization. Without
+// relations, or unless the instance has exactly one Organization (the schema
+// holds one, idx_smeldr_organizations_one), it writes nothing and the caller
+// places the Domain. An update writes nothing.
+func (a *App) domainInOrganization(ctx Context, exec DB, existing, item any) error {
+	d, ok := item.(*Domain)
+	if existing != nil || !ok || d.ID == "" || a.relationStore == nil {
+		return nil
+	}
+	orgs, err := organizationIDs(ctx, exec)
+	if err != nil {
+		return fmt.Errorf("%w: place the Domain in the Organization: %s", ErrInternal, err)
+	}
+	if len(orgs) != 1 {
+		return nil
+	}
+	if _, _, err := writeEdgeRow(ctx, exec, domainOrganizationEdge(d.ID, orgs[0])); err != nil {
+		return fmt.Errorf("%w: place the Domain in the Organization: %s", ErrInternal, err)
+	}
+	return nil
+}
+
+// announceDomainPlace announces the edge [App.domainInOrganization] wrote, once
+// the create has committed. Fail-open: the edge is stored.
+func (a *App) announceDomainPlace(ctx Context, db DB, rs *RelationStore, existing, item any) {
+	d, ok := item.(*Domain)
+	if existing != nil || !ok || rs == nil {
+		return
+	}
+	orgs, err := organizationIDs(ctx, db)
+	if err != nil || len(orgs) != 1 {
+		return
+	}
+	if edge, err := liveEdge(ctx, db, domainOrganizationEdge(d.ID, orgs[0])); err == nil {
+		rs.announceEdge(ctx, edge, true)
+	}
+}
+
+// placeDomainsNeverPlaced gives belongs_to_organization to every Domain that
+// never had one (T1321): a Domain created before a create placed it. A Domain
+// whose edge was ended on purpose keeps its history and is left alone. It
+// returns the addresses (or IDs) of the Domains it placed.
+func (a *App) placeDomainsNeverPlaced(ctx context.Context, db DB, org string) ([]string, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT d.id, COALESCE(d.address, '') FROM smeldr_domains d WHERE NOT EXISTS (
+		   SELECT 1 FROM smeldr_relations r WHERE r.source_type = 'Domain' AND r.source_id = d.id
+		     AND r.relation_kind = 'belongs_to_organization')
+		 ORDER BY d.created_at, d.id`)
+	if err != nil {
+		return nil, err
+	}
+	type domain struct{ id, address string }
+	var todo []domain
+	for rows.Next() {
+		var d domain
+		if err := rows.Scan(&d.id, &d.address); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		todo = append(todo, d)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	var placed []string
+	for _, d := range todo {
+		edge, _, err := writeEdgeRow(ctx, db, domainOrganizationEdge(d.id, org))
+		if err != nil {
+			return placed, err
+		}
+		if a.relationStore != nil {
+			a.relationStore.announceEdge(ctx, edge, true)
+		}
+		placed = append(placed, addressOrID(d.address, d.id))
+	}
+	return placed, nil
+}
+
+// repairDomainPlaces runs [App.placeDomainsNeverPlaced] for an existing
+// Organization at boot and logs one Info line naming the Domains it placed;
+// nothing when there were none or there are no relations. A failure is a
+// warning: the boot goes on, and the next boot tries again.
+func (a *App) repairDomainPlaces(ctx context.Context, db DB, org string) {
+	relations, err := tableExists(ctx, db, "smeldr_relations")
+	if err != nil || !relations {
+		return
+	}
+	placed, err := a.placeDomainsNeverPlaced(ctx, db, org)
+	if len(placed) > 0 {
+		slog.InfoContext(ctx, "smeldr: Domains placed in the Organization, which they were never in", "count", len(placed), "domains", placed)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "smeldr: Domains not placed in the Organization", "error", err)
+	}
+}
 
 // EnsureOrganization makes sure the instance has its Organization (D142): when none exists it
 // creates Organization with name, a default Domain, and the belongs_to_organization edge from
@@ -40,6 +151,7 @@ func (a *App) EnsureOrganization(ctx context.Context, name string) (*Organizatio
 		return nil, fmt.Errorf("%w: EnsureOrganization needs a database", ErrInternal)
 	}
 	if existing, err := QueryOne[*OrganizationRecord](ctx, db, `SELECT * FROM smeldr_organizations LIMIT 1`); err == nil {
+		a.repairDomainPlaces(ctx, db, existing.ID)
 		return existing, nil
 	} else if !errors.Is(err, ErrNotFound) {
 		return nil, fmt.Errorf("%w: EnsureOrganization: read Organization: %s", ErrInternal, err)
