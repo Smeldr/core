@@ -547,7 +547,7 @@ func (a *App) OpenSignalsOlderThan(ctx context.Context, age time.Duration, limit
 func (a *App) SignalsAddressedTo(ctx Context, state string, limit, offset int) ([]Signal, int, error) {
 	owner := ctx.User().ID
 	if owner == "" {
-		return nil, 0, fmt.Errorf("%w: SignalsAddressedTo needs a caller with an identity", ErrForbidden)
+		return nil, 0, problem(problemSignalsNoCaller, fmt.Errorf("%w: SignalsAddressedTo needs a caller with an identity", ErrForbidden), nil)
 	}
 	if a.cfg.DB == nil {
 		return []Signal{}, 0, nil

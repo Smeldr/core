@@ -48,6 +48,7 @@ Every refusal and validation error Smeldr core answers with carries a stable **t
 | `plan.relations_core_owned` | correction | 403 | person |  | T1015 | A caller asserts a plan's belongs_to_area / checked_against relation by hand |  |
 | `administrators.unauthenticated` | refusal | 403 | person |  |  | Asking who administers without being authenticated |  |
 | `subscription.no_caller` | refusal | 403 | person |  | D116 | A subscription API is called with governance on and no caller/identity in context |  |
+| `signals.no_caller` | refusal | 403 | person |  |  | Listing the Signals addressed to the caller with no caller identity |  |
 | `subscription.not_owner` | refusal | 403 | person |  | D116 | Creating or changing a subscription owned by another token without administer |  |
 | `subscription.webhook_needs_admin` | refusal | 403 | person |  | D116 | A subscription asks for webhook delivery without administer |  |
 | `subscription.seed_needs_admin` | refusal | 403 | person |  | D116 | Seeding role subscriptions without administer |  |

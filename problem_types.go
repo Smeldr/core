@@ -109,6 +109,7 @@ const (
 	problemPlanRelationsCoreOwned             ProblemType = "plan.relations_core_owned"
 	problemAdministratorsUnauthenticated      ProblemType = "administrators.unauthenticated"
 	problemSubscriptionNoCaller               ProblemType = "subscription.no_caller"
+	problemSignalsNoCaller                    ProblemType = "signals.no_caller"
 	problemSubscriptionNotOwner               ProblemType = "subscription.not_owner"
 	problemSubscriptionWebhookNeedsAdmin      ProblemType = "subscription.webhook_needs_admin"
 	problemSubscriptionSeedNeedsAdmin         ProblemType = "subscription.seed_needs_admin"
@@ -288,6 +289,7 @@ var problemTypeList = []ProblemTypeInfo{
 	{ID: problemPlanRelationsCoreOwned, Status: 403, Title: "A caller asserts a plan's belongs_to_area / checked_against relation by hand", Rule: "T1015", Audience: "person", Class: problemClassCorrection},
 	{ID: problemAdministratorsUnauthenticated, Status: 403, Title: "Asking who administers without being authenticated", Audience: "person", Class: problemClassRefusal},
 	{ID: problemSubscriptionNoCaller, Status: 403, Title: "A subscription API is called with governance on and no caller/identity in context", Rule: "D116", Audience: "person", Class: problemClassRefusal},
+	{ID: problemSignalsNoCaller, Status: 403, Title: "Listing the Signals addressed to the caller with no caller identity", Audience: "person", Class: problemClassRefusal},
 	{ID: problemSubscriptionNotOwner, Status: 403, Title: "Creating or changing a subscription owned by another token without administer", Rule: "D116", Audience: "person", Class: problemClassRefusal},
 	{ID: problemSubscriptionWebhookNeedsAdmin, Status: 403, Title: "A subscription asks for webhook delivery without administer", Rule: "D116", Audience: "person", Class: problemClassRefusal},
 	{ID: problemSubscriptionSeedNeedsAdmin, Status: 403, Title: "Seeding role subscriptions without administer", Rule: "D116", Audience: "person", Class: problemClassRefusal},
