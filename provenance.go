@@ -40,6 +40,10 @@ type ProvenanceRecord struct {
 	// while ActorID names the identity (D165). Empty when the act came
 	// through no stored token, or before the column existed.
 	Means string `json:"means,omitempty"`
+	// Via is the client the act came through ([User.Via], D195 point 5): the
+	// actor is the token's own identity, and Via notes the route beside it. Empty for an act
+	// with the token itself, or before the column existed.
+	Via string `json:"via,omitempty"`
 }
 
 // ProvenanceFilter narrows a [ProvenanceStore.List] query.
@@ -65,6 +69,8 @@ type sqlProvenanceStore struct {
 	db DB
 	// noMeans is set once the table is found without the means column.
 	noMeans atomic.Bool
+	// noVia is set once the table is found without the via column.
+	noVia atomic.Bool
 }
 
 // NewProvenanceStore returns a [ProvenanceStore] backed by db.
@@ -123,7 +129,11 @@ func CreateProvenanceTable(db DB) error {
 		return err
 	}
 	// The token an act came through (D165), on a table made before it.
-	return EnsureColumn(context.Background(), db, "smeldr_provenance", "means", "TEXT NOT NULL DEFAULT ''")
+	if err := EnsureColumn(context.Background(), db, "smeldr_provenance", "means", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	// The client an act came through (D195).
+	return EnsureColumn(context.Background(), db, "smeldr_provenance", "via", "TEXT NOT NULL DEFAULT ''")
 }
 
 // Append persists r to the smeldr_provenance table.
@@ -132,12 +142,28 @@ func CreateProvenanceTable(db DB) error {
 // A record whose actor is the request's user gets that user's token as its
 // [ProvenanceRecord.Means] when it has none.
 func (s *sqlProvenanceStore) Append(ctx context.Context, r ProvenanceRecord) error {
-	if r.Means == "" {
-		if sc, ok := ctx.(interface{ User() User }); ok {
-			if u := sc.User(); u.ID != "" && u.ID == r.ActorID {
+	if sc, ok := ctx.(interface{ User() User }); ok {
+		if u := sc.User(); u.ID != "" && u.ID == r.ActorID {
+			if r.Means == "" {
 				r.Means = u.TokenID
 			}
+			if r.Via == "" {
+				r.Via = u.Via
+			}
 		}
+	}
+	if !s.noVia.Load() && !s.noMeans.Load() {
+		_, err := s.db.ExecContext(ctx,
+			`INSERT INTO smeldr_provenance
+			 (id, timestamp, subject_type, subject_id, verb, from_state, to_state, actor_kind, actor_id, surface, reason, means, via)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+			r.ID, r.Timestamp.UTC().Format(time.RFC3339), r.SubjectType, r.SubjectID,
+			r.Verb, r.FromState, r.ToState, r.ActorKind, r.ActorID, r.Surface, r.Reason, r.Means, r.Via,
+		)
+		if !isNoSuchColumn(err, "via") && !isNoSuchColumn(err, "means") {
+			return err
+		}
+		s.noVia.Store(true)
 	}
 	if !s.noMeans.Load() {
 		_, err := s.db.ExecContext(ctx,
@@ -196,6 +222,18 @@ func (s *sqlProvenanceStore) List(ctx context.Context, f ProvenanceFilter) ([]Pr
 	}
 	query += " ORDER BY timestamp DESC, id DESC"
 
+	if !s.noVia.Load() && !s.noMeans.Load() {
+		withVia := strings.Replace(query, "surface, reason", "surface, reason, means, via", 1)
+		rows, err := s.db.QueryContext(ctx, withVia, args...)
+		if err == nil {
+			defer rows.Close()
+			return scanProvenanceRowsVia(rows)
+		}
+		if !isNoSuchColumn(err, "via") && !isNoSuchColumn(err, "means") {
+			return nil, err
+		}
+		s.noVia.Store(true)
+	}
 	if !s.noMeans.Load() {
 		withMeans := strings.Replace(query, "surface, reason", "surface, reason, means", 1)
 		rows, err := s.db.QueryContext(ctx, withMeans, args...)
@@ -220,6 +258,23 @@ func (s *sqlProvenanceStore) List(ctx context.Context, f ProvenanceFilter) ([]Pr
 // subject_id, verb, from_state, to_state, actor_kind, actor_id, surface, reason.
 func scanProvenanceRows(rows *sql.Rows) ([]ProvenanceRecord, error) {
 	return scanProvenanceRowsWith(rows, false)
+}
+
+// scanProvenanceRowsVia is [scanProvenanceRows], reading means and via as the
+// twelfth and thirteenth columns.
+func scanProvenanceRowsVia(rows *sql.Rows) ([]ProvenanceRecord, error) {
+	var out []ProvenanceRecord
+	for rows.Next() {
+		var r ProvenanceRecord
+		var tsStr string
+		if err := rows.Scan(&r.ID, &tsStr, &r.SubjectType, &r.SubjectID,
+			&r.Verb, &r.FromState, &r.ToState, &r.ActorKind, &r.ActorID, &r.Surface, &r.Reason, &r.Means, &r.Via); err != nil {
+			return nil, err
+		}
+		r.Timestamp, _ = time.Parse(time.RFC3339, tsStr)
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // scanProvenanceRowsWith is [scanProvenanceRows], reading means as a twelfth

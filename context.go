@@ -29,6 +29,14 @@ type User struct {
 	// act, next to the identity in ID (D165). It is never part of a signed
 	// token.
 	TokenID string
+
+	// Via is the client a request came through when it carries a credential
+	// that stands for the user's token, such as an OAuth access token: the
+	// client's ID (D195 point 5). Empty for a request with the token itself.
+	// It is a note of the route only: provenance records it beside the
+	// token's own signature, and it changes nothing about what the request
+	// may do.
+	Via string
 }
 
 // GuestUser is the zero-value User representing an unauthenticated request.

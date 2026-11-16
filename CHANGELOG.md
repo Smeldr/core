@@ -18,6 +18,12 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Security
+
+- **What core needs so that an OAuth access token stands for exactly the Smeldr token pasted at sign-in (D195, T1287).** This is the core part. The fix lands with smeldr.dev/oauth and smeldr.dev/mcp, and their CHANGELOGs say what a client and a server must do.
+  - `TokenStore.ActingUser` reads a stored token by its fingerprint: the user it acts as, its role and class, and whether it is still valid.
+  - `User.Via` and `ProvenanceRecord.Via` note the client a request came through, beside the token's own signature. `CreateProvenanceTable` adds the `via` column.
+
 ### Changed
 
 - **The three approval roles read the place they approve in (D191, T1247).** Before, a `domain-approver` or `area-approver` with no reader grant beside it was refused the Decisions and Checks it was meant to approve, so an `area-approver` alone could not answer its change checks.
