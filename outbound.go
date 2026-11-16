@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -476,16 +478,50 @@ func (p *workerPool) moveToDeadLetter(ctx context.Context, jobID string) error {
 	return err
 }
 
-// RetryDead resets a dead job to pending so the worker pool will retry it.
+// RetryDead queues a dead or pending job for delivery now: attempts back to
+// zero, due at once, and a new 24-hour delivery window (T1266). A pending job
+// in its backoff is sent now, and one past its window is sent again. A job
+// that was already delivered is refused with [problemWebhookJobDelivered] and
+// is not sent again; an id that names no job is refused with
+// [problemWebhookJobNotFound]. Nothing changes when it refuses.
+//
+// The update and its condition are one statement, so a worker cannot change
+// the job in between. A job a worker holds at that moment is pending too, and
+// a claim is not visible in the table, so it can then be delivered twice, as
+// before this check.
 func (p *workerPool) RetryDead(ctx context.Context, jobID string) error {
-	_, err := p.db.ExecContext(ctx, `
+	now := p.clock.Now()
+	res, err := p.db.ExecContext(ctx, `
 		UPDATE smeldr_outbound_jobs
 		SET status = 'pending', attempts = 0, next_retry_at = $1,
 		    expires_at = $2
-		WHERE id = $3`,
-		p.clock.Now(), p.clock.Now().Add(24*time.Hour), jobID,
+		WHERE id = $3 AND status IN ('dead', 'pending')`,
+		now, now.Add(24*time.Hour), jobID,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("smeldr: webhook: retry job %s: %w", jobID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("smeldr: webhook: retry job %s: %w", jobID, err)
+	}
+	if n == 1 {
+		return nil
+	}
+	var status string
+	err = p.db.QueryRowContext(ctx, `SELECT status FROM smeldr_outbound_jobs WHERE id = $1`, jobID).Scan(&status)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return problem(problemWebhookJobNotFound, fmt.Errorf("%w: webhook job %s does not exist", ErrNotFound, jobID),
+			problemValues{"job": jobID})
+	case err != nil:
+		return fmt.Errorf("smeldr: webhook: retry job %s: %w", jobID, err)
+	case status == "delivered":
+		return problem(problemWebhookJobDelivered,
+			fmt.Errorf("%w: webhook job %s was already delivered, so it is not sent again; nothing changed", ErrConflict, jobID),
+			problemValues{"job": jobID, "status": status})
+	}
+	return fmt.Errorf("%w: webhook job %s has status %q, which retry does not know", ErrInternal, jobID, status)
 }
 
 // ListDeliveryLogs returns all delivery logs for a job, newest first.

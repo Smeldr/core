@@ -740,7 +740,7 @@ These tools are available when the site has `App.Webhooks(store)` configured:
 | `list_webhooks` | Lists all registered endpoints with delivery statistics. |
 | `delete_webhook` | Removes an endpoint by ID. |
 | `list_webhook_deliveries` | Shows delivery log for a specific job ID. |
-| `retry_webhook` | Re-queues a dead job for delivery. |
+| `retry_webhook` | Sends a dead or pending job now. A delivered job is refused (`webhook.job_delivered`) and an unknown id too (`webhook.job_not_found`). |
 
 **Webhook rules:**
 - `create_webhook` requires `url` (HTTPS, no private/localhost IPs) and `events` (list of event names such as `post.published`)

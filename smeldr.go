@@ -1374,6 +1374,9 @@ func (a *App) WebhookStore() *WebhookStore { return a.webhookStore }
 // type returned by [App.WebhookPool].
 type WebhookJobQueue interface {
 	Enqueue(ctx context.Context, job OutboundJob) error
+	// RetryDead queues a dead or pending job for delivery now. A delivered job
+	// is refused (webhook.job_delivered, ErrConflict) and an unknown id too
+	// (webhook.job_not_found, ErrNotFound); nothing changes then.
 	RetryDead(ctx context.Context, jobID string) error
 	ListDeliveryLogs(ctx context.Context, jobID string) ([]DeliveryLog, error)
 	ListJobsForEndpoint(ctx context.Context, endpointID string) ([]OutboundJob, error)

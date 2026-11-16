@@ -3729,6 +3729,7 @@ webhook subscriber cannot distinguish the two by event name.
 - **Dead-letter:** job marked `"dead"` after 7 attempts.
 - **One worker per attempt:** a worker claims a due job before it delivers it, so one attempt is one delivery, one delivery log row and one count for the circuit breaker, on SQLite and Postgres alike. A claim holds the job for 2 minutes; if the worker stops before it finishes, the job is due again after that, with its attempts unchanged (core v1.190.1, T1146).
 - **At least once:** a delivery can still arrive twice (a worker that stopped after the receiver answered, then the lease ended), so deduplicate on `X-Smeldr-Delivery`.
+- **Retry** (`WebhookJobQueue.RetryDead`, `retry_webhook`, `smeldr-cli webhook retry`): a `dead` or `pending` job is queued for delivery now, with attempts back to 0 and a new 24-hour window; a pending job in its backoff is sent at once, and one past its window is sent again. A `delivered` job is refused with `webhook.job_delivered` (409, values `job`, `status`) and is not sent again; an id that names no job is refused with `webhook.job_not_found` (404, value `job`). Nothing changes when it refuses (T1266). A claim is not visible to a retry, so retrying a job while a worker is delivering it can deliver it twice.
 
 ### MCP webhook tools (Admin role)
 
@@ -3740,7 +3741,7 @@ Available when `App.Webhooks(store)` is configured:
 | `list_webhooks` | All endpoints with delivery stats (no secrets) |
 | `delete_webhook` | Remove endpoint by ID |
 | `list_webhook_deliveries` | Delivery log for a job ID |
-| `retry_webhook` | Re-queue a dead job |
+| `retry_webhook` | Send a dead or pending job now; a delivered job and an unknown id are refused (see Retry above) |
 
 ### smeldr.dev/cli webhook commands
 

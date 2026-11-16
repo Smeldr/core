@@ -234,6 +234,8 @@ const (
 	problemAddressPrefixWebContent            ProblemType = "address.prefix_web_content"
 	problemPlacesMigrateAddressHeld           ProblemType = "places_migrate.address_held"
 	problemWebhookUrlNotAllowed               ProblemType = "webhook.url_not_allowed"
+	problemWebhookJobNotFound                 ProblemType = "webhook.job_not_found"
+	problemWebhookJobDelivered                ProblemType = "webhook.job_delivered"
 	problemConfigInvalid                      ProblemType = "config.invalid"
 	problemIdentitySchemaNotReady             ProblemType = "identity.schema_not_ready"
 	problemAmendsNoDatabase                   ProblemType = "amends.no_database"
@@ -411,6 +413,8 @@ var problemTypeList = []ProblemTypeInfo{
 	{ID: problemAddressPrefixWebContent, Status: 422, Title: "A web-content type (url_prefix) is given an address prefix", Rule: "D110", Audience: "person", Class: problemClassCorrection},
 	{ID: problemPlacesMigrateAddressHeld, Status: 422, Title: "A legacy place's address is already held by the compiled type", Audience: "operator", Class: problemClassRefusal, Values: []string{"type", "record", "holder_type", "holder"}, AlwaysValues: []string{"type", "record", "holder_type", "holder"}},
 	{ID: problemWebhookUrlNotAllowed, Status: 422, Title: "A webhook URL is not HTTPS, targets localhost/.local, cannot resolve, or resolves to a private IP", Audience: "person", Class: problemClassCorrection},
+	{ID: problemWebhookJobNotFound, Status: 404, Title: "A webhook retry names no outbound job", Rule: "T1266", Audience: "person", Class: problemClassRefusal, Values: []string{"job"}, AlwaysValues: []string{"job"}},
+	{ID: problemWebhookJobDelivered, Status: 409, Title: "A webhook retry names a job that was already delivered, so it is not sent again", Rule: "T1266", Audience: "person", Class: problemClassConflict, Values: []string{"job", "status"}, AlwaysValues: []string{"job", "status"}},
 	{ID: problemConfigInvalid, Status: 422, Title: "ValidateConfig rejects a Config field", Rule: "T969", Audience: "person", Class: problemClassCorrection, Values: []string{"value", "min"}},
 	{ID: problemIdentitySchemaNotReady, Status: 422, Title: "Minting a classified token before the token/identity columns exist", Rule: "D165", Audience: "operator", Class: problemClassFailure},
 	{ID: problemAmendsNoDatabase, Status: 422, Title: "amends cannot be checked because no database is configured", Audience: "person", Class: problemClassFailure},

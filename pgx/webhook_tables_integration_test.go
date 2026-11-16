@@ -105,3 +105,60 @@ func TestPG_OutboundClaimOnce(t *testing.T) {
 		t.Errorf("due after the lease = %d %v", due, err)
 	}
 }
+
+// T1266 on Postgres: webhook retry re-queues a dead job and a pending one in
+// its backoff, refuses a delivered job without changing it, and refuses an id
+// that names no job. The App's pool is used without App.Run, so no worker
+// delivers anything.
+func TestPG_WebhookRetry(t *testing.T) {
+	db, _ := isolatedDB(t)
+	ctx := context.Background()
+	if err := smeldr.CreateWebhookTables(db); err != nil {
+		t.Fatal(err)
+	}
+	app := smeldr.New(smeldr.Config{BaseURL: "http://localhost", Secret: []byte("test-secret-32-bytes-xxxxxxxxxxxx"), DB: db})
+	app.Webhooks(smeldr.NewWebhookStore(db, []byte("app-secret")))
+	pool := app.WebhookPool()
+	now := time.Now().UTC()
+	for _, j := range []struct {
+		id, status string
+		attempts   int
+		next       time.Time
+	}{
+		{"dead", "dead", 7, now.Add(-time.Hour)},
+		{"backoff", "pending", 3, now.Add(time.Hour)},
+		{"delivered", "delivered", 1, now.Add(-time.Hour)},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO smeldr_outbound_jobs (id, endpoint_id, target_url, secret_enc, payload, event, attempts, next_retry_at, created_at, expires_at, status)
+			VALUES ($1, 'ep1', 'https://8.8.8.8/hook', 'enc', $2, 'post.created', $3, $4, $5, $6, $7)`,
+			j.id, []byte(`{}`), j.attempts, j.next, now.Add(-2*time.Hour), now.Add(time.Hour), j.status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"dead", "backoff"} {
+		if err := pool.RetryDead(ctx, id); err != nil {
+			t.Fatalf("retry %s: %v", id, err)
+		}
+		var status string
+		var attempts int
+		var next time.Time
+		if err := db.QueryRowContext(ctx, `SELECT status, attempts, next_retry_at FROM smeldr_outbound_jobs WHERE id = $1`, id).Scan(&status, &attempts, &next); err != nil {
+			t.Fatal(err)
+		}
+		if status != "pending" || attempts != 0 || next.After(time.Now().Add(time.Second)) {
+			t.Errorf("%s after retry: %s, attempts %d, next %v", id, status, attempts, next)
+		}
+	}
+	err := pool.RetryDead(ctx, "delivered")
+	if smeldr.ProblemTypeOf(err) != "webhook.job_delivered" || smeldr.ProblemValuesOf(err)["status"] != "delivered" {
+		t.Errorf("retry delivered: %v (type %q)", err, smeldr.ProblemTypeOf(err))
+	}
+	var status string
+	var attempts int
+	if err := db.QueryRowContext(ctx, `SELECT status, attempts FROM smeldr_outbound_jobs WHERE id = 'delivered'`).Scan(&status, &attempts); err != nil || status != "delivered" || attempts != 1 {
+		t.Errorf("the delivered job changed: %s, attempts %d, %v", status, attempts, err)
+	}
+	if err := pool.RetryDead(ctx, "no-such-job"); smeldr.ProblemTypeOf(err) != "webhook.job_not_found" {
+		t.Errorf("retry unknown: %v (type %q)", err, smeldr.ProblemTypeOf(err))
+	}
+}

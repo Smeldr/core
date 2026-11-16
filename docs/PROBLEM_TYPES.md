@@ -173,6 +173,8 @@ Every refusal and validation error Smeldr core answers with carries a stable **t
 | `address.prefix_web_content` | correction | 422 | person |  | D110 | A web-content type (url_prefix) is given an address prefix |  |
 | `places_migrate.address_held` | refusal | 422 | operator | **`type`**, **`record`**, **`holder_type`**, **`holder`** |  | A legacy place's address is already held by the compiled type |  |
 | `webhook.url_not_allowed` | correction | 422 | person |  |  | A webhook URL is not HTTPS, targets localhost/.local, cannot resolve, or resolves to a private IP |  |
+| `webhook.job_not_found` | refusal | 404 | person | **`job`** | T1266 | A webhook retry names no outbound job |  |
+| `webhook.job_delivered` | conflict | 409 | person | **`job`**, **`status`** | T1266 | A webhook retry names a job that was already delivered, so it is not sent again |  |
 | `config.invalid` | correction | 422 | person | `value`, `min` | T969 | ValidateConfig rejects a Config field |  |
 | `identity.schema_not_ready` | failure | 422 | operator |  | D165 | Minting a classified token before the token/identity columns exist |  |
 | `amends.no_database` | failure | 422 | person |  |  | amends cannot be checked because no database is configured |  |

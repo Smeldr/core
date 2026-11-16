@@ -3,11 +3,13 @@ package smeldr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -309,34 +311,121 @@ func TestWorkerPool_CircuitBreaker(t *testing.T) {
 	}
 }
 
-// TestWorkerPool_RetryDead verifies that RetryDead resets a dead job to pending.
+// RetryDead queues a dead or pending job for delivery now, and refuses a
+// delivered job and an unknown id without changing anything (T1266).
 func TestWorkerPool_RetryDead(t *testing.T) {
-	pool, store := outboundTestDB(t)
 	ctx := context.Background()
+	type row struct {
+		status   string
+		attempts int
+		next     time.Time
+		expires  time.Time
+	}
+	read := func(t *testing.T, pool *workerPool, id string) row {
+		t.Helper()
+		var r row
+		if err := pool.db.QueryRowContext(ctx, `SELECT status, attempts, next_retry_at, expires_at FROM smeldr_outbound_jobs WHERE id = $1`, id).
+			Scan(&r.status, &r.attempts, scanDest(&r.next), scanDest(&r.expires)); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	tests := []struct {
+		name     string
+		status   string
+		attempts int
+		next     time.Time
+		expires  time.Time
+		queued   bool // re-queued and due now
+	}{
+		{"dead", "dead", 7, now.Add(-time.Hour), now.Add(time.Hour), true},
+		{"pending in its backoff", "pending", 3, now.Add(time.Hour), now.Add(2 * time.Hour), true},
+		{"pending past its window", "pending", 5, now.Add(-time.Hour), now.Add(-time.Minute), true},
+		{"delivered", "delivered", 1, now.Add(-time.Hour), now.Add(time.Hour), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pool, store := outboundTestDB(t)
+			pool.clock = newFakeClock(now)
+			enc, _ := store.encryptSecret([]byte("s"))
+			id := NewID()
+			if _, err := pool.db.ExecContext(ctx,
+				`INSERT INTO smeldr_outbound_jobs VALUES ($1,'ep','https://x.com',$2,'{}','ev',$3,$4,$5,$6,$7)`,
+				id, enc, tc.attempts, tc.next, now.Add(-2*time.Hour), tc.expires, tc.status); err != nil {
+				t.Fatal(err)
+			}
+			before := read(t, pool, id)
+			err := pool.RetryDead(ctx, id)
+			after := read(t, pool, id)
+			due, ferr := pool.fetchDueJobs(ctx)
+			if ferr != nil {
+				t.Fatal(ferr)
+			}
+			if !tc.queued {
+				wantTypedG(t, err, problemWebhookJobDelivered, map[string]string{"job": id, "status": "delivered"},
+					"Conflict: webhook job "+id+" was already delivered, so it is not sent again; nothing changed")
+				if !errors.Is(err, ErrConflict) {
+					t.Errorf("errors.Is(err, ErrConflict) = false")
+				}
+				if after != before {
+					t.Errorf("row changed: %+v, was %+v", after, before)
+				}
+				if len(due) != 0 {
+					t.Errorf("a delivered job is due again: %+v", due)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RetryDead: %v", err)
+			}
+			if after.status != "pending" || after.attempts != 0 || !after.next.Equal(now) || !after.expires.Equal(now.Add(24*time.Hour)) {
+				t.Errorf("after RetryDead: %+v", after)
+			}
+			if len(due) != 1 || due[0].ID != id {
+				t.Errorf("due after RetryDead: %+v", due)
+			}
+		})
+	}
 
-	enc, _ := store.encryptSecret([]byte("s"))
-	now := time.Now().UTC()
-	jobID := NewID()
-	_, _ = pool.db.ExecContext(ctx,
-		`INSERT INTO smeldr_outbound_jobs VALUES ($1,'ep','https://x.com',$2,'{}','ev',7,$3,$3,$4,'dead')`,
-		jobID, enc, now, now.Add(time.Hour),
-	)
+	t.Run("unknown id", func(t *testing.T) {
+		pool, _ := outboundTestDB(t)
+		err := pool.RetryDead(ctx, "no-such-job")
+		wantTypedG(t, err, problemWebhookJobNotFound, map[string]string{"job": "no-such-job"},
+			"Not found: webhook job no-such-job does not exist")
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("errors.Is(err, ErrNotFound) = false")
+		}
+	})
 
-	if err := pool.RetryDead(ctx, jobID); err != nil {
-		t.Fatalf("RetryDead: %v", err)
-	}
-	rows, _ := pool.db.QueryContext(ctx, `SELECT status, attempts FROM smeldr_outbound_jobs WHERE id = $1`, jobID)
-	defer rows.Close()
-	var status string
-	var attempts int
-	rows.Next()
-	rows.Scan(&status, &attempts)
-	if status != "pending" {
-		t.Errorf("after RetryDead: status %q want pending", status)
-	}
-	if attempts != 0 {
-		t.Errorf("after RetryDead: attempts %d want 0", attempts)
-	}
+	t.Run("a status retry does not know", func(t *testing.T) {
+		pool, store := outboundTestDB(t)
+		enc, _ := store.encryptSecret([]byte("s"))
+		if _, err := pool.db.ExecContext(ctx,
+			`INSERT INTO smeldr_outbound_jobs VALUES ('odd','ep','https://x.com',$1,'{}','ev',0,$2,$2,$2,'sending')`, enc, now); err != nil {
+			t.Fatal(err)
+		}
+		err := pool.RetryDead(ctx, "odd")
+		if !errors.Is(err, ErrInternal) || ProblemTypeOf(err) != "" {
+			t.Errorf("err = %v (type %q); want an untyped ErrInternal", err, ProblemTypeOf(err))
+		}
+	})
+
+	t.Run("the database fails", func(t *testing.T) {
+		for _, match := range []string{"status IN ('dead', 'pending')", "SELECT status FROM smeldr_outbound_jobs"} {
+			pool, _ := outboundTestDB(t)
+			pool.db = failAddressDB{DB: pool.db, match: match}
+			err := pool.RetryDead(ctx, "j1")
+			if err == nil || ProblemTypeOf(err) != "" || !strings.Contains(err.Error(), "smeldr: webhook: retry job j1") {
+				t.Errorf("%s fails: err = %v; want a wrapped, untyped error", match, err)
+			}
+		}
+		pool, _ := outboundTestDB(t)
+		pool.db = &rowsAffectedFailDB{DB: pool.db, failOn: "status IN ('dead', 'pending')"}
+		if err := pool.RetryDead(ctx, "j1"); err == nil || !strings.Contains(err.Error(), "simulated rows affected error") {
+			t.Errorf("RowsAffected fails: err = %v", err)
+		}
+	})
 }
 
 // TestHTTPDeliver_Success verifies header sending via httptest server.
