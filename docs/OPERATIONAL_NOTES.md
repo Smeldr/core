@@ -125,6 +125,16 @@ over the examples on every push and fails when one is missing or older. When the
 root's toolchain is bumped, bump the examples in the same commit
 (`go mod edit -toolchain=goX.Y.Z` in each).
 
+**A red Pin currency run right after a release is the bump still owed.** The weekly
+`pin-currency.yml` runs checkpins against the proxy's latest tags. Between tagging a
+standalone module (oauth, mcp, media, ...) and bumping every example that pins it, the
+run is red by design: on 16 November 2026 it ran on core main `5a303dd` between the oauth
+v0.7.0 tag and example/server's oauth pin bump (`dbd89b1`), and reported
+`example/server: smeldr.dev/oauth pinned at v0.6.1, latest is v0.7.0`. Read the stale
+pin it names: if a release in progress owes that bump, it is the expected gap, closed by
+the bump; otherwise the bump was forgotten. Either way it is core's to fix (CLAUDE.md,
+"After tagging any module"), and a red run is never noise.
+
 ## PowerShell working directory
 
 `cd`/`Set-Location` updates PowerShell's own logical location (what
