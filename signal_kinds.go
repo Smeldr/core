@@ -42,7 +42,7 @@ type SignalTypeInfo struct {
 var signalTypeTable = []SignalTypeInfo{
 	{"ratification-required", SignalCondition, "resolved when the Decision leaves proposed"},
 	{"authorization-required", SignalCondition, "resolved when the subject leaves from_state: the blocked transition happened or was abandoned"},
-	{"conflict-detected", SignalCondition, "resolved when the contradicts edge ends or a side leaves ratified; for a taken URL, when the item is published or its slug changes"},
+	{"conflict-detected", SignalCondition, "opened while both Decisions can still hold (proposed, ratified or pending re-evaluation); resolved when the contradicts edge ends or a side is superseded, retired or archived; for a taken URL, when the item is published or its slug changes"},
 	{"downstream-blocked", SignalCondition, "resolved when the blocking item is done; no emitter yet"},
 	{"reference-stale", SignalCondition, "resolved when the reference is refreshed or removed; no emitter yet"},
 	{"premise-flagged", SignalCondition, "resolved when the premise is in force again, the grounded_in edge ends, the resting Decision leaves force, or a ratify holder confirms it with confirm_premise"},

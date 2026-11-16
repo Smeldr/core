@@ -120,4 +120,19 @@ func TestPG_ConflictDetected(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT status, resolution FROM smeldr_signals WHERE id = 'old-sig'`).Scan(&status, &resolution); err != nil || status != "resolved" || resolution != "the contradicts relation ended (withdrawn)" {
 		t.Errorf("old row after the edge ended: %s %q %v", status, resolution, err)
 	}
+
+	// T1242 (D192): dec-b archived behind the resolver's back; the sweep
+	// resolves the live pair dec-a/dec-b, each row naming only its own side.
+	if _, err := db.ExecContext(ctx, `UPDATE smeldr_decisions SET status = 'archived' WHERE id = 'dec-b'`); err != nil {
+		t.Fatal(err)
+	}
+	res, err = app.SweepContradictionConditions(ctx)
+	if err != nil || res.Stale != 2 {
+		t.Fatalf("stale sweep = %+v %v", res, err)
+	}
+	for subject, want := range map[string]string{"dec-b": "D81 can no longer hold (archived)", "dec-a": "the contradicting Decision can no longer hold"} {
+		if err := db.QueryRowContext(ctx, `SELECT status, resolution FROM smeldr_signals WHERE signal_type = 'conflict-detected' AND subject_id = $1`, subject).Scan(&status, &resolution); err != nil || status != "resolved" || resolution != want {
+			t.Errorf("%s: %s %q %v; want resolved %q", subject, status, resolution, err, want)
+		}
+	}
 }

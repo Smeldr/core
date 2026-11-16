@@ -33,7 +33,7 @@ func signalMigrationFixture(t *testing.T) (*App, *sql.DB, map[string]string) {
 	insertDecision(t, db, "d-open", "d-open", "proposed")
 	insertDecision(t, db, "d-has", "d-has", "proposed")
 	insertDecision(t, db, "d-done", "d-done", "ratified")
-	if err := InsertSignal(withSignalSystem(context.Background()), db, ratificationSignal("d-has")); err != nil {
+	if err := InsertSignal(withSignalSystem(context.Background()), db, ratificationSignal("Decision d-has", "d-has")); err != nil {
 		t.Fatal(err)
 	}
 	return app, db, ids

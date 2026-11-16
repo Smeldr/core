@@ -100,8 +100,8 @@ func TestConflictDetected_Resolves(t *testing.T) {
 		t.Fatal(err)
 	}
 	for d, want := range map[string]struct{ resolution, other string }{
-		"b1": {"D-b1 is no longer ratified (superseded)", "a1"},
-		"a1": {"the contradicting Decision is no longer ratified", "b1"},
+		"b1": {"D-b1 can no longer hold (superseded)", "a1"},
+		"a1": {"the contradicting Decision can no longer hold", "b1"},
 		"a2": {"the contradicts relation ended (withdrawn)", "b2"},
 		"b2": {"the contradicts relation ended (withdrawn)", "a2"},
 	} {
@@ -208,8 +208,8 @@ func TestSweepContradictions_Legacy(t *testing.T) {
 	}
 	for id, want := range map[string][3]string{
 		live:       {"open", "D-" + edge.SourceID + " contradicts a Decision", ""},
-		movedOther: {"resolved", "D-a2 contradicts a Decision", "the contradicting Decision is no longer ratified"},
-		movedOwn:   {"resolved", "D-a3 contradicts a Decision", "D-a3 is no longer ratified (superseded)"},
+		movedOther: {"resolved", "D-a2 contradicts a Decision", "the contradicting Decision can no longer hold"},
+		movedOwn:   {"resolved", "D-a3 contradicts a Decision", "D-a3 can no longer hold (superseded)"},
 		ended:      {"resolved", "D-a4 contradicts a Decision", "the contradicts relation ended (withdrawn)"},
 		stale:      {"resolved", "D-a4 contradicts a Decision", "the contradicts relation ended"},
 	} {
@@ -331,7 +331,7 @@ func TestSweepContradictions_Paths(t *testing.T) {
 		t.Fatalf("sweep = %+v %v", res, err)
 	}
 	var resolution string
-	if err := f.db.QueryRow(`SELECT resolution FROM smeldr_signals WHERE id = $1`, s.ID).Scan(&resolution); err != nil || resolution != "the contradicting Decision is no longer ratified" {
+	if err := f.db.QueryRow(`SELECT resolution FROM smeldr_signals WHERE id = $1`, s.ID).Scan(&resolution); err != nil || resolution != "the contradicting Decision can no longer hold" {
 		t.Errorf("resolution = %q %v", resolution, err)
 	}
 	// A failed Decision read labels by ID; a failed place read fails the opening.

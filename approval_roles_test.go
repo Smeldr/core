@@ -410,7 +410,7 @@ func TestMigrateApprovalRoles_Errors(t *testing.T) {
 // The ratification condition is addressed to ratify, so the tokens that hold
 // it are the ones it reaches.
 func TestRatificationRequired_RoutesToRatify(t *testing.T) {
-	s := ratificationSignal("dec-1")
+	s := ratificationSignal("Decision dec-1", "dec-1")
 	if s.Receiver != OperationRatify || s.RequiredOperation != OperationRatify {
 		t.Errorf("receiver %q, required %q; want ratify", s.Receiver, s.RequiredOperation)
 	}

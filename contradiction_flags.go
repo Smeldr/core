@@ -61,14 +61,26 @@ func contradictionEndedText(cause string) string {
 	return "the contradicts relation ended (" + cause + ")"
 }
 
+// decisionInPlay reports whether a Decision in state can still hold, so a
+// contradiction it is a side of holds an open condition (D192): proposed,
+// ratified or pending re-evaluation. Superseded, retired and archived cannot
+// come back.
+func decisionInPlay(state string) bool {
+	switch state {
+	case decisionProposed, decisionRatified, "pending-re-evaluation":
+		return true
+	}
+	return false
+}
+
 // contradictionLeftText resolves one condition of a pair whose Decision
-// moved out of ratified: the row about the moved Decision names it, the
+// moved out of play (to): the row about the moved Decision names it, the
 // other row names nothing.
 func contradictionLeftText(label string, own bool, to string) string {
 	if own {
-		return label + " is no longer ratified (" + to + ")"
+		return label + " can no longer hold (" + to + ")"
 	}
-	return "the contradicting Decision is no longer ratified"
+	return "the contradicting Decision can no longer hold"
 }
 
 // pairSignals returns the open conflict-detected Signals of the pair rows
@@ -110,8 +122,19 @@ func (r signalResolver) pairSignals(ctx context.Context, where string, args ...a
 // emitContradiction opens the two conflict-detected conditions of a
 // contradicts edge (D85), one about each side, each placed where its side is
 // placed (T928). One open condition per contradiction (D115): a pair with an
-// open condition opens nothing. Fail-open.
+// open condition opens nothing, and so does a pair with a side that can no
+// longer hold (D192). A side that cannot be read counts as in play. Fail-open.
 func (r signalResolver) emitContradiction(ctx context.Context, edge RelationEdge) {
+	for _, side := range []string{edge.SourceID, edge.TargetID} {
+		d, err := readPremiseDecision(ctx, r.db, side)
+		if err != nil {
+			slog.WarnContext(ctx, "smeldr: conflict-detected: side not read", "edge_id", edge.ID, "decision", side, "error", err)
+			continue
+		}
+		if d.found && !decisionInPlay(d.state) {
+			return
+		}
+	}
 	_, open, err := r.pairSignals(ctx, "source_id = $1 AND target_id = $2", edge.SourceID, edge.TargetID)
 	if err != nil {
 		slog.WarnContext(ctx, "smeldr: conflict-detected: lookup failed", "edge_id", edge.ID, "error", err)
@@ -212,8 +235,8 @@ func (r signalResolver) resolveContradiction(ctx context.Context, sourceID, targ
 }
 
 // resolveContradictionsOf resolves every open contradiction a Decision is a
-// side of, after it left ratified for to: each row's text names only its
-// own Decision.
+// side of, after it moved out of play to to (D192): each row's text names
+// only its own Decision.
 func (r signalResolver) resolveContradictionsOf(ctx context.Context, decisionID, to string) {
 	subjects, open, err := r.pairSignals(ctx, "source_id = $1 OR target_id = $1", decisionID)
 	if err != nil {
@@ -241,6 +264,10 @@ type ContradictionSweep struct {
 	// Decisions is how many Decisions with open conditions had their
 	// conditions' places synced.
 	Decisions int `json:"decisions"`
+	// Stale is how many open conditions written since T928 were resolved
+	// because their contradiction no longer holds: the relation ended, or a
+	// side can no longer hold (D192).
+	Stale int `json:"stale"`
 }
 
 // oldContradictsPrefix and oldContradictsMiddle make up the message of a
@@ -256,8 +283,10 @@ const (
 // (message "Decision <id> contradicts Decision <id>", in any state) gets the
 // new message naming only its own Decision, a resolution that names no other
 // Decision, and its pair row; an open one whose contradiction no longer holds
-// (the edge ended, or a side left ratified) is resolved. Then every open
-// contradiction or premise condition is placed where its Decision is placed.
+// (the edge ended, or a side can no longer hold) is resolved. Then every open
+// condition with a pair row whose contradiction no longer holds is resolved
+// the same way (D192), and every open contradiction or premise condition is
+// placed where its Decision is placed.
 // It is idempotent; a row it cannot read is counted and left as it is. Run it
 // at boot and on the structural sweep's schedule. Reading the rows fails as
 // [ErrInternal]; a row that fails is logged and skipped.
@@ -305,6 +334,7 @@ func (a *App) SweepContradictionConditions(ctx context.Context) (ContradictionSw
 			}
 		}
 	}
+	out.Stale = a.resolveStaleContradictions(ctx)
 	subjects, err := premisePairs(ctx, db,
 		`SELECT DISTINCT subject_id, '' FROM smeldr_signals
 		  WHERE signal_type IN ('conflict-detected', 'premise-flagged') AND subject_type = 'Decision' AND status = 'open'`)
@@ -379,8 +409,63 @@ func rewordContradictionResolution(resolution, subject, label string) string {
 	return "resolved"
 }
 
-// contradictionEnded says why an old open contradiction no longer holds (the
-// edge ended, or a side is no longer ratified), or "" when it still holds.
+// resolveStaleContradictions resolves the open conditions that have a pair
+// row and whose contradiction no longer holds, and returns how many. A read
+// that fails is logged and resolves nothing.
+func (a *App) resolveStaleContradictions(ctx context.Context) int {
+	pairs, err := contradictionPairsOpen(ctx, a.cfg.DB)
+	if err != nil {
+		if !isNoSuchTable(err) {
+			slog.WarnContext(ctx, "smeldr: SweepContradictionConditions: open pairs not read", "error", err)
+		}
+		return 0
+	}
+	r := a.signalResolver()
+	n := 0
+	for _, p := range pairs {
+		ended, err := a.contradictionEnded(ctx, p[0], p[1], p[2], decisionLabel(ctx, a.cfg.DB, p[2]))
+		if err != nil {
+			slog.WarnContext(ctx, "smeldr: SweepContradictionConditions: pair not checked", "signal", p[3], "error", err)
+			continue
+		}
+		if ended == "" {
+			continue
+		}
+		open, err := r.selectOpen(ctx, "id = $1", p[3])
+		if err != nil {
+			slog.WarnContext(ctx, "smeldr: SweepContradictionConditions: pair not checked", "signal", p[3], "error", err)
+			continue
+		}
+		r.resolve(ctx, open, ended)
+		n += len(open)
+	}
+	return n
+}
+
+// contradictionPairsOpen returns (source, target, subject, signal) of every
+// pair row whose conflict-detected Signal is open.
+func contradictionPairsOpen(ctx context.Context, db DB) ([][4]string, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT f.source_id, f.target_id, f.subject_id, f.signal_id FROM smeldr_contradiction_flags f
+		   JOIN smeldr_signals s ON s.id = f.signal_id
+		  WHERE s.status = 'open' AND s.signal_type = 'conflict-detected'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out [][4]string
+	for rows.Next() {
+		var p [4]string
+		if err := rows.Scan(&p[0], &p[1], &p[2], &p[3]); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// contradictionEnded says why an open contradiction no longer holds (the
+// edge ended, or a side can no longer hold, D192), or "" when it still holds.
 func (a *App) contradictionEnded(ctx context.Context, source, target, subject, label string) (string, error) {
 	db := a.cfg.DB
 	var n int
@@ -397,7 +482,7 @@ func (a *App) contradictionEnded(ctx context.Context, source, target, subject, l
 		if err != nil {
 			return "", err
 		}
-		if d.found && d.state != decisionRatified {
+		if d.found && !decisionInPlay(d.state) {
 			return contradictionLeftText(label, side == subject, d.state), nil
 		}
 	}

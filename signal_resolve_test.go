@@ -101,8 +101,8 @@ func TestResolve_RatificationRequired(t *testing.T) {
 	}
 }
 
-// A contradiction is resolved when its edge ends, and when a side leaves
-// ratified. Asserting the edge again while it is open adds no rows.
+// A contradiction is resolved when its edge ends, and when a side can no
+// longer hold (D192). Asserting the edge again while it is open adds no rows.
 func TestResolve_ConflictDetected(t *testing.T) {
 	store := setupRelationStoreWithSignals(t)
 	ctx := context.Background()
@@ -126,9 +126,15 @@ func TestResolve_ConflictDetected(t *testing.T) {
 	app, db := signalTestApp(t)
 	r := app.signalResolver()
 	r.emitContradiction(ctx, RelationEdge{ID: "e1", SourceType: "Decision", SourceID: "d1", TargetType: "Decision", TargetID: "d2", RelationKind: "contradicts"})
+	// D192: a side under re-evaluation can still hold, so the pair stays
+	// open; superseded it can no longer hold, and both rows resolve.
 	app.afterStatusChange(ctx, statusTransition{typeName: "Decision", id: "d2", from: "ratified", to: "pending-re-evaluation"})
+	if n := countSignals(t, db, "conflict-detected", "open"); n != 2 {
+		t.Errorf("open after re-evaluation began = %d, want 2", n)
+	}
+	app.afterStatusChange(ctx, statusTransition{typeName: "Decision", id: "d2", from: "pending-re-evaluation", to: "superseded"})
 	if n := countSignals(t, db, "conflict-detected", "resolved"); n != 2 {
-		t.Errorf("resolved after a side left ratified = %d, want 2", n)
+		t.Errorf("resolved after a side was superseded = %d, want 2", n)
 	}
 }
 

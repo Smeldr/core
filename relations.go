@@ -969,7 +969,8 @@ func (s *RelationStore) MCPAssertRelationAt(ctx context.Context,
 	confidence *float64, validAt, invalidAt *time.Time,
 	attributes json.RawMessage, rev *int,
 ) (RelationEdge, []CreateWarning, error) {
-	if _, ok := s.GetKind(relationKind); !ok {
+	kind, ok := s.GetKind(relationKind)
+	if !ok {
 		return RelationEdge{}, nil, errRelationKindUnknown
 	}
 	if planTimeEdge(sourceType, relationKind) {
@@ -981,7 +982,11 @@ func (s *RelationStore) MCPAssertRelationAt(ctx context.Context,
 	}
 	var warnings []CreateWarning
 	if rev == nil && revRequiredKind(relationKind) {
-		if liveID := s.liveAssertedEdge(ctx, sourceType, sourceID, targetType, targetID, relationKind); liveID != "" {
+		// T1242: a non-directional kind is stored in one order (D61), so the
+		// live edge is looked up in that order: "B contradicts A" re-asserts
+		// a live "A contradicts B".
+		c := canonicalizeNonDirectional(kind, RelationEdge{SourceType: sourceType, SourceID: sourceID, TargetType: targetType, TargetID: targetID})
+		if liveID := s.liveAssertedEdge(ctx, c.SourceType, c.SourceID, c.TargetType, c.TargetID, relationKind); liveID != "" {
 			w, err := revMissingFor(liveID, "assert_relation "+relationKind, s.revCutover)
 			if err != nil {
 				return RelationEdge{}, nil, err

@@ -186,7 +186,8 @@ func (a *App) resolveSignalsFor(ctx context.Context, t statusTransition) {
 	// D149: the Decision's premise pairs, as the resting Decision and as the
 	// premise.
 	r.evaluatePremisesOf(ctx, t.id)
-	if t.from == decisionRatified {
+	// D192: a contradiction holds while both sides can still hold.
+	if decisionInPlay(t.from) && !decisionInPlay(t.to) {
 		r.resolveContradictionsOf(ctx, t.id, t.to)
 	}
 	if t.to == decisionProposed && !ratificationOpen {
@@ -200,13 +201,14 @@ const (
 	decisionRatified = "ratified"
 )
 
-// ratificationSignal is the ratification-required condition of a Decision.
-func ratificationSignal(decisionID string) *Signal {
+// ratificationSignal is the ratification-required condition of a Decision;
+// label is how the message names it (its address, see decisionLabel).
+func ratificationSignal(label, decisionID string) *Signal {
 	return &Signal{
 		Sender:            "system",
 		Receiver:          decisionRatifyOperation,
 		SignalType:        "ratification-required",
-		Message:           fmt.Sprintf("Decision %s is proposed and waits for ratification", decisionID),
+		Message:           label + " is proposed and waits for ratification",
 		SubjectType:       "Decision",
 		SubjectID:         decisionID,
 		FromState:         decisionProposed,
@@ -218,7 +220,7 @@ func ratificationSignal(decisionID string) *Signal {
 // emitRatificationRequired opens the ratification-required condition of a
 // Decision now in proposed. The caller has checked none is open.
 func (a *App) emitRatificationRequired(ctx context.Context, decisionID string) {
-	if err := a.signalResolver().emit(ctx, ratificationSignal(decisionID)); err != nil {
+	if err := a.signalResolver().emit(ctx, ratificationSignal(decisionLabel(ctx, a.cfg.DB, decisionID), decisionID)); err != nil {
 		slog.WarnContext(ctx, "smeldr: ratification-required not emitted", "decision", decisionID, "error", err)
 	}
 }
