@@ -45,6 +45,7 @@ cross-referenced below by their Amendment ID.
 
 ### Docs
 
+- **Every environment variable the release binary reads is listed (T1310).** main.go's doc comment gains `CHANGE_CHECK_RECHECK_SCHEDULE` (the re-check of open pull request Checks, default `*/5 * * * *`, read when governance records are on). AGENTS.md's table gains the 25 variables it did not list, from `ENABLE_GOVERNANCE_RECORDS` and `ORGANIZATION_NAME` to the five cutover dates, each with its default written as its value; `ENABLE_SIGNAL_EXPIRY_SWEEP` is listed as retired, only logging that it does nothing. A new test in example/server reads every `os.Getenv`, `os.LookupEnv`, `envOr`, `requireEnv` and `getenv` call and fails, naming each variable and the file, when one is missing from main.go's doc comment, docs/SELF_HOSTING.md or AGENTS.md.
 - **What a PUT keeps, and who the scheduler is (T1300).** `updateHandler`'s doc comment and REFERENCE say a PUT keeps the stored ID, slug and address, so a `Slug` in the body is ignored with a 200 (a PATCH refuses it), and keeps `PublishedAt` when the body has none. `SignalEvent.ActorRole` is `guest` also for a system path with no actor, such as the scheduler's publish: `ActorID` is empty and `Surface` is `trigger`.
 
 ---

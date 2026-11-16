@@ -94,6 +94,9 @@
 //	                             each item's stored standing with its state's tag, records a Finding
 //	                             per mismatch; requires governance records; default off)
 //	STANDING_DRIFT_CHECK_SCHEDULE  5-field cron expression for the check (default: "30 3 * * *", daily)
+//	CHANGE_CHECK_RECHECK_SCHEDULE  5-field cron expression for the re-check of open pull
+//	                      request Checks (default: "*/5 * * * *"); read when governance
+//	                      records are on (ENABLE_GOVERNANCE_RECORDS or ENABLE_ORCHESTRATION)
 //	(findings)            with governance records or the structural sweep on, smeldr_findings is
 //	                      created and App.Findings wired, so the detectors record (T948)
 //	ENABLE_CONTEXT_PACKET wire GET /packet/{type}/{slug} (Editor role required; requires

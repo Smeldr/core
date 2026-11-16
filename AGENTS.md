@@ -432,6 +432,29 @@ SECRET=changeme go run .
 | `GITHUB_ADAPTER_TOKEN_ID` | when ENABLE_GITHUB | the `token_id` `create_token` returned for a class `job` token that holds `check_change` (grant `editor`); the adapter acts in process as that token, so discard its plaintext |
 | `GITHUB_CORE_WEBHOOK_SECRET` | optional | by default the server registers its own core webhook for `changecheck.transitioned`; set this to register it yourself |
 | `GITHUB_NAMES_SHOWN`, `GITHUB_CHECK_URL`, `GITHUB_ITEM_URL` | optional | repositories whose comments show names (D152), link formats |
+| `ENABLE_GOVERNANCE_RECORDS` | boolean | wire the governance records (Signal, Decision, Amendment, their flows and relation kinds) without the Orchestration add-on; records, not access; needs `ENABLE_RELATIONS` |
+| `ORGANIZATION_NAME` | optional | the name of the Organization created with the organization (default: the value of `INSTANCE_NAME`) |
+| `ENABLE_AUTHORITY` | boolean | wire the Authority mechanism (Rule, AuthorityStub); independent of `ENABLE_ORCHESTRATION` |
+| `ENABLE_CHECK` | boolean | wire the Check precondition on Decision ratification; needs `ENABLE_AUTHORITY` and governance records, or the boot is refused |
+| `ENABLE_SCHEMA_TOOLS` | boolean | wire the schema store and its discovery MCP tools without the rest of the block tools (`ENABLE_BLOCKS` and `ENABLE_DYNAMIC_CONTENT` include them) |
+| `ENABLE_CONTEXT_PACKET` | boolean | wire `GET /packet/{type}/{slug}` (Editor role); needs `ENABLE_RELATIONS` and governance records |
+| `ENABLE_REACHABILITY` | boolean | wire `GET /reachability/{type}/{id}` (Author role); needs `ENABLE_RELATIONS` only |
+| `MEDIA_STORE_BACKEND` | optional | media backend (default: `local`; `local` is the only value supported) |
+| `MASTODON_CLIENT_ID`, `MASTODON_CLIENT_SECRET`, `MASTODON_INSTANCE_URL` | optional, deprecated | fallback Mastodon OAuth client ID, secret and instance base URL (no default); configure each platform at runtime with `create_platform_config` instead (see `ENABLE_SOCIAL`) |
+| `EVENT_LOG_RETENTION_DAYS` | optional | days the event log keeps an event, a whole number of 1 or more (default: `30`); any other value refuses the boot when `ENABLE_EVENT_LOG` is set |
+| `ENABLE_STRUCTURAL_SWEEP` | boolean | wire a scheduled relation-staleness sweep (`App.SweepStructural`); needs `ENABLE_RELATIONS` |
+| `STRUCTURAL_SWEEP_SCHEDULE` | optional | 5-field cron expression for the sweep (default: `0 * * * *`, hourly) |
+| `ENABLE_EVAL_QUEUE_DRAIN` | boolean | wire a scheduled drain of the evaluation queue (`App.DrainEvalQueue`); needs governance records |
+| `EVAL_QUEUE_DRAIN_SCHEDULE` | optional | 5-field cron expression for the drain (default: `*/5 * * * *`) |
+| `ENABLE_STANDING_DRIFT_CHECK` | boolean | wire a scheduled, report-only standing drift check (a Finding per item whose stored standing differs from its state's); needs governance records; off by default |
+| `STANDING_DRIFT_CHECK_SCHEDULE` | optional | 5-field cron expression for the check (default: `30 3 * * *`, daily) |
+| `CHANGE_CHECK_RECHECK_SCHEDULE` | optional | 5-field cron expression for the re-check of open pull request Checks (default: `*/5 * * * *`); read only when governance records are on (`ENABLE_GOVERNANCE_RECORDS` or `ENABLE_ORCHESTRATION`) |
+| `ENABLE_SIGNAL_EXPIRY_SWEEP` | retired | does nothing: nothing expires (D115); when set, the boot only logs that it does nothing |
+| `TITLE_CUTOVER` | optional | RFC3339 time after which a Decision, Task, Goal or Amendment without a title, or with one over 120 characters, is refused (no default: warnings only) |
+| `SIGNAL_MESSAGE_CUTOVER` | optional | RFC3339 time after which a Signal message over 500 characters is refused (no default: warnings only) |
+| `SIGNAL_EVENT_CUTOVER` | optional | RFC3339 time after which a history `signal_type` is refused (no default: warnings only) |
+| `PLAN_PATHS_CUTOVER` | optional | RFC3339 time after which a commit plan without `repository` and `paths` is refused (no default: warnings only) |
+| `REV_CUTOVER` | optional | RFC3339 time after which a governance write that names no `rev` is refused (no default: warnings only) |
 
 Boolean vars gate their subsystem: set the var to any non-empty value to enable it
 (`ENABLE_TOKENS=1`, `ENABLE_GOVERNANCE=true`, etc.).
