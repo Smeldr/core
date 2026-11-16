@@ -14,7 +14,20 @@ sufficient (see CLAUDE.md's non-negotiable rules).
 ## Preconditions — confirm all before starting
 
 - [ ] `git status --short` is clean, on `main`.
-- [ ] `go test ./...` is green (root, and inside each changed submodule).
+- [ ] `go test ./...` is green (root, and inside each changed submodule),
+      run with the same test command as that repository's `ci.yml` (cli's
+      runs `go test -coverprofile=coverage.out ./...`), so a failure CI would
+      show is seen before the push.
+- [ ] CI is green on the exact commit to be tagged, in every repository
+      being tagged (T1296):
+
+      ```powershell
+      gh run list --commit <sha> --workflow ci.yml --json status,conclusion
+      ```
+
+      It must show `completed` and `success`. Still running: wait. Red or no
+      run at all: stop and fix it first; say in the release report when a
+      repository has no `ci.yml`.
 - [ ] `CHANGELOG.md` (root, if core) or the standalone module's own
       `CHANGELOG.md` has a `[X.Y.Z]` section for this exact version.
 - [ ] For a standalone module depending on smeldr.dev/core (mcp, media,
@@ -99,6 +112,7 @@ by a few minutes.
   are attached.
 
 - Tag before `go test ./...` is green.
+- Tag a commit whose CI run is red, still running, or missing.
 - Tag before `CHANGELOG.md` has an entry for the version.
 - Use a lightweight tag (`git tag vX.Y.Z` without `-a`).
 - Push the tag in the same command as commits.

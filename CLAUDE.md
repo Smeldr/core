@@ -870,6 +870,13 @@ The detail belongs in the submodule's own file.
    - `git status --short` → clean tree
    The module proxy caches go.mod permanently on first fetch — a bad tag requires a new patch
    version. Running this checklist before tagging is the only way to avoid that.
+5. CI is green on the exact commit being tagged, in every repository being tagged (T1296):
+   `gh run list --commit <sha> --workflow ci.yml --json status,conclusion` shows
+   `completed` and `success`. Still running: wait. Red or missing: stop, and fix it first.
+   The local run in items 2 and 4 uses the same test command as that repository's
+   `ci.yml` (cli's runs `go test -coverprofile=coverage.out ./...`), so a failure CI
+   would show is seen before the push. cli's CI was red from 6 November 2026 on every
+   push, and five cli releases were tagged on it, because no step read CI.
 
 **Tag and push sequence:**
 ```powershell
