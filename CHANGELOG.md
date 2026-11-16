@@ -18,6 +18,10 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.194.0] - 2026-11-16
+
 ### Security
 
 - **The bootstrap admin token is no longer kept by `CaptureLogs` or served at `/_logs` (T1299).** It still shows once on standard error at start, unchanged. This affected a Go program that calls `CaptureLogs` before the token store creates the bootstrap token; the release binary does not call `CaptureLogs`.
