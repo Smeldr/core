@@ -152,7 +152,10 @@ AGENT_MCP_URL         agent MCP endpoint (default: http://127.0.0.1:PORT/mcp/mes
 AGENT_MCP_TOKEN       bearer token for agent MCP calls
 ANTHROPIC_API_KEY     read by the Anthropic SDK when an agent job runs; not checked at boot,
                       a missing key fails the run, not the boot
-OAUTH_ISSUER          enable OAuth 2.1; set to canonical issuer URL (requires ENABLE_TOKENS)
+OAUTH_ISSUER          enable OAuth 2.1; set to the canonical issuer URL: an absolute http or https
+                      URL with a host, no query or fragment (public http, user info or a trailing
+                      slash start with a warning); may differ from BASE_URL (logged at start);
+                      requires ENABLE_TOKENS. A refused value stops the start, naming the variable
 OAUTH_DB_PATH         path to the OAuth SQLite database (default: ./oauth.db)
 ENABLE_GITHUB         mount the GitHub adapter of the pull request check (gated merges):
                       POST /github/webhook and POST /github/core-events; needs ENABLE_TOKENS,

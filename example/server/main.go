@@ -106,7 +106,8 @@
 //	AGENT_MCP_TOKEN       bearer token for agent MCP calls
 //	ANTHROPIC_API_KEY     read by the Anthropic SDK when an agent job runs; not checked at boot,
 //	                      a missing key fails the run, not the boot
-//	OAUTH_ISSUER          enable OAuth 2.1; set to canonical issuer URL (requires ENABLE_TOKENS)
+//	OAUTH_ISSUER          enable OAuth 2.1; set to canonical issuer URL (requires ENABLE_TOKENS;
+//	                      an absolute http or https URL with a host, no query or fragment)
 //	OAUTH_DB_PATH         path to the OAuth SQLite database (default: ./oauth.db)
 //	ENABLE_GITHUB         mount the pull request check's GitHub adapter (smeldr.dev/github) on
 //	                      POST /github/webhook and POST /github/core-events (T940); requires
@@ -947,6 +948,12 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	}
 
 	if cfg.OAuthIssuer != "" {
+		// An issuer on another origin than BASE_URL may be meant (a separate
+		// auth host, a TLS proxy), so it starts; the line makes a typo
+		// visible (T1286).
+		if origin(cfg.OAuthIssuer) != origin(cfg.BaseURL) {
+			slog.Info("oauth: OAUTH_ISSUER is on another origin than BASE_URL", "oauth_issuer", redactURL(cfg.OAuthIssuer), "base_url", cfg.BaseURL)
+		}
 		oauthStore, err := oauth.NewSQLiteStore(cfg.OAuthDBPath)
 		if err != nil {
 			return ServerResult{}, fmt.Errorf("oauth store: %w", err)
@@ -955,12 +962,24 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 		oauthSrv := oauth.New(oauth.Config{
 			Issuer:   cfg.OAuthIssuer,
 			Resource: cfg.BaseURL + "/mcp",
-			VerifyBearer: func(token string) bool {
+			// An access token stands for exactly the token pasted at sign-in
+			// (D195): its identity and fingerprint, never its value, read
+			// again at each exchange and refresh.
+			ResolveBearer: func(token string) (oauth.Subject, bool) {
 				if tokenStore == nil {
-					return false
+					return oauth.Subject{}, false
 				}
-				_, ok := smeldr.VerifyTokenString(token, []byte(cfg.Secret), tokenStore)
-				return ok
+				u, ok := smeldr.VerifyTokenString(token, []byte(cfg.Secret), tokenStore)
+				if !ok || u.TokenID == "" {
+					return oauth.Subject{}, false
+				}
+				return oauthSubject(tokenStore, u.TokenID)
+			},
+			TokenActive: func(tokenID string) (oauth.Subject, bool) {
+				if tokenStore == nil {
+					return oauth.Subject{}, false
+				}
+				return oauthSubject(tokenStore, tokenID)
 			},
 		}, oauthStore)
 		mcpOptions = append(mcpOptions, mcp.WithOAuth(oauthSrv), mcp.WithForgeFallback())

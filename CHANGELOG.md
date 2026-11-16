@@ -18,6 +18,18 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Security
+
+- **The release binary signs an OAuth client in with the pasted token (T1287).** With `OAUTH_ISSUER` set, example/server wires smeldr.dev/oauth's `ResolveBearer` and `TokenActive` to `TokenStore.ActingUser`. The access token then stands for the pasted token, and a revoked or expired token ends the client's access at its next refresh. Clients signed in before this sign in again.
+
+### Changed
+
+- **The release binary checks `OAUTH_ISSUER` at start (T1286).** Before, any value was published as given, so `not-a-url` gave the endpoint `not-a-url/oauth/authorize`.
+  - Now the start stops, naming `OAUTH_ISSUER`, when the value is not an absolute http or https URL with a host, or has a query or a fragment. With these, every OAuth endpoint answered 404.
+  - `OAUTH_ISSUER` without `ENABLE_TOKENS` is refused, since an access token stands for a Smeldr token.
+  - Public http, user info and a trailing slash still start, each with a warning from smeldr.dev/oauth.
+  - An issuer on another origin than `BASE_URL` starts, with one Info line naming both values.
+
 ### Fixed
 
 - **A webhook retry never makes two workers deliver one job (T1304).** A worker's claim only moved `next_retry_at`, so a job a worker held looked like one in its backoff: retrying it made it due, a second worker claimed it, both delivered, and the first then wrote over the row. Now the claim names its holder (`claim_id`) and its lease (`claimed_until`), the holder's update after its attempt applies only while its own claim is on the row, and a retry of a held job only leaves a request (`retry_requested`): the job is due now right after the attempt in flight if that attempt fails, and not sent again if it succeeds. If the holder dies, the next worker to claim the job after the lease honours the request. A job table without the new columns works as before.

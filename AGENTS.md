@@ -424,7 +424,7 @@ SECRET=changeme go run .
 | `ENABLE_AGENTS` | boolean | wire the agent job system |
 | `AGENT_MCP_URL` | when ENABLE_AGENTS | agent MCP endpoint (default: `http://127.0.0.1:PORT/mcp/message`) |
 | `AGENT_MCP_TOKEN` | when ENABLE_AGENTS | bearer token for agent MCP calls |
-| `OAUTH_ISSUER` | optional | enable OAuth 2.1; set to canonical issuer URL |
+| `OAUTH_ISSUER` | optional | enable OAuth 2.1; canonical issuer URL: absolute http or https URL with a host, no query or fragment (public http, user info or a trailing slash start with a warning); may differ from BASE_URL (logged); requires ENABLE_TOKENS |
 | `OAUTH_DB_PATH` | when OAUTH_ISSUER | path to OAuth SQLite database (default: `./oauth.db`) |
 | `ENABLE_GITHUB` | boolean | mount the GitHub adapter of the pull request check (smeldr.dev/github) on `POST /github/webhook` and `POST /github/core-events`; needs tokens, governance, relations, webhooks and governance records; refuses to start, naming the variable, when one below is missing or wrong |
 | `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET` | when ENABLE_GITHUB | the GitHub App's ID and webhook secret |

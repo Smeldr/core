@@ -10,7 +10,7 @@ require (
 	smeldr.dev/core v1.193.2
 	smeldr.dev/mcp v1.77.3
 	smeldr.dev/media v1.7.3
-	smeldr.dev/oauth v0.6.1
+	smeldr.dev/oauth v0.7.0
 	smeldr.dev/social v0.11.2
 )
 

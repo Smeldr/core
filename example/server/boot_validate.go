@@ -10,6 +10,7 @@ import (
 
 	"smeldr.dev/agent"
 	smeldr "smeldr.dev/core"
+	"smeldr.dev/oauth"
 )
 
 // Default cron schedules, used when ServerConfig is built by hand rather than
@@ -80,6 +81,8 @@ func validateBoot(cfg ServerConfig) (bootChecks, error) {
 		return checks, errors.New("ENABLE_EVAL_QUEUE_DRAIN requires ENABLE_GOVERNANCE_RECORDS (or ENABLE_ORCHESTRATION)")
 	case cfg.EnableStandingDriftCheck && !cfg.governanceRecords():
 		return checks, errors.New("ENABLE_STANDING_DRIFT_CHECK requires ENABLE_GOVERNANCE_RECORDS (or ENABLE_ORCHESTRATION)")
+	case cfg.OAuthIssuer != "" && !cfg.EnableTokens:
+		return checks, errors.New("OAUTH_ISSUER requires ENABLE_TOKENS (an access token stands for a Smeldr token)")
 	case cfg.EnableMedia && cfg.MediaBackend != "local":
 		return checks, fmt.Errorf("unsupported MEDIA_STORE_BACKEND %q (only \"local\" is supported)", cfg.MediaBackend)
 	}
@@ -97,6 +100,13 @@ func validateBoot(cfg ServerConfig) (bootChecks, error) {
 			if err := checkSchedule(s.schedule); err != nil {
 				return checks, fmt.Errorf("%s: %w", s.name, err)
 			}
+		}
+	}
+	if cfg.OAuthIssuer != "" {
+		// The module's own rule (T1286): what never worked is refused here,
+		// naming the variable, before any write.
+		if err := oauth.ValidateIssuer(cfg.OAuthIssuer); err != nil {
+			return checks, fmt.Errorf("OAUTH_ISSUER: %w", err)
 		}
 	}
 	if cfg.EnableGitHub {
