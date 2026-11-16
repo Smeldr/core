@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net"
 	"net/http"
@@ -64,7 +65,10 @@ type OutboundDelivery interface {
 //	    created_at    TIMESTAMPTZ NOT NULL,
 //	    expires_at    TIMESTAMPTZ NOT NULL,
 //	    status        TEXT    NOT NULL DEFAULT 'pending',
-//	    event_id      TEXT    NOT NULL DEFAULT ''
+//	    event_id      TEXT    NOT NULL DEFAULT '',
+//	    claim_id      TEXT    NOT NULL DEFAULT '',
+//	    claimed_until TIMESTAMPTZ,
+//	    retry_requested BOOLEAN NOT NULL DEFAULT FALSE
 //	);
 type OutboundJob struct {
 	ID          string
@@ -222,6 +226,29 @@ func EnsureOutboundJobEventIDColumn(ctx context.Context, db DB) error {
 	return nil
 }
 
+// EnsureOutboundJobClaimColumns adds the claim columns to smeldr_outbound_jobs
+// (T1304), to a table created before them: claim_id (the holder's claim, from
+// [OutboundClaimHolderSQL]), claimed_until (the end of its lease) and
+// retry_requested (a retry asked for while the job was held). Without them the
+// worker pool works as before, and a retry of a job a worker holds can deliver
+// it twice. A database without the table is left alone. Idempotent.
+func EnsureOutboundJobClaimColumns(ctx context.Context, db DB) error {
+	ok, err := tableExists(ctx, db, "smeldr_outbound_jobs")
+	if err != nil || !ok {
+		return err
+	}
+	for _, c := range []struct{ name, ddl string }{
+		{"claim_id", "TEXT NOT NULL DEFAULT ''"},
+		{"claimed_until", "TIMESTAMPTZ"},
+		{"retry_requested", "BOOLEAN NOT NULL DEFAULT FALSE"},
+	} {
+		if err := EnsureColumn(ctx, db, "smeldr_outbound_jobs", c.name, c.ddl); err != nil {
+			return fmt.Errorf("smeldr: EnsureOutboundJobClaimColumns: %w", err)
+		}
+	}
+	return nil
+}
+
 // webhookTableStmts are the statements of [CreateWebhookTables], with the
 // table each one makes, in the order they run.
 var webhookTableStmts = []struct{ table, stmt string }{
@@ -245,7 +272,10 @@ var webhookTableStmts = []struct{ table, stmt string }{
 		created_at    TIMESTAMPTZ NOT NULL,
 		expires_at    TIMESTAMPTZ NOT NULL,
 		status        TEXT    NOT NULL DEFAULT 'pending',
-		event_id      TEXT    NOT NULL DEFAULT ''
+		event_id      TEXT    NOT NULL DEFAULT '',
+		claim_id      TEXT    NOT NULL DEFAULT '',
+		claimed_until TIMESTAMPTZ,
+		retry_requested BOOLEAN NOT NULL DEFAULT FALSE
 	)`},
 	{"smeldr_outbound_jobs", `CREATE INDEX IF NOT EXISTS idx_smeldr_outbound_jobs_due ON smeldr_outbound_jobs (status, next_retry_at)`},
 	{"smeldr_delivery_logs", `CREATE TABLE IF NOT EXISTS smeldr_delivery_logs (
@@ -265,7 +295,8 @@ var webhookTableStmts = []struct{ table, stmt string }{
 // (due jobs by status and next_retry_at, logs by job). Call it before
 // [App.Webhooks]; without the job table no event is ever delivered (T947).
 // Idempotent and safe on every boot: existing tables keep their rows, and a
-// job table made before D117 gains event_id. Works on SQLite and Postgres.
+// job table made before D117 gains event_id, one made before T1304 the claim
+// columns. Works on SQLite and Postgres.
 func CreateWebhookTables(db DB) error {
 	ctx := context.Background()
 	for _, s := range webhookTableStmts {
@@ -273,7 +304,10 @@ func CreateWebhookTables(db DB) error {
 			return fmt.Errorf("smeldr: CreateWebhookTables: %s: %w", s.table, err)
 		}
 	}
-	return EnsureOutboundJobEventIDColumn(ctx, db)
+	if err := EnsureOutboundJobEventIDColumn(ctx, db); err != nil {
+		return err
+	}
+	return EnsureOutboundJobClaimColumns(ctx, db)
 }
 
 // runWorker is the main loop for one worker goroutine.
@@ -353,28 +387,67 @@ func (p *workerPool) fetchDueJobs(ctx context.Context) ([]OutboundJob, error) {
 // fetch is stale (the job was attempted and became due again since) matches
 // nothing either, because attempts changed. A claimed job whose worker dies
 // becomes due again when the lease ends.
+//
+// It does not name its holder, so a job claimed with it cannot be told from a
+// job in its backoff. The worker pool claims with [OutboundClaimHolderSQL]
+// where the table has the claim columns (T1304); a worker that uses this
+// statement keeps the behaviour from before.
 const OutboundClaimSQL = `UPDATE smeldr_outbound_jobs
 	SET next_retry_at = $1
+	WHERE id = $2 AND status = 'pending' AND next_retry_at <= $3 AND attempts = $4`
+
+// OutboundClaimHolderSQL is [OutboundClaimSQL] that also names its holder
+// (T1304): $5 is a new claim ID, written to claim_id, and claimed_until is set
+// to the end of the lease ($1). A job is held while claimed_until is in the
+// future; the holder's update after its attempt is conditional on its claim
+// ID and clears both, and a retry of a held job leaves a request for the
+// holder instead of making the job due. Exported so the Postgres integration
+// test runs the same text the worker runs; it is not meant for callers. It
+// needs the columns [EnsureOutboundJobClaimColumns] adds.
+const OutboundClaimHolderSQL = `UPDATE smeldr_outbound_jobs
+	SET next_retry_at = $1, claim_id = $5, claimed_until = $1
 	WHERE id = $2 AND status = 'pending' AND next_retry_at <= $3 AND attempts = $4`
 
 // outboundLease is how long a claimed job stays out of other workers' reach:
 // well over one delivery, which outboundClientTimeout bounds.
 const outboundLease = 4 * outboundClientTimeout
 
-// claimJob claims job for this worker with [OutboundClaimSQL]. It reports
-// false, and no error, when another worker has it or the row changed since
-// the fetch.
-func (p *workerPool) claimJob(ctx context.Context, job OutboundJob) (bool, error) {
+// outboundClaimColumns are the columns [EnsureOutboundJobClaimColumns] adds; a
+// statement that fails on one of them falls back to the statement from before.
+var outboundClaimColumns = []string{"claim_id", "claimed_until", "retry_requested"}
+
+// missingClaimColumn reports whether err says one of the claim columns does not
+// exist: a table from before T1304.
+func missingClaimColumn(err error) bool {
+	for _, c := range outboundClaimColumns {
+		if isNoSuchColumn(err, c) {
+			return true
+		}
+	}
+	return false
+}
+
+// claimJob claims job for this worker with [OutboundClaimHolderSQL], or with
+// [OutboundClaimSQL] on a table without the claim columns. It returns whether
+// the claim was won, and the claim ID ("" on such a table). It reports false,
+// and no error, when another worker has it or the row changed since the fetch.
+func (p *workerPool) claimJob(ctx context.Context, job OutboundJob) (bool, string, error) {
 	now := p.clock.Now()
-	res, err := p.db.ExecContext(ctx, OutboundClaimSQL, now.Add(outboundLease), job.ID, now, job.Attempts)
+	lease := now.Add(outboundLease)
+	claimID := NewID()
+	res, err := p.db.ExecContext(ctx, OutboundClaimHolderSQL, lease, job.ID, now, job.Attempts, claimID)
+	if err != nil && missingClaimColumn(err) {
+		claimID = ""
+		res, err = p.db.ExecContext(ctx, OutboundClaimSQL, lease, job.ID, now, job.Attempts)
+	}
 	if err != nil {
-		return false, fmt.Errorf("smeldr: webhook: claim job %s: %w", job.ID, err)
+		return false, "", fmt.Errorf("smeldr: webhook: claim job %s: %w", job.ID, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("smeldr: webhook: claim job %s: %w", job.ID, err)
+		return false, "", fmt.Errorf("smeldr: webhook: claim job %s: %w", job.ID, err)
 	}
-	return n == 1, nil
+	return n == 1, claimID, nil
 }
 
 // processJob checks the circuit breaker, claims the job, decrypts the
@@ -384,14 +457,15 @@ func (p *workerPool) processJob(ctx context.Context, job OutboundJob, rng *rand.
 	if !p.circuitAllows(job.EndpointID) {
 		return nil // circuit open — skip silently; job retains pending status
 	}
-	if claimed, err := p.claimJob(ctx, job); err != nil || !claimed {
+	claimed, claimID, err := p.claimJob(ctx, job)
+	if err != nil || !claimed {
 		return err
 	}
 
 	secret, err := p.secrets.decryptSecret(job.SecretEnc)
 	if err != nil {
 		// Unrecoverable — dead-letter immediately.
-		_ = p.moveToDeadLetter(ctx, job.ID)
+		_ = p.moveToDeadLetter(ctx, job, claimID)
 		_ = p.logDelivery(ctx, DeliveryLog{
 			ID:          NewID(),
 			JobID:       job.ID,
@@ -422,15 +496,15 @@ func (p *workerPool) processJob(ctx context.Context, job OutboundJob, rng *rand.
 
 		const maxAttempts = 7
 		if job.Attempts >= maxAttempts {
-			_ = p.moveToDeadLetter(ctx, job.ID)
+			_ = p.moveToDeadLetter(ctx, job, claimID)
 		} else {
 			delay := backoffDelay(job.Attempts, rng)
-			_ = p.updateJobAfterAttempt(ctx, job, false, delay)
+			_ = p.updateJobAfterAttempt(ctx, job, claimID, false, delay)
 		}
 	} else {
 		dl.StatusCode = 200
 		p.recordCircuitResult(job.EndpointID, true)
-		_ = p.updateJobAfterAttempt(ctx, job, true, 0)
+		_ = p.updateJobAfterAttempt(ctx, job, claimID, true, 0)
 	}
 	return p.logDelivery(ctx, dl)
 }
@@ -454,28 +528,96 @@ func (p *workerPool) logDelivery(ctx context.Context, dl DeliveryLog) error {
 	return err
 }
 
-// updateJobAfterAttempt updates attempts, next_retry_at, and status.
-func (p *workerPool) updateJobAfterAttempt(ctx context.Context, job OutboundJob, success bool, delay time.Duration) error {
-	status := "pending"
-	if success {
-		status = "delivered"
+// outboundRetryWindow is the delivery window a retried job gets.
+const outboundRetryWindow = 24 * time.Hour
+
+// updateJobAfterAttempt writes the outcome of the holder's attempt: attempts,
+// next_retry_at and status. With a claim ID (T1304) it changes the row only
+// while the holder's claim is on it, clears the claim, and honours a retry
+// asked for during the attempt: a failed attempt then leaves the job due now,
+// with attempts 0 and a new window, instead of in its backoff. A successful
+// one is delivered and the request is cleared. A holder whose claim was taken
+// over (its lease ran out) changes nothing and logs a warning. Without a claim
+// ID (a table without the claim columns) the update is the one from before.
+func (p *workerPool) updateJobAfterAttempt(ctx context.Context, job OutboundJob, claimID string, success bool, delay time.Duration) error {
+	now := p.clock.Now()
+	if claimID == "" {
+		status := "pending"
+		if success {
+			status = "delivered"
+		}
+		_, err := p.db.ExecContext(ctx, `
+			UPDATE smeldr_outbound_jobs
+			SET attempts = $1, next_retry_at = $2, status = $3
+			WHERE id = $4`,
+			job.Attempts, now.Add(delay), status, job.ID,
+		)
+		return err
 	}
-	nextRetry := p.clock.Now().Add(delay)
-	_, err := p.db.ExecContext(ctx, `
-		UPDATE smeldr_outbound_jobs
-		SET attempts = $1, next_retry_at = $2, status = $3
-		WHERE id = $4`,
-		job.Attempts, nextRetry, status, job.ID,
-	)
-	return err
+	var res sql.Result
+	var err error
+	if success {
+		res, err = p.db.ExecContext(ctx, `
+			UPDATE smeldr_outbound_jobs
+			SET attempts = $1, next_retry_at = $2, status = 'delivered',
+			    claim_id = '', claimed_until = NULL, retry_requested = FALSE
+			WHERE id = $3 AND claim_id = $4`,
+			job.Attempts, now, job.ID, claimID,
+		)
+	} else {
+		res, err = p.db.ExecContext(ctx, `
+			UPDATE smeldr_outbound_jobs
+			SET attempts = CASE WHEN retry_requested THEN 0 ELSE $1 END,
+			    next_retry_at = CASE WHEN retry_requested THEN $2 ELSE $3 END,
+			    expires_at = CASE WHEN retry_requested THEN $4 ELSE expires_at END,
+			    status = 'pending', claim_id = '', claimed_until = NULL, retry_requested = FALSE
+			WHERE id = $5 AND claim_id = $6`,
+			job.Attempts, now, now.Add(delay), now.Add(outboundRetryWindow), job.ID, claimID,
+		)
+	}
+	return p.holderWrote(ctx, res, err, job.ID)
 }
 
-// moveToDeadLetter marks a job as dead so it is no longer retried.
-func (p *workerPool) moveToDeadLetter(ctx context.Context, jobID string) error {
-	_, err := p.db.ExecContext(ctx,
-		`UPDATE smeldr_outbound_jobs SET status = 'dead' WHERE id = $1`, jobID,
+// moveToDeadLetter marks a job as dead so it is no longer retried. With a
+// claim ID (T1304) it is conditional on the holder's claim, as
+// [workerPool.updateJobAfterAttempt]; a retry asked for during the attempt
+// leaves the job pending and due now instead of dead.
+func (p *workerPool) moveToDeadLetter(ctx context.Context, job OutboundJob, claimID string) error {
+	if claimID == "" {
+		_, err := p.db.ExecContext(ctx,
+			`UPDATE smeldr_outbound_jobs SET status = 'dead' WHERE id = $1`, job.ID,
+		)
+		return err
+	}
+	now := p.clock.Now()
+	res, err := p.db.ExecContext(ctx, `
+		UPDATE smeldr_outbound_jobs
+		SET status = CASE WHEN retry_requested THEN 'pending' ELSE 'dead' END,
+		    attempts = CASE WHEN retry_requested THEN 0 ELSE attempts END,
+		    next_retry_at = CASE WHEN retry_requested THEN $1 ELSE next_retry_at END,
+		    expires_at = CASE WHEN retry_requested THEN $2 ELSE expires_at END,
+		    claim_id = '', claimed_until = NULL, retry_requested = FALSE
+		WHERE id = $3 AND claim_id = $4`,
+		now, now.Add(outboundRetryWindow), job.ID, claimID,
 	)
-	return err
+	return p.holderWrote(ctx, res, err, job.ID)
+}
+
+// holderWrote checks a holder's conditional update: no row means its claim
+// was taken over after its lease ran out, which is logged, not an error.
+func (p *workerPool) holderWrote(ctx context.Context, res sql.Result, err error, jobID string) error {
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		slog.WarnContext(ctx, "smeldr: webhook: a worker's claim was taken over before it wrote its attempt; the row is left to the new holder",
+			"job", jobID)
+	}
+	return nil
 }
 
 // RetryDead queues a dead or pending job for delivery now: attempts back to
@@ -485,19 +627,37 @@ func (p *workerPool) moveToDeadLetter(ctx context.Context, jobID string) error {
 // is not sent again; an id that names no job is refused with
 // [problemWebhookJobNotFound]. Nothing changes when it refuses.
 //
-// The update and its condition are one statement, so a worker cannot change
-// the job in between. A job a worker holds at that moment is pending too, and
-// a claim is not visible in the table, so it can then be delivered twice, as
-// before this check.
+// A job a worker holds (claimed_until in the future, T1304) is not made due,
+// since another worker would then deliver it too: the retry is left as a
+// request for the holder, which sends it again right after its attempt if
+// that attempt fails, and not again if it succeeds. If the holder dies, the
+// next worker to claim the job after the lease honours the request. The
+// update and its condition are one statement, so a worker cannot change the
+// job in between. On a table without the claim columns a held job cannot be
+// seen, and its retry can deliver it twice.
 func (p *workerPool) RetryDead(ctx context.Context, jobID string) error {
 	now := p.clock.Now()
 	res, err := p.db.ExecContext(ctx, `
 		UPDATE smeldr_outbound_jobs
-		SET status = 'pending', attempts = 0, next_retry_at = $1,
-		    expires_at = $2
+		SET retry_requested = CASE WHEN status = 'pending' AND claimed_until > $1 THEN TRUE ELSE FALSE END,
+		    attempts = CASE WHEN status = 'pending' AND claimed_until > $1 THEN attempts ELSE 0 END,
+		    next_retry_at = CASE WHEN status = 'pending' AND claimed_until > $1 THEN next_retry_at ELSE $1 END,
+		    expires_at = CASE WHEN status = 'pending' AND claimed_until > $1 THEN expires_at ELSE $2 END,
+		    claim_id = CASE WHEN status = 'pending' AND claimed_until > $1 THEN claim_id ELSE '' END,
+		    claimed_until = CASE WHEN status = 'pending' AND claimed_until > $1 THEN claimed_until ELSE NULL END,
+		    status = 'pending'
 		WHERE id = $3 AND status IN ('dead', 'pending')`,
-		now, now.Add(24*time.Hour), jobID,
+		now, now.Add(outboundRetryWindow), jobID,
 	)
+	if err != nil && missingClaimColumn(err) {
+		res, err = p.db.ExecContext(ctx, `
+			UPDATE smeldr_outbound_jobs
+			SET status = 'pending', attempts = 0, next_retry_at = $1,
+			    expires_at = $2
+			WHERE id = $3 AND status IN ('dead', 'pending')`,
+			now, now.Add(outboundRetryWindow), jobID,
+		)
+	}
 	if err != nil {
 		return fmt.Errorf("smeldr: webhook: retry job %s: %w", jobID, err)
 	}

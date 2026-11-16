@@ -689,7 +689,8 @@ func buildApp(cfg ServerConfig, db *sql.DB) (ServerResult, error) {
 	if cfg.EnableWebhooks {
 		// The endpoint, job and delivery log tables, before App.Webhooks:
 		// without the job table no event is delivered (T947). It also adds
-		// event_id (D117) to a job table from before it.
+		// event_id (D117) and the claim columns (T1304) to a job table from
+		// before them.
 		if err := smeldr.CreateWebhookTables(db); err != nil {
 			return ServerResult{}, fmt.Errorf("create webhook tables: %w", err)
 		}

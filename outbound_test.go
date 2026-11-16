@@ -720,10 +720,10 @@ func TestWorkerPool_ClaimOnce(t *testing.T) {
 	pool.clock = newFakeClock(time.Now().UTC())
 	job := enqueueDueJob(t, pool, store)
 	ctx := context.Background()
-	if ok, err := pool.claimJob(ctx, job); err != nil || !ok {
+	if ok, _, err := pool.claimJob(ctx, job); err != nil || !ok {
 		t.Fatalf("first claim: %v %v", ok, err)
 	}
-	if ok, err := pool.claimJob(ctx, job); err != nil || ok {
+	if ok, _, err := pool.claimJob(ctx, job); err != nil || ok {
 		t.Fatalf("second claim: %v %v, want false", ok, err)
 	}
 }
@@ -736,7 +736,7 @@ func TestWorkerPool_ClaimLeaseExpires(t *testing.T) {
 	pool.clock = clk
 	job := enqueueDueJob(t, pool, store)
 	ctx := context.Background()
-	if ok, err := pool.claimJob(ctx, job); err != nil || !ok {
+	if ok, _, err := pool.claimJob(ctx, job); err != nil || !ok {
 		t.Fatalf("claim: %v %v", ok, err)
 	}
 	if due, err := pool.fetchDueJobs(ctx); err != nil || len(due) != 0 {
@@ -763,14 +763,14 @@ func TestWorkerPool_StaleSnapshotNotClaimed(t *testing.T) {
 		t.Fatalf("first attempt: %v", err)
 	}
 	clk.Advance(time.Hour) // past the retry delay: due again
-	if ok, err := pool.claimJob(ctx, stale); err != nil || ok {
+	if ok, _, err := pool.claimJob(ctx, stale); err != nil || ok {
 		t.Fatalf("stale claim: %v %v, want false", ok, err)
 	}
 	due, err := pool.fetchDueJobs(ctx)
 	if err != nil || len(due) != 1 || due[0].Attempts != 1 {
 		t.Fatalf("fresh fetch: %v %v", due, err)
 	}
-	if ok, err := pool.claimJob(ctx, due[0]); err != nil || !ok {
+	if ok, _, err := pool.claimJob(ctx, due[0]); err != nil || !ok {
 		t.Fatalf("fresh claim: %v %v", ok, err)
 	}
 }

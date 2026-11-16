@@ -106,6 +106,82 @@ func TestPG_OutboundClaimOnce(t *testing.T) {
 	}
 }
 
+// T1304 on Postgres: of ten workers that claim the same due job with its
+// holder, one wins and its claim ID is on the row; a retry of the held job
+// only leaves a request, so the job is not due; after the lease a retry
+// resets it.
+func TestPG_OutboundClaimHolder(t *testing.T) {
+	db, _ := isolatedDB(t)
+	ctx := context.Background()
+	if err := smeldr.CreateWebhookTables(db); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(ctx, `INSERT INTO smeldr_outbound_jobs (id, endpoint_id, target_url, secret_enc, payload, event, attempts, next_retry_at, created_at, expires_at, status)
+		VALUES ('j1', 'ep1', 'https://8.8.8.8/hook', 'enc', $1, 'post.created', 0, $2, $2, $3, 'pending')`,
+		[]byte(`{}`), now.Add(-time.Second), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	lease := now.Add(2 * time.Minute)
+	var won atomic.Int64
+	var winner atomic.Value
+	var wg sync.WaitGroup
+	errs := make(chan error, 10)
+	for i := range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id := "claim-" + string(rune('a'+i))
+			res, err := db.ExecContext(ctx, smeldr.OutboundClaimHolderSQL, lease, "j1", now, 0, id)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if n, _ := res.RowsAffected(); n == 1 {
+				won.Add(1)
+				winner.Store(id)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	if won.Load() != 1 {
+		t.Fatalf("%d workers claimed the job, want 1", won.Load())
+	}
+	var claimID string
+	if err := db.QueryRowContext(ctx, `SELECT claim_id FROM smeldr_outbound_jobs WHERE id = 'j1'`).Scan(&claimID); err != nil || claimID != winner.Load() {
+		t.Errorf("claim_id = %q %v, want %v", claimID, err, winner.Load())
+	}
+
+	app := smeldr.New(smeldr.Config{BaseURL: "http://localhost", Secret: []byte("test-secret-32-bytes-xxxxxxxxxxxx"), DB: db})
+	app.Webhooks(smeldr.NewWebhookStore(db, []byte("app-secret")))
+	if err := app.WebhookPool().RetryDead(ctx, "j1"); err != nil {
+		t.Fatal(err)
+	}
+	var requested bool
+	var next time.Time
+	if err := db.QueryRowContext(ctx, `SELECT retry_requested, next_retry_at FROM smeldr_outbound_jobs WHERE id = 'j1'`).Scan(&requested, &next); err != nil {
+		t.Fatal(err)
+	}
+	if !requested || !next.Equal(lease.Truncate(time.Microsecond)) {
+		t.Errorf("held job after a retry: requested %v, next %v; want the request and the lease kept", requested, next)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE smeldr_outbound_jobs SET claimed_until = $1 WHERE id = 'j1'`, now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.WebhookPool().RetryDead(ctx, "j1"); err != nil {
+		t.Fatal(err)
+	}
+	var cid string
+	if err := db.QueryRowContext(ctx, `SELECT retry_requested, claim_id FROM smeldr_outbound_jobs WHERE id = 'j1'`).Scan(&requested, &cid); err != nil || requested || cid != "" {
+		t.Errorf("after the lease: requested %v, claim %q, %v; want reset", requested, cid, err)
+	}
+}
+
 // T1266 on Postgres: webhook retry re-queues a dead job and a pending one in
 // its backoff, refuses a delivered job without changing it, and refuses an id
 // that names no job. The App's pool is used without App.Run, so no worker

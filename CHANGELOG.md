@@ -18,6 +18,14 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A webhook retry never makes two workers deliver one job (T1304).** A worker's claim only moved `next_retry_at`, so a job a worker held looked like one in its backoff: retrying it made it due, a second worker claimed it, both delivered, and the first then wrote over the row. Now the claim names its holder (`claim_id`) and its lease (`claimed_until`), the holder's update after its attempt applies only while its own claim is on the row, and a retry of a held job only leaves a request (`retry_requested`): the job is due now right after the attempt in flight if that attempt fails, and not sent again if it succeeds. If the holder dies, the next worker to claim the job after the lease honours the request. A job table without the new columns works as before.
+
+### Added
+
+- **`EnsureOutboundJobClaimColumns(ctx, db)` and `OutboundClaimHolderSQL` (T1304).** The function adds `claim_id`, `claimed_until` and `retry_requested` to a job table from before them; `CreateWebhookTables` calls it, so example/server's boot adds them. `OutboundClaimHolderSQL` is the worker pool's claim with a holder; `OutboundClaimSQL` is unchanged.
+
 ---
 
 ## [1.194.0] - 2026-11-16
