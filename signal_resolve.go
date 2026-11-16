@@ -220,9 +220,14 @@ func ratificationSignal(label, decisionID string) *Signal {
 // emitRatificationRequired opens the ratification-required condition of a
 // Decision now in proposed. The caller has checked none is open.
 func (a *App) emitRatificationRequired(ctx context.Context, decisionID string) {
-	if err := a.signalResolver().emit(ctx, ratificationSignal(decisionLabel(ctx, a.cfg.DB, decisionID), decisionID)); err != nil {
+	r := a.signalResolver()
+	if err := r.emit(ctx, ratificationSignal(decisionLabel(ctx, a.cfg.DB, decisionID), decisionID)); err != nil {
 		slog.WarnContext(ctx, "smeldr: ratification-required not emitted", "decision", decisionID, "error", err)
+		return
 	}
+	// Placed where the Decision is placed (T1289); a failure is logged and
+	// the next sweep places it.
+	r.syncDecisionConditionPlaces(ctx, decisionID)
 }
 
 // signalItemCreated opens the conditions a new item starts in: a Decision

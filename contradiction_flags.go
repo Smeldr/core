@@ -337,7 +337,7 @@ func (a *App) SweepContradictionConditions(ctx context.Context) (ContradictionSw
 	out.Stale = a.resolveStaleContradictions(ctx)
 	subjects, err := premisePairs(ctx, db,
 		`SELECT DISTINCT subject_id, '' FROM smeldr_signals
-		  WHERE signal_type IN ('conflict-detected', 'premise-flagged') AND subject_type = 'Decision' AND status = 'open'`)
+		  WHERE signal_type IN ('conflict-detected', 'premise-flagged', 'ratification-required') AND subject_type = 'Decision' AND status = 'open'`)
 	if err != nil {
 		slog.WarnContext(ctx, "smeldr: SweepContradictionConditions: open conditions not read", "error", err)
 		return out, nil

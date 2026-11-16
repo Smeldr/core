@@ -286,9 +286,9 @@ func (r signalResolver) premiseEdgeChanged(ctx context.Context, edge RelationEdg
 	}
 }
 
-// syncDecisionConditionPlaces keeps every open premise-flagged and
-// contradiction (conflict-detected) condition about a Decision placed where
-// the Decision is placed (T925, T928): a place edge of the
+// syncDecisionConditionPlaces keeps every open premise-flagged, contradiction
+// (conflict-detected) and ratification-required Signal about a Decision
+// placed where the Decision is placed (T925, T928, T1289): a place edge of the
 // condition that is not the Decision's current place is ended (cause
 // [EdgeEndMoved]) and the current one written if missing, in one
 // transaction per condition, announced after the commit. An unplaced
@@ -296,12 +296,14 @@ func (r signalResolver) premiseEdgeChanged(ctx context.Context, edge RelationEdg
 // and the condition stays where it was until the next sync or sweep.
 func (r signalResolver) syncDecisionConditionPlaces(ctx context.Context, decisionID string) {
 	if err := r.syncDecisionConditionPlacesErr(ctx, decisionID); err != nil && !isNoSuchTable(err) {
-		slog.WarnContext(ctx, "smeldr: premise-flagged place not synced", "decision", decisionID, "error", err)
+		slog.WarnContext(ctx, "smeldr: Decision condition place not synced", "decision", decisionID, "error", err)
 	}
 }
 
 func (r signalResolver) syncDecisionConditionPlacesErr(ctx context.Context, decisionID string) error {
-	open, err := r.selectOpen(ctx, "signal_type IN ('premise-flagged', 'conflict-detected') AND subject_type = 'Decision' AND subject_id = $1", decisionID)
+	// T1289: the ratification request is placed with its Decision too, so
+	// the place's approver reads the request it is asked to answer.
+	open, err := r.selectOpen(ctx, "signal_type IN ('premise-flagged', 'conflict-detected', 'ratification-required') AND subject_type = 'Decision' AND subject_id = $1", decisionID)
 	if err != nil || len(open) == 0 {
 		return err
 	}
