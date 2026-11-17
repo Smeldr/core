@@ -661,7 +661,7 @@ governance is wired.
 
 | Tool | Description |
 |------|-------------|
-| `grant_role` | Grants a role to a token. Requires `token_id` (the token's JWT user ID, not its `list_tokens` fingerprint) and `role`. Optional `scope_static` (array of `"type:id"`/`"type:*"` patterns) and `scope_anchor_id` for scoped roles. Optional `reason` and `expires_in_days` (mcp v1.53.0): a time-boxed grant stops authorizing when it expires, with no revoke, and stays in `list_grants`. |
+| `grant_role` | Grants a role to a token. Requires `token_id` (the token's JWT user ID, not its `list_tokens` fingerprint) and `role`. Optional `scope_static` (array of `"type:id"`/`"type:*"` patterns) and `scope_anchor_id`, which a role with a dynamic scope requires (without it the grant is refused with `grant.anchor_required`, T1248). Optional `reason` and `expires_in_days` (mcp v1.53.0): a time-boxed grant stops authorizing when it expires, with no revoke, and stays in `list_grants`. |
 | `list_grants` | Lists governance grants. Omit `token_id` to list every grant on the instance; pass it to filter to one token. |
 | `revoke_grant` | Revokes a grant by its own `id` (from `grant_role` or `list_grants`) — not by `token_id`. |
 

@@ -101,8 +101,10 @@ func TestReadScope_EquivalentToAuthorized(t *testing.T) {
 			[]RoleGrant{{RoleName: "g", ExpiresAt: &past}}},
 		{"no read op", []RoleDefinition{{Name: "w", Operations: []string{"update"}, ScopeMode: ScopeGlobal}},
 			[]RoleGrant{{RoleName: "w"}}},
+		// Grant refuses this shape now (T1248); the row is stored with an
+		// anchor and the anchor cleared below, as an older Grant left it.
 		{"dynamic without anchor", []RoleDefinition{{Name: "d", Operations: []string{"read"}, ScopeMode: ScopeDynamic, ScopeRelationKind: "belongs_to_domain", ScopeDirection: "incoming"}},
-			[]RoleGrant{{RoleName: "d"}}},
+			[]RoleGrant{{RoleName: "d", ScopeAnchorID: "A"}}},
 	}
 	candidates := [][2]string{
 		{"Decision", "d1"}, {"Decision", "d2"}, {"Task", "t1"}, {"Task", "a2"},
@@ -117,6 +119,11 @@ func TestReadScope_EquivalentToAuthorized(t *testing.T) {
 			for _, g := range c.grant {
 				g.TokenID = "tok"
 				f.grant(t, g)
+			}
+			if c.name == "dynamic without anchor" {
+				if _, err := f.db.ExecContext(context.Background(), `UPDATE smeldr_role_grants SET scope_anchor_id = NULL WHERE token_id = 'tok'`); err != nil {
+					t.Fatal(err)
+				}
 			}
 			s, err := LoadReadScope(context.Background(), f.rs, User{ID: "tok"})
 			if err != nil {

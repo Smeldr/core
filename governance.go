@@ -106,7 +106,46 @@ func migrateGovernance(ctx context.Context, db DB) error {
 	if _, err := pruneInertTokenGrants(ctx, db); err != nil {
 		slog.Warn("smeldr: migrateGovernance: inert grant pruning skipped", "err", err)
 	}
+	reportAnchorlessDynamicGrants(ctx, db)
 	return nil
+}
+
+// reportAnchorlessDynamicGrants logs, once at boot, the grants of a dynamic
+// role stored with no anchor (T1248). Grant refuses them now; an older one
+// authorizes nothing, so it is reported for an operator to revoke and never
+// deleted here. The log names grant IDs only. A failed read is a warning and
+// never stops the boot.
+func reportAnchorlessDynamicGrants(ctx context.Context, db DB) {
+	ids, err := anchorlessDynamicGrantIDs(ctx, db)
+	if err != nil {
+		slog.Warn("smeldr: migrateGovernance: anchorless dynamic grant check skipped", "err", err)
+		return
+	}
+	if len(ids) > 0 {
+		slog.Warn("smeldr: dynamic grants with no anchor authorize nothing; revoke them", "count", len(ids), "grant_ids", ids)
+	}
+}
+
+// anchorlessDynamicGrantIDs returns the IDs of the grants of a dynamic role
+// whose anchor is NULL or empty, in ID order.
+func anchorlessDynamicGrantIDs(ctx context.Context, db DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT g.id FROM smeldr_role_grants g JOIN smeldr_roles r ON r.id = g.role_id
+		  WHERE r.scope_mode = 'dynamic' AND (g.scope_anchor_id IS NULL OR g.scope_anchor_id = '')
+		  ORDER BY g.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // roleGrantExpiryUTCSuffix ends the text the SQLite driver writes for a UTC
@@ -1222,8 +1261,14 @@ func (s *RoleStore) GrantAt(ctx context.Context, grant RoleGrant, rev *int) (str
 	// T1213: a dynamic grant's anchor is the item's ID, resolved here from
 	// an ID, an address or a slug, so a grant never names an item it cannot
 	// find and then reads nothing. After the agent rule, whose refusals do
-	// not depend on whether the anchor exists.
-	if ScopeMode(scopeMode) == ScopeDynamic && strings.TrimSpace(grant.ScopeAnchorID) != "" {
+	// not depend on whether the anchor exists. T1248: a dynamic grant with
+	// no anchor reaches nothing (grant_no_anchor_test.go), so it is refused.
+	if ScopeMode(scopeMode) == ScopeDynamic {
+		if strings.TrimSpace(grant.ScopeAnchorID) == "" {
+			return "", nil, fieldErr(problemGrantAnchorRequired, "scope_anchor_id",
+				fmt.Sprintf("role %q has a dynamic scope, so a grant needs scope_anchor_id: the item it is over, by its address, slug or ID", grant.RoleName),
+				problemValues{"role": grant.RoleName})
+		}
 		id, err := s.resolveGrantAnchor(ctx, grant.RoleName, relKind.String, relDir.String, grant.ScopeAnchorID)
 		if err != nil {
 			return "", nil, err

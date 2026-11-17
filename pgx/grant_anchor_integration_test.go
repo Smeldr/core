@@ -55,4 +55,12 @@ func TestPG_GrantAnchorResolved(t *testing.T) {
 	if smeldr.ProblemTypeOf(err) != "grant.anchor_not_found" {
 		t.Errorf("unknown anchor: %v (%s)", err, smeldr.ProblemTypeOf(err))
 	}
+	// T1248: no anchor at all is refused, and nothing is stored.
+	_, err = store.Grant(ctx, smeldr.RoleGrant{TokenID: "none", RoleName: "domain-reader"})
+	if smeldr.ProblemTypeOf(err) != "grant.anchor_required" {
+		t.Errorf("no anchor: %v (%s)", err, smeldr.ProblemTypeOf(err))
+	}
+	if gs, err := store.ListGrants(ctx, "none"); err != nil || len(gs) != 0 {
+		t.Errorf("no anchor: grants %+v, %v; want none", gs, err)
+	}
 }

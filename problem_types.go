@@ -85,6 +85,7 @@ const (
 	problemGrantGrantorLacksAreaAuthority     ProblemType = "grant.grantor_lacks_area_authority"
 	problemGrantAuthorityUnreadable           ProblemType = "grant.authority_unreadable"
 	problemGrantAnchorNotFound                ProblemType = "grant.anchor_not_found"
+	problemGrantAnchorRequired                ProblemType = "grant.anchor_required"
 	problemGrantJobNeverGrants                ProblemType = "grant.job_never_grants"
 	problemGrantItemApproverScope             ProblemType = "grant.item_approver_scope"
 	problemGrantItemApproverNeedsHumanGrantor ProblemType = "grant.item_approver_needs_human_grantor"
@@ -265,6 +266,7 @@ var problemTypeList = []ProblemTypeInfo{
 	{ID: problemGrantGrantorLacksAreaAuthority, Status: 403, Title: "The grantor holds no approve-change over the Area it tries to delegate (Area role, or item-change-approver for a Check's Area)", Rule: "T971, D144", Audience: "person", Class: problemClassRefusal, Values: []string{"area", "token_class"}, AlwaysValues: []string{"area"}},
 	{ID: problemGrantAuthorityUnreadable, Status: 403, Title: "A grant check fails closed because the grantee/grantor class, the anchor, or the grantor's authority/Areas cannot be read", Rule: "D142, T971", Audience: "person", Class: problemClassFailure, Values: []string{"grantee", "grantor", "token_class", "role", "area"}},
 	{ID: problemGrantAnchorNotFound, Status: 422, Title: "A dynamic grant's anchor names no item, among the types the role's relation kind can anchor, that the granter may read", Rule: "T1213, D113", Audience: "person", Class: problemClassCorrection, Values: []string{"anchor", "role", "types"}, AlwaysValues: []string{"anchor", "role", "types"}},
+	{ID: problemGrantAnchorRequired, Status: 422, Title: "A grant of a role with a dynamic scope names no anchor, so it would reach nothing", Rule: "T1248", Audience: "person", Class: problemClassCorrection, Values: []string{"role"}, AlwaysValues: []string{"role"}},
 	{ID: problemGrantJobNeverGrants, Status: 403, Title: "A job token tries to grant any role", Rule: "D156, T986", Audience: "person", Class: problemClassRefusal, Values: []string{"role"}, AlwaysValues: []string{"role"}},
 	{ID: problemGrantItemApproverScope, Status: 403, Title: "An item-change-approver grant does not name exactly one ChangeCheck", Rule: "D144", Audience: "person", Class: problemClassCorrection, Values: []string{"role"}, AlwaysValues: []string{"role"}},
 	{ID: problemGrantItemApproverNeedsHumanGrantor, Status: 403, Title: "An item-change-approver grant has no known grantor, or the grantor is not human", Rule: "D144", Audience: "person", Class: problemClassRefusal, Values: []string{"role", "grantor_class"}, AlwaysValues: []string{"role"}},
