@@ -315,7 +315,7 @@ type App struct {
 	sitemapSourcesMounted  map[string]bool                     // application fragments (App.SitemapFragment) mounted on the mux
 	seo                    seoState                            // app-level SEO configuration set via SEO()
 	robotsTxtRegistered    bool                                // true once GET /robots.txt is registered
-	templateModules        []templateParser                    // modules with HTML templates; parsed at Run() time
+	templateModules        []templateParser                    // modules with HTML templates; parsed by prepareTemplates (Run or Handler)
 	llmsStore              *LLMsStore                          // non-nil when at least one module uses AIIndex
 	llmsTxtRegistered      bool                                // true once GET /llms.txt is registered
 	llmsFullTxtRegistered  bool                                // true once GET /llms-full.txt is registered
@@ -346,7 +346,12 @@ type App struct {
 	dynamicContentReg      bool                                // true once /_content/ routes and 2-segment dispatcher are registered
 	dynamicTypesLoaded     bool                                // guards loadDynamicTypes idempotency
 	rebuildDone            bool                                // true once startup rebuildAll goroutine is launched
-	partialsDir            string                              // set by App.Partials(); shared partial templates loaded at Run() time
+	partialsDir            string                              // set by App.Partials(); shared partial templates loaded at Run() or Handler() time
+	templatesMu            sync.Mutex                          // guards the three template fields below (prepareTemplates)
+	templatesPrepared      int                                 // templateModules[:n] have had parseTemplates called
+	partialsLoaded         bool                                // the partials directory has been read once
+	partials               []string                            // the partials read, pushed to each template module
+	templatesErr           error                               // the first partials or template error; RunListener returns it
 	tokenStore             *TokenStore                         // non-nil when Config.TokenStore is set; enables DB-backed token management
 	navTree                *NavTree                            // non-nil when NavMode is set or App.Nav() is called
 	navCodeItems           []NavItem                           // items supplied via App.Nav() for NavModeCode
@@ -1584,7 +1589,24 @@ func httpsRedirect() func(http.Handler) http.Handler {
 // to hand the handler to your own server (e.g. for testing or embedding):
 //
 //	srv := &http.Server{Handler: app.Handler()}
+//
+// Handler parses the HTML templates of every module with [Templates] (and
+// the [App.Partials]), as Run does, so the handler answers HTML the same way.
+// Register every module before the first Handler call. A template that does
+// not parse cannot stop Handler as it stops Run: it is logged once at ERROR,
+// naming the module's prefix and the file, and that module answers JSON.
+//
+// Four things belong to Run and [App.RunListener], not to Handler. A program
+// that serves Handler with its own server does without them:
+//   - the version line on stderr;
+//   - the webhook worker pool, so queued webhook jobs are not delivered;
+//   - scheduled publishing, so a scheduled item is not published at its time;
+//   - graceful shutdown on SIGINT or SIGTERM (event streams released, request
+//     contexts cancelled, every module's Stop called).
 func (a *App) Handler() http.Handler {
+	for _, err := range a.prepareTemplates() {
+		slog.Error("smeldr: templates did not parse, so this module answers JSON instead of HTML", "error", err)
+	}
 	a.wireSignalBus()
 	if a.sitemapStore != nil && !a.sitemapIndexRegistered {
 		a.sitemapIndexRegistered = true
@@ -2244,27 +2266,13 @@ func (a *App) Run(addr string) error {
 // ln is closed when RunListener returns. An error before serving (a partial or
 // template that does not parse) closes ln and is returned.
 func (a *App) RunListener(ln net.Listener) error {
-	// Load shared partials once, then push to each module before parsing.
-	partials, err := loadPartials(a.partialsDir)
-	if err != nil {
+	// Parse HTML templates (with the shared partials) before starting the
+	// server. Fail fast so startup errors are obvious rather than surfacing
+	// at request time.
+	a.prepareTemplates()
+	if err := a.templatesError(); err != nil {
 		ln.Close()
 		return err
-	}
-	if len(partials) > 0 {
-		for _, tp := range a.templateModules {
-			if sp, ok := tp.(interface{ setPartials([]string) }); ok {
-				sp.setPartials(partials)
-			}
-		}
-	}
-
-	// Parse HTML templates before starting the server. Fail fast so startup
-	// errors are obvious rather than surfacing as 406 responses at request time.
-	for _, tp := range a.templateModules {
-		if err := tp.parseTemplates(); err != nil {
-			ln.Close()
-			return err
-		}
 	}
 
 	// Log framework versions at startup.
@@ -2293,6 +2301,52 @@ func (a *App) RunListener(ln net.Listener) error {
 	// the process at once.
 	context.AfterFunc(ctx, stop)
 	return a.serve(ctx, ln, 5*time.Second)
+}
+
+// prepareTemplates loads the shared partials once and parses the templates of
+// every template module not parsed yet, in registration order (T1317). It is
+// idempotent: [App.RunListener] and [App.Handler] both call it, and each
+// module is parsed once. It returns the errors this call produced, each once:
+// the first error of all is kept for [App.templatesError]. A module whose
+// templates do not parse keeps answering JSON.
+func (a *App) prepareTemplates() []error {
+	a.templatesMu.Lock()
+	defer a.templatesMu.Unlock()
+	var fresh []error
+	record := func(err error) {
+		fresh = append(fresh, err)
+		if a.templatesErr == nil {
+			a.templatesErr = err
+		}
+	}
+	if !a.partialsLoaded {
+		p, err := loadPartials(a.partialsDir)
+		if err != nil {
+			record(err)
+		}
+		a.partialsLoaded, a.partials = true, p
+	}
+	partials := a.partials
+	for _, tp := range a.templateModules[a.templatesPrepared:] {
+		if len(partials) > 0 {
+			if sp, ok := tp.(interface{ setPartials([]string) }); ok {
+				sp.setPartials(partials)
+			}
+		}
+		if err := tp.parseTemplates(); err != nil {
+			record(err)
+		}
+		a.templatesPrepared++
+	}
+	return fresh
+}
+
+// templatesError is the first partials or template error [App.prepareTemplates]
+// met, or nil.
+func (a *App) templatesError() error {
+	a.templatesMu.Lock()
+	defer a.templatesMu.Unlock()
+	return a.templatesErr
 }
 
 // shutdownStreamGrace is how long a graceful shutdown lets in-flight requests

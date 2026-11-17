@@ -170,7 +170,7 @@ func (m *Module[T]) setPageMetaStore(s *PageMetaStore) {
 
 // setPartials stores the pre-loaded partial template sources so they are
 // registered into each module template set during [Module.parseTemplates].
-// Called by [App.Run] after [App.Partials] has loaded the partials directory.
+// Called by prepareTemplates after [App.Partials] has loaded the partials directory.
 func (m *Module[T]) setPartials(p []string) {
 	m.partials = p
 }
@@ -218,7 +218,7 @@ func (m *Module[T]) setSEODefaults(d *OGDefaults, a *AppSchema, ha *HeadAssets) 
 // (set via [setPartials]) in both template sets, and stores them
 // thread-safely under tplMu.
 //
-// Called by [App.Run] before the server starts. Returns a descriptive error
+// Called once per module by [App.Run] and [App.Handler] (prepareTemplates). Returns a descriptive error
 // when a required file is absent or a template fails to parse. Returns nil
 // immediately when no template directory is configured.
 func (m *Module[T]) parseTemplates() error {
