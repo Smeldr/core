@@ -693,6 +693,9 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 			return err
 		}
 	}
+	if transitionBeforeWrite != nil {
+		transitionBeforeWrite(r.typeName, id)
+	}
 	// Reads only: the winner's own write comes first and the items it
 	// supersedes after it, in one transaction where the handle supports one, so
 	// a failed winner leaves every loser untouched (task_plan item-68).
@@ -723,28 +726,33 @@ func (r *DynamicTypeRepo) setStatusVia(ctx context.Context, id string, status St
 // writeStatus writes node's move to status under plan: the UPDATE and the
 // items plan supersedes in one transaction where the handle supports one, then
 // plan's effects. scheduled is the scheduler's publish (T1004): it clears
-// scheduled_at and applies only while the row is still in node's status, and
-// written is false, with nothing written, when the row has moved since.
+// scheduled_at, and written is false, with nothing written, when the row has
+// moved since. Every write applies only while the row is still in node's
+// status (T1330): a caller's move that finds it moved is refused with
+// transition.state_moved, with nothing written, recorded or announced.
 func (r *DynamicTypeRepo) writeStatus(ctx context.Context, plan *conflictPlan, node *DynamicNode, status Status, publishedAt, now time.Time, actorID, surface string, scheduled bool) (written bool, err error) {
 	exec, commit, rollback, err := conflictTx(ctx, r.db)
 	if err != nil {
 		return false, err
 	}
 	defer rollback()
-	q := "UPDATE smeldr_dynamic_content SET status = $1, published_at = $2, updated_at = $3, last_actor = $4 WHERE id = $5 AND type_name = $6"
-	args := []any{string(status), publishedAt, now, actorID, node.ID, r.typeName}
+	q := "UPDATE smeldr_dynamic_content SET status = $1, published_at = $2, updated_at = $3, last_actor = $4 WHERE id = $5 AND type_name = $6 AND status = $7"
 	if scheduled {
 		q = "UPDATE smeldr_dynamic_content SET status = $1, published_at = $2, updated_at = $3, last_actor = $4, scheduled_at = NULL WHERE id = $5 AND type_name = $6 AND status = $7"
-		args = append(args, string(node.Status))
 	}
-	res, err := exec.ExecContext(ctx, q, args...)
+	res, err := exec.ExecContext(ctx, q, string(status), publishedAt, now, actorID, node.ID, r.typeName, string(node.Status))
 	if err != nil {
 		return false, err
 	}
-	if scheduled {
-		if n, err := res.RowsAffected(); err == nil && n == 0 {
-			return false, nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("%w: SetStatus: %s", ErrInternal, err)
+	}
+	if n == 0 {
+		if scheduled {
+			return false, nil // the scheduler has no caller to tell
 		}
+		return false, errStateMoved(ctx, exec, r.typeName, node.ID, true, string(node.Status), string(status))
 	}
 	moved := plan.supersede(ctx, exec)
 	if err := commit(); err != nil {
@@ -808,6 +816,9 @@ func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, schedu
 	if err := r.publishedSlugConflict(ctx, node); err != nil {
 		return err
 	}
+	if transitionBeforeWrite != nil {
+		transitionBeforeWrite(r.typeName, id)
+	}
 	// The conflict policy applies when Scheduled is the flow's ActiveState (rare,
 	// but it keeps "every status writer applies the policy or cannot reach the
 	// active state" true without an exception). Same shape as setStatusVia: reads,
@@ -819,11 +830,18 @@ func (r *DynamicTypeRepo) ScheduleContent(ctx context.Context, id string, schedu
 	defer plan.release()
 	ctx = plan.holding(ctx)
 	now := time.Now().UTC()
-	_, err = r.db.ExecContext(ctx,
-		"UPDATE smeldr_dynamic_content SET status = $1, scheduled_at = $2, updated_at = $3, last_actor = $4 WHERE id = $5 AND type_name = $6",
-		string(Scheduled), scheduledAt, now, actorID, id, r.typeName)
+	// T1330: only from the state the move was checked from; a moved item is
+	// refused before any loser moves and before anything is recorded.
+	res, err := r.db.ExecContext(ctx,
+		"UPDATE smeldr_dynamic_content SET status = $1, scheduled_at = $2, updated_at = $3, last_actor = $4 WHERE id = $5 AND type_name = $6 AND status = $7",
+		string(Scheduled), scheduledAt, now, actorID, id, r.typeName, string(node.Status))
 	if err != nil {
 		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("%w: ScheduleContent: %s", ErrInternal, err)
+	} else if n == 0 {
+		return errStateMoved(ctx, r.db, r.typeName, id, true, string(node.Status), string(Scheduled))
 	}
 	plan.run(ctx, r.db, r.relStore, r.prov, r.announce, true, "")
 	changed := *node

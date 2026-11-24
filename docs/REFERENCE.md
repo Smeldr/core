@@ -4352,8 +4352,13 @@ a refused move may still advance the rev). Read the item again and decide whethe
 `ConflictSupersede` plan is moved only while it is still in the active state it was planned in; one
 that left it meanwhile stays where it is. Core's own callers that expect the race handle it: a
 change Check moved while it was settled (superseded by a newer commit, or settled by a redelivery) is
-left where the other call put it. Not yet covered (T1330): `DrainEvalQueue` and the runtime-defined
-types' status writes.
+left where the other call put it. Runtime-defined types are refused the same way (T1330):
+`DynamicTypeRepo.SetStatus`/`SetStatusWithReason`, `POST /_content/{type}/{id}/status`,
+`transition_item` on such a type, and `ScheduleContent` (no `scheduled_at` is set for a refused
+schedule); the scheduler's own publish skips a moved item without an error. `App.DrainEvalQueue`
+has no caller to refuse: a queued move whose item moved after the drain read it is skipped, logged
+at Warn (item, the state it was queued from, the state it is in now), counted in `skipped`, and its
+queue row deleted.
 - `POST /_content/{type}/{id}/status` records surface `"http"` and the authenticated caller as
   actor (v1.109.1; v1.109.0 recorded no actor there because the handler passed the plain request
   context).

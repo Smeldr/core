@@ -1689,11 +1689,24 @@ func (a *App) TransitionItemAt(ctx context.Context, surface, typeName, slug, toS
 	return a.transitionItem(ctx, surface, typeName, slug, toState, reason, &rev)
 }
 
-// transitionBeforeWrite, when set, runs in transitionItem for a compiled type
-// after the move is validated and before its transaction opens: a test sets
-// it to make another call land between the read of the state and the write
-// (T1324). It must never be set outside a test; production leaves it nil.
+// transitionBeforeWrite, when set, runs after a move is validated and before
+// it is planned and written, at four places: transitionItem for a compiled
+// type (T1324), DynamicTypeRepo.setStatusVia and ScheduleContent, and
+// DrainEvalQueue's write (T1330). A test sets it to make another call land
+// between the read of the state and the write. It must never be set outside a
+// test; production leaves it nil.
 var transitionBeforeWrite func(typeName, id string)
+
+// errStateMoved is the refusal of a move checked from the state from whose
+// item another call moved before the write (T1324, T1330). db is the handle
+// the write ran on (its open transaction, if any), so the address is read
+// there; dynamic says the type is runtime-defined.
+func errStateMoved(ctx context.Context, db DB, typeName, id string, dynamic bool, from, to string) error {
+	item := addressOrID(lookupAddressByID(ctx, db, typeName, id, dynamic), id)
+	return problem(problemTransitionStateMoved,
+		fmt.Errorf("%w: %s %s moved from %s while it was moved to %s; read it again", ErrConflict, typeName, item, from, to),
+		problemValues{"type": typeName, "item": item, "from": from, "to": to})
+}
 
 // transitionItem is TransitionItemVia with an expected rev (nil: none named).
 func (a *App) transitionItem(ctx context.Context, surface, typeName, slug, toState, reason string, expected *int) (map[string]any, error) {
@@ -1862,10 +1875,7 @@ func (a *App) transitionItem(ctx context.Context, surface, typeName, slug, toSta
 	} else if n == 0 {
 		// Rolled back by the deferred rollback: no rev bump, no superseded
 		// loser, and nothing recorded or announced for this move.
-		item := addressOrID(lookupAddressByID(ctx, exec, typeName, id, false), id)
-		return nil, problem(problemTransitionStateMoved,
-			fmt.Errorf("%w: %s %s moved from %s while it was moved to %s; read it again", ErrConflict, typeName, item, currentStatus, toState),
-			problemValues{"type": typeName, "item": item, "from": currentStatus, "to": toState})
+		return nil, errStateMoved(ctx, exec, typeName, id, false, currentStatus, toState)
 	}
 	moved := plan.supersede(ctx, exec)
 	if err := commit(); err != nil {
@@ -2256,6 +2266,9 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 			// active item, like every other status writer. A rejection is a skip:
 			// logged, counted, and the queue row is deleted below as for any other
 			// blocked transition.
+			if transitionBeforeWrite != nil {
+				transitionBeforeWrite(r.typeName, r.itemID)
+			}
 			plan, planErr := planConflict(ctx, db, r.typeName, r.toState, r.itemID)
 			if planErr != nil {
 				slog.WarnContext(ctx, "smeldr: DrainEvalQueue: skipped by the conflict policy, not re-queued",
@@ -2263,21 +2276,37 @@ func (a *App) DrainEvalQueue(ctx context.Context) (walked, triggered, skipped in
 				skipped++
 				break
 			}
-			_, updateErr := db.ExecContext(ctx,
-				"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2, last_actor = $3 WHERE id = $4",
-				r.toState, now, "drain-eval-queue", r.itemID,
+			// T1330: only from the state the gate read. An item another call
+			// moved meanwhile is skipped: the queued move was decided for a
+			// state it has left.
+			res, updateErr := db.ExecContext(ctx,
+				"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2, last_actor = $3 WHERE id = $4 AND status = $5",
+				r.toState, now, "drain-eval-queue", r.itemID, fromState,
 			)
 			if isNoSuchColumn(updateErr, "last_actor") {
-				_, updateErr = db.ExecContext(ctx,
-					"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
-					r.toState, now, r.itemID,
+				res, updateErr = db.ExecContext(ctx,
+					"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3 AND status = $4",
+					r.toState, now, r.itemID, fromState,
 				)
 			}
-			if updateErr != nil {
+			var moved int64 = 1
+			if updateErr == nil {
+				moved, updateErr = res.RowsAffected()
+			}
+			switch {
+			case updateErr != nil:
 				slog.WarnContext(ctx, "smeldr: DrainEvalQueue: UPDATE failed",
 					"type_name", r.typeName, "item_id", r.itemID, "to_state", r.toState, "error", updateErr)
 				skipped++
-			} else {
+			case moved == 0:
+				// The state it is in now, as the gate read it ("unknown" when
+				// it is gone).
+				current := "unknown"
+				_ = db.QueryRowContext(ctx, "SELECT status FROM "+quoteIdent(table)+" WHERE id = $1", r.itemID).Scan(&current)
+				slog.WarnContext(ctx, "smeldr: DrainEvalQueue: the item moved before the drain wrote; skipped, not re-queued",
+					"type_name", r.typeName, "item_id", r.itemID, "queued_from", fromState, "now", current, "to_state", r.toState)
+				skipped++
+			default:
 				// T1010: the move advances the item's rev, as transition_item's does.
 				if _, _, err := bumpRev(ctx, db, table, r.typeName, r.itemID, nil); err != nil {
 					slog.WarnContext(ctx, "smeldr: DrainEvalQueue: rev not advanced",
