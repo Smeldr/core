@@ -14,9 +14,10 @@ import (
 
 // T1330 on Postgres: two moves of one runtime-defined item from draft at the
 // same moment (to published and to archived) never both write over each
-// other. Thirty rounds on real parallel connections: every refusal is
-// transition.state_moved, and the item ends in the state of a move that was
-// not refused. Core's deterministic test proves the order; this one runs the
+// other. Thirty rounds on real parallel connections: a refusal is
+// transition.state_moved (the moves overlapped) or transition.not_permitted
+// (they ran one after the other and the flow refuses the second from the
+// first's state), and the item ends in the state of a move that went through. Core's deterministic test proves the order; this one runs the
 // same SQL under load.
 func TestPG_DynamicSetStatus_ConcurrentMoves(t *testing.T) {
 	db, _ := isolatedDB(t)
@@ -65,12 +66,17 @@ func TestPG_DynamicSetStatus_ConcurrentMoves(t *testing.T) {
 				won = append(won, string(targets[i]))
 			case smeldr.ProblemTypeOf(err) == "transition.state_moved":
 				refused++
+			case smeldr.ProblemTypeOf(err) == "transition.not_permitted":
+				// The two ran one after the other: the second read the
+				// first's state and its flow refuses the move from there.
 			default:
 				t.Fatalf("round %d, move to %s: %v", round, targets[i], err)
 			}
 		}
-		// One refused: the item is in the other's state. None refused: the
-		// two ran one after the other, and the item is in one of them.
+		// One went through: the item is in its state (the other was refused,
+		// for a concurrent move or by the flow after the first). Both went
+		// through: they ran one after the other, and the item is in one of
+		// them. Never neither.
 		if len(won) == 1 && status != won[0] || len(won) == 0 {
 			t.Fatalf("round %d: status %s, moves that went through %v", round, status, won)
 		}
