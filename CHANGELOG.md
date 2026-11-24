@@ -18,6 +18,14 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+### Changed
+
+- **A move whose item moved meanwhile is refused with `transition.state_moved` (T1324).** `App.TransitionItemVia` (and `transition_item`, `TransitionItem`, `TransitionItemWithReason`) checks the move from the state it read and then writes it; the write now names that state. When another call moved the item in between, the move is refused with `ErrConflict` (HTTP 409, MCP -32001) and the type `transition.state_moved`, values `type`, `item`, `from` (the state the move was checked from) and `to`, and nothing is written, recorded or announced for it. Before, the last write won, also into a state the item's flow forbids from where the other call had left it. What to do: read the item again and decide whether the move still holds. On a handle without transactions (no `BeginTx`) a refused move may still advance the item's rev. A loser of a `ConflictSupersede` plan that left the active state meanwhile is no longer superseded: it stays where the other call put it.
+
+### Fixed
+
+- **Two commits of one pull request checked at the same moment leave one live Check (T1324).** A settle of the older Check could write `commented` over the `superseded` that the newer commit's call had just set, so both Checks were live and none was superseded (seen in CI as a flaky `TestCheckChange_OneLiveCheck`). The settle now finds a Check moved meanwhile and leaves it where the other call put it, so the older Check stays superseded with the edge from the newer one, on SQLite and on Postgres.
+
 ---
 
 ## [1.195.0] - 2026-11-24

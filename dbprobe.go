@@ -248,23 +248,31 @@ const columnFallbackSavepoint = "smeldr_column_fallback"
 // still fails the whole change atomically (A398), and on SQLite the caller sees
 // the error and decides. The savepoint is released best-effort in every case.
 func execWithColumnFallback(ctx context.Context, exec DB, column, first string, firstArgs []any, fallback string, fallbackArgs []any) error {
+	_, err := execWithColumnFallbackResult(ctx, exec, column, first, firstArgs, fallback, fallbackArgs)
+	return err
+}
+
+// execWithColumnFallbackResult is [execWithColumnFallback] that also returns
+// the result of the statement that ran, so a conditional write can read how
+// many rows it moved (T1324).
+func execWithColumnFallbackResult(ctx context.Context, exec DB, column, first string, firstArgs []any, fallback string, fallbackArgs []any) (sql.Result, error) {
 	tx, inTx := exec.(*sql.Tx)
 	if inTx {
 		if _, err := tx.ExecContext(ctx, "SAVEPOINT "+columnFallbackSavepoint); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	_, err := exec.ExecContext(ctx, first, firstArgs...)
+	res, err := exec.ExecContext(ctx, first, firstArgs...)
 	if err != nil && isNoSuchColumn(err, column) {
 		if inTx {
 			if _, rerr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+columnFallbackSavepoint); rerr != nil {
-				return rerr
+				return nil, rerr
 			}
 		}
-		_, err = exec.ExecContext(ctx, fallback, fallbackArgs...)
+		res, err = exec.ExecContext(ctx, fallback, fallbackArgs...)
 	}
 	if inTx {
 		_, _ = tx.ExecContext(ctx, "RELEASE SAVEPOINT "+columnFallbackSavepoint)
 	}
-	return err
+	return res, err
 }

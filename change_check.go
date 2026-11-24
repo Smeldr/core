@@ -641,7 +641,21 @@ func (a *App) settleChangeCheck(ctx context.Context, c *ChangeCheck) error {
 		to, reason = ChangeCheckAwaitingApproval, "a touched Area requires approval"
 	}
 	if _, err := a.TransitionItemVia(ctx, "", "ChangeCheck", c.ID, to, reason); err != nil {
-		return err
+		if ProblemTypeOf(err) != problemTransitionStateMoved {
+			return err
+		}
+		// Another call moved it meanwhile (T1324): superseded by a newer
+		// commit checked at the same moment, or settled by a redelivery. It
+		// stays where that call put it.
+		now, ferr := QueryOne[*ChangeCheck](ctx, a.cfg.DB, `SELECT * FROM smeldr_change_checks WHERE id = $1`, c.ID)
+		if ferr != nil {
+			return fmt.Errorf("%w: read the Check %s again: %v", ErrInternal, addressOrID(c.Address, c.ID), ferr)
+		}
+		if string(now.Status) == ChangeCheckChecking {
+			return err
+		}
+		*c = *now
+		return nil
 	}
 	c.Status = Status(to)
 	if to == ChangeCheckAwaitingApproval {

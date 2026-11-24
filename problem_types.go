@@ -131,6 +131,7 @@ const (
 	problemRelationWithdrawFailed             ProblemType = "relation.withdraw_failed"
 	problemTransitionNotPermitted             ProblemType = "transition.not_permitted"
 	problemTransitionUnknownTarget            ProblemType = "transition.unknown_target"
+	problemTransitionStateMoved               ProblemType = "transition.state_moved"
 	problemStateUnknownInitial                ProblemType = "state.unknown_initial"
 	problemTransitionSingletonState           ProblemType = "transition.singleton_state"
 	problemItemLockedState                    ProblemType = "item.locked_state"
@@ -312,6 +313,7 @@ var problemTypeList = []ProblemTypeInfo{
 	{ID: problemRelationWithdrawFailed, Status: 409, Title: "Withdrawing a relation whose row could not be updated (changed concurrently)", Rule: "T1010", Audience: "person", Class: problemClassConflict, Values: []string{"relation"}, AlwaysValues: []string{"relation"}},
 	{ID: problemTransitionNotPermitted, Status: 409, Title: "The from-to transition is not in the type's flow", Audience: "person", Class: problemClassRefusal, Values: []string{"type", "from", "to"}, AlwaysValues: []string{"type", "from", "to"}},
 	{ID: problemTransitionUnknownTarget, Status: 409, Title: "The target state does not exist in the type's flow", Audience: "person", Class: problemClassCorrection, Values: []string{"type", "to"}, AlwaysValues: []string{"type", "to"}},
+	{ID: problemTransitionStateMoved, Status: 409, Title: "The item moved to another state while it was moved", Audience: "person", Class: problemClassCorrection, Values: []string{"type", "item", "from", "to"}, AlwaysValues: []string{"type", "item", "from", "to"}},
 	{ID: problemStateUnknownInitial, Status: 409, Title: "A create names an initial status that is not a state in the registered flow", Audience: "person", Class: problemClassCorrection, Values: []string{"type", "state"}, AlwaysValues: []string{"type", "state"}},
 	{ID: problemTransitionSingletonState, Status: 409, Title: "The type already has an item in a state that admits only one", Audience: "person", Class: problemClassRefusal, Values: []string{"type", "state"}, AlwaysValues: []string{"type", "state"}},
 	{ID: problemItemLockedState, Status: 409, Title: "Editing (or re-slugging) an item in a locked state", Audience: "person", Class: problemClassRefusal, Values: []string{"type", "record", "state"}, AlwaysValues: []string{"type", "record", "state"}},

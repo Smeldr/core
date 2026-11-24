@@ -4338,6 +4338,22 @@ name). Before this these paths recorded only `last_actor`.
   the signal bus.
 - **No backfill.** Transitions made before the instance upgraded have no record and none can be
   reconstructed.
+
+### A move is written only from the state it was checked from (T1324)
+
+`App.TransitionItemVia` reads the item's state, checks the move against the flow, and writes it in
+a later transaction. The write names the state it was checked from (`... WHERE id = $id AND
+status = $from`). When another call moved the item in between, nothing is written: the move is
+refused with `ErrConflict` (HTTP 409, MCP -32001) and the refusal type `transition.state_moved`,
+values `type`, `item` (address or ID), `from` and `to`. The transaction is rolled back, so the rev is
+not advanced, no `ConflictSupersede` loser is moved, and no provenance, event or webhook is written
+for the refused move (on a handle without `BeginTx` the rev bump before the write is not undone, so
+a refused move may still advance the rev). Read the item again and decide whether the move still holds. A loser of a
+`ConflictSupersede` plan is moved only while it is still in the active state it was planned in; one
+that left it meanwhile stays where it is. Core's own callers that expect the race handle it: a
+change Check moved while it was settled (superseded by a newer commit, or settled by a redelivery) is
+left where the other call put it. Not yet covered (T1330): `DrainEvalQueue` and the runtime-defined
+types' status writes.
 - `POST /_content/{type}/{id}/status` records surface `"http"` and the authenticated caller as
   actor (v1.109.1; v1.109.0 recorded no actor there because the handler passed the plain request
   context).

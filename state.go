@@ -1241,24 +1241,33 @@ func (p *conflictPlan) supersede(ctx context.Context, exec DB) []string {
 	now := time.Now().UTC()
 	actorID, _ := actorFromContext(ctx)
 	var moved []string
+	left := 0
 	for _, oldID := range p.losers {
+		// T1324: a loser is moved only while it is still in the active state
+		// it was planned in; one that another call moved meanwhile is left
+		// where that call put it.
+		var res sql.Result
 		var updateErr error
 		if p.isDynamic {
-			updateErr = execWithColumnFallback(ctx, exec, "last_actor",
-				`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1, last_actor = $2 WHERE id = $3 AND type_name = $4`,
-				[]any{now, actorID, oldID, p.typeName},
-				`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1 WHERE id = $2 AND type_name = $3`,
-				[]any{now, oldID, p.typeName})
+			res, updateErr = execWithColumnFallbackResult(ctx, exec, "last_actor",
+				`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1, last_actor = $2 WHERE id = $3 AND type_name = $4 AND status = $5`,
+				[]any{now, actorID, oldID, p.typeName, p.activeState},
+				`UPDATE smeldr_dynamic_content SET status = 'superseded', updated_at = $1 WHERE id = $2 AND type_name = $3 AND status = $4`,
+				[]any{now, oldID, p.typeName, p.activeState})
 		} else {
-			updateErr = execWithColumnFallback(ctx, exec, "last_actor",
-				`UPDATE `+quoteIdent(p.table)+` SET status = 'superseded', updated_at = $1, last_actor = $2 WHERE id = $3`,
-				[]any{now, actorID, oldID},
-				`UPDATE `+quoteIdent(p.table)+` SET status = 'superseded', updated_at = $1 WHERE id = $2`,
-				[]any{now, oldID})
+			res, updateErr = execWithColumnFallbackResult(ctx, exec, "last_actor",
+				`UPDATE `+quoteIdent(p.table)+` SET status = 'superseded', updated_at = $1, last_actor = $2 WHERE id = $3 AND status = $4`,
+				[]any{now, actorID, oldID, p.activeState},
+				`UPDATE `+quoteIdent(p.table)+` SET status = 'superseded', updated_at = $1 WHERE id = $2 AND status = $3`,
+				[]any{now, oldID, p.activeState})
 		}
 		if updateErr != nil {
 			slog.WarnContext(ctx, "smeldr: conflict policy: supersede UPDATE failed",
 				"type", p.typeName, "id", oldID, "error", updateErr)
+			continue
+		}
+		if n, err := res.RowsAffected(); err == nil && n == 0 {
+			left++
 			continue
 		}
 		// T1010: a superseded item's rev advances too, so a stale write to it
@@ -1271,7 +1280,7 @@ func (p *conflictPlan) supersede(ctx context.Context, exec DB) []string {
 		}
 		moved = append(moved, oldID)
 	}
-	if len(moved) < len(p.losers) {
+	if len(moved)+left < len(p.losers) {
 		slog.ErrorContext(ctx, "smeldr: conflict policy: not every active item was superseded, the type now has more than one item in its active state",
 			"type", p.typeName, "active_state", p.activeState, "winner", p.newItemID,
 			"planned", len(p.losers), "superseded", len(moved))
@@ -1680,6 +1689,12 @@ func (a *App) TransitionItemAt(ctx context.Context, surface, typeName, slug, toS
 	return a.transitionItem(ctx, surface, typeName, slug, toState, reason, &rev)
 }
 
+// transitionBeforeWrite, when set, runs in transitionItem for a compiled type
+// after the move is validated and before its transaction opens: a test sets
+// it to make another call land between the read of the state and the write
+// (T1324). It must never be set outside a test; production leaves it nil.
+var transitionBeforeWrite func(typeName, id string)
+
 // transitionItem is TransitionItemVia with an expected rev (nil: none named).
 func (a *App) transitionItem(ctx context.Context, surface, typeName, slug, toState, reason string, expected *int) (map[string]any, error) {
 	desc := a.typeRegistry.Lookup(typeName)
@@ -1780,6 +1795,9 @@ func (a *App) transitionItem(ctx context.Context, surface, typeName, slug, toSta
 			return nil, err
 		}
 	}
+	if transitionBeforeWrite != nil {
+		transitionBeforeWrite(typeName, id)
+	}
 	// The conflict policy decides with reads only, before anything is written;
 	// the winner's own write comes first and the items it supersedes after it,
 	// in one transaction where the handle supports one, so a failed winner
@@ -1827,13 +1845,27 @@ func (a *App) transitionItem(ctx context.Context, surface, typeName, slug, toSta
 	// UPDATE when the column doesn't exist, rather than special-casing by
 	// type. Tables this framework owns (the six orchestration tables,
 	// smeldr_dynamic_content) always have the column from this commit on.
-	if err := execWithColumnFallback(ctx, exec, "last_actor",
-		"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2, last_actor = $3 WHERE id = $4",
-		[]any{toState, now, actorID, id},
-		"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3",
-		[]any{toState, now, id},
-	); err != nil {
+	// T1324: the write names the state the move was validated from, so a
+	// move another call made meanwhile is never undone (the last writer used
+	// to win, also into a state the flow forbids from where the item was).
+	res, err := execWithColumnFallbackResult(ctx, exec, "last_actor",
+		"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2, last_actor = $3 WHERE id = $4 AND status = $5",
+		[]any{toState, now, actorID, id, currentStatus},
+		"UPDATE "+quoteIdent(table)+" SET status = $1, updated_at = $2 WHERE id = $3 AND status = $4",
+		[]any{toState, now, id, currentStatus},
+	)
+	if err != nil {
 		return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("%w: TransitionItem: %s", ErrInternal, err)
+	} else if n == 0 {
+		// Rolled back by the deferred rollback: no rev bump, no superseded
+		// loser, and nothing recorded or announced for this move.
+		item := addressOrID(lookupAddressByID(ctx, exec, typeName, id, false), id)
+		return nil, problem(problemTransitionStateMoved,
+			fmt.Errorf("%w: %s %s moved from %s while it was moved to %s; read it again", ErrConflict, typeName, item, currentStatus, toState),
+			problemValues{"type": typeName, "item": item, "from": currentStatus, "to": toState})
 	}
 	moved := plan.supersede(ctx, exec)
 	if err := commit(); err != nil {

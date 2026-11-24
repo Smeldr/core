@@ -70,6 +70,7 @@ Every refusal and validation error Smeldr core answers with carries a stable **t
 | `relation.withdraw_failed` | conflict | 409 | person | **`relation`** | T1010 | Withdrawing a relation whose row could not be updated (changed concurrently) |  |
 | `transition.not_permitted` | refusal | 409 | person | **`type`**, **`from`**, **`to`** |  | The from-to transition is not in the type's flow |  |
 | `transition.unknown_target` | correction | 409 | person | **`type`**, **`to`** |  | The target state does not exist in the type's flow |  |
+| `transition.state_moved` | correction | 409 | person | **`type`**, **`item`**, **`from`**, **`to`** |  | The item moved to another state while it was moved |  |
 | `state.unknown_initial` | correction | 409 | person | **`type`**, **`state`** |  | A create names an initial status that is not a state in the registered flow |  |
 | `transition.singleton_state` | refusal | 409 | person | **`type`**, **`state`** |  | The type already has an item in a state that admits only one |  |
 | `item.locked_state` | refusal | 409 | person | **`type`**, **`record`**, **`state`** |  | Editing (or re-slugging) an item in a locked state |  |
