@@ -18,12 +18,17 @@ cross-referenced below by their Amendment ID.
 
 ## [Unreleased]
 
+---
+
+## [1.195.0] - 2026-11-24
+
 ### Security
 
 - **The release binary signs an OAuth client in with the pasted token (T1287).** With `OAUTH_ISSUER` set, example/server wires smeldr.dev/oauth's `ResolveBearer` and `TokenActive` to `TokenStore.ActingUser`. The access token then stands for the pasted token, and a revoked or expired token ends the client's access at its next refresh. Clients signed in before this sign in again.
 
 ### Changed
 
+- **The release binary is built with smeldr.dev/mcp v1.78.0 (it was v1.77.3).** It brings `record_close`, the OAuth sign-in that stands for the pasted token (T1287), clearer refusals in `retry_webhook` (T1266) and the grant tools (T1248), and tool descriptions that name no record of smeldr.dev's own instance (T1222); see smeldr.dev/mcp's CHANGELOG.
 - **The release binary checks `OAUTH_ISSUER` at start (T1286).** Before, any value was published as given, so `not-a-url` gave the endpoint `not-a-url/oauth/authorize`.
   - Now the start stops, naming `OAUTH_ISSUER`, when the value is not an absolute http or https URL with a host, or has a query or a fragment. With these, every OAuth endpoint answered 404.
   - `OAUTH_ISSUER` without `ENABLE_TOKENS` is refused, since an access token stands for a Smeldr token.
