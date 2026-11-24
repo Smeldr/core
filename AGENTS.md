@@ -721,7 +721,7 @@ Since smeldr.dev/mcp v1.61.0 (A500) every MCP tool applies them:
 - an item the reader may not read answers -32000 "not found", the same as a missing one, on every tool and on `resources/read` (which used -32001 before);
 - `list_signals`, `list_content` and the `list_*` tools count and page readable items only;
 - `transition_item` needs read on the type, then, on the one item, `manage` or the operation the requested transition requires (since smeldr.dev/mcp v1.61.1): forbidden only for an item the reader can see;
-- `transition_item` on an item that another call moved between the check and the write answers -32001 with `data.id` `transition.state_moved` (values `from`, `to`) and writes nothing (core T1324): read the item again and decide whether the move still holds; `schedule_content` and `transition_item` on a runtime-defined type answer the same (T1330);
+- `transition_item` on an item that another call moved between the check and the write answers -32001 with `data.id` `transition.state_moved` (values `from`, `to`) and writes nothing (core T1324): read the item again and decide whether the move still holds; `schedule_content` and `transition_item` on a runtime-defined type answer the same (T1330), and so do `publish_*`, `schedule_*` and `archive_*` when the item's status moved (a field changed meanwhile answers -32001 `rev.conflict`, T1331);
 - `create_signal` stores a readable subject by its ID; `delegate_item`, `create_preview_url` and the relation writes check the items they name.
 
 **Delegating a role to someone else, time-boxed** — `delegate_item` (Author+

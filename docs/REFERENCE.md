@@ -4355,7 +4355,13 @@ change Check moved while it was settled (superseded by a newer commit, or settle
 left where the other call put it. Runtime-defined types are refused the same way (T1330):
 `DynamicTypeRepo.SetStatus`/`SetStatusWithReason`, `POST /_content/{type}/{id}/status`,
 `transition_item` on such a type, and `ScheduleContent` (no `scheduled_at` is set for a refused
-schedule); the scheduler's own publish skips a moved item without an error. `App.DrainEvalQueue`
+schedule); the scheduler's own publish skips a moved item without an error. A compiled module's
+lifecycle tools (`MCPPublish`, `MCPSchedule`, `MCPArchive`, T1331) save the whole item after the
+check, so they rely on the repository: `SQLRepo.Save` refuses a stale `Rev` with `ErrRevConflict`, and
+the tools answer `transition.state_moved` when the other call moved the status and `rev.conflict` when
+it changed a field, with nothing written either way. A custom `Repository` keeps another call's write
+only when its `Save` refuses a stale `Rev` the same way (the interface is unchanged; without the check
+the last save wins, as before). `MemoryRepo.Save` has no rev check. `App.DrainEvalQueue`
 has no caller to refuse: a queued move whose item moved after the drain read it is skipped, logged
 at Warn (item, the state it was queued from, the state it is in now), counted in `skipped`, and its
 queue row deleted.

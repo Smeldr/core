@@ -3842,6 +3842,24 @@ func (m *Module[T]) patchHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, item)
 }
 
+// saveMove saves item, which a lifecycle tool moved from prevStatus to to.
+// A Save refused for a concurrent write ([ErrRevConflict], as [SQLRepo]
+// answers) is told apart (T1331): when the stored item's status is no longer
+// prevStatus, another call moved it and the answer is transition.state_moved,
+// as transition_item gives; otherwise another call changed a field and the
+// answer stays the rev conflict. Nothing is written either way.
+func (m *Module[T]) saveMove(ctx Context, item T, prevStatus, to Status) error {
+	err := m.repo.Save(ctx, item)
+	if !errors.Is(err, ErrRevConflict) {
+		return err
+	}
+	stored, ferr := m.repo.FindByID(ctx, nodeIDOf(item))
+	if ferr != nil || nodeStatusOf(stored) == prevStatus {
+		return err
+	}
+	return errStateMoved(ctx, m.db, m.contentTypeName, nodeIDOf(item), false, string(prevStatus), string(to))
+}
+
 // MCPPublish transitions the item with the given slug to Published, sets
 // PublishedAt to now, fires AfterPublish, and triggers derived-content rebuild.
 // reason is threaded into validateTransition's own RequiredReason gate (T237).
@@ -3868,7 +3886,7 @@ func (m *Module[T]) MCPPublish(ctx Context, slug, reason string) error {
 	ctx = plan.holdingContext(ctx)
 	setNodeStatus(item, Published)
 	setNodeTime(item, "PublishedAt", time.Now().UTC())
-	if err := m.repo.Save(ctx, item); err != nil {
+	if err := m.saveMove(ctx, item, prevStatus, Published); err != nil {
 		return err
 	}
 	// The winner is saved: now the items it supersedes. The repository is a
@@ -3910,7 +3928,7 @@ func (m *Module[T]) MCPSchedule(ctx Context, slug string, at time.Time, reason s
 	setNodeStatus(item, Scheduled)
 	atCopy := at
 	setNodeTimePtr(item, "ScheduledAt", &atCopy)
-	if err := m.repo.Save(ctx, item); err != nil {
+	if err := m.saveMove(ctx, item, prevStatus, Scheduled); err != nil {
 		return err
 	}
 	plan.run(ctx, m.db, m.relationStore, m.provenanceStore, m.statusAnnouncer, true, surfaceMCP)
@@ -3940,7 +3958,7 @@ func (m *Module[T]) MCPArchive(ctx Context, slug, reason string) error {
 	defer plan.release()
 	ctx = plan.holdingContext(ctx)
 	setNodeStatus(item, Archived)
-	if err := m.repo.Save(ctx, item); err != nil {
+	if err := m.saveMove(ctx, item, prevStatus, Archived); err != nil {
 		return err
 	}
 	plan.run(ctx, m.db, m.relationStore, m.provenanceStore, m.statusAnnouncer, true, surfaceMCP)

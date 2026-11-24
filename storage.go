@@ -343,6 +343,13 @@ func (o ListOptions) Offset() int {
 // Repository is the storage interface for a content type.
 // Implement it to provide a custom storage backend.
 // Use [NewMemoryRepo] for in-process testing and prototyping.
+//
+// Save of an existing item should refuse a stale copy: when T embeds [Node]
+// and the Rev it carries is not the stored item's, return [ErrRevConflict]
+// and store nothing, as [SQLRepo.Save] does. The lifecycle tools (publish,
+// schedule, archive) read an item, check the move, and save the whole item;
+// with that check a write another call made in between is kept and the move
+// is refused, and without it the last Save wins (T1331).
 type Repository[T any] interface {
 	FindByID(ctx context.Context, id string) (T, error)
 	FindBySlug(ctx context.Context, slug string) (T, error)
